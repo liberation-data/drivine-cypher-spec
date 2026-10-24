@@ -1172,9 +1172,9 @@ cases:
       - cypher: "RETURN [toString($f), toString($g), $f + 'a']"
         parameters: {f: 0.00012, g: 12345678.5}
         rows: [["1.2E-4", "1.23456785E7", "1.2E-4a"]]
-      - note: "JSON holds no NaN, and Postgres's double precision fails a division by zero."
+      - note: "JSON holds no NaN: Postgres's double precision fails a division by zero, and SQLite's gives null."
         cypher: "RETURN [toString(0.0 / 0.0), toString(1.0 / 0), toString(-1.0 / 0)]"
-        except: [postgres]
+        except: [postgres, sqlite]
         rows: [["NaN", "Infinity", "-Infinity"]]
 
   - name: "Sorted by a list"
