@@ -1220,3 +1220,21 @@ cases:
         cypher: "UNWIND [[1, 2], [[null]], [1, [2, null]], [1, [2]], [1, [1, 5]]] AS xs RETURN xs ORDER BY xs"
         except: [oracle]
         rows: [[[null]], [1, [1, 5]], [1, [2]], [1, [2, null]], [1, 2]]
+      - note: "A list worked out in the order term, by reverse(), tail(), a slice, +, range() or split(), sorts so too."
+        cypher: "UNWIND [[1, 2], [3], [0, 5, 6]] AS xs RETURN xs ORDER BY reverse(xs)"
+        rows: [[1, 2], [3], [0, 5, 6]]
+      - cypher: "UNWIND [[9, 1, 2], [9, 3], [9]] AS xs RETURN xs ORDER BY tail(xs)"
+        rows: [[9], [9, 1, 2], [9, 3]]
+      - cypher: "UNWIND [[9, 1, 2], [9, 3], [9]] AS xs WITH xs ORDER BY xs[1..] DESC RETURN collect(xs)"
+        rows: [[[9, 3], [9, 1, 2], [9]]]
+      - cypher: "UNWIND [[1, 2], [3], [0, 5, 6]] AS xs RETURN xs ORDER BY xs + [0]"
+        rows: [[0, 5, 6], [1, 2], [3]]
+      - cypher: "UNWIND [3, 1, 2] AS i RETURN i ORDER BY range(i, 3)"
+        rows: [1, 2, 3]
+      - cypher: "UNWIND ['b', 'a,c'] AS s RETURN s ORDER BY split(s, ',')"
+        rows: ["a,c", "b"]
+      - note: "So does an item, or head() of a slice, of a list of lists."
+        cypher: "WITH [[3], [1, 2]] AS ls UNWIND [0, 1] AS i RETURN i ORDER BY ls[i]"
+        rows: [1, 0]
+      - cypher: "WITH [[3], [1, 2]] AS ls UNWIND [0, 1] AS i RETURN i ORDER BY head(ls[i..]) DESC"
+        rows: [0, 1]
