@@ -1088,6 +1088,9 @@ cases:
         rows: [[false, true, false, true, false, true]]
       - cypher: "MATCH (:Person {name: 'Keanu'})-[r1:KNOWS]->(), (:Person {name: 'Laurence'})-[r2:KNOWS]->() RETURN [{x: r1} IN [{x: r2}], {x: r1} IN [{x: r1}], [r1, 1] = [r2, 1], {x: r1, y: 1} = {x: r1, y: 1}, {x: r1} = {x: {}}]"
         rows: [[false, true, false, true, false]]
+      - note: "Holding the same relationship, a map or a list is equal to one whose number is written as a float, or whose keys come in another order."
+        cypher: "MATCH (:Person {name: 'Keanu'})-[r1:KNOWS]->() RETURN [{x: r1, y: 1} = {x: r1, y: 1.0}, [r1, 1] = [r1, 1.0], {a: 1, x: r1} = {x: r1, a: 1}, {x: r1, y: 1} IN [{x: r1, y: 1.0}]]"
+        rows: [[true, true, true, true]]
       - note: "Carried by a WITH, a map keeps what it holds by identity."
         cypher: "MATCH (:Person {name: 'Keanu'})-[r1:KNOWS]->(), (:Person {name: 'Laurence'})-[r2:KNOWS]->() WITH {x: r1} AS a, {x: r2} AS b, {x: r1} AS c RETURN [a = b, a = c]"
         rows: [[false, true]]
