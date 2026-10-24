@@ -1,4 +1,5 @@
 {
+  "$comment": "Drivine model file: this module's fragments, relationship fragments and views, written by the build. Drivine Studio reads it to browse the model and query the data. Keep it in source control: the build rewrites it when the model changes, and CI checks that it is current. Format: https://github.com/liberation-data/drivine-cypher-spec/tree/main/model",
   "format": "drivine-model/1",
   "generator": {
     "library": "drivine4j",

@@ -10,7 +10,9 @@ The file describes what is stored, in Drivine's terms, not in any one language's
 
 A library writes `.drivine/model.json` beside each module's build file (`build.gradle`, `pom.xml`, `package.json`, `pyproject.toml`). A repository with several modules has several files, and Studio reads them all, matching ids across them.
 
-A library writes the file by default, and has a switch to turn it off. A project that does not want the file in its repository ignores it in git. A build in CI writes it again and fails when it differs from the file committed, as with a lock file.
+A library writes the file by default, and has a switch to turn it off.
+
+Keep the file in source control, as with a lock file. Studio can then read a repository's model straight from GitHub, with nothing built; a change to the model shows in review as a change to the file; and a build in CI writes it again and fails when it differs from the file committed. A project that would rather not can ignore it in git, and Studio then reads it from a local build.
 
 ## Writing it the same way every time
 
@@ -24,6 +26,7 @@ The file changes only when the model does:
 
 ```json
 {
+  "$comment": "Drivine model file: this module's fragments, relationship fragments and views, written by the build. ...",
   "format": "drivine-model/1",
   "generator": { "library": "drivine4j", "version": "0.4.0", "language": "kotlin" },
   "module": "drivine4j-sample",
@@ -35,6 +38,7 @@ The file changes only when the model does:
 
 | Key | What it is |
 |---|---|
+| `$comment` | What the file is for, for someone who comes across it: the text in `examples/sample.json`, word for word, whichever library writes it. Not read. |
 | `format` | `drivine-model/` and the format's major version. A reader refuses a major version it does not know. Within one, a reader skips keys it does not know, so a library can add one without breaking an older Studio. |
 | `generator` | The library that wrote the file, its version, and the language of the classes. Shown, not read. |
 | `module` | The module's name, as its build names it. |

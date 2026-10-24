@@ -6,6 +6,7 @@
   "type": "object",
   "required": ["format", "generator", "module", "fragments", "relationshipFragments", "views"],
   "properties": {
+    "$comment": { "type": "string" },
     "format": { "const": "drivine-model/1" },
     "generator": {
       "type": "object",
