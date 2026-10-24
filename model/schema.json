@@ -39,6 +39,7 @@
       "properties": {
         "id": { "$ref": "#/$defs/id" },
         "name": { "$ref": "#/$defs/name" },
+        "removed": { "type": "boolean" },
         "labels": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1 },
         "nodeId": { "$ref": "#/$defs/name" },
         "stamp": { "type": "boolean" },
@@ -114,6 +115,7 @@
       "properties": {
         "id": { "$ref": "#/$defs/id" },
         "name": { "$ref": "#/$defs/name" },
+        "removed": { "type": "boolean" },
         "target": {
           "type": "object",
           "required": ["field", "fragment"],
@@ -131,6 +133,7 @@
       "properties": {
         "id": { "$ref": "#/$defs/id" },
         "name": { "$ref": "#/$defs/name" },
+        "removed": { "type": "boolean" },
         "root": {
           "type": "object",
           "required": ["field", "fragment"],
@@ -163,7 +166,7 @@
           }
         },
         "readOnly": { "type": "boolean" },
-        "path": { "type": "array", "items": { "$ref": "#/$defs/hop" }, "minItems": 2 }
+        "path": { "type": "array", "items": { "$ref": "#/$defs/hop" }, "minItems": 1 }
       },
       "oneOf": [
         { "required": ["type", "direction"], "not": { "required": ["path"] } },

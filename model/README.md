@@ -18,7 +18,7 @@ Keep the file in source control, as with a lock file. Studio can then read a rep
 
 The file changes only when the model does:
 
-- Lists are sorted: fragments, relationship fragments and views by `id`; properties by `name`; a view's relationships by `field`. Labels keep the order they are declared in, since the first is the one a node is told by.
+- Lists are sorted: fragments, relationship fragments and views by `id`, removed or not; properties by `name`; a view's relationships by `field`. Labels keep the order they are declared in, since the first is the one a node is told by.
 - No timestamps, no absolute paths, nothing of the machine that wrote it.
 - Two spaces of indentation, keys in the order the schema lists them, and a newline at the end.
 
@@ -48,6 +48,17 @@ The file changes only when the model does:
 
 An id is the class's fully qualified name in its own language: `org.drivine.sample.fragment.Person`, `sample.fragments.person.Person`, or for TypeScript the module path and class, `src/fragments/Person#Person`. Every reference in the file is an id. Nothing is nested, so a view that refers to itself needs nothing special.
 
+### Removed entries
+
+A fragment, relationship fragment or view that the file had and the code no longer declares stays in the file, marked `"removed": true`, as it last was. The store may still hold nodes and relationships written under it, and a reader shows them as such: Studio greys a removed entry out, rather than leaving a node it cannot name. So a library writes the file from the code and from the file before it.
+
+- An entry that comes back into the code is written from the code again, and is no longer removed.
+- An entry stays removed until someone deletes it from the file by hand, once the store holds nothing of it.
+- A module whose code declares nothing at all still writes its file, with every entry removed.
+- An id that is removed in one module's file and current in another's, as when a class moves, is the current one.
+
+A removed entry may refer to other removed entries, and to current ones. A current entry refers only to current ones.
+
 ### Fragments
 
 ```json
@@ -67,6 +78,7 @@ An id is the class's fully qualified name in its own language: `org.drivine.samp
 | Key | What it is |
 |---|---|
 | `name` | The class's simple name, for showing. |
+| `removed` | The code no longer declares it: see [Removed entries](#removed-entries). Absent means `false`. Every kind of entry may carry it. |
 | `labels` | The labels every node of the fragment carries. |
 | `nodeId` | The `name` of the `@NodeId` property, or absent. |
 | `stamp` | Whether the fragment has a `@NodeStamp` field. Its value is stored under `__drivine.stamp`, whatever the field is called. |
@@ -160,7 +172,7 @@ A `@RelationshipFragment` is a relationship's properties and the node at its far
 | `maxDepth` | Above 1, the relationship is followed up to this many times: a view that holds itself, or a list read over several hops. |
 | `sortedBy` | `{ "property": "person.name", "ascending": true }`: the library sorts the list once it has read it. |
 | `readOnly` | Loaded, never written. A path is always read-only. |
-| `path` | A `@GraphPath`, in place of `type` and `direction`: its hops, in order. |
+| `path` | A `@GraphPath`, in place of `type` and `direction`: its hops, in order, one or more. |
 
 A hop:
 
