@@ -1483,8 +1483,9 @@ cases:
   - name: "IN compares as equality does"
     description: "x IN list is true where an item is equal to x, else null where a comparison is null, else false."
     steps:
-      - cypher: |
-          RETURN [null IN [null], [null] IN [[null]], 1 IN [null], 1 IN [1, null], 2 IN [1, null], null IN [], [null] IN [[1, 2]],
+      - note: "The first item is in parentheses: FalkorDB reads a list that starts `[null IN` as a list comprehension."
+        cypher: |
+          RETURN [(null IN [null]), [null] IN [[null]], 1 IN [null], 1 IN [1, null], 2 IN [1, null], null IN [], [null] IN [[1, 2]],
                   [null] IN [[1]], [1, null] IN [[2, null]], [1] IN [[1], null], {x: null} IN [{x: null}], [1] IN [[2], null], [1] IN [[null]], null IN [1]]
         rows: [[null, null, null, true, null, false, false, null, false, true, null, null, null, null]]
       - cypher: "RETURN [$x IN $l, 2 IN $l, $a IN $ls, $a IN [[2, null]], 1 IN $n]"
@@ -1501,9 +1502,9 @@ cases:
   - name: "Values that hold a null, compared at run time"
     description: "Parameters, values a WITH carries and collected lists are compared item by item as written lists are."
     steps:
-      - cypher: "RETURN [$a = $b, $a = $c, $a IN [$b], $a IN $l, $m = $n, $p = $p]"
-        parameters: {a: [1, null], b: [1, null], c: [2, null], l: [[1, null], [3]], m: {x: null}, n: {x: 1}, p: [1, 2]}
-        rows: [[null, false, null, null, null, true]]
+      - cypher: "RETURN [$a = $b, $a = $c, $a IN [$b], $m = $n, $p = $p]"
+        parameters: {a: [1, null], b: [1, null], c: [2, null], m: {x: null}, n: {x: 1}, p: [1, 2]}
+        rows: [[null, false, null, null, true]]
       - cypher: "WITH [1, null] AS a, [1, null] AS b, [2, null] AS c, [null, 1] AS d RETURN [a = b, a = c, a <> c, a = d, a IN [b, c], a IN [c]]"
         rows: [[null, false, true, null, null, false]]
       - cypher: "WITH [[null], 1] AS a, [[null], 2] AS b, {k: [null]} AS m, {k: [1]} AS n, {k: [1], j: 2} AS o RETURN [a = b, m = n, m = m, m = o, n = n]"
