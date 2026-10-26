@@ -848,7 +848,7 @@ cases:
       - only: [neo4j, sql]
         cypher: "UNWIND [2147483647, 2147483647.5] AS p RETURN [round(2.5, p), round(2.5, p, 'HALF_EVEN')]"
         rows: [[2.5, 2.5], [2.5, 2.5]]
-      - note: "Past 2147483647, it fails on a row it rounds a number on, written, a parameter's value or read from data, in both forms, and so far below 0 too."
+      - note: "Past 2147483647, it fails on a row it rounds a number on, written, a parameter's value or read from data, in both forms, and as far below 0 too."
         only: [neo4j, sql]
         cypher: "RETURN round(2.5, 2147483648)"
         error: true
