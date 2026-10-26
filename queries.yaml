@@ -814,6 +814,13 @@ cases:
         only: [neo4j, sql]
         cypher: "UNWIND [-2] AS p RETURN [round(null, p), round(null, p, 'HALF_UP')]"
         rows: [[null, null]]
+      - only: [neo4j, sql]
+        cypher: "UNWIND [-1000] AS p RETURN [round(null, p), round(null, p, 'UP')]"
+        rows: [[null, null]]
+      - note: "A whole number by a negative precision from data fails, as a float does."
+        only: [neo4j, sql]
+        cypher: "UNWIND [-2] AS p RETURN round(5, p)"
+        error: true
 
   - name: "EXISTS and COUNT subqueries"
     description: "EXISTS { } and COUNT { } take a pattern, clauses or a whole query, evaluated per row."
