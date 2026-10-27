@@ -526,7 +526,7 @@ cases:
         rows: [["B", 2]]
 
   - name: "Values of several kinds in Cypher's order of kinds"
-    description: "ORDER BY sorts a map, then a list, a text, a truth value, a number, and null last ascending (first descending), and values of one kind among themselves."
+    description: "ORDER BY sorts a map, then a list, a text, a truth value, a number, and null last ascending (first descending), and values of one kind among themselves; min() and max() take that order too."
     steps:
       - note: "Postgres sorts a number before a truth value, and a map and a list last (drivine4j#307)."
         cypher: "UNWIND [1, {a: 1}, 'b', true, [2], 2.5, null, false, 'A', [1, 2], -1] AS t RETURN t ORDER BY t"

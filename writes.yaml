@@ -663,14 +663,14 @@ cases:
   - name: "A property stored as several kinds sorts in Cypher's order of kinds"
     description: "A property read from the store may be of any kind: ORDER BY sorts a list, then a text, a truth value, a number, and a missing property last."
     steps:
+      - cypher: "CREATE (:CyWrite {v: 2}), (:CyWrite {v: 'b'}), (:CyWrite {v: true}), (:CyWrite {v: [1]}), (:CyWrite {v: 1.5}), (:CyWrite {v: 'B'}), (:CyWrite {v: false}), (:CyWrite)"
       - note: "Postgres sorts a number before a truth value, and a list last (drivine4j#307)."
-        cypher: "CREATE (:Kind {v: 2}), (:Kind {v: 'b'}), (:Kind {v: true}), (:Kind {v: [1]}), (:Kind {v: 1.5}), (:Kind {v: 'B'}), (:Kind {v: false}), (:Kind)"
-      - cypher: "MATCH (k:Kind) RETURN k.v ORDER BY k.v"
+        cypher: "MATCH (k:CyWrite) RETURN k.v ORDER BY k.v"
         except: [postgres]
         rows: [[1], "B", "b", false, true, 1.5, 2, null]
-      - cypher: "MATCH (k:Kind) RETURN k.v ORDER BY k.v DESC"
+      - cypher: "MATCH (k:CyWrite) RETURN k.v ORDER BY k.v DESC"
         except: [postgres]
         rows: [null, 2, 1.5, true, false, "b", "B", [1]]
-      - cypher: "MATCH (k:Kind) WITH k ORDER BY k.v SKIP 2 LIMIT 2 RETURN k.v"
+      - cypher: "MATCH (k:CyWrite) WITH k ORDER BY k.v SKIP 2 LIMIT 2 RETURN k.v"
         except: [postgres]
         rows: ["b", false]
