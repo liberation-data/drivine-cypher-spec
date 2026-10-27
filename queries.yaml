@@ -1668,6 +1668,15 @@ cases:
         cypher: "UNWIND $xs AS x RETURN sum(x)"
         parameters: {xs: [0.5, 1.0, 0.5]}
         rows: [2.0]
+      - note: "A float too small for a store's decimal to write with a point is still a float."
+        only: [neo4j, sql]
+        cypher: "UNWIND $xs AS x RETURN sum(x)"
+        parameters: {xs: [1.0e-41, -1.0e-41]}
+        rows: [0.0]
+      - note: "A float past a store's decimal is summed as a double, not dropped."
+        only: [neo4j, sql]
+        cypher: "UNWIND [1e300, 1.0] AS x RETURN sum(x)"
+        rows: [1.0e+300]
 
   - name: "Floats written as text"
     description: "A float is written as Java writes a double: from 10^7, or under 10^-3, in scientific notation, as returned, by toString() and added to a text."
