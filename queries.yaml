@@ -1677,6 +1677,10 @@ cases:
         only: [neo4j, sql]
         cypher: "UNWIND [1e300, 1.0] AS x RETURN sum(x)"
         rows: [1.0e+300]
+      - note: "An integer summed with a float is summed as a double."
+        only: [neo4j, sql]
+        cypher: "UNWIND [9223372036854775807, 0.5] AS x RETURN sum(x)"
+        rows: [9.223372036854776e+18]
 
   - name: "Floats written as text"
     description: "A float is written as Java writes a double: from 10^7, or under 10^-3, in scientific notation, as returned, by toString() and added to a text."
