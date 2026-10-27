@@ -645,8 +645,8 @@ cases:
       - cypher: "MATCH (n:CyWrite) RETURN n.u = n.v"
         rows: [true]
 
-  - name: "A list that holds a null in a statement that writes"
-    description: "A statement that writes compares a list that holds a null item by item too."
+  - name: "Values that hold a null in a statement that writes"
+    description: "A statement that writes compares a list or a map that holds a null, or a null node, item by item too."
     steps:
       - cypher: "CREATE (n:CyWrite) WITH n, [1, null] AS a, [1, null] AS b, [2, null] AS c SET n.same = coalesce(a = b, 'null'), n.other = a = c, n.unequal = a <> c RETURN [n.same, n.other, n.unequal]"
         rows: [["null", false, true]]
