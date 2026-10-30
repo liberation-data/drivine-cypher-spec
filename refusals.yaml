@@ -458,8 +458,10 @@ cases:
         error: "a is a node, and is used as a relationship: a variable is of one kind, as in Neo4j."
       - cypher: "MATCH (a) RETURN COUNT { (a)-[a]->() } AS c"
         error: "a is a node, and is used as a relationship: a variable is of one kind, as in Neo4j."
-      - note: A CALL { … } reads a variable its WITH imports as the kind it is, and returns one as the kind it is.
+      - note: A CALL { … } reads a variable its WITH or its brackets import as the kind it is, and returns one as the kind it is.
         cypher: "MATCH (a) CALL { WITH a MATCH ()-[a]->() RETURN 1 AS x } RETURN x"
+        error: "a is a node, and is used as a relationship: a variable is of one kind, as in Neo4j."
+      - cypher: "MATCH (a) CALL (a) { MATCH ()-[a]->() RETURN 1 AS x } RETURN x"
         error: "a is a node, and is used as a relationship: a variable is of one kind, as in Neo4j."
       - cypher: "CALL { MATCH (a) RETURN a } MATCH ()-[a]->() RETURN a"
         error: "a is a node, and is used as a relationship: a variable is of one kind, as in Neo4j."
@@ -489,6 +491,8 @@ cases:
       - cypher: "MATCH ()-[r]->() CREATE (r)"
         error: "r is bound already, so a CREATE makes no node of it, as in Neo4j."
       - cypher: "MATCH (a) CALL { WITH a CREATE (a) } RETURN 1"
+        error: "a is bound already, so a CREATE makes no node of it, as in Neo4j."
+      - cypher: "MATCH (a) CALL (a) { CREATE (a) } RETURN 1"
         error: "a is bound already, so a CREATE makes no node of it, as in Neo4j."
       - cypher: "CREATE (n:Foo)-[:T1]->(), (n:Bar)-[:T2]->()"
         error: "n is bound already, so a CREATE or MERGE makes no node of it with labels or properties."
