@@ -1741,6 +1741,23 @@ cases:
         only: [neo4j, sql]
         cypher: "UNWIND [9223372036854775807, 0.5] AS x RETURN sum(x)"
         rows: [9.223372036854776e+18]
+      - note: "Integers whose sum is past a long's range sum to a float, as on Neo4j. Oracle's NUMBER and Postgres's numeric summed them exactly, past a long (drivine4j#339)."
+        only: [neo4j, postgres, oracle]
+        cypher: "UNWIND [9223372036854775807, 1] AS x RETURN sum(x)"
+        rows: [9.223372036854776e+18]
+      - only: [neo4j, postgres, oracle]
+        cypher: "UNWIND [-9223372036854775807, -2] AS x RETURN sum(x)"
+        rows: [-9.223372036854776e+18]
+      - only: [neo4j, postgres, oracle]
+        cypher: "UNWIND [9223372036854775807, 9223372036854775807] AS x RETURN sum(x)"
+        rows: [1.8446744073709552e+19]
+      - only: [neo4j, postgres, oracle]
+        cypher: "UNWIND [9223372036854775807, 9223372036854775807, 1] AS x RETURN sum(DISTINCT x)"
+        rows: [9.223372036854776e+18]
+      - note: "SQLite's sum() fails with \"integer overflow\" where a total of integers passes a long's range."
+        only: [sqlite]
+        cypher: "UNWIND [9223372036854775807, 1] AS x RETURN sum(x)"
+        error: true
 
   - name: "Floats written as text"
     description: "A float is written as Java writes a double: from 10^7, or under 10^-3, in scientific notation, as returned, by toString() and added to a text."
