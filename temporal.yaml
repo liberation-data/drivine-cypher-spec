@@ -256,7 +256,7 @@ cases:
                   localMicros: localtime.truncate('microsecond', localtime('12:31:14.645876')).microsecond,
                   micros: datetime.truncate('microsecond', datetime('2017-10-11T12:31:14.645876-01:00')).microsecond}
         only: [neo4j, sql]
-        note: "Not checked on Memgraph and FalkorDB."
+        note: "Memgraph and FalkorDB have no date.truncate()."
         rows:
           - millennium: 2000
             lastMillennium: 1000
