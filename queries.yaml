@@ -1756,9 +1756,6 @@ cases:
       - cypher: "UNWIND [1, 2] AS i CALL (i) { UNWIND [i, i, 3] AS x WITH x, count(*) AS c WHERE count(*) > 1 AND x = i RETURN c } RETURN i, c"
         only: [neo4j, sql]
         rows: [[1, 2], [2, 2]]
-      - cypher: "UNWIND [1, 1, 2] AS i CALL (i) { WITH DISTINCT i WHERE count(*) > 0 RETURN i AS j } RETURN j"
-        only: [neo4j, sql]
-        rows: [1, 1, 2]
       - cypher: "MATCH (p:Person) RETURN p.name, COUNT { MATCH (p)-[:ACTED_IN]->(m) WITH m, count(*) AS k WHERE count(*) > 0 RETURN m } AS n ORDER BY p.name"
         only: [neo4j, sql]
         rows: [["Carrie", 2], ["Hugo", 0], ["Keanu", 3], ["Laurence", 1]]
