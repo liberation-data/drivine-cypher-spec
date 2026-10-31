@@ -1743,6 +1743,13 @@ cases:
       - cypher: "MATCH (:Person)-[r:ACTED_IN]->(m) RETURN r.role AS role, any(t IN collect(m.title) WHERE t = r.role) AS n ORDER BY role"
         only: [neo4j, sql]
         rows: [["Johnny", false], ["Morpheus", false], ["Neo", false], ["Trinity", false]]
+      - note: "An e that reads only a y that a comprehension or a reduce() in it binds of its own reads no y of the quantifier's."
+        cypher: "UNWIND [{a: 1, b: 1}, {a: 1, b: 2}, {a: 2, b: 1}] AS x RETURN x.a AS a, any(y IN collect(x.b) WHERE y = [y IN [x.a] | y][0]) AS n ORDER BY a, n"
+        only: [neo4j, sql]
+        rows: [[1, true], [2, false]]
+      - cypher: "UNWIND [{a: 1, b: 1}, {a: 1, b: 2}, {a: 2, b: 1}] AS x RETURN x.a AS a, none(y IN collect(x.b) WHERE reduce(s = 0, y IN [x.a] | s + y) = y) AS n ORDER BY a, n"
+        only: [neo4j, sql]
+        rows: [[1, false], [2, true]]
       - cypher: "UNWIND [{a: 1, b: 1}, {a: 1, b: 2}, {a: 2, b: 1}] AS x RETURN x.a AS a, all(y IN collect(x.b) WHERE y = x.a) AS n ORDER BY a, n"
         only: [neo4j, sql]
         rows: [[1, false], [1, true], [2, false]]
