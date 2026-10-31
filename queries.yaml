@@ -1694,6 +1694,60 @@ cases:
       - cypher: "MATCH (:Person)-[r:ACTED_IN]->(m) RETURN r.role AS role, any(t IN collect(m.title) WHERE t CONTAINS r.role) AS n ORDER BY role"
         only: [neo4j, sql]
         rows: [["Johnny", true], ["Morpheus", false], ["Neo", false], ["Neo", false], ["Trinity", false], ["Trinity", false]]
+      - note: "Inside a list comprehension's WHERE, the key all through: in a quantifier's WHERE, a reduce()'s step or a comprehension's projection there too. Two x share a = 1, so a row for each x would give a = 1 twice."
+        cypher: "MATCH (:Person)-[r:ACTED_IN]->(m) RETURN r.role AS role, size([t IN collect(m.title) WHERE any(u IN [t] WHERE u CONTAINS r.role)]) AS n ORDER BY role"
+        only: [neo4j, sql]
+        rows: [["Johnny", 1], ["Morpheus", 0], ["Neo", 0], ["Trinity", 0]]
+      - cypher: "UNWIND [{a: 1, b: 1}, {a: 1, b: 2}, {a: 2, b: 1}] AS x RETURN x.a AS a, size([t IN collect(x.b) WHERE reduce(s = false, u IN [t] | s OR u > x.a)]) AS n ORDER BY a"
+        only: [neo4j, sql]
+        rows: [[1, 1], [2, 0]]
+      - cypher: "UNWIND [{a: 1, b: 1}, {a: 1, b: 2}, {a: 2, b: 1}] AS x RETURN x.a AS a, size([t IN collect(x.b) WHERE [u IN [t] | u > x.a][0]]) AS n ORDER BY a"
+        only: [neo4j, sql]
+        rows: [[1, 1], [2, 0]]
+      - note: "Not the other way about: a list comprehension's WHERE inside a quantifier's WHERE over an aggregate is grouped by x."
+        cypher: "UNWIND [{a: 1, b: 1}, {a: 1, b: 2}, {a: 2, b: 1}] AS x RETURN x.a AS a, any(t IN collect(x.b) WHERE size([u IN [t] WHERE u > x.a]) > 0) AS n ORDER BY a, n"
+        only: [neo4j, sql]
+        rows: [[1, false], [1, true], [2, false]]
+      - note: "A comprehension, a quantifier or a reduce() that holds no aggregate reads the key in each of its bodies."
+        cypher: "UNWIND [{a: 1, b: 1}, {a: 1, b: 2}, {a: 2, b: 1}] AS x RETURN x.a AS a, count(*) + [y IN [1] | x.a][0] AS n ORDER BY a"
+        only: [neo4j, sql]
+        rows: [[1, 3], [2, 3]]
+      - cypher: "UNWIND [{a: 1, b: 1}, {a: 1, b: 2}, {a: 2, b: 1}] AS x RETURN x.a AS a, count(*) + reduce(s = 0, y IN [1] | s + x.a) AS n ORDER BY a"
+        only: [neo4j, sql]
+        rows: [[1, 3], [2, 3]]
+      - cypher: "UNWIND [{a: 1, b: 1}, {a: 1, b: 2}, {a: 2, b: 1}] AS x RETURN x.a AS a, [count(*), any(y IN [0, 1] WHERE y > x.a)] AS n ORDER BY a"
+        only: [neo4j, sql]
+        rows: [[1, [2, false]], [2, [1, false]]]
+      - note: "But in the projection of a comprehension over an aggregate, x, whatever the projection holds."
+        cypher: "UNWIND [{a: 1, b: 1}, {a: 1, b: 2}, {a: 2, b: 1}] AS x RETURN x.a AS a, size([t IN collect(x.b) WHERE t >= x.a | [y IN [1] | x.a][0]]) AS n ORDER BY a, n"
+        only: [neo4j, sql]
+        rows: [[1, 1], [1, 1], [2, 0]]
+      - note: "Neo4j reads any(y IN list WHERE y = e) as e IN list, and none(…) as NOT e IN list, where e reads no y, so these read the key; y IN [e] is y = e. all() and single() are not read so."
+        cypher: "UNWIND [{a: 1, b: 1}, {a: 1, b: 2}, {a: 2, b: 1}] AS x RETURN x.a AS a, any(y IN collect(x.b) WHERE y = x.a) AS n ORDER BY a"
+        only: [neo4j, sql]
+        rows: [[1, true], [2, false]]
+      - cypher: "UNWIND [{a: 1, b: 1}, {a: 1, b: 2}, {a: 2, b: 1}] AS x RETURN x.a AS a, none(y IN collect(x.b) WHERE x.a = y) AS n ORDER BY a"
+        only: [neo4j, sql]
+        rows: [[1, false], [2, true]]
+      - cypher: "UNWIND [{a: 1, b: 1}, {a: 1, b: 2}, {a: 2, b: 1}] AS x RETURN x.a AS a, any(y IN collect(x.b) WHERE y IN [x.a]) AS n ORDER BY a"
+        only: [neo4j, sql]
+        rows: [[1, true], [2, false]]
+      - cypher: "MATCH (:Person)-[r:ACTED_IN]->(m) RETURN r.role AS role, any(t IN collect(m.title) WHERE t = r.role) AS n ORDER BY role"
+        only: [neo4j, sql]
+        rows: [["Johnny", false], ["Morpheus", false], ["Neo", false], ["Trinity", false]]
+      - cypher: "UNWIND [{a: 1, b: 1}, {a: 1, b: 2}, {a: 2, b: 1}] AS x RETURN x.a AS a, all(y IN collect(x.b) WHERE y = x.a) AS n ORDER BY a, n"
+        only: [neo4j, sql]
+        rows: [[1, false], [1, true], [2, false]]
+      - note: "An order term that aggregates reads the key as an item does."
+        cypher: "UNWIND [{a: 1, b: 1}, {a: 1, b: 2}, {a: 2, b: 1}] AS x RETURN x.a AS a, count(*) AS n ORDER BY size([y IN collect(x.b) WHERE y > x.a])"
+        only: [neo4j, sql]
+        rows: [[2, 1], [1, 2]]
+      - cypher: "MATCH (:Person)-[r:ACTED_IN]->(m) RETURN r.role AS role, count(*) AS n ORDER BY size([t IN collect(m.title) WHERE t CONTAINS r.role]) DESC, role"
+        only: [neo4j, sql]
+        rows: [["Johnny", 1], ["Morpheus", 1], ["Neo", 2], ["Trinity", 2]]
+      - cypher: "UNWIND [{a: 1, b: 1}, {a: 1, b: 2}, {a: 2, b: 1}] AS x RETURN x.a AS a, count(*) AS n ORDER BY size([y IN collect(x.b) | x.a]), a"
+        only: [neo4j, sql]
+        rows: [[1, 1], [1, 1], [2, 1]]
       - note: "Unnamed, a map projection is an item named after its variable, which an order term or the next clause reads."
         cypher: "MATCH (p:Person)-[:ACTED_IN]->(m) RETURN p {.name}, count(*) AS c ORDER BY p.name"
         only: [neo4j, sql]
