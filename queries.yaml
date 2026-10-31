@@ -1750,6 +1750,9 @@ cases:
       - cypher: "UNWIND [{a: 1, b: 1}, {a: 1, b: 2}, {a: 2, b: 1}] AS x RETURN x.a AS a, none(y IN collect(x.b) WHERE reduce(s = 0, y IN [x.a] | s + y) = y) AS n ORDER BY a, n"
         only: [neo4j, sql]
         rows: [[1, false], [2, true]]
+      - cypher: "UNWIND [{a: 1, b: 1}, {a: 1, b: 2}, {a: 2, b: 1}] AS x RETURN x.a AS a, any(y IN collect(x.b) WHERE y = [y IN [x.a] WHERE y > 0 | y][0]) AS n ORDER BY a, n"
+        only: [neo4j, sql]
+        rows: [[1, true], [2, false]]
       - cypher: "UNWIND [{a: 1, b: 1}, {a: 1, b: 2}, {a: 2, b: 1}] AS x RETURN x.a AS a, all(y IN collect(x.b) WHERE y = x.a) AS n ORDER BY a, n"
         only: [neo4j, sql]
         rows: [[1, false], [1, true], [2, false]]
