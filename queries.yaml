@@ -1043,10 +1043,13 @@ cases:
         only: [neo4j, sql]
         cypher: "UNWIND [1, 2] AS i CALL { WITH * RETURN * } RETURN i"
         error: true
-      - note: "After a WITH, a star passes on what that WITH did, not what the brackets import."
+      - note: "A star gives none of what brackets import, which the CALL sees throughout anyway."
         only: [neo4j, sql]
         cypher: "UNWIND [1, 2] AS i CALL (i) { WITH 1 AS one WITH * RETURN * } RETURN *"
         rows: [[1, 1], [2, 1]]
+      - cypher: "UNWIND [1, 2] AS i CALL (i) { WITH *, 2 AS y RETURN * } RETURN *"
+        only: [neo4j, sql]
+        rows: [[1, 2], [2, 2]]
       - note: "Where the CALL imports nothing, a leading WITH * passes on nothing."
         only: [neo4j, sql]
         cypher: "CALL { WITH * RETURN 1 AS x } RETURN x"
@@ -1060,6 +1063,9 @@ cases:
       - cypher: "UNWIND [1] AS i CALL () { WITH * RETURN i AS x } RETURN x"
         only: [neo4j, sql]
         error: true
+      - cypher: "UNWIND [1, 2] AS i CALL () { WITH * WITH * RETURN 3 AS x } RETURN i, x"
+        only: [neo4j, sql]
+        rows: [[1, 3], [2, 3]]
       - note: "In a UNION, each query imports what its own leading WITH names."
         only: [neo4j, sql]
         cypher: "MATCH (a:Person {name: 'Keanu'}) CALL { WITH a MATCH (a)-[:ACTED_IN]->(m) RETURN count(m) AS n UNION ALL MATCH (a:Movie) RETURN count(a) AS n } RETURN a.name, n"
@@ -1392,6 +1398,10 @@ cases:
         rows: [[2, 1, 0]]
       - cypher: "WITH 1 AS b, 2 AS a WITH * RETURN *"
         rows: [[2, 1]]
+      - note: "A WITH * where nothing is bound passes on nothing."
+        only: [neo4j, sql]
+        cypher: "WITH * RETURN 1 AS x"
+        rows: [1]
       - cypher: "UNWIND [2, 1] AS b WITH b, 10 - b AS a RETURN * ORDER BY b"
         rows: [[9, 1], [8, 2]]
 
