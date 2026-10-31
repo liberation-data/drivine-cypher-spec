@@ -1008,6 +1008,58 @@ cases:
       - cypher: "MATCH (a:Person {name: 'Keanu'}) CALL { WITH * MATCH (a)-[:ACTED_IN]->(m) RETURN count(m) AS n } RETURN n"
         only: [neo4j, sql]
         rows: [3]
+      - note: "A leading WITH * passes on what the CALL imports, with brackets or without."
+        only: [neo4j, sql]
+        cypher: "UNWIND [1, 2] AS i CALL { WITH * RETURN i AS x } RETURN x"
+        rows: [1, 2]
+      - cypher: "UNWIND [1, 2] AS i CALL (*) { WITH * RETURN i AS x } RETURN x"
+        only: [neo4j, sql]
+        rows: [1, 2]
+      - cypher: "UNWIND [1, 2] AS i CALL (i) { WITH * RETURN i AS x } RETURN x"
+        only: [neo4j, sql]
+        rows: [1, 2]
+      - cypher: "UNWIND [1, 2] AS i CALL (i) { WITH * WITH * RETURN i * 10 AS x } RETURN x"
+        only: [neo4j, sql]
+        rows: [10, 20]
+      - cypher: "UNWIND [1] AS i WITH i, 2 AS j CALL { WITH * RETURN i + j AS x } RETURN x"
+        only: [neo4j, sql]
+        rows: [3]
+      - cypher: "UNWIND [1] AS i CALL { WITH * UNWIND [5] AS k WITH * RETURN i + k AS x } RETURN x"
+        only: [neo4j, sql]
+        rows: [6]
+      - cypher: "MATCH (p:Person) CALL { WITH * RETURN p.name AS n } RETURN n ORDER BY n"
+        only: [neo4j, sql]
+        rows: ["Carrie", "Hugo", "Keanu", "Laurence"]
+      - cypher: "UNWIND [1, 2] AS i CALL { WITH * RETURN i AS x UNION WITH * RETURN i * 10 AS x } RETURN x ORDER BY x"
+        only: [neo4j, sql]
+        rows: [1, 2, 10, 20]
+      - cypher: "UNWIND [1] AS i CALL { WITH * CALL { WITH * RETURN i AS y } RETURN y AS x } RETURN x"
+        only: [neo4j, sql]
+        rows: [1]
+      - cypher: "UNWIND [1, 2] AS i OPTIONAL CALL { WITH * WITH * WHERE i > 1 RETURN i AS x } RETURN i, x"
+        only: [neo4j, sql]
+        rows: [[1, null], [2, 2]]
+      - note: "A RETURN * after it returns what the CALL imports, which the row holds already."
+        only: [neo4j, sql]
+        cypher: "UNWIND [1, 2] AS i CALL { WITH * RETURN * } RETURN i"
+        error: true
+      - note: "After a WITH, a star passes on what that WITH did, not what the brackets import."
+        only: [neo4j, sql]
+        cypher: "UNWIND [1, 2] AS i CALL (i) { WITH 1 AS one WITH * RETURN * } RETURN *"
+        rows: [[1, 1], [2, 1]]
+      - note: "Where the CALL imports nothing, a leading WITH * passes on nothing."
+        only: [neo4j, sql]
+        cypher: "CALL { WITH * RETURN 1 AS x } RETURN x"
+        rows: [1]
+      - cypher: "CALL (*) { WITH * RETURN 1 AS x } RETURN x"
+        only: [neo4j, sql]
+        rows: [1]
+      - cypher: "UNWIND [1] AS i CALL () { WITH * RETURN 1 AS x } RETURN i, x"
+        only: [neo4j, sql]
+        rows: [[1, 1]]
+      - cypher: "UNWIND [1] AS i CALL () { WITH * RETURN i AS x } RETURN x"
+        only: [neo4j, sql]
+        error: true
       - note: "In a UNION, each query imports what its own leading WITH names."
         only: [neo4j, sql]
         cypher: "MATCH (a:Person {name: 'Keanu'}) CALL { WITH a MATCH (a)-[:ACTED_IN]->(m) RETURN count(m) AS n UNION ALL MATCH (a:Movie) RETURN count(a) AS n } RETURN a.name, n"
