@@ -1454,6 +1454,23 @@ cases:
         rows: [[2, 1], [1, 1]]
       - cypher: "UNWIND [1, 2] AS x UNWIND [3] AS z RETURN x, count(*) AS c ORDER BY [w IN collect(z) | w + x][0] DESC"
         rows: [[2, 1], [1, 1]]
+      - note: "A map projection of a variable an item renames reads the key; so does a pattern, where no item renames the variable."
+        only: [neo4j, sql]
+        cypher: "MATCH (p:Person)-[:ACTED_IN]->(m) RETURN p AS q, count(*) AS c ORDER BY size(keys(p {.name})) + count(*) DESC"
+        rows: [[{name: "Keanu", born: 1964}, 3], [{name: "Carrie", born: 1967}, 2], [{name: "Laurence", born: 1961}, 1]]
+      - cypher: "MATCH (p:Person)-[:ACTED_IN]->(m) RETURN p AS q, count(*) AS c ORDER BY p {.born}.born + count(*) DESC"
+        only: [neo4j, sql]
+        rows: [[{name: "Carrie", born: 1967}, 2], [{name: "Keanu", born: 1964}, 3], [{name: "Laurence", born: 1961}, 1]]
+      - cypher: "MATCH (p:Person)-[:ACTED_IN]->(m) RETURN p, count(*) AS c ORDER BY size([(p)-[:KNOWS]->(k) | k]) * 10 - count(*) DESC"
+        only: [neo4j, sql]
+        rows: [[{name: "Laurence", born: 1961}, 1], [{name: "Keanu", born: 1964}, 3], [{name: "Carrie", born: 1967}, 2]]
+      - note: "Where an item renames it, Neo4j reads the variable in an order term's pattern as a new one that matches any node, not as the key; the compiler refuses it."
+        only: [neo4j]
+        cypher: "MATCH (p:Person)-[:ACTED_IN]->(m) RETURN p AS q, count(*) AS c ORDER BY size([(p)-[:KNOWS]->(k) | k]) * 10 - count(*) DESC"
+        rows: [[{name: "Laurence", born: 1961}, 1], [{name: "Carrie", born: 1967}, 2], [{name: "Keanu", born: 1964}, 3]]
+      - only: [sql]
+        cypher: "MATCH (p:Person)-[:ACTED_IN]->(m) RETURN p AS q, count(*) AS c ORDER BY size([(p)-[:KNOWS]->(k) | k]) * 10 - count(*) DESC"
+        error: "A term of an ORDER BY aggregates, and names p outside its aggregates and the items: Cypher would group by it without being told. Order by an item's name, or by an expression of the items and aggregates."
 
   - name: "Aggregate beside a WHERE"
     description: "A WHERE over what an aggregate gave, and one in a subquery's or a CALL's own query, which aggregates in its projection, filters as Neo4j does. An aggregate in a WHERE is refused (see refusals.yaml, \"Aggregate in a WHERE\")."
