@@ -546,6 +546,21 @@ cases:
           RETURN [[a.day, a.second, a.millisecond], [b.month, b.day, b.hour], [c.month, c.day, c.hour, c.timezone], [e.year, e.hour, e.minute]]
         only: [neo4j, sql]
         rows: [[[28, 42, 645], [1, 5, 10], [1, 12, 10, "+01:00"], [2020, 1, 11]]]
+      - cypher: |
+          WITH date({date: date('2024-02-29'), year: 2023, dayOfWeek: 4}) AS a, date({date: date('2024-02-29'), year: 2020, dayOfWeek: 4}) AS b,
+               date({date: date('2021-01-02'), year: 2021, dayOfWeek: 1}) AS c, date({date: date('2020-12-31'), year: 2021, dayOfWeek: 7}) AS e,
+               date({date: date('2026-01-01'), year: 2019, dayOfWeek: 5}) AS f, datetime({datetime: datetime('2024-02-29T23:30+05:00'), year: 2023, dayOfWeek: 3, timezone: '-05:00'}) AS g
+          RETURN [[a.year, a.month, a.day], [b.year, b.month, b.day], [c.year, c.month, c.day], [e.year, e.month, e.day], [f.year, f.month, f.day], [g.year, g.month, g.day, g.hour, g.timezone]]
+        only: [neo4j, sql]
+        note: "Beside a day of the week the year moves the date so many years, to February 28th from the 29th of a common year, where alone it fails; then the day of the week moves it within its week, which may be in another year."
+        rows: [[[2023, 3, 2], [2020, 2, 27], [2020, 12, 28], [2022, 1, 2], [2019, 1, 4], [2023, 3, 1, 13, "-05:00"]]]
+      - cypher: |
+          UNWIND [[date('2024-02-29'), 2023, 1], [date('2024-03-15'), 1999, 2]] AS p
+          WITH date({date: p[0], year: p[1], dayOfWeek: p[2]}) AS a
+          RETURN [a.year, a.month, a.day]
+        only: [neo4j, sql]
+        note: "The same, with the value, the year and the day of the week given by expressions."
+        rows: [[2023, 2, 27], [1999, 3, 16]]
       - cypher: "RETURN [date({date: date('1984-11-11'), week: 1}), date({date: localdatetime('1984-11-11T12:31:14'), quarter: 3}), date({date: datetime('1984-11-11T23:30-05:00'), ordinalDay: 28})]"
         only: [sql]
         rows: [["1984-01-08", "1984-08-11", "1984-01-28"]]
@@ -644,6 +659,46 @@ cases:
       - cypher: "UNWIND [[date('2024-03-15'), 5]] AS p RETURN date({date: p[0], quarter: p[1]})"
         only: [neo4j, sql]
         note: "Neo4j: 22007. A field past its range that an expression gives."
+        error: true
+
+  - name: "Temporal values from another that an expression gives as none"
+    description: "Another temporal value or a time zone an expression gives that is null, or of a kind that hasn't what it is to give, fails as the statement runs, not given as null."
+    steps:
+      - cypher: "UNWIND [null] AS d RETURN date({date: d, day: 1})"
+        only: [neo4j, sql]
+        note: "Neo4j: 22007."
+        error: true
+      - cypher: "OPTIONAL MATCH (n:CyNothing) RETURN date({date: n.at})"
+        only: [neo4j, sql]
+        note: "Neo4j: 22007. A property of a node that isn't there."
+        error: true
+      - cypher: "UNWIND [null] AS t RETURN datetime({date: date('2024-03-15'), time: t})"
+        only: [neo4j, sql]
+        note: "Neo4j: 22007."
+        error: true
+      - cypher: "UNWIND [localtime('10:00')] AS d RETURN date({date: d})"
+        only: [neo4j, sql]
+        note: "Neo4j: 22G05. A time of day gives no date."
+        error: true
+      - cypher: "UNWIND [date('2024-03-15')] AS t RETURN time({time: t, timezone: '+01:00'})"
+        only: [neo4j, sql]
+        note: "Neo4j: 22G05. A date gives no time of day."
+        error: true
+      - cypher: "UNWIND ['hello'] AS t RETURN localtime({time: t})"
+        only: [neo4j, sql]
+        note: "Neo4j: 22007. A text that is no temporal value."
+        error: true
+      - cypher: "UNWIND [null] AS z RETURN datetime({datetime: datetime('2024-03-15T10:00Z'), timezone: z})"
+        only: [neo4j, sql]
+        note: "Neo4j: 22G06. A time zone that is null."
+        error: true
+      - cypher: "UNWIND [null] AS z RETURN time({time: localtime('10:00'), timezone: z})"
+        only: [neo4j, sql]
+        note: "Neo4j: 22G06."
+        error: true
+      - cypher: "UNWIND ['hello'] AS z RETURN datetime({date: date('2024-03-15'), timezone: z})"
+        only: [neo4j, sql]
+        note: "Neo4j: 22000. A text that is no time zone."
         error: true
 
   - name: "Converting between temporal kinds"
