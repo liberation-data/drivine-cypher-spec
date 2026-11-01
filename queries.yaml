@@ -1753,6 +1753,17 @@ cases:
       - cypher: "UNWIND [{a: 1, b: 1}, {a: 1, b: 2}, {a: 2, b: 1}] AS x RETURN x.a AS a, any(y IN collect(x.b) WHERE y = [y IN [x.a] WHERE y > 0 | y][0]) AS n ORDER BY a, n"
         only: [neo4j, sql]
         rows: [[1, true], [2, false]]
+      - note: "A y of the scope is not the y a comprehension binds of its own, though its WHERE and its projection both read that one: the item is not grouped by the scope's y. In the projection of a comprehension over an aggregate, x.a groups by x, not by y too."
+        cypher: "UNWIND [1, 2] AS y UNWIND [{a: 1, b: 1}, {a: 1, b: 2}] AS x RETURN x.a AS a, [y IN collect(x.b) WHERE y > 0 | y] AS n ORDER BY a"
+        only: [neo4j, sql]
+        unorderedLists: true
+        rows: [[1, [1, 2, 1, 2]]]
+      - cypher: "UNWIND [1, 2] AS y UNWIND [{a: 1, b: 1}, {a: 1, b: 2}] AS x RETURN x.a AS a, size([y IN collect(x.b) WHERE y > 0 | y + x.a]) AS n ORDER BY a"
+        only: [neo4j, sql]
+        rows: [[1, 2], [1, 2]]
+      - cypher: "UNWIND [1, 2] AS y UNWIND [{a: 1, b: 1}, {a: 1, b: 2}] AS x RETURN x.a AS a, count(*) + [y IN [1] WHERE y > 0 | y][0] AS n ORDER BY a"
+        only: [neo4j, sql]
+        rows: [[1, 5]]
       - cypher: "UNWIND [{a: 1, b: 1}, {a: 1, b: 2}, {a: 2, b: 1}] AS x RETURN x.a AS a, all(y IN collect(x.b) WHERE y = x.a) AS n ORDER BY a, n"
         only: [neo4j, sql]
         rows: [[1, false], [1, true], [2, false]]
