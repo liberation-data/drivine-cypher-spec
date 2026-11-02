@@ -625,6 +625,13 @@ cases:
         only: [neo4j, sql]
         note: "Memgraph and FalkorDB have no date.truncate()."
         rows: [["0000-01-01", "0000-01-01", "0000-01-01", "-1000-01-01", "-0044-01-01", "0000-01-01T00:00:00Z", "0000-01-01T00:00:00"]]
+      - cypher: |
+          RETURN [toString(date.truncate('millennium', date('-0001-06-01'))), toString(date.truncate('century', date('-0001-06-01'))),
+                  toString(date.truncate('decade', date('-0001-06-01'))), toString(date.truncate('millennium', date('-0999-06-01'))),
+                  toString(date.truncate('century', date('-0150-06-01'))), toString(date.truncate('decade', date('-0015-06-01')))]
+        only: [neo4j, sql]
+        note: "A year before 1 is truncated toward 0."
+        rows: [["0000-01-01", "0000-01-01", "0000-01-01", "0000-01-01", "-0100-01-01", "-0010-01-01"]]
       - cypher: "CREATE (:CyTemporal {id: 'a', day: date('-0044-03-15'), at: datetime('-0044-03-15T12:00:00Z'), clock: localdatetime('0000-01-01T00:00:00')}), (:CyTemporal {id: 'b', day: date('0001-01-01') - duration('P1D')})"
         only: [neo4j, sql]
       - note: "Read from the store, their kind told by their text."
