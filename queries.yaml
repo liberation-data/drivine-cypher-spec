@@ -1754,6 +1754,13 @@ cases:
       - only: [neo4j, postgres, oracle]
         cypher: "UNWIND [9223372036854775807, 9223372036854775807, 1] AS x RETURN sum(DISTINCT x)"
         rows: [9.223372036854776e+18]
+      - note: "A sum that reaches a long's bounds, and no further, is still an integer."
+        only: [neo4j, sql]
+        cypher: "UNWIND [9223372036854775806, 1] AS x RETURN sum(x)"
+        rows: [9223372036854775807]
+      - only: [neo4j, sql]
+        cypher: "UNWIND [-9223372036854775807, -1] AS x RETURN sum(x)"
+        rows: [-9223372036854775808]
       - note: "SQLite's sum() fails with \"integer overflow\" where a total of integers passes a long's range."
         only: [sqlite]
         cypher: "UNWIND [9223372036854775807, 1] AS x RETURN sum(x)"
