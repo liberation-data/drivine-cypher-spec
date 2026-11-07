@@ -39,6 +39,7 @@ src/test/kotlin/org/drivine/cypher/OracleOptionalJoinTest.kt src/jvmTest/kotlin/
 src/test/kotlin/org/drivine/cypher/OracleParameterTextTest.kt src/jvmTest/kotlin/org/drivine/cypher/OracleParameterTextTest.kt
 src/test/kotlin/org/drivine/cypher/OracleReverseTextTest.kt src/jvmTest/kotlin/org/drivine/cypher/OracleReverseTextTest.kt
 src/test/kotlin/org/drivine/cypher/SetBasedDeleteTest.kt src/jvmTest/kotlin/org/drivine/cypher/SetBasedDeleteTest.kt
+src/test/kotlin/org/drivine/cypher/TwoStageParseTest.kt src/jvmTest/kotlin/org/drivine/cypher/TwoStageParseTest.kt
 src/test/kotlin/org/drivine/cypher/UndirectedJoinTest.kt src/jvmTest/kotlin/org/drivine/cypher/UndirectedJoinTest.kt
 src/test/kotlin/org/drivine/cypher/spec/CypherSpec.kt src/jvmTest/kotlin/org/drivine/cypher/spec/CypherSpec.kt
 src/test/kotlin/org/drivine/cypher/spec/CypherSpecTest.kt src/jvmTest/kotlin/org/drivine/cypher/spec/CypherSpecTest.kt
