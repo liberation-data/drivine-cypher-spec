@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Merges drivine4j's compiler changes since the commit in compiler/DRIVINE4J into the module, up to <commit>.
 #
-#   compiler/scripts/sync-from-drivine4j.sh <commit>       # a drivine4j commit, such as origin/main's
+#   compiler/scripts/sync-from-drivine4j.sh <commit>       # a drivine4j commit from before its switch (drivine4j#662)
 #
 # The module's sources were ported from drivine4j's (scripts/sync-paths.txt says which from which), with edits for
 # common Kotlin: no java.*, no Jackson, the JVM's number text. So each changed file is merged three ways: drivine4j's file
