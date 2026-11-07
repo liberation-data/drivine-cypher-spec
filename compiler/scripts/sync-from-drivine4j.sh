@@ -39,12 +39,15 @@ to="$(git -C "$repo" rev-parse --verify "$target^{commit}")"
 # copy, its changes are made here, and drivine4j has none of the mapped files left to sync. A sync to such a commit would
 # take drivine4j's deletion of each for a change, delete the module's files that still match it, and leave half a module.
 # Such a commit is told by its gradle/cypher-compiler.properties, the pin drivine4j builds against, or by its having no
-# compiler package at all.
-if git -C "$repo" cat-file -e "$to:gradle/cypher-compiler.properties" 2>/dev/null; then
+# compiler package at all. Both are read from the commit's tree, which a blob-less clone holds, and each as an assignment,
+# so a git that can't read the tree stops the sync rather than reads as the file's absence.
+pin="$(git -C "$repo" ls-tree --name-only "$to" -- gradle/cypher-compiler.properties)"
+compiler="$(git -C "$repo" ls-tree --name-only "$to" -- src/main/kotlin/org/drivine/cypher/)"
+if [ -n "$pin" ]; then
     echo "drivine4j $to builds against this module (gradle/cypher-compiler.properties pins it): the module is the compiler's source now, so there is nothing to sync from it. Make the change here, and move drivine4j's pin." >&2
     exit 1
 fi
-if [ -z "$(git -C "$repo" ls-tree "$to" -- src/main/kotlin/org/drivine/cypher/)" ]; then
+if [ -z "$compiler" ]; then
     echo "drivine4j $to has no src/main/kotlin/org/drivine/cypher/: it doesn't hold the compiler, so a sync to it would delete the module's sources. The module is the compiler's source now." >&2
     exit 1
 fi

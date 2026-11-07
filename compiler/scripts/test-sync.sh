@@ -165,6 +165,16 @@ status=$?
 set -e
 [ "$status" -ne 0 ] || fail "a sync to a drivine4j that builds against the module ran"
 echo "$out" | grep -q 'builds against this module' || fail "the refusal of a drivine4j that builds against the module doesn't say why: $out"
+# So is it from a blob-less clone that can't reach its origin, which holds the pin's tree entry but not its blob.
+git -C "$d4j" config uploadpack.allowFilter true
+git clone --quiet --filter=blob:none --no-checkout "file://$d4j" "$root/blobless"
+git -C "$root/blobless" remote set-url origin "file://$root/no-such-repo"
+set +e
+out="$(DRIVINE4J_REPO="$root/blobless" "$module/scripts/sync-from-drivine4j.sh" HEAD 2>&1)"
+status=$?
+set -e
+[ "$status" -ne 0 ] || fail "a sync to a drivine4j that builds against the module ran from a blob-less clone"
+echo "$out" | grep -q 'builds against this module' || fail "the refusal from a blob-less clone doesn't say why: $out"
 git -C "$d4j" rm --quiet -r gradle src/main/kotlin/org/drivine/cypher
 git -C "$d4j" commit --quiet -m emptied
 set +e
