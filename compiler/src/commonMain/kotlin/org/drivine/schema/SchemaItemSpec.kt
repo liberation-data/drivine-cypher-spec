@@ -1,5 +1,6 @@
 package org.drivine.schema
 
+import org.drivine.DrivineInternalApi
 import kotlin.jvm.JvmOverloads
 
 /**
@@ -105,9 +106,10 @@ internal fun requireNameNotWhitespace(name: String?, specType: String) {
 
 /**
  * The item as it is made: one that ignores case is made over the lowercased copies of its properties
- * (see [org.drivine.model.LowerCopies]), under its own name; any other as it is declared.
+ * (see [org.drivine.cypher.store.LowerCopies]), under its own name; any other as it is declared.
  */
-internal fun SchemaItemSpec.made(): SchemaItemSpec = when (this) {
+@DrivineInternalApi
+fun SchemaItemSpec.made(): SchemaItemSpec = when (this) {
     is RangeIndexSpec -> made()
     is TextIndexSpec -> made()
     is UniquenessConstraintSpec -> made()
@@ -115,13 +117,16 @@ internal fun SchemaItemSpec.made(): SchemaItemSpec = when (this) {
 }
 
 /** [made], for an index. */
-internal fun IndexSpec.made(): IndexSpec = (this as SchemaItemSpec).made() as IndexSpec
+@DrivineInternalApi
+fun IndexSpec.made(): IndexSpec = (this as SchemaItemSpec).made() as IndexSpec
 
 /** [made], for a constraint. */
-internal fun ConstraintSpec.made(): ConstraintSpec = (this as SchemaItemSpec).made() as ConstraintSpec
+@DrivineInternalApi
+fun ConstraintSpec.made(): ConstraintSpec = (this as SchemaItemSpec).made() as ConstraintSpec
 
 /** The properties whose lowercased copies the item is made over; none for one that does not ignore case. */
-internal val SchemaItemSpec.lowercased: List<String>
+@DrivineInternalApi
+val SchemaItemSpec.lowercased: List<String>
     get() = when (this) {
         is RangeIndexSpec -> properties.takeIf { ignoreCase }
         is TextIndexSpec -> properties.takeIf { ignoreCase }

@@ -1,6 +1,6 @@
 package org.drivine.cypher
 
-import org.drivine.DrivineException
+import org.drivine.cypher.CompilerException
 import org.drivine.cypher.ast.Clause
 import org.drivine.cypher.ast.Expression
 import org.drivine.cypher.ast.NodePattern
@@ -59,9 +59,9 @@ internal enum class Procedure(val qualifiedName: String, val field: String) {
      * variable, [yields] pairs of the two, and with [where], only the rows that meet it.
      */
     fun query(arguments: List<Expression>, yields: List<Pair<String, String>>, where: Expression?): Query {
-        if (arguments.isNotEmpty()) throw DrivineException("$qualifiedName() takes no argument.")
+        if (arguments.isNotEmpty()) throw CompilerException("$qualifiedName() takes no argument.")
         yields.forEach { (yielded, _) ->
-            if (yielded != field) throw DrivineException("$qualifiedName() yields $field, not $yielded.")
+            if (yielded != field) throw CompilerException("$qualifiedName() yields $field, not $yielded.")
         }
         val variables = yields.map { (_, variable) -> variable }
         fun projection(distinct: Boolean, items: List<Projection.Item>) = Projection(distinct, false, items, emptyList(), null, null)

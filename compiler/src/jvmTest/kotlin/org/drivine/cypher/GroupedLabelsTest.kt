@@ -1,6 +1,6 @@
 package org.drivine.cypher
 
-import org.drivine.backend.oracle.OracleSql
+import org.drivine.cypher.store.OracleSql
 import org.drivine.cypher.sql.OracleCypherCompiler
 import org.drivine.cypher.sql.PostgresCypherCompiler
 import org.junit.jupiter.api.Test

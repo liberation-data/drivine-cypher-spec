@@ -1,11 +1,16 @@
-package org.drivine.backend.sqlite
+package org.drivine.cypher.store
 
+import org.drivine.DrivineInternalApi
 import org.drivine.cypher.json.CypherJson
 import org.drivine.cypher.json.JsonNode
 import org.drivine.cypher.json.JsonNodeFactory
 
-/** SPIKE: the write side of drivine4j's `SqliteCypherValues`, which the compiler calls; the functions SQLite runs stay in drivine4j. */
-internal object SqliteCypherValues {
+/**
+ * The write side of drivine4j's `org.drivine.backend.sqlite.SqliteCypherValues`, which the compiler calls; the functions
+ * SQLite runs stay in drivine4j, and call these.
+ */
+@DrivineInternalApi
+object SqliteCypherValues {
     fun write(node: JsonNode): String = CypherJson.writeValueAsString(nonFinite(node))
 
     val NAN: JsonNode = JsonNodeFactory.instance.objectNode().put("\$numberDouble", "NaN")

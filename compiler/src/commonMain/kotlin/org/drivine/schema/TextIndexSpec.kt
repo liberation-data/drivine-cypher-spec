@@ -2,7 +2,7 @@ package org.drivine.schema
 
 import kotlin.jvm.JvmOverloads
 
-import org.drivine.model.LowerCopies
+import org.drivine.cypher.store.LowerCopies
 
 /**
  * Neo4j's TEXT index over a single string property: `CREATE TEXT INDEX … FOR (n:Label) ON (n.prop)`.
@@ -12,7 +12,7 @@ import org.drivine.model.LowerCopies
  * which is a full-text index and so is what [FullTextIndexSpec] makes there.
  *
  * Only Neo4j has one. On every other engine [IndexManager] refuses the spec with a
- * [org.drivine.DrivineException] rather than make some other index in its place (see
+ * [org.drivine.cypher.CompilerException] rather than make some other index in its place (see
  * [SchemaGrammar.supportsTextIndex]).
  *
  * @param label node label, e.g. `"Chunk"`

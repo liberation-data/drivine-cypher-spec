@@ -1,6 +1,6 @@
 package org.drivine.cypher
 
-import org.drivine.DrivineException
+import org.drivine.cypher.CompilerException
 import org.drivine.cypher.sql.OracleCypherCompiler
 import org.drivine.cypher.sql.PostgresCypherCompiler
 import org.drivine.cypher.sql.SqlCypherCompiler
@@ -104,12 +104,12 @@ class SetBasedDeleteTest {
         for (label in listOf("it's \"x\\", "a \\\nb é")) {
             val read = subquery("MATCH (g:`$label`) DETACH DELETE g")
             val alias = Regex("JSON_SERIALIZE\\((n\\d+\\.labels)\\)").find(read)!!.groupValues[1]
-            assertTrue(org.drivine.backend.oracle.OracleSql.holdsLabel(alias, label) in read, read)
+            assertTrue(org.drivine.cypher.store.OracleSql.holdsLabel(alias, label) in read, read)
         }
         // A string of the statement's that reads as the test is a string still.
         val read = subquery("MATCH (g:Gone) WHERE g.s = \"JSON_EXISTS(n1.labels, '\$[*]?(@ == \\\"Y\\\")')\" DETACH DELETE g")
         assertEquals(1, Regex("JSON_EXISTS\\(n1\\.labels").findAll(read).count(), read)
-        assertFalse(org.drivine.backend.oracle.OracleSql.holdsLabel("n1.labels", "Y") in read, read)
+        assertFalse(org.drivine.cypher.store.OracleSql.holdsLabel("n1.labels", "Y") in read, read)
         // A read that deletes nothing keeps the test the index answers.
         assertTrue("JSON_EXISTS(" in OracleCypherCompiler("g").compile("MATCH (g:Gone) RETURN g.k").sql)
     }
@@ -120,12 +120,12 @@ class SetBasedDeleteTest {
             val name = "${compiler::class.simpleName}"
             assertEquals(
                 "m is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used.",
-                assertFailsWith<DrivineException>(name) { compiler.compile("MATCH (n) DETACH DELETE m") }.message,
+                assertFailsWith<CompilerException>(name) { compiler.compile("MATCH (n) DETACH DELETE m") }.message,
                 name,
             )
             assertEquals(
                 "A DELETE of anything but a variable is Cypher, and is not compiled to SQL yet.",
-                assertFailsWith<DrivineException>(name) { compiler.compile("MATCH (n) DETACH DELETE n.x") }.message,
+                assertFailsWith<CompilerException>(name) { compiler.compile("MATCH (n) DETACH DELETE n.x") }.message,
                 name,
             )
         }

@@ -34,6 +34,22 @@ when (result) {
 }
 ```
 
+The compiler throws `org.drivine.cypher.CompilerException` where it refuses a statement or a value; `compile` gives that
+refusal as `Refusal`. drivine4j turns it into its own `DrivineException`, which names the query run, at each of its
+calls into the compiler.
+
+### drivine4j's own calls
+
+drivine4j calls more of the module than the API above: the compiler classes themselves, the parts of its own SQL
+helpers that the compiler calls too (`org.drivine.cypher.store`), and a few of the schema specs' and compilers'
+functions. Those are public only so that drivine4j, built apart from the module, can call them, and are marked
+`@org.drivine.DrivineInternalApi`, an opt-in at the level of an error: drivine4j opts in module-wide, and any other
+caller that doesn't is refused at compile time. They may change or go in any release.
+
+Among them, a compiler can be made with a `CypherEncoder`, the host's writing of the values it gives as JSON, which the
+compiler asks before its own. drivine4j gives its Jackson mapper's, so that a parameter is written as drivine4j has
+always written it. An encoder is the compiler's own, for as long as it compiles: no state is shared between hosts.
+
 A host with no Kotlin types calls `CompileJson.compile(request)`, JSON text in and out. The wasm build exports it as
 `compile`, and the shared library as `drivine_compile`:
 
@@ -197,8 +213,8 @@ lists conflicts to resolve. Then build, run every check, and commit. `compiler/s
 over a made-up drivine4j.
 
 Before it merges, it puts drivine4j's two files through the port's mechanical rewrites, `scripts/port-rewrites.sed`, so a
-line the port changed by them alone isn't a conflict. Each rewrite maps a JVM library's name to the module's name for the
-same thing, and nothing more:
+line the port changed by them alone isn't a conflict. Each rewrite maps a JVM library's name, or a drivine4j name the
+module holds under another, to the module's name for the same thing, and nothing more:
 
 | drivine4j | the module |
 |---|---|
@@ -206,6 +222,8 @@ same thing, and nothing more:
 | `import com.fasterxml.jackson.databind.JsonNode`, `….node.ObjectNode` and the other node types | `import org.drivine.cypher.json.…`, the module's tree of the same names |
 | `import java.math.BigDecimal`, `BigInteger` | bignum's |
 | `syntaxError(recognizer: Recognizer<*, *>?, …, msg: String?, …)` | antlr-kotlin's signature of it, non-null |
+| `org.drivine.DrivineException`, `DrivineException` | `org.drivine.cypher.CompilerException`, `CompilerException` |
+| `org.drivine.backend.oracle.OracleSql`, `….backend.sqlite.SqliteSql`, `SqliteCypherValues`, `SqliteFunctions`, `SqliteTimestamps`, `org.drivine.model.Stamps`, `LowerCopies` | `org.drivine.cypher.store.…`, the part of each the compiler calls |
 
 A file drivine4j adds is copied in with the same rewrites. Anything else the port changed (java.time, Jackson's mapper,
 `String.format`, a double's text in a refusal) is its own edit, and a drivine4j change to such a line is a conflict to resolve by hand. Add a rewrite
@@ -225,7 +243,10 @@ After the merge, it lists what to look at by hand (`scripts/sync-report.py`):
 
 - WASI: left out. It comes back as drivine-python's `py3-none-any` fallback wheel, for platforms with no native wheel,
   when Python switches to this compiler.
-- Publishing: the jar to Maven Central, the npm package, Python wheels and an iOS XCFramework, from this repository's tags.
+- Publishing: the Maven publications are built (`./gradlew publishJvmPublicationToMavenLocal
+  publishKotlinMultiplatformPublicationToMavenLocal -Pcompiler.version=<v>`), and drivine4j builds against the JVM's
+  published from a pinned commit into a repository of its own checkout. Not yet: the jar to Maven Central, the npm
+  package, Python wheels and an iOS XCFramework, from this repository's tags.
 - A host's reading of schema DDL: `compile` refuses it with drivine4j's schema-command message, and no entry gives a
   host the spec a DDL statement reads as.
 - `Float` text off the JVM is the platform's own: only a JVM host binds a `Float`.

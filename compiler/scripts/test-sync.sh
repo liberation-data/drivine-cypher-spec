@@ -13,7 +13,7 @@ fail() { echo "test-sync: $*" >&2; exit 1; }
 # A drivine4j of two commits: the compiler's package, a helper beside a mapped file in its package, and a test.
 d4j="$root/drivine4j"
 src="$d4j/src/main/kotlin/org/drivine"
-mkdir -p "$src/cypher" "$src/backend/sqlite" "$d4j/src/test/kotlin/org/drivine/cypher"
+mkdir -p "$src/cypher" "$src/backend/sqlite" "$src/backend/oracle" "$d4j/src/test/kotlin/org/drivine/cypher"
 git -C "$root" init --quiet drivine4j
 git -C "$d4j" config user.email test@example.com
 git -C "$d4j" config user.name test
@@ -48,6 +48,21 @@ package org.drivine.backend.sqlite
 
 object SqliteRound { const val NAME = "round" }
 EOF
+# drivine4j's exception, and a library file of which the module holds a part in store/: both renamed by the rewrites.
+cat > "$src/cypher/Refuse.kt" <<'EOF'
+package org.drivine.cypher
+
+import org.drivine.DrivineException
+import org.drivine.backend.oracle.OracleSql
+
+fun refuse(): Nothing = throw DrivineException("no")
+fun literal() = OracleSql.literal("a")
+EOF
+cat > "$src/backend/oracle/OracleSql.kt" <<'EOF'
+package org.drivine.backend.oracle
+
+object OracleSql { fun literal(text: String) = "'" + text + "'" }
+EOF
 git -C "$d4j" add -A && git -C "$d4j" commit --quiet -m one
 old="$(git -C "$d4j" rev-parse HEAD)"
 
@@ -64,6 +79,7 @@ EOF
 ours="$module/src/commonMain/kotlin/org/drivine"
 mkdir -p "$ours/cypher"
 sed -E -f "$scripts/port-rewrites.sed" "$src/cypher/Reader.kt" > "$ours/cypher/Reader.kt"
+sed -E -f "$scripts/port-rewrites.sed" "$src/cypher/Refuse.kt" > "$ours/cypher/Refuse.kt"
 cp "$src/cypher/Gone.kt" "$ours/cypher/Gone.kt"
 echo "fun edited() = 1" >> "$ours/cypher/Edited.kt"
 cat > "$ours/cypher/Clash.kt" <<'EOF'
@@ -90,6 +106,8 @@ import com.fasterxml.jackson.databind.node.ObjectNode
 fun added(node: ObjectNode) = node
 EOF
 sed -i.bak 's/"round"/"ROUND"/' "$src/backend/sqlite/SqliteRound.kt" && rm "$src"/backend/sqlite/*.bak
+sed -i.bak 's/DrivineException("no")/DrivineException("no!")/' "$src/cypher/Refuse.kt" && rm "$src"/cypher/*.bak
+sed -i.bak 's/text + /text.trim() + /' "$src/backend/oracle/OracleSql.kt" && rm "$src"/backend/oracle/*.bak
 echo "class NewTest" > "$d4j/src/test/kotlin/org/drivine/cypher/NewTest.kt"
 git -C "$d4j" add -A && git -C "$d4j" commit --quiet -m two
 new="$(git -C "$d4j" rev-parse HEAD)"
@@ -117,4 +135,10 @@ grep -q '^import org.drivine.cypher.json.ObjectNode$' "$ours/cypher/Added.kt" ||
 echo "$out" | grep -q 'src/main/kotlin/org/drivine/backend/sqlite/SqliteRound.kt' ||
     fail "the report misses SqliteRound.kt, which SqliteSql.kt uses from its own package with no import"
 echo "$out" | grep -q 'src/test/kotlin/org/drivine/cypher/NewTest.kt' || fail "the report misses the new test"
+grep -q '<<<<<<<' "$ours/cypher/Refuse.kt" && fail "Refuse.kt conflicted, though only the rewrites renamed the exception"
+grep -q '^fun refuse(): Nothing = throw CompilerException("no!")$' "$ours/cypher/Refuse.kt" ||
+    fail "Refuse.kt didn't take drivine4j's change as the module's exception"
+grep -q '^import org.drivine.cypher.store.OracleSql$' "$ours/cypher/Refuse.kt" || fail "Refuse.kt lost the store's import"
+echo "$out" | sed -n '/check the replacement/,/^  [a-z]/p' | grep -q 'src/main/kotlin/org/drivine/backend/oracle/OracleSql.kt' ||
+    fail "the report doesn't list OracleSql.kt, whose part the module holds in store/, as a replacement to check"
 echo "test-sync: the sync merged, conflicted, copied, deleted, kept and reported as it should."

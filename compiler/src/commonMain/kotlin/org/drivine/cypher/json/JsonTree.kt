@@ -8,6 +8,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import org.drivine.DrivineInternalApi
 
 /**
  * SPIKE: a JSON tree shaped as Jackson's `JsonNode`, so the compiler's code that walks parameter trees moves to common code
@@ -215,19 +216,36 @@ const val MAX_DEPTH = 64
 fun sha256(bytes: ByteArray): ByteArray = Sha256.digest(bytes)
 
 /**
+ * A host's own writing of the values it gives the compiler as JSON, asked before the compiler's own of each value that is
+ * not already a tree: null leaves the value to the compiler. drivine4j gives its Jackson mapper's, so that a value is
+ * written as drivine4j has always written it, an object of the application's among them. A compiler is given one when it
+ * is made, and it is asked only while that compiler compiles: no host shares one with another.
+ */
+@DrivineInternalApi
+fun interface CypherEncoder {
+    /** [value] as a tree, as [CypherJson.valueToTree] makes one, or null. */
+    fun tree(value: Any?): JsonNode?
+
+    /** [value] as compact JSON text, as [CypherJson.writeValueAsString] writes it, or null: by default, as [tree] makes it. */
+    fun text(value: Any?): String? = null
+}
+
+/**
  * SPIKE: what drivine4j's `CypherJson` did for the compiler: a value as a JSON tree, and a tree or a value as
  * compact JSON text, as Jackson writes it.
  */
 object CypherJson {
-    /** A host's own conversion, tried before the built-in one: drivine4j would hand its Jackson mapper's here. */
-    var encoder: ((Any?) -> JsonNode?)? = null
-
+    /**
+     * [value] as a tree. [encoder], where given, is asked first of each value in it that is not already a tree, and its
+     * tree taken where it gives one: see [CypherEncoder].
+     */
     @OptIn(kotlin.io.encoding.ExperimentalEncodingApi::class)
-    fun valueToTree(value: Any?): JsonNode {
-        encoder?.invoke(value)?.let { return it }
+    fun valueToTree(value: Any?, encoder: CypherEncoder? = null): JsonNode {
+        if (value is JsonNode) return value
+        encoder?.tree(value)?.let { return it }
+        fun valueToTree(value: Any?) = valueToTree(value, encoder)
         return when (value) {
             null -> NullNode
-            is JsonNode -> value
             is String -> TextNode(value)
             is Boolean -> BooleanNode(value)
             is Int -> LongNode(value.toLong())
@@ -255,8 +273,11 @@ object CypherJson {
         }
     }
 
-    fun writeValueAsString(value: Any?, plainDecimals: Boolean = false): String =
-        StringBuilder().also { write(valueToTree(value), it, plainDecimals) }.toString()
+    /** [value] as compact JSON text: as [encoder] writes it where it does (decimals written plain aside), else as its tree. */
+    fun writeValueAsString(value: Any?, plainDecimals: Boolean = false, encoder: CypherEncoder? = null): String {
+        if (!plainDecimals && value !is JsonNode) encoder?.text(value)?.let { return it }
+        return StringBuilder().also { write(valueToTree(value, encoder), it, plainDecimals) }.toString()
+    }
 
     /**
      * [text] as a tree, refused where its arrays and objects nest past [MAX_DEPTH]: before it is parsed, as

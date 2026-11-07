@@ -1,5 +1,6 @@
-package org.drivine.backend.sqlite
+package org.drivine.cypher.store
 
+import org.drivine.DrivineInternalApi
 
 /**
  * The functions Drivine registers on each connection to a SQLite store, which its statements call:
@@ -37,7 +38,8 @@ package org.drivine.backend.sqlite
  * A function that reads only its arguments is registered as deterministic, so SQLite may index an
  * expression over it.
  */
-internal object SqliteFunctions {
+@DrivineInternalApi
+object SqliteFunctions {
 
     const val WRITE = "drivine_write"
     const val DELETE = "drivine_delete"

@@ -1,6 +1,6 @@
 package org.drivine.cypher
 
-import org.drivine.DrivineException
+import org.drivine.cypher.CompilerException
 import org.drivine.cypher.sql.OracleCypherCompiler
 import org.drivine.cypher.sql.PostgresCypherCompiler
 import org.drivine.cypher.sql.SqliteCypherCompiler
@@ -148,9 +148,9 @@ class NonFiniteCompileTest {
     fun `a statement that writes NaN is refused where the store's JSON holds none`() {
         val nan = mapOf("p" to Double.NaN)
         val infinity = mapOf("p" to Double.POSITIVE_INFINITY)
-        assertThrows<DrivineException> { PostgresCypherCompiler("g").compile("CREATE (:A {x: \$p})", nan) }
-        assertThrows<DrivineException> { PostgresCypherCompiler("g").compile("CREATE (:A {x: \$p})", infinity) }
-        assertThrows<DrivineException> { SqliteCypherCompiler("g").compile("CREATE (:A {x: [\$p]})", nan) }
+        assertThrows<CompilerException> { PostgresCypherCompiler("g").compile("CREATE (:A {x: \$p})", nan) }
+        assertThrows<CompilerException> { PostgresCypherCompiler("g").compile("CREATE (:A {x: \$p})", infinity) }
+        assertThrows<CompilerException> { SqliteCypherCompiler("g").compile("CREATE (:A {x: [\$p]})", nan) }
         // SQLite holds an infinity, and Oracle both.
         SqliteCypherCompiler("g").compile("CREATE (:A {x: \$p})", infinity)
         OracleCypherCompiler("g").compile("CREATE (:A {x: \$p})", nan)

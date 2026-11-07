@@ -1,6 +1,6 @@
 package org.drivine.cypher
 
-import org.drivine.DrivineException
+import org.drivine.cypher.CompilerException
 import org.drivine.cypher.spec.CypherSpec
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
@@ -19,7 +19,7 @@ class TwoStageParseTest {
     /** What [read] gives [cypher]: its query, or the message it is refused with. */
     private fun outcome(cypher: String, read: (String) -> Any): Any = try {
         read(cypher)
-    } catch (e: DrivineException) {
+    } catch (e: CompilerException) {
         "refused: " + e.message
     }
 
@@ -68,7 +68,7 @@ class TwoStageParseTest {
             "RETURN 'unterminated" to "line 1, column 8: token recognition error at: ''unterminated'",
             "RETURN 1 # 2" to "line 1, column 10: token recognition error at: '#'",
         ).forEach { (cypher, where) ->
-            assertEquals("The statement is not Cypher, at $where", assertThrows<DrivineException>(cypher) { CypherReader.read(cypher) }.message)
+            assertEquals("The statement is not Cypher, at $where", assertThrows<CompilerException>(cypher) { CypherReader.read(cypher) }.message)
         }
     }
 }

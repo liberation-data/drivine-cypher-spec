@@ -1,6 +1,6 @@
 package org.drivine.cypher.sql
 
-import org.drivine.DrivineException
+import org.drivine.cypher.CompilerException
 import org.drivine.cypher.ast.Clause
 import org.drivine.cypher.ast.Expression
 import org.drivine.cypher.ast.Pattern
@@ -90,7 +90,7 @@ internal class Aggregates(
         expression(where)
     }
 
-    private fun refuse(aggregate: Expression): Nothing = throw DrivineException(
+    private fun refuse(aggregate: Expression): Nothing = throw CompilerException(
         "${named(aggregate)} aggregates, and a WHERE holds no aggregate unless its WITH aggregates, as in Neo4j: aggregate in a WITH first, " +
             "and filter what it gives in that WITH's WHERE, as in WITH x, count(*) AS c WHERE c > 1."
     )

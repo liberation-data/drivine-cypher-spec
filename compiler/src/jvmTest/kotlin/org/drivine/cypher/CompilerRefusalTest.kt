@@ -1,6 +1,6 @@
 package org.drivine.cypher
 
-import org.drivine.DrivineException
+import org.drivine.cypher.CompilerException
 import org.drivine.cypher.spec.CypherSpec
 import org.drivine.cypher.sql.OracleCypherCompiler
 import org.drivine.cypher.sql.PostgresCypherCompiler
@@ -33,7 +33,7 @@ class CompilerRefusalTest {
     fun `collect(DISTINCT) beside a variable no other item is, outside its aggregates, is refused as collect() is`() {
         // Not in the spec yet: aggregatesFirst groups by each such variable, so it is refused before.
         listOf(PostgresCypherCompiler("g"), OracleCypherCompiler("g"), SqliteCypherCompiler("g")).forEach { compiler ->
-            val refused = assertThrows<DrivineException> { compiler.compile("MATCH (p:Person) RETURN p.born, collect(DISTINCT p.name) + p.name") }.message!!
+            val refused = assertThrows<CompilerException> { compiler.compile("MATCH (p:Person) RETURN p.born, collect(DISTINCT p.name) + p.name") }.message!!
             assertTrue(refused.contains("names p outside its aggregates"), refused)
         }
     }
@@ -47,7 +47,7 @@ class CompilerRefusalTest {
                 "MATCH (a) MERGE (a {})-[:R]->(b)",
                 "MATCH (a) FOREACH (x IN [1] | CREATE (a {})-[:R]->(b))",
             ).forEach { cypher ->
-                val refused = assertThrows<DrivineException>("${compiler::class.simpleName}: $cypher") { compiler.compile(cypher) }.message!!
+                val refused = assertThrows<CompilerException>("${compiler::class.simpleName}: $cypher") { compiler.compile(cypher) }.message!!
                 assertEquals("a is bound already, so a CREATE or MERGE makes no node of it with labels or properties.", refused)
             }
             compiler.compile("MATCH (a) CREATE (a)-[:R {}]->(b {})")
@@ -75,7 +75,7 @@ class CompilerRefusalTest {
                 "MATCH (n) CALL () { MATCH (m) WHERE (n)-->(m) RETURN m } RETURN m" to "n",
                 "MATCH (n) RETURN size((n)-[r]->())" to "r",
             ).forEach { (cypher, variable) ->
-                val refused = assertThrows<DrivineException>("${compiler::class.simpleName}: $cypher") { compiler.compile(cypher) }.message!!
+                val refused = assertThrows<CompilerException>("${compiler::class.simpleName}: $cypher") { compiler.compile(cypher) }.message!!
                 assertEquals(
                     "$variable is not defined: a pattern used as an expression binds no new variable, as in Neo4j. Bind it in a MATCH, or test the pattern with EXISTS { … }.",
                     refused,
@@ -113,7 +113,7 @@ class CompilerRefusalTest {
                 "MATCH (a), (b), (c) RETURN size((a)-[:REL]->(:C)<-[:REL]-(a {num: 5}))",
                 "MATCH (a), (b), (c) RETURN size(()-[:REL*0..2]->()<-[:REL]-(:A {num: 5}))",
             ).forEach { cypher ->
-                val refused = assertThrows<DrivineException>("${compiler::class.simpleName}: $cypher") { compiler.compile(cypher) }.message!!
+                val refused = assertThrows<CompilerException>("${compiler::class.simpleName}: $cypher") { compiler.compile(cypher) }.message!!
                 assertEquals("size() takes a list or a text, not a pattern, as in Neo4j: COUNT { … } counts a pattern's matches.", refused)
             }
             compiler.compile("MATCH (a) RETURN COUNT { (a)-->() }")
@@ -154,7 +154,7 @@ class CompilerRefusalTest {
                 "WITH [1, 2] AS l RETURN toString(l)" to "list",
                 "RETURN toString({a: 1})" to "map",
             ).forEach { (cypher, kind) ->
-                val refused = assertThrows<DrivineException>("${compiler::class.simpleName}: $cypher") { compiler.compile(cypher) }.message!!
+                val refused = assertThrows<CompilerException>("${compiler::class.simpleName}: $cypher") { compiler.compile(cypher) }.message!!
                 assertEquals("toString() takes a number, a text, a truth value or a temporal value, not a $kind, as in Neo4j.", refused)
             }
             // A value whose kind the statement leaves open is compiled, as Neo4j plans it.
@@ -173,7 +173,7 @@ class CompilerRefusalTest {
             val cypher = "WITH {a: 1} AS m RETURN m[\$k]"
             assertEquals(
                 "A map is indexed by a text, not an integer, as in Neo4j.",
-                assertThrows<DrivineException>(cypher) { compiler().compile(cypher, mapOf("k" to 1)) }.message,
+                assertThrows<CompilerException>(cypher) { compiler().compile(cypher, mapOf("k" to 1)) }.message,
                 cypher,
             )
             // A value whose kind is known only when the row is read, a property, a parameter or an unwound item, is compiled, as
@@ -221,7 +221,7 @@ class CompilerRefusalTest {
                 "RETURN 1 IN CASE WHEN true THEN 1.5 ELSE 2.5 END" to "IN takes a list, not a float, as in Neo4j.",
                 "WITH 1 AS x RETURN [1, 2][CASE x WHEN 1 THEN 1.5 END]" to "A list is indexed by an integer, not a float, as in Neo4j.",
             ).forEach { (cypher, message) ->
-                assertEquals(message, assertThrows<DrivineException>(cypher) { compiler().compile(cypher) }.message, cypher)
+                assertEquals(message, assertThrows<CompilerException>(cypher) { compiler().compile(cypher) }.message, cypher)
             }
             // Integer arithmetic is an integer, and a CASE or a list of an integer and a float or a null is of no kind known.
             listOf(
@@ -270,7 +270,7 @@ class CompilerRefusalTest {
             val cypher = "MATCH (a) CALL (*) { CREATE (a) } RETURN 1"
             assertEquals(
                 "a is bound already, so a CREATE makes no node of it, as in Neo4j.",
-                assertThrows<DrivineException>(cypher) { compiler().compile(cypher) }.message,
+                assertThrows<CompilerException>(cypher) { compiler().compile(cypher) }.message,
                 cypher,
             )
             // Neo4j takes each of these: a node bound before an OPTIONAL MATCH or a MERGE that joins it up, a name a WITH, a
@@ -345,7 +345,7 @@ class CompilerRefusalTest {
                     "#anew9 is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used.",
             ).forEach { (cypher, message) ->
                 val store = compiler()::class.simpleName
-                assertEquals(message, assertThrows<DrivineException>("$store: $cypher") { compiler().compile(cypher) }.message, "$store: $cypher")
+                assertEquals(message, assertThrows<CompilerException>("$store: $cypher") { compiler().compile(cypher) }.message, "$store: $cypher")
             }
         }
     }
@@ -369,7 +369,7 @@ class CompilerRefusalTest {
                 // One holding a randomUUID() too, whose query reads a UUID made for the row before its WITH.
                 "MATCH (a) CALL { WITH a AS c RETURN c.x + randomUUID() AS x } RETURN x",
             ).forEach { cypher ->
-                val refused = assertThrows<DrivineException>("$store: $cypher") { compiler.compile(cypher) }.message!!
+                val refused = assertThrows<CompilerException>("$store: $cypher") { compiler.compile(cypher) }.message!!
                 assertTrue(refused.startsWith("The importing WITH of a CALL { … } names variables of the row alone, as in Cypher"), "$store: $cypher: $refused")
             }
             // A leading WITH that names no variable of the row as it is imports nothing, and is any WITH; so is one of a CALL with brackets.
@@ -387,13 +387,13 @@ class CompilerRefusalTest {
     fun `two lists compared in a statement that writes are refused on Oracle, whose block calls no function the query declares`() {
         // #349: Oracle compares two lists by a function the query declares, which a procedure's queries do not call.
         val cypher = "CREATE (n:N {a: [1] < [2]})"
-        val refused = assertThrows<DrivineException> { OracleCypherCompiler("g").compile(cypher) }.message!!
+        val refused = assertThrows<CompilerException> { OracleCypherCompiler("g").compile(cypher) }.message!!
         assertTrue(refused.startsWith("Two lists compared with <, <=, > or >= do not run on Oracle in a statement that writes"), refused)
         PostgresCypherCompiler("g").compile(cypher)
         SqliteCypherCompiler("g").compile(cypher)
         // Nor does a reduce()'s step, which is a function the query declares.
         val folded = "RETURN reduce(acc = false, x IN [[1], [2]] | acc OR [1] < x)"
-        val inStep = assertThrows<DrivineException> { OracleCypherCompiler("g").compile(folded) }.message!!
+        val inStep = assertThrows<CompilerException> { OracleCypherCompiler("g").compile(folded) }.message!!
         assertTrue(inStep.startsWith("Two lists compared with <, <=, > or >= do not run on Oracle in the step of a reduce()"), inStep)
         PostgresCypherCompiler("g").compile(folded)
         SqliteCypherCompiler("g").compile(folded)
@@ -403,7 +403,7 @@ class CompilerRefusalTest {
     fun `a date written as a text that is no date is refused, with what the JVM's parser says of it`() {
         // Not in the spec: the message ends with the JVM's own text.
         listOf(PostgresCypherCompiler("g"), OracleCypherCompiler("g"), SqliteCypherCompiler("g")).forEach { compiler ->
-            val refused = assertThrows<DrivineException> { compiler.compile("RETURN date('2024-02-30')") }.message!!
+            val refused = assertThrows<CompilerException> { compiler.compile("RETURN date('2024-02-30')") }.message!!
             assertTrue(refused.startsWith("'2024-02-30' is no date"), refused)
         }
     }
@@ -416,7 +416,7 @@ class CompilerRefusalTest {
             val cypher = "RETURN date({year: 4294969319, week: 1})"
             assertEquals(
                 "date() takes no year 4294969319: Invalid value for Year (valid values -999999999 - 999999999): 4294969319",
-                assertThrows<DrivineException>("${compiler::class.simpleName}: $cypher") { compiler.compile(cypher) }.message,
+                assertThrows<CompilerException>("${compiler::class.simpleName}: $cypher") { compiler.compile(cypher) }.message,
                 cypher,
             )
             // Week 53 of a year of 52 weeks and a day of the quarter past its last run on, and what an expression gives is the store's to check.
@@ -437,7 +437,7 @@ class CompilerRefusalTest {
         )
         listOf(PostgresCypherCompiler("g"), OracleCypherCompiler("g"), SqliteCypherCompiler("g")).forEach { compiler ->
             refused.forEach { (cypher, message) ->
-                assertEquals(message, assertThrows<DrivineException>("${compiler::class.simpleName}: $cypher") { compiler.compile(cypher) }.message, cypher)
+                assertEquals(message, assertThrows<CompilerException>("${compiler::class.simpleName}: $cypher") { compiler.compile(cypher) }.message, cypher)
             }
             // A day of the week or of the quarter alone, beside a value that gives the date, and a number an expression gives, are the store's to check.
             listOf(
@@ -455,7 +455,7 @@ class CompilerRefusalTest {
             val cypher = "RETURN date.truncate('month', date('2024-03-15'), {day: null, dayOfWeek: 3})"
             assertEquals(
                 "date.truncate() takes a day or a day of the week, not both.",
-                assertThrows<DrivineException>("${compiler::class.simpleName}: $cypher") { compiler.compile(cypher) }.message,
+                assertThrows<CompilerException>("${compiler::class.simpleName}: $cypher") { compiler.compile(cypher) }.message,
                 cypher,
             )
             // The units and the fields of every kind the stores have SQL for compile.
@@ -498,7 +498,7 @@ class CompilerRefusalTest {
         listOf(PostgresCypherCompiler("g"), OracleCypherCompiler("g"), SqliteCypherCompiler("g")).forEach { compiler ->
             refused.forEach { (cypher, message) ->
                 val store = compiler::class.simpleName
-                assertEquals(message, assertThrows<DrivineException>("$store: $cypher") { compiler.compile(cypher) }.message, "$store: $cypher")
+                assertEquals(message, assertThrows<CompilerException>("$store: $cypher") { compiler.compile(cypher) }.message, "$store: $cypher")
             }
             // A WHERE over what an aggregate gave, or in a subquery or a CALL that aggregates in its own query, is compiled, as Neo4j runs it.
             listOf(
@@ -536,7 +536,7 @@ class CompilerRefusalTest {
         listOf(PostgresCypherCompiler("g"), OracleCypherCompiler("g"), SqliteCypherCompiler("g")).forEach { compiler ->
             refused.forEach { (cypher, message) ->
                 val store = compiler::class.simpleName
-                assertEquals(message, assertThrows<DrivineException>("$store: $cypher") { compiler.compile(cypher) }.message, "$store: $cypher")
+                assertEquals(message, assertThrows<CompilerException>("$store: $cypher") { compiler.compile(cypher) }.message, "$store: $cypher")
             }
             // A body or an order term that names only what the projection groups by, an item's name, or a variable of its own is compiled,
             // as Neo4j runs it.

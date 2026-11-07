@@ -1,13 +1,15 @@
 package org.drivine.cypher.sql
 
+import org.drivine.DrivineInternalApi
 import org.drivine.cypher.json.JsonNode
 import org.drivine.cypher.json.ArrayNode
 import org.drivine.cypher.json.DecimalNode
 import org.drivine.cypher.json.ObjectNode
-import org.drivine.DrivineException
+import org.drivine.cypher.CompilerException
 import org.drivine.cypher.ast.RelationshipPattern
+import org.drivine.cypher.json.CypherEncoder
 import org.drivine.cypher.json.CypherJson
-import org.drivine.model.Stamps
+import org.drivine.cypher.store.Stamps
 import com.ionspin.kotlin.bignum.decimal.BigDecimal
 import org.drivine.cypher.json.jvmDoubleText
 import org.drivine.cypher.json.sha256
@@ -27,7 +29,10 @@ import org.drivine.cypher.json.sha256
  * nothing, and each is written as Java writes it ([asText]). The rows give each back as the double it is (see
  * [org.drivine.mapper.JdbcResultMapper]). A statement that writes refuses them, as the store would keep that number in their place.
  */
-class PostgresCypherCompiler(graph: String) : SqlCypherCompiler(graph) {
+class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCompiler(graph, encoder) {
+
+    // The constructor drivine4j's compiler had, kept so that what was compiled against it still links.
+    constructor(graph: String) : this(graph, null)
 
     override fun literalJson(value: Any?) = "CAST(${literal(written(value))} AS jsonb)"
 
@@ -40,8 +45,8 @@ class PostgresCypherCompiler(graph: String) : SqlCypherCompiler(graph) {
      * Java writes it, `1.0E7`, `jsonb` reads it as the whole number 10000000, which is then read back as an integer.
      */
     private fun written(value: Any?): String {
-        val tree = CypherJson.valueToTree(value)
-        return CypherJson.writeValueAsString(wholeFloats(tree), plainDecimals = true)
+        val tree = CypherJson.valueToTree(value, encoder)
+        return CypherJson.writeValueAsString(wholeFloats(tree), plainDecimals = true, encoder = encoder)
     }
 
     /**
@@ -175,7 +180,7 @@ class PostgresCypherCompiler(graph: String) : SqlCypherCompiler(graph) {
 
     override fun containsAll(props: String, map: String) = "$props @> $map"
 
-    override fun hasLabel(labels: String, label: String) = "$labels @> ${literal(CypherJson.writeValueAsString(listOf(label)))}"
+    override fun hasLabel(labels: String, label: String) = "$labels @> ${literal(CypherJson.writeValueAsString(listOf(label), encoder = encoder))}"
 
     /**
      * A probe of the key for each row, which Postgres plans as a scan of the primary key's index whatever the table's
@@ -454,7 +459,7 @@ class PostgresCypherCompiler(graph: String) : SqlCypherCompiler(graph) {
     override fun nonFiniteWorkedOut(writes: Boolean) = !writes
 
     override fun refuseNonFiniteWrite(parameters: Map<String, Any?>) =
-        throw DrivineException(NON_FINITE_WRITE.formatted("NaN or an infinity", "Postgres's `jsonb`"))
+        throw CompilerException(NON_FINITE_WRITE.formatted("NaN or an infinity", "Postgres's `jsonb`"))
 
     override fun page(skip: String?, limit: String?) = listOfNotNull(skip?.let { "OFFSET $it" }, limit?.let { "LIMIT $it" })
 
@@ -815,7 +820,8 @@ class PostgresCypherCompiler(graph: String) : SqlCypherCompiler(graph) {
          * The double the number [number] in the rows of a statement given NaN or an infinity is: NaN where it stands for it, as
          * [standIn] writes it, and an infinity where it is past any double's, as the number that stands for one is.
          */
-        internal fun read(number: BigDecimal): Double = when {
+        @DrivineInternalApi
+        fun read(number: BigDecimal): Double = when {
             number.compareTo(NOT_A_NUMBER) == 0 -> Double.NaN
             number >= BigDecimal.parseString(INFINITE) -> Double.POSITIVE_INFINITY
             number <= BigDecimal.parseString(INFINITE).negate() -> Double.NEGATIVE_INFINITY

@@ -1,7 +1,7 @@
 package org.drivine.cypher.sql
 
-import org.drivine.backend.sqlite.SqliteFunctions
-import org.drivine.backend.sqlite.SqliteTimestamps
+import org.drivine.cypher.store.SqliteFunctions
+import org.drivine.cypher.store.SqliteTimestamps
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 
