@@ -60,14 +60,16 @@ Values are plain JSON, tagged only where JSON, or a host's reading of it, loses 
 | Value | Written |
 |---|---|
 | a whole number (Long, or past a Long a big integer) | a JSON integer: `2` |
-| a float | a JSON number with a fraction or an exponent (`2.5`, `1e-7`), or `{"$float": "2.0"}` (or `2`): JavaScript can't write a whole float |
+| a float | `{"$float": "2.0"}` (or `{"$float": 2}`), or in a request a JSON number with a fraction or an exponent (`2.5`, `1e-7`). A host whose JSON writer drops a whole float's fraction (JavaScript writes `2.0` as `2`) tags its floats |
 | NaN, the infinities | `{"$float": "NaN"}`, `{"$float": "Infinity"}`, `{"$float": "-Infinity"}` |
 | a temporal value | `{"$temporal": "DATE", "text": "2026-11-07"}`: `DATE`, `LOCAL_TIME`, `TIME`, `LOCAL_DATE_TIME`, `DATE_TIME` or `DURATION`, and its ISO 8601 text |
 | bytes | `{"$bytes": "<base64>"}` |
 | a map with a key that starts with `$` | `{"$map": {"$key": …}}` |
 
-The values bound come back the same way, a float written as Java writes it (`2.0`, `1.0E23`), so a host that reads a
-number's text can tell it from a whole number.
+The values bound come back the same way, except that every float is tagged, whole or not: `{"$float": "2.0"}`,
+`{"$float": "2.5"}`, its text as Java writes it. JavaScript's `JSON.parse` reads `2.0` as the integer 2, and Postgres
+types a parameter by the value it is given, so an untagged float would be bound as an integer. An untagged JSON number
+in the answer is always a whole number.
 
 ### npm
 
@@ -92,7 +94,8 @@ Each call stands alone, so a host may call it from several threads at once.
 
 ## Building
 
-JDK 21 runs Gradle; the build pins Temurin 21 for its own work, and provisions it where it isn't installed.
+JDK 21 runs Gradle. The build compiles with Temurin 21, provisioned where it isn't installed, and writes the zone ids
+and the JVM's answers on the exact JDK it pins (see [The pinned JDK](#the-pinned-jdk)).
 
 ```sh
 ./gradlew jvmTest                  # the JVM's tests, and the double fuzz on the JVM
@@ -106,9 +109,26 @@ JDK 21 runs Gradle; the build pins Temurin 21 for its own work, and provisions i
 
 Run `./gradlew clean` before a build you check: the wasm optimize step can leave stale output behind.
 
-What the build generates (`gen/Generate.java`, run on the pinned JVM): the zone ids that JVM's `ZoneId.of` takes, which
+What the build generates (`gen/Generate.java`, run on the pinned JDK): the zone ids that JDK's `ZoneId.of` takes, which
 the other targets check a zone name against, as their own zone databases (the OS's, Node's ICU) are other tzdb releases;
 and the tables of powers of ten and five the double text and parse use.
+
+### The pinned JDK
+
+`gradle/pinned-jdk.properties` pins one JDK exactly: Temurin 21.0.13+9, which brings tzdb 2026e. It writes the zone ids
+and the JVM's answers (`jvmOracle`), and CI runs every job on it. Compiling and the JVM tests take any Temurin 21.
+Where the pinned JDK isn't installed, the build fetches Adoptium's archive of it once, into `~/.gradle/drivine-jdks`,
+and checks it against the SHA-256 pinned for the platform.
+
+A JDK release can bring a new tzdb, and with it zones the compiler takes or refuses, so the pin changes only in a
+reviewed pull request. To bump it:
+
+1. Set `version` to the new Temurin 21 release, and each `sha256.<os>-<arch>` to Adoptium's checksum of that release's
+   archive (`https://api.adoptium.net/v3/assets/release_name/eclipse/jdk-<version>?os=<os>&architecture=<arch>&image_type=jdk`).
+2. Set `java-version` in `.github/workflows/compiler.yml` to the same release.
+3. Run `./gradlew generateTables`. Where the JDK brings another tzdb, it stops and names it: set `tzdb` to that.
+4. Open the pull request, and say in it which zones the new tzdb adds or removes (the diff of the generated
+   `build/generated/tables/org/drivine/cypher/time/JvmZoneIds.kt` against the old one's).
 
 ## Checks
 
@@ -153,3 +173,12 @@ It merges each changed file three ways (drivine4j's at the old commit, the modul
 module's edits for common Kotlin are kept, copies in a file drivine4j added, writes the new commit to `DRIVINE4J`, and
 lists conflicts to resolve and what changed in drivine4j outside the mapped files. Then build, run every check, and
 commit.
+
+## Not yet
+
+- WASI: left out. It comes back as drivine-python's `py3-none-any` fallback wheel, for platforms with no native wheel,
+  when Python switches to this compiler.
+- Publishing: the jar to Maven Central, the npm package, Python wheels and an iOS XCFramework, from this repository's tags.
+- A host's reading of schema DDL: `compile` refuses it with drivine4j's schema-command message, and no entry gives a
+  host the spec a DDL statement reads as.
+- `Float` text off the JVM is the platform's own: only a JVM host binds a `Float`.

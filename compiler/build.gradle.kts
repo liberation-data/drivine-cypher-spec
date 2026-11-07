@@ -1,6 +1,8 @@
 import com.strumenta.antlrkotlin.gradle.AntlrKotlinTask
 import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompilationTask
+import java.security.MessageDigest
+import java.util.Properties
 
 plugins {
     // Kotlin and antlr-kotlin are pinned together: antlr-kotlin's runtime is built with one Kotlin version, and 1.0.8 is
@@ -14,10 +16,50 @@ plugins {
 group = "org.drivine"
 version = providers.gradleProperty("compiler.version").getOrElse("0.0.0-SNAPSHOT")
 
-/** The JVM the compiler is built and tested with, as drivine4j pins it, and the JVM the zone ids are read from. */
+/** The JVM the compiler is built and tested with, as drivine4j pins it: Temurin 21, of any update. */
 val pinnedJvm = javaToolchains.launcherFor {
     languageVersion.set(JavaLanguageVersion.of(21))
     vendor.set(JvmVendorSpec.ADOPTIUM)
+}
+
+/**
+ * The exact JDK of gradle/pinned-jdk.properties, which writes the zone ids and the JVM's answers: a JDK brings its own
+ * tzdb, so the zones the compiler takes are those of one JDK, changed only by a reviewed change of the pin.
+ */
+val pinnedJdk = Properties().apply { layout.projectDirectory.file("gradle/pinned-jdk.properties").asFile.inputStream().use(::load) }
+val pinnedJdkVersion: String = pinnedJdk.getProperty("version")
+val pinnedTzdb: String = pinnedJdk.getProperty("tzdb")
+
+/**
+ * The `java` of the pinned JDK: the toolchain's where it is that release (CI installs it), else Adoptium's archive of it,
+ * fetched once into ~/.gradle/drivine-jdks and checked against the pinned SHA-256.
+ */
+fun pinnedJava(): File {
+    val toolchain = pinnedJvm.get()
+    if (toolchain.metadata.javaRuntimeVersion.startsWith(pinnedJdkVersion)) return toolchain.executablePath.asFile
+    val os = System.getProperty("os.name").lowercase().let { when { it.contains("mac") -> "mac"; it.contains("windows") -> "windows"; else -> "linux" } }
+    val arch = System.getProperty("os.arch").let { if (it == "aarch64" || it == "arm64") "aarch64" else "x64" }
+    val sha256 = requireNotNull(pinnedJdk.getProperty("sha256.$os-$arch")) { "gradle/pinned-jdk.properties pins no JDK for $os-$arch: install Temurin $pinnedJdkVersion." }
+    val home = File(gradle.gradleUserHomeDir, "drivine-jdks/temurin-$pinnedJdkVersion-$os-$arch")
+    val java = { home.walkTopDown().maxDepth(6).firstOrNull { it.isFile && (it.name == "java" || it.name == "java.exe") && it.parentFile.name == "bin" } }
+    java()?.let { return it }
+    val archive = File(home.parentFile, "temurin-$pinnedJdkVersion-$os-$arch" + if (os == "windows") ".zip" else ".tar.gz")
+    archive.parentFile.mkdirs()
+    val url = "https://api.adoptium.net/v3/binary/version/jdk-${pinnedJdkVersion.replace("+", "%2B")}/$os/$arch/jdk/hotspot/normal/eclipse"
+    logger.lifecycle("Fetching Temurin $pinnedJdkVersion ($os-$arch), the pinned JDK, from $url")
+    uri(url).toURL().openStream().use { input -> archive.outputStream().use { input.copyTo(it) } }
+    val digest = MessageDigest.getInstance("SHA-256").digest(archive.readBytes()).joinToString("") { "%02x".format(it) }
+    if (digest != sha256) {
+        archive.delete()
+        throw GradleException("Temurin $pinnedJdkVersion ($os-$arch) has SHA-256 $digest, not $sha256 as gradle/pinned-jdk.properties pins.")
+    }
+    // The system's tar (bsdtar on Windows, which reads a zip too), which keeps the JDK's file modes.
+    home.deleteRecursively()
+    home.mkdirs()
+    val untar = ProcessBuilder("tar", "-xf", archive.absolutePath, "-C", home.absolutePath).inheritIO().start()
+    if (untar.waitFor() != 0) throw GradleException("tar could not unpack $archive.")
+    archive.delete()
+    return requireNotNull(java()) { "No bin/java in Temurin $pinnedJdkVersion's archive." }.also { it.setExecutable(true) }
 }
 
 val generateGrammar = tasks.register<AntlrKotlinTask>("generateGrammar") {
@@ -27,16 +69,18 @@ val generateGrammar = tasks.register<AntlrKotlinTask>("generateGrammar") {
     outputDirectory = layout.buildDirectory.dir("generated/antlr/org/drivine/cypher/grammar").get().asFile
 }
 
-/** The zone ids of the pinned JVM, and the tables of powers the double text and parse use: see gen/Generate.java. */
+/** The zone ids of the pinned JDK, and the tables of powers the double text and parse use: see gen/Generate.java. */
 val generateTables = tasks.register<Exec>("generateTables") {
     val generator = layout.projectDirectory.file("gen/Generate.java")
     val out = layout.buildDirectory.dir("generated/tables")
     inputs.file(generator)
-    inputs.property("jvm", pinnedJvm.map { it.metadata.javaRuntimeVersion })
+    inputs.file(layout.projectDirectory.file("gradle/pinned-jdk.properties"))
     outputs.dir(out)
-    doFirst { delete(out) }
-    executable(pinnedJvm.get().executablePath.asFile.absolutePath)
-    args(generator.asFile.absolutePath, out.get().asFile.absolutePath)
+    doFirst {
+        delete(out)
+        executable(pinnedJava().absolutePath)
+    }
+    args(generator.asFile.absolutePath, out.get().asFile.absolutePath, pinnedJdkVersion, pinnedTzdb)
 }
 
 kotlin {
@@ -111,24 +155,26 @@ tasks.matching { it.name.endsWith("SourcesJar") }.configureEach { dependsOn(gene
  * and SQLite (corpus.jsonl), and doubles as Java writes and reads them (doubles.txt). See org.drivine.cypher.oracle.Oracle.
  */
 val oracleDir = layout.buildDirectory.dir("oracle")
-val jvmOracle = tasks.register<JavaExec>("jvmOracle") {
+val jvmOracle = tasks.register<Exec>("jvmOracle") {
     description = "Writes the JVM's answers the other targets are checked against, into build/oracle."
     val compilation = kotlin.jvm().compilations.getByName("test")
     dependsOn(compilation.compileTaskProvider, "jvmTestProcessResources")
-    classpath = files(compilation.output.allOutputs, compilation.runtimeDependencyFiles)
-    mainClass.set("org.drivine.cypher.oracle.Oracle")
-    javaLauncher.set(pinnedJvm)
-    maxHeapSize = "2g"
-    args(
+    val classpath = files(compilation.output.allOutputs, compilation.runtimeDependencyFiles)
+    // Such as a flight recording: -Poracle.jvmArgs="-XX:StartFlightRecording=…".
+    val jvmArgs = providers.gradleProperty("oracle.jvmArgs").orNull?.split(' ') ?: emptyList()
+    val oracleArgs = listOf(
         layout.projectDirectory.dir("..").asFile.absolutePath,
         oracleDir.get().asFile.absolutePath,
         providers.gradleProperty("fuzz.count").getOrElse("100000"),
         providers.gradleProperty("fuzz.seed").getOrElse("646"),
     )
-    // Such as a flight recording: -Poracle.jvmArgs="-XX:StartFlightRecording=…".
-    providers.gradleProperty("oracle.jvmArgs").orNull?.let { jvmArgs(it.split(' ')) }
     outputs.dir(oracleDir)
     outputs.upToDateWhen { false }
+    // The pinned JDK, whose zones the other targets take: the JVM's answers are its.
+    doFirst {
+        executable(pinnedJava().absolutePath)
+        args(listOf("-Xmx2g") + jvmArgs + listOf("-cp", classpath.asPath, "org.drivine.cypher.oracle.Oracle") + oracleArgs)
+    }
 }
 
 // The double fuzz on each target reads the JVM's answers.

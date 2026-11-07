@@ -43,8 +43,11 @@ import kotlin.io.encoding.ExperimentalEncodingApi
  * - `{"$map": {...}}` is the map it holds, its keys taken as they are: how a map with a key that starts with `$` is written;
  * - any other map is the map it is.
  *
- * A bound value is written likewise: a float as Java writes it (`2.0`, `1.0E23`), so a host that reads a number's text can
- * tell it from a whole number, and NaN and the infinities as `{"$float": …}`.
+ * A bound value is written likewise, except that every float is tagged, whole or not: `{"$float": "2.0"}`,
+ * `{"$float": "2.5"}`, `{"$float": "NaN"}`, its text as Java writes it. JavaScript's `JSON.parse` reads `2.0` as the
+ * integer 2, and Postgres types a parameter by it. A host that writes a request does likewise for a float its JSON writer
+ * can't write with a fraction (JavaScript's `JSON.stringify(2.0)` is `2`): an untagged JSON number with a fraction or an
+ * exponent is read as a float, and one without as a whole number.
  */
 object CompileJson {
 
@@ -131,7 +134,8 @@ object TypedJson {
             is String -> quote(value, out)
             is Boolean -> out.append(value)
             is Long, is Int, is Short, is Byte -> out.append(value.toString())
-            is Double -> if (value.isFinite()) out.append(jvmDoubleText(value)) else { out.append("{\"$FLOAT\":"); quote(jvmDoubleText(value), out); out.append('}') }
+            // Every float tagged, a whole one too: JavaScript's JSON.parse reads 2.0 as the integer 2.
+            is Double -> { out.append("{\"$FLOAT\":"); quote(jvmDoubleText(value), out); out.append('}') }
             is Float -> write(value.toDouble(), out)
             is BigInteger -> out.append(value.toString())
             is BigDecimal -> out.append(value.toStringExpanded())

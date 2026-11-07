@@ -15,12 +15,22 @@ import java.util.TreeSet;
  * - org/drivine/cypher/number/DoubleTables.kt: the powers of ten Schubfach writes a double with, and the powers of five
  *   Eisel-Lemire reads one with. Both are exact arithmetic, worked out here with BigInteger.
  *
- *   java gen/Generate.java <output directory>
+ *   java gen/Generate.java <output directory> [<pinned JDK version> <pinned tzdb>]
  */
 public class Generate {
 
     public static void main(String[] args) throws IOException {
         Path out = Path.of(args[0]);
+        // The JDK and the tzdb the build pins (gradle/pinned-jdk.properties): the zone ids are theirs, or the build stops.
+        String jdk = System.getProperty("java.runtime.version");
+        String tzdb = ZoneRulesProvider.getVersions("UTC").lastKey();
+        if (args.length > 2 && !jdk.startsWith(args[1])) {
+            throw new IllegalStateException("gen/Generate.java runs on JDK " + jdk + ", not the pinned " + args[1] + ".");
+        }
+        if (args.length > 2 && !tzdb.equals(args[2])) {
+            throw new IllegalStateException("JDK " + jdk + " brings tzdb " + tzdb + ", not " + args[2]
+                + " as gradle/pinned-jdk.properties says: set its tzdb to " + tzdb + " in the pull request that bumps the JDK.");
+        }
         write(out.resolve("org/drivine/cypher/time/JvmZoneIds.kt"), zoneIds());
         write(out.resolve("org/drivine/cypher/number/DoubleTables.kt"), doubleTables());
     }
