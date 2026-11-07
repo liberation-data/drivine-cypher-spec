@@ -3116,3 +3116,26 @@ cases:
       - cypher: "MATCH (in:Person {name: 'Hugo'}) WITH in AS as, [x IN [1, 2] | x] AS is RETURN as.name, is, size(is)"
         rows: [["Hugo", [1, 2], 2]]
 
+
+  - name: "NaN and the infinities worked out, then worked with"
+    description: "NaN and an infinity a statement works out are floats like any other: arithmetic keeps them, NaN is equal to nothing and ordered with nothing, and an infinity is beyond every finite number, after a WITH or an UNWIND too."
+    steps:
+      - note: "Oracle read a float it had worked out as a NUMBER, which holds neither, and held NaN equal to NaN."
+        only: [neo4j, sql]
+        cypher: "WITH 0.0 / 0.0 AS n, 1.0 / 0.0 AS i RETURN [n + 1, i - 1, i * 2, -i, n = n, n <> n, n > 1.0, n < 1.0, i > 1e308]"
+        rows: [[{$float: "NaN"}, {$float: "Infinity"}, {$float: "Infinity"}, {$float: "-Infinity"}, false, true, false, false, true]]
+      - only: [neo4j, sql]
+        cypher: "UNWIND [0.0 / 0.0, 1.0 / 0.0, 1.0] AS x RETURN [x + 1, x = x, x > 0.5, x IN [x]]"
+        rows: [[{$float: "NaN"}, false, false, false], [{$float: "Infinity"}, true, true, true], [2.0, true, true, true]]
+
+  - name: "A sum past a long's range, as text"
+    description: "Integers whose sum is past a long's range sum to a float, which toString() writes as a float and which is equal to that float: so a host whose numbers hold neither the float nor the exact sum tells them apart."
+    steps:
+      - note: "Postgres's numeric and Oracle's NUMBER summed them exactly, past a long (drivine4j#339). SQLite's sum() fails (see Aggregates of floats)."
+        only: [neo4j, postgres, oracle]
+        cypher: "UNWIND [9223372036854775807, 9223372036854775807] AS x RETURN [toString(sum(x)), sum(x) = 1.8446744073709552E19]"
+        rows: [["1.8446744073709552E19", true]]
+      - note: "Oracle writes this float to 17 digits, not as Java's shortest text (drivine4j#456)."
+        only: [neo4j, postgres, oracle]
+        cypher: "UNWIND [-9223372036854775807, -2] AS x RETURN toString(sum(x))"
+        rows: ["-9.223372036854776E18"]
