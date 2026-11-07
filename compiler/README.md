@@ -170,9 +170,32 @@ compiler/scripts/sync-from-drivine4j.sh <drivine4j commit>      # DRIVINE4J_REPO
 ```
 
 It merges each changed file three ways (drivine4j's at the old commit, the module's, drivine4j's at the new one), so the
-module's edits for common Kotlin are kept, copies in a file drivine4j added, writes the new commit to `DRIVINE4J`, and
-lists conflicts to resolve and what changed in drivine4j outside the mapped files. Then build, run every check, and
-commit.
+module's edits for common Kotlin are kept. It copies in a file drivine4j added, writes the new commit to `DRIVINE4J`, and
+lists conflicts to resolve. Then build, run every check, and commit.
+
+Before it merges, it puts drivine4j's two files through the port's mechanical rewrites, `scripts/port-rewrites.sed`, so a
+line the port changed by them alone isn't a conflict. Each rewrite maps a JVM library's name to the module's name for the
+same thing, and nothing more:
+
+| drivine4j | the module |
+|---|---|
+| `org.antlr.v4.runtime.…` | `org.antlr.v4.kotlinruntime.…` (antlr-kotlin) |
+| `import com.fasterxml.jackson.databind.JsonNode`, `….node.ObjectNode` and the other node types | `import org.drivine.cypher.json.…`, the module's tree of the same names |
+| `import java.math.BigDecimal`, `BigInteger` | bignum's |
+| `syntaxError(recognizer: Recognizer<*, *>?, …, msg: String?, …)` | antlr-kotlin's signature of it, non-null |
+
+A file drivine4j adds is copied in with the same rewrites. Anything else the port changed (java.time, Jackson's mapper,
+`String.format`) is its own edit, and a drivine4j change to such a line is a conflict to resolve by hand. Add a rewrite
+only where it is a rename that can't change meaning.
+
+After the merge, it lists what to look at by hand (`scripts/sync-report.py`):
+
+- Files outside the mapping that the compiler imports, and that changed. The imports are followed from drivine4j's
+  mapped sources through each file they import. A file only the library uses, such as full-text search, isn't listed.
+- Files the compiler imports in drivine4j that the port replaced (the module's copy dropped the import), and that changed:
+  check the replacement.
+- New tests in drivine4j's `src/test/kotlin/org/drivine/cypher` that the mapping has no line for: add each that needs no
+  store to `scripts/sync-paths.txt`.
 
 ## Not yet
 

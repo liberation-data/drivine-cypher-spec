@@ -7,7 +7,12 @@
 # common Kotlin: no java.*, no Jackson, the JVM's number text. So each changed file is merged three ways: drivine4j's file
 # at the old commit is the base, the module's file is ours, and drivine4j's at <commit> is theirs. A change of drivine4j's
 # that doesn't touch what the port edited merges cleanly; one that does is left with conflict markers to resolve.
-# A file drivine4j adds under a mapped directory is copied in as it is, to be made common Kotlin where it isn't.
+# Before the merge, the base and theirs are put through the port's mechanical rewrites (scripts/port-rewrites.sed: the
+# packages of antlr-kotlin, of the module's JSON tree and of bignum), so a line the port changed only by them merges.
+# A file drivine4j adds under a mapped directory is copied in, rewritten so, to be made common Kotlin where it isn't.
+#
+# It then lists what to look at by hand: a file outside the mapping that the compiler's drivine4j sources import, directly
+# or through each other, which changed; and a new test of the compiler's package that the mapping has no line for.
 #
 # DRIVINE4J_REPO names a local clone of drivine4j to read from, in place of a fresh clone of GitHub's.
 #
@@ -34,6 +39,15 @@ if [ "$to" = "$(git -C "$repo" rev-parse "$base^{commit}")" ]; then
 fi
 
 work="$(mktemp -d)"
+rewrites="$module/scripts/port-rewrites.sed"
+
+# drivine4j's file <path> at <commit>, with the port's mechanical rewrites where it is Kotlin.
+show() {
+    case "$2" in
+        *.kt) git -C "$repo" show "$1:$2" | sed -E -f "$rewrites" ;;
+        *) git -C "$repo" show "$1:$2" ;;
+    esac
+}
 clean=0; conflicted=(); added=(); deleted=(); kept=()
 mapped=()
 while read -r from into; do
@@ -45,7 +59,7 @@ while read -r from into; do
         ours="$module/$into${path#"$from"}"
         case "$status" in
             D)
-                if [ -f "$ours" ] && git -C "$repo" show "$base:$path" | cmp -s - "$ours"; then
+                if [ -f "$ours" ] && show "$base" "$path" | cmp -s - "$ours"; then
                     rm "$ours"; deleted+=("${ours#"$module/"}")
                 else
                     kept+=("${ours#"$module/"} (drivine4j deleted $path; the module's edited copy is kept)")
@@ -55,15 +69,15 @@ while read -r from into; do
                 mkdir -p "$(dirname "$ours")"
                 if [ -f "$ours" ]; then
                     : > "$work/base"
-                    git -C "$repo" show "$to:$path" > "$work/theirs"
+                    show "$to" "$path" > "$work/theirs"
                     if git merge-file -L module -L "drivine4j $base" -L "drivine4j $to" "$ours" "$work/base" "$work/theirs"; then clean=$((clean + 1)); else conflicted+=("${ours#"$module/"}"); fi
                 else
-                    git -C "$repo" show "$to:$path" > "$ours"; added+=("${ours#"$module/"}")
+                    show "$to" "$path" > "$ours"; added+=("${ours#"$module/"}")
                 fi
                 ;;
             *)
-                git -C "$repo" show "$base:$path" > "$work/base"
-                git -C "$repo" show "$to:$path" > "$work/theirs"
+                show "$base" "$path" > "$work/base"
+                show "$to" "$path" > "$work/theirs"
                 if [ ! -f "$ours" ]; then
                     cp "$work/theirs" "$ours"; added+=("${ours#"$module/"}")
                 elif git merge-file -L module -L "drivine4j $base" -L "drivine4j $to" "$ours" "$work/base" "$work/theirs"; then
@@ -84,8 +98,6 @@ echo "Merged drivine4j $base..$to into the module: $clean files merged cleanly."
 [ ${#kept[@]} -eq 0 ] || printf '  kept: %s\n' "${kept[@]}"
 [ ${#conflicted[@]} -eq 0 ] || printf '  CONFLICTS, to resolve: %s\n' "${conflicted[@]}"
 
-# What else changed in drivine4j's sources the compiler may call: a helper of the backends, a schema spec.
-others="$(git -C "$repo" diff --name-only "$base" "$to" -- src/main/kotlin/org/drivine/backend src/main/kotlin/org/drivine/schema src/main/kotlin/org/drivine/model src/test/kotlin/org/drivine/cypher \
-    | grep -v -x -F -f <(printf '%s\n' "${mapped[@]}") | grep -v -F -f <(printf '%s\n' "${mapped[@]}" | grep '/$') || true)"
-[ -z "$others" ] || { echo "  changed in drivine4j outside the mapped files, which the compiler may need:"; echo "$others" | sed 's/^/    /'; }
+# What else to look at, worked out from drivine4j's imports: see scripts/sync-report.py.
+python3 "$module/scripts/sync-report.py" "$repo" "$base" "$to" "$module"
 [ ${#conflicted[@]} -eq 0 ]
