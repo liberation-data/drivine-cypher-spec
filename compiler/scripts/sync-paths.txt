@@ -1,0 +1,46 @@
+# What the module's sources were ported from in drivine4j: <drivine4j path> <module path>. A path that ends with / is a
+# directory, every file under it mapped. scripts/sync-from-drivine4j.sh merges drivine4j's changes to these into the module.
+# Module files with no drivine4j source (api/, json/, number/, text/, time/, the platform source sets) are the module's own.
+src/main/antlr/org/drivine/cypher/grammar/Cypher.g4 src/commonMain/antlr/Cypher.g4
+src/main/kotlin/org/drivine/cypher/ src/commonMain/kotlin/org/drivine/cypher/
+src/main/kotlin/org/drivine/DrivineException.kt src/commonMain/kotlin/org/drivine/DrivineException.kt
+src/main/kotlin/org/drivine/backend/oracle/OracleSql.kt src/commonMain/kotlin/org/drivine/backend/oracle/OracleSql.kt
+src/main/kotlin/org/drivine/backend/sqlite/SqliteCypherValues.kt src/commonMain/kotlin/org/drivine/backend/sqlite/SqliteCypherValues.kt
+src/main/kotlin/org/drivine/backend/sqlite/SqliteFunctions.kt src/commonMain/kotlin/org/drivine/backend/sqlite/SqliteFunctions.kt
+src/main/kotlin/org/drivine/backend/sqlite/SqliteSql.kt src/commonMain/kotlin/org/drivine/backend/sqlite/SqliteSql.kt
+src/main/kotlin/org/drivine/backend/sqlite/SqliteTimestamps.kt src/commonMain/kotlin/org/drivine/backend/sqlite/SqliteTimestamps.kt
+src/main/kotlin/org/drivine/model/Stamps.kt src/commonMain/kotlin/org/drivine/model/Stamps.kt
+src/main/kotlin/org/drivine/schema/ConstraintSpec.kt src/commonMain/kotlin/org/drivine/schema/ConstraintSpec.kt
+src/main/kotlin/org/drivine/schema/EngineVectorOptions.kt src/commonMain/kotlin/org/drivine/schema/EngineVectorOptions.kt
+src/main/kotlin/org/drivine/schema/FullTextIndexSpec.kt src/commonMain/kotlin/org/drivine/schema/FullTextIndexSpec.kt
+src/main/kotlin/org/drivine/schema/IndexSpec.kt src/commonMain/kotlin/org/drivine/schema/IndexSpec.kt
+src/main/kotlin/org/drivine/schema/RangeIndexSpec.kt src/commonMain/kotlin/org/drivine/schema/RangeIndexSpec.kt
+src/main/kotlin/org/drivine/schema/SchemaItemKind.kt src/commonMain/kotlin/org/drivine/schema/SchemaItemKind.kt
+src/main/kotlin/org/drivine/schema/SchemaItemSpec.kt src/commonMain/kotlin/org/drivine/schema/SchemaItemSpec.kt
+src/main/kotlin/org/drivine/schema/SimilarityFunction.kt src/commonMain/kotlin/org/drivine/schema/SimilarityFunction.kt
+src/main/kotlin/org/drivine/schema/TextIndexSpec.kt src/commonMain/kotlin/org/drivine/schema/TextIndexSpec.kt
+src/main/kotlin/org/drivine/schema/UniquenessConstraintSpec.kt src/commonMain/kotlin/org/drivine/schema/UniquenessConstraintSpec.kt
+src/main/kotlin/org/drivine/schema/VectorIndexSpec.kt src/commonMain/kotlin/org/drivine/schema/VectorIndexSpec.kt
+src/main/kotlin/org/drivine/schema/ddl/SchemaDdl.kt src/commonMain/kotlin/org/drivine/schema/ddl/SchemaDdl.kt
+src/main/kotlin/org/drivine/schema/ddl/SchemaDdlResult.kt src/commonMain/kotlin/org/drivine/schema/ddl/SchemaDdlResult.kt
+src/test/kotlin/org/drivine/cypher/CompiledSizeTest.kt src/jvmTest/kotlin/org/drivine/cypher/CompiledSizeTest.kt
+src/test/kotlin/org/drivine/cypher/CompilerRefusalTest.kt src/jvmTest/kotlin/org/drivine/cypher/CompilerRefusalTest.kt
+src/test/kotlin/org/drivine/cypher/CypherReaderTest.kt src/jvmTest/kotlin/org/drivine/cypher/CypherReaderTest.kt
+src/test/kotlin/org/drivine/cypher/GroupedLabelsTest.kt src/jvmTest/kotlin/org/drivine/cypher/GroupedLabelsTest.kt
+src/test/kotlin/org/drivine/cypher/IntegerSumPastLongTest.kt src/jvmTest/kotlin/org/drivine/cypher/IntegerSumPastLongTest.kt
+src/test/kotlin/org/drivine/cypher/NonFiniteCompileTest.kt src/jvmTest/kotlin/org/drivine/cypher/NonFiniteCompileTest.kt
+src/test/kotlin/org/drivine/cypher/OracleCompareTextTest.kt src/jvmTest/kotlin/org/drivine/cypher/OracleCompareTextTest.kt
+src/test/kotlin/org/drivine/cypher/OracleContainsTextTest.kt src/jvmTest/kotlin/org/drivine/cypher/OracleContainsTextTest.kt
+src/test/kotlin/org/drivine/cypher/OracleEraFunctionTest.kt src/jvmTest/kotlin/org/drivine/cypher/OracleEraFunctionTest.kt
+src/test/kotlin/org/drivine/cypher/OracleItemPropertyTest.kt src/jvmTest/kotlin/org/drivine/cypher/OracleItemPropertyTest.kt
+src/test/kotlin/org/drivine/cypher/OracleJsonTableTransformTest.kt src/jvmTest/kotlin/org/drivine/cypher/OracleJsonTableTransformTest.kt
+src/test/kotlin/org/drivine/cypher/OracleLabelTestTextTest.kt src/jvmTest/kotlin/org/drivine/cypher/OracleLabelTestTextTest.kt
+src/test/kotlin/org/drivine/cypher/OracleOptionalJoinTest.kt src/jvmTest/kotlin/org/drivine/cypher/OracleOptionalJoinTest.kt
+src/test/kotlin/org/drivine/cypher/OracleParameterTextTest.kt src/jvmTest/kotlin/org/drivine/cypher/OracleParameterTextTest.kt
+src/test/kotlin/org/drivine/cypher/OracleReverseTextTest.kt src/jvmTest/kotlin/org/drivine/cypher/OracleReverseTextTest.kt
+src/test/kotlin/org/drivine/cypher/SetBasedDeleteTest.kt src/jvmTest/kotlin/org/drivine/cypher/SetBasedDeleteTest.kt
+src/test/kotlin/org/drivine/cypher/TwoStageParseTest.kt src/jvmTest/kotlin/org/drivine/cypher/TwoStageParseTest.kt
+src/test/kotlin/org/drivine/cypher/UndirectedJoinTest.kt src/jvmTest/kotlin/org/drivine/cypher/UndirectedJoinTest.kt
+src/test/kotlin/org/drivine/cypher/spec/CypherSpec.kt src/jvmTest/kotlin/org/drivine/cypher/spec/CypherSpec.kt
+src/test/kotlin/org/drivine/cypher/spec/CypherSpecTest.kt src/jvmTest/kotlin/org/drivine/cypher/spec/CypherSpecTest.kt
+src/test/resources/oracle/era-inline/ src/jvmTest/resources/oracle/era-inline/
