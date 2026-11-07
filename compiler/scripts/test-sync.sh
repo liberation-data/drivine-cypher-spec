@@ -151,4 +151,27 @@ grep -q '^// org.drivine.backend.oracle.OracleSqlTypes is no store name.$' "$our
     fail "a name that only starts with a store name was renamed"
 echo "$out" | sed -n '/check the replacement/,/^  [a-z]/p' | grep -q 'src/main/kotlin/org/drivine/backend/oracle/OracleSql.kt' ||
     fail "the report doesn't list OracleSql.kt, whose part the module holds in store/, as a replacement to check"
-echo "test-sync: the sync merged, conflicted, copied, deleted, kept and reported as it should."
+
+# The sync ends where drivine4j builds against the module: a commit with its pin, or with no compiler package, is
+# refused, and the module is left as it was.
+snapshot() { (cd "$module" && find src scripts DRIVINE4J -type f -exec shasum {} + | sort); }
+before="$(snapshot)"
+mkdir -p "$d4j/gradle"
+echo "version=0.0.0-000000000000" > "$d4j/gradle/cypher-compiler.properties"
+git -C "$d4j" add -A && git -C "$d4j" commit --quiet -m switched
+set +e
+out="$(DRIVINE4J_REPO="$d4j" "$module/scripts/sync-from-drivine4j.sh" HEAD 2>&1)"
+status=$?
+set -e
+[ "$status" -ne 0 ] || fail "a sync to a drivine4j that builds against the module ran"
+echo "$out" | grep -q 'builds against this module' || fail "the refusal of a drivine4j that builds against the module doesn't say why: $out"
+git -C "$d4j" rm --quiet -r gradle src/main/kotlin/org/drivine/cypher
+git -C "$d4j" commit --quiet -m emptied
+set +e
+out="$(DRIVINE4J_REPO="$d4j" "$module/scripts/sync-from-drivine4j.sh" HEAD 2>&1)"
+status=$?
+set -e
+[ "$status" -ne 0 ] || fail "a sync to a drivine4j with no compiler package ran"
+echo "$out" | grep -q 'has no src/main/kotlin/org/drivine/cypher/' || fail "the refusal of a drivine4j with no compiler package doesn't say why: $out"
+[ "$(snapshot)" = "$before" ] || fail "a refused sync changed the module"
+echo "test-sync: the sync merged, conflicted, copied, deleted, kept and reported as it should, and refused a drivine4j past it."

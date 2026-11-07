@@ -7,6 +7,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertSame
+import kotlin.test.assertTrue
 
 /** A host's [CypherEncoder]: asked before the compiler's own writing of a value, and only by the compiler it is given to. */
 class CypherEncoderTest {
@@ -94,5 +95,54 @@ class CypherEncoderTest {
             OracleCypherCompiler("g", false, false, setOf("Person" to "name"), null).compile(cypher, p),
             OracleCypherCompiler("g", nullsEqualStored = false, eraStored = false, indexedProperties = setOf("Person" to "name")).compile(cypher, p),
         )
+    }
+
+    /** An encoder that writes [target] as the text `"MARK"`, asking nothing of a tree, and keeps what it was asked of. */
+    private fun marking(target: Any?) = object : CypherEncoder {
+        val textsAsked = mutableListOf<Any?>()
+        override fun tree(value: Any?): JsonNode? = null
+        override fun text(value: Any?): String? = value.also { textsAsked += it }.takeIf { it == target }?.let { "\"MARK\"" }
+    }
+
+    @Test
+    fun oraclesLiteralJsonIsWrittenAsTheEncodersText() {
+        // A literal the statement writes, a text here, compared as JSON.
+        val encoder = marking("x")
+        val sql = OracleCypherCompiler("g", true, true, emptySet(), encoder).compile("MATCH (n:N) WHERE n.a = 'x' RETURN n").sql
+        assertTrue("x" in encoder.textsAsked, "Not asked of 'x': ${encoder.textsAsked}")
+        assertTrue("JSON('\"MARK\"')" in sql, sql)
+    }
+
+    @Test
+    fun postgresLabelTestIsWrittenAsTheEncodersText() {
+        val encoder = marking(listOf("Person"))
+        val sql = PostgresCypherCompiler("g", encoder).compile("MATCH (n:Person) RETURN n").sql
+        assertTrue(listOf("Person") in encoder.textsAsked, "Not asked of [\"Person\"]: ${encoder.textsAsked}")
+        assertTrue("@> '\"MARK\"'" in sql, sql)
+    }
+
+    @Test
+    fun sqlitesProcedureStepsAreWrittenAsTheEncodersText() {
+        val encoder = object : CypherEncoder {
+            val textsAsked = mutableListOf<Any?>()
+            override fun tree(value: Any?): JsonNode? = null
+            override fun text(value: Any?): String? {
+                textsAsked += value
+                return if (value is Map<*, *> && value.keys == setOf("steps")) "\"MARK\"" else null
+            }
+        }
+        val sql = SqliteCypherCompiler("g", encoder).compile("CREATE (n:N {a: 1})").sql
+        assertTrue(encoder.textsAsked.any { it is Map<*, *> && it.keys == setOf("steps") }, "Not asked of the steps: ${encoder.textsAsked}")
+        assertTrue("MARK" in sql, sql)
+    }
+
+    @Test
+    fun oraclesParameterKeyedAsExtendedJsonIsWrittenAsTheEncodersTreeAndNotReadAsExtended() {
+        // A host's tree with a key as extended JSON's: written as JSON is, and not read as extended JSON, or Oracle would
+        // read {"$numberLong": "5"} as the number 5.
+        val encoder = CypherEncoder { value -> if (value is Point) ObjectNode().put("\$numberLong", value.x.toString()) else null }
+        val compiled = OracleCypherCompiler("g", true, true, emptySet(), encoder).compile("RETURN \$p", mapOf("p" to Point(5, 0)))
+        assertEquals("{\"\$numberLong\":\"5\"}", compiled.parameters["_cy_p"])
+        assertTrue("EXTENDED" !in compiled.sql, compiled.sql)
     }
 }

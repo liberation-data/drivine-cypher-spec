@@ -200,7 +200,15 @@ writes and reads them itself (`org.drivine.cypher.number`), and the JVM keeps `D
 
 ## Syncing from drivine4j
 
-The compiler's sources come from drivine4j (`src/main/kotlin/org/drivine/cypher` and the few helpers it calls), and its
+**The sync ends when drivine4j switches to this module** (liberation-data/drivine4j#662, which builds drivine4j against
+the JVM artifact and deletes the files `scripts/sync-paths.txt` maps). From that commit on, this module is the compiler's
+one copy: a compiler change, its tests among it, is made here, and drivine4j takes it by moving the commit
+`gradle/cypher-compiler.properties` pins. `scripts/sync-from-drivine4j.sh` refuses a drivine4j commit that holds that pin,
+or that has no `src/main/kotlin/org/drivine/cypher`: a sync to one would read each mapped file's deletion as a change,
+delete the module's files that still match drivine4j's, and leave half a module. What follows is how the module was kept
+in step until then, for a change on a drivine4j branch from before the switch.
+
+The compiler's sources came from drivine4j (`src/main/kotlin/org/drivine/cypher` and the few helpers it calls), and its
 pure compiler tests from drivine4j's tests. `DRIVINE4J` holds the drivine4j commit they were last synced from, and
 `scripts/sync-paths.txt` which file came from which. To take drivine4j's changes since:
 

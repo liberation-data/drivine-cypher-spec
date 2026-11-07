@@ -306,17 +306,39 @@ tasks.register<Exec>("nativeCorpusCheck") {
  */
 publishing {
     publications.withType<MavenPublication>().configureEach {
+        // Maven Central takes a publication only with a javadoc jar beside its jar and sources: an empty one, as the
+        // module's API is documented in its KDoc and README. One for each publication, so that each publication's signing
+        // task, when Central's publishing signs them, depends on its own.
+        val publication = name
+        artifact(tasks.register<Jar>("${publication}JavadocJar") {
+            description = "The empty javadoc jar Maven Central asks of the $publication publication."
+            archiveClassifier.set("javadoc")
+            archiveBaseName.set("drivine-cypher-compiler-$publication")
+        })
+        // What Maven Central asks of a POM: a name, a description, a URL, a license, a developer and the source's place.
         pom {
             name.set("Drivine Cypher compiler")
             description.set("Drivine's compiler of Cypher to SQL for Postgres, Oracle and SQLite.")
             url.set("https://github.com/liberation-data/drivine-cypher-spec")
             licenses {
                 license {
-                    name.set("Apache License, Version 2.0")
+                    name.set("Apache License 2.0")
                     url.set("https://www.apache.org/licenses/LICENSE-2.0")
+                    distribution.set("repo")
                 }
             }
-            scm { url.set("https://github.com/liberation-data/drivine-cypher-spec") }
+            developers {
+                developer {
+                    id.set("jasperblues")
+                    name.set("Jasper Blues")
+                    email.set("jasper@liberation-data.com")
+                }
+            }
+            scm {
+                connection.set("scm:git:https://github.com/liberation-data/drivine-cypher-spec.git")
+                developerConnection.set("scm:git:ssh://git@github.com/liberation-data/drivine-cypher-spec.git")
+                url.set("https://github.com/liberation-data/drivine-cypher-spec")
+            }
         }
     }
 }
