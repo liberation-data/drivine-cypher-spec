@@ -42,9 +42,10 @@ calls into the compiler.
 
 drivine4j calls more of the module than the API above: the compiler classes themselves, the parts of its own SQL
 helpers that the compiler calls too (`org.drivine.cypher.store`), and a few of the schema specs' and compilers'
-functions. Those are public only so that drivine4j, built apart from the module, can call them, and are marked
-`@org.drivine.DrivineInternalApi`, an opt-in at the level of an error: drivine4j opts in module-wide, and any other
-caller that doesn't is refused at compile time. They may change or go in any release.
+functions. The compiler classes are public and unmarked; the rest are public only so that drivine4j, built apart from
+the module, can call them, and are marked `@org.drivine.DrivineInternalApi`, an opt-in at the level of an error:
+drivine4j opts in module-wide, and any other caller that doesn't is refused at compile time. They may change or go in
+any release.
 
 Among them, a compiler can be made with a `CypherEncoder`, the host's writing of the values it gives as JSON, which the
 compiler asks before its own. drivine4j gives its Jackson mapper's, so that a parameter is written as drivine4j has

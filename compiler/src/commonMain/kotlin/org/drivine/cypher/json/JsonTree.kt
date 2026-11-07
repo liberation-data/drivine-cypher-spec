@@ -226,7 +226,11 @@ fun interface CypherEncoder {
     /** [value] as a tree, as [CypherJson.valueToTree] makes one, or null. */
     fun tree(value: Any?): JsonNode?
 
-    /** [value] as compact JSON text, as [CypherJson.writeValueAsString] writes it, or null: by default, as [tree] makes it. */
+    /**
+     * [value] as compact JSON text, as [CypherJson.writeValueAsString] writes it, or null: by default, as [tree] makes it.
+     * Asked only of a whole value, not of one inside a container, and not where decimals are written plain, as Postgres
+     * writes its parameters: there [tree] is asked.
+     */
     fun text(value: Any?): String? = null
 }
 

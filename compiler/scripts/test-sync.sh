@@ -54,6 +54,7 @@ package org.drivine.cypher
 
 import org.drivine.DrivineException
 import org.drivine.backend.oracle.OracleSql
+import org.drivine.model.Stamps
 
 fun refuse(): Nothing = throw DrivineException("no")
 fun literal() = OracleSql.literal("a")
@@ -139,6 +140,7 @@ grep -q '<<<<<<<' "$ours/cypher/Refuse.kt" && fail "Refuse.kt conflicted, though
 grep -q '^fun refuse(): Nothing = throw CompilerException("no!")$' "$ours/cypher/Refuse.kt" ||
     fail "Refuse.kt didn't take drivine4j's change as the module's exception"
 grep -q '^import org.drivine.cypher.store.OracleSql$' "$ours/cypher/Refuse.kt" || fail "Refuse.kt lost the store's import"
+grep -q '^import org.drivine.cypher.store.Stamps$' "$ours/cypher/Refuse.kt" || fail "Refuse.kt lost the store's import of Stamps"
 echo "$out" | sed -n '/check the replacement/,/^  [a-z]/p' | grep -q 'src/main/kotlin/org/drivine/backend/oracle/OracleSql.kt' ||
     fail "the report doesn't list OracleSql.kt, whose part the module holds in store/, as a replacement to check"
 echo "test-sync: the sync merged, conflicted, copied, deleted, kept and reported as it should."
