@@ -26,8 +26,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with: { distribution: temurin, java-version: '21.0.13+9' }
+      - uses: actions/setup-java@v5
+        with: { distribution: temurin, java-version: '21.0.13+9.0.LTS' }
       - uses: gradle/actions/setup-gradle@v4
       # Clean, as the wasm optimize step leaves stale output behind.
       - run: ./gradlew --no-daemon clean jvmTest metadataCompile
@@ -40,8 +40,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with: { distribution: temurin, java-version: '21.0.13+9' }
+      - uses: actions/setup-java@v5
+        with: { distribution: temurin, java-version: '21.0.13+9.0.LTS' }
       - uses: actions/setup-node@v4
         with: { node-version: '22' }
       - uses: gradle/actions/setup-gradle@v4
@@ -58,8 +58,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with: { distribution: temurin, java-version: '21.0.13+9' }
+      - uses: actions/setup-java@v5
+        with: { distribution: temurin, java-version: '21.0.13+9.0.LTS' }
       - uses: actions/setup-python@v5
         with: { python-version: '3.12' }
       - uses: gradle/actions/setup-gradle@v4
@@ -82,8 +82,8 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with: { distribution: temurin, java-version: '21.0.13+9' }
+      - uses: actions/setup-java@v5
+        with: { distribution: temurin, java-version: '21.0.13+9.0.LTS' }
       - uses: actions/setup-python@v5
         with: { python-version: '3.12' }
       - uses: gradle/actions/setup-gradle@v4

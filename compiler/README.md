@@ -125,7 +125,7 @@ reviewed pull request. To bump it:
 
 1. Set `version` to the new Temurin 21 release, and each `sha256.<os>-<arch>` to Adoptium's checksum of that release's
    archive (`https://api.adoptium.net/v3/assets/release_name/eclipse/jdk-<version>?os=<os>&architecture=<arch>&image_type=jdk`).
-2. Set `java-version` in `.github/workflows/compiler.yml` to the same release.
+2. Set `java-version` in `.github/workflows/compiler.yml` to the same release, as setup-java names it (`21.0.13+9.0.LTS`).
 3. Run `./gradlew generateTables`. Where the JDK brings another tzdb, it stops and names it: set `tzdb` to that.
 4. Open the pull request, and say in it which zones the new tzdb adds or removes (the diff of the generated
    `build/generated/tables/org/drivine/cypher/time/JvmZoneIds.kt` against the old one's).
