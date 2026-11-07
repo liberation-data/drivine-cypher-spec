@@ -63,7 +63,9 @@ jobs:
         with: { python-version: '3.12' }
       - uses: gradle/actions/setup-gradle@v4
       - uses: actions/cache@v4
-        with: { path: ~/.konan, key: konan-${{ runner.os }}-${{ hashFiles('compiler/build.gradle.kts') }} }
+        with:
+          path: ~/.konan
+          key: konan-${{ runner.os }}-${{ hashFiles('compiler/build.gradle.kts') }}
       - run: ./gradlew --no-daemon clean linuxX64Test nativeCorpusCheck -Ppython="$(command -v python)" | tee corpus.log
       - name: The shared library for linuxArm64 and mingwX64, cross-compiled
         run: ./gradlew --no-daemon linkDrivinecypherReleaseSharedLinuxArm64 linkDrivinecypherReleaseSharedMingwX64
@@ -85,7 +87,9 @@ jobs:
         with: { python-version: '3.12' }
       - uses: gradle/actions/setup-gradle@v4
       - uses: actions/cache@v4
-        with: { path: ~/.konan, key: konan-${{ runner.os }}-${{ hashFiles('compiler/build.gradle.kts') }} }
+        with:
+          path: ~/.konan
+          key: konan-${{ runner.os }}-${{ hashFiles('compiler/build.gradle.kts') }}
       - run: ./gradlew --no-daemon clean macosArm64Test nativeCorpusCheck -Ppython="$(command -v python)" | tee corpus.log
       - name: Summary
         if: always()
