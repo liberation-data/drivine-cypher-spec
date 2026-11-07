@@ -152,7 +152,8 @@ tasks.matching { it.name.endsWith("SourcesJar") }.configureEach { dependsOn(gene
 
 /**
  * What the other targets are checked against, written by the JVM build: every spec statement compiled for Postgres, Oracle
- * and SQLite (corpus.jsonl), and doubles as Java writes and reads them (doubles.txt). See org.drivine.cypher.oracle.Oracle.
+ * and SQLite (corpus.jsonl), a sample of them mutated (mutants.jsonl, -Pmutants.count=<n>), and doubles as Java writes
+ * and reads them (doubles.txt). See org.drivine.cypher.oracle.Oracle.
  */
 val oracleDir = layout.buildDirectory.dir("oracle")
 val jvmOracle = tasks.register<Exec>("jvmOracle") {
@@ -167,6 +168,7 @@ val jvmOracle = tasks.register<Exec>("jvmOracle") {
         oracleDir.get().asFile.absolutePath,
         providers.gradleProperty("fuzz.count").getOrElse("100000"),
         providers.gradleProperty("fuzz.seed").getOrElse("646"),
+        providers.gradleProperty("mutants.count").getOrElse("10000"),
     )
     outputs.dir(oracleDir)
     outputs.upToDateWhen { false }
@@ -193,12 +195,12 @@ tasks.withType<org.jetbrains.kotlin.gradle.targets.js.testing.KotlinJsTest>().co
     environment("DRIVINE_ORACLE", oracleDir.get().asFile.absolutePath)
 }
 
-/** The npm package, @drivine/cypher-compiler, in build/npm: the production wasm, its ES module loaders and the CJS entry. */
+/** The npm package, @drivine/cypher-compiler, in build/npm: the production wasm, its ES module loaders, the CJS entry, and the types of each. */
 val npmPackage = tasks.register<Sync>("npmPackage") {
     description = "Assembles the npm package @drivine/cypher-compiler in build/npm."
     val distribution = tasks.named("wasmJsNodeProductionLibraryDistribution")
     from(distribution) { include("*.wasm", "*.mjs", "*.d.mts") }
-    from(layout.projectDirectory.dir("npm")) { include("index.cjs") }
+    from(layout.projectDirectory.dir("npm")) { include("index.cjs", "index.d.cts") }
     into(layout.buildDirectory.dir("npm"))
     val packageVersion = project.version.toString()
     doLast {
@@ -214,7 +216,13 @@ val npmPackage = tasks.register<Sync>("npmPackage") {
             "type" to "commonjs",
             "main" to "index.cjs",
             "types" to "drivine-cypher-compiler.d.mts",
-            "exports" to mapOf("." to mapOf("import" to "./drivine-cypher-compiler.mjs", "require" to "./index.cjs")),
+            // Each condition names its types: TypeScript's node16 resolution of a `require` reads no top-level `types`.
+            "exports" to mapOf(
+                "." to mapOf(
+                    "import" to mapOf("types" to "./drivine-cypher-compiler.d.mts", "default" to "./drivine-cypher-compiler.mjs"),
+                    "require" to mapOf("types" to "./index.d.cts", "default" to "./index.cjs"),
+                ),
+            ),
             "engines" to mapOf("node" to ">=22"),
             "dependencies" to kotlinPackage["dependencies"],
         )
@@ -237,10 +245,11 @@ val hostNative: String? = run {
 
 /**
  * The corpus check on wasmJs: the npm package, loaded through its CommonJS entry by Node 22 or later (`node` on the PATH,
- * or -Pnode=<path>), compiles each request of the JVM's corpus, and its answer must be the JVM's, byte for byte.
+ * or -Pnode=<path>), compiles each request of the JVM's corpus and of its mutants, and its answer must be the JVM's, byte
+ * for byte.
  */
 tasks.register<Exec>("wasmJsCorpusCheck") {
-    description = "Checks the wasmJs build's answers against the JVM's, over the spec's corpus."
+    description = "Checks the wasmJs build's answers against the JVM's, over the spec's corpus and its mutants."
     group = "verification"
     dependsOn(npmPackage, jvmOracle, "kotlinWasmNpmInstall")
     executable(providers.gradleProperty("node").getOrElse("node"))
@@ -251,15 +260,18 @@ tasks.register<Exec>("wasmJsCorpusCheck") {
         layout.buildDirectory.dir("npm").get().asFile.absolutePath,
         oracleDir.get().file("corpus.jsonl").asFile.absolutePath,
         oracleDir.get().file("differences-wasmJs.jsonl").asFile.absolutePath,
+        oracleDir.get().file("mutants.jsonl").asFile.absolutePath,
+        oracleDir.get().file("differences-mutants-wasmJs.jsonl").asFile.absolutePath,
     )
 }
 
 /**
  * The corpus check on the host's native target: the release shared library, loaded over its C ABI by Python's ctypes
- * (`python3`, or -Ppython=<path>), compiles each request of the JVM's corpus, and its answer must be the JVM's.
+ * (`python3`, or -Ppython=<path>), compiles each request of the JVM's corpus and of its mutants, and its answer must be
+ * the JVM's.
  */
 tasks.register<Exec>("nativeCorpusCheck") {
-    description = "Checks the host's native shared library's answers against the JVM's, over the spec's corpus."
+    description = "Checks the host's native shared library's answers against the JVM's, over the spec's corpus and its mutants."
     group = "verification"
     val target = requireNotNull(hostNative) { "No Kotlin/Native target for this host." }
     val link = "linkDrivinecypherReleaseShared${target.replaceFirstChar { it.uppercase() }}"
@@ -275,6 +287,8 @@ tasks.register<Exec>("nativeCorpusCheck") {
         layout.buildDirectory.file("bin/$target/drivinecypherReleaseShared/$library").get().asFile.absolutePath,
         oracleDir.get().file("corpus.jsonl").asFile.absolutePath,
         oracleDir.get().file("differences-$target.jsonl").asFile.absolutePath,
+        oracleDir.get().file("mutants.jsonl").asFile.absolutePath,
+        oracleDir.get().file("differences-mutants-$target.jsonl").asFile.absolutePath,
     )
 }
 

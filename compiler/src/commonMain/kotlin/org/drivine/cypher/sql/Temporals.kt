@@ -1,7 +1,6 @@
 package org.drivine.cypher.sql
 
 import com.ionspin.kotlin.bignum.decimal.BigDecimal
-import com.ionspin.kotlin.bignum.decimal.DecimalMode
 import kotlinx.datetime.atTime
 import kotlinx.datetime.atDate
 import kotlinx.datetime.number
@@ -594,6 +593,8 @@ class Temporals(
             val written = if (from.zoned) Regex(Temporal.OFFSET).find(text)!!.value else null
             val local = if (written != null) text.removeSuffix(written) else text
             val offset = written?.replace(Regex("^[+-]00:?00$"), "Z")?.replace(Regex("^([+-][0-9]{2})([0-9]{2})$"), "$1:$2")
+            // SPIKE: java.time's message where it refuses the text; kotlinx-datetime's are its own.
+            org.drivine.cypher.time.CommonTime.javaParseError(local)?.let { throw org.drivine.cypher.time.CommonTime.TemporalException(it) }
             val clock = when (from) {
                 Temporal.DATE -> kotlinx.datetime.LocalDate.parse(local).atTime(0, 0)
                 Temporal.LOCAL_DATE_TIME, Temporal.DATE_TIME -> kotlinx.datetime.LocalDateTime.parse(local)
@@ -628,10 +629,12 @@ class Temporals(
         /** The canonical text of the duration text [text], as [text] of its parts writes it. */
         private fun canonicalDuration(text: String): String {
             val groups = Regex(Temporal.DURATION.pattern).matchEntire(text)!!.groupValues
-            fun dec(text: String) = BigDecimal.parseString(text)
+            // As java.math's `BigDecimal(text)`, which refuses a part of no digits or of two points with NumberFormatException.
+            fun dec(text: String) = if (JAVA_DECIMAL.matches(text)) BigDecimal.parseString(text) else throw NumberFormatException("No decimal: $text")
             fun dec(n: Int) = BigDecimal.fromInt(n)
             fun down(value: BigDecimal) = value.roundToDigitPositionAfterDecimalPoint(0, com.ionspin.kotlin.bignum.decimal.RoundingMode.TOWARDS_ZERO)
-            fun quotient(a: BigDecimal, b: BigDecimal) = down(a.divide(b, DecimalMode(60, com.ionspin.kotlin.bignum.decimal.RoundingMode.TOWARDS_ZERO)))
+            // As `divide(b, 0, DOWN)`, exactly, however many digits: [a] cut toward zero, divided as whole numbers.
+            fun quotient(a: BigDecimal, b: BigDecimal) = BigDecimal.fromBigInteger(down(a).toBigInteger().divide(b.toBigInteger()))
             fun part(group: Int) = groups[group].takeIf { it.isNotEmpty() }?.let(::dec) ?: BigDecimal.ZERO
             val sign = if (groups[1] == "-") BigDecimal.ONE.negate() else BigDecimal.ONE
             val m0 = sign * (part(3) * dec(12) + part(5))
@@ -651,6 +654,9 @@ class Temporals(
             val time = if (seconds.signum() != 0) "T" + unit(hours, "H") + unit(minutes, "M") + unit(secs, "S") else ""
             return "P" + unit(years, "Y") + unit(months - years * dec(12), "M") + unit(days, "D") + time
         }
+
+        /** A part of a duration as java.math reads a decimal: a sign, and digits with one point at most. */
+        private val JAVA_DECIMAL = Regex("-?([0-9]+[.]?[0-9]*|[.][0-9]+)")
 
         /** The kinds of a time of day, which no months are between. */
         private val TIMES = setOf(Temporal.TIME, Temporal.LOCAL_TIME)

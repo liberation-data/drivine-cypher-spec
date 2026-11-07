@@ -22,7 +22,9 @@ import platform.posix.memcpy
  * void drivine_free(char *answer);             // frees what drivine_compile gave
  * ```
  *
- * Each call is independent of every other, so a host may call it from several threads at once.
+ * Each call is independent of every other, so a host may call it from several threads at once. A NULL request is read as
+ * an empty one, which is answered with an error; the answer is NULL only where malloc fails, and is the host's to free
+ * with drivine_free, as it is malloc's.
  */
 @CName("drivine_compile")
 fun drivineCompile(request: CPointer<ByteVar>?): CPointer<ByteVar>? {

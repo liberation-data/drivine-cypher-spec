@@ -18,8 +18,11 @@ import java.time.format.DateTimeFormatter
  *   out: no two runs give it alike. It is found by its SQL holding that moment, so no list of statements is kept.
  * - `doubles.txt`: doubles as Java writes them (`T<tab>bits<tab>text`) and texts as Java reads them
  *   (`P<tab>bits<tab>text`, the bits `-` where Java throws NumberFormatException). See [Doubles].
+ * - `standins-<name>.txt`: what Java gives where the module stands in for it, a file for each stand-in. See [StandIns].
+ * - `mutants.jsonl`: a sample of the spec's statements mutated, whose answers the parser's syntax refusal isn't, as
+ *   `corpus.jsonl` has them. See [Mutants].
  *
- *   Oracle <spec directory> <output directory> <fuzz count> <seed>
+ *   Oracle <spec directory> <output directory> <fuzz count> <seed> <mutant count>
  */
 object Oracle {
     private val json = ObjectMapper()
@@ -31,9 +34,18 @@ object Oracle {
         val out = File(args[1]).apply { mkdirs() }
         val count = args.getOrElse(2) { "100000" }.toInt()
         val seed = args.getOrElse(3) { "646" }.toLong()
+        val mutantCount = args.getOrElse(4) { "10000" }.toInt()
         val corpus = corpus(spec, File(out, "corpus.jsonl"))
+        val mutants = Mutants.write(statements(spec), STORES, File(out, "mutants.jsonl"), mutantCount, seed, ::answerUnlessClocked)
+        // Fewer than asked for would pass the checks over less than the README says they cover.
+        check(mutants.written == mutantCount) {
+            "jvmOracle: ${mutants.kept} mutants of interest, not the $mutantCount asked for: ask for fewer (-Pmutants.count) or mutate each statement more (-Poracle.jvmArgs=-Dmutants.perStatement=<n>)."
+        }
         val doubles = Doubles.write(File(out, "doubles.txt"), count, seed)
+        val standIns = StandIns.write(out, seed)
         println("jvmOracle: ${corpus.first} statements in the corpus (${corpus.second} left out, as they embed the clock); $doubles double cases.")
+        println("jvmOracle: ${mutants.made} mutant requests, ${mutants.kept} of interest, ${mutants.written} of them in mutants.jsonl.")
+        println("jvmOracle: stand-in cases ${standIns.entries.joinToString { (name, n) -> "$name $n" }}.")
     }
 
     private val FILES = listOf("queries.yaml", "writes.yaml", "temporal.yaml", "refusals.yaml", "schema.yaml")
@@ -45,25 +57,14 @@ object Oracle {
         var clocked = 0
         into.printWriter().use { w ->
             fun emit(request: String) {
-                val before = LocalDateTime.now(ZoneOffset.UTC)
-                val answer = CompileJson.compile(request)
-                val after = LocalDateTime.now(ZoneOffset.UTC)
-                if (embedsClock(answer, before, after)) {
+                val answer = answerUnlessClocked(request) ?: run {
                     clocked++
                     return
                 }
                 w.println(json.writeValueAsString(linkedMapOf("request" to request, "answer" to answer)))
                 lines++
             }
-            for (file in FILES) {
-                val tree = yaml.readTree(File(spec, file))
-                val cases = if (tree.isArray) tree else tree["cases"]
-                for (case in cases) for (step in case["steps"] ?: continue) {
-                    val cypher = (step["cypher"]?.takeIf { it.isTextual } ?: step["ddl"])?.textValue() ?: continue
-                    val parameters = step["parameters"]?.let { typed(json.treeToValue(it, Any::class.java)) } ?: emptyMap<String, Any?>()
-                    for (store in STORES) emit(request(store, cypher, parameters))
-                }
-            }
+            for ((cypher, parameters) in statements(spec)) for (store in STORES) emit(request(store, cypher, parameters))
             for ((cypher, parameters) in TYPED) for (store in STORES) emit(request(store, cypher, parameters))
             // Oracle's graph options.
             for (options in ORACLE_OPTIONS) {
@@ -75,6 +76,26 @@ object Oracle {
             for (request in listOf("", "[]", "{\"store\": \"neo4j\", \"graph\": {\"name\": \"g\"}, \"cypher\": \"RETURN 1\"}", "{\"store\": \"postgres\", \"cypher\": \"RETURN 1\"}")) emit(request)
         }
         return lines to clocked
+    }
+
+    /** Every statement in the spec's files, with its parameters, in the files' order. */
+    private fun statements(spec: File): List<Mutants.Statement> = buildList {
+        for (file in FILES) {
+            val tree = yaml.readTree(File(spec, file))
+            val cases = if (tree.isArray) tree else tree["cases"]
+            for (case in cases) for (step in case["steps"] ?: continue) {
+                val cypher = (step["cypher"]?.takeIf { it.isTextual } ?: step["ddl"])?.textValue() ?: continue
+                val parameters = step["parameters"]?.let { typed(json.treeToValue(it, Any::class.java)) } ?: emptyMap<String, Any?>()
+                add(Mutants.Statement(cypher, parameters))
+            }
+        }
+    }
+
+    /** [request]'s answer on the JVM, or null where it embeds the moment it was compiled (see [embedsClock]). */
+    private fun answerUnlessClocked(request: String): String? {
+        val before = LocalDateTime.now(ZoneOffset.UTC)
+        val answer = CompileJson.compile(request)
+        return answer.takeUnless { embedsClock(it, before, LocalDateTime.now(ZoneOffset.UTC)) }
     }
 
     private val SECONDS = DateTimeFormatter.ofPattern("uuuu-MM-dd'T'HH:mm")

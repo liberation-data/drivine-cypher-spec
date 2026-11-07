@@ -59,7 +59,9 @@ while read -r from into; do
         ours="$module/$into${path#"$from"}"
         case "$status" in
             D)
-                if [ -f "$ours" ] && show "$base" "$path" | cmp -s - "$ours"; then
+                if [ ! -f "$ours" ]; then
+                    :
+                elif show "$base" "$path" | cmp -s - "$ours"; then
                     rm "$ours"; deleted+=("${ours#"$module/"}")
                 else
                     kept+=("${ours#"$module/"} (drivine4j deleted $path; the module's edited copy is kept)")

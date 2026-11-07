@@ -388,7 +388,7 @@ class OracleCypherCompiler(
 
     /** Whether the value [given] is a number, a truth value or a text of 1 to [SHORT_TEXT] bytes, which `JSON_VALUE` reads as a `VARCHAR2`. */
     private fun readShort(given: Any) =
-        given is Number || given is Boolean || given is String && given.isNotEmpty() && given.encodeToByteArray().size <= SHORT_TEXT
+        given is Number || given is Boolean || given is String && given.isNotEmpty() && org.drivine.cypher.text.JavaText.utf8(given).size <= SHORT_TEXT
 
     /**
      * Whether [json] is a value the statement writes that is no text, or a text of 1 to [SHORT_TEXT] bytes, which `JSON_VALUE`
@@ -960,7 +960,7 @@ class OracleCypherCompiler(
      */
     private fun textSum(a: String, b: String, given: Pair<Any?, Any?>): String {
         val swapped = given.second to given.first
-        fun bytes(json: String, given: Any?) = (given as? String)?.encodeToByteArray()?.size?.toString() ?: "LENGTHB(JSON_VALUE($json, '\$'))"
+        fun bytes(json: String, given: Any?) = (given as? String)?.let(org.drivine.cypher.text.JavaText::utf8)?.size?.toString() ?: "LENGTHB(JSON_VALUE($json, '\$'))"
         val fits = "${bytes(a, given.first)} + ${bytes(b, given.second)} <= ${SHORT_TEXT - 2 * NUMBER_TEXT}"
         val short = "${summedText(a, given, short = true)} || ${summedText(b, swapped, short = true)}"
         val whole = "TO_CLOB(${summedText(a, given, short = false)}) || ${summedText(b, swapped, short = false)}"

@@ -678,10 +678,8 @@ object CypherReader {
                 'f' -> out.append('\u000C')
                 'u', 'U' -> {
                     val digits = if (escaped == 'u') 4 else 8
-                    body.substring(i + 2, i + 2 + digits).toInt(16).let { cp ->
-                        // SPIKE: common Kotlin has no appendCodePoint.
-                        if (cp < 0x10000) out.append(cp.toChar()) else { val v = cp - 0x10000; out.append((0xD800 + (v shr 10)).toChar()).append((0xDC00 + (v and 0x3FF)).toChar()) }
-                    }
+                    // SPIKE: common Kotlin has no appendCodePoint, and its substring's and toInt(16)'s messages off the JVM aren't Java's.
+                    org.drivine.cypher.text.JavaText.run { appendCodePoint(out, parseInt(substring(body, i + 2, i + 2 + digits), 16)) }
                     i += digits
                 }
                 else -> out.append(escaped)

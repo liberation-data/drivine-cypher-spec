@@ -31,6 +31,8 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       # Clean, as the wasm optimize step leaves stale output behind.
       - run: ./gradlew --no-daemon clean jvmTest metadataCompile
+      - name: The sync from drivine4j, over a made-up drivine4j
+        run: scripts/test-sync.sh
       - name: Summary
         if: always()
         run: ../.github/scripts/compiler-summary.sh build/test-results/jvmTest >> "$GITHUB_STEP_SUMMARY"

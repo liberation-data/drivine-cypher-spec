@@ -10,7 +10,6 @@ import org.drivine.cypher.json.CypherJson
 import org.drivine.model.Stamps
 import com.ionspin.kotlin.bignum.decimal.BigDecimal
 import org.drivine.cypher.json.jvmDoubleText
-import org.drivine.cypher.json.jvmFloatText
 import org.drivine.cypher.json.sha256
 
 /**
@@ -53,7 +52,7 @@ class PostgresCypherCompiler(graph: String) : SqlCypherCompiler(graph) {
     private fun wholeFloats(node: JsonNode): JsonNode = when {
         (node.isDouble || node.isFloat) && !node.doubleValue().isFinite() -> DecimalNode(standIn(node.doubleValue()), standInText(node.doubleValue()))
         (node.isDouble || node.isFloat) && node.doubleValue().let { it.isFinite() && it == kotlin.math.round(it) } ->
-            wholePlain(if (node.isFloat) jvmFloatText(node.doubleValue().toFloat()) else jvmDoubleText(node.doubleValue())).let { DecimalNode(BigDecimal.parseString(it), it) }
+            wholePlain(jvmDoubleText(node.doubleValue())).let { DecimalNode(BigDecimal.parseString(it), it) }
         node is ObjectNode -> node.apply { properties().toList().forEach { (key, value) -> set<JsonNode>(key, wholeFloats(value)) } }
         node is ArrayNode -> node.apply { (0 until size()).forEach { set(it, wholeFloats(get(it))) } }
         else -> node
@@ -620,7 +619,7 @@ class PostgresCypherCompiler(graph: String) : SqlCypherCompiler(graph) {
             indent(body.joinToString("\n")),
             "END",
         )).joinToString("\n")
-        val digest = sha256(text.encodeToByteArray()).joinToString("") { (it.toInt() and 0xff).toString(16).padStart(2, '0') }
+        val digest = sha256(org.drivine.cypher.text.JavaText.utf8(text)).joinToString("") { (it.toInt() and 0xff).toString(16).padStart(2, '0') }
         val function = "pg_temp.drivine_cypher_${digest.take(24)}"
         // The body is quoted with dollars, by a tag no text in it holds: a text of `$cy$` would end it early.
         val quote = (sequenceOf("\$cy\$") + generateSequence(1) { it + 1 }.map { "\$cy$it\$" }).first { it !in text }

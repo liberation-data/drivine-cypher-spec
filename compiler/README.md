@@ -68,8 +68,13 @@ Values are plain JSON, tagged only where JSON, or a host's reading of it, loses 
 
 The values bound come back the same way, except that every float is tagged, whole or not: `{"$float": "2.0"}`,
 `{"$float": "2.5"}`, its text as Java writes it. JavaScript's `JSON.parse` reads `2.0` as the integer 2, and Postgres
-types a parameter by the value it is given, so an untagged float would be bound as an integer. An untagged JSON number
-in the answer is always a whole number.
+types a parameter by the value it is given, so an untagged float would be bound as an integer. A decimal, which only a
+Kotlin host gives (bignum's `BigDecimal`, or java.math's), comes back as `{"$decimal": "2.5"}`, its plain text (java.math's
+keeps its scale, `"2.50"`; bignum's, on any target, keeps none): neither a float, whose text is a double's, nor a number
+a host's JSON reads as a double, losing digits. An untagged JSON number in the answer is always a whole number.
+
+A request nests its arrays and objects at most 64 deep, its own object and `parameters` two of them; a deeper one is
+an error.
 
 ### npm
 
@@ -81,7 +86,7 @@ const answer = JSON.parse(compile(JSON.stringify({ store: 'sqlite', graph: { nam
 The CommonJS entry (`npm/index.cjs`) loads the wasm synchronously. Kotlin/Wasm writes only an ES module loader, with a
 top-level await, so the entry runs that loader's text as a function with its Node branch made synchronous. Each edit
 is checked, so a Kotlin release that writes the loader otherwise fails at once. The corpus check on wasmJs goes through
-this entry.
+this entry. Each entry has its TypeScript types: Kotlin's `.d.mts` for `import`, and `npm/index.d.cts` for `require`.
 
 ### C
 
@@ -89,6 +94,9 @@ this entry.
 char *drivine_compile(const char *request);   /* NUL-terminated UTF-8 JSON in, and out */
 void drivine_free(char *answer);              /* frees what drivine_compile gave */
 ```
+
+A NULL request is answered as an empty one, with `{"error": …}`. `drivine_compile` gives NULL only where it can't allocate
+the answer. The answer is the host's to free, with `drivine_free` and nothing else, as the library allocates it.
 
 Each call stands alone, so a host may call it from several threads at once.
 
@@ -98,9 +106,9 @@ JDK 21 runs Gradle. The build compiles with Temurin 21, provisioned where it isn
 and the JVM's answers on the exact JDK it pins (see [The pinned JDK](#the-pinned-jdk)).
 
 ```sh
-./gradlew jvmTest                  # the JVM's tests, and the double fuzz on the JVM
-./gradlew wasmJsNodeTest           # the double fuzz on wasmJs
-./gradlew macosArm64Test           # the double fuzz on native (linuxX64Test on Linux)
+./gradlew jvmTest                  # the JVM's tests, and the double and stand-in fuzz on the JVM
+./gradlew wasmJsNodeTest           # the double and stand-in fuzz on wasmJs
+./gradlew macosArm64Test           # the double and stand-in fuzz on native (linuxX64Test on Linux)
 ./gradlew wasmJsCorpusCheck        # the corpus on wasmJs (node on the PATH, or -Pnode=<path>)
 ./gradlew nativeCorpusCheck        # the corpus on the host's native target (python3, or -Ppython=<path>)
 ./gradlew metadataCompile          # common code compiled alone
@@ -141,10 +149,24 @@ The JVM is the oracle. `./gradlew jvmOracle` writes, into `build/oracle`:
   SQL holding that moment.
 - `doubles.txt`: random doubles (subnormals included) and Java's text of each, and random decimal and hexadecimal texts,
   halfway points between doubles and texts a digit either side, and Java's reading of each.
+- `mutants.jsonl`: a sample of the spec's statements mutated (`Mutants`), which no corpus statement is: truncated,
+  a character or a token deleted, junk inserted, two tokens swapped, a clause written twice, a literal made an edge
+  value, a function's name a letter off. Only a mutant whose answer isn't the parser's syntax refusal is kept, as the
+  stdlib's exceptions and texts reach a refusal off those paths: 10,000 of them (`-Pmutants.count=<n>`), from the seed.
+  Where fewer are of interest, `jvmOracle` fails.
+- `standins-<name>.txt`: what Java gives where the module stands in for it, worked out by Java's own API on the pinned
+  JDK (`StandIns`): `ZoneId.of`'s reading of a zone; java.time's calendar dates, and its parse and text of a temporal
+  value, with java.math's of a duration; `substring`, `Integer.parseInt(s, 16)` and `appendCodePoint` of a string
+  literal's escape; a text's UTF-8; SHA-256; case mapping and character classes; `String.format`'s `%s`;
+  `parseDouble`'s refusals, `BigInteger`'s reading and `doubleValue`, `BigDecimal`'s text of a double, `Math.rint`;
+  Jackson's JSON text of a value; and SQLite's timestamp format.
 
 The corpus checks compile each request on wasmJs (the npm package, through its CommonJS entry) and on native (the
-release shared library, through its C ABI from Python) and fail on any byte that differs from the JVM's answer. The
-double fuzz checks each target's text and reading of each double against Java's.
+release shared library, through its C ABI from Python), the corpus's and then the mutants', and fail on any byte that
+differs from the JVM's answer. The double fuzz checks each target's text and reading of each double against Java's. The stand-in fuzz (`JavaStandInFuzzTest`) checks
+each stand-in's answer, or the message it throws, against Java's on every target, the JVM included. Off the JVM it lets be
+the case mapping Kotlin's own tables give a final sigma and Unicode 14's new case pairs, which no name the compiler
+compares can hold.
 
 ## Doubles
 
@@ -171,7 +193,8 @@ compiler/scripts/sync-from-drivine4j.sh <drivine4j commit>      # DRIVINE4J_REPO
 
 It merges each changed file three ways (drivine4j's at the old commit, the module's, drivine4j's at the new one), so the
 module's edits for common Kotlin are kept. It copies in a file drivine4j added, writes the new commit to `DRIVINE4J`, and
-lists conflicts to resolve. Then build, run every check, and commit.
+lists conflicts to resolve. Then build, run every check, and commit. `compiler/scripts/test-sync.sh` tests the sync itself,
+over a made-up drivine4j.
 
 Before it merges, it puts drivine4j's two files through the port's mechanical rewrites, `scripts/port-rewrites.sed`, so a
 line the port changed by them alone isn't a conflict. Each rewrite maps a JVM library's name to the module's name for the
@@ -185,13 +208,14 @@ same thing, and nothing more:
 | `syntaxError(recognizer: Recognizer<*, *>?, …, msg: String?, …)` | antlr-kotlin's signature of it, non-null |
 
 A file drivine4j adds is copied in with the same rewrites. Anything else the port changed (java.time, Jackson's mapper,
-`String.format`) is its own edit, and a drivine4j change to such a line is a conflict to resolve by hand. Add a rewrite
+`String.format`, a double's text in a refusal) is its own edit, and a drivine4j change to such a line is a conflict to resolve by hand. Add a rewrite
 only where it is a rename that can't change meaning.
 
 After the merge, it lists what to look at by hand (`scripts/sync-report.py`):
 
 - Files outside the mapping that the compiler imports, and that changed. The imports are followed from drivine4j's
-  mapped sources through each file they import. A file only the library uses, such as full-text search, isn't listed.
+  mapped sources through each file they import, and from a mapped source to a file of its own package whose names its
+  code uses, which needs no import. A file only the library uses, such as full-text search, isn't listed.
 - Files the compiler imports in drivine4j that the port replaced (the module's copy dropped the import), and that changed:
   check the replacement.
 - New tests in drivine4j's `src/test/kotlin/org/drivine/cypher` that the mapping has no line for: add each that needs no

@@ -1,23 +1,39 @@
 'use strict';
 /**
  * The corpus check on wasmJs: each request of the JVM's corpus (build/oracle/corpus.jsonl) compiled by the npm package
- * through its CommonJS entry, and its answer compared with the JVM's, byte for byte.
+ * through its CommonJS entry, and its answer compared with the JVM's, byte for byte. Then the same of the mutants
+ * (build/oracle/mutants.jsonl), where given.
  *
- *   node check/corpus-node.cjs <npm package directory> <corpus.jsonl> [<differences.jsonl>]
+ *   node check/corpus-node.cjs <npm package directory> <corpus.jsonl> [<differences.jsonl> [<mutants.jsonl> <their differences.jsonl>]]
  */
 const fs = require('fs');
 const { performance } = require('perf_hooks');
 const { report } = require('./report.cjs');
 
-const [packageDir, corpus, differencesFile] = process.argv.slice(2);
+const [packageDir, corpus, differencesFile, mutants, mutantDifferencesFile] = process.argv.slice(2);
+// Every file the package's package.json names (its entries, and the types of each) is in the package.
+const named = [];
+(function walk(value) {
+    if (typeof value === 'string') named.push(value);
+    else if (value) Object.values(value).forEach(walk);
+})((({ main, types, exports }) => ({ main, types, exports }))(JSON.parse(fs.readFileSync(require('path').join(packageDir, 'package.json'), 'utf8'))));
+const absent = named.filter((file) => !fs.existsSync(require('path').join(packageDir, file)));
+if (absent.length > 0) {
+    console.error(`The npm package's package.json names files it hasn't: ${absent.join(', ')}`);
+    process.exit(1);
+}
 const started = performance.now();
 const { compile } = require(require('path').resolve(packageDir));
 compile(JSON.stringify({ store: 'postgres', graph: { name: 'g' }, cypher: 'RETURN 1' }));
 const loadMs = performance.now() - started;
-const lines = fs.readFileSync(corpus, 'utf8').trim().split('\n').map((line) => JSON.parse(line));
-const results = lines.map(({ request, answer }) => {
-    const start = performance.now();
-    const got = compile(request);
-    return { request, answer, got, ms: performance.now() - start };
-});
-process.exit(report(`wasmJs (Node ${process.version})`, results, loadMs, differencesFile));
+const run = (file) =>
+    fs.readFileSync(file, 'utf8').split('\n').filter((line) => line.trim()).map((line) => {
+        const { request, answer } = JSON.parse(line);
+        const start = performance.now();
+        const got = compile(request);
+        return { request, answer, got, ms: performance.now() - start };
+    });
+const target = `wasmJs (Node ${process.version})`;
+let exit = report(target, run(corpus), loadMs, differencesFile);
+if (mutants) exit |= report(target, run(mutants), loadMs, mutantDifferencesFile, 'Mutants');
+process.exit(exit);

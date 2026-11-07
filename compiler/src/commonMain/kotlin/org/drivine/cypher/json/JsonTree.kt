@@ -169,9 +169,19 @@ data class TemporalValue(val kind: org.drivine.cypher.sql.Temporal, val text: St
  */
 expect fun parseDoubleOrNull(text: String): Double?
 
-/** [text] as the JVM's `Double.parseDouble` reads it, and the `NumberFormatException` it throws. */
+/**
+ * [text] as the JVM's `Double.parseDouble` reads it, and the `NumberFormatException` it throws: of the text trimmed, or of
+ * a second point among the digits that open a decimal (after its sign), where Java stops reading.
+ */
 fun parseDouble(text: String): Double = parseDoubleOrNull(text) ?: throw NumberFormatException(
-    if (text.trim { it <= ' ' }.isEmpty()) "empty String" else "For input string: \"$text\"",
+    text.trim { it <= ' ' }.let { trimmed ->
+        val unsigned = trimmed.removePrefix("+").let { if (it == trimmed) trimmed.removePrefix("-") else it }
+        when {
+            trimmed.isEmpty() -> "empty String"
+            !unsigned.startsWith("0x", ignoreCase = true) && unsigned.takeWhile { it in '0'..'9' || it == '.' }.count { it == '.' } > 1 -> "multiple points"
+            else -> "For input string: \"$trimmed\""
+        }
+    },
 )
 
 /** The platform's tree of a value of one of its own types (java.time, `BigDecimal`, an enum…); null for any other. */
@@ -191,6 +201,15 @@ expect fun jvmDoubleText(value: Double): String
  * JSON gives doubles, so elsewhere this is the platform's own text, unchecked against the JVM's.
  */
 expect fun jvmFloatText(value: Float): String
+
+/**
+ * The most levels a request's arrays and objects, or a value's lists and maps, nest, the outermost the first. Far past any
+ * real request, and short of a small thread's stack: read and written recursively, a deeper one would overflow it, which
+ * on native ends the host's process. Each level costs the native library about 1 KiB of stack, and its debug build some
+ * 4 KiB, so 64 levels fit a Kotlin/Native Worker's 512 KiB on macOS, and musl's 128 KiB, where 256 don't.
+ * A request's own object and its `parameters` are two of the levels.
+ */
+const val MAX_DEPTH = 64
 
 /** The SHA-256 digest of [bytes]. */
 fun sha256(bytes: ByteArray): ByteArray = Sha256.digest(bytes)
@@ -239,7 +258,30 @@ object CypherJson {
     fun writeValueAsString(value: Any?, plainDecimals: Boolean = false): String =
         StringBuilder().also { write(valueToTree(value), it, plainDecimals) }.toString()
 
-    fun readTree(text: String): JsonNode = fromElement(Json.parseToJsonElement(text))
+    /**
+     * [text] as a tree, refused where its arrays and objects nest past [MAX_DEPTH]: before it is parsed, as
+     * kotlinx.serialization's parse recurses as deep as the text nests, and overflows the stack.
+     */
+    fun readTree(text: String): JsonNode {
+        nesting(text)
+        return fromElement(Json.parseToJsonElement(text))
+    }
+
+    /** Refuses [text] where its arrays and objects, outside its strings, nest past [MAX_DEPTH]. The parse finds any other fault. */
+    private fun nesting(text: String) {
+        var depth = 0
+        var inString = false
+        var i = 0
+        while (i < text.length) {
+            val c = text[i++]
+            when {
+                inString -> if (c == '\\') i++ else if (c == '"') inString = false
+                c == '"' -> inString = true
+                c == '[' || c == '{' -> require(++depth <= MAX_DEPTH) { "A request nests its arrays and objects at most $MAX_DEPTH deep." }
+                c == ']' || c == '}' -> depth--
+            }
+        }
+    }
 
     private fun fromElement(element: JsonElement): JsonNode = when (element) {
         is JsonNull -> NullNode
@@ -249,10 +291,14 @@ object CypherJson {
             element.isString -> TextNode(element.content)
             element.content == "true" -> BooleanNode(true)
             element.content == "false" -> BooleanNode(false)
+            // kotlinx.serialization takes any word unquoted; Jackson reads only JSON's numbers (no `1.5f`, `.5`, `01`, `NaN`).
+            !JSON_NUMBER.matches(element.content) -> throw IllegalArgumentException("${element.content} is no JSON value.")
             element.content.any { it == '.' || it == 'e' || it == 'E' } -> DoubleNode(parseDouble(element.content))
             else -> element.content.toLongOrNull()?.let(::LongNode) ?: BigIntegerNode(BigInteger.parseString(element.content))
         }
     }
+
+    private val JSON_NUMBER = Regex("-?(0|[1-9][0-9]*)([.][0-9]+)?([eE][+-]?[0-9]+)?")
 
     private fun write(node: JsonNode, out: StringBuilder, plain: Boolean) {
         when (node) {

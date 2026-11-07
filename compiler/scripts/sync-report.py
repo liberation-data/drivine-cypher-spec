@@ -3,7 +3,8 @@ What a sync from drivine4j leaves to look at by hand, which scripts/sync-from-dr
 
 - Files outside the mapping (scripts/sync-paths.txt) that the compiler imports and that changed between the two commits.
   The compiler's imports are followed from drivine4j's mapped sources at the new commit, through `import org.drivine...`
-  lines, from file to file. An import the module's copy of a file dropped is one the port replaced on purpose (Jackson's
+  lines from file to file, and from a mapped file through the names its code uses from another file of its own package,
+  which Kotlin needs no import for. An import the module's copy of a file dropped is one the port replaced on purpose (Jackson's
   mapper by the module's JSON tree, say): its file is listed apart, as one to check the replacement of, and not followed.
   A file only the library uses (full-text search, the connections) is in neither list.
 - New tests of the compiler's package (src/test/kotlin/org/drivine/cypher) that the mapping has no line for.
@@ -60,7 +61,7 @@ def resolve(name):
     declares = re.compile(r"^(?:[a-z ]*)(?:class|object|interface|fun|val|typealias)\s+(?:<[^>]*>\s*)?" + re.escape(simple) + r"\b", re.M)
     for path in sorted(files_at_to):
         if path.startswith(package) and "/" not in path[len(package):] and path.endswith(".kt"):
-            if declares.search(git("show", f"{to}:{path}")):
+            if declares.search(show(path)):
                 return path
     return None
 
@@ -69,21 +70,65 @@ def imports(text):
     return set(IMPORT.findall(text))
 
 
+SHOWN = {}
+
+
+def show(path):
+    if path not in SHOWN:
+        SHOWN[path] = git("show", f"{to}:{path}")
+    return SHOWN[path]
+
+
+COMMENT = re.compile(r"/\*.*?\*/|//[^\n]*", re.S)
+TOP_LEVEL = re.compile(
+    r"^(?:[a-z]+ )*(?:class|object|interface|fun|val|var|typealias)\s+(?:<[^>]*>\s*)?(?:[A-Za-z0-9_]+\.)?([A-Za-z_][A-Za-z0-9_]*)", re.M
+)
+
+
+def code(text):
+    """[text] without its comments, so a name a KDoc mentions is no use of it."""
+    return COMMENT.sub("", text)
+
+
+def same_package(path, text):
+    """Each other file of [path]'s package whose top-level names [text]'s code uses, with the names it uses."""
+    package = path.rsplit("/", 1)[0] + "/"
+    body = code(text)
+    for other in sorted(files_at_to):
+        if other == path or not other.startswith(package) or "/" in other[len(package):] or not other.endswith(".kt"):
+            continue
+        names = {n for n in TOP_LEVEL.findall(show(other)) if re.search(r"\b" + re.escape(n) + r"\b", body)}
+        if names:
+            yield other, names
+
+
 changed = set(git("diff", "--name-only", base, to).split("\n")) - {""}
 start = [p for p in files_at_to if p.startswith(MAIN) and p.endswith(".kt") and mapped_to(p)]
 seen, replaced, queue = set(start), set(), list(start)
 while queue:
     path = queue.pop()
-    theirs = imports(git("show", f"{to}:{path}"))
+    text = show(path)
+    theirs = imports(text)
     ours_path = mapped_to(path)
     ours = os.path.join(module, ours_path) if ours_path else None
-    kept = imports(open(ours, encoding="utf-8").read()) if ours and os.path.isfile(ours) else None
+    ours_text = open(ours, encoding="utf-8").read() if ours and os.path.isfile(ours) else None
+    kept = imports(ours_text) if ours_text is not None else None
     for name in theirs:
         target = resolve(name)
         if target is None or target in seen:
             continue
         if kept is not None and name not in kept and mapped_to(target) is None:
             # The port dropped the import: replaced on purpose, so its file is checked, not followed.
+            replaced.add(target)
+            continue
+        seen.add(target)
+        queue.append(target)
+    # A file of the same package is used with no import. Only from a file the module has: through the library's own files
+    # these edges reach most of the library. Replaced where the port's copy uses none of its names, else followed.
+    for target, names in same_package(path, text) if ours_text is not None else ():
+        if target in seen:
+            continue
+        if mapped_to(target) is None and not any(re.search(r"\b" + re.escape(n) + r"\b", code(ours_text)) for n in names):
             replaced.add(target)
             continue
         seen.add(target)

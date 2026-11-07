@@ -110,7 +110,7 @@ object SchemaDdl {
                 c == '`' -> quoted()
                 c == '\'' || c == '"' -> string(c)
                 c.isDigit() -> number()
-                c.isLetter() || c == '_' -> Token(Type.WORD, word())
+                org.drivine.cypher.text.JavaText.isLetter(c) || c == '_' -> Token(Type.WORD, word())
                 c == '$' -> parameter()
                 c == ':' && text.startsWith("::", at) -> { at += 2; Token(Type.SYMBOL, "::") }
                 else -> { at++; Token(Type.SYMBOL, c.toString()) }
@@ -130,7 +130,7 @@ object SchemaDdl {
 
         private fun word(): String {
             val start = at
-            while (at < text.length && (text[at].isLetterOrDigit() || text[at] == '_')) at++
+            while (at < text.length && (org.drivine.cypher.text.JavaText.isLetterOrDigit(text[at]) || text[at] == '_')) at++
             return text.substring(start, at)
         }
 
@@ -533,7 +533,7 @@ object SchemaDdl {
 
         private fun analyzer(options: Map<String, Any?>): String? = when (val analyzer = config(options)["fulltext.analyzer"]) {
             null, is String -> analyzer as String?
-            else -> throw Refusal("A full-text index's `fulltext.analyzer` is the name of an analyzer, not $analyzer.")
+            else -> throw Refusal("A full-text index's `fulltext.analyzer` is the name of an analyzer, not ${org.drivine.cypher.text.JavaText.of(analyzer)}.")
         }
 
         private fun vector(label: String, property: String, options: Map<String, Any?>): VectorIndexSpec {
@@ -544,11 +544,11 @@ object SchemaDdl {
                 null -> SimilarityFunction.COSINE
                 is String -> SimilarityFunction.entries.firstOrNull { it.name.equals(function, ignoreCase = true) }
                     ?: throw Refusal("A vector index's `vector.similarity_function` is 'cosine' or 'euclidean', not '$function'.")
-                else -> throw Refusal("A vector index's `vector.similarity_function` is 'cosine' or 'euclidean', not $function.")
+                else -> throw Refusal("A vector index's `vector.similarity_function` is 'cosine' or 'euclidean', not ${org.drivine.cypher.text.JavaText.of(function)}.")
             }
             val quantization = when (val enabled = config["vector.quantization.enabled"]) {
                 null, is Boolean -> enabled as Boolean?
-                else -> throw Refusal("A vector index's `vector.quantization.enabled` is true or false, not $enabled.")
+                else -> throw Refusal("A vector index's `vector.quantization.enabled` is true or false, not ${org.drivine.cypher.text.JavaText.of(enabled)}.")
             }
             return VectorIndexSpec(
                 label, property, dimensions, similarity,
@@ -563,7 +563,7 @@ object SchemaDdl {
             val value = config[key] ?: return null
             val number = (value as? Long)?.takeIf { it in 1..Int.MAX_VALUE }?.toInt()
                 ?: (value as? Double)?.takeIf { it >= 1 && it <= Int.MAX_VALUE && it == kotlin.math.floor(it) }?.toInt()
-            return number ?: throw Refusal("A vector index's `$key` is a positive whole number, not $value.")
+            return number ?: throw Refusal("A vector index's `$key` is a positive whole number, not ${org.drivine.cypher.text.JavaText.of(value)}.")
         }
 
         // ----- DROP -----

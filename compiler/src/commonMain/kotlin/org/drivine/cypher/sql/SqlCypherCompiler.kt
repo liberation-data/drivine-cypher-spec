@@ -3383,7 +3383,7 @@ abstract class SqlCypherCompiler(graph: String) {
 
         /** A `SKIP` or `LIMIT`: a whole number, or a parameter bound to one. */
         private fun count(expression: Expression): String = when (expression) {
-            is Expression.Literal -> (expression.value as? Long)?.toString() ?: throw DrivineException("SKIP and LIMIT take a whole number, not ${expression.value}.")
+            is Expression.Literal -> (expression.value as? Long)?.toString() ?: throw DrivineException("SKIP and LIMIT take a whole number, not ${org.drivine.cypher.text.JavaText.of(expression.value)}.")
             is Expression.Parameter -> parameters.count(expression.name)
             else -> unsupported("SKIP or LIMIT of an expression")
         }
@@ -4105,7 +4105,7 @@ abstract class SqlCypherCompiler(graph: String) {
                     null -> CALENDAR_LEAST.getValue(key)
                     is Long -> literal
                     is Int -> literal.toLong()
-                    else -> throw DrivineException("$name() takes a whole number for $key, not ${if (literal is String) "'$literal'" else literal}.")
+                    else -> throw DrivineException("$name() takes a whole number for $key, not ${if (literal is String) "'$literal'" else org.drivine.cypher.text.JavaText.of(literal)}.")
                 }
             }
             val year = numbers.getValue("year")
@@ -4185,7 +4185,7 @@ abstract class SqlCypherCompiler(graph: String) {
                 val nouns = kinds.reversed().map { "a ${it.function}" }
                 fun refused(given: String): Nothing =
                     throw DrivineException("$name() takes ${nouns.dropLast(1).joinToString(", ")} or ${nouns.last()} for $key, not $given.")
-                if (value is Expression.Literal) refused(when (val v = value.value) { null -> "null"; is String -> "'$v'"; else -> "$v" })
+                if (value is Expression.Literal) refused(when (val v = value.value) { null -> "null"; is String -> "'$v'"; else -> org.drivine.cypher.text.JavaText.of(v) })
                 val given = expression(value, scope)
                 if (given !is Value.Json) refused(if (given is Value.Bool) "a truth value" else "a node, a relationship or a path")
                 given.known?.let { refused(it.noun) }
@@ -4212,13 +4212,13 @@ abstract class SqlCypherCompiler(graph: String) {
                         }
                         "$literal"
                     }
-                    else -> throw DrivineException("$name() takes a whole number for $key, not ${if (literal is String) "'$literal'" else literal}.")
+                    else -> throw DrivineException("$name() takes a whole number for $key, not ${if (literal is String) "'$literal'" else org.drivine.cypher.text.JavaText.of(literal)}.")
                 }
             }
             val timezone = entries["timezone"]?.let { value ->
                 when {
                     value == Expression.Literal(null) -> throw DrivineException("$name() takes a time zone, not null.")
-                    value is Expression.Literal -> (value.value as? String)?.let { zone(it) } ?: throw DrivineException("$name() takes a time zone, not ${value.value}.")
+                    value is Expression.Literal -> (value.value as? String)?.let { zone(it) } ?: throw DrivineException("$name() takes a time zone, not ${org.drivine.cypher.text.JavaText.of(value.value)}.")
                     else -> text(comparable(json(expression(value, scope))))
                 }
             }
@@ -4293,7 +4293,7 @@ abstract class SqlCypherCompiler(graph: String) {
                         }
                         "$literal"
                     }
-                    else -> throw DrivineException("${function.name}() takes a whole number for $key, not ${if (literal is String) "'$literal'" else literal}.")
+                    else -> throw DrivineException("${function.name}() takes a whole number for $key, not ${if (literal is String) "'$literal'" else org.drivine.cypher.text.JavaText.of(literal)}.")
                 }
                 key to number
             }
@@ -4835,7 +4835,7 @@ abstract class SqlCypherCompiler(graph: String) {
          */
         private fun short(node: JsonNode): Boolean =
             if (node.isArray) node.all(::short)
-            else CypherJson.writeValueAsString(scalarOf(node)).encodeToByteArray().size <= LITERAL_BYTES
+            else org.drivine.cypher.text.JavaText.utf8(CypherJson.writeValueAsString(scalarOf(node))).size <= LITERAL_BYTES
 
         /**
          * Whether the JSON value [json] is equal to [given], a list that may hold a null and lists, as Cypher compares them: the
@@ -5243,7 +5243,7 @@ abstract class SqlCypherCompiler(graph: String) {
                 "replace" -> {
                     if (arguments.size != 3) throw DrivineException("replace() takes a text, what to replace, and what with.")
                     // How long what to replace, and what with, are, in bytes, where the statement gives them.
-                    val (searchBytes, replacementBytes) = function.arguments.drop(1).map { (given(it) as? String)?.encodeToByteArray()?.size }
+                    val (searchBytes, replacementBytes) = function.arguments.drop(1).map { (given(it) as? String)?.let(org.drivine.cypher.text.JavaText::utf8)?.size }
                     Value.Json(texts(*arguments.map { comparable(json(it)) }.toTypedArray()) { (text, search, replacement) ->
                         scalar(replaceText(text, search, replacement, searchBytes, replacementBytes))
                     }, text = true)
@@ -5329,7 +5329,7 @@ abstract class SqlCypherCompiler(graph: String) {
             if (mode !is Expression.Literal && mode !is Expression.Parameter) unsupported("A rounding mode an expression gives")
             val name = given(mode) ?: return null
             val known = RoundingMode.entries.firstOrNull { it.name == name }
-                ?: throw DrivineException("round() rounds by CEILING, FLOOR, UP, DOWN, HALF_EVEN, HALF_UP, HALF_DOWN or UNNECESSARY, not $name.")
+                ?: throw DrivineException("round() rounds by CEILING, FLOOR, UP, DOWN, HALF_EVEN, HALF_UP, HALF_DOWN or UNNECESSARY, not ${org.drivine.cypher.text.JavaText.of(name)}.")
             // It fails where rounding would change the number, which SQL has no way to say in a query.
             if (known == RoundingMode.UNNECESSARY) unsupported("round() by UNNECESSARY")
             return known
