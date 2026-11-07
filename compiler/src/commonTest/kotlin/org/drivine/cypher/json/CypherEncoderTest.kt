@@ -138,11 +138,13 @@ class CypherEncoderTest {
 
     @Test
     fun oraclesParameterKeyedAsExtendedJsonIsWrittenAsTheEncodersTreeAndNotReadAsExtended() {
-        // A host's tree with a key as extended JSON's: written as JSON is, and not read as extended JSON, or Oracle would
-        // read {"$numberLong": "5"} as the number 5.
-        val encoder = CypherEncoder { value -> if (value is Point) ObjectNode().put("\$numberLong", value.x.toString()) else null }
+        // A host's tree with a key as extended JSON's: written as JSON is, its whole float too, and not read as extended
+        // JSON, or Oracle would read {"$numberLong": "5"} as the number 5. The float is what would make it extended.
+        val encoder = CypherEncoder { value ->
+            if (value is Point) ObjectNode().put("\$numberLong", value.x.toString()).apply { set<JsonNode>("d", DoubleNode(2.0)) } else null
+        }
         val compiled = OracleCypherCompiler("g", true, true, emptySet(), encoder).compile("RETURN \$p", mapOf("p" to Point(5, 0)))
-        assertEquals("{\"\$numberLong\":\"5\"}", compiled.parameters["_cy_p"])
+        assertEquals("{\"\$numberLong\":\"5\",\"d\":2.0}", compiled.parameters["_cy_p"])
         assertTrue("EXTENDED" !in compiled.sql, compiled.sql)
     }
 }
