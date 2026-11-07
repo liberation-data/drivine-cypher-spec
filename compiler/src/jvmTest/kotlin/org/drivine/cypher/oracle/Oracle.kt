@@ -1,0 +1,138 @@
+package org.drivine.cypher.oracle
+
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.dataformat.yaml.YAMLFactory
+import org.drivine.cypher.api.CompileJson
+import java.io.File
+import java.math.BigDecimal
+import java.time.LocalDateTime
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
+
+/**
+ * The JVM's answers, which the other targets are checked against, byte for byte (`./gradlew jvmOracle`):
+ *
+ * - `corpus.jsonl`: every statement in the spec's files, compiled for Postgres, Oracle and SQLite, and a few with typed
+ *   parameters: each line `{"request": …, "answer": …}`, both JSON text, the answer as [CompileJson] gives it on the JVM.
+ *   A statement whose SQL embeds the moment it was compiled at, as SQLite's does of `datetime()` and the like, is left
+ *   out: no two runs give it alike. It is found by its SQL holding that moment, so no list of statements is kept.
+ * - `doubles.txt`: doubles as Java writes them (`T<tab>bits<tab>text`) and texts as Java reads them
+ *   (`P<tab>bits<tab>text`, the bits `-` where Java throws NumberFormatException). See [Doubles].
+ *
+ *   Oracle <spec directory> <output directory> <fuzz count> <seed>
+ */
+object Oracle {
+    private val json = ObjectMapper()
+    private val yaml = ObjectMapper(YAMLFactory())
+
+    @JvmStatic
+    fun main(args: Array<String>) {
+        val spec = File(args[0])
+        val out = File(args[1]).apply { mkdirs() }
+        val count = args.getOrElse(2) { "100000" }.toInt()
+        val seed = args.getOrElse(3) { "646" }.toLong()
+        val corpus = corpus(spec, File(out, "corpus.jsonl"))
+        val doubles = Doubles.write(File(out, "doubles.txt"), count, seed)
+        println("jvmOracle: ${corpus.first} statements in the corpus (${corpus.second} left out, as they embed the clock); $doubles double cases.")
+    }
+
+    private val FILES = listOf("queries.yaml", "writes.yaml", "temporal.yaml", "refusals.yaml", "schema.yaml")
+    private val STORES = listOf("postgres", "oracle", "sqlite")
+
+    /** Writes the corpus to [into]: how many lines, and how many statements left out for the clock. */
+    private fun corpus(spec: File, into: File): Pair<Int, Int> {
+        var lines = 0
+        var clocked = 0
+        into.printWriter().use { w ->
+            fun emit(request: String) {
+                val before = LocalDateTime.now(ZoneOffset.UTC)
+                val answer = CompileJson.compile(request)
+                val after = LocalDateTime.now(ZoneOffset.UTC)
+                if (embedsClock(answer, before, after)) {
+                    clocked++
+                    return
+                }
+                w.println(json.writeValueAsString(linkedMapOf("request" to request, "answer" to answer)))
+                lines++
+            }
+            for (file in FILES) {
+                val tree = yaml.readTree(File(spec, file))
+                val cases = if (tree.isArray) tree else tree["cases"]
+                for (case in cases) for (step in case["steps"] ?: continue) {
+                    val cypher = (step["cypher"]?.takeIf { it.isTextual } ?: step["ddl"])?.textValue() ?: continue
+                    val parameters = step["parameters"]?.let { typed(json.treeToValue(it, Any::class.java)) } ?: emptyMap<String, Any?>()
+                    for (store in STORES) emit(request(store, cypher, parameters))
+                }
+            }
+            for ((cypher, parameters) in TYPED) for (store in STORES) emit(request(store, cypher, parameters))
+            // Oracle's graph options.
+            for (options in ORACLE_OPTIONS) {
+                emit(json.writeValueAsString(linkedMapOf("store" to "oracle", "graph" to options, "cypher" to "MATCH (p:Person {name: \$name}) WHERE p.age = \$age RETURN p.name, p.born", "parameters" to mapOf("name" to "Ada", "age" to 36))))
+                emit(json.writeValueAsString(linkedMapOf("store" to "oracle", "graph" to options, "cypher" to "MATCH (p:Person) WHERE p.nick = \$nick RETURN p", "parameters" to mapOf("nick" to null))))
+                emit(json.writeValueAsString(linkedMapOf("store" to "oracle", "graph" to options, "cypher" to "RETURN date({year: -44, month: 3, day: 15}) AS d")))
+            }
+            // Requests that are no request.
+            for (request in listOf("", "[]", "{\"store\": \"neo4j\", \"graph\": {\"name\": \"g\"}, \"cypher\": \"RETURN 1\"}", "{\"store\": \"postgres\", \"cypher\": \"RETURN 1\"}")) emit(request)
+        }
+        return lines to clocked
+    }
+
+    private val SECONDS = DateTimeFormatter.ofPattern("uuuu-MM-dd'T'HH:mm")
+
+    /** Whether [answer] holds the moment it was compiled, between [before] and [after], as SQLite's SQL writes a moment. */
+    private fun embedsClock(answer: String, before: LocalDateTime, after: LocalDateTime): Boolean =
+        listOf(before, after).any { answer.contains("'" + SECONDS.format(it)) }
+
+    private fun request(store: String, cypher: String, parameters: Map<String, Any?>): String =
+        json.writeValueAsString(linkedMapOf("store" to store, "graph" to mapOf("name" to "g"), "cypher" to cypher, "parameters" to parameters))
+
+    /**
+     * The spec's values (see its README) as [CompileJson]'s typed JSON: `{$repeat, times}` written out, `{$float}` as it is,
+     * and any other map keyed with `$` wrapped as `{$map}`, as the spec reads it as the map it is.
+     */
+    @Suppress("UNCHECKED_CAST")
+    private fun typed(value: Any?): Map<String, Any?> = typedValue(value) as Map<String, Any?>
+
+    private fun typedValue(value: Any?): Any? = when (value) {
+        is Map<*, *> -> when {
+            value.keys == setOf("\$repeat", "times") -> (value["\$repeat"] as String).repeat((value["times"] as Number).toInt())
+            value.keys == setOf("\$float") -> value
+            value.keys.any { it.toString().startsWith("$") } -> mapOf("\$map" to value.entries.associate { (k, v) -> k.toString() to typedValue(v) })
+            else -> value.entries.associate { (k, v) -> k.toString() to typedValue(v) }
+        }
+        is List<*> -> value.map(::typedValue)
+        else -> value
+    }
+
+    private fun float(text: String) = mapOf("\$float" to text)
+    private fun temporal(kind: String, text: String) = mapOf("\$temporal" to kind, "text" to text)
+
+    /** Statements given values the spec has no form for: whole floats, temporal values, bytes, and maps keyed with `$`. */
+    private val TYPED: List<Pair<String, Map<String, Any?>>> = listOf(
+        "RETURN \$x AS x, \$x + 1 AS y" to mapOf("x" to float("2.0")),
+        "RETURN \$x AS x" to mapOf("x" to float("1e23")),
+        "RETURN \$x * 2 AS x" to mapOf("x" to mapOf("\$float" to 3)),
+        "CREATE (n:N {x: \$x}) RETURN n.x" to mapOf("x" to float("10000000.0")),
+        "CREATE (n:N {x: \$x}) RETURN n.x" to mapOf("x" to 0.1),
+        "CREATE (n:N {x: \$x}) RETURN n.x" to mapOf("x" to BigDecimal("4.9E-324")),
+        "RETURN \$xs AS xs" to mapOf("xs" to listOf(float("NaN"), float("-Infinity"), 1, 1.5, float("1.0"))),
+        "RETURN \$d AS d, \$d.year AS y" to mapOf("d" to temporal("DATE", "2026-11-07")),
+        "RETURN \$t AS t" to mapOf("t" to temporal("LOCAL_TIME", "12:34:56.789")),
+        "RETURN \$t AS t" to mapOf("t" to temporal("TIME", "12:34:56+10:00")),
+        "RETURN \$t AS t, \$t.month AS m" to mapOf("t" to temporal("LOCAL_DATE_TIME", "2026-11-07T09:30")),
+        "RETURN \$t AS t, \$t.timezone AS z" to mapOf("t" to temporal("DATE_TIME", "2026-11-07T09:30:00Z")),
+        "RETURN \$d AS d, \$d.days AS days" to mapOf("d" to temporal("DURATION", "P1Y2M3DT4H5M6.5S")),
+        "CREATE (n:N {at: \$at}) RETURN n.at" to mapOf("at" to temporal("DATE_TIME", "2026-11-07T09:30:00.123Z")),
+        "RETURN \$b AS b" to mapOf("b" to mapOf("\$bytes" to "AAECAwQ=")),
+        "CREATE (n:N {b: \$b}) RETURN n.b" to mapOf("b" to mapOf("\$bytes" to "/w==")),
+        "RETURN \$m AS m, \$m.`\$a` AS a" to mapOf("m" to mapOf("\$map" to mapOf("\$a" to 1, "b" to float("2.0")))),
+        "RETURN \$big AS big" to mapOf("big" to java.math.BigInteger("123456789012345678901234567890")),
+        "MATCH (p:Person) RETURN p.name, p.age SKIP \$s LIMIT \$l" to mapOf("s" to 1, "l" to 2),
+    )
+
+    private val ORACLE_OPTIONS: List<Map<String, Any?>> = listOf(
+        mapOf("name" to "g", "nullsEqualStored" to false),
+        mapOf("name" to "g", "eraStored" to false),
+        mapOf("name" to "g", "indexedProperties" to listOf(listOf("Person", "name"), listOf("Person", "age"))),
+    )
+}
