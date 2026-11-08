@@ -150,8 +150,9 @@ reviewed pull request. To bump it:
 
 1. Set `version` to the new Temurin 21 release, and each `sha256.<os>-<arch>` to Adoptium's checksum of that release's
    archive (`https://api.adoptium.net/v3/assets/release_name/eclipse/jdk-<version>?os=<os>&architecture=<arch>&image_type=jdk`).
-2. Set `java-version` in `.github/workflows/compiler.yml` and `.github/workflows/compiler-release.yml` to the same
-   release, as setup-java names it (`21.0.13+9.0.LTS`).
+2. Nothing else names it but this section's first line (with `tzdb`): CI installs the JDK from Adoptium's archive of
+   `version`, checked against its `sha256` (`.github/actions/pinned-toolchain`). Merge the bump to `main` before the next
+   tag, so main's run fetches the new archive into the cache a tag's gate reads (see [Releasing](#releasing)).
 3. Run `./gradlew generateTables`. Where the JDK brings another tzdb, it stops and names it: set `tzdb` to that.
 4. Open the pull request, and say in it which zones the new tzdb adds or removes (the diff of the generated
    `build/generated/tables/org/drivine/cypher/time/JvmZoneIds.kt` against the old one's).
@@ -260,16 +261,57 @@ number.
 `.github/workflows/compiler-release.yml` does it:
 
 1. It checks the tag (`vX.Y.Z`, on `main`), and runs the compiler's CI, `compiler.yml`.
-2. On macOS, which builds every target, it builds every publication, signs each with a throwaway key, and checks the
-   bundle (`.github/scripts/compiler-release-check.sh`): exactly the artifacts above, each with its jar or klib, sources,
-   javadoc, POM and module at the tag's version, and every file's signature verified. The bundle is kept as the run's
-   artifact.
-3. The upload waits in the `release` environment for its reviewer. It builds the bundle again from the same commit,
-   signed with the release key, checks it, and uploads every target as one deployment: the Central Portal releases all
-   of them or none.
+2. On macOS, which builds every target, it builds every publication, unsigned, into one bundle, and checks it
+   (`.github/scripts/compiler-release-check.sh`): exactly the artifacts above, each with its jar or klib, sources,
+   javadoc, POM and module at the tag's version. The bundle is kept as the run's artifact.
+3. The upload waits in the `release` environment for its reviewer. It signs that bundle with the release key
+   (`.github/scripts/compiler-release-sign.sh`) and uploads it to the Central Portal
+   (`.github/scripts/compiler-release-upload.sh`), as one deployment, which releases every target or none. It then
+   follows the deployment until the Portal has published it, and fails with the Portal's reasons where it fails it.
+
+What is published is the bundle step 2 checked, byte for byte, with a signature beside each file. Step 3 builds nothing,
+and needs no JDK, Gradle or dependency: only the bundle, this commit's scripts, and the runner's gpg, curl, jq and zip.
+Before it is given a secret, it refuses a bundle whose SHA-256 isn't the one step 2 gave as its job's output, which no
+other job of the run can set, so an artifact of the same name put in the bundle's place is never signed; a re-run of the
+failed upload alone keeps step 2's output, and its bundle. Before it imports the key, it checks the bundle holds every artifact at the tag's version and nothing else: no link,
+which zip would follow into the job's keyring or environment, no file the publications don't make, no other version,
+no checksum or signature of a file it doesn't hold, nothing outside `org/drivine`. Then it checks each file's checksums in the bundle; after signing, each signature against
+the key, and the signed bundle as step 2 checked it. The key is imported into a keyring made for the job and deleted
+after it, and the key's variables are unset before the signing runs anything, so no process the signing starts is given them. Neither the
+key, its passphrase nor the Portal token is passed on a command line or written to the log: the token's base64, which
+GitHub doesn't mask as it masks the secrets, is masked too. The signed bundle is kept as the run's artifact only once
+it is published. A failed upload is re-run
+alone ("Re-run failed jobs"), and waits for the reviewer again; the upload itself isn't retried, as a second would make
+a second deployment of the version, so look at https://central.sonatype.com/publishing/deployments before re-running one
+that failed without the Portal's answer.
+
+The jobs that build install the pinned JDK and Gradle with `.github/actions/pinned-toolchain`: from Adoptium's archive
+of `gradle/pinned-jdk.properties`'s `version` and the zip `gradle/wrapper/gradle-wrapper.properties` names, each checked
+against the SHA-256 pinned beside it, so a cache can't bring another. Adoptium and services.gradle.org serve those
+archives as GitHub release assets, whose outage failed v0.31.0's upload three times, so `compiler.yml`'s jobs keep them
+in the repository's Actions cache, each under its checksum, and saved as soon as it is fetched, so a re-run keeps what
+an earlier attempt got. A tag's run reads the caches of `main`, so the first tag after a bump of the JDK or of Gradle
+runs its gate fastest after a run on `main` since the bump (its merge, or workflow_dispatch of `Compiler` on `main`);
+GitHub drops a cache no run has read for 7 days. Where nothing is cached, a job fetches them, with retries; where it
+can't, it fails naming the URL: re-run it once GitHub's release downloads work.
+
+The release's build job (step 2) reads no cache: it fetches the archives each time, and checks them, as a cache entry
+is unpacked before its archive is checked, and an earlier job of a tag's run, the gate's, which runs third-party
+actions, could save one in the tag's scope. Every action `compiler.yml` and this workflow use is pinned to a commit.
+Maven Central also serves some dependencies through GitHub's release downloads. So an outage can fail step 2, or the
+gate; it fails before the reviewer is asked, and is re-run.
+
+To bump Gradle, keep the checksum: `./gradlew wrapper --gradle-version <v> --gradle-distribution-sha256-sum <sum>`,
+with the sum of the `-bin` zip from https://gradle.org/release-checksums/. Without one, every job stops at it.
 
 A run from workflow_dispatch, or on a pull request that changes the release machinery, is a dry run: steps 1 and 2,
-under the version `0.0.0-dry-run`.
+under the version `0.0.0-dry-run`, and step 3's signing, with a key made in the job and thrown away with it, with
+GitHub's release downloads and Adoptium's API blocked. It checks the bundle's SHA-256 as step 3 does, and that the signed bundle is step 2's, file for file and
+byte for byte, with a signature beside each file, keeps it as the run's artifact, and uploads it as step 3 does, to a
+stand-in for the Central Portal on the runner, which refuses an upload that isn't the one nmcp made and a status call
+for any other deployment. It also checks that the signing refuses a bundle it must not sign
+(`.github/scripts/compiler-release-sign-test.sh`): one with a link among thousands, a file, a version or a path that no
+publication makes, or a checksum of a file it doesn't hold.
 
 The `release` environment is this repository's own, not drivine4j's, and is set up once in its settings before the first
 release: a required reviewer, tags `v*` allowed to deploy to it, and the secrets drivine4j's release uses,
@@ -280,7 +322,8 @@ Push the tag with or after `main`: a tag pushed before the commit is on `main` i
 re-run the workflow.
 
 To build the bundle yourself, unsigned: `./gradlew zipAggregationPublication -Pcompiler.version=<v>`, which writes
-`build/nmcp/zip/publicationAggregated.zip`. `SIGN=true`, with `SIGNING_KEY` and `SIGNING_PASSWORD`, signs it.
+`build/nmcp/zip/publicationAggregated.zip`. `.github/scripts/compiler-release-sign.sh` signs it, with `SIGNING_KEY` and
+`SIGNING_PASSWORD`, and `ARTIFACTS` set as the workflow sets it.
 
 Between tags, drivine4j can build against a commit of the module, published into a repository of its own checkout as
 `0.0.0-<commit>`, but it can't release on one: its release refuses a `0.0.0-` pin.
