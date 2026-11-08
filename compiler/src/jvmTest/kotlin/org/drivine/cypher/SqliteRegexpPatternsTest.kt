@@ -1,0 +1,153 @@
+package org.drivine.cypher
+
+import com.fasterxml.jackson.databind.ObjectMapper
+import org.drivine.cypher.api.CompileJson
+import org.drivine.cypher.oracle.Mutants
+import org.drivine.cypher.oracle.Oracle
+import org.junit.jupiter.api.Test
+import java.io.File
+import kotlin.test.assertEquals
+import kotlin.test.assertTrue
+
+/**
+ * Over every SQLite statement of the corpus and of the mutants, as `./gradlew jvmOracle` makes them: each regular expression
+ * the compiler writes into SQLite's `REGEXP`, `drivine_regex_group` or `drivine_regexp_replace` means the same to every
+ * library's host, which reads it with its own language's regular expressions (see the spec's `host.yaml`). So it is written
+ * with no construct the hosts read otherwise: no `\s`, `\d`, `\w`, `\b` or any other class escape (drivine4j's are Unicode's,
+ * Drivine for TypeScript's `\d` and `\w` ASCII's), no `$` (Java's matches before a line break that ends the text), no `.`
+ * (Java's matches no U+0085, JavaScript's does), and no flag group: only `\z` for the text's end, and classes written out,
+ * with `\t`, `\n`, `\f`, `\r`, `\xNN` and `\uNNNN` escapes. A user's own pattern, given to `=~`, is the user's: only the
+ * compiler's text around it is checked.
+ */
+class SqliteRegexpPatternsTest {
+
+    private val json = ObjectMapper()
+
+    /** The spec's files, as the test's resources hold them. */
+    private val spec = File(requireNotNull(javaClass.getResource("/cypher/queries.yaml")) { "No spec file cypher/queries.yaml" }.toURI()).parentFile
+
+    /** The SQL of each SQLite statement of the requests [requests], its setup too, with its Cypher. */
+    private fun sqliteSql(requests: Sequence<String>) = requests.mapNotNull { request ->
+        val read = runCatching { json.readTree(request) }.getOrNull()?.takeIf { it.isObject } ?: return@mapNotNull null
+        if (read["store"]?.textValue() != "sqlite") return@mapNotNull null
+        val answer = json.readTree(CompileJson.compile(request))
+        val sql = answer["sql"]?.textValue() ?: return@mapNotNull null
+        read["cypher"].textValue() to (listOf(sql) + (answer["setup"]?.map { it.textValue() } ?: emptyList())).joinToString("\n")
+    }
+
+    @Test
+    fun `no pattern the compiler writes on SQLite leans on a construct the hosts read otherwise, over the corpus and the mutants`() {
+        val corpus = sqliteSql(Oracle.corpusRequests(spec).asSequence()).toList()
+        val sample = File.createTempFile("mutants", ".jsonl").apply { deleteOnExit() }
+        // As jvmOracle samples them: see Oracle.main.
+        Mutants.write(Oracle.statements(spec), Oracle.STORES, sample, 10_000, 646, Oracle::answerUnlessClocked)
+        val mutants = sqliteSql(sample.readLines().asSequence().map { json.readTree(it)["request"].textValue() }).toList()
+        assertTrue(corpus.size > 1_000 && mutants.size > 1_000, "${corpus.size} corpus and ${mutants.size} mutant statements on SQLite")
+        val patterns = mutableMapOf<String, String>()
+        for ((cypher, sql) in corpus + mutants) for (pattern in patterns(sql)) patterns.putIfAbsent(pattern, cypher)
+        println("Patterns the compiler writes on SQLite, as each depth of SQL reads them: ${patterns.size}.")
+        assertEquals(emptyMap(), patterns.mapValues { (pattern, _) -> unsafe(pattern) }.filterValues { it.isNotEmpty() }
+            .mapKeys { (pattern, _) -> "$pattern (of ${patterns.getValue(pattern)})" })
+        // The kinds of temporal values, the parts of a duration, an offset, toFloat's and toInteger's texts, and =~'s ends.
+        for (known in listOf("^-?[0-9]{4}-[0-9]{2}-[0-9]{2}\\z", "T((-?[0-9.]+)H)?((-?[0-9.]+)M)?((-?[0-9.]+)S)?\\z", "(Z|[+-][0-9]{2}:?[0-9]{2})\\z",
+            "^[+-]00:?00\\z", "^[\\x00-\\x20]*[+-]?NaN[\\x00-\\x20]*\\z", "^(?:", ")\\z")) {
+            assertTrue(known in patterns, "the corpus has the pattern $known: ${patterns.keys}")
+        }
+    }
+
+    @Test
+    fun `a construct the hosts read otherwise is found, and one they read alike is not`() {
+        assertEquals(listOf("\\s", "$"), unsafe("^\\s*a$"))
+        assertEquals(listOf("\\d", "\\w", "\\b", "\\S", "\\p", "\\Z"), unsafe("\\d\\w\\b\\S\\p{L}\\Z"))
+        assertEquals(listOf("(?i", "."), unsafe("(?i)a.b"))
+        assertEquals(listOf("[:"), unsafe("[[:alnum:]]"))
+        assertEquals(listOf("\\-"), unsafe("a\\-b"))
+        assertEquals(emptyList(), unsafe("^[\\t\\n\\x0B\\f\\r \\u3000-]*[+-]?([0-9]+\\.?[0-9]*|[.$][0-9]+){0,17}\\$\\z"))
+        assertEquals(emptyList(), unsafe("^(?:"))
+    }
+
+    @Test
+    fun `the patterns of a statement are found at every depth its SQL nests them, and a user's own pattern is left out`() {
+        assertEquals(setOf("^a\\z"), patterns("x REGEXP '^a\\z'"))
+        assertTrue("^a\\z" in patterns("drivine_cypher('{\"sql\": \"x REGEXP ''^a\\\\z''\"}')"))
+        assertEquals(setOf("(Z)\\z", "^b\\z"), patterns("drivine_regexp_replace(drivine_regex_group(f(t, (g(1))), '(Z)\\z', 1), '^b\\z', 'Z')"))
+        assertEquals(setOf("^(?:", ")\\z"), patterns("(x REGEXP ('^(?:' || 'a\\s$' || ')\\z'))"))
+    }
+
+    /**
+     * The patterns [sql] gives SQLite's `REGEXP` and the regular expression functions Drivine registers, at each depth its SQL
+     * nests statements: as a text of SQL, its quotes doubled, and as JSON's, its backslashes doubled too. The pieces `=~`
+     * puts around a user's pattern are among them, and the user's pattern not.
+     */
+    private fun patterns(sql: String): Set<String> {
+        val texts = generateSequence(listOf(sql)) { level -> level.flatMap { listOf(it.replace("''", "'"), it.replace("\\\\", "\\").replace("\\\"", "\"")) }.distinct() }
+            .take(4).flatten().distinct()
+        return texts.flatMap { text ->
+            OPERAND.findAll(text).map { it.groupValues[1] } + MATCHES.findAll(text).flatMap { listOf(it.groupValues[1], it.groupValues[2]) } +
+                FUNCTION.findAll(text).mapNotNull { secondArgument(text, it.range.last + 1) }
+        }.map { it.replace("''", "'") }.filter { it.isNotEmpty() }.toSet()
+    }
+
+    /** The SQL text that is the second argument of the call whose arguments open at [from] in [sql]: null where it is no SQL text. */
+    private fun secondArgument(sql: String, from: Int): String? {
+        var depth = 0
+        var at = from
+        while (at < sql.length) {
+            when (sql[at]) {
+                '\'' -> at = sql.indexOf('\'', at + 1).takeIf { it >= 0 } ?: return null
+                '(' -> depth++
+                ')' -> if (depth-- == 0) return null
+                ',' -> if (depth == 0) return LITERAL.matchAt(sql, at + 2)?.groupValues?.get(1)
+            }
+            at++
+        }
+        return null
+    }
+
+    /** The constructs in [pattern] that the hosts read otherwise. */
+    private fun unsafe(pattern: String): List<String> {
+        val found = mutableListOf<String>()
+        var inClass = false
+        var at = 0
+        while (at < pattern.length) {
+            val c = pattern[at]
+            when {
+                c == '\\' -> {
+                    val escaped = pattern.getOrNull(at + 1)
+                    if (escaped == null || !(escaped in ESCAPES || escaped in SYNTAX || (inClass && escaped == '-'))) found += "\\${escaped ?: ""}"
+                    at++
+                }
+                inClass -> if (c == ']') inClass = false else if (c == '[' && pattern.getOrNull(at + 1) == ':') found += "[:"
+                c == '[' -> {
+                    inClass = true
+                    if (pattern.getOrNull(at + 1) == '^') at++
+                    if (pattern.getOrNull(at + 1) == ']') at++
+                }
+                c == '$' || c == '.' -> found += "$c"
+                c == '(' && pattern.getOrNull(at + 1) == '?' && pattern.getOrNull(at + 2) != ':' -> found += pattern.substring(at, minOf(at + 3, pattern.length))
+            }
+            at++
+        }
+        return found
+    }
+
+    private companion object {
+        /** A pattern given `REGEXP` as a SQL text. */
+        val OPERAND = Regex("""REGEXP '((?:[^']|'')*)'""")
+
+        /** The pieces `=~` puts around a user's pattern: see `SqliteCypherCompiler.matches`. */
+        val MATCHES = Regex("""REGEXP \('((?:[^']|'')*)' \|\| .*? \|\| '(\)(?:[^']|'')*)'\)""")
+
+        /** A call of a regular expression function Drivine registers, whose second argument, a SQL text, is a pattern. */
+        val FUNCTION = Regex("""(drivine_regex_group|drivine_regexp_replace|drivine_regexp_count)\(""")
+
+        /** A SQL text. */
+        val LITERAL = Regex("""'((?:[^']|'')*)'""")
+
+        /** The escapes every host reads alike: of a tab, a line feed, a form feed, a CR, `\xNN`, `\uNNNN`, and `\z`, the text's end. */
+        const val ESCAPES = "tnfrxuz"
+
+        /** The characters of a pattern's syntax, which a backslash makes themselves on every host: JavaScript's `u` reads no other. */
+        const val SYNTAX = "^$\\.*+?()[]{}|/"
+    }
+}

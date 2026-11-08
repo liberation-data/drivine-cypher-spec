@@ -25,6 +25,13 @@ class SqliteTemporalSql(shared: (List<String>, (List<String>) -> String) -> Stri
 
     override fun matches(text: String, pattern: String) = "($text REGEXP $pattern)"
 
+    /**
+     * [pattern] ending at `\z`, the text's end, in place of `$`: `REGEXP` and the functions Drivine registers read it with
+     * each library's own regular expressions, and Java's `$` matches before a line break that ends the text too, where
+     * JavaScript's does not. The spec's `host.yaml` pins what each library reads a pattern compiled SQL gives it as.
+     */
+    override fun regex(pattern: String) = if (pattern.endsWith("$") && !pattern.endsWith("\\$")) pattern.dropLast(1) + "\\z" else pattern
+
     override fun group(text: String, pattern: String, group: Int) = "${SqliteFunctions.REGEX_GROUP}($text, $pattern, $group)"
 
     override fun number(text: String) = "CAST(NULLIF($text, '') AS NUMERIC)"
