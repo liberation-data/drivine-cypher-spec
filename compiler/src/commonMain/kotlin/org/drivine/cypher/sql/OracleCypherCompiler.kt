@@ -1179,9 +1179,9 @@ class OracleCypherCompiler(
      * The guide is worked out by the lateral view itself, as its one aggregate over `DUAL`: a subquery that works it out,
      * in that view's select list, is worked out once, and every row then had the first row's keys (#414). The keys of
      * 100,000 maps so take 7 s, where a `JSON_TABLE` over each guide takes 4.4 s.
-     * Null has no keys, and gives null.
+     * Null has no keys, and gives null; a value of another kind fails, as in Neo4j.
      */
-    private fun keys(json: String): String = bound(json) { (map) -> "CASE WHEN ${kind(map)} = 'object' THEN ${keysOf(map)} END" }
+    private fun keys(json: String): String = bound(json) { (map) -> keysOrFailure(kind(map), keysOf(map)) }
 
     private fun keysOf(json: String): String {
         val key = """CASE WHEN SUBSTR(d.p, 3, 1) = '"' THEN JSON_VALUE(JSON(SUBSTR(d.p, 3)), '${'$'}') ELSE SUBSTR(d.p, 3) END"""
@@ -1617,6 +1617,16 @@ class OracleCypherCompiler(
         val shift = "POWER(10, $past)"
         "CASE WHEN ABS($n) >= POWER(10, $DOUBLE_DIGITS - $p) THEN $n ELSE ${round("($n * $shift)", "($p - $past)")} / $shift END"
     }
+
+    /**
+     * NUMBER holds no infinity, so `JSON_VALUE(… RETURNING NUMBER)` of a stored one is null: round() gives an infinity
+     * back, as Neo4j does, from the `BINARY_DOUBLE` it is (drivine4j#669). It is given back before the precision is read,
+     * so a precision out of range fails only a row whose value is no infinity.
+     */
+    override fun infinitiesKept(value: Value, json: () -> String, round: (Value) -> Value.Json): Value.Json =
+        Value.Json(shared(json()) { (x) ->
+            "CASE WHEN ${kind(x)} = 'double' AND JSON_VALUE($x, '\$' RETURNING BINARY_DOUBLE) IS INFINITE THEN $x ELSE ${round(Value.Json(x)).sql} END"
+        })
 
     /** A text that is no number, read as one: Oracle fails with ORA-01722, whose ORA-03302 detail gives the text. */
     override fun failure(message: String, value: String) = "TO_NUMBER(${literal("$message ")} || TO_CHAR($value))"

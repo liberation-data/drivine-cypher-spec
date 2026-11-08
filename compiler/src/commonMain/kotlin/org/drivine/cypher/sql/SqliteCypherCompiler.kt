@@ -277,7 +277,7 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
     override fun containsText(a: String, b: String) = "(instr($a, $b) > 0)"
 
     override fun function(name: String, json: String): String? = when (name) {
-        "keys" -> shared(json) { (x) -> "CASE WHEN json_type($x) = 'object' THEN (SELECT json_group_array(k.key ORDER BY k.key) FROM json_each($x) k) END" }
+        "keys" -> shared(json) { (x) -> keysOrFailure(typeOf(x), "(SELECT json_group_array(k.key ORDER BY k.key) FROM json_each($x) k)") }
         "size" -> shared(json) { (x) -> "CASE json_type($x) WHEN 'array' THEN json_quote(json_array_length($x)) WHEN 'text' THEN json_quote(length($x ->> '$')) END" }
         "tolower" -> scalar("${SqliteFunctions.LOWER}(${text(json)})")
         "toupper" -> scalar("${SqliteFunctions.UPPER}(${text(json)})")

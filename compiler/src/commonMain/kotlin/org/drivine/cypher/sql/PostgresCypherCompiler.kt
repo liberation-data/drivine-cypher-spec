@@ -428,7 +428,7 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
     override fun containsText(a: String, b: String) = "strpos($a, $b) > 0"
 
     override fun function(name: String, json: String): String? = when (name) {
-        "keys" -> shared(json) { (x) -> "CASE WHEN jsonb_typeof($x) = 'object' THEN (SELECT COALESCE(jsonb_agg(k ORDER BY k), '[]'::jsonb) FROM jsonb_object_keys($x) k) END" }
+        "keys" -> shared(json) { (x) -> keysOrFailure("jsonb_typeof($x)", "(SELECT COALESCE(jsonb_agg(k ORDER BY k), '[]'::jsonb) FROM jsonb_object_keys($x) k)") }
         "size" -> "CASE jsonb_typeof($json) WHEN 'array' THEN to_jsonb(jsonb_array_length($json)) WHEN 'string' THEN to_jsonb(length($json #>> '{}')) END"
         "tolower" -> "to_jsonb(lower(${text(json)}))"
         "toupper" -> "to_jsonb(upper(${text(json)}))"
