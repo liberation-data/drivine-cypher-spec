@@ -2534,6 +2534,26 @@ cases:
         rows: ["Keanu"]
       - cypher: "WITH [{a: 1}] AS l, 'a' AS k RETURN l[0][k]"
         rows: [1]
+      - note: "An entry read so, divided or taken % by an integer zero, or an integer zero read so dividing or taking % a float, fails, as a number read at run time does: Neo4j works out no entry as it plans (drivine4j#686)."
+        only: [neo4j, sql]
+        cypher: "WITH {x: 3.0} AS m, 'x' AS k RETURN m[k] / 0"
+        error: true
+      - only: [neo4j, sql]
+        cypher: "WITH {x: 5.0} AS m, 'x' AS k RETURN m[k] % 0"
+        error: true
+      - only: [neo4j, sql]
+        cypher: "WITH {z: 0} AS m, 'z' AS k RETURN 1.0 / m[k]"
+        error: true
+      - only: [neo4j, sql]
+        cypher: "WITH {z: 0} AS m, 'z' AS k RETURN 5.0 % m[k]"
+        error: true
+      - only: [neo4j, sql]
+        cypher: "MATCH (p:Person {name: 'Keanu'}) WITH p, 'born' AS k RETURN p[k] % 0"
+        error: true
+      - note: "An entry that is a float zero is a float still: taken % by it is NaN."
+        only: [neo4j, oracle]
+        cypher: "WITH {f: 0.0} AS m, 'f' AS k RETURN [5 % m[k], 5.0 % m[k]]"
+        rows: [[{$float: "NaN"}, {$float: "NaN"}]]
 
   - name: "reduce reads the row"
     description: "reduce() reads the row's variables and the parameters."
