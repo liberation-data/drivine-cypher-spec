@@ -319,7 +319,7 @@ cases:
         rows: [1]
       - cypher: "MATCH (n:CyWrite) SET n.e = EXISTS { UNWIND [3, 2] AS j WITH j ORDER BY j LIMIT 1 WITH j WHERE j = n.id RETURN j } RETURN [n.id, n.hasA, n.e] ORDER BY n.id"
         rows: [[1, true, false], [2, null, true]]
-      - note: "Neo4j refuses a subquery in the MERGE itself, its ON CREATE SET among it, so the SET follows it."
+      - note: "Neo4j refuses a subquery in the MERGE itself, its ON CREATE SET among it, so the SET follows it (drivine4j#697)."
         cypher: "MERGE (n:CyWrite {id: 3}) SET n.e = EXISTS { UNWIND [1, 3] AS j WITH j WHERE j = n.id RETURN j ORDER BY j } RETURN n.e"
         rows: [true]
       - cypher: "MATCH (n:CyWrite) RETURN [n.id, n.e] ORDER BY n.id"
