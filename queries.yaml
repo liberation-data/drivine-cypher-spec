@@ -3090,6 +3090,11 @@ cases:
         only: [neo4j, sql]
         cypher: "UNWIND [1, 1] AS k RETURN [k, 0.0 / 0.0] AS l, count(*) AS c"
         rows: [[[1, {$float: "NaN"}], 2]]
+      - note: "RETURN DISTINCT over the groups keeps each NaN group apart, as it keeps each NaN row (drivine4j#685)."
+        only: [neo4j, sql]
+        cypher: "UNWIND [0.0, 0.0, 1.0, 1.0] AS z RETURN DISTINCT z / z AS v, count(*) AS c"
+        unordered: true
+        rows: [[{$float: "NaN"}, 1], [{$float: "NaN"}, 1], [1.0, 2]]
       - note: "A statement's UNION without ALL gives each row whose item is NaN, of one item or of several (drivine4j#688)."
         only: [neo4j, sql]
         cypher: "RETURN 0.0 / 0.0 AS v UNION RETURN 0.0 / 0.0 AS v UNION RETURN 1.0 AS v UNION RETURN 1.0 AS v"
