@@ -2910,6 +2910,14 @@ cases:
         only: [neo4j, memgraph, falkordb, postgres]
         cypher: "RETURN 5 % 0"
         error: true
+      - note: "A number taken % by an infinity is the number, as a float, as in Java (drivine4j#555)."
+        only: [neo4j, sql]
+        cypher: "RETURN [5 % $i, -5 % $i, 5 % $n, 5.5 % $i, 0 % $n]"
+        parameters: {i: {$float: "Infinity"}, n: {$float: "-Infinity"}}
+        rows: [[5.0, -5.0, 5.0, 5.5, 0.0]]
+      - cypher: "WITH toFloat('Infinity') AS i RETURN [7 % i, 7 % -i]"
+        only: [neo4j, sql]
+        rows: [[7.0, 7.0]]
       - note: "toFloat reads a text as Java reads a double: NaN and the infinities by Java's names, spaces around them allowed. Memgraph gives null for each, and FalkorDB reads ' NaN ' as null."
         only: [neo4j, sql]
         cypher: "RETURN [toFloat('NaN'), toFloat('Infinity'), toFloat('-Infinity'), toFloat('+Infinity'), toFloat(' NaN '), toFloat('-NaN'), toFloat('Infinityx')]"
