@@ -1,14 +1,16 @@
 package org.drivine.cypher.sql
 
+import org.drivine.DrivineInternalApi
 import org.drivine.cypher.json.JsonNode
 import org.drivine.cypher.json.ArrayNode
 import org.drivine.cypher.json.JsonNodeFactory
 import org.drivine.cypher.json.ObjectNode
-import org.drivine.DrivineException
-import org.drivine.backend.oracle.OracleSql
+import org.drivine.cypher.CompilerException
+import org.drivine.cypher.store.OracleSql
 import org.drivine.cypher.ast.RelationshipPattern
+import org.drivine.cypher.json.CypherEncoder
 import org.drivine.cypher.json.CypherJson
-import org.drivine.model.Stamps
+import org.drivine.cypher.store.Stamps
 
 /**
  * Compiles a Cypher statement to SQL over a graph's tables on Oracle: see [SqlCypherCompiler].
@@ -32,16 +34,26 @@ import org.drivine.model.Stamps
  */
 class OracleCypherCompiler(
     graph: String,
-    private val nullsEqualStored: Boolean = true,
-    eraStored: Boolean = true,
+    private val nullsEqualStored: Boolean,
+    eraStored: Boolean,
     /**
      * The labels and properties a range index or a one-property uniqueness constraint is over, each as `label to key`: a
      * node a pattern finds by one is read through that index ([indexedEquality]). Empty, as a statement compiled without
      * the store's catalog is, no node is: its labels tested as the index over them answers, a property with no index of its
      * own would read every node of the graph in place of those of the label (#617).
      */
-    private val indexedProperties: Set<Pair<String, String>> = emptySet(),
-) : SqlCypherCompiler(graph) {
+    private val indexedProperties: Set<Pair<String, String>>,
+    /** The host's writing of the values it gives as JSON: see [CypherEncoder]. */
+    encoder: CypherEncoder?,
+) : SqlCypherCompiler(graph, encoder) {
+
+    // The constructor drivine4j's compiler had, its defaults among it, kept so that what was compiled against it still links.
+    constructor(
+        graph: String,
+        nullsEqualStored: Boolean = true,
+        eraStored: Boolean = true,
+        indexedProperties: Set<Pair<String, String>> = emptySet(),
+    ) : this(graph, nullsEqualStored, eraStored, indexedProperties, null)
 
     /** The function the store keeps that compares two values that may hold a null: see [nullsEqual]. */
     private val storedNullsEqual = nullsEqualName(graph)
@@ -63,7 +75,7 @@ class OracleCypherCompiler(
 
     override fun literalJson(value: Any?) =
         if (value is Double) "JSON_SCALAR(TO_BINARY_DOUBLE(${literal(org.drivine.cypher.json.jvmDoubleText(value))}))"
-        else "JSON(${literal(CypherJson.writeValueAsString(value))})"
+        else "JSON(${literal(CypherJson.writeValueAsString(value, encoder = encoder))})"
 
     /**
      * A text that holds an extended JSON double is read as extended JSON, and only one: else a map of the parameter's whose
@@ -90,13 +102,13 @@ class OracleCypherCompiler(
      * a double in them: see [propertyOf].
      */
     override fun parameterText(value: Any?): String {
-        val tree = CypherJson.valueToTree(value)
-        if (keyedAsExtended(tree)) return CypherJson.writeValueAsString(tree)
+        val tree = CypherJson.valueToTree(value, encoder)
+        if (keyedAsExtended(tree)) return CypherJson.writeValueAsString(tree, encoder = encoder)
         var doubled = false
         val written = doubles(tree) { doubled = true }
         // A procedure's parameters are one map: those of its entries with a double in them are read as extended JSON.
         if (doubled && written is ObjectNode) extendedParameters += written.properties().filter { keyedAsExtended(it.value) }.map { it.key }
-        return CypherJson.writeValueAsString(written).also { if (doubled) extended += it }
+        return CypherJson.writeValueAsString(written, encoder = encoder).also { if (doubled) extended += it }
     }
 
     /** Whether [node] holds a map with a key that starts with `$`, as extended JSON's keys do. */
@@ -717,7 +729,7 @@ class OracleCypherCompiler(
     /** Whether [value] holds a float that is a whole number, as extended JSON's double: see [doubles]. */
     private fun doubled(value: Any?): Boolean {
         var doubled = false
-        doubles(CypherJson.valueToTree(value)) { doubled = true }
+        doubles(CypherJson.valueToTree(value, encoder)) { doubled = true }
         return doubled
     }
 
@@ -1072,8 +1084,8 @@ class OracleCypherCompiler(
      * lists are not compared there.
      */
     override fun listOrder(x: String, y: String): String {
-        if (procedural) throw DrivineException("Two lists compared with <, <=, > or >= do not run on Oracle in a statement that writes: its block calls no function of its own from SQL.")
-        if (folding) throw DrivineException("Two lists compared with <, <=, > or >= do not run on Oracle in the step of a reduce(): its function calls no function of the query's from SQL.")
+        if (procedural) throw CompilerException("Two lists compared with <, <=, > or >= do not run on Oracle in a statement that writes: its block calls no function of its own from SQL.")
+        if (folding) throw CompilerException("Two lists compared with <, <=, > or >= do not run on Oracle in the step of a reduce(): its function calls no function of the query's from SQL.")
         // Declared once, however often it is called; and again where a compile only to see gave its declaration back.
         declare(listOrderFunction(LIST_ORDER))
         return "$LIST_ORDER($x, $y)"
@@ -1255,8 +1267,8 @@ class OracleCypherCompiler(
         context: () -> String,
         contextStep: (accumulator: String, item: String, context: String) -> String,
     ): String {
-        if (procedural) throw DrivineException("reduce() does not run on Oracle in a statement that writes: its block calls no function of its own from SQL.")
-        if (folding) throw DrivineException("reduce() does not run on Oracle in the step of a reduce(): its function calls no function of the query's from SQL.")
+        if (procedural) throw CompilerException("reduce() does not run on Oracle in a statement that writes: its block calls no function of its own from SQL.")
+        if (folding) throw CompilerException("reduce() does not run on Oracle in the step of a reduce(): its function calls no function of the query's from SQL.")
         val function = "cy_$name"
         val given = context()
         folding = true
@@ -1663,10 +1675,12 @@ class OracleCypherCompiler(
         private const val NO_JSON_TABLE_TRANSFORM = "NO_JSON_TABLE_TRANSFORM"
 
         /** The hint that plans a statement without statistics feedback: see [planned]. */
-        internal const val NO_FEEDBACK = "OPT_PARAM('_optimizer_use_feedback' 'false')"
+        @DrivineInternalApi
+        const val NO_FEEDBACK = "OPT_PARAM('_optimizer_use_feedback' 'false')"
 
         /** The rows [fewRows] estimates a list of ids at: few enough that Oracle reads each node it gives by its key. */
-        internal const val FEW_ROWS = 10
+        @DrivineInternalApi
+        const val FEW_ROWS = 10
 
         /**
          * A test of a column of labels, `n1.labels`, as [hasLabel] writes it, `JSON_EXISTS(n1.labels, '$[*]?(@ == "X")')`,
@@ -1727,13 +1741,16 @@ class OracleCypherCompiler(
         private const val MOST_PLACES = 100
 
         /** The function the store keeps beside the graph [graph]'s tables that compares two values that may hold a null: see [nullsEqual]. */
-        internal fun nullsEqualName(graph: String) = "${graph}_nulls_equal"
+        @DrivineInternalApi
+        fun nullsEqualName(graph: String) = "${graph}_nulls_equal"
 
         /** The function the store keeps beside the graph [graph]'s tables that renumbers the year of an ISO text as Oracle does: see [eraFunction]. */
-        internal fun eraName(graph: String) = "${graph}_era"
+        @DrivineInternalApi
+        fun eraName(graph: String) = "${graph}_era"
 
         /** The function the store keeps beside the graph [graph]'s tables that renumbers the year Oracle writes as ISO 8601 does: see [eraDateFunction]. */
-        internal fun eraDateName(graph: String) = "${graph}_era_date"
+        @DrivineInternalApi
+        fun eraDateName(graph: String) = "${graph}_era_date"
 
         /**
          * The function [name], which gives the ISO 8601 text `t` of a date or a moment whose year may be BC as Oracle numbers
@@ -1748,7 +1765,8 @@ class OracleCypherCompiler(
          * `_era`, its lines joined by `\n` with no newline after the last. Changing a byte of it changes the layout for all
          * three, so it changes in all three together.
          */
-        internal fun eraFunction(name: String): String = listOf(
+        @DrivineInternalApi
+        fun eraFunction(name: String): String = listOf(
             "FUNCTION $name(t VARCHAR2) RETURN VARCHAR2 DETERMINISTIC IS",
             "BEGIN",
             "    IF ASCII(t) < ${TemporalSql.BC_BELOW} THEN",
@@ -1769,7 +1787,8 @@ class OracleCypherCompiler(
          * then `_era_date`, its lines joined by `\n` with no newline after the last. Changing a byte of it changes the layout
          * for all three, so it changes in all three together.
          */
-        internal fun eraDateFunction(name: String): String = listOf(
+        @DrivineInternalApi
+        fun eraDateFunction(name: String): String = listOf(
             "FUNCTION $name(t VARCHAR2) RETURN VARCHAR2 DETERMINISTIC IS",
             "BEGIN",
             "    IF SUBSTR(t, 1, 1) = '-' THEN",
@@ -1791,7 +1810,8 @@ class OracleCypherCompiler(
          * `_nulls_equal`, its lines joined by `\n` with no newline after the last (the `//` comment below is not in it).
          * Changing a byte of it changes the layout for all three, so it changes in all three together.
          */
-        internal fun nullsEqualFunction(name: String): String = listOf(
+        @DrivineInternalApi
+        fun nullsEqualFunction(name: String): String = listOf(
             "FUNCTION $name(cy_x JSON, cy_y JSON) RETURN NUMBER IS",
             "    FUNCTION eq(a JSON_ELEMENT_T, b JSON_ELEMENT_T) RETURN NUMBER IS",
             "        r NUMBER := 1;",

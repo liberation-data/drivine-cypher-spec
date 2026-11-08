@@ -11,6 +11,7 @@ plugins {
     kotlin("multiplatform") version "2.2.20"
     kotlin("plugin.serialization") version "2.2.20"
     id("com.strumenta.antlr-kotlin") version "1.0.8"
+    `maven-publish`
 }
 
 group = "org.drivine"
@@ -109,14 +110,17 @@ kotlin {
     applyDefaultHierarchyTemplate()
 
     sourceSets {
+        // The module calls its own declarations that are drivine4j's to call too: see org.drivine.DrivineInternalApi.
+        all { languageSettings.optIn("org.drivine.DrivineInternalApi") }
         commonMain {
             kotlin.srcDir(layout.buildDirectory.dir("generated/antlr"))
             kotlin.srcDir(generateTables)
             dependencies {
                 implementation("com.strumenta:antlr-kotlin-runtime:1.0.8")
                 implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.9.0")
-                implementation("org.jetbrains.kotlinx:kotlinx-datetime:0.7.1")
-                implementation("com.ionspin.kotlin:bignum:0.3.10")
+                // Named in the module's public signatures (a temporal parameter, a decimal), so a caller compiles against them.
+                api("org.jetbrains.kotlinx:kotlinx-datetime:0.7.1")
+                api("com.ionspin.kotlin:bignum:0.3.10")
             }
         }
         commonTest {
@@ -148,7 +152,8 @@ val specResources = tasks.register<Copy>("specResources") {
 tasks.named("jvmTestProcessResources") { dependsOn(specResources) }
 
 tasks.withType<KotlinCompilationTask<*>>().configureEach { dependsOn(generateGrammar, generateTables) }
-tasks.matching { it.name.endsWith("SourcesJar") }.configureEach { dependsOn(generateGrammar, generateTables) }
+// The root publication's sourcesJar too, which publishing adds.
+tasks.matching { it.name == "sourcesJar" || it.name.endsWith("SourcesJar") }.configureEach { dependsOn(generateGrammar, generateTables) }
 
 /**
  * What the other targets are checked against, written by the JVM build: every spec statement compiled for Postgres, Oracle
@@ -290,6 +295,52 @@ tasks.register<Exec>("nativeCorpusCheck") {
         oracleDir.get().file("mutants.jsonl").asFile.absolutePath,
         oracleDir.get().file("differences-mutants-$target.jsonl").asFile.absolutePath,
     )
+}
+
+/**
+ * The module's Maven publications, one for each target and the root one that names them, as org.drivine:drivine-cypher-compiler
+ * (the JVM's as drivine-cypher-compiler-jvm). drivine4j builds against the JVM's, published to a local repository from a
+ * pinned commit until the module is on Maven Central:
+ *
+ *   ./gradlew publishJvmPublicationToMavenLocal publishKotlinMultiplatformPublicationToMavenLocal -Pcompiler.version=<v>
+ */
+publishing {
+    publications.withType<MavenPublication>().configureEach {
+        // Maven Central takes a publication only with a javadoc jar beside its jar and sources: an empty one, as the
+        // module's API is documented in its KDoc and README. One for each publication, so that each publication's signing
+        // task, when Central's publishing signs them, depends on its own.
+        val publication = name
+        artifact(tasks.register<Jar>("${publication}JavadocJar") {
+            description = "The empty javadoc jar Maven Central asks of the $publication publication."
+            archiveClassifier.set("javadoc")
+            archiveBaseName.set("drivine-cypher-compiler-$publication")
+        })
+        // What Maven Central asks of a POM: a name, a description, a URL, a license, a developer and the source's place.
+        pom {
+            name.set("Drivine Cypher compiler")
+            description.set("Drivine's compiler of Cypher to SQL for Postgres, Oracle and SQLite.")
+            url.set("https://github.com/liberation-data/drivine-cypher-spec")
+            licenses {
+                license {
+                    name.set("Apache License 2.0")
+                    url.set("https://www.apache.org/licenses/LICENSE-2.0")
+                    distribution.set("repo")
+                }
+            }
+            developers {
+                developer {
+                    id.set("jasperblues")
+                    name.set("Jasper Blues")
+                    email.set("jasper@liberation-data.com")
+                }
+            }
+            scm {
+                connection.set("scm:git:https://github.com/liberation-data/drivine-cypher-spec.git")
+                developerConnection.set("scm:git:ssh://git@github.com/liberation-data/drivine-cypher-spec.git")
+                url.set("https://github.com/liberation-data/drivine-cypher-spec")
+            }
+        }
+    }
 }
 
 /** Every metadata compilation: common code compiled alone, which catches what a target's own compilation lets through. */

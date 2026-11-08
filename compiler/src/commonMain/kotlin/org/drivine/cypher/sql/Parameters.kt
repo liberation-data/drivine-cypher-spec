@@ -1,6 +1,6 @@
 package org.drivine.cypher.sql
 
-import org.drivine.DrivineException
+import org.drivine.cypher.CompilerException
 
 /**
  * The parameters of a statement as the SQL binds them. A Cypher parameter is a value, so it is bound as
@@ -76,7 +76,7 @@ class Parameters(
     fun value(name: String): Any? = given(name)
 
     private fun given(name: String): Any? {
-        if (!given.containsKey(name)) throw DrivineException("The statement has a parameter \$$name, and no value is bound to it.")
+        if (!given.containsKey(name)) throw CompilerException("The statement has a parameter \$$name, and no value is bound to it.")
         return given[name]
     }
 

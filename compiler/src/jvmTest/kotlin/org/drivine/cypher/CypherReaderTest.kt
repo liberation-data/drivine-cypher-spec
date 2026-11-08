@@ -1,6 +1,6 @@
 package org.drivine.cypher
 
-import org.drivine.DrivineException
+import org.drivine.cypher.CompilerException
 import org.drivine.cypher.ast.Clause
 import org.drivine.cypher.ast.Expression
 import org.drivine.cypher.ast.Expression.Binary.Operator
@@ -150,11 +150,11 @@ class CypherReaderTest {
         assertEquals(Expression.Unary(Expression.Unary.Operator.NEGATE, Expression.Literal(1L)), returned("RETURN -1"))
         assertEquals(
             "9223372036854775808 is past the range of a whole number, from -9223372036854775808 to 9223372036854775807.",
-            assertThrows<DrivineException> { CypherReader.read("RETURN 9223372036854775808") }.message,
+            assertThrows<CompilerException> { CypherReader.read("RETURN 9223372036854775808") }.message,
         )
         assertEquals(
             "-9223372036854775809 is past the range of a whole number, from -9223372036854775808 to 9223372036854775807.",
-            assertThrows<DrivineException> { CypherReader.read("RETURN -9223372036854775809") }.message,
+            assertThrows<CompilerException> { CypherReader.read("RETURN -9223372036854775809") }.message,
         )
     }
 
@@ -174,7 +174,7 @@ class CypherReaderTest {
             "MATCH (n) RETURN n SKIP 1e400" to "1e400",
             "MATCH (n) RETURN n LIMIT -1e400" to "-1e400",
         )) {
-            assertEquals("$written $range", assertThrows<DrivineException>(cypher) { CypherReader.read(cypher) }.message, cypher)
+            assertEquals("$written $range", assertThrows<CompilerException>(cypher) { CypherReader.read(cypher) }.message, cypher)
         }
         assertEquals(Expression.Literal(0.0), returned("RETURN 1e-400"))
         assertEquals(Expression.Literal(Double.MAX_VALUE), returned("RETURN 1.7976931348623157E308"))
@@ -248,7 +248,7 @@ class CypherReaderTest {
         assertEquals(Clause.Delete(true, listOf(Expression.Variable("t"))), delete)
         assertEquals(
             "A write to a property of anything but a variable is Cypher, and is not compiled to SQL yet.",
-            assertThrows<DrivineException> { CypherReader.read("MATCH (n) SET n.a.b = 1") }.message,
+            assertThrows<CompilerException> { CypherReader.read("MATCH (n) SET n.a.b = 1") }.message,
         )
     }
 
@@ -262,7 +262,7 @@ class CypherReaderTest {
         val (made, read, with, _) = CypherReader.read("CREATE (n:Thing) MATCH (m:Thing) WITH count(m) AS c RETURN c").clauses
         assertTrue(made is Clause.Create && read is Clause.Match && with is Clause.With)
         // As in Neo4j, a query that returns nothing ends in a write.
-        assertThrows<DrivineException> { CypherReader.read("CREATE (n) MATCH (m)") }
+        assertThrows<CompilerException> { CypherReader.read("CREATE (n) MATCH (m)") }
     }
 
     @Test
@@ -333,9 +333,9 @@ class CypherReaderTest {
     fun `cypher the compiler does not take is refused by name, and what is not cypher with where`() {
         assertEquals(
             "A procedure call (CALL) is Cypher, and is not compiled to SQL yet.",
-            assertThrows<DrivineException> { CypherReader.read("CALL db.indexes()") }.message,
+            assertThrows<CompilerException> { CypherReader.read("CALL db.indexes()") }.message,
         )
-        val syntax = assertThrows<DrivineException> { CypherReader.read("MATCH (n RETURN n") }.message!!
+        val syntax = assertThrows<CompilerException> { CypherReader.read("MATCH (n RETURN n") }.message!!
         assertTrue(syntax.startsWith("The statement is not Cypher, at line 1, column "), syntax)
     }
 
@@ -348,7 +348,7 @@ class CypherReaderTest {
             "MATCH (n) RETURN n ORDER" to "line 1, column 25",
             "MATCH (n)\nWITH n\nRETURN n ORDER BY" to "line 3, column 18",
         ).forEach { (cypher, at) ->
-            val syntax = assertThrows<DrivineException>(cypher) { CypherReader.read(cypher) }.message!!
+            val syntax = assertThrows<CompilerException>(cypher) { CypherReader.read(cypher) }.message!!
             assertTrue(syntax.startsWith("The statement is not Cypher, at $at: "), syntax)
         }
     }

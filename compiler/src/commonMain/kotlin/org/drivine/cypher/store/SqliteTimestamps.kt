@@ -1,9 +1,14 @@
-package org.drivine.backend.sqlite
+package org.drivine.cypher.store
 
+import org.drivine.DrivineInternalApi
 import kotlinx.datetime.LocalDateTime
 
-/** SPIKE: drivine4j's `SqliteTimestamps.write`, `uuuu-MM-dd'T'HH:mm:ss.SSSSSS`, without java.time. */
-internal object SqliteTimestamps {
+/**
+ * A moment as SQLite keeps one, `uuuu-MM-dd'T'HH:mm:ss.SSSSSS`, without java.time: drivine4j's
+ * `org.drivine.backend.sqlite.SqliteTimestamps.write` calls it.
+ */
+@DrivineInternalApi
+object SqliteTimestamps {
     fun write(clock: LocalDateTime): String {
         fun two(n: Int) = n.toString().padStart(2, '0')
         // `uuuu`: four digits at least, a sign before 0 and past 9999.

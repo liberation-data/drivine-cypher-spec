@@ -1,11 +1,12 @@
 package org.drivine.cypher.sql
 
-import org.drivine.DrivineException
-import org.drivine.backend.sqlite.SqliteCypherValues
-import org.drivine.backend.sqlite.SqliteFunctions
-import org.drivine.backend.sqlite.SqliteSql
+import org.drivine.cypher.CompilerException
+import org.drivine.cypher.store.SqliteCypherValues
+import org.drivine.cypher.store.SqliteFunctions
+import org.drivine.cypher.store.SqliteSql
+import org.drivine.cypher.json.CypherEncoder
 import org.drivine.cypher.json.CypherJson
-import org.drivine.model.Stamps
+import org.drivine.cypher.store.Stamps
 
 /**
  * Compiles a Cypher statement to SQL over a graph's tables on SQLite: see [SqlCypherCompiler]. A statement it
@@ -36,18 +37,21 @@ import org.drivine.model.Stamps
  * [org.drivine.mapper.JdbcResultMapper]). A statement that writes refuses NaN, as the store would keep that map in its place, and
  * fails where it writes NaN it works out ([finite]).
  */
-class SqliteCypherCompiler(graph: String) : SqlCypherCompiler(graph) {
+class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCompiler(graph, encoder) {
+
+    // The constructor drivine4j's compiler had, kept so that what was compiled against it still links.
+    constructor(graph: String) : this(graph, null)
 
     override fun literalJson(value: Any?) = literal(parameterText(value))
 
     /** As JSON, NaN and the infinities as the class writes them. */
     override fun parameterText(value: Any?): String =
-        if (!holdsNonFinite(value)) CypherJson.writeValueAsString(value)
-        else SqliteCypherValues.write(CypherJson.valueToTree(value))
+        if (!holdsNonFinite(value)) CypherJson.writeValueAsString(value, encoder = encoder)
+        else SqliteCypherValues.write(CypherJson.valueToTree(value, encoder))
 
     /** NaN, which SQLite's JSON holds as no number: an infinity it holds, as the number it writes for one. */
     override fun refuseNonFiniteWrite(parameters: Map<String, Any?>) {
-        if (parameters.values.any { holdsNonFinite(it, Double::isNaN) }) throw DrivineException(NON_FINITE_WRITE.formatted("NaN", "SQLite's JSON"))
+        if (parameters.values.any { holdsNonFinite(it, Double::isNaN) }) throw CompilerException(NON_FINITE_WRITE.formatted("NaN", "SQLite's JSON"))
     }
 
     /** Whether the JSON [json] is NaN, as a statement given one writes it: see the class. */
@@ -480,7 +484,7 @@ class SqliteCypherCompiler(graph: String) : SqlCypherCompiler(graph) {
      * numbered parameter, `?1`, and the variables bound to them in turn. The rows it returns are JSON's, in a list.
      */
     override fun procedure(program: List<ProcedureStep>): String {
-        val steps = CypherJson.writeValueAsString(mapOf("steps" to program.map(::step)))
+        val steps = CypherJson.writeValueAsString(mapOf("steps" to program.map(::step)), encoder = encoder)
         val c = "cy"
         return "SELECT ${item(c)} AS result FROM json_each(${SqliteFunctions.CYPHER}(${literal(steps)}, \$${Parameters.OBJECT})) AS $c ORDER BY $c.key"
     }

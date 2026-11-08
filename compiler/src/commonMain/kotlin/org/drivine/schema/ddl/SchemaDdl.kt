@@ -1,5 +1,6 @@
 package org.drivine.schema.ddl
 
+import org.drivine.DrivineInternalApi
 import kotlin.jvm.JvmStatic
 
 import org.drivine.schema.FullTextIndexSpec
@@ -71,7 +72,8 @@ object SchemaDdl {
     }
 
     /** Whether [spec] is the uniqueness constraint of one of Drivine's own nodes, by any name. */
-    internal fun reserved(spec: SchemaItemSpec): Boolean =
+    @DrivineInternalApi
+    fun reserved(spec: SchemaItemSpec): Boolean =
         spec is UniquenessConstraintSpec && RESERVED[spec.label]?.properties == spec.properties
 
     /** The uniqueness constraints of Drivine's own nodes, by label: the schema marker's scope and the store stamp's key. */

@@ -13,7 +13,7 @@ fail() { echo "test-sync: $*" >&2; exit 1; }
 # A drivine4j of two commits: the compiler's package, a helper beside a mapped file in its package, and a test.
 d4j="$root/drivine4j"
 src="$d4j/src/main/kotlin/org/drivine"
-mkdir -p "$src/cypher" "$src/backend/sqlite" "$d4j/src/test/kotlin/org/drivine/cypher"
+mkdir -p "$src/cypher" "$src/backend/sqlite" "$src/backend/oracle" "$d4j/src/test/kotlin/org/drivine/cypher"
 git -C "$root" init --quiet drivine4j
 git -C "$d4j" config user.email test@example.com
 git -C "$d4j" config user.name test
@@ -48,6 +48,25 @@ package org.drivine.backend.sqlite
 
 object SqliteRound { const val NAME = "round" }
 EOF
+# drivine4j's exception, and a library file of which the module holds a part in store/: both renamed by the rewrites.
+cat > "$src/cypher/Refuse.kt" <<'EOF'
+package org.drivine.cypher
+
+import org.drivine.DrivineException
+import org.drivine.backend.oracle.OracleSql
+import org.drivine.model.Stamps
+import org.drivine.model.LowerCopies
+
+fun refuse(): Nothing = throw DrivineException("no")
+fun literal() = OracleSql.literal("a")
+fun named() = org.drivine.backend.oracle.OracleSql.literal("b")
+// org.drivine.backend.oracle.OracleSqlTypes is no store name.
+EOF
+cat > "$src/backend/oracle/OracleSql.kt" <<'EOF'
+package org.drivine.backend.oracle
+
+object OracleSql { fun literal(text: String) = "'" + text + "'" }
+EOF
 git -C "$d4j" add -A && git -C "$d4j" commit --quiet -m one
 old="$(git -C "$d4j" rev-parse HEAD)"
 
@@ -64,6 +83,7 @@ EOF
 ours="$module/src/commonMain/kotlin/org/drivine"
 mkdir -p "$ours/cypher"
 sed -E -f "$scripts/port-rewrites.sed" "$src/cypher/Reader.kt" > "$ours/cypher/Reader.kt"
+sed -E -f "$scripts/port-rewrites.sed" "$src/cypher/Refuse.kt" > "$ours/cypher/Refuse.kt"
 cp "$src/cypher/Gone.kt" "$ours/cypher/Gone.kt"
 echo "fun edited() = 1" >> "$ours/cypher/Edited.kt"
 cat > "$ours/cypher/Clash.kt" <<'EOF'
@@ -90,6 +110,8 @@ import com.fasterxml.jackson.databind.node.ObjectNode
 fun added(node: ObjectNode) = node
 EOF
 sed -i.bak 's/"round"/"ROUND"/' "$src/backend/sqlite/SqliteRound.kt" && rm "$src"/backend/sqlite/*.bak
+sed -i.bak 's/DrivineException("no")/DrivineException("no!")/' "$src/cypher/Refuse.kt" && rm "$src"/cypher/*.bak
+sed -i.bak 's/text + /text.trim() + /' "$src/backend/oracle/OracleSql.kt" && rm "$src"/backend/oracle/*.bak
 echo "class NewTest" > "$d4j/src/test/kotlin/org/drivine/cypher/NewTest.kt"
 git -C "$d4j" add -A && git -C "$d4j" commit --quiet -m two
 new="$(git -C "$d4j" rev-parse HEAD)"
@@ -117,4 +139,49 @@ grep -q '^import org.drivine.cypher.json.ObjectNode$' "$ours/cypher/Added.kt" ||
 echo "$out" | grep -q 'src/main/kotlin/org/drivine/backend/sqlite/SqliteRound.kt' ||
     fail "the report misses SqliteRound.kt, which SqliteSql.kt uses from its own package with no import"
 echo "$out" | grep -q 'src/test/kotlin/org/drivine/cypher/NewTest.kt' || fail "the report misses the new test"
-echo "test-sync: the sync merged, conflicted, copied, deleted, kept and reported as it should."
+grep -q '<<<<<<<' "$ours/cypher/Refuse.kt" && fail "Refuse.kt conflicted, though only the rewrites renamed the exception"
+grep -q '^fun refuse(): Nothing = throw CompilerException("no!")$' "$ours/cypher/Refuse.kt" ||
+    fail "Refuse.kt didn't take drivine4j's change as the module's exception"
+grep -q '^import org.drivine.cypher.store.OracleSql$' "$ours/cypher/Refuse.kt" || fail "Refuse.kt lost the store's import"
+grep -q '^import org.drivine.cypher.store.Stamps$' "$ours/cypher/Refuse.kt" || fail "Refuse.kt lost the store's import of Stamps"
+grep -q '^import org.drivine.cypher.store.LowerCopies$' "$ours/cypher/Refuse.kt" || fail "Refuse.kt lost the store's import of LowerCopies"
+grep -q '^fun named() = org.drivine.cypher.store.OracleSql.literal("b")$' "$ours/cypher/Refuse.kt" ||
+    fail "Refuse.kt's name of OracleSql written out in full wasn't renamed"
+grep -q '^// org.drivine.backend.oracle.OracleSqlTypes is no store name.$' "$ours/cypher/Refuse.kt" ||
+    fail "a name that only starts with a store name was renamed"
+echo "$out" | sed -n '/check the replacement/,/^  [a-z]/p' | grep -q 'src/main/kotlin/org/drivine/backend/oracle/OracleSql.kt' ||
+    fail "the report doesn't list OracleSql.kt, whose part the module holds in store/, as a replacement to check"
+
+# The sync ends where drivine4j builds against the module: a commit with its pin, or with no compiler package, is
+# refused, and the module is left as it was.
+snapshot() { (cd "$module" && find src scripts DRIVINE4J -type f -exec shasum {} + | sort); }
+before="$(snapshot)"
+mkdir -p "$d4j/gradle"
+echo "version=0.0.0-000000000000" > "$d4j/gradle/cypher-compiler.properties"
+git -C "$d4j" add -A && git -C "$d4j" commit --quiet -m switched
+set +e
+out="$(DRIVINE4J_REPO="$d4j" "$module/scripts/sync-from-drivine4j.sh" HEAD 2>&1)"
+status=$?
+set -e
+[ "$status" -ne 0 ] || fail "a sync to a drivine4j that builds against the module ran"
+echo "$out" | grep -q 'builds against this module' || fail "the refusal of a drivine4j that builds against the module doesn't say why: $out"
+# So is it from a blob-less clone that can't reach its origin, which holds the pin's tree entry but not its blob.
+git -C "$d4j" config uploadpack.allowFilter true
+git clone --quiet --filter=blob:none --no-checkout "file://$d4j" "$root/blobless"
+git -C "$root/blobless" remote set-url origin "file://$root/no-such-repo"
+set +e
+out="$(DRIVINE4J_REPO="$root/blobless" "$module/scripts/sync-from-drivine4j.sh" HEAD 2>&1)"
+status=$?
+set -e
+[ "$status" -ne 0 ] || fail "a sync to a drivine4j that builds against the module ran from a blob-less clone"
+echo "$out" | grep -q 'builds against this module' || fail "the refusal from a blob-less clone doesn't say why: $out"
+git -C "$d4j" rm --quiet -r gradle src/main/kotlin/org/drivine/cypher
+git -C "$d4j" commit --quiet -m emptied
+set +e
+out="$(DRIVINE4J_REPO="$d4j" "$module/scripts/sync-from-drivine4j.sh" HEAD 2>&1)"
+status=$?
+set -e
+[ "$status" -ne 0 ] || fail "a sync to a drivine4j with no compiler package ran"
+echo "$out" | grep -q 'has no src/main/kotlin/org/drivine/cypher/' || fail "the refusal of a drivine4j with no compiler package doesn't say why: $out"
+[ "$(snapshot)" = "$before" ] || fail "a refused sync changed the module"
+echo "test-sync: the sync merged, conflicted, copied, deleted, kept and reported as it should, and refused a drivine4j past it."

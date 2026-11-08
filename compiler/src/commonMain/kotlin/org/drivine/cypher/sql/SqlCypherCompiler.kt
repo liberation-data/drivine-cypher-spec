@@ -3,7 +3,7 @@ package org.drivine.cypher.sql
 import org.drivine.cypher.json.JsonNode
 import org.drivine.cypher.json.JsonNodeFactory
 import org.drivine.cypher.json.NullNode
-import org.drivine.DrivineException
+import org.drivine.cypher.CompilerException
 import org.drivine.cypher.CypherReader
 import org.drivine.cypher.time.CommonTime
 import kotlinx.datetime.LocalDate
@@ -18,8 +18,9 @@ import org.drivine.cypher.ast.Query
 import org.drivine.cypher.ast.RelationshipPattern
 import org.drivine.cypher.ast.RemoveItem
 import org.drivine.cypher.ast.SetItem
+import org.drivine.cypher.json.CypherEncoder
 import org.drivine.cypher.json.CypherJson
-import org.drivine.model.Stamps
+import org.drivine.cypher.store.Stamps
 import org.drivine.schema.ddl.SchemaDdl
 import org.drivine.schema.ddl.SchemaDdlResult
 
@@ -50,7 +51,14 @@ import org.drivine.schema.ddl.SchemaDdlResult
  * for one row after another, as Cypher makes it: a `MERGE` finds what an earlier row made. A read after
  * a write sees what it wrote. Its parameters are bound as one object, [Parameters.OBJECT].
  */
-abstract class SqlCypherCompiler(graph: String) {
+abstract class SqlCypherCompiler(
+    graph: String,
+    /** The host's writing of the values it gives as JSON, asked before the compiler's own: see [CypherEncoder]. */
+    protected val encoder: CypherEncoder?,
+) {
+    // The constructor drivine4j's compiler had, kept so that what was compiled against it still links.
+    constructor(graph: String) : this(graph, null)
+
 
     protected val nodes = "${graph}_node"
     protected val edges = "${graph}_edge"
@@ -136,8 +144,8 @@ abstract class SqlCypherCompiler(graph: String) {
     fun compile(cypher: String, parameters: Map<String, Any?> = emptyMap()): CompiledCypher {
         when (val ddl = SchemaDdl.translate(cypher)) {
             is SchemaDdlResult.NotDdl -> {}
-            is SchemaDdlResult.Refused -> throw DrivineException(ddl.message)
-            else -> throw DrivineException(SCHEMA_COMMAND)
+            is SchemaDdlResult.Refused -> throw CompilerException(ddl.message)
+            else -> throw CompilerException(SCHEMA_COMMAND)
         }
         return compile(CypherReader.read(cypher), parameters)
     }
@@ -278,10 +286,10 @@ abstract class SqlCypherCompiler(graph: String) {
     private fun union(query: Query, parameters: Map<String, Any?>): CompiledCypher {
         val parts = listOf(query.clauses) + query.unions.map { it.clauses }
         if (parts.any { part -> part.any(::writes) }) unsupported("A write in a UNION")
-        if (query.unions.map { it.all }.distinct().size > 1) throw DrivineException("UNION and UNION ALL are not mixed in one statement, as in Cypher.")
+        if (query.unions.map { it.all }.distinct().size > 1) throw CompilerException("UNION and UNION ALL are not mixed in one statement, as in Cypher.")
         val names = parts.map { part -> (part.last() as Clause.Return).projection.items.map { it.name } }
         if (names.distinct().size > 1) {
-            throw DrivineException("Each query of a UNION returns the same names, as in Cypher: ${names.joinToString(" and ") { it.joinToString(prefix = "(", postfix = ")") }}.")
+            throw CompilerException("Each query of a UNION returns the same names, as in Cypher: ${names.joinToString(" and ") { it.joinToString(prefix = "(", postfix = ")") }}.")
         }
         val writer = Writer(Parameters(parameters, ::parameterJson, ::parameterCount, text = ::parameterText, asPath = parameterPath))
         // Every query's names, before any is compiled: a name made in one is no variable of a later one's.
@@ -317,7 +325,7 @@ abstract class SqlCypherCompiler(graph: String) {
     protected open val parameterPath: ((marker: String, text: String?, keys: List<String>, value: Any?) -> String)? = null
 
     /** The JSON text a parameter's [value] is bound as. */
-    protected open fun parameterText(value: Any?): String = CypherJson.writeValueAsString(value)
+    protected open fun parameterText(value: Any?): String = CypherJson.writeValueAsString(value, encoder = encoder)
 
     /** The parameter bound as [marker], a whole number, as one. */
     protected abstract fun parameterCount(marker: String): String
@@ -1007,7 +1015,7 @@ abstract class SqlCypherCompiler(graph: String) {
      * In a statement that writes, each variable the row holds, which a `CALL { … }` there sees whether it imports it or not.
      */
     private fun redeclared(returned: Collection<String>, bound: Collection<String>) {
-        returned.firstOrNull { it in bound }?.let { throw DrivineException("The variable $it is bound already, so a CALL does not return or yield it, as in Cypher: name it with AS.") }
+        returned.firstOrNull { it in bound }?.let { throw CompilerException("The variable $it is bound already, so a CALL does not return or yield it, as in Cypher: name it with AS.") }
     }
 
     /** `right`: the last [count] characters of the SQL text [text], or all of it where it has fewer. */
@@ -1147,7 +1155,7 @@ abstract class SqlCypherCompiler(graph: String) {
                 if (clause is Clause.Return) return project(select, clause.projection, final = true).sql
                 select = read(select, clause)
             }
-            throw DrivineException("A Cypher statement ends with RETURN.")
+            throw CompilerException("A Cypher statement ends with RETURN.")
         }
 
         // ----- Clauses -----
@@ -1550,11 +1558,11 @@ abstract class SqlCypherCompiler(graph: String) {
         private fun calledUnion(select: Select, call: Clause.Call): Projected {
             val query = call.query
             val parts = listOf(query.clauses) + query.unions.map { it.clauses }
-            if (query.unions.map { it.all }.distinct().size > 1) throw DrivineException("UNION and UNION ALL are not mixed in one statement, as in Cypher.")
+            if (query.unions.map { it.all }.distinct().size > 1) throw CompilerException("UNION and UNION ALL are not mixed in one statement, as in Cypher.")
             val returns = parts.map { it.last() as Clause.Return }
             if (returns.any { it.projection.orderBy.isNotEmpty() }) unsupported("An ORDER BY in a query of a UNION in CALL { … }")
             val names = returns.first().projection.items.map { it.name }
-            if (returns.any { r -> r.projection.items.map { it.name }.toSet() != names.toSet() }) throw DrivineException("Each query of a UNION returns the same names, as in Cypher.")
+            if (returns.any { r -> r.projection.items.map { it.name }.toSet() != names.toSet() }) throw CompilerException("Each query of a UNION returns the same names, as in Cypher.")
             val distinct = !query.unions.first().all
             var projected = comparingParts(distinct) { parts.map { calledPart(select, call, it, names, distinct) } }
             if (projected.map { p -> p.scope.values.map { it::class } }.distinct().size > 1) unsupported("A UNION in CALL { … } whose queries return values of different kinds")
@@ -1674,7 +1682,7 @@ abstract class SqlCypherCompiler(graph: String) {
                             if (select.afterGrouping) grouped += value.nid
                         }
                     }
-                    else -> throw DrivineException("${node.variable} is not a node, and is used as one in a pattern.")
+                    else -> throw CompilerException("${node.variable} is not a node, and is used as one in a pattern.")
                 }
                 if (node.labels.isNotEmpty()) {
                     val test = if (select.afterGrouping) groupedLabels(value.labels, node.labels) else hasLabels(value.labels, node.labels)
@@ -1845,7 +1853,7 @@ abstract class SqlCypherCompiler(graph: String) {
             }
             scope.groupBy({ it.first }).forEach { (variable, values) ->
                 if (values.size > 1) unsupported("A variable named twice in a quantified path pattern")
-                if (select.scope[variable] != null) throw DrivineException("$variable is bound outside the quantified path pattern that names it.")
+                if (select.scope[variable] != null) throw CompilerException("$variable is bound outside the quantified path pattern that names it.")
             }
             val tests = inner.nodes.mapNotNull { it.properties } + inner.relationships.mapNotNull { it.properties } + listOfNotNull(group.where)
             val read = tests.flatMap(::variablesIn).toSet()
@@ -2367,7 +2375,7 @@ abstract class SqlCypherCompiler(graph: String) {
          */
         private fun foreach(foreach: Clause.Foreach) {
             if (nesting == NESTING) unsupported("A FOREACH or CALL { … } that writes nested more than $NESTING deep")
-            if (foreach.clauses.any { it is Clause.Call }) throw DrivineException("A CALL { … } is not written in a FOREACH, as in Cypher.")
+            if (foreach.clauses.any { it is Clause.Call }) throw CompilerException("A CALL { … } is not written in a FOREACH, as in Cypher.")
             val saved = "$SAVED${++nesting}"
             val items = "$GATHERED$nesting"
             val before = LinkedHashMap(kinds)
@@ -2413,7 +2421,7 @@ abstract class SqlCypherCompiler(graph: String) {
                 when (node.variable?.let { kinds[it] }) {
                     Kind.NODE -> {
                         if (node.labels.isNotEmpty() || node.mapped) {
-                            throw DrivineException("${node.variable} is bound already, so a CREATE or MERGE makes no node of it with labels or properties.")
+                            throw CompilerException("${node.variable} is bound already, so a CREATE or MERGE makes no node of it with labels or properties.")
                         }
                         idOf(ROW, key(node.variable!!))
                     }
@@ -2426,19 +2434,19 @@ abstract class SqlCypherCompiler(graph: String) {
                         )
                         made(node.variable, Kind.NODE)
                     }
-                    else -> throw DrivineException("${node.variable} is not a node, and is used as one in a pattern.")
+                    else -> throw CompilerException("${node.variable} is not a node, and is used as one in a pattern.")
                 }
             }
             pattern.relationships.forEachIndexed { i, relationship ->
                 if (relationship.group != null) unsupported("A quantified path pattern in CREATE or MERGE")
                 if (relationship.range != null) unsupported("A variable-length relationship in CREATE or MERGE")
-                val type = relationship.types.singleOrNull() ?: throw DrivineException("A relationship that CREATE or MERGE makes has one type.")
+                val type = relationship.types.singleOrNull() ?: throw CompilerException("A relationship that CREATE or MERGE makes has one type.")
                 if (relationship.variable != null && relationship.variable in kinds) unsupported("A relationship variable bound before its pattern")
                 val (src, dst) = when (relationship.direction) {
                     RelationshipPattern.Direction.OUTGOING -> ids[i] to ids[i + 1]
                     RelationshipPattern.Direction.INCOMING -> ids[i + 1] to ids[i]
                     RelationshipPattern.Direction.EITHER ->
-                        if (merging) ids[i] to ids[i + 1] else throw DrivineException("A relationship that CREATE makes has a direction.")
+                        if (merging) ids[i] to ids[i + 1] else throw CompilerException("A relationship that CREATE makes has a direction.")
                 }
                 evaluate(VALUE, relationship.properties) { scope -> written(relationship.properties, scope) }
                 if (merging) refuseUnmergeable(relationship.properties, "relationship")
@@ -2515,8 +2523,8 @@ abstract class SqlCypherCompiler(graph: String) {
         private fun target(variable: String, writing: String): Triple<String, String, String> = when (kinds[variable]) {
             Kind.NODE -> Triple(nodes, "nid", idOf(ROW, key(variable)))
             Kind.RELATIONSHIP -> Triple(edges, "eid", idOf(ROW, key(variable)))
-            Kind.VALUE, Kind.NODES, Kind.RELATIONSHIPS, Kind.PATH -> throw DrivineException("$variable is not a node or a relationship, and $writing writes to one.")
-            null -> throw DrivineException("$variable is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used.")
+            Kind.VALUE, Kind.NODES, Kind.RELATIONSHIPS, Kind.PATH -> throw CompilerException("$variable is not a node or a relationship, and $writing writes to one.")
+            null -> throw CompilerException("$variable is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used.")
         }
 
         private fun set(item: SetItem) {
@@ -2526,7 +2534,7 @@ abstract class SqlCypherCompiler(graph: String) {
                     // A map written, or a list written that holds one or a list, is no property, as Neo4j refuses it, and as drivine's saves do.
                     val written = item.value
                     if (written is Expression.MapLiteral || written is Expression.ListLiteral && written.items.any { it is Expression.MapLiteral || it is Expression.ListLiteral }) {
-                        throw DrivineException("A property is a number, a text, a truth value, a temporal value or a list of them, not ${if (written is Expression.MapLiteral) "a map" else "a list of maps or lists"}, as in Neo4j.")
+                        throw CompilerException("A property is a number, a text, a truth value, a temporal value or a list of them, not ${if (written is Expression.MapLiteral) "a map" else "a list of maps or lists"}, as in Neo4j.")
                     }
                     evaluate(VALUE, item.value) { scope -> comparable(json(expression(item.value, scope))) }
                     if (table == nodes && item.key == Stamps.PROPERTY) execute("UPDATE $nodes SET stamp = ${text(VALUE)} WHERE nid = $row")
@@ -2551,7 +2559,7 @@ abstract class SqlCypherCompiler(graph: String) {
                 }
                 is SetItem.Labels -> {
                     val (table, id, row) = target(item.variable, "SET")
-                    if (table != nodes) throw DrivineException("${item.variable} is not a node, and a label is set on one.")
+                    if (table != nodes) throw CompilerException("${item.variable} is not a node, and a label is set on one.")
                     item.labels.forEach { label ->
                         execute("UPDATE $nodes SET labels = ${appended("labels", literalJson(label))} WHERE $id = $row AND NOT ${hasLabel("labels", label)}")
                     }
@@ -2568,7 +2576,7 @@ abstract class SqlCypherCompiler(graph: String) {
                 }
                 is RemoveItem.Labels -> {
                     val (table, id, row) = target(item.variable, "REMOVE")
-                    if (table != nodes) throw DrivineException("${item.variable} is not a node, and a label is removed from one.")
+                    if (table != nodes) throw CompilerException("${item.variable} is not a node, and a label is removed from one.")
                     item.labels.forEach { label -> execute("UPDATE $nodes SET labels = ${withoutLabel("labels", label)} WHERE $id = $row") }
                 }
             }
@@ -2662,7 +2670,7 @@ abstract class SqlCypherCompiler(graph: String) {
             // Not a randomUUID() made first for a CALL or a condition (see `anewCall`), which the statement never named.
             val starred = select.bound.keys.filterNot { it in madeAnew }.sorted()
             val items = (if (written.star) starred.map { Projection.Item(Expression.Variable(it), it) } else emptyList()) + written.items
-            if (items.isEmpty()) throw DrivineException("A projection has at least one item.")
+            if (items.isEmpty()) throw CompilerException("A projection has at least one item.")
             // An order term, or a part of one, written as an item but for its functions' names' case is that item, as Neo4j
             // names a function in any case: so `ORDER BY TOUPPER(x.a) + count(*)` after `toUpper(x.a)` reads the key.
             val projection = written.copy(
@@ -3323,7 +3331,7 @@ abstract class SqlCypherCompiler(graph: String) {
             items.filter { contains(it.expression, ::isAggregate) }.forEach { item ->
                 val implicit = namedOutside(item.expression, emptySet(), scope, keys) - keys.filterIsInstance<Expression.Variable>().map { it.name }.toSet()
                 if (implicit.isNotEmpty()) {
-                    throw DrivineException(
+                    throw CompilerException(
                         "${item.name} aggregates, and names ${implicit.joinToString()} outside its aggregates, which no other item is: " +
                             "Cypher would group by it without being told. Aggregate in a WITH first, " +
                             "as in WITH ${implicit.joinToString()}, collect(…) AS items RETURN { … }."
@@ -3337,7 +3345,7 @@ abstract class SqlCypherCompiler(graph: String) {
                 // pattern's to Neo4j, which matches any node, so it is refused rather than read as the key.
                 val implicit = namedOutside(sort.expression, names, scope, grouped)
                 if (implicit.isNotEmpty()) {
-                    throw DrivineException(
+                    throw CompilerException(
                         "A term of an ORDER BY aggregates, and names ${implicit.joinToString()} outside its aggregates and the items: " +
                             "Cypher would group by it without being told. Order by an item's name, or by an expression of the items and aggregates."
                     )
@@ -3383,7 +3391,7 @@ abstract class SqlCypherCompiler(graph: String) {
 
         /** A `SKIP` or `LIMIT`: a whole number, or a parameter bound to one. */
         private fun count(expression: Expression): String = when (expression) {
-            is Expression.Literal -> (expression.value as? Long)?.toString() ?: throw DrivineException("SKIP and LIMIT take a whole number, not ${org.drivine.cypher.text.JavaText.of(expression.value)}.")
+            is Expression.Literal -> (expression.value as? Long)?.toString() ?: throw CompilerException("SKIP and LIMIT take a whole number, not ${org.drivine.cypher.text.JavaText.of(expression.value)}.")
             is Expression.Parameter -> parameters.count(expression.name)
             else -> unsupported("SKIP or LIMIT of an expression")
         }
@@ -3473,11 +3481,11 @@ abstract class SqlCypherCompiler(graph: String) {
             is Expression.Literal -> Value.Json(literalJson(expression.value), text = expression.value is String, jsonNull = expression.value == null)
             is Expression.Parameter ->
                 givenParameters?.get(expression.name) ?: Value.Json(parameters.json(expression.name), temporal = Temporal.ofValue(parameters.value(expression.name)))
-            is Expression.Variable -> scope[expression.name] ?: throw DrivineException("${expression.name} is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used.")
+            is Expression.Variable -> scope[expression.name] ?: throw CompilerException("${expression.name} is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used.")
             is Expression.Property -> inParameter(expression)?.let { Value.Json(it, jsonNull = true) } ?: property(expression(expression.subject, scope), expression.key)
             is Expression.HasLabels -> when (val subject = expression(expression.subject, scope)) {
                 is Value.Node -> Value.Bool("(${if (subject.nid in grouped) groupedLabels(subject.labels, expression.labels) else hasLabels(subject.labels, expression.labels)})")
-                else -> throw DrivineException("A label is tested of a node.")
+                else -> throw CompilerException("A label is tested of a node.")
             }
             is Expression.ListLiteral -> {
                 val items = expression.items.map { expression(it, scope) }
@@ -3576,7 +3584,7 @@ abstract class SqlCypherCompiler(graph: String) {
                 val given = parametersIn(expression.expression)
                 val context = {
                     // A path is no JSON a function may be given.
-                    if (read.any { scope.getValue(it) is Value.Path }) throw DrivineException("A path read in the step of reduce() does not run on Oracle: its function is given the row as JSON.")
+                    if (read.any { scope.getValue(it) is Value.Path }) throw CompilerException("A path read in the step of reduce() does not run on Oracle: its function is given the row as JSON.")
                     comparable(Value.Json(jsonObject(read.map { it to json(scope.getValue(it)).sql } + given.map { "$$it" to parameters.json(it) }), ordered = true))
                 }
                 Value.Json(
@@ -3802,16 +3810,16 @@ abstract class SqlCypherCompiler(graph: String) {
             val by = when (subject) {
                 Value.Known.LIST -> Value.Known.INTEGER
                 Value.Known.MAP -> Value.Known.TEXT
-                else -> throw DrivineException("${subject.noun.replaceFirstChar(Char::uppercase)} is not a list or a map, and is indexed as one, as in Neo4j.")
+                else -> throw CompilerException("${subject.noun.replaceFirstChar(Char::uppercase)} is not a list or a map, and is indexed as one, as in Neo4j.")
             }
             val kind = knownKind(index.index, scope) ?: (index.index as? Expression.Parameter)?.let { Value.Known.of(known(it)) } ?: return
-            if (kind != by) throw DrivineException("${subject.noun.replaceFirstChar(Char::uppercase)} is indexed by ${by.noun}, not ${kind.noun}, as in Neo4j.")
+            if (kind != by) throw CompilerException("${subject.noun.replaceFirstChar(Char::uppercase)} is indexed by ${by.noun}, not ${kind.noun}, as in Neo4j.")
         }
 
         /** Refuses [expression], an operand of [operator], where its kind is known ([knownKind]) to be other than a truth value, as Neo4j refuses it. */
         private fun requireCondition(expression: Expression, scope: Map<String, Value>, operator: String) {
             val kind = knownKind(expression, scope) ?: return
-            if (kind != Value.Known.BOOLEAN) throw DrivineException("$operator takes a truth value, not ${kind.noun}, as in Neo4j.")
+            if (kind != Value.Known.BOOLEAN) throw CompilerException("$operator takes a truth value, not ${kind.noun}, as in Neo4j.")
         }
 
         /**
@@ -3868,17 +3876,17 @@ abstract class SqlCypherCompiler(graph: String) {
          * among the keys too ([temporalField]). An unwound item's, which `JSON_TABLE` takes out, is read as [propertyOf] reads it.
          */
         private fun property(subject: Value, key: String): Value = when (subject) {
-            is Value.Entities -> throw DrivineException("A list has no properties.")
+            is Value.Entities -> throw CompilerException("A list has no properties.")
             is Value.Node -> Value.Json(if (key == Stamps.PROPERTY) scalar(subject.stamp) else propertyOfRow(subject.props, key))
             is Value.Relationship -> Value.Json(propertyOfRow(subject.props, key))
             // A value the statement writes as one of a kind other than a map has none, as Neo4j says when it plans the statement.
-            is Value.Json -> subject.known?.takeIf { it != Value.Known.MAP }?.let { throw DrivineException("${it.noun.replaceFirstChar(Char::uppercase)} has no properties.") }
+            is Value.Json -> subject.known?.takeIf { it != Value.Known.MAP }?.let { throw CompilerException("${it.noun.replaceFirstChar(Char::uppercase)} has no properties.") }
                 ?: temporalField(subject, key) ?: subject.rowKeys?.let { keys -> Value.Json(rowValue(keys + key), rowKeys = keys + key, jsonNull = !subject.flat) }
                 ?: mapProperty(subject, comparable(subject), key).let { taken ->
                     Value.Json(taken, identity = identityOf(subject, taken, true) { propertyOf(it, key) }, temporals = subject.temporals, jsonNull = !subject.flat)
                 }
-            is Value.Bool -> throw DrivineException("A truth value has no properties.")
-            is Value.Path -> throw DrivineException("A path has no properties.")
+            is Value.Bool -> throw CompilerException("A truth value has no properties.")
+            is Value.Path -> throw CompilerException("A path has no properties.")
         }
 
         /**
@@ -4029,20 +4037,20 @@ abstract class SqlCypherCompiler(graph: String) {
         private fun temporal(kind: Temporal, function: Expression.Function, arguments: List<Value>, scope: Map<String, Value>): Value {
             fun of(text: String) = Value.Json(scalar(text), temporal = kind)
             if (arguments.isEmpty()) {
-                if (kind == Temporal.DURATION) throw DrivineException("duration() takes a text or a map of its fields.")
+                if (kind == Temporal.DURATION) throw CompilerException("duration() takes a text or a map of its fields.")
                 return of(temporals.now(kind))
             }
-            if (arguments.size != 1) throw DrivineException("${function.name}() takes a text or a map of its fields.")
+            if (arguments.size != 1) throw CompilerException("${function.name}() takes a text or a map of its fields.")
             val written = function.arguments.single()
             // A text the statement writes is worked out here, as the store would work it out.
             if (written is Expression.Literal && written.value is String) {
                 val canonical = try {
-                    Temporals.canonical(written.value as String, kind) ?: throw DrivineException("'${written.value}' is no ${function.name}.")
+                    Temporals.canonical(written.value as String, kind) ?: throw CompilerException("'${written.value}' is no ${function.name}.")
                 } catch (e: NumberFormatException) {
-                    throw DrivineException("'${written.value}' is no ${function.name}.", e)
+                    throw CompilerException("'${written.value}' is no ${function.name}.", e)
                 } catch (e: IllegalArgumentException) {
                     // SPIKE: java.time's DateTimeException was caught here; kotlinx-datetime throws IllegalArgumentException.
-                    throw DrivineException("'${written.value}' is no ${function.name}: ${e.message}", e)
+                    throw CompilerException("'${written.value}' is no ${function.name}: ${e.message}", e)
                 }
                 return Value.Json(literalJson(canonical), temporal = kind)
             }
@@ -4052,7 +4060,7 @@ abstract class SqlCypherCompiler(graph: String) {
                 val dated = kind == Temporal.DATE || kind == Temporal.LOCAL_DATE_TIME || kind == Temporal.DATE_TIME
                 val known = if (kind == Temporal.DURATION) DURATION_MAP_FIELDS else if (dated) INSTANT_MAP_FIELDS + Temporals.CALENDAR_FIELDS else INSTANT_MAP_FIELDS
                 // A time of day has no date to give, as Neo4j has it.
-                if (kind.instant && !dated) fields.keys.firstOrNull { it in Temporals.CALENDAR_FIELDS }?.let { throw DrivineException("${function.name}() takes no field $it.") }
+                if (kind.instant && !dated) fields.keys.firstOrNull { it in Temporals.CALENDAR_FIELDS }?.let { throw CompilerException("${function.name}() takes no field $it.") }
                 fields.keys.firstOrNull { it !in known }?.let { unsupported("${function.name}() of a map with $it") }
                 val numbers = fields.filterKeys { it != "timezone" }.mapValues { number(comparable(json(it.value))) }
                 if (kind == Temporal.DURATION) return of(temporals.duration(numbers))
@@ -4071,7 +4079,7 @@ abstract class SqlCypherCompiler(graph: String) {
                 }
                 return of(temporals.of(numbers, timezone, kind))
             }
-            val given = arguments.single() as? Value.Json ?: throw DrivineException("${function.name}() takes a text or a map of its fields.")
+            val given = arguments.single() as? Value.Json ?: throw CompilerException("${function.name}() takes a text or a map of its fields.")
             val text = text(comparable(given))
             return when {
                 kind == Temporal.DURATION -> of(temporals.duration(text))
@@ -4093,24 +4101,24 @@ abstract class SqlCypherCompiler(graph: String) {
             val name = function.name
             val keys = written.entries.map { it.first }.toSet()
             val calendars = calendars(name, keys)
-            if ("dayOfWeek" in keys && "week" !in keys) throw DrivineException("$name() takes a day of the week beside a week.")
-            if ("dayOfQuarter" in keys && "quarter" !in keys) throw DrivineException("$name() takes a day of the quarter beside a quarter.")
+            if ("dayOfWeek" in keys && "week" !in keys) throw CompilerException("$name() takes a day of the week beside a week.")
+            if ("dayOfQuarter" in keys && "quarter" !in keys) throw CompilerException("$name() takes a day of the quarter beside a quarter.")
             if ("year" !in keys) {
                 // Neo4j makes an ordinal day of no year one of the year 0, which no store's date reaches.
                 if ("ordinalDay" in keys) unsupported("$name() of an ordinal day without a year")
-                throw DrivineException("$name() takes a year beside ${calendars.single().first}.")
+                throw CompilerException("$name() takes a year beside ${calendars.single().first}.")
             }
             val numbers = written.entries.filter { (key, _) -> key == "year" || key in Temporals.CALENDAR_FIELDS }.associate { (key, value) ->
                 key to when (val literal = (writtenLiteral(value) ?: return null).value) {
                     null -> CALENDAR_LEAST.getValue(key)
                     is Long -> literal
                     is Int -> literal.toLong()
-                    else -> throw DrivineException("$name() takes a whole number for $key, not ${if (literal is String) "'$literal'" else org.drivine.cypher.text.JavaText.of(literal)}.")
+                    else -> throw CompilerException("$name() takes a whole number for $key, not ${if (literal is String) "'$literal'" else org.drivine.cypher.text.JavaText.of(literal)}.")
                 }
             }
             val year = numbers.getValue("year")
             fun field(key: String, label: String, last: Long, of: String = "") = (numbers[key] ?: 1L).also {
-                if (it !in 1L..last) throw DrivineException("$name() takes $label from 1 to $last$of, not $it.")
+                if (it !in 1L..last) throw CompilerException("$name() takes $label from 1 to $last$of, not $it.")
             }
             return try {
                 // A year past java.time's, as Neo4j's, fails here, where toInt() would wrap it into range.
@@ -4130,7 +4138,7 @@ abstract class SqlCypherCompiler(graph: String) {
                     }
                 }
             } catch (e: CommonTime.TemporalException) {
-                throw DrivineException("$name() takes no year $year: ${e.message}", e)
+                throw CompilerException("$name() takes no year $year: ${e.message}", e)
             }
         }
 
@@ -4143,7 +4151,7 @@ abstract class SqlCypherCompiler(graph: String) {
                 "a month" to setOf("month", "day"), "a week" to setOf("week", "dayOfWeek"), "an ordinal day" to setOf("ordinalDay"),
                 "a quarter" to setOf("quarter", "dayOfQuarter"),
             ).filter { (_, fields) -> fields.any { it in keys } }
-            if (calendars.size > 1) throw DrivineException("$name() takes ${calendars[0].first} or ${calendars[1].first}, not both.")
+            if (calendars.size > 1) throw CompilerException("$name() takes ${calendars[0].first} or ${calendars[1].first}, not both.")
             return calendars
         }
 
@@ -4165,26 +4173,26 @@ abstract class SqlCypherCompiler(graph: String) {
             val takes = (if (kind == Temporal.DATE) setOf("date") else if (!dated) setOf("time") else Temporals.SELECTORS) +
                 (if (dated) setOf("year", "month", "day") + Temporals.CALENDAR_FIELDS else emptySet()) +
                 (if (timed) TRUNCATION_TIME_FIELDS else emptySet()) + (if (kind.zoned) setOf("timezone") else emptySet())
-            keys.firstOrNull { it !in takes }?.let { throw DrivineException("$name() takes no field $it.") }
-            if ("datetime" in keys && ("date" in keys || "time" in keys)) throw DrivineException("$name() takes a datetime, or a date and a time, not both.")
+            keys.firstOrNull { it !in takes }?.let { throw CompilerException("$name() takes no field $it.") }
+            if ("datetime" in keys && ("date" in keys || "time" in keys)) throw CompilerException("$name() takes a datetime, or a date and a time, not both.")
             val calendar = calendars(name, keys).singleOrNull()
             if (dated && "date" !in keys && "datetime" !in keys) {
                 val whole = mapOf("a month" to setOf("year", "month", "day"), "a week" to setOf("year", "week", "dayOfWeek"),
                     "an ordinal day" to setOf("year", "ordinalDay"), "a quarter" to setOf("year", "quarter", "dayOfQuarter"))
                 if (calendar == null || !keys.containsAll(whole.getValue(calendar.first))) {
-                    throw DrivineException("$name() takes a date beside a time: a date, or a year with a month and a day, a week and a day of the week, an ordinal day, or a quarter and a day of the quarter.")
+                    throw CompilerException("$name() takes a date beside a time: a date, or a year with a month and a day, a week and a day of the week, an ordinal day, or a quarter and a day of the quarter.")
                 }
             }
             if (timed && "time" !in keys && "datetime" !in keys) {
                 listOf("minute" to "hour", "second" to "minute", "millisecond" to "second", "microsecond" to "second", "nanosecond" to "second").forEach { (field, above) ->
-                    if (field in keys && above !in keys) throw DrivineException("$name() takes a $field beside ${FIELD_NOUNS[above] ?: "a $above"}.")
+                    if (field in keys && above !in keys) throw CompilerException("$name() takes a $field beside ${FIELD_NOUNS[above] ?: "a $above"}.")
                 }
             }
             fun base(key: String, kinds: List<Temporal>): Temporals.Base? {
                 val value = entries[key] ?: return null
                 val nouns = kinds.reversed().map { "a ${it.function}" }
                 fun refused(given: String): Nothing =
-                    throw DrivineException("$name() takes ${nouns.dropLast(1).joinToString(", ")} or ${nouns.last()} for $key, not $given.")
+                    throw CompilerException("$name() takes ${nouns.dropLast(1).joinToString(", ")} or ${nouns.last()} for $key, not $given.")
                 if (value is Expression.Literal) refused(when (val v = value.value) { null -> "null"; is String -> "'$v'"; else -> org.drivine.cypher.text.JavaText.of(v) })
                 val given = expression(value, scope)
                 if (given !is Value.Json) refused(if (given is Value.Bool) "a truth value" else "a node, a relationship or a path")
@@ -4208,17 +4216,17 @@ abstract class SqlCypherCompiler(graph: String) {
                         val range = if (beside == null) OVER_RANGES[key] else if (key == "nanosecond" && beside == "millisecond") 0L..999_999L else 0L..999L
                         if (range != null && (literal as Number).toLong() !in range) {
                             val besides = beside?.let { " beside a $it" } ?: ""
-                            throw DrivineException("$name() takes ${FIELD_NOUNS[key] ?: "a $key"} from ${range.first} to ${range.last}$besides, not $literal.")
+                            throw CompilerException("$name() takes ${FIELD_NOUNS[key] ?: "a $key"} from ${range.first} to ${range.last}$besides, not $literal.")
                         }
                         "$literal"
                     }
-                    else -> throw DrivineException("$name() takes a whole number for $key, not ${if (literal is String) "'$literal'" else org.drivine.cypher.text.JavaText.of(literal)}.")
+                    else -> throw CompilerException("$name() takes a whole number for $key, not ${if (literal is String) "'$literal'" else org.drivine.cypher.text.JavaText.of(literal)}.")
                 }
             }
             val timezone = entries["timezone"]?.let { value ->
                 when {
-                    value == Expression.Literal(null) -> throw DrivineException("$name() takes a time zone, not null.")
-                    value is Expression.Literal -> (value.value as? String)?.let { zone(it) } ?: throw DrivineException("$name() takes a time zone, not ${org.drivine.cypher.text.JavaText.of(value.value)}.")
+                    value == Expression.Literal(null) -> throw CompilerException("$name() takes a time zone, not null.")
+                    value is Expression.Literal -> (value.value as? String)?.let { zone(it) } ?: throw CompilerException("$name() takes a time zone, not ${org.drivine.cypher.text.JavaText.of(value.value)}.")
                     else -> text(comparable(json(expression(value, scope))))
                 }
             }
@@ -4240,7 +4248,7 @@ abstract class SqlCypherCompiler(graph: String) {
             return when {
                 id != null && Regex("Z|[+-][0-9]{2}:[0-9]{2}").matches(zone) -> "'$id'"
                 id == null && CommonTime.isRegion(zone) -> unsupported("The time zone '$zone'")
-                else -> throw DrivineException("'$zone' is no time zone.")
+                else -> throw CompilerException("'$zone' is no time zone.")
             }
         }
 
@@ -4269,15 +4277,15 @@ abstract class SqlCypherCompiler(graph: String) {
             val takes = (if (kind != Temporal.LOCAL_TIME && kind != Temporal.TIME) TRUNCATION_DATE_FIELDS else emptySet()) +
                 (if (kind != Temporal.DATE) TRUNCATION_TIME_FIELDS else emptySet()) + (if (kind.zoned) setOf("timezone") else emptySet())
             entries.forEach { (key, _) ->
-                if (key !in takes) throw DrivineException("${function.name}() takes no field $key.")
+                if (key !in takes) throw CompilerException("${function.name}() takes no field $key.")
                 if (key in TRUNCATION_FIELDS_NOT_COMPILED) unsupported("${function.name}() of a map with $key")
             }
             val keys = entries.map { it.first }.toSet()
-            if ("day" in keys && "dayOfWeek" in keys) throw DrivineException("${function.name}() takes a day or a day of the week, not both.")
-            if ("month" in keys && "dayOfWeek" in keys) throw DrivineException("${function.name}() takes a month or a day of the week, not both.")
+            if ("day" in keys && "dayOfWeek" in keys) throw CompilerException("${function.name}() takes a day or a day of the week, not both.")
+            if ("month" in keys && "dayOfWeek" in keys) throw CompilerException("${function.name}() takes a month or a day of the week, not both.")
             val millis = "millisecond" in keys || unit == "millisecond"
             val timezone = entries.firstOrNull { it.first == "timezone" }?.let { (_, value) ->
-                if (value == Expression.Literal(null)) throw DrivineException("${function.name}() takes a time zone, not null.")
+                if (value == Expression.Literal(null)) throw CompilerException("${function.name}() takes a time zone, not null.")
                 zone((value as? Expression.Literal)?.value as? String ?: unsupported("A truncation to a time zone an expression gives"))
             }
             val numbers = entries.filter { it.first != "timezone" }.associate { (key, value) ->
@@ -4289,11 +4297,11 @@ abstract class SqlCypherCompiler(graph: String) {
                         if (range != null && (literal as Number).toLong() !in range) {
                             val name = mapOf("dayOfWeek" to "a day of the week", "hour" to "an hour")[key] ?: "a $key"
                             val beside = if (key == "microsecond" && millis) " beside a millisecond" else ""
-                            throw DrivineException("${function.name}() takes $name from ${range.first} to ${range.last}$beside, not $literal.")
+                            throw CompilerException("${function.name}() takes $name from ${range.first} to ${range.last}$beside, not $literal.")
                         }
                         "$literal"
                     }
-                    else -> throw DrivineException("${function.name}() takes a whole number for $key, not ${if (literal is String) "'$literal'" else org.drivine.cypher.text.JavaText.of(literal)}.")
+                    else -> throw CompilerException("${function.name}() takes a whole number for $key, not ${if (literal is String) "'$literal'" else org.drivine.cypher.text.JavaText.of(literal)}.")
                 }
                 key to number
             }
@@ -4301,12 +4309,12 @@ abstract class SqlCypherCompiler(graph: String) {
         }
 
         private fun mapProjection(projection: Expression.MapProjection, scope: Map<String, Value>): Value {
-            val subject = scope[projection.variable] ?: throw DrivineException("${projection.variable} is not defined.")
+            val subject = scope[projection.variable] ?: throw CompilerException("${projection.variable} is not defined.")
             val values = projection.elements.filterNot { it is Expression.MapProjection.Element.All }.map { element ->
                 when (element) {
                     is Expression.MapProjection.Element.Selected -> element.key to property(subject, element.key)
                     is Expression.MapProjection.Element.Entry -> element.key to expression(element.value, scope)
-                    is Expression.MapProjection.Element.Variable -> element.name to (scope[element.name] ?: throw DrivineException("${element.name} is not defined."))
+                    is Expression.MapProjection.Element.Variable -> element.name to (scope[element.name] ?: throw CompilerException("${element.name} is not defined."))
                     Expression.MapProjection.Element.All -> error("filtered")
                 }
             }
@@ -4372,7 +4380,7 @@ abstract class SqlCypherCompiler(graph: String) {
                 )
             }
             if (binary.operator == Operator.IN) knownKind(binary.right, scope)?.takeIf { it != Value.Known.LIST }?.let { kind ->
-                throw DrivineException("IN takes a list, not ${kind.noun}, as in Neo4j.")
+                throw CompilerException("IN takes a list, not ${kind.noun}, as in Neo4j.")
             }
             // An id in a list written or given, where the row must pass that, is tested by its key beside: see [idKey]. A list
             // read from the store or worked out may be no list, whose items no store's elements of it would read as Cypher does.
@@ -4678,7 +4686,7 @@ abstract class SqlCypherCompiler(graph: String) {
 
         /** The parameter [name]'s value as the JSON it is bound as; null where it is null. */
         private fun parameterTree(name: String): JsonNode? = parameterTrees.getOrPut(name) {
-            CypherJson.valueToTree(parameters.value(name)).takeUnless { it.isNull || it.isMissingNode }
+            CypherJson.valueToTree(parameters.value(name), encoder).takeUnless { it.isNull || it.isMissingNode }
         }
 
         private val parameterTrees = mutableMapOf<String, JsonNode?>()
@@ -4693,7 +4701,7 @@ abstract class SqlCypherCompiler(graph: String) {
         /** [expression] as the JSON it is, where the statement gives the whole of it ([unwoundGiven]); null where it doesn't. */
         private fun givenTree(expression: Expression): JsonNode? = when (expression) {
             is Expression.Parameter -> parameterTree(expression.name) ?: NullNode.instance
-            is Expression.Literal -> CypherJson.valueToTree(expression.value)
+            is Expression.Literal -> CypherJson.valueToTree(expression.value, encoder)
             is Expression.ListLiteral -> JsonNodeFactory.instance.arrayNode().apply { for (item in expression.items) add(givenTree(item) ?: return null) }
             is Expression.MapLiteral -> JsonNodeFactory.instance.objectNode().apply { for ((key, value) in expression.entries) set<JsonNode>(key, givenTree(value) ?: return null) }
             else -> null
@@ -4835,7 +4843,7 @@ abstract class SqlCypherCompiler(graph: String) {
          */
         private fun short(node: JsonNode): Boolean =
             if (node.isArray) node.all(::short)
-            else org.drivine.cypher.text.JavaText.utf8(CypherJson.writeValueAsString(scalarOf(node))).size <= LITERAL_BYTES
+            else org.drivine.cypher.text.JavaText.utf8(CypherJson.writeValueAsString(scalarOf(node), encoder = encoder)).size <= LITERAL_BYTES
 
         /**
          * Whether the JSON value [json] is equal to [given], a list that may hold a null and lists, as Cypher compares them: the
@@ -5093,23 +5101,23 @@ abstract class SqlCypherCompiler(graph: String) {
 
         private fun function(function: Expression.Function, scope: Map<String, Value>): Value {
             val arguments = function.arguments.map { expression(it, scope) }
-            fun one(): Value = arguments.singleOrNull() ?: throw DrivineException("${function.name}() takes one argument.")
+            fun one(): Value = arguments.singleOrNull() ?: throw CompilerException("${function.name}() takes one argument.")
             val distinct = if (function.distinct) "DISTINCT " else ""
             return when (val name = function.name.lowercase()) {
                 "properties" -> when (val subject = one()) {
                     is Value.Node, is Value.Relationship -> json(subject)
                     else -> subject.also { requireKind(it, Value.Known.MAP) { kind -> "properties() takes a node, a relationship or a map, not $kind, as in Neo4j." } }
                 }
-                "labels" -> (one() as? Value.Node)?.let { Value.Json(it.labels) } ?: throw DrivineException("labels() takes a node.")
-                "type" -> (one() as? Value.Relationship)?.let { Value.Json(scalar(it.type), text = true) } ?: throw DrivineException("type() takes a relationship.")
+                "labels" -> (one() as? Value.Node)?.let { Value.Json(it.labels) } ?: throw CompilerException("labels() takes a node.")
+                "type" -> (one() as? Value.Relationship)?.let { Value.Json(scalar(it.type), text = true) } ?: throw CompilerException("type() takes a relationship.")
                 "id", "elementid" -> when (val subject = one()) {
                     is Value.Node -> Value.Json(scalar(subject.nid))
                     is Value.Relationship -> Value.Json(scalar(subject.eid))
-                    else -> throw DrivineException("${function.name}() takes a node or a relationship.")
+                    else -> throw CompilerException("${function.name}() takes a node or a relationship.")
                 }
-                "length" -> (one() as? Value.Path)?.let { Value.Json(idCount(it.eids)) } ?: throw DrivineException("length() takes a path.")
-                "nodes" -> (one() as? Value.Path)?.let { nodeList(it.nids) } ?: throw DrivineException("nodes() takes a path.")
-                "relationships" -> (one() as? Value.Path)?.let { relationshipList(it.eids) } ?: throw DrivineException("relationships() takes a path.")
+                "length" -> (one() as? Value.Path)?.let { Value.Json(idCount(it.eids)) } ?: throw CompilerException("length() takes a path.")
+                "nodes" -> (one() as? Value.Path)?.let { nodeList(it.nids) } ?: throw CompilerException("nodes() takes a path.")
+                "relationships" -> (one() as? Value.Path)?.let { relationshipList(it.eids) } ?: throw CompilerException("relationships() takes a path.")
                 "coalesce" -> Value.Json(
                     "COALESCE(${function.arguments.zip(arguments).joinToString(", ") { (argument, value) -> coalesced(argument, value, scope) }})",
                     temporal = kindOf(function.arguments.zip(arguments)),
@@ -5164,17 +5172,17 @@ abstract class SqlCypherCompiler(graph: String) {
                     )
                 }
                 "range" -> {
-                    if (arguments.size !in 2..3) throw DrivineException("range() takes a start, an end and a step.")
+                    if (arguments.size !in 2..3) throw CompilerException("range() takes a start, an end and a step.")
                     arguments.forEach { requireKind(it, Value.Known.INTEGER) { kind -> "range() takes integers, not $kind, as in Neo4j." } }
                     // A step written or given as 0 would never reach the end.
                     if (function.arguments.getOrNull(2)?.let(::known).let { it is Long && it == 0L || it is Int && it == 0 }) {
-                        throw DrivineException("range() takes a step other than 0, as in Neo4j.")
+                        throw CompilerException("range() takes a step other than 0, as in Neo4j.")
                     }
                     val (from, to) = arguments.map { number(comparable(json(it))) }
                     Value.Json(range(from, to, arguments.getOrNull(2)?.let { number(comparable(json(it))) } ?: "1"), list = true)
                 }
                 "split" -> {
-                    if (arguments.size != 2) throw DrivineException("split() takes a text and a separator.")
+                    if (arguments.size != 2) throw CompilerException("split() takes a text and a separator.")
                     Value.Json(texts(*arguments.map { comparable(json(it)) }.toTypedArray()) { (text, separator) -> split(text, separator) }, list = true, texts = true)
                 }
                 "reverse" -> Value.Json(shared(comparable(json(one()))) { (x) ->
@@ -5211,16 +5219,16 @@ abstract class SqlCypherCompiler(graph: String) {
                 "floor", "ceil" -> Value.Json(scalar(float("${name.uppercase()}(${number(comparable(json(one())))})")))
                 in MATH_FUNCTIONS -> Value.Json(scalar(math(name, listOf(number(comparable(json(one())))))))
                 "atan2" -> if (arguments.size == 2) Value.Json(scalar(math(name, arguments.map { number(comparable(json(it))) })))
-                    else throw DrivineException("atan2() takes two numbers.")
+                    else throw CompilerException("atan2() takes two numbers.")
                 // Java's constants, which Neo4j gives, written as the floats they are.
                 "e", "pi" -> if (arguments.isEmpty()) Value.Json(literalJson(if (name == "e") kotlin.math.E else kotlin.math.PI))
-                    else throw DrivineException("${function.name}() takes no argument.")
+                    else throw CompilerException("${function.name}() takes no argument.")
                 "sign" -> Value.Json(scalar(signOf(number(comparable(json(one()))))))
                 "ltrim", "rtrim" -> Value.Json(texts(comparable(json(one()))) { (t) -> scalar("${name.uppercase()}($t)") }, text = true)
-                "randomuuid" -> if (arguments.isEmpty()) Value.Json(scalar(uuid())) else throw DrivineException("randomUUID() takes no argument.")
+                "randomuuid" -> if (arguments.isEmpty()) Value.Json(scalar(uuid())) else throw CompilerException("randomUUID() takes no argument.")
                 // A position is counted from 0, as Cypher counts it, and SQL from 1.
                 "substring" -> {
-                    if (arguments.size !in 2..3) throw DrivineException("substring() takes a text, a start and a length.")
+                    if (arguments.size !in 2..3) throw CompilerException("substring() takes a text, a start and a length.")
                     Value.Json(texts(comparable(json(arguments[0]))) { read ->
                         scalar(shared(read.single()) { (text) ->
                             val start = countOf(function, 1, "start", arguments, text)
@@ -5232,7 +5240,7 @@ abstract class SqlCypherCompiler(graph: String) {
                     }, text = true)
                 }
                 "left", "right" -> {
-                    if (arguments.size != 2) throw DrivineException("${function.name}() takes a text and a length.")
+                    if (arguments.size != 2) throw CompilerException("${function.name}() takes a text and a length.")
                     Value.Json(texts(comparable(json(arguments[0]))) { read ->
                         scalar(shared(read.single()) { (text) ->
                             val count = countOf(function, 1, "length", arguments, text)
@@ -5241,7 +5249,7 @@ abstract class SqlCypherCompiler(graph: String) {
                     }, text = true)
                 }
                 "replace" -> {
-                    if (arguments.size != 3) throw DrivineException("replace() takes a text, what to replace, and what with.")
+                    if (arguments.size != 3) throw CompilerException("replace() takes a text, what to replace, and what with.")
                     // How long what to replace, and what with, are, in bytes, where the statement gives them.
                     val (searchBytes, replacementBytes) = function.arguments.drop(1).map { (given(it) as? String)?.let(org.drivine.cypher.text.JavaText::utf8)?.size }
                     Value.Json(texts(*arguments.map { comparable(json(it)) }.toTypedArray()) { (text, search, replacement) ->
@@ -5250,25 +5258,25 @@ abstract class SqlCypherCompiler(graph: String) {
                 }
                 "date", "localtime", "time", "localdatetime", "datetime", "duration" -> temporal(Temporal.ofFunction(name)!!, function, arguments, scope)
                 "timestamp" -> if (arguments.isEmpty()) Value.Json(scalar(temporals.field(temporals.now(Temporal.DATE_TIME), Temporal.DATE_TIME, "epochMillis")!!.sql))
-                    else throw DrivineException("timestamp() takes no argument.")
+                    else throw CompilerException("timestamp() takes no argument.")
                 // The moment the statement runs, however it is asked for: one statement is one moment here.
                 in TEMPORAL_NOW -> Value.Json(scalar(temporals.now(Temporal.ofFunction(name.substringBefore('.'))!!)), temporal = Temporal.ofFunction(name.substringBefore('.')))
                 in TEMPORAL_TRUNCATE -> {
                     val to = Temporal.ofFunction(name.substringBefore('.'))!!
-                    if (arguments.size < 2) throw DrivineException("${function.name}() takes a unit and a value.")
-                    if (arguments.size > 3) throw DrivineException("${function.name}() takes a unit, a value and a map of fields.")
+                    if (arguments.size < 2) throw CompilerException("${function.name}() takes a unit and a value.")
+                    if (arguments.size > 3) throw CompilerException("${function.name}() takes a unit, a value and a map of fields.")
                     val unit = (function.arguments[0] as? Expression.Literal)?.value as? String ?: unsupported("A truncation to a unit an expression gives")
-                    val given = arguments[1] as? Value.Json ?: throw DrivineException("${function.name}() takes a unit and a value.")
+                    val given = arguments[1] as? Value.Json ?: throw CompilerException("${function.name}() takes a unit and a value.")
                     val fields = function.arguments.getOrNull(2)?.let { truncationFields(function, unit, to, it, scope) }
                     fun cut(text: String, from: Temporal) = temporals.truncate(unit, text, from, to, fields)
-                        ?: throw DrivineException("${function.name}() truncates to ${TemporalSql.UNITS.dropLast(1).joinToString(", ")} or ${TemporalSql.UNITS.last()}, not $unit.")
+                        ?: throw CompilerException("${function.name}() truncates to ${TemporalSql.UNITS.dropLast(1).joinToString(", ")} or ${TemporalSql.UNITS.last()}, not $unit.")
                     val text = text(comparable(given))
                     Value.Json(scalar(given.temporal?.takeIf { it.instant }?.let { cut(text, it) } ?: temporals.byKind(text) { from, t -> cut(t, from) }), temporal = to)
                 }
                 "duration.between", "duration.inmonths", "duration.indays", "duration.inseconds" -> {
-                    if (arguments.size != 2) throw DrivineException("${function.name}() takes two temporal values.")
+                    if (arguments.size != 2) throw CompilerException("${function.name}() takes two temporal values.")
                     val unit = mapOf("duration.inmonths" to "months", "duration.indays" to "days", "duration.inseconds" to "seconds")[name]
-                    val (from, to) = arguments.map { (it as? Value.Json) ?: throw DrivineException("${function.name}() takes two temporal values.") }
+                    val (from, to) = arguments.map { (it as? Value.Json) ?: throw CompilerException("${function.name}() takes two temporal values.") }
                     val (a, b) = text(comparable(from)) to text(comparable(to))
                     // A value whose kind the statement does not make is taken to be of the other's.
                     val (fromKind, toKind) = listOf(from, to).map { side -> side.temporal?.takeIf { it.instant } }
@@ -5304,7 +5312,7 @@ abstract class SqlCypherCompiler(graph: String) {
          */
         private fun requireKind(value: Value, allowed: Value.Known, message: (String) -> String) {
             val kind = (value as? Value.Json)?.known ?: return
-            if (kind != allowed) throw DrivineException(message(kind.noun))
+            if (kind != allowed) throw CompilerException(message(kind.noun))
         }
 
         /**
@@ -5318,7 +5326,7 @@ abstract class SqlCypherCompiler(graph: String) {
                 written is Expression.MapLiteral || written is Expression.MapProjection -> "map"
                 else -> return
             }
-            throw DrivineException("${function.name}() takes a number, a text, a truth value or a temporal value, not a $kind, as in Neo4j.")
+            throw CompilerException("${function.name}() takes a number, a text, a truth value or a temporal value, not a $kind, as in Neo4j.")
         }
 
         /**
@@ -5329,7 +5337,7 @@ abstract class SqlCypherCompiler(graph: String) {
             if (mode !is Expression.Literal && mode !is Expression.Parameter) unsupported("A rounding mode an expression gives")
             val name = given(mode) ?: return null
             val known = RoundingMode.entries.firstOrNull { it.name == name }
-                ?: throw DrivineException("round() rounds by CEILING, FLOOR, UP, DOWN, HALF_EVEN, HALF_UP, HALF_DOWN or UNNECESSARY, not ${org.drivine.cypher.text.JavaText.of(name)}.")
+                ?: throw CompilerException("round() rounds by CEILING, FLOOR, UP, DOWN, HALF_EVEN, HALF_UP, HALF_DOWN or UNNECESSARY, not ${org.drivine.cypher.text.JavaText.of(name)}.")
             // It fails where rounding would change the number, which SQL has no way to say in a query.
             if (known == RoundingMode.UNNECESSARY) unsupported("round() by UNNECESSARY")
             return known
@@ -5350,7 +5358,7 @@ abstract class SqlCypherCompiler(graph: String) {
             val negated = count is Expression.Unary && count.operator == Expression.Unary.Operator.NEGATE
             val written = if (negated) (count as Expression.Unary).operand else count
             val given = given(written)
-            if ((arguments[index] as? Value.Json)?.known == Value.Known.FLOAT) throw DrivineException("${function.name}() takes an integer for its $what, not a float, as in Neo4j.")
+            if ((arguments[index] as? Value.Json)?.known == Value.Known.FLOAT) throw CompilerException("${function.name}() takes an integer for its $what, not a float, as in Neo4j.")
             if (given is Number) {
                 val cut = if (given is Long || given is Int) given.toLong() else kotlin.math.truncate(given.toDouble()).toLong()
                 val whole = if (negated) -cut else cut
@@ -5359,7 +5367,7 @@ abstract class SqlCypherCompiler(graph: String) {
                 // Where the text is given, it is null, so the function gives null, or it is refused.
                 if (isGiven(subject)) {
                     if (given(subject) == null) return "CAST(NULL AS INTEGER)"
-                    throw DrivineException(outOfRange)
+                    throw CompilerException(outOfRange)
                 }
                 // A failure of constants alone may be worked out before any row: this one reads the text.
                 return "CASE WHEN $text IS NOT NULL THEN ${failure(outOfRange, "CASE WHEN $text IS NOT NULL THEN $whole END")} END"
@@ -5458,7 +5466,7 @@ abstract class SqlCypherCompiler(graph: String) {
             is Value.Relationship -> Value.Json("CASE WHEN ${value.eid} IS NOT NULL THEN ${value.props} END")
             is Value.Entities -> Value.Json(entitiesJson(value), ordered = true, list = true)
             // Each graph engine's driver gives a path as a value of its own, so a path is given by its parts.
-            is Value.Path -> throw DrivineException("A path is not a value drivine gives the same on each store: use nodes(p), relationships(p) and length(p).")
+            is Value.Path -> throw CompilerException("A path is not a value drivine gives the same on each store: use nodes(p), relationships(p) and length(p).")
         }
 
         /**
@@ -5467,9 +5475,9 @@ abstract class SqlCypherCompiler(graph: String) {
          */
         fun bool(value: Value): String = when (value) {
             is Value.Bool -> value.sql
-            is Value.Json -> value.known?.takeIf { it != Value.Known.BOOLEAN }?.let { throw DrivineException("${it.noun.replaceFirstChar(Char::uppercase)} is not a condition, as in Neo4j.") }
+            is Value.Json -> value.known?.takeIf { it != Value.Known.BOOLEAN }?.let { throw CompilerException("${it.noun.replaceFirstChar(Char::uppercase)} is not a condition, as in Neo4j.") }
                 ?: boolOf(comparable(value))
-            else -> throw DrivineException("A node, a relationship or a path is not a condition.")
+            else -> throw CompilerException("A node, a relationship or a path is not a condition.")
         }
 
         /**
@@ -5648,7 +5656,7 @@ abstract class SqlCypherCompiler(graph: String) {
 
         fun indent(text: String) = text.prependIndent("    ")
 
-        fun unsupported(construct: String): Nothing = throw DrivineException("$construct is Cypher, and is not compiled to SQL yet.")
+        fun unsupported(construct: String): Nothing = throw CompilerException("$construct is Cypher, and is not compiled to SQL yet.")
 
         /** Whether [clause] writes, which makes its statement a procedure. */
         fun writes(clause: Clause): Boolean =

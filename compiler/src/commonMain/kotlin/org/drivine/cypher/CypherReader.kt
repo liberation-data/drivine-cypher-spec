@@ -9,7 +9,7 @@ import org.antlr.v4.kotlinruntime.Recognizer
 import org.antlr.v4.kotlinruntime.atn.PredictionMode
 import org.antlr.v4.kotlinruntime.misc.ParseCancellationException
 import org.antlr.v4.kotlinruntime.tree.TerminalNode
-import org.drivine.DrivineException
+import org.drivine.cypher.CompilerException
 import org.drivine.cypher.ast.Clause
 import org.drivine.cypher.ast.Expression
 import org.drivine.cypher.ast.NodePattern
@@ -67,7 +67,7 @@ object CypherReader {
     private val refusing = object : BaseErrorListener() {
         override fun syntaxError(
             recognizer: Recognizer<*, *>, offendingSymbol: Any?, line: Int, charPositionInLine: Int, msg: String, e: RecognitionException?,
-        ) = throw DrivineException("The statement is not Cypher, at line $line, column ${charPositionInLine + 1}: $msg")
+        ) = throw CompilerException("The statement is not Cypher, at line $line, column ${charPositionInLine + 1}: $msg")
     }
 
     private fun query(context: OC_QueryContext): Query = context.oC_RegularQuery()?.let(::regular) ?: standalone(context.oC_StandaloneCall()!!)
@@ -82,7 +82,7 @@ object CypherReader {
         val items = call.oC_YieldItems()
         // As Neo4j refuses it: a WHERE filters rows a clause after it reads.
         if (items?.oC_Where() != null) {
-            throw DrivineException("A CALL that is the whole statement takes no WHERE, as in Cypher: follow its YIELD with WITH or RETURN, as in CALL ${procedure.qualifiedName}() YIELD ${procedure.field} WHERE … RETURN ${procedure.field}.")
+            throw CompilerException("A CALL that is the whole statement takes no WHERE, as in Cypher: follow its YIELD with WITH or RETURN, as in CALL ${procedure.qualifiedName}() YIELD ${procedure.field} WHERE … RETURN ${procedure.field}.")
         }
         val yields = items?.let(::yields) ?: listOf(procedure.field to procedure.field)
         return procedure.query(invocation?.oC_Expression()?.map(::expression).orEmpty(), yields, null)
@@ -97,7 +97,7 @@ object CypherReader {
         val procedure = procedure(invocation.oC_ProcedureName())
         // As Neo4j refuses it: within a query, what a procedure gives is named.
         val items = call.oC_YieldItems()
-            ?: throw DrivineException("A CALL of a procedure within a query names what it yields, as in Cypher: CALL ${procedure.qualifiedName}() YIELD ${procedure.field}.")
+            ?: throw CompilerException("A CALL of a procedure within a query names what it yields, as in Cypher: CALL ${procedure.qualifiedName}() YIELD ${procedure.field}.")
         val where = items.oC_Where()?.let { expression(it.oC_Expression()) }
         return Clause.Call(false, procedure.query(invocation.oC_Expression().map(::expression), yields(items), where), importsAll = true)
     }
@@ -245,12 +245,12 @@ object CypherReader {
         context.children!!.forEach { child ->
             when (child) {
                 is OC_NodePatternContext -> {
-                    if (nodes.size > relationships.size) throw DrivineException("Two nodes of a path are side by side: a relationship or a quantified path pattern goes between them.")
+                    if (nodes.size > relationships.size) throw CompilerException("Two nodes of a path are side by side: a relationship or a quantified path pattern goes between them.")
                     nodes += node(child)
                 }
                 is OC_PatternElementChainContext -> {
                     // Only after a quantified path pattern: Cypher puts a node between them.
-                    if (nodes.size == relationships.size) throw DrivineException("A relationship after a quantified path pattern has a node between them.")
+                    if (nodes.size == relationships.size) throw CompilerException("A relationship after a quantified path pattern has a node between them.")
                     relationships += chained(child)
                     nodes += node(child.oC_NodePattern())
                 }
@@ -267,15 +267,15 @@ object CypherReader {
     /** `((a)-[:R]->(b) WHERE …){1,3}`: a relationship of the pattern that repeats its own, between the nodes beside it. */
     private fun quantified(context: OC_QuantifiedPathPatternContext): RelationshipPattern {
         val pattern = pattern(context.oC_PatternElement(), null)
-        if (pattern.relationships.isEmpty()) throw DrivineException("A quantified path pattern holds a relationship.")
+        if (pattern.relationships.isEmpty()) throw CompilerException("A quantified path pattern holds a relationship.")
         pattern.relationships.forEach { relationship ->
-            if (relationship.group != null) throw DrivineException("A quantified path pattern holds no quantified path pattern.")
+            if (relationship.group != null) throw CompilerException("A quantified path pattern holds no quantified path pattern.")
             if (relationship.range != null) refuse("A variable-length relationship in a quantified path pattern")
         }
         val group = RelationshipPattern.Group(pattern, context.oC_Where()?.let { expression(it.oC_Expression()) })
         val range = range(context.oC_PathQuantifier())
         // As in Neo4j: a group that may repeat no times at most matches nothing of its own.
-        if (range.max == 0) throw DrivineException("A quantified path pattern's quantifier has a maximum of at least 1.")
+        if (range.max == 0) throw CompilerException("A quantified path pattern's quantifier has a maximum of at least 1.")
         return RelationshipPattern(null, emptyList(), RelationshipPattern.Direction.OUTGOING, range, null, group)
     }
 
@@ -311,13 +311,13 @@ object CypherReader {
         val comma = context.children!!.indexOfFirst { it.text == "," }
         if (comma < 0) {
             val bound = context.oC_IntegerLiteral().singleOrNull()?.let { integer(it).toInt() }
-                ?: throw DrivineException("A quantifier in braces has a bound in them, as in {2} or {1,3}.")
+                ?: throw CompilerException("A quantifier in braces has a bound in them, as in {2} or {1,3}.")
             return RelationshipPattern.Range(bound, bound)
         }
         val before = context.oC_IntegerLiteral().firstOrNull { context.children!!.indexOf(it) < comma }?.let { integer(it).toInt() }
         val after = context.oC_IntegerLiteral().firstOrNull { context.children!!.indexOf(it) > comma }?.let { integer(it).toInt() }
         if (before != null && after != null && before > after) {
-            throw DrivineException("A quantifier's least bound is at most its greatest, and $before is more than $after.")
+            throw CompilerException("A quantifier's least bound is at most its greatest, and $before is more than $after.")
         }
         return RelationshipPattern.Range(before ?: 0, after)
     }
@@ -645,13 +645,13 @@ object CypherReader {
     }
 
     private fun outOfRange(written: String) =
-        DrivineException("$written is past the range of a whole number, from -9223372036854775808 to 9223372036854775807.")
+        CompilerException("$written is past the range of a whole number, from -9223372036854775808 to 9223372036854775807.")
 
     /** The float [written], refused where it is past a double's range, which Neo4j refuses too: it is no infinity. */
     private fun float(written: String): Double = org.drivine.cypher.json.parseDouble(written).also { if (it.isInfinite()) throw floatOutOfRange(written) }
 
     private fun floatOutOfRange(written: String) =
-        DrivineException("$written is past the range of a float, from -${org.drivine.cypher.json.jvmDoubleText(Double.MAX_VALUE)} to ${org.drivine.cypher.json.jvmDoubleText(Double.MAX_VALUE)}.")
+        CompilerException("$written is past the range of a float, from -${org.drivine.cypher.json.jvmDoubleText(Double.MAX_VALUE)} to ${org.drivine.cypher.json.jvmDoubleText(Double.MAX_VALUE)}.")
 
     private val LONG_MAX_MAGNITUDE = BigInteger.fromLong(Long.MAX_VALUE)
 
@@ -691,5 +691,5 @@ object CypherReader {
 
     /** Cypher the compiler does not take: refused by name, so the caller is told what, and not that the SQL failed. */
     private fun refuse(construct: String): Nothing =
-        throw DrivineException("$construct is Cypher, and is not compiled to SQL yet.")
+        throw CompilerException("$construct is Cypher, and is not compiled to SQL yet.")
 }

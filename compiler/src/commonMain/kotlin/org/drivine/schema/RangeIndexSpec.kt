@@ -2,7 +2,7 @@ package org.drivine.schema
 
 import kotlin.jvm.JvmOverloads
 
-import org.drivine.model.LowerCopies
+import org.drivine.cypher.store.LowerCopies
 
 /**
  * A range (b-tree / exact-match) index over one or more properties.

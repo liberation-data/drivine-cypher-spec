@@ -1,6 +1,6 @@
 package org.drivine.cypher.sql
 
-import org.drivine.DrivineException
+import org.drivine.cypher.CompilerException
 import org.drivine.cypher.ast.Clause
 import org.drivine.cypher.ast.Expression
 import org.drivine.cypher.ast.Pattern
@@ -122,7 +122,7 @@ internal object VariableKinds {
         val all = names.toSet()
         if (call.importsAll) return all
         call.imports?.let { imports ->
-            imports.firstOrNull { it !in all }?.let { throw DrivineException("$it is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used.") }
+            imports.firstOrNull { it !in all }?.let { throw CompilerException("$it is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used.") }
             return imports.toSet()
         }
         val with = clauses.firstOrNull() as? Clause.With ?: return emptySet()
@@ -130,7 +130,7 @@ internal object VariableKinds {
         if (!leading.star && leading.items.none { (it.expression as? Expression.Variable)?.name in all }) return emptySet()
         val plain = leading.items.all { (it.expression as? Expression.Variable)?.name == it.name }
         if (!plain || with.where != null || leading.distinct || leading.orderBy.isNotEmpty() || leading.skip != null || leading.limit != null) {
-            throw DrivineException(
+            throw CompilerException(
                 "The importing WITH of a CALL { … } names variables of the row alone, as in Cypher: no alias, expression, DISTINCT, WHERE, ORDER BY, SKIP " +
                     "or LIMIT. Import them with CALL (a, b) { … }, and work on them in a WITH after."
             )
@@ -179,7 +179,7 @@ internal object VariableKinds {
             relationship.variable?.let { use(it, if (relationship.range != null) Kind.RELATIONSHIPS else Kind.RELATIONSHIP, scope) }
         }
         pattern.variable?.let { variable ->
-            if (!within && scope[variable] != null) throw DrivineException("$variable is bound already, so a pattern binds no path to it, as in Neo4j.")
+            if (!within && scope[variable] != null) throw CompilerException("$variable is bound already, so a pattern binds no path to it, as in Neo4j.")
             scope[variable] = Kind.PATH
         }
     }
@@ -200,7 +200,7 @@ internal object VariableKinds {
     private fun fits(bound: Kind, kind: Kind) = bound == kind || bound == Kind.ANY || (kind == Kind.RELATIONSHIPS && bound == Kind.LIST)
 
     private fun conflict(variable: String, bound: Kind, used: Kind) =
-        DrivineException("$variable is ${bound.noun}, and is used as ${used.noun}: a variable is of one kind, as in Neo4j.")
+        CompilerException("$variable is ${bound.noun}, and is used as ${used.noun}: a variable is of one kind, as in Neo4j.")
 
     /**
      * A pattern a `CREATE` or a `MERGE` makes, over [scope]: each node of it new, or one bound already that it joins
@@ -220,10 +220,10 @@ internal object VariableKinds {
                 return@forEach
             }
             if (!foreach && (node.labels.isNotEmpty() || node.mapped)) {
-                throw DrivineException("$variable is bound already, so a CREATE or MERGE makes no node of it with labels or properties.")
+                throw CompilerException("$variable is bound already, so a CREATE or MERGE makes no node of it with labels or properties.")
             }
             if (pattern.relationships.isEmpty()) {
-                if (!foreach) throw DrivineException("$variable is bound already, so a $clause makes no node of it, as in Neo4j.")
+                if (!foreach) throw CompilerException("$variable is bound already, so a $clause makes no node of it, as in Neo4j.")
                 return@forEach
             }
             if (!fits(bound, Kind.NODE)) throw conflict(variable, bound, Kind.NODE)
@@ -234,7 +234,7 @@ internal object VariableKinds {
             if (foreach) return@forEach scope.set(variable, scope[variable] ?: Kind.RELATIONSHIP)
             val bound = scope[variable]
             if (bound != null && (bound != Kind.RELATIONSHIP || variable in made)) {
-                throw DrivineException("$variable is bound already, so a $clause makes no relationship of it, as in Neo4j.")
+                throw CompilerException("$variable is bound already, so a $clause makes no relationship of it, as in Neo4j.")
             }
             scope[variable] = Kind.RELATIONSHIP
             made += variable
@@ -329,7 +329,7 @@ internal object VariableKinds {
     private fun predicated(pattern: Pattern, scope: Scope) {
         val names = pattern.nodes.indices.flatMap { i -> listOfNotNull(pattern.nodes[i].variable, pattern.relationships.getOrNull(i)?.variable) }
         names.firstOrNull { scope[it] == null }?.let {
-            throw DrivineException("$it is not defined: a pattern used as an expression binds no new variable, as in Neo4j. Bind it in a MATCH, or test the pattern with EXISTS { … }.")
+            throw CompilerException("$it is not defined: a pattern used as an expression binds no new variable, as in Neo4j. Bind it in a MATCH, or test the pattern with EXISTS { … }.")
         }
     }
 
@@ -340,11 +340,11 @@ internal object VariableKinds {
      */
     private fun function(function: Expression.Function, scope: Scope) {
         if (function.name.equals("size", ignoreCase = true) && function.arguments.singleOrNull() is Expression.PatternPredicate) {
-            throw DrivineException("size() takes a list or a text, not a pattern, as in Neo4j: COUNT { … } counts a pattern's matches.")
+            throw CompilerException("size() takes a list or a text, not a pattern, as in Neo4j: COUNT { … } counts a pattern's matches.")
         }
         val argument = (function.arguments.singleOrNull() as? Expression.Variable)?.let { scope[it.name] } ?: return
         if (function.name.equals("size", ignoreCase = true) && argument == Kind.PATH) {
-            throw DrivineException("size() takes a list or a text, not a path, as in Neo4j: length() takes a path.")
+            throw CompilerException("size() takes a list or a text, not a path, as in Neo4j: length() takes a path.")
         }
     }
 }

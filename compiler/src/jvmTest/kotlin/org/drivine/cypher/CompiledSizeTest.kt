@@ -3,7 +3,7 @@ package org.drivine.cypher
 import org.drivine.cypher.sql.OracleCypherCompiler
 import org.drivine.cypher.sql.PostgresCypherCompiler
 import org.drivine.cypher.sql.SqliteCypherCompiler
-import org.drivine.model.Stamps
+import org.drivine.cypher.store.Stamps
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue

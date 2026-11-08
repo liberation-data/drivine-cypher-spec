@@ -33,6 +33,9 @@ jobs:
       - run: ./gradlew --no-daemon clean jvmTest metadataCompile
       - name: The sync from drivine4j, over a made-up drivine4j
         run: scripts/test-sync.sh
+      # As drivine4j publishes it from a pinned commit, into a repository of its own: the POMs and module metadata build.
+      - name: The Maven publications
+        run: ./gradlew --no-daemon publishJvmPublicationToMavenLocal publishKotlinMultiplatformPublicationToMavenLocal -Pcompiler.version=0.0.0-ci -Dmaven.repo.local="$RUNNER_TEMP/compiler-repo"
       - name: Summary
         if: always()
         run: ../.github/scripts/compiler-summary.sh build/test-results/jvmTest >> "$GITHUB_STEP_SUMMARY"

@@ -1,10 +1,17 @@
-package org.drivine.backend.oracle
+package org.drivine.cypher.store
 
-/** SPIKE: the pieces of drivine4j's `OracleSql` the compiler calls, copied as they are. */
-internal object OracleSql {
+import org.drivine.DrivineInternalApi
+
+/**
+ * The Oracle SQL the compiler writes that drivine4j's `org.drivine.backend.oracle.OracleSql` writes too: drivine4j's
+ * calls these, so each is written once.
+ */
+@DrivineInternalApi
+object OracleSql {
     fun literal(text: String): String = "'${text.replace("'", "''")}'"
 
-    private fun step(key: String): String =
+    /** One step of a JSON path: a key, quoted when it must be, so a key with a dot in it is one key. */
+    fun step(key: String): String =
         if (PLAIN_KEY.matches(key) && key !in JSON_WORDS) key else "\"${key.replace("\\", "\\\\").replace("\"", "\\\"")}\""
 
     /** A key a JSON path writes bare: what SQL would take for an identifier. */
@@ -83,7 +90,7 @@ internal object OracleSql {
     }
 
     /** [text] as JSON writes a string. */
-    internal fun quoted(text: String): String = "\"${text.replace("\\", "\\\\").replace("\"", "\\\"")}\""
+    fun quoted(text: String): String = "\"${text.replace("\\", "\\\\").replace("\"", "\\\"")}\""
 
     /**
      * [text] as Oracle's `JSON_SERIALIZE` writes a string, checked on Oracle Free 23 for every character: `"` and `\`
@@ -91,7 +98,7 @@ internal object OracleSql {
      * character below U+0020, and U+007F, as `\u00XX` in upper case; U+2028 and U+2029 as `\u2028` and `\u2029`; and
      * every other character as it is.
      */
-    internal fun serialized(text: String): String = buildString {
+    fun serialized(text: String): String = buildString {
         append('"')
         for (c in text) {
             when (c) {
