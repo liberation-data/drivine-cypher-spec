@@ -1,0 +1,35 @@
+# Installs the JDK that compiler-release.yml's build job used, from the archive it kept as this run's artifact, so a job
+# that rebuilds the release needs no download of a JDK. Adoptium serves its JDKs as GitHub release assets, and an outage
+# of those must not hold up a release that already passed its gate (v0.31.0's publish failed twice on a 504 fetching
+# Temurin). The JDK is gradle/pinned-jdk.properties's exactly, which the build writes the zone ids with; the step that
+# checks it fails here, not in Gradle, where Gradle would try to fetch the pinned JDK.
+name: The release build's JDK
+description: Installs the JDK the build job kept as an artifact, and checks it is the pinned one.
+runs:
+  using: composite
+  steps:
+    - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      with:
+        name: compiler-release-jdk
+        path: ${{ runner.temp }}/release-jdk
+    - name: The pinned version
+      id: pinned
+      shell: bash
+      run: echo "version=$(sed -n 's/^version=//p' compiler/gradle/pinned-jdk.properties)" >> "$GITHUB_OUTPUT"
+    - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+      with:
+        distribution: jdkfile
+        jdkFile: ${{ runner.temp }}/release-jdk/jdk.tar.gz
+        java-version: ${{ steps.pinned.outputs.version }}
+    - name: The JDK is the pinned one
+      shell: bash
+      env:
+        PINNED: ${{ steps.pinned.outputs.version }}
+      run: |
+        runtime=$("$JAVA_HOME/bin/java" -XshowSettings:properties -version 2>&1 | sed -n 's/^ *java\.runtime\.version = //p')
+        vendor=$("$JAVA_HOME/bin/java" -XshowSettings:properties -version 2>&1 | sed -n 's/^ *java\.vendor = //p')
+        if [[ "$runtime" != "$PINNED"* || "$vendor" != *Adoptium* ]]; then
+          echo "::error::The build job's JDK is $vendor $runtime, not Temurin $PINNED as compiler/gradle/pinned-jdk.properties pins."
+          exit 1
+        fi
+        echo "Temurin $runtime, the build job's."
