@@ -3762,6 +3762,10 @@ cases:
         cypher: "UNWIND [1, [1], 'x', {a: 1}] AS a UNWIND [[null], {a: null}] AS b RETURN a = b AS r"
         only: [neo4j, sql]
         rows: [false, false, null, false, false, false, false, null]
+      - note: "One that holds a null in a list whose items are of several kinds."
+        cypher: "UNWIND [[1, 'x', true], [1, [1]], [{a: 1}, [null]], []] AS l RETURN [[null] IN l, {a: null} IN l] AS r"
+        only: [neo4j, sql]
+        rows: [[false, false], [null, false], [null, null], [false, false]]
       - cypher: "UNWIND [{a: 1}, {a: [1]}, {a: 'x'}, {a: {b: 1}}] AS m RETURN [m.a = [null], m.a = {b: null}, m.a IN [[null]]] AS r"
         only: [neo4j, sql]
         rows: [[false, false, false], [null, false, null], [false, false, false], [false, null, false]]
