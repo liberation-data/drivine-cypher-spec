@@ -335,8 +335,11 @@ abstract class SqlCypherCompiler(
         val sql = if (query.unions.first().all) {
             "SELECT u.result FROM (\n${indent(rows)}\n) u\nORDER BY u.part, u.n"
         } else {
-            // A row is given once, where it is first given: its rows are compared as JSON compares them.
-            "SELECT d.result FROM (\n${indent("SELECT u.result, MIN(u.part * 1000000000.0 + u.n) AS k FROM (\n${indent(rows)}\n) u\nGROUP BY u.result")}\n) d\nORDER BY d.k"
+            // A row is given once, where it is first given: its rows are compared as JSON compares them. One whose item is NaN,
+            // equal to nothing, is given each time, as Neo4j gives it (drivine4j#688): by its own place beside the result.
+            val nan = (if (names.first().size == 1) listOf("u.result") else names.first().indices.map { itemAt("u.result", it) }).mapNotNull(::bareNaN)
+            val apart = if (nan.isEmpty()) "" else ", CASE WHEN ${nan.joinToString(" OR ") { "($it)" }} THEN u.part * 1000000000.0 + u.n END"
+            "SELECT d.result FROM (\n${indent("SELECT u.result, MIN(u.part * 1000000000.0 + u.n) AS k FROM (\n${indent(rows)}\n) u\nGROUP BY u.result$apart")}\n) d\nORDER BY d.k"
         }
         return CompiledCypher(planned(sql), writer.parameters.values, nonFinite)
     }
@@ -2861,6 +2864,15 @@ abstract class SqlCypherCompiler(
                 items.zip(columns).forEach { (item, pair) ->
                     if (!contains(item.expression, ::isAggregate)) keys += pair.second.groupKeys()
                     else variablesOutsideAggregates(item.expression).forEach { variable -> select.scope[variable]?.let { keys += it.groupKeys() } }
+                }
+                // A key that is NaN, equal to nothing, makes a group of each row, as Neo4j groups it (drivine4j#688): by a value made
+                // for each row beside it. Only where a key may be NaN ([bareNaN]), so a statement given and working out none compiles
+                // as it did.
+                compiled.zip(columns).forEach { (item, pair) ->
+                    val (name, value) = item
+                    if (items.first { it.name == name }.expression.let { contains(it, ::isAggregate) }) return@forEach
+                    (pair.second as? Value.Json)?.takeIf { (value as? Value.Json)?.let(::mayBeFloat) == true }?.let { bareNaN(it.sql) }
+                        ?.let { keys += "CASE WHEN $it THEN ${uuid()} END" }
                 }
                 keys.distinct()
             }
