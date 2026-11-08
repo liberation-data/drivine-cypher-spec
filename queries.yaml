@@ -3733,6 +3733,56 @@ cases:
         cypher: "UNWIND [[1, null], [2, null], [3]] AS l WITH l WHERE l = [1, null] OR l = [3] RETURN l"
         rows: [[3]]
 
+  - name: "Values of two kinds in one column, compared with one that holds a null"
+    description: "A number, a text, a truth value or a map is not equal to a list, and a list or a number not to a map, where the column also holds the other kind; a list beside a list is compared item by item."
+    steps:
+      - cypher: "CALL { RETURN 1 AS v UNION ALL RETURN [1] AS v } RETURN v, v = [null] AS r"
+        only: [neo4j, sql]
+        unordered: true
+        rows: [[1, false], [[1], null]]
+      - cypher: "CALL { RETURN [1] AS v UNION ALL RETURN 1 AS v } RETURN v, v = [null] AS r"
+        only: [neo4j, sql]
+        unordered: true
+        rows: [[[1], null], [1, false]]
+      - cypher: "CALL { RETURN 1 AS v UNION ALL RETURN [1] AS v } RETURN v, [v <> [null], [null] = v, v IN [[null]], v IN [[1], [null]]] AS r"
+        only: [neo4j, sql]
+        unordered: true
+        rows: [[1, [true, false, false, false]], [[1], [null, null, null, true]]]
+      - cypher: "CALL { RETURN {a: 1} AS v UNION ALL RETURN 'x' AS v } RETURN v, [v = [null], v = {a: null}, v <> {a: null}, v IN [{a: null}]] AS r"
+        only: [neo4j, sql]
+        unordered: true
+        rows: [[{a: 1}, [false, null, null, null]], ["x", [false, false, true, false]]]
+      - cypher: "UNWIND [1, [1], 'x', {a: 1}] AS v RETURN v = [null] AS r"
+        only: [neo4j, sql]
+        rows: [false, null, false, false]
+      - cypher: "UNWIND [1, 1.5, 'x', true, null, {a: 1}, {a: null}, [1], [null], [1, 2], [[1]], [1, [1]], [[null]]] AS v RETURN [v = [null], v = [1, null], v = {a: null}, v = [[null]], v = [1, [null]], v = {a: [null]}, v <> [null], [null] = v, v IN [[null]], v IN [[1, null]], v IN [{a: null}]] AS r"
+        only: [neo4j, sql]
+        rows: [[false, false, false, false, false, false, true, false, false, false, false], [false, false, false, false, false, false, true, false, false, false, false], [false, false, false, false, false, false, true, false, false, false, false], [false, false, false, false, false, false, true, false, false, false, false], [null, null, null, null, null, null, null, null, null, null, null], [false, false, null, false, false, false, true, false, false, false, null], [false, false, null, false, false, null, true, false, false, false, null], [null, false, false, false, false, false, null, null, null, false, false], [null, false, false, null, false, false, null, null, null, false, false], [false, null, false, false, false, false, true, false, false, null, false], [null, false, false, null, false, false, null, null, null, false, false], [false, null, false, false, null, false, true, false, false, null, false], [null, false, false, null, false, false, null, null, null, false, false]]
+      - note: "Both of open kind."
+        cypher: "UNWIND [1, [1], 'x', {a: 1}] AS a UNWIND [[null], {a: null}] AS b RETURN a = b AS r"
+        only: [neo4j, sql]
+        rows: [false, false, null, false, false, false, false, null]
+      - note: "One that holds a null in a list whose items are of several kinds."
+        cypher: "UNWIND [[1, 'x', true], [1, [1]], [{a: 1}, [null]], []] AS l RETURN [[null] IN l, {a: null} IN l] AS r"
+        only: [neo4j, sql]
+        rows: [[false, false], [null, false], [null, null], [false, false]]
+      - cypher: "UNWIND [{a: 1}, {a: [1]}, {a: 'x'}, {a: {b: 1}}] AS m RETURN [m.a = [null], m.a = {b: null}, m.a IN [[null]]] AS r"
+        only: [neo4j, sql]
+        rows: [[false, false, false], [null, false, null], [false, false, false], [false, null, false]]
+      - note: "A property that is a text on one node and a number on another."
+        cypher: "MATCH (c:Code) RETURN c.code, [c.code = [null], c.code <> [1, null], c.code IN [[null]], c.code = {a: null}] AS r"
+        only: [neo4j, sql]
+        unordered: true
+        rows: [["7", [false, true, false, false]], [7, [false, true, false, false]]]
+      - note: "A float, a date, a moment and a duration are not equal to a list either, nor 1.0 to a list or a map: a list beside a list is compared item by item, where 1 is equal to 1.0."
+        cypher: "UNWIND [1.0, date('2020-01-01'), datetime('2020-01-01T00:00Z'), duration('P1D'), [1.0, null]] AS v RETURN [v = [null], v = [1, null], v = {a: null}] AS r"
+        only: [neo4j, sql]
+        rows: [[false, false, false], [false, false, false], [false, false, false], [false, false, false], [false, null, false]]
+      - note: "In the step of a reduce."
+        cypher: "UNWIND [1, [1], 'x', {a: 1}, 1.5, true] AS v RETURN reduce(acc = [], x IN [[null], {a: null}] | acc + [v = x]) AS r"
+        only: [neo4j, sql]
+        rows: [[false, false], [null, false], [false, false], [false, null], [false, false], [false, false]]
+
   - name: "Values that hold a null, compared in the step of a reduce"
     description: "The step of a reduce() compares lists and maps that hold a null item by item, as a query does."
     steps:
