@@ -275,7 +275,7 @@ Before it imports the key, it checks the bundle holds every artifact at the tag'
 which zip would follow into the job's keyring or environment, no file the publications don't make, no other version,
 nothing outside `org/drivine`. Then it checks each file's checksums in the bundle; after signing, each signature against
 the key, and the signed bundle as step 2 checked it. The key is imported into a keyring made for the job and deleted
-after it, and the key's variables are unset once it is, so no process the signing starts is given them. Neither the
+after it, and the key's variables are unset before the signing runs anything, so no process the signing starts is given them. Neither the
 key, its passphrase nor the Portal token is passed on a command line or written to the log: the token's base64, which
 GitHub doesn't mask as it masks the secrets, is masked too. The signed bundle is kept as the run's artifact only once
 it is published. A failed upload is re-run

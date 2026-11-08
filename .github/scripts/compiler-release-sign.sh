@@ -5,7 +5,7 @@
 # every artifact at the version and nothing else, no link (zip would follow one into the keyring or the environment), no
 # file its publications don't make, nothing outside org/drivine. Then checks each file's checksums the bundle holds,
 # signs each file Maven Central asks a signature of, checks each signature against the key, and checks the signed bundle
-# again. The key's variables are unset once it is imported, so no process this starts is given them.
+# again. The key's variables are unset before anything else is run, so no process this starts is given them.
 #   compiler-release-sign.sh <unsigned bundle zip> <version> <signed bundle zip> <check out dir>
 # The key is SIGNING_KEY, an ASCII-armored private key, with its passphrase in SIGNING_PASSWORD: the release key in the
 # publish job, a throwaway key in a dry run. It is imported into a keyring made for this run alone and deleted after,
@@ -15,6 +15,10 @@ unsigned="$1" version="$2" signed="$3" out="$4"
 fail() { echo "::error::$*"; exit 1; }
 [[ "${SIGNING_KEY:-}" == *'BEGIN PGP PRIVATE KEY BLOCK'* ]] || fail "SIGNING_KEY isn't an ASCII-armored private key."
 [[ -n "${SIGNING_PASSWORD:-}" ]] || fail "SIGNING_PASSWORD isn't set."
+# Out of the environment from here on, so no process this script starts (the check, unzip, zip, gpg) is given the key or
+# its passphrase: each is kept in a variable of this shell alone, for gpg's stdin and fd 3.
+key="$SIGNING_KEY" passphrase="$SIGNING_PASSWORD"
+unset SIGNING_KEY SIGNING_PASSWORD
 signed=$(cd "$(dirname "$signed")" && pwd)/$(basename "$signed")
 
 work=$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/compiler-sign.XXXXXX")
@@ -30,12 +34,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-gpg --batch --quiet --pinentry-mode loopback --passphrase-fd 3 --import 3<<< "$SIGNING_PASSWORD" <<< "$SIGNING_KEY" 2> /dev/null ||
+gpg --batch --quiet --pinentry-mode loopback --passphrase-fd 3 --import 3<<< "$passphrase" <<< "$key" 2> /dev/null ||
     fail "SIGNING_KEY couldn't be imported."
-# Out of the environment from here on, so no process this script starts (unzip, zip, gpg) is given the key or its
-# passphrase: the passphrase is kept in a variable of this shell alone, for gpg's fd 3.
-passphrase="$SIGNING_PASSWORD"
-unset SIGNING_KEY SIGNING_PASSWORD
 fingerprint=$(gpg --batch --with-colons --list-secret-keys | awk -F: '$1 == "fpr" { print $10; exit }')
 [[ -n "$fingerprint" ]] || fail "SIGNING_KEY holds no secret key."
 
