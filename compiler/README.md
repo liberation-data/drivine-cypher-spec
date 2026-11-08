@@ -150,7 +150,8 @@ reviewed pull request. To bump it:
 
 1. Set `version` to the new Temurin 21 release, and each `sha256.<os>-<arch>` to Adoptium's checksum of that release's
    archive (`https://api.adoptium.net/v3/assets/release_name/eclipse/jdk-<version>?os=<os>&architecture=<arch>&image_type=jdk`).
-2. Set `java-version` in `.github/workflows/compiler.yml` to the same release, as setup-java names it (`21.0.13+9.0.LTS`).
+2. Set `java-version` in `.github/workflows/compiler.yml` and `.github/workflows/compiler-release.yml` to the same
+   release, as setup-java names it (`21.0.13+9.0.LTS`).
 3. Run `./gradlew generateTables`. Where the JDK brings another tzdb, it stops and names it: set `tzdb` to that.
 4. Open the pull request, and say in it which zones the new tzdb adds or removes (the diff of the generated
    `build/generated/tables/org/drivine/cypher/time/JvmZoneIds.kt` against the old one's).
@@ -289,8 +290,8 @@ Between tags, drivine4j can build against a commit of the module, published into
 Each library's sync script copies named files out of the tag's tarball, not the whole of it, so the compiler in the
 tarball never reaches a library's spec copy. A new spec file is copied only once it is named in all three libraries'
 sync and check scripts (`scripts/sync-cypher-spec.sh` and `scripts/check-cypher-spec.sh` in drivine4j and Drivine for
-TypeScript, `scripts/sync_cypher_spec.py` in drivine-python). `host.yaml`, and any spec file added after it, is added to
-those lists in the change that syncs the tag bringing it.
+TypeScript, `scripts/sync_cypher_spec.py` in drivine-python). So each library adds a new spec file to those lists in
+the change that syncs the tag bringing it: the next is `host.yaml`, the host functions' cases, still being written.
 
 ## Not yet
 
