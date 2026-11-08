@@ -99,6 +99,12 @@ class NonFiniteCompileTest {
         assertTrue(numbered(OracleCypherCompiler("g").compile("UNWIND [0.0, 1.0] AS z RETURN DISTINCT z / z").sql))
         // Where the projection aggregates, by its group's value made apart (drivine4j#688): DISTINCT would take the groups as one.
         assertTrue(PostgresCypherCompiler("g").compile("UNWIND \$l AS x RETURN DISTINCT x, count(*)", nan).sql.contains("MIN(CASE WHEN"))
+        // NaN worked out by % of a float zero, or by / of one beside the test for an integer zero (drivine4j#554, drivine4j#559).
+        listOf(SqliteCypherCompiler("g"), OracleCypherCompiler("g")).forEach { compiler ->
+            listOf("UNWIND [5.0, 5.0] AS x WITH DISTINCT x % 0.0 AS v RETURN count(*)", "UNWIND [0.0, 0.0] AS z RETURN DISTINCT 0.0 / z AS v").forEach { cypher ->
+                assertTrue(numbered(compiler.compile(cypher, emptyMap()).sql), cypher)
+            }
+        }
         // Not where the statement works out none, nor of a value made a text or a list.
         listOf(PostgresCypherCompiler("g"), SqliteCypherCompiler("g"), OracleCypherCompiler("g")).forEach { compiler ->
             assertFalse(numbered(compiler.compile("MATCH (n:A) RETURN DISTINCT n.x").sql))
@@ -162,6 +168,32 @@ class NonFiniteCompileTest {
         assertFalse(postgres.compile("RETURN \$p AS x UNION RETURN 1 AS x", mapOf("p" to 1.5)).nonFinite)
         assertTrue(OracleCypherCompiler("g").compile("CREATE (n:A {x: \$p}) RETURN n.x", mapOf("p" to Double.NaN)).nonFinite)
         assertTrue(SqliteCypherCompiler("g").compile("CREATE (n:A {x: \$p}) RETURN n.x", mapOf("p" to Double.POSITIVE_INFINITY)).nonFinite)
+    }
+
+    @Test
+    fun `on SQLite a number divided or taken % by an integer zero fails, where a divisor may be zero, and else compiles as before`() {
+        // drivine4j#554: SQLite gave null where Neo4j fails. What each gives is the spec's, in queries.yaml ("NaN worked out").
+        val sqlite = SqliteCypherCompiler("g")
+        fun sql(cypher: String, parameters: Map<String, Any?> = emptyMap()) = sqlite.compile(cypher, parameters).sql
+        val fails = "drivine_fail('/ by zero')"
+        listOf(
+            "RETURN 1 / 0" to emptyMap(), "RETURN 5 % 0" to emptyMap(), "RETURN \$x / \$z" to mapOf("x" to 1.0, "z" to 0L),
+            "WITH 0 AS z RETURN 1.0 / z" to emptyMap(), "MATCH (n:A) RETURN n.x / n.y, n.x % n.y" to emptyMap(),
+            // A divisor worked out as the statement runs, with no parameters.
+            "RETURN 1 / size([])" to emptyMap(), "UNWIND [0] AS z RETURN 1 / z" to emptyMap(), "MATCH (n:A) RETURN count(*) / (count(*) - 1)" to emptyMap(),
+            "UNWIND [1, 2] AS i RETURN sum(i / 0)" to emptyMap(), "UNWIND [1, 2] AS i RETURN i ORDER BY i % 0" to emptyMap(),
+            // A write, which SQLite carries out as a procedure.
+            "CREATE (w:W {a: \$x / \$z, b: \$x % \$z}) RETURN w.a" to mapOf("x" to 1L, "z" to 0L),
+        ).forEach { (cypher, parameters) ->
+            // The procedure's SQL is a text in it, its quotes doubled.
+            val compiled = sql(cypher, parameters).replace("''", "'")
+            assertTrue(fails in compiled, "$cypher: $compiled")
+        }
+        // Each divisor given a number not zero: no division may be by zero, so none is tested.
+        listOf("RETURN [7 / 2, 7 % 2, \$x / \$y]", "UNWIND [1, 2] AS i RETURN i / 2, i % \$y").forEach { cypher ->
+            val compiled = sql(cypher, mapOf("x" to 7L, "y" to 2L))
+            assertFalse("drivine_fail" in compiled, "$cypher: $compiled")
+        }
     }
 
     @Test
@@ -232,6 +264,46 @@ class NonFiniteCompileTest {
         }
         // Of two integers written, the divisor not zero, MOD's of NUMBERs alone, as before.
         assertFalse("BINARY_DOUBLE" in sql("RETURN [7 % 3, 70 % 4]"))
+    }
+
+    @Test
+    fun `a number divided by an integer zero fails on Oracle, a float too, and by any other number divides as before`() {
+        // drivine4j#559: BINARY_DOUBLE's division gave a float divided by an integer zero as an infinity or NaN, where Neo4j fails at
+        // run time. What each gives on Oracle is the spec's, in queries.yaml ("NaN worked out").
+        val oracle = OracleCypherCompiler("g")
+        fun sql(cypher: String, parameters: Map<String, Any?> = emptyMap()) = oracle.compile(cypher, parameters).sql
+        val byZero = "THEN TRUNC(1 / "
+        val divided = "= 'double' OR "
+        // An integer zero written: NUMBER's division by it, which fails as 1 / 0 does, and no BINARY_DOUBLE's. A float written too,
+        // as pi() is written, which Neo4j fails on where it gives an infinity for 1.0 / 0 (drivine4j#686).
+        listOf("RETURN 1.0 / 0", "RETURN 0.0 / 0", "RETURN pi() / 0", "RETURN e() / 0", "MATCH (n:A) RETURN n.x / 0", "RETURN \$x / 0").forEach { cypher ->
+            val compiled = sql(cypher, mapOf("x" to 3.0))
+            assertTrue(byZero in compiled, "$cypher: $compiled")
+            assertFalse(divided in compiled, "$cypher: $compiled")
+        }
+        // A divisor not written may be an integer zero, tested first, and else divides as before.
+        listOf(
+            "RETURN \$x / \$z" to mapOf("x" to 3.0, "z" to 0L),
+            "WITH 0 AS z RETURN 1.0 / z" to emptyMap(),
+            "MATCH (n:A) RETURN n.x / n.y" to emptyMap(),
+            "RETURN 1.0 / (1 - 1)" to emptyMap(),
+            // A dividend long enough to be bound binds the divisor beside it, which is read as any other there.
+            "RETURN -1.0 / 0" to emptyMap(),
+            // A write, which Oracle compiles as a procedure.
+            "CREATE (w:W {a: \$x / \$z}) RETURN w.a" to mapOf("x" to 3.0, "z" to 0L),
+        ).forEach { (cypher, parameters) ->
+            val compiled = sql(cypher, parameters)
+            assertTrue("= 0 THEN JSON_SCALAR(CASE WHEN" in compiled && byZero in compiled, "$cypher: $compiled")
+            assertTrue(divided in compiled, "$cypher: $compiled")
+        }
+        // A divisor written as any other number, a float zero among them, isn't tested for a zero.
+        listOf("MATCH (n:A) RETURN n.x / 2", "MATCH (n:A) RETURN n.x / 2.5", "RETURN 1.0 / 0.0", "MATCH (n:A) RETURN n.x / 0.0").forEach { cypher ->
+            val compiled = sql(cypher)
+            assertFalse(byZero in compiled, "$cypher: $compiled")
+            assertTrue(divided in compiled, "$cypher: $compiled")
+        }
+        // The other operators are as before.
+        listOf("MATCH (n:A) RETURN n.x * 0", "MATCH (n:A) RETURN n.x - 0").forEach { cypher -> assertFalse(byZero in sql(cypher), cypher) }
     }
 
     @Test

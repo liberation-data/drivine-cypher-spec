@@ -172,8 +172,8 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
     /**
      * Where the statement is given NaN or an infinity, or may work one out, NaN where either number is NaN, or where an infinity
      * makes the result NaN, which SQLite gives as null: `∞ - ∞`, `∞ * 0`, `∞ / ∞`. A number divided by a float zero, which SQLite
-     * gives as null too, is NaN for zero, and else the infinity of the dividend's sign, as in Java (#408). By an integer zero it is
-     * null still, as two integers are by [wholeQuotient] (#201), where Neo4j fails.
+     * gives as null too, is NaN for zero, and else the infinity of the dividend's sign, as in Java (#408). By an integer zero it
+     * fails ([byIntegerZero]), a float, NaN or an infinity too, as on Neo4j, where SQLite gives null (drivine4j#554).
      */
     override fun arithmetic(a: String, b: String, operator: String): String {
         if (!nonFinite) return super.arithmetic(a, b, operator)
@@ -182,20 +182,28 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
             val infinite = "(abs(${number(x)}) = $INFINITY OR abs(${number(y)}) = $INFINITY)" + if (operator == "/") " AND ${number(y)} <> 0" else ""
             val byZero = if (operator != "/") "" else "WHEN ${typeOf(x)} = 'number' AND ${number(y)} = 0 AND NOT ${integral(y)} THEN CASE WHEN ${number(x)} > 0 THEN json_quote($INFINITY) " +
                 "WHEN ${number(x)} < 0 THEN json_quote(-$INFINITY) ELSE $NAN_JSON END "
-            "CASE WHEN ${typeOf(x)} = 'number' AND ${typeOf(y)} = 'number' AND (${isNaN(x)} OR ${isNaN(y)} OR ($result IS NULL AND $infinite)) " +
+            "CASE ${if (operator == "/") byIntegerZero(x, y) else ""}WHEN ${typeOf(x)} = 'number' AND ${typeOf(y)} = 'number' AND (${isNaN(x)} OR ${isNaN(y)} OR ($result IS NULL AND $infinite)) " +
                 "THEN $NAN_JSON ${byZero}ELSE $result END"
         }
     }
 
     /**
+     * The `WHEN` of a `CASE` that fails the statement where the JSON number [x], NaN and the infinities among them, is divided or
+     * taken % by the JSON integer zero [y], as Neo4j fails ("/ by zero"), where SQLite gives null (drivine4j#554). Neo4j works a
+     * float written in the statement divided by an integer zero written out as it plans, as Java does (`1.0 / 0` is an
+     * infinity): there [y] is a float already (see `divisor` in [SqlCypherCompiler]), so this passes it by.
+     */
+    private fun byIntegerZero(x: String, y: String) = "WHEN ${typeOf(x)} = 'number' AND ${integral(y)} AND ${number(y)} = 0 THEN $BY_ZERO_FAILS "
+
+    /**
      * Where the statement is given NaN or an infinity, or may work one out, NaN where either number is NaN, the first is an
-     * infinity, or a number is taken by a float zero, as in Java, which SQLite gives as null (#408). By an integer zero it is null
-     * still, where Neo4j fails.
+     * infinity, or a number is taken by a float zero, as in Java, which SQLite gives as null (#408). By an integer zero it fails
+     * ([byIntegerZero]), as on Neo4j (drivine4j#554).
      */
     override fun remainder(a: String, b: String): String {
         if (!nonFinite) return super.remainder(a, b)
         return shared(a, b) { (x, y) ->
-            "CASE WHEN ${typeOf(x)} = 'number' AND ${typeOf(y)} = 'number' AND (${isNaN(x)} OR ${isNaN(y)} OR abs(${number(x)}) = $INFINITY " +
+            "CASE ${byIntegerZero(x, y)}WHEN ${typeOf(x)} = 'number' AND ${typeOf(y)} = 'number' AND (${isNaN(x)} OR ${isNaN(y)} OR abs(${number(x)}) = $INFINITY " +
                 "OR (${number(y)} = 0 AND NOT ${integral(y)})) THEN $NAN_JSON ELSE ${super.remainder(x, y)} END"
         }
     }
@@ -241,8 +249,11 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
     /** SQLite puts null first when ascending, and Cypher last. */
     override fun orderTerm(term: String, descending: Boolean) = if (descending) "$term DESC NULLS FIRST" else "$term NULLS LAST"
 
-    /** SQLite divides one whole number by another to a whole number, toward zero. */
-    override fun wholeQuotient(a: String, b: String) = "($a / $b)"
+    /**
+     * SQLite divides one whole number by another to a whole number, toward zero. By zero it gives null, so that fails, as on Neo4j
+     * (drivine4j#554), where the statement may divide by zero ([nonFinite]): else each divisor is a number it is given, not zero.
+     */
+    override fun wholeQuotient(a: String, b: String) = if (!nonFinite) "($a / $b)" else shared(b) { (y) -> "CASE WHEN $y = 0 THEN $BY_ZERO_FAILS ELSE ($a / $y) END" }
 
     override fun aggregateList(value: String, order: String?) = "json_group_array(json($value)${order?.let { " ORDER BY $it" }.orEmpty()})"
 
@@ -591,6 +602,12 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
 
         /** An infinity, as SQLite reads the number its JSON writes for one. */
         const val INFINITY = SqliteCypherValues.INFINITY
+
+        /** Why a number divided or taken % by an integer zero fails, in Neo4j's words: see [byIntegerZero]. */
+        const val BY_ZERO = "/ by zero"
+
+        /** What fails the statement where a number is divided or taken % by an integer zero: see [byIntegerZero]. */
+        val BY_ZERO_FAILS = "${SqliteFunctions.FAIL}(${literal(BY_ZERO)})"
 
         /** Why a statement that writes NaN it works out fails: see [finite]. */
         const val NAN_WRITTEN = "A statement that writes works out NaN, which SQLite's JSON holds as no number: it would store another value in its place."
