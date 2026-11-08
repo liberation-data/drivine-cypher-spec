@@ -2791,7 +2791,7 @@ abstract class SqlCypherCompiler(
                 val nans = compiled.zip(columns).mapNotNull { (item, column) ->
                     (column.second as? Value.Json)?.takeIf { (item.second as? Value.Json)?.let(::mayBeFloat) == true }?.let { bareNaN(it.sql) }
                 }
-                if (nans.isNotEmpty()) selectList += "CASE WHEN ${nans.joinToString(" OR ") { "($it)" }} THEN ROW_NUMBER() OVER () END AS d1"
+                if (nans.isNotEmpty()) selectList += "CASE WHEN ${nans.joinToString(" OR ") { "($it)" }} THEN $rowNumber END AS d1"
             }
             // An order is written over the items' names, and where nothing is grouped or kept distinct, the variables too.
             val name = alias("p")
