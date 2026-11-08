@@ -3347,6 +3347,10 @@ cases:
         only: [neo4j, sql]
         cypher: "RETURN [toFloat('NAN'), toFloat('Inf'), toFloat('INF'), toFloat('infinity'), toFloat('+inf'), toFloat('-inf'), toFloat('Infinityx'), toFloat('NaNd'), toFloat('Infinityd'), toFloat('- Infinity')]"
         rows: [[null, null, null, null, null, null, null, null, null, null]]
+      - note: "So such a spelling divided or taken % by an integer zero is null, as null is, where NaN fails (drivine4j#551, drivine4j#559)."
+        only: [neo4j, sql]
+        cypher: "RETURN [toFloat('nan') / 0, toFloat('inf') % 0, toFloat('INFINITY') / 0]"
+        rows: [[null, null, null]]
       - note: "Java's names are read with Java's spaces around them, and a sign before them."
         only: [neo4j, sql]
         cypher: "RETURN [toFloat('+NaN'), toFloat('\\tInfinity\\n'), toFloat(' -Infinity'), toFloat('Infinity ')]"
@@ -3446,7 +3450,7 @@ cases:
       - note: "A text given as a parameter is read alike. The SQL stores give null for the Java and Cypher forms here (drivine4j#696)."
         only: [neo4j]
         cypher: "RETURN [toFloat($a), toFloat($b), toFloat($c), toFloat($d), toFloat($e), toFloat($f)]"
-        parameters: {a: "nan", b: "0x10", c: "1_000", d: "1d", e: " NaN", f: "0x1p3"}
+        parameters: {a: "nan", b: "0x10", c: "1_000", d: "1d", e: "\u00A0NaN", f: "0x1p3"}
         rows: [[null, 16.0, 1000.0, 1.0, null, 8.0]]
       - note: "A minus zero read is a negative zero; Postgres, Oracle and SQLite keep none (drivine4j#552)."
         only: [neo4j]
