@@ -3014,8 +3014,8 @@ cases:
       - only: [neo4j, sql]
         cypher: "RETURN e() / 0"
         error: true
-      - note: "NaN and the infinities divided by an integer zero at run time fail too (drivine4j#554, drivine4j#559). Postgres gives NaN, as for % (drivine4j#687)."
-        only: [neo4j, oracle, sqlite]
+      - note: "NaN and the infinities divided by an integer zero at run time fail too (drivine4j#554, drivine4j#559, drivine4j#687)."
+        only: [neo4j, sql]
         cypher: "RETURN $x / $z"
         parameters: {x: {$float: "NaN"}, z: 0}
         error: true
@@ -3038,8 +3038,8 @@ cases:
         cypher: "RETURN $x % $z"
         parameters: {x: 5, z: 0}
         error: true
-      - note: "NaN or an infinity taken % by an integer zero at run time fails too (drivine4j#550, drivine4j#554). On Postgres NaN doesn't (drivine4j#687)."
-        only: [neo4j, oracle, sqlite]
+      - note: "NaN or an infinity taken % by an integer zero at run time fails too (drivine4j#550, drivine4j#554, drivine4j#687)."
+        only: [neo4j, sql]
         cypher: "RETURN $x % $z"
         parameters: {x: {$float: "NaN"}, z: 0}
         error: true
@@ -3067,6 +3067,23 @@ cases:
         cypher: "RETURN [null % 0, $n % 0, $n % $z]"
         parameters: {n: null, z: 0}
         rows: [[null, null, null]]
+      - note: "Null taken % by an integer zero in an aggregate is null still, where the statement is given NaN (drivine4j#687)."
+        only: [neo4j, postgres]
+        cypher: "UNWIND [null] AS i RETURN [$x, sum(i % 0)]"
+        parameters: {x: {$float: "NaN"}}
+        rows: [[{$float: "NaN"}, 0]]
+      - note: "NaN worked out as the statement runs, divided or taken % by an integer zero, fails too (drivine4j#554, drivine4j#559, drivine4j#687)."
+        only: [neo4j, sql]
+        cypher: "UNWIND [0.0 / 0.0] AS x WITH x, 0 AS z RETURN x / z"
+        error: true
+      - only: [neo4j, sql]
+        cypher: "UNWIND [0.0 / 0.0] AS x WITH x, 0 AS z RETURN x % z"
+        error: true
+      - note: "NaN by a float zero is NaN still, and null by an integer zero null (drivine4j#687)."
+        only: [neo4j, postgres]
+        cypher: "RETURN [$x / $f, -$x / $f, $x % $f, $n / $z, $n % $z]"
+        parameters: {x: {$float: "NaN"}, f: 0.0, n: null, z: 0}
+        rows: [[{$float: "NaN"}, {$float: "NaN"}, {$float: "NaN"}, null, null]]
       - note: "Any number taken % by a float zero written is NaN."
         except: [neptune]
         cypher: "RETURN [5 % 0.0, -5.5 % 0.0]"
