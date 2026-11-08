@@ -150,7 +150,8 @@ reviewed pull request. To bump it:
 
 1. Set `version` to the new Temurin 21 release, and each `sha256.<os>-<arch>` to Adoptium's checksum of that release's
    archive (`https://api.adoptium.net/v3/assets/release_name/eclipse/jdk-<version>?os=<os>&architecture=<arch>&image_type=jdk`).
-2. Set `java-version` in `.github/workflows/compiler.yml` to the same release, as setup-java names it (`21.0.13+9.0.LTS`).
+2. Set `java-version` in `.github/workflows/compiler.yml` and `.github/workflows/compiler-release.yml` to the same
+   release, as setup-java names it (`21.0.13+9.0.LTS`).
 3. Run `./gradlew generateTables`. Where the JDK brings another tzdb, it stops and names it: set `tzdb` to that.
 4. Open the pull request, and say in it which zones the new tzdb adds or removes (the diff of the generated
    `build/generated/tables/org/drivine/cypher/time/JvmZoneIds.kt` against the old one's).
@@ -248,14 +249,55 @@ After the merge, it lists what to look at by hand (`scripts/sync-report.py`):
 - New tests in drivine4j's `src/test/kotlin/org/drivine/cypher` that the mapping has no line for: add each that needs no
   store to `scripts/sync-paths.txt`.
 
+## Releasing
+
+A spec tag is a compiler release: pushing the tag `vX.Y.Z` on `main` publishes the compiler to Maven Central as
+`org.drivine:drivine-cypher-compiler` `X.Y.Z`, with one artifact for each target (`-jvm`, `-wasm-js`, `-macosarm64`,
+`-linuxx64`, `-linuxarm64`, `-mingwx64`). The compiler and the spec it was checked against then share one number, so a
+library pins one tag for both. A tag that changes only the spec publishes the compiler again, unchanged, under the new
+number.
+
+`.github/workflows/compiler-release.yml` does it:
+
+1. It checks the tag (`vX.Y.Z`, on `main`), and runs the compiler's CI, `compiler.yml`.
+2. On macOS, which builds every target, it builds every publication, signs each with a throwaway key, and checks the
+   bundle (`.github/scripts/compiler-release-check.sh`): exactly the artifacts above, each with its jar or klib, sources,
+   javadoc, POM and module at the tag's version, and every file's signature verified. The bundle is kept as the run's
+   artifact.
+3. The upload waits in the `release` environment for its reviewer. It builds the bundle again from the same commit,
+   signed with the release key, checks it, and uploads every target as one deployment: the Central Portal releases all
+   of them or none.
+
+A run from workflow_dispatch, or on a pull request that changes the release machinery, is a dry run: steps 1 and 2,
+under the version `0.0.0-dry-run`.
+
+The `release` environment is this repository's own, not drivine4j's, and is set up once in its settings before the first
+release: a required reviewer, tags `v*` allowed to deploy to it, and the secrets drivine4j's release uses,
+`CENTRAL_PORTAL_USERNAME`, `CENTRAL_PORTAL_PASSWORD`, `SIGNING_KEY` and `SIGNING_PASSWORD`. Without it, a tag's run makes
+an empty one, with no reviewer, and step 3 stops at its check of the secrets.
+
+Push the tag with or after `main`: a tag pushed before the commit is on `main` is refused at step 1; push `main` and
+re-run the workflow.
+
+To build the bundle yourself, unsigned: `./gradlew zipAggregationPublication -Pcompiler.version=<v>`, which writes
+`build/nmcp/zip/publicationAggregated.zip`. `SIGN=true`, with `SIGNING_KEY` and `SIGNING_PASSWORD`, signs it.
+
+Between tags, drivine4j can build against a commit of the module, published into a repository of its own checkout as
+`0.0.0-<commit>`, but it can't release on one: its release refuses a `0.0.0-` pin.
+
+### The libraries' copies of the spec
+
+Each library's sync script copies named files out of the tag's tarball, not the whole of it, so the compiler in the
+tarball never reaches a library's spec copy. A new spec file is copied only once it is named in all three libraries'
+sync and check scripts (`scripts/sync-cypher-spec.sh` and `scripts/check-cypher-spec.sh` in drivine4j and Drivine for
+TypeScript, `scripts/sync_cypher_spec.py` in drivine-python). So each library adds a new spec file to those lists in
+the change that syncs the tag bringing it: the next is `host.yaml`, the host functions' cases, still being written.
+
 ## Not yet
 
 - WASI: left out. It comes back as drivine-python's `py3-none-any` fallback wheel, for platforms with no native wheel,
   when Python switches to this compiler.
-- Publishing: the Maven publications are built (`./gradlew publishJvmPublicationToMavenLocal
-  publishKotlinMultiplatformPublicationToMavenLocal -Pcompiler.version=<v>`), and drivine4j builds against the JVM's
-  published from a pinned commit into a repository of its own checkout. Not yet: the jar to Maven Central, the npm
-  package, Python wheels and an iOS XCFramework, from this repository's tags.
+- Publishing beyond Maven Central: the npm package, Python wheels and an iOS XCFramework, from this repository's tags.
 - A host's reading of schema DDL: `compile` refuses it with drivine4j's schema-command message, and no entry gives a
   host the spec a DDL statement reads as.
 - `Float` text off the JVM is the platform's own: only a JVM host binds a `Float`.
