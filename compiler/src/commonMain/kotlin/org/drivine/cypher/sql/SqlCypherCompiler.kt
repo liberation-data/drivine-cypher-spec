@@ -312,7 +312,7 @@ abstract class SqlCypherCompiler(
 
     /**
      * A `UNION`: each query's rows, in the order of the queries and each query's own order, as a graph engine
-     * gives them; without `ALL`, each row once, where it is first given.
+     * gives them; without `ALL`, each row once, where it is first given, but one whose item is NaN each time ([bareNaN]).
      */
     private fun union(query: Query, parameters: Map<String, Any?>): CompiledCypher {
         val parts = listOf(query.clauses) + query.unions.map { it.clauses }
