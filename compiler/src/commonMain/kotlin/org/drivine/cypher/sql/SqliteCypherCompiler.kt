@@ -57,6 +57,9 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
     /** Whether the JSON [json] is NaN, as a statement given one writes it: see the class. */
     private fun isNaN(json: String) = "(json_type($json) = 'object' AND json_extract($json, '\$.\"\$numberDouble\"') = 'NaN')"
 
+    /** Where the statement is given or works out NaN or an infinity ([nonFinite]): SQLite's JSON holds no NaN, whose write is refused. */
+    override fun bareNaN(json: String) = if (!nonFinite) null else isNaN(json)
+
     override fun parameterJson(marker: String, text: String?) = marker
 
     override fun parameterCount(marker: String) = "CAST($marker AS INTEGER)"
@@ -248,14 +251,17 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
 
     override fun joinedTexts(text: String, order: String) = "group_concat($text, '' ORDER BY $order)"
 
+    /** Each item where it is first among those equal to it, and each that is NaN, which is equal to nothing ([bareNaN]). */
     override fun distinctItems(list: String, temporal: Boolean) =
         "(SELECT json_group_array(json(d.item) ORDER BY d.first) FROM (SELECT min(${itemNo("e")}) AS first, ${item("e")} AS item " +
-            "FROM ${elements(list, "e")} GROUP BY ${SqliteFunctions.CANONICAL}(${item("e")})) d)"
+            "FROM ${elements(list, "e")} GROUP BY ${SqliteFunctions.CANONICAL}(${item("e")})" +
+            "${bareNaN(item("e"))?.let { ", CASE WHEN $it THEN ${itemNo("e")} END" }.orEmpty()}) d)"
 
     /** Each item read at its place: `json_each` is no table a join can look a place up in, so a join reads it whole for each. */
     override fun firstOfEach(list: String, identities: String) =
         "(SELECT json_group_array(json($list -> ('\$[' || f.first || ']')) ORDER BY f.first) " +
-            "FROM (SELECT min(e.key) AS first FROM ${elements(identities, "e")} GROUP BY ${SqliteFunctions.CANONICAL}(${item("e")})) f)"
+            "FROM (SELECT min(e.key) AS first FROM ${elements(identities, "e")} GROUP BY ${SqliteFunctions.CANONICAL}(${item("e")})" +
+            "${bareNaN(item("e"))?.let { ", CASE WHEN $it THEN ${itemNo("e")} END" }.orEmpty()}) f)"
 
     /** The first of the values in order, the nulls left out: SQLite's `min` and `max` order no JSON. */
     override fun extreme(value: String, min: Boolean, key: String?): String {

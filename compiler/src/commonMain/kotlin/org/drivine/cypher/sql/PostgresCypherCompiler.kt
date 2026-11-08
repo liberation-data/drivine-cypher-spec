@@ -99,6 +99,9 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
     /** Whether the JSON [json] is or holds NaN, at any depth, as a statement given one writes it: see the class. */
     private fun holdsNaN(json: String) = "jsonb_path_exists($json, '\$.** ? (@ == \$n)', jsonb_build_object('n', $NOT_A_NUMBER_JSON))"
 
+    /** Only where the statement is given or works out NaN or an infinity ([nonFinite]): Postgres's JSON holds no NaN. */
+    override fun bareNaN(json: String) = if (nonFinite) isNaN(json) else null
+
     /** Equal as JSON, where the statement is given NaN or an infinity, and holding no NaN, which is equal to nothing. */
     override fun jsonEquals(x: String, y: String) =
         if (!nonFinite) super.jsonEquals(x, y) else shared(x, y) { (a, b) -> "($a = $b AND NOT ${holdsNaN(a)})" }
@@ -265,12 +268,15 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
 
     override fun joinedTexts(text: String, order: String) = "string_agg($text, '' ORDER BY $order)"
 
+    /** Each item where it is first among those equal to it, and each that is NaN, which is equal to nothing ([bareNaN]). */
     override fun distinctItems(list: String, temporal: Boolean) =
-        "(SELECT COALESCE(json_agg(d.item ORDER BY d.first), '[]'::json) FROM (SELECT min(e.item_no) AS first, e.item FROM ${elements(list, "e")} GROUP BY e.item) d)"
+        "(SELECT COALESCE(json_agg(d.item ORDER BY d.first), '[]'::json) FROM (SELECT min(e.item_no) AS first, e.item FROM ${elements(list, "e")} " +
+            "GROUP BY e.item${bareNaN("e.item")?.let { ", CASE WHEN $it THEN e.item_no END" }.orEmpty()}) d)"
 
     override fun firstOfEach(list: String, identities: String) =
         "(SELECT ${aggregateList("v.item", "v.item_no")} FROM ${elements(list, "v")} " +
-            "JOIN (SELECT min(e.item_no) AS first FROM ${elements(identities, "e")} GROUP BY e.item) f ON f.first = v.item_no)"
+            "JOIN (SELECT min(e.item_no) AS first FROM ${elements(identities, "e")} " +
+            "GROUP BY e.item${bareNaN("e.item")?.let { ", CASE WHEN $it THEN e.item_no END" }.orEmpty()}) f ON f.first = v.item_no)"
 
     /**
      * Postgres has no min or max of jsonb, which orders: the first of the values in order is the least. Texts are first ordered

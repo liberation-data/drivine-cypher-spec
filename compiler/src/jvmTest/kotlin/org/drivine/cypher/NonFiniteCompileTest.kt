@@ -66,6 +66,30 @@ class NonFiniteCompileTest {
     }
 
     @Test
+    fun `count(DISTINCT …) and collect(DISTINCT …) keep NaN apart only where a value may be NaN, by its identity too`() {
+        // drivine4j#558: what each gives is the spec's, in "NaN worked out"; here, where the test of NaN is compiled at all.
+        val nan = mapOf("l" to listOf(Double.NaN, 1.0))
+        fun counted(sql: String) = sql.contains("count(CASE WHEN")
+        assertTrue(counted(PostgresCypherCompiler("g").compile("UNWIND \$l AS x RETURN count(DISTINCT x)", nan).sql))
+        assertTrue(counted(SqliteCypherCompiler("g").compile("UNWIND \$l AS x RETURN count(DISTINCT x)", nan).sql))
+        assertTrue(counted(OracleCypherCompiler("g").compile("UNWIND [0.0, 1.0] AS z RETURN count(DISTINCT z / z)").sql))
+        // So is NaN worked out of an infinity Oracle stores, as ∞ - ∞ is.
+        assertTrue(counted(OracleCypherCompiler("g").compile("MATCH (n:A) RETURN count(DISTINCT n.x - n.x)").sql))
+        // Not where the statement works out none, nor of a value made a text, a list or a map: on Oracle, which may store NaN, too,
+        // as testing each value read cost a count(DISTINCT …) 2.6 times as long.
+        assertFalse(counted(OracleCypherCompiler("g").compile("MATCH (n:A) RETURN count(DISTINCT n.x)").sql))
+        assertFalse(counted(PostgresCypherCompiler("g").compile("MATCH (n:A) RETURN count(DISTINCT n.x)").sql))
+        assertFalse(counted(SqliteCypherCompiler("g").compile("MATCH (n:A) RETURN count(DISTINCT n.x)").sql))
+        listOf("toString(x)", "[x]", "{a: x}").forEach { value ->
+            val cypher = "UNWIND \$l AS x RETURN count(DISTINCT $value)"
+            assertFalse(counted(PostgresCypherCompiler("g").compile(cypher, nan).sql), cypher)
+        }
+        // A value kept by its identity, as one read from a map that holds a node, keeps NaN apart as its identity does, so the two stay as long.
+        val identified = OracleCypherCompiler("g").compile("UNWIND [0.0] AS z MATCH (p:A) WITH {p: p, x: z / z} AS m RETURN collect(DISTINCT m.x)").sql
+        assertEquals(2, Regex("THEN e\\.item_no END").findAll(identified).count(), identified)
+    }
+
+    @Test
     fun `NaN and the infinities are bound as each store holds them, alone and in a list or a map`() {
         val given = mapOf("p" to Double.NaN, "l" to listOf(1.0, Double.POSITIVE_INFINITY), "m" to mapOf("x" to Double.NEGATIVE_INFINITY))
         val cypher = "RETURN [\$p, \$l, \$m]"
