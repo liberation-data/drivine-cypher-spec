@@ -251,8 +251,8 @@ jobs:
           fi
           echo "The signed bundle is build's, with $signatures signatures."
       # The upload as publish makes it, to a stand-in for the Central Portal on this runner. It refuses an upload that
-      # isn't nmcp's (the token's header, AUTOMATIC, the bundle's field and filename, the signed bundle's bytes), then
-      # answers the status as the Portal does.
+      # isn't nmcp's (the token's header, AUTOMATIC, the bundle's field, filename and type, the signed bundle's bytes),
+      # then answers the status as the Portal does, and fails a status request for anything but that deployment's id.
       - name: Upload the bundle as publish does, to a stand-in Portal
         run: |
           python3 -I - "$RUNNER_TEMP/signed.zip" <<'EOF' &
@@ -262,18 +262,20 @@ jobs:
           class Portal(http.server.BaseHTTPRequestHandler):
               def do_POST(self):
                   body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
-                  upload = self.path.startswith("/upload?")
-                  ok = self.headers.get("Authorization") == token and (not upload or (
+                  upload = self.path.split("?")[0] == "/upload"
+                  ok = self.headers.get("Authorization") == token and (
                       self.path == "/upload?publishingType=AUTOMATIC"
-                      and b'name="bundle"; filename="publicationAggregated.zip"' in body and bundle in body))
-                  self.send_response((201 if upload else 200) if ok else 400)
+                      and b'name="bundle"; filename="publicationAggregated.zip"\r\nContent-Type: application/zip\r\n' in body
+                      and bundle in body if upload else self.path == "/status?id=0f0e1d2c-0000-4000-8000-00000000d0d0")
+                  self.send_response((201 if upload else 200) if ok or not upload else 400)
                   self.end_headers()
-                  if not ok:
+                  if not ok and upload:
                       self.wfile.write(b"Not the upload nmcp makes.")
                   elif upload:
                       self.wfile.write(b"0f0e1d2c-0000-4000-8000-00000000d0d0")
                   else:
-                      self.wfile.write(json.dumps({"deploymentState": "PUBLISHED"}).encode())
+                      self.wfile.write(json.dumps({"deploymentState": "PUBLISHED"} if ok else
+                          {"deploymentState": "FAILED", "errors": ["Not the Portal's status request."]}).encode())
           http.server.HTTPServer(("127.0.0.1", 18080), Portal).serve_forever()
           EOF
           for _ in $(seq 1 20); do curl -s -o /dev/null http://127.0.0.1:18080/ && break; sleep 1; done
