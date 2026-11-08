@@ -1246,13 +1246,83 @@ class OracleCypherCompiler(
                 "WHEN $double = -BINARY_DOUBLE_INFINITY THEN JSON_SCALAR(${Long.MIN_VALUE}) " +
                 "ELSE JSON_SCALAR(TRUNC(TO_NUMBER(JSON_VALUE($x, '\$') DEFAULT NULL ON CONVERSION ERROR))) END"
         }
-        "tofloat" -> "JSON_SCALAR(TO_BINARY_DOUBLE(JSON_VALUE($json, '\$') DEFAULT NULL ON CONVERSION ERROR))"
+        // A text is read as Neo4j reads it ([textFloat]); TO_BINARY_DOUBLE reads 'nan', 'inf' and 'INFINITY' too (drivine4j#551).
+        "tofloat" -> shared(json) { (x) ->
+            "CASE WHEN ${kind(x)} = 'string' THEN JSON_SCALAR(${textFloat("JSON_VALUE($x, '\$')")}) " +
+                "ELSE JSON_SCALAR(TO_BINARY_DOUBLE(JSON_VALUE($x, '\$') DEFAULT NULL ON CONVERSION ERROR)) END"
+        }
         // An item read so where it is a text past 32 KB crashed the session: see [listItem].
         "head" -> listItem(json, "'\$[0]'")
         "last" -> listItem(json, "'\$[last]'")
         "abs" -> "CASE WHEN ${kind(json)} = 'double' THEN JSON_SCALAR(ABS(TO_BINARY_DOUBLE(${number(json)}))) ELSE JSON_SCALAR(ABS(${number(json)})) END"
         "keys" -> keys(json)
         else -> null
+    }
+
+    /**
+     * The text [text] as a `BINARY_DOUBLE`, as Neo4j's toFloat reads one (drivine4j#551): first as Java's `Double.parseDouble`
+     * reads it, the characters up to a space taken off its ends ([JAVA_SPACES]): NaN and the infinities by Java's names alone,
+     * a decimal with a type's letter after it, `1.5f`, and a hexadecimal one, `0x1.8p1`. Else as a number written in Cypher,
+     * read as Cypher reads one: Cypher's spaces ([CYPHER_SPACES]) and comments around it and after its `-` allowed, `_`
+     * between digits, a float past a double's range an infinity, and a whole number in hexadecimal or octal, `0x1F` or
+     * `0o17`, which only a long holds. Any other is null. `TO_BINARY_DOUBLE` alone read `'nan'`, `'inf'` and `'INFINITY'` as
+     * NaN and the infinities, and none of Java's or Cypher's other spellings.
+     * A plain decimal, nearly every text read, is read so without the subquery the others are taken apart in.
+     */
+    private fun textFloat(text: String): String {
+        // Each comment a space, as Cypher reads one, and the spaces after a minus taken out.
+        val spaced = "LTRIM(RTRIM(REGEXP_REPLACE($text, $CYPHER_COMMENT, ' ', 1, 0, 'n'), $CYPHER_SPACES), $CYPHER_SPACES)"
+        val cypher = "REGEXP_REPLACE($spaced, '^-[' || $CYPHER_SPACES || ']+', '-')"
+        val parsed = bound("LTRIM(RTRIM($text, $JAVA_SPACES), $JAVA_SPACES)", cypher) { (j, c) ->
+            "CASE WHEN ${like(j, JAVA_NAN)} THEN BINARY_DOUBLE_NAN WHEN ${like(j, JAVA_INFINITY)} THEN BINARY_DOUBLE_INFINITY " +
+                "WHEN $j = '-Infinity' THEN -BINARY_DOUBLE_INFINITY WHEN ${like(j, JAVA_DECIMAL)} THEN TO_BINARY_DOUBLE(RTRIM($j, 'fFdD')) " +
+                "WHEN ${like(j, JAVA_HEXADECIMAL)} THEN ${hexadecimalFloat(j)} " +
+                "WHEN ${like(c, CYPHER_WHOLE)} THEN ${cypherWhole(c)} " +
+                "WHEN ${like(c, CYPHER_DECIMAL)} THEN TO_BINARY_DOUBLE(REPLACE($c, '_')) END"
+        }
+        return "CASE WHEN ${like(text, PLAIN_DECIMAL)} THEN TO_BINARY_DOUBLE($text) ELSE $parsed END"
+    }
+
+    private fun like(text: String, pattern: String) = "REGEXP_LIKE($text, '$pattern', 'c')"
+
+    /**
+     * The text [j], as [JAVA_HEXADECIMAL] matches it, as Java reads it: its digits as a whole number, to 30 of them, made a
+     * double and taken by 2 to its power. A digit past the 30th is only told apart from none, by the last one kept, so the
+     * double is rounded as from them all. The power is taken in two steps, each within a double's range.
+     */
+    private fun hexadecimalFloat(j: String): String {
+        val parts = "'$HEXADECIMAL_PARTS', 1, 1, 'c'"
+        return bound(
+            "CASE WHEN SUBSTR($j, 1, 1) = '-' THEN -1 ELSE 1 END",
+            "LTRIM(UPPER(REGEXP_SUBSTR($j, $parts, 2) || REGEXP_SUBSTR($j, $parts, 3)), '0')",
+            "NVL(LENGTH(REGEXP_SUBSTR($j, $parts, 3)), 0)",
+            "REGEXP_SUBSTR($j, $parts, 4)",
+        ) { (sign, digits, places, power) ->
+            val exponent = "CASE WHEN LENGTH(LTRIM($power, '+-0')) > 5 THEN CASE WHEN SUBSTR($power, 1, 1) = '-' THEN -99999 ELSE 99999 END " +
+                "ELSE TO_NUMBER(LTRIM($power, '+')) END"
+            bound(
+                "CASE WHEN LENGTH($digits) > 30 THEN SUBSTR($digits, 1, 29) || CASE WHEN LTRIM(SUBSTR($digits, 30), '0') IS NULL THEN '0' ELSE '1' END ELSE $digits END",
+                "GREATEST(LEAST($exponent - 4 * $places + 4 * GREATEST(NVL(LENGTH($digits), 0) - 30, 0), 1400), -1400)",
+            ) { (kept, by) ->
+                val first = "GREATEST(LEAST($by, 1000), -1000)"
+                "CASE WHEN $kept IS NULL THEN TO_BINARY_DOUBLE(0) ELSE $sign * TO_BINARY_DOUBLE(TO_NUMBER($kept, '${"X".repeat(30)}')) " +
+                    "* POWER(TO_BINARY_DOUBLE(2), $first) * POWER(TO_BINARY_DOUBLE(2), $by - $first) END"
+            }
+        }
+    }
+
+    /**
+     * The text [c], as [CYPHER_WHOLE] matches it, as Cypher reads a whole number: decimal, `0x` hexadecimal or `0o` octal,
+     * `_` between digits, and null past a long's range.
+     */
+    private fun cypherWhole(c: String): String = bound("CASE WHEN SUBSTR($c, 1, 1) = '-' THEN -1 ELSE 1 END", "REPLACE(LTRIM($c, '-'), '_')") { (sign, written) ->
+        val digits = "LTRIM(SUBSTR($written, 3), '0')"
+        val octal = "(SELECT NVL(SUM(SUBSTR($digits, LEVEL, 1) * POWER(8, LENGTH($digits) - LEVEL)), 0) FROM DUAL CONNECT BY LEVEL <= LENGTH($digits))"
+        bound(
+            "CASE SUBSTR($written, 2, 1) WHEN 'x' THEN CASE WHEN $digits IS NULL THEN 0 WHEN LENGTH($digits) <= 16 THEN TO_NUMBER(UPPER($digits), '${"X".repeat(16)}') END " +
+                "WHEN 'o' THEN CASE WHEN NVL(LENGTH($digits), 0) <= 22 THEN $octal END " +
+                "ELSE CASE WHEN NVL(LENGTH(LTRIM($written, '0')), 0) <= 19 THEN TO_NUMBER($written) END END",
+        ) { (whole) -> "TO_BINARY_DOUBLE(CASE WHEN $whole <= CASE WHEN $sign < 0 THEN 9223372036854775808 ELSE ${Long.MAX_VALUE} END THEN $sign * $whole END)" }
     }
 
     /**
@@ -1764,6 +1834,35 @@ class OracleCypherCompiler(
          * equal to nothing, where Oracle's JSON finds it equal to itself: beside it the other side is tested for NaN (#409).
          */
         private val WRITTEN_FLOAT = Regex("""JSON_SCALAR\(TO_BINARY_DOUBLE\('(?!NaN')[^']*'\)\)""")
+
+        /** The characters Java's `Double.parseDouble` takes off a text's ends, U+0000 to the space: see [textFloat]. */
+        private val JAVA_SPACES = "UNISTR('${(0..0x20).joinToString("") { "\\" + it.toString(16).padStart(4, '0') }}')"
+
+        /** The characters Cypher reads as spaces, which Neo4j takes off a number written as Cypher writes one: see [textFloat]. */
+        private val CYPHER_SPACES = "UNISTR('${((0x09..0x0D) + (0x1C..0x20) + listOf(0x85, 0xA0, 0x1680) + (0x2000..0x200A) + listOf(0x2028, 0x2029, 0x202F, 0x205F, 0x3000))
+            .joinToString("") { "\\" + it.toString(16).padStart(4, '0') }}')"
+
+        /**
+         * A decimal both Java and `TO_BINARY_DOUBLE` read, and alike, with nothing around it: see [textFloat]. It ends at `\z`, as
+         * Oracle's `$` matches before a line break that ends the text too.
+         */
+        private const val PLAIN_DECIMAL = "^[+-]?([0-9]+\\.?[0-9]*|\\.[0-9]+)([eE][+-]?[0-9]+)?\\z"
+
+        /** NaN, Infinity and a decimal, by Java's names and as Java writes one, a type's letter after it allowed: see [textFloat]. */
+        private const val JAVA_NAN = "^[+-]?NaN\$"
+        private const val JAVA_INFINITY = "^\\+?Infinity\$"
+        private const val JAVA_DECIMAL = "^[+-]?([0-9]+\\.?[0-9]*|\\.[0-9]+)([eE][+-]?[0-9]+)?[fFdD]?\$"
+
+        /** A hexadecimal float as Java writes one, `0x1.8p1`; [HEXADECIMAL_PARTS] takes it apart: sign, digits before and after the point, power. */
+        private const val JAVA_HEXADECIMAL = "^[+-]?0[xX]([0-9a-fA-F]+\\.?[0-9a-fA-F]*|\\.[0-9a-fA-F]+)[pP][+-]?[0-9]+[fFdD]?\$"
+        private const val HEXADECIMAL_PARTS = "^([+-]?)0[xX]([0-9a-fA-F]*)\\.?([0-9a-fA-F]*)[pP]([+-]?[0-9]+)[fFdD]?\$"
+
+        /** A comment as Cypher writes one, to the line's end or between `/*` and `*/`: see [textFloat]. */
+        private const val CYPHER_COMMENT = "'//[^' || UNISTR('\\000a\\000d') || ']*|/\\*.*?\\*/'"
+
+        /** A whole number and a decimal as Cypher writes them, one `_` before a digit allowed, and a decimal whole number with no 0 first: see [textFloat]. */
+        private const val CYPHER_WHOLE = "^-?(0|[1-9](_?[0-9])*|0x(_?[0-9a-fA-F])+|0o(_?[0-7])+)\$"
+        private const val CYPHER_DECIMAL = "^-?(([0-9](_?[0-9])*)?\\.[0-9](_?[0-9])*([eE][+-]?[0-9](_?[0-9])*)?|[0-9](_?[0-9])*[eE][+-]?[0-9](_?[0-9])*)\$"
 
         /** A quoted SQL text, its quotes doubled: see [nanFree]. */
         private val QUOTED = Regex("'(?:[^']|'')*'")
