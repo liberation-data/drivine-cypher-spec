@@ -1080,6 +1080,9 @@ cases:
         rows: [true]
       - cypher: "UNWIND [1, 2, 3] AS o RETURN o, EXISTS { UNWIND [3, 1, 2] AS j WITH j WHERE j > o RETURN j ORDER BY j DESC }"
         rows: [[1, true], [2, true], [3, false]]
+      - note: "A DISTINCT in the subquery, beside the row's own value (drivine4j#502)."
+        cypher: "UNWIND [1, 2, 3] AS o RETURN o, EXISTS { UNWIND [1, 1, 2] AS j WITH DISTINCT j WHERE j = o RETURN j }"
+        rows: [[1, true], [2, true], [3, false]]
       - cypher: "UNWIND [1, 2, 3] AS o RETURN o, EXISTS { UNWIND [3, 1, 2] AS j WITH j ORDER BY j WHERE j > o RETURN j }"
         rows: [[1, true], [2, true], [3, false]]
       - note: "The ORDER BY picks the row the LIMIT keeps: the least, not the list's first."
