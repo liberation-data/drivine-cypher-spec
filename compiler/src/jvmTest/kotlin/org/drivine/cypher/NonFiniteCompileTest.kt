@@ -123,6 +123,32 @@ class NonFiniteCompileTest {
     }
 
     @Test
+    fun `on SQLite a number divided or taken % by an integer zero fails, where a divisor may be zero, and else compiles as before`() {
+        // drivine4j#554: SQLite gave null where Neo4j fails. What each gives is the spec's, in queries.yaml ("NaN worked out").
+        val sqlite = SqliteCypherCompiler("g")
+        fun sql(cypher: String, parameters: Map<String, Any?> = emptyMap()) = sqlite.compile(cypher, parameters).sql
+        val fails = "drivine_fail('/ by zero')"
+        listOf(
+            "RETURN 1 / 0" to emptyMap(), "RETURN 5 % 0" to emptyMap(), "RETURN \$x / \$z" to mapOf("x" to 1.0, "z" to 0L),
+            "WITH 0 AS z RETURN 1.0 / z" to emptyMap(), "MATCH (n:A) RETURN n.x / n.y, n.x % n.y" to emptyMap(),
+            // A divisor worked out as the statement runs, with no parameters.
+            "RETURN 1 / size([])" to emptyMap(), "UNWIND [0] AS z RETURN 1 / z" to emptyMap(), "MATCH (n:A) RETURN count(*) / (count(*) - 1)" to emptyMap(),
+            "UNWIND [1, 2] AS i RETURN sum(i / 0)" to emptyMap(), "UNWIND [1, 2] AS i RETURN i ORDER BY i % 0" to emptyMap(),
+            // A write, which SQLite carries out as a procedure.
+            "CREATE (w:W {a: \$x / \$z, b: \$x % \$z}) RETURN w.a" to mapOf("x" to 1L, "z" to 0L),
+        ).forEach { (cypher, parameters) ->
+            // The procedure's SQL is a text in it, its quotes doubled.
+            val compiled = sql(cypher, parameters).replace("''", "'")
+            assertTrue(fails in compiled, "$cypher: $compiled")
+        }
+        // Each divisor given a number not zero: no division may be by zero, so none is tested.
+        listOf("RETURN [7 / 2, 7 % 2, \$x / \$y]", "UNWIND [1, 2] AS i RETURN i / 2, i % \$y").forEach { cypher ->
+            val compiled = sql(cypher, mapOf("x" to 7L, "y" to 2L))
+            assertFalse("drivine_fail" in compiled, "$cypher: $compiled")
+        }
+    }
+
+    @Test
     fun `% on Oracle of a side that may be NaN or an infinity works it out as Java does, and of two written numbers as before`() {
         // drivine4j#683: a number taken % by an infinity is that number as a float, and NaN or an infinity taken % is NaN, where
         // MOD's NUMBERs, which hold neither, gave null. What each gives on Oracle is the spec's, in queries.yaml ("NaN worked out").
