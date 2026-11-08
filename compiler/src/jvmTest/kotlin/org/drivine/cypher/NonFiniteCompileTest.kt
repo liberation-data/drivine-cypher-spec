@@ -209,6 +209,8 @@ class NonFiniteCompileTest {
         fun sql(cypher: String, parameters: Map<String, Any?> = emptyMap()) = oracle.compile(cypher, parameters).sql
         val byZero = "THEN TRUNC(1 / "
         val floats = "THEN BINARY_DOUBLE_NAN ELSE MOD("
+        // The divisor written, an integer, made a float: the NUMBER of a 0 written, or of arithmetic of numbers written.
+        val folded = Regex("""JSON_SCALAR\(TO_BINARY_DOUBLE\((\(SELECT |CASE WHEN DECODE\(JSON_VALUE\(JSON\('0'\))""")
         // An integer zero written: NUMBER's division by it, which fails as 1 / 0 does, and no MOD. pi() and e() too, which Neo4j
         // fails on.
         listOf("RETURN 5 % 0", "MATCH (n:A) RETURN n.x % 0", "RETURN \$x % 0", "RETURN pi() % 0", "RETURN e() % 0").forEach { cypher ->
@@ -218,9 +220,18 @@ class NonFiniteCompileTest {
         }
         // A float written taken % by an integer written, worked out of numbers written alone, is taken % by that integer as a
         // float, which is NaN by zero, as Neo4j works it out as it plans (drivine4j#686).
-        listOf("RETURN 5.0 % 0", "RETURN 0.0 % 0", "RETURN -5.0 % 0", "RETURN 5.0 % -0", "RETURN (5.0 + 0) % 0", "RETURN 5.0 % (1 - 1)").forEach { cypher ->
+        // A write too, which Oracle compiles as a procedure.
+        listOf(
+            "RETURN 5.0 % 0", "RETURN 0.0 % 0", "RETURN -5.0 % 0", "RETURN 5.0 % -0", "RETURN (5.0 + 0) % 0", "RETURN 5.0 % (1 - 1)",
+            "CREATE (w:W {a: 5.0 % 0}) RETURN w.a",
+        ).forEach { cypher ->
             val compiled = sql(cypher)
-            assertTrue(floats in compiled, "$cypher: $compiled")
+            assertTrue(floats in compiled && folded.containsMatchIn(compiled), "$cypher: $compiled")
+        }
+        // Not where the dividend is an integer or isn't written, or the divisor isn't written.
+        listOf("RETURN 5 % (1 - 1)", "RETURN pi() % 0", "WITH 0 AS z RETURN 5.0 % z", "MATCH (n:A) RETURN n.x % 0").forEach { cypher ->
+            val compiled = sql(cypher)
+            assertFalse(folded.containsMatchIn(compiled), "$cypher: $compiled")
         }
         // A divisor not written may be an integer zero, tested first, and either side may be a float, taken % as BINARY_DOUBLEs.
         listOf(
@@ -256,6 +267,8 @@ class NonFiniteCompileTest {
         fun sql(cypher: String, parameters: Map<String, Any?> = emptyMap()) = oracle.compile(cypher, parameters).sql
         val byZero = "THEN TRUNC(1 / "
         val divided = "= 'double' OR "
+        // The divisor written, an integer, made a float: the NUMBER of a 0 written, or of arithmetic of numbers written.
+        val folded = Regex("""JSON_SCALAR\(TO_BINARY_DOUBLE\((\(SELECT |CASE WHEN DECODE\(JSON_VALUE\(JSON\('0'\))""")
         // An integer zero written: NUMBER's division by it, which fails as 1 / 0 does, and no BINARY_DOUBLE's. pi() and e() too,
         // which Neo4j fails on.
         listOf("RETURN pi() / 0", "RETURN e() / 0", "MATCH (n:A) RETURN n.x / 0", "RETURN \$x / 0").forEach { cypher ->
@@ -265,18 +278,24 @@ class NonFiniteCompileTest {
         }
         // A float written divided by an integer written, worked out of numbers written alone, is divided by that integer as a
         // float, an infinity or NaN by zero, as Neo4j works it out as it plans (drivine4j#686).
-        listOf("RETURN 1.0 / 0", "RETURN 0.0 / 0", "RETURN 1.0 / -0", "RETURN (1.0 + 0) / 0").forEach { cypher ->
+        // A dividend long enough to be bound (-1.0) too, and a write, which Oracle compiles as a procedure.
+        listOf(
+            "RETURN 1.0 / 0", "RETURN 0.0 / 0", "RETURN 1.0 / -0", "RETURN (1.0 + 0) / 0", "RETURN 1.0 / (1 - 1)", "RETURN -1.0 / 0",
+            "CREATE (w:W {a: 1.0 / 0}) RETURN w.a",
+        ).forEach { cypher ->
             val compiled = sql(cypher)
-            assertTrue(divided in compiled, "$cypher: $compiled")
+            assertTrue(divided in compiled && folded.containsMatchIn(compiled), "$cypher: $compiled")
+        }
+        // Not where the dividend is an integer or isn't written, or the divisor isn't written.
+        listOf("RETURN 1 / (1 - 1)", "RETURN e() / 0", "WITH 0 AS z RETURN 1.0 / z", "MATCH (n:A) RETURN n.x / 0").forEach { cypher ->
+            val compiled = sql(cypher)
+            assertFalse(folded.containsMatchIn(compiled), "$cypher: $compiled")
         }
         // A divisor not written may be an integer zero, tested first, and else divides as before.
         listOf(
             "RETURN \$x / \$z" to mapOf("x" to 3.0, "z" to 0L),
             "WITH 0 AS z RETURN 1.0 / z" to emptyMap(),
             "MATCH (n:A) RETURN n.x / n.y" to emptyMap(),
-            "RETURN 1.0 / (1 - 1)" to emptyMap(),
-            // A dividend long enough to be bound binds the divisor beside it, which is read as any other there.
-            "RETURN -1.0 / 0" to emptyMap(),
             // A write, which Oracle compiles as a procedure.
             "CREATE (w:W {a: \$x / \$z}) RETURN w.a" to mapOf("x" to 3.0, "z" to 0L),
         ).forEach { (cypher, parameters) ->
