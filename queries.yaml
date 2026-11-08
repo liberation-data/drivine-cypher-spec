@@ -1584,6 +1584,31 @@ cases:
         only: [neo4j, sql]
         unordered: true
         rows: [[1, 1], [null, 2]]
+      - note: "A UNION in a CALL gives a list or a map one query writes beside a number another gives (drivine4j#516)."
+        cypher: "CALL { RETURN [10] AS v UNION ALL RETURN 10 AS v } RETURN v"
+        only: [neo4j, sql]
+        unordered: true
+        rows: [[10], 10]
+      - cypher: "CALL { RETURN {a: 1} AS v UNION ALL RETURN 10 AS v } RETURN v"
+        only: [neo4j, sql]
+        unordered: true
+        rows: [{a: 1}, 10]
+      - cypher: "CALL { RETURN [10] AS v UNION RETURN 10 AS v UNION RETURN [10] AS v } RETURN v"
+        only: [neo4j, sql]
+        unordered: true
+        rows: [[10], 10]
+      - note: "collect leaves out the null one query gives beside a list another builds."
+        cypher: "CALL { UNWIND [{a: null}] AS x RETURN x.a AS v UNION ALL RETURN [10] AS v } RETURN collect(v) AS c, count(v) AS n"
+        only: [neo4j, sql]
+        rows: [[[[10]], 1]]
+      - note: "A UNION in a CALL whose queries order their rows differently, as an UNWIND's places and a CALL's, gives each query's rows (drivine4j#506)."
+        cypher: "CALL { UNWIND [{a: null}] AS x RETURN x.a AS v UNION ALL CALL { UNWIND [{a: null}] AS y RETURN y.a AS w UNION UNWIND [{b: 1}] AS z RETURN z.a AS w } RETURN w AS v } RETURN v, count(*)"
+        only: [neo4j, sql]
+        rows: [[null, 2]]
+      - cypher: "CALL { UNWIND [1, 2] AS x RETURN x AS v UNION ALL CALL { RETURN 3 AS w } RETURN w AS v } RETURN v"
+        only: [neo4j, sql]
+        unordered: true
+        rows: [1, 2, 3]
       - note: "A null written is the same null as a property a node has not."
         cypher: "MATCH (p:Person) RETURN CASE WHEN p.born > 1960 THEN p.nickname ELSE null END AS v, count(*) AS c"
         only: [neo4j, sql]
