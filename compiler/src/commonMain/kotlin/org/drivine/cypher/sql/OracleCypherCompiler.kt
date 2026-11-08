@@ -1264,7 +1264,16 @@ class OracleCypherCompiler(
                 "WHEN $double = -BINARY_DOUBLE_INFINITY THEN JSON_SCALAR(${Long.MIN_VALUE}) " +
                 "ELSE JSON_SCALAR(TRUNC(TO_NUMBER(JSON_VALUE($x, '\$') DEFAULT NULL ON CONVERSION ERROR))) END"
         }
-        "tofloat" -> "JSON_SCALAR(TO_BINARY_DOUBLE(JSON_VALUE($json, '\$') DEFAULT NULL ON CONVERSION ERROR))"
+        // TO_BINARY_DOUBLE reads 'nan', 'inf' and 'INFINITY' too, and Neo4j only Java's names, on the text with U+0000 to the
+        // space taken off its ends (drivine4j#551): a name is read so trimmed, as TO_BINARY_DOUBLE takes ASCII's spaces alone
+        // off. A text with no N in it, a decimal, is read as before; so is any but a text.
+        "tofloat" -> shared(json) { (x) ->
+            val text = "JSON_VALUE($x, '\$')"
+            val trimmed = "LTRIM(RTRIM($text, $JAVA_SPACES), $JAVA_SPACES)"
+            val read = "TO_BINARY_DOUBLE($text DEFAULT NULL ON CONVERSION ERROR)"
+            "JSON_SCALAR(CASE WHEN ${kind(x)} = 'string' AND INSTR(UPPER($text), 'N') > 0 THEN " +
+                "CASE WHEN REGEXP_LIKE($trimmed, '$JAVA_NAMES', 'c') THEN TO_BINARY_DOUBLE($trimmed) END ELSE $read END)"
+        }
         // An item read so where it is a text past 32 KB crashed the session: see [listItem].
         "head" -> listItem(json, "'\$[0]'")
         "last" -> listItem(json, "'\$[last]'")
@@ -1800,6 +1809,12 @@ class OracleCypherCompiler(
          * equal to nothing, where Oracle's JSON finds it equal to itself: beside it the other side is tested for NaN (#409).
          */
         private val WRITTEN_FLOAT = Regex("""JSON_SCALAR\(TO_BINARY_DOUBLE\('(?!NaN')[^']*'\)\)""")
+
+        /** The characters Java's `Double.parseDouble` takes off a text's ends, U+0000 to the space: see `toFloat` in [functionOf]. */
+        private val JAVA_SPACES = "UNISTR('${(0..0x20).joinToString("") { "\\" + it.toString(16).padStart(4, '0') }}')"
+
+        /** NaN and the infinities by Java's names, as `Double.parseDouble` reads them: see `toFloat` in [functionOf]. */
+        private const val JAVA_NAMES = "^([+-]?NaN|[+]?Infinity|-Infinity)\$"
 
         /** A quoted SQL text, its quotes doubled: see [nanFree]. */
         private val QUOTED = Regex("'(?:[^']|'')*'")
