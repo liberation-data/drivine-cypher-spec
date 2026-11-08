@@ -2871,7 +2871,8 @@ abstract class SqlCypherCompiler(
                 compiled.zip(columns).forEach { (item, pair) ->
                     val (name, value) = item
                     if (items.first { it.name == name }.expression.let { contains(it, ::isAggregate) }) return@forEach
-                    (pair.second as? Value.Json)?.takeIf { (value as? Value.Json)?.let(::mayBeFloat) == true }?.let { bareNaN(it.sql) }
+                    // Written out, not bound in a subquery as Oracle's test binds a long value: Oracle groups by no subquery (ORA-22818).
+                    (pair.second as? Value.Json)?.takeIf { (value as? Value.Json)?.let(::mayBeFloat) == true }?.let { unshared { bareNaN(it.sql) } }
                         ?.let { keys += "CASE WHEN $it THEN ${uuid()} END" }
                 }
                 keys.distinct()
