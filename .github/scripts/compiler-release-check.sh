@@ -37,6 +37,12 @@ allowed="$out/allowed.txt" present="$out/present.txt" extra="$out/extra.txt"
 (cd "$out/maven-repo" && find . -mindepth 1 | sed 's#^\./##' | LC_ALL=C sort) > "$present"
 LC_ALL=C comm -13 "$allowed" "$present" > "$extra"
 [[ ! -s "$extra" ]] || fail "The bundle holds what no artifact's publication at $version makes: $(head -5 "$extra" | tr '\n' ' ')"
+# A checksum or a signature beside its own file only: one of a file the bundle doesn't hold would be published unchecked.
+while IFS= read -r f; do
+    case "$f" in
+        *.md5|*.sha1|*.sha256|*.sha512|*.asc) grep -qxF -- "${f%.*}" "$present" || fail "The bundle holds ${f##*/}, but not the file it is of." ;;
+    esac
+done < "$present"
 
 staged=$(ls "$repo" | sort | tr '\n' ' ')
 expected=$(tr ' ' '\n' <<< "$ARTIFACTS" | grep . | sort | tr '\n' ' ')

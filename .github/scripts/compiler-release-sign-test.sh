@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Tests that compiler-release-sign.sh refuses a bundle it must not sign, made from build's unsigned bundle with one thing
 # added: a link among thousands (which once got past its check, find killed by SIGPIPE under pipefail), a file no
-# artifact's publication makes, a version other than the one released, and a path outside org/drivine. Each must be
+# artifact's publication makes, a version other than the one released, a path outside org/drivine, and a checksum of a
+# file the bundle doesn't hold. Each must be
 # refused, and leave no signed bundle. Run by compiler-release.yml's dry run, with its throwaway key in SIGNING_KEY and
 # SIGNING_PASSWORD, on Linux, whose unzip makes the links a zip holds.
 #   compiler-release-sign-test.sh <unsigned bundle zip> <version>
@@ -66,6 +67,9 @@ refused "A path outside org/drivine" "$work/outside.zip" "what no artifact's pub
 
 made "$work/top.zip" "file|leak.txt"
 refused "A file at the top" "$work/top.zip" "what no artifact's publication"
+
+made "$work/orphan.zip" "file|$dir/drivine-cypher-compiler-jvm-$version.klib.md5"
+refused "A checksum of a file it doesn't hold" "$work/orphan.zip" "but not the file it is of"
 
 (( failures == 0 )) || { echo "::error::$failures of the sign script's refusals failed."; exit 1; }
 echo "The sign script refused each bundle it must not sign."
