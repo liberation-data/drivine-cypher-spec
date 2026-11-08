@@ -196,6 +196,13 @@ abstract class SqlCypherCompiler(
     protected open fun nonFiniteWorkedOut(writes: Boolean) = false
 
     /**
+     * Whether a float written divided or taken % by an integer written is worked out as by a float, as Neo4j's planner does
+     * (`divisor`): where the statement is compiled as one given NaN or an infinity ([nonFinite]). A store whose floats hold
+     * them, which compiles none so, does it wherever the statement may work one out ([nanWorkedOut]).
+     */
+    protected open fun foldsWrittenDivisor() = nonFinite
+
+    /**
      * Whether the store holds an infinity a statement may read, and so work NaN out of with no NaN or infinity given
      * ([worksOutNaN]). By default not: Postgres's JSON holds none, and Oracle's floats hold NaN too.
      */
@@ -3879,13 +3886,14 @@ abstract class SqlCypherCompiler(
         }
 
         /**
-         * The divisor [b] of [binary], `/` or `%`, as a float where the statement may work NaN or an infinity out ([nonFinite]) and
-         * both sides are numbers worked out from numbers written in it alone, the dividend a float and the divisor an integer
-         * ([writtenNumber]): Neo4j's planner works those out before it runs, as Java does, so `1.0 / 0` is an infinity there,
-         * where a float divided by an integer 0 it runs fails (#408).
+         * The divisor [b] of [binary], `/` or `%`, as a float where the statement may work NaN or an infinity out
+         * ([foldsWrittenDivisor]) and both sides are numbers worked out from numbers written in it alone, the dividend a float and
+         * the divisor an integer ([writtenNumber]): Neo4j's planner works those out before it runs, as Java does, so `1.0 / 0` is
+         * an infinity there and `5.0 % 0` NaN, where a float divided or taken % by an integer 0 it runs fails (#408, #686), as
+         * `pi() % 0` does.
          */
         private fun divisor(binary: Expression.Binary, b: String) =
-            if (nonFinite && writtenNumber(binary.left) == Value.Known.FLOAT && writtenNumber(binary.right) == Value.Known.INTEGER) scalar(float(number(b))) else b
+            if (foldsWrittenDivisor() && writtenNumber(binary.left) == Value.Known.FLOAT && writtenNumber(binary.right) == Value.Known.INTEGER) scalar(float(number(b))) else b
 
         /** The kind of [expression] where it is a number worked out from numbers written in the statement alone (`1.0`, `-0`, `1 - 1`), as Java does. */
         private fun writtenNumber(expression: Expression): Value.Known? = when (expression) {

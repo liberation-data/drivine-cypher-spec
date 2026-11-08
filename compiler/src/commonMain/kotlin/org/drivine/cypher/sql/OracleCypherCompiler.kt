@@ -917,6 +917,9 @@ class OracleCypherCompiler(
             "ELSE ${super.avg(json, distinct)} END"
     }
 
+    /** Oracle's floats hold NaN and the infinities, so it compiles no statement as given one: wherever one may be worked out. */
+    override fun foldsWrittenDivisor() = nanWorkedOut
+
     /**
      * In `BINARY_DOUBLE` where either is one, so a float stays a float, as in Cypher: `NUMBER` keeps no such kind. Each is read as
      * a `BINARY_DOUBLE` there, which NaN and the infinities are, where [number] reads them as no `NUMBER`.
@@ -924,8 +927,8 @@ class OracleCypherCompiler(
      * A number divided by an integer zero fails, as Neo4j fails one at run time ("/ by zero"), where `BINARY_DOUBLE`'s division
      * gives a float NaN or an infinity (drivine4j#559): NaN and the infinities too. An integer divided by one fails already, as
      * `NUMBER`'s division does. Neo4j gives an infinity or NaN where it works a float and an integer zero written in the
-     * statement out as it plans, as Java does (`1.0 / 0`), but here a float written is no different from `pi()`, which Neo4j
-     * fails on, so both fail, as for `%` ([remainder], drivine4j#686). A divisor written as any other number isn't tested.
+     * statement out as it plans, as Java does (`1.0 / 0`), and fails on `pi() / 0`: the divisor of the first comes here a float
+     * ([foldsWrittenDivisor], drivine4j#686). A divisor written as any other number isn't tested.
      */
     override fun arithmetic(a: String, b: String, operator: String): String {
         val result = "CASE WHEN ${kind(a)} = 'double' OR ${kind(b)} = 'double' " +
@@ -1114,8 +1117,8 @@ class OracleCypherCompiler(
      *   taken % by NaN, is NaN.
      * - By an integer zero it fails, as `/` by one does (ORA-01476), where `MOD` gives the number taken (drivine4j#550): a
      *   float too, as Neo4j fails at run time. Neo4j gives NaN where it works a float and an integer zero written in the
-     *   statement out as it plans, as Java does (`5.0 % 0`), but here a float written is no different from `pi()`, which
-     *   Neo4j fails on, so both fail (drivine4j#686).
+     *   statement out as it plans, as Java does (`5.0 % 0`), and fails on `pi() % 0`: the divisor of the first comes here a
+     *   float ([foldsWrittenDivisor], drivine4j#686).
      * - Where either side is a float, in `BINARY_DOUBLE`, so the remainder is a float, as in Cypher (drivine4j#427): `NUMBER`
      *   keeps no such kind, so `64.0 % 8.0` and `7 % 2.5` were the integers 0 and 2. By a float zero it is NaN.
      *
