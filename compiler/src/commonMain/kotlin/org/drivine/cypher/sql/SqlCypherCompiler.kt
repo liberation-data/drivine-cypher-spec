@@ -180,9 +180,9 @@ abstract class SqlCypherCompiler(
 
     /**
      * Whether the JSON [json] is NaN itself, not a list or a map holding it: null where it can't be, as the statement is given or
-     * works out none and the store holds none. `count(DISTINCT …)` and `collect(DISTINCT …)` keep each such value apart, as
-     * Neo4j does, NaN being equal to nothing, while a list or a map holding NaN is compared as any other, as Neo4j compares one
-     * stored or worked out for each row (drivine4j#558).
+     * works out none and the store holds none. `count(DISTINCT …)`, `collect(DISTINCT …)` and `WITH DISTINCT` or `RETURN DISTINCT`
+     * keep each such value apart, as Neo4j does, NaN being equal to nothing, while a list or a map holding NaN is compared as any
+     * other, as Neo4j compares one stored or worked out for each row (drivine4j#558, drivine4j#685).
      */
     protected open fun bareNaN(json: String): String? = null
 
@@ -2784,6 +2784,15 @@ abstract class SqlCypherCompiler(
             val compared = projection.distinct || aggregating
             val columns = compiled.mapIndexed { i, (_, value) -> "c${i + 1}" to (if (compared) compared(value) else value) }
             val selectList = columns.flatMap { (column, value) -> value.columns(column) }.toMutableList()
+            // A row of DISTINCT whose item is NaN, equal to nothing, is kept apart, as Neo4j keeps it (drivine4j#685): its own
+            // number beside it, which no other row has. Only where an item may be NaN ([bareNaN]), so a statement given and working
+            // out none compiles as it did.
+            if (projection.distinct && !aggregating) {
+                val nans = compiled.zip(columns).mapNotNull { (item, column) ->
+                    (column.second as? Value.Json)?.takeIf { (item.second as? Value.Json)?.let(::mayBeFloat) == true }?.let { bareNaN(it.sql) }
+                }
+                if (nans.isNotEmpty()) selectList += "CASE WHEN ${nans.joinToString(" OR ") { "($it)" }} THEN $rowNumber END AS d1"
+            }
             // An order is written over the items' names, and where nothing is grouped or kept distinct, the variables too.
             val name = alias("p")
             // Where rows are compared, an order term of the items that is no item is read over their columns, once compared:
