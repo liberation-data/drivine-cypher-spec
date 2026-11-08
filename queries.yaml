@@ -2444,7 +2444,7 @@ cases:
         error: "A path is not a value drivine gives the same on each store: use nodes(p), relationships(p) and length(p)."
 
   - name: "A key worked out at run time"
-    description: "A map, a node or a relationship read by a key an expression gives reads the entry at that key, whatever the key holds; a key it doesn't hold, a null key and a null map read null (drivine4j#417)."
+    description: "A map, a node or a relationship read by a key an expression gives reads the entry at that key, whatever the key holds; a key it doesn't hold, a null key, a null map and an empty one read null (drivine4j#417)."
     steps:
       - cypher: "WITH {a: 1} AS m, 'a' AS k, [5, 6] AS xs, 1 AS i RETURN [m[k], xs[i]]"
         rows: [[1, 6]]
@@ -2505,10 +2505,22 @@ cases:
         rows: [[null, null]]
       - cypher: "WITH null AS m, 'x' AS k RETURN m[k]"
         rows: [null]
+      - note: "An empty map."
+        cypher: "WITH $m AS m, 'a' AS k RETURN m[k]"
+        parameters: {m: {}}
+        rows: [null]
+      - note: "Only a map's entries are read: a list read by a text is null on a SQL store, and not its items' entries. Neo4j fails."
+        only: [sql]
+        cypher: "UNWIND [[{a: 1}], {a: 2}] AS x WITH x, 'a' AS k RETURN x[k]"
+        unordered: true
+        rows: [null, 2]
       - cypher: "OPTIONAL MATCH (x:Nobody) WITH x, 'name' AS k RETURN x[k]"
         rows: [null]
       - cypher: "MATCH (p:Person) WITH p, 'name' AS k WHERE p[k] = 'Keanu' RETURN p.born"
         rows: [1964]
+      - note: "The label test is kept beside the read, in a WHERE too: a Code has no name either, and would be counted."
+        cypher: "MATCH (m:Movie) WITH m, 'name' AS k WHERE m[k] IS NULL RETURN count(*)"
+        rows: [3]
       - cypher: "MATCH (p:Person) WHERE p.born IS NOT NULL WITH p, 'born' AS k RETURN p.name ORDER BY p[k] DESC"
         rows: ["Carrie", "Keanu", "Laurence"]
       - cypher: "MATCH (m:Movie) WITH m, 'released' AS k RETURN m[k] > 2000 AS late, count(*) ORDER BY late"

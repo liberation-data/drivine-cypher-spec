@@ -362,6 +362,14 @@ cases:
       - cypher: "UNWIND $ms AS m WITH m, 'long' AS k RETURN size(m[k])"
         parameters: {ms: [{long: {$repeat: "x", times: 40000}}, {long: {$repeat: "y", times: 40000}}]}
         rows: [40000, 40000]
+      - note: "A text read so beside NaN and an infinity: the node's other entries are written out with it."
+        only: [neo4j, oracle]
+        cypher: "CREATE (n:CyWrite {nan: $nan, inf: $inf, s: 'x', d: 2.0}) WITH n, 's' AS k RETURN [n[k], n['na' + 'n'], n['in' + 'f'], n['d' + '']]"
+        parameters: {nan: {$float: "NaN"}, inf: {$float: "Infinity"}}
+        rows: [["x", {$float: "NaN"}, {$float: "Infinity"}, 2.0]]
+      - note: "In a FOREACH."
+        cypher: "MATCH (n:CyWrite {name: 'Apa'}) FOREACH (k IN ['name'] | SET n.each = n[k]) RETURN n.each"
+        rows: ["Apa"]
 
   - name: "SET from COUNT and EXISTS"
     description: "COUNT { } and EXISTS { } in a SET read the row being written."

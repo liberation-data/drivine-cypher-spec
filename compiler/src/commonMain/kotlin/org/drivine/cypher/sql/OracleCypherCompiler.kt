@@ -743,10 +743,15 @@ class OracleCypherCompiler(
      *
      * The entry is read as [listItem] reads an item, a text from the list written out as text, anything else as JSON: a text
      * past 32 KB taken out as JSON, for two rows or more, crashes the session (see [itemProperty]).
+     *
+     * Each read lists the map's entries again, and a text writes that list out whole, so a read costs the map's size, not
+     * the entry's: 20,000 rows of `WITH n, 'name' AS k RETURN n[k]` took 474 ms against 127 ms for `n.name`; over 2,000
+     * nodes of 50 keys `[k IN keys(n) | n[k]]` took 16 s against 35 ms for `keys(n)`, and a node of 1,000 keys read at each took 33 s. A short text first read as a `VARCHAR2`
+     * saved about a quarter of that and cost as much on a number, so it was left out.
      */
     override fun keyed(json: String, key: String): String {
         val entries = "JSON_QUERY($json, '\$.keyvalue()' RETURNING JSON WITH ARRAY WRAPPER)"
-        val entry = shared(entries) { (e) -> throughText(e, KEYED, KEYED_KIND, " PASSING $key AS \"k\"") }
+        val entry = shared(entries) { (e) -> listItem(e, KEYED, " PASSING $key AS \"k\"") }
         return "CASE WHEN ${kind(json)} = 'object' THEN $entry END"
     }
 
@@ -1842,9 +1847,6 @@ class OracleCypherCompiler(
 
         /** The path of the value of the entry, among a map's entries as `keyvalue()` lists them, whose key the variable `k` holds: see [keyed]. */
         private const val KEYED = "'\$[*]?(@.key == \$k).value'"
-
-        /** The path of that value's kind: see [keyed]. */
-        private const val KEYED_KIND = "'\$[*]?(@.key == \$k).value.type()'"
 
         /** The most bytes a `VARCHAR2` holds in SQL, as a database is made by default (`MAX_STRING_SIZE = STANDARD`). */
         const val SHORT_TEXT = 4000

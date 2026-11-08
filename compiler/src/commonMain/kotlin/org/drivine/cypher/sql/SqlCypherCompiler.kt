@@ -469,11 +469,8 @@ abstract class SqlCypherCompiler(
     /** The item of the JSON list [json] at the JSON [index], counted from the end where it is negative. */
     protected abstract fun element(json: String, index: String): String
 
-    /**
-     * The value of the JSON map [json] at the key the JSON [key] names; null where the store reads no key an
-     * expression names, where such a key reads as null.
-     */
-    protected abstract fun keyed(json: String, key: String): String?
+    /** The value of the JSON map [json] at the key the JSON [key] holds, a text an expression gives (`m[k]`). */
+    protected abstract fun keyed(json: String, key: String): String
 
     /** Whether the JSON map [props] holds every entry of the JSON map [map]. */
     protected abstract fun containsAll(props: String, map: String): String
@@ -3690,9 +3687,7 @@ abstract class SqlCypherCompiler(
                     }
                     else -> {
                         fun item(list: String) = shared(list, at) { (map, key) ->
-                            // A store that reads no key an expression gives reads a list's item alone.
-                            val keyed = keyed(map, key)?.let { " WHEN 'string' THEN $it" }.orEmpty()
-                            "CASE ${typeOf(key)} WHEN 'number' THEN ${element(map, key)}$keyed END"
+                            "CASE ${typeOf(key)} WHEN 'number' THEN ${element(map, key)} WHEN 'string' THEN ${keyed(map, key)} END"
                         }
                         item(subject()).let { taken ->
                             Value.Json(
