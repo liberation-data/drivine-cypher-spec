@@ -661,13 +661,13 @@ abstract class SqlCypherCompiler(
     /**
      * [round] of [value], whose JSON [json] gives, or [value] itself where it is an infinity, as Neo4j rounds one, to any
      * places in range, by a precision and mode that are not null: on a store whose JSON holds the infinities, where its
-     * SQL number, which [round] reads, holds none (Oracle's). There [round] is given the value to read as JSON bound where it is long, so a round of a round doesn't write the
-     * value out twice at each level.
+     * SQL number, which [round] reads, holds none (Oracle's). There [round] is given the value to read as JSON bound where
+     * it is long, so a round of a round doesn't write the value out twice at each level.
      */
     protected open fun infinitiesKept(value: Value, json: () -> String, round: (Value) -> Value.Json): Value.Json = round(value)
 
     /**
-     * `keys()` of the JSON [map], whose kind is [kind] as text: [keysOf] where it is a map (a node's or a relationship's
+     * `keys()` of a JSON value whose kind is [kind] as text: [keysOf], its keys, where it is a map (a node's or a relationship's
      * properties are one), null where it is null, and otherwise a failure naming the kind, as Neo4j fails on a value
      * that is no map, node or relationship (drivine4j#669).
      */

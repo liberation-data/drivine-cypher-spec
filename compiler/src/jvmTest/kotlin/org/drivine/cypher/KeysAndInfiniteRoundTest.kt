@@ -12,8 +12,9 @@ import kotlin.test.assertTrue
 /**
  * drivine4j#669: `keys()` of a value that is no map, node or relationship fails, as in Neo4j, on every store, where it gave
  * null; and on Oracle, whose NUMBER holds no infinity, `round()` of a stored one gives it back, as Neo4j does, where it gave
- * null. What they give on each store is the spec's, in `writes.yaml` ("NaN worked out from stored infinities"): this is
- * what each store is given, without one.
+ * null. What they give on each store is the spec's, in `queries.yaml` ("keys()") and, for a stored infinity, `writes.yaml`
+ * ("NaN worked out from stored infinities", liberation-data/drivine-cypher-spec#70): this is what each store is given,
+ * without one.
  */
 class KeysAndInfiniteRoundTest {
 
