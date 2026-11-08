@@ -114,6 +114,8 @@ jobs:
     needs: [check, gate]
     # macOS builds every target: macosArm64 only builds there, and Kotlin/Native cross-compiles the others.
     runs-on: macos-latest
+    outputs:
+      bundle-sha256: ${{ steps.bundle.outputs.sha256 }}
     env:
       VERSION: ${{ needs.check.outputs.version }}
       PUBLISH: ${{ needs.check.outputs.publish }}
@@ -143,6 +145,11 @@ jobs:
         run: ./gradlew --no-daemon zipAggregationPublication -Pcompiler.version="$VERSION"
       - name: Check the bundle
         run: ../.github/scripts/compiler-release-check.sh build/nmcp/zip/publicationAggregated.zip "$VERSION" none release
+      # A job output, which no other job of the run can set: publish signs only this bundle, not an artifact of the same
+      # name put in its place.
+      - name: The bundle's SHA-256
+        id: bundle
+        run: echo "sha256=$(shasum -a 256 release/publicationAggregated.zip | cut -d' ' -f1)" | tee -a "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: compiler-maven-central-${{ env.VERSION }}
@@ -171,6 +178,15 @@ jobs:
         with:
           name: compiler-maven-central-${{ env.VERSION }}
           path: ${{ runner.temp }}/unsigned
+      - name: The bundle is build's
+        env:
+          BUNDLE_SHA256: ${{ needs.build.outputs.bundle-sha256 }}
+        run: |
+          got=$(shasum -a 256 "$RUNNER_TEMP/unsigned/publicationAggregated.zip" | cut -d' ' -f1)
+          if [[ -z "$BUNDLE_SHA256" || "$got" != "$BUNDLE_SHA256" ]]; then
+            echo "::error::The bundle downloaded has SHA-256 $got, not ${BUNDLE_SHA256:-none} as build made it."
+            exit 1
+          fi
       - name: The release secrets are set
         env:
           SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
@@ -220,6 +236,15 @@ jobs:
         with:
           name: compiler-maven-central-${{ env.VERSION }}
           path: ${{ runner.temp }}/unsigned
+      - name: The bundle is build's
+        env:
+          BUNDLE_SHA256: ${{ needs.build.outputs.bundle-sha256 }}
+        run: |
+          got=$(shasum -a 256 "$RUNNER_TEMP/unsigned/publicationAggregated.zip" | cut -d' ' -f1)
+          if [[ -z "$BUNDLE_SHA256" || "$got" != "$BUNDLE_SHA256" ]]; then
+            echo "::error::The bundle downloaded has SHA-256 $got, not ${BUNDLE_SHA256:-none} as build made it."
+            exit 1
+          fi
       - name: Block GitHub's release downloads and Adoptium's API
         run: |
           for host in objects.githubusercontent.com release-assets.githubusercontent.com api.adoptium.net api.foojay.io; do
