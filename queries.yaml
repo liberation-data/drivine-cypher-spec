@@ -2904,6 +2904,23 @@ cases:
         parameters: {p: {$float: "NaN"}}
         unordered: true
         rows: [{$float: "NaN"}, {$float: "NaN"}, 1.0]
+      - note: "So does a UNION without ALL (drivine4j#688)."
+        only: [neo4j]
+        cypher: "UNWIND [$p, $p] AS v RETURN v UNION RETURN $p AS v"
+        parameters: {p: {$float: "NaN"}}
+        rows: [{$float: "NaN"}]
+      - only: [sql]
+        cypher: "UNWIND [$p, $p] AS v RETURN v UNION RETURN $p AS v"
+        parameters: {p: {$float: "NaN"}}
+        rows: [{$float: "NaN"}, {$float: "NaN"}, {$float: "NaN"}]
+      - only: [neo4j]
+        cypher: "RETURN $p AS v, 1 AS w UNION RETURN $p AS v, 1 AS w"
+        parameters: {p: {$float: "NaN"}}
+        rows: [[{$float: "NaN"}, 1]]
+      - only: [sql]
+        cypher: "RETURN $p AS v, 1 AS w UNION RETURN $p AS v, 1 AS w"
+        parameters: {p: {$float: "NaN"}}
+        rows: [[{$float: "NaN"}, 1], [{$float: "NaN"}, 1]]
       - note: "sum() and avg() of a group that holds NaN, or both infinities, are NaN."
         only: [neo4j, sql]
         cypher: "UNWIND $l AS x RETURN [sum(x), avg(x)]"
