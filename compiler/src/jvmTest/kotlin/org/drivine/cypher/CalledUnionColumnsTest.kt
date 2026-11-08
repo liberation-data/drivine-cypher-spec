@@ -10,8 +10,8 @@ import kotlin.test.assertTrue
 
 /**
  * The queries of a `UNION` in `CALL { … }` give it columns of one number and one type: each query's own columns, not what it
- * orders its rows by too (drivine4j#506), and on Postgres, a list or a map one query builds as `json` is `jsonb` where another
- * query's value is (drivine4j#516). What the stores give is the spec's, in `queries.yaml` (a UNION ALL in a CALL).
+ * orders its rows by too (drivine4j#506), and on Postgres, a `jsonb` one query gives is `json` where another query builds a list
+ * or a map as `json` (drivine4j#516), so a map keeps its keys' order. What the stores give is the spec's, in `queries.yaml` (a UNION ALL in a CALL).
  */
 class CalledUnionColumnsTest {
 
@@ -33,12 +33,25 @@ class CalledUnionColumnsTest {
     }
 
     @Test
-    fun `on Postgres, a list or a map one query builds is cast to jsonb where another query gives a jsonb`() {
+    fun `on Postgres, a jsonb one query gives is cast to json where another query builds a list or a map, which keeps a map's keys in their order`() {
         val postgres = PostgresCypherCompiler("g")
-        listOf("[10]", "{a: 1}").forEach { built ->
+        listOf("[10]", "{b: 1, a: 2}").forEach { built ->
             val heads = partHeads(postgres.compile("CALL { RETURN $built AS v UNION ALL RETURN 10 AS v } RETURN v").sql)
-            assertEquals(listOf(true, false), heads.map { it.startsWith("CAST(") && it.endsWith(" AS jsonb) AS c1") }, "$built: $heads")
+            assertEquals(listOf(false, true), heads.map { it.startsWith("CAST(") && it.endsWith(" AS json) AS c1") }, "$built: $heads")
         }
+    }
+
+    @Test
+    fun `on Postgres, what a UNION in a CALL gives as json where any query builds it is compared as jsonb after`() {
+        val sql = PostgresCypherCompiler("g").compile("CALL { RETURN 10 AS v UNION ALL RETURN {b: 1, a: 2} AS v } RETURN DISTINCT v").sql
+        assertTrue(Regex("""CAST\(c\d+\.c1 AS jsonb\)""").containsMatchIn(sql), sql)
+    }
+
+    @Test
+    fun `on SQLite, whose JSON is text, a map one query builds beside a number keeps its keys in their order`() {
+        val sql = SqliteCypherCompiler("g").compile("CALL { RETURN {b: 1, a: 2} AS v UNION ALL RETURN 10 AS v } RETURN v").sql
+        assertEquals(listOf("q", "q"), partHeads(sql).map { it.take(1) }, sql)
+        assertFalse(sql.contains(Regex("""drivine_canonical\(q\d+""")), sql)
     }
 
     @Test

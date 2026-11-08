@@ -340,6 +340,12 @@ abstract class SqlCypherCompiler(
     /** A JSON value as what compares, groups and orders as JSON. */
     protected abstract fun comparable(value: Value.Json): String
 
+    /**
+     * The JSON value [json], one not [Value.Json.ordered], of the type a value that is: Postgres's `json` of its `jsonb`, so that
+     * the two may be the columns of one `UNION` (drivine4j#516). Oracle's JSON and SQLite's text are of one type.
+     */
+    protected open fun orderedJson(json: String) = json
+
     /** A SQL value [sql], a number, a text or a truth value, as JSON. */
     protected abstract fun scalar(sql: String): String
 
@@ -1602,18 +1608,20 @@ abstract class SqlCypherCompiler(
                 }
             }
             // A value one query writes as JSON that keeps its keys' order ([Value.Json.ordered]), as Postgres's `json` of a list or a map
-            // it builds, and another as it compares, Postgres's `jsonb`, is written as it compares in each, so the parts' columns are of
-            // one type (drivine4j#516).
+            // it builds, and another as it compares, Postgres's `jsonb`, is written as one that keeps them in each ([orderedJson]), so
+            // the parts' columns are of one type (drivine4j#516) and a map one query builds keeps its keys' order, as it does
+            // returned on its own. Not as it compares: SQLite's canonical text of such a map, and Postgres's `jsonb`, sort its keys.
+            // A UNION that compares its rows has its parts' values compared already, none of them ordered.
             val mixed = projected.first().scope.keys.filter { variable -> projected.map { (it.scope.getValue(variable) as? Value.Json)?.ordered }.distinct().size > 1 }
             // Each query's columns, and only those: a query's rows also carry what it orders them by, as an UNWIND's places, which
             // another query's need not (drivine4j#506).
             val sql = projected.joinToString(if (distinct) "\nUNION\n" else "\nUNION ALL\n") { part ->
                 val q = alias("q")
-                val compared = mixed.mapNotNull { variable ->
-                    (part.scope.getValue(variable) as? Value.Json)?.takeIf { it.ordered }?.let { PENDING_COLUMN.find(it.sql)?.groupValues?.get(1) }
+                val unordered = mixed.mapNotNull { variable ->
+                    (part.scope.getValue(variable) as? Value.Json)?.takeUnless { it.ordered }?.let { PENDING_COLUMN.find(it.sql)?.groupValues?.get(1) }
                 }.toSet()
                 val columns = returned(part).joinToString(", ") { (column, _) ->
-                    if (column in compared) "${comparable(Value.Json("$q.$column", ordered = true))} AS $column" else "$q.$column"
+                    if (column in unordered) "${orderedJson("$q.$column")} AS $column" else "$q.$column"
                 }
                 "SELECT $columns FROM (\n${indent(part.sql)}\n) $q"
             }
@@ -1623,12 +1631,13 @@ abstract class SqlCypherCompiler(
             // query reads it from one. Its kind is known only where each query writes it as a value of that one. It may be JSON's null
             // ([Value.Json.jsonNull]) where any query's may be, so that what reads it after compares that null and SQL's as one (#512).
             // It is a list ([Value.Json.list]) only where each query makes it one, so that an order sorts the others' numbers and
-            // maps by their kinds, not as lists; and it holds no null ([Value.Json.flat]) only where each query's holds none.
+            // maps by their kinds, not as lists; and it holds no null ([Value.Json.flat]) only where each query's holds none. It keeps
+            // its keys' order ([Value.Json.ordered]) where any query's does, as each is then written as one that does ([orderedJson]).
             val scope = projected.first().scope.mapValues { (variable, value) ->
                 val all = projected.map { it.scope.getValue(variable) as? Value.Json }
                 if (value !is Value.Json) value
                 else value.copy(
-                    ordered = all.all { it?.ordered == true },
+                    ordered = all.any { it?.ordered == true },
                     temporal = all.map { it?.temporal }.distinct().singleOrNull(), items = all.map { it?.items }.distinct().singleOrNull(),
                     rowKeys = all.map { it?.rowKeys }.distinct().singleOrNull(), fromList = all.all { it?.fromList == true },
                     itemItems = all.map { it?.itemItems }.distinct().singleOrNull(), temporals = all.any { it?.temporals == true },
