@@ -67,6 +67,8 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
 
     override fun comparable(value: Value.Json) = if (value.ordered) "CAST(${value.sql} AS jsonb)" else value.sql
 
+    override fun orderedJson(json: String) = "CAST($json AS json)"
+
     /**
      * Where the statement is given NaN or an infinity, a `numeric` or a `double precision` that is one, which `to_jsonb` writes as
      * a text, `"NaN"`, as the number that stands for it: see the class.
