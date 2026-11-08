@@ -2790,10 +2790,12 @@ abstract class SqlCypherCompiler(
             val selectList = columns.flatMap { (column, value) -> value.columns(column) }.toMutableList()
             // A row of DISTINCT whose item is NaN, equal to nothing, is kept apart, as Neo4j keeps it (drivine4j#685): its own
             // number beside it, which no other row has. Only where an item may be NaN ([bareNaN]), so a statement given and working
-            // out none compiles as it did.
+            // out none compiles as it did. It binds no value in a subquery: so bound beside the DISTINCT of a CALL { … }'s query,
+            // Oracle (23.26) read the values of the row the CALL runs for as null, `NO_DECORRELATE` or not, as
+            // `UNWIND [0.0, 1.0] AS z CALL (z) { RETURN DISTINCT z / z AS v } RETURN z, v` gave v null (drivine4j#502).
             if (projection.distinct && !aggregating) {
                 val nans = compiled.zip(columns).mapNotNull { (item, column) ->
-                    (column.second as? Value.Json)?.takeIf { (item.second as? Value.Json)?.let(::mayBeFloat) == true }?.let { bareNaN(it.sql) }
+                    (column.second as? Value.Json)?.takeIf { (item.second as? Value.Json)?.let(::mayBeFloat) == true }?.let { unshared { bareNaN(it.sql) } }
                 }
                 if (nans.isNotEmpty()) selectList += "CASE WHEN ${nans.joinToString(" OR ") { "($it)" }} THEN $rowNumber END AS d1"
             }
