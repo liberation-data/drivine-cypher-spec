@@ -3511,6 +3511,14 @@ cases:
         only: [neo4j, oracle, sqlite]
         cypher: "UNWIND ['\\u00A0NaN', '\\u3000Infinity', 'NaN\\u00A0', '\\u3000-Infinity'] AS s RETURN toFloat(s)"
         rows: [null, null, null, null]
+      - note: "U+0000 is among the characters Java takes off (drivine4j#693). Postgres fails, as its JSON holds no U+0000."
+        only: [neo4j, oracle, sqlite]
+        cypher: "RETURN [toFloat('\\u0000NaN'), toFloat('Infinity\\u0000'), toFloat('\\u0000-Infinity\\u0000')]"
+        rows: [[{$float: "NaN"}, {$float: "Infinity"}, {$float: "-Infinity"}]]
+      - note: "A line break that ends a text is no space Java takes off a name (drivine4j#693)."
+        only: [neo4j, sql]
+        cypher: "RETURN [toFloat('NaN\\u2028'), toFloat('Infinity\\u0085'), toFloat('-Infinity\\u2029')]"
+        rows: [[null, null, null]]
       - note: "A decimal may end in a type's letter, as Java reads one. The SQL stores give null (drivine4j#696)."
         only: [neo4j]
         cypher: "RETURN [toFloat('1d'), toFloat('1f'), toFloat('1.5F'), toFloat('1.5D')]"
@@ -3574,6 +3582,14 @@ cases:
         cypher: "UNWIND [$a, $b, $c] AS s RETURN toInteger(s)"
         parameters: {a: "\u00A0+1.5", b: "\u00A05.", c: "\u00A09223372036854775808"}
         rows: [null, null, null]
+      - note: "Nor from what Cypher does not write before a line break that ends a text (drivine4j#693). Oracle gives null for the last (drivine4j#696), and Postgres fails on some (drivine4j#692)."
+        only: [neo4j, sqlite]
+        cypher: "RETURN [toFloat('5.\\u0085'), toFloat('+1.5\\u2028'), toInteger('+5\\u2028'), toInteger('5.\\u0085'), toInteger('5\\u2028')]"
+        rows: [[null, null, null, null, 5]]
+      - note: "toInteger reads a whole number with ASCII's spaces around it as itself, past a double's precision (drivine4j#693). Oracle gives null for the last (drivine4j#696)."
+        only: [neo4j, postgres, sqlite]
+        cypher: "RETURN [toInteger('\\t9007199254740993'), toInteger('9007199254740993\\n'), toInteger('\\u000B-9007199254740993\\r')]"
+        rows: [[9007199254740993, 9007199254740993, -9007199254740993]]
       - note: "Spaces and comments may come between a minus and a number Cypher writes, and comments around it. The SQL stores give null (drivine4j#696)."
         only: [neo4j]
         cypher: "RETURN [toFloat('- 1.5'), toFloat('-\\u00A01.5'), toFloat('- 0x10'), toFloat('- 0o17'), toFloat('-/*c*/1'), toFloat('/*a*/-1'), toFloat('-//x\\n1'), toFloat('1//x'), toFloat('/*a*/1'), toFloat('1 /*a*/'), toFloat('/*a\\nb*/1_0'), toFloat('1_0 //x\\n'), toFloat('1_0\\u0085//x')]"

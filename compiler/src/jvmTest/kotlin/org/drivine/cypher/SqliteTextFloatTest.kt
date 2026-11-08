@@ -86,6 +86,36 @@ class SqliteTextFloatTest {
     }
 
     @Test
+    fun `a line break that ends a text is no space where a pattern takes none, as each host reads the text's end`() {
+        // Java's `$`, and Python's as drivine-python writes it, matches before a line break that ends the text, and
+        // JavaScript's does not: each pattern ends at `\z`, the text's end, as `=~`'s does.
+        val float = patterns(sql("MATCH (n:A) RETURN toFloat(n.s)"))
+        for (none in listOf("5.\u0085", "+1.5 ", "NaN ", "Infinity\u0085", "-Infinity ")) {
+            assertEquals(-1, first(float, none), none.codes())
+        }
+        val integer = patterns(sql("MATCH (n:A) RETURN toInteger(n.s)"))
+        for (none in listOf("+5 ", "5.\u0085", "+1.5 ")) assertEquals(-1, first(integer, none), none.codes())
+        assertEquals(2, first(integer, "5 "))
+        assertTrue((float + integer).all { it.endsWith("\\z") }, (float + integer).toString())
+    }
+
+    @Test
+    fun `toInteger reads a whole number with ASCII's spaces around it as itself`() {
+        val sql = sql("MATCH (n:A) RETURN toInteger(n.s)")
+        val integer = patterns(sql)
+        for (whole in listOf("9007199254740993", " 9007199254740993\n", "\t-5\r", "\u000B+5\u000C")) assertEquals(0, first(integer, whole), whole.codes())
+        assertTrue(sql.contains("THEN json_quote(CAST(((n1.props -> '\$.\"s\"') ->> '\$') AS INTEGER))"), sql)
+    }
+
+    @Test
+    fun `a name is NaN or an infinity with U+0000 around it, as Java trims it`() {
+        val patterns = patterns(sql("MATCH (n:A) RETURN toFloat(n.s)"))
+        assertEquals(1, first(patterns, "\u0000NaN"))
+        assertEquals(2, first(patterns, "Infinity\u0000"))
+        assertEquals(3, first(patterns, "\u0000-Infinity\u0000"))
+    }
+
+    @Test
     fun `a statement given no NaN or infinity names none`() {
         val patterns = patterns(sql("RETURN toFloat(\$s)", mapOf("s" to "1.5")))
         assertEquals(2, patterns.size)

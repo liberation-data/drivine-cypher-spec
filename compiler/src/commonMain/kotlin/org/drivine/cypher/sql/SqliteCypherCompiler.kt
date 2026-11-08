@@ -311,7 +311,7 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
         "tointeger" -> shared(json) { (x) ->
             (if (nonFinite) "CASE WHEN ${isNaN(x)} THEN '0' ELSE " else "") +
             "CASE json_type($x) WHEN 'integer' THEN $x WHEN 'real' THEN json_quote(CAST($x ->> '$' AS INTEGER)) " +
-                "WHEN 'text' THEN CASE WHEN trim($x ->> '$') REGEXP '^[+-]?[0-9]+$' THEN json_quote(CAST(trim($x ->> '$') AS INTEGER)) " +
+                "WHEN 'text' THEN CASE WHEN ($x ->> '$') REGEXP ${literal(WHOLE_TEXT)} THEN json_quote(CAST(($x ->> '$') AS INTEGER)) " +
                 "WHEN ($x ->> '$') REGEXP ${literal(DECIMAL_TEXT)} THEN json_quote(CAST(CAST(trim($x ->> '$') AS REAL) AS INTEGER)) " +
                 "WHEN ($x ->> '$') REGEXP ${literal(CYPHER_NUMBER_TEXT)} THEN json_quote(${cypherInteger("($x ->> '$')")}) END END" +
                 if (nonFinite) " END" else ""
@@ -627,16 +627,25 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
          */
         const val ASCII_SPACE = """[\t\n\x0B\f\r ]"""
 
-        /** A decimal, with ASCII's spaces around it: a text SQLite's `CAST` reads as Java's `Double.parseDouble` does. */
-        const val DECIMAL_TEXT = """^$ASCII_SPACE*[+-]?([0-9]+\.?[0-9]*|\.[0-9]+)([eE][+-]?[0-9]+)?$ASCII_SPACE*$"""
+        /**
+         * A decimal, with ASCII's spaces around it: a text SQLite's `CAST` reads as Java's `Double.parseDouble` does. Each of
+         * these patterns ends at `\z`, the text's end, as [matches] does: Java's `$` matches before a line break that ends the
+         * text too, and JavaScript's does not.
+         */
+        const val DECIMAL_TEXT = """^$ASCII_SPACE*[+-]?([0-9]+\.?[0-9]*|\.[0-9]+)([eE][+-]?[0-9]+)?$ASCII_SPACE*\z"""
 
-        /** What Java's `String.trim` takes off a text's ends, U+0001 to the space, around a name of NaN or an infinity. */
-        const val JAVA_SPACE = """[\x01-\x20]"""
+        /** A whole number, with ASCII's spaces around it, which `CAST` reads as itself, as Neo4j's `toInteger` does. */
+        const val WHOLE_TEXT = """^$ASCII_SPACE*[+-]?[0-9]+$ASCII_SPACE*\z"""
+
+        /** What Java's `String.trim` takes off a text's ends, U+0000 to the space, around a name of NaN or an infinity. */
+        const val JAVA_SPACE = """[\x00-\x20]"""
 
         /** The names of NaN and the infinities, as [SqlCypherCompiler.NAN_NAME] and the others, with [JAVA_SPACE] around them. */
-        val NAN_TEXT = NAN_NAME.replace("""\s""", JAVA_SPACE)
-        val INFINITY_TEXT = INFINITY_NAME.replace("""\s""", JAVA_SPACE)
-        val NEGATIVE_INFINITY_TEXT = NEGATIVE_INFINITY_NAME.replace("""\s""", JAVA_SPACE)
+        val NAN_TEXT = javaName(NAN_NAME)
+        val INFINITY_TEXT = javaName(INFINITY_NAME)
+        val NEGATIVE_INFINITY_TEXT = javaName(NEGATIVE_INFINITY_NAME)
+
+        private fun javaName(name: String) = name.replace("""\s""", JAVA_SPACE).removeSuffix("$") + """\z"""
 
         /** Cypher's spaces, which may come around a number written in Cypher: tab to CR, U+001C to the space, and Unicode's. */
         private val CYPHER_SPACES = listOf(0x09..0x0D, 0x1C..0x20, 0x85..0x85, 0xA0..0xA0, 0x1680..0x1680, 0x2000..0x200A, 0x2028..0x2029,
@@ -655,7 +664,7 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
          * long's ends are left out, null (drivine4j#696).
          */
         val CYPHER_NUMBER_TEXT = "^$CYPHER_SPACE*-?((0|[1-9][0-9]*)(\\.[0-9]+([eE][+-]?[0-9]+)?|[eE][+-]?[0-9]+)|\\.[0-9]+([eE][+-]?[0-9]+)?|" +
-            "0|[1-9][0-9]{0,17}|[1-8][0-9]{18})$CYPHER_SPACE*$"
+            "0|[1-9][0-9]{0,17}|[1-8][0-9]{18})$CYPHER_SPACE*\\z"
 
         private fun escaped(code: Int) = if (code < 0x100) "\\x" + code.toString(16).padStart(2, '0') else "\\u" + code.toString(16).padStart(4, '0')
 
