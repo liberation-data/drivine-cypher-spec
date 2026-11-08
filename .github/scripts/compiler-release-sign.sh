@@ -3,6 +3,7 @@
 # is uploaded is that bundle, byte for byte, with a signature beside each file: no JDK, Gradle or dependency is fetched
 # after the release's gate. Checks each file's checksums the bundle holds first, then signs each file Maven Central asks
 # a signature of, checks each signature against the key, and checks the signed bundle with compiler-release-check.sh.
+# It refuses a bundle holding a link, or anything else that is neither a file nor a directory, as zip would follow it.
 #   compiler-release-sign.sh <unsigned bundle zip> <version> <signed bundle zip> <check out dir>
 # The key is SIGNING_KEY, an ASCII-armored private key, with its passphrase in SIGNING_PASSWORD: the release key in the
 # publish job, a throwaway key in a dry run. It is imported into a keyring made for this run alone and deleted after,

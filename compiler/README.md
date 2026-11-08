@@ -271,9 +271,11 @@ number.
 
 What is published is the bundle step 2 checked, byte for byte, with a signature beside each file. Step 3 builds nothing,
 and needs no JDK, Gradle or dependency: only the bundle, this commit's scripts, and the runner's gpg, curl, jq and zip.
-Before it signs, it checks each file's checksums in the bundle; after, each signature against the key, and the signed
+Before it signs, it checks each file's checksums in the bundle, and refuses a bundle holding a link, which zip would
+follow into the job's keyring or environment; after, each signature against the key, and the signed
 bundle as step 2 checked it. The key is imported into a keyring made for the job and deleted after it, and neither the
-key, its passphrase nor the Portal token is passed on a command line or written to the log. A failed upload is re-run
+key, its passphrase nor the Portal token is passed on a command line or written to the log: the token's base64, which
+GitHub doesn't mask as it masks the secrets, is masked too. A failed upload is re-run
 alone ("Re-run failed jobs"), and waits for the reviewer again; the upload itself isn't retried, as a second would make
 a second deployment of the version, so look at https://central.sonatype.com/publishing/deployments before re-running one
 that failed without the Portal's answer.
@@ -296,7 +298,8 @@ with the sum of the `-bin` zip from https://gradle.org/release-checksums/. Witho
 A run from workflow_dispatch, or on a pull request that changes the release machinery, is a dry run: steps 1 and 2,
 under the version `0.0.0-dry-run`, and step 3's signing, with a key made in the job and thrown away with it, with
 GitHub's release downloads and Adoptium's API blocked. It checks that the signed bundle is step 2's, file for file and
-byte for byte, with a signature beside each file, keeps it as the run's artifact, and uploads nothing.
+byte for byte, with a signature beside each file, keeps it as the run's artifact, and uploads it as step 3 does, to a
+stand-in for the Central Portal on the runner, which refuses an upload that isn't the one nmcp made.
 
 The `release` environment is this repository's own, not drivine4j's, and is set up once in its settings before the first
 release: a required reviewer, tags `v*` allowed to deploy to it, and the secrets drivine4j's release uses,

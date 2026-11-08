@@ -9,8 +9,9 @@
 #   reviewer's approval, then signs that bundle with the release key and uploads it to the Central Portal as one
 #   deployment, which releases every target or none. What is published is the bundle that was checked, byte for byte,
 #   with a signature beside each file; nothing is built, and no JDK, Gradle or dependency fetched, after the gate.
-# - workflow_dispatch, and a pull request that changes the release machinery, are dry runs: everything but the upload,
-#   the bundle signed with a throwaway key, with GitHub's release downloads blocked, and kept as the run's artifact.
+# - workflow_dispatch, and a pull request that changes the release machinery, are dry runs: everything but the upload
+#   to the Portal, the bundle signed with a throwaway key, with GitHub's release downloads blocked, kept as the run's
+#   artifact, and uploaded to a stand-in for the Portal on the runner.
 # - The jobs that build install the pinned JDK and Gradle with .github/actions/pinned-toolchain, from checked archives
 #   kept in the cache, so a GitHub release-download outage, which failed v0.31.0's publish, doesn't hold up a run whose
 #   cache is warm.
@@ -199,7 +200,8 @@ jobs:
 
   # A dry run's stand-in for publish, which it skips: build's bundle signed as publish signs it, but with a key made here
   # and thrown away with the runner, with GitHub's release downloads blocked throughout, then checked to be build's bundle
-  # with a signature beside each file, and kept as the run's artifact. It uploads nothing.
+  # with a signature beside each file, uploaded as publish uploads it to a stand-in for the Portal on the runner, and kept
+  # as the run's artifact. It uploads nothing to the Portal.
   publish-dry-run:
     needs: [check, build]
     if: needs.check.outputs.publish != 'true'
@@ -248,6 +250,38 @@ jobs:
             exit 1
           fi
           echo "The signed bundle is build's, with $signatures signatures."
+      # The upload as publish makes it, to a stand-in for the Central Portal on this runner. It refuses an upload that
+      # isn't nmcp's (the token's header, AUTOMATIC, the bundle's field and filename, the signed bundle's bytes), then
+      # answers the status as the Portal does.
+      - name: Upload the bundle as publish does, to a stand-in Portal
+        run: |
+          python3 -I - "$RUNNER_TEMP/signed.zip" <<'EOF' &
+          import base64, http.server, json, sys
+          bundle = open(sys.argv[1], "rb").read()
+          token = "UserToken " + base64.b64encode(b"dry-run:dry-run").decode()
+          class Portal(http.server.BaseHTTPRequestHandler):
+              def do_POST(self):
+                  body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+                  upload = self.path.startswith("/upload?")
+                  ok = self.headers.get("Authorization") == token and (not upload or (
+                      self.path == "/upload?publishingType=AUTOMATIC"
+                      and b'name="bundle"; filename="publicationAggregated.zip"' in body and bundle in body))
+                  self.send_response((201 if upload else 200) if ok else 400)
+                  self.end_headers()
+                  if not ok:
+                      self.wfile.write(b"Not the upload nmcp makes.")
+                  elif upload:
+                      self.wfile.write(b"0f0e1d2c-0000-4000-8000-00000000d0d0")
+                  else:
+                      self.wfile.write(json.dumps({"deploymentState": "PUBLISHED"}).encode())
+          http.server.HTTPServer(("127.0.0.1", 18080), Portal).serve_forever()
+          EOF
+          for _ in $(seq 1 20); do curl -s -o /dev/null http://127.0.0.1:18080/ && break; sleep 1; done
+          ../.github/scripts/compiler-release-upload.sh "$RUNNER_TEMP/signed.zip"
+        env:
+          CENTRAL_PORTAL_URL: http://127.0.0.1:18080
+          CENTRAL_PORTAL_USERNAME: dry-run
+          CENTRAL_PORTAL_PASSWORD: dry-run
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: compiler-maven-central-signed-${{ env.VERSION }}

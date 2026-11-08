@@ -5,7 +5,8 @@
 # Portal fails it, with the Portal's reasons.
 #   compiler-release-upload.sh <signed bundle zip>
 # The Portal token is CENTRAL_PORTAL_USERNAME and CENTRAL_PORTAL_PASSWORD. It is sent in a header read from a file this
-# script makes and deletes, so it is never on a command line, and nothing here writes it to the log.
+# script makes and deletes, so it is never on a command line, and nothing here writes it to the log. Its base64, which
+# GitHub doesn't mask as it masks the secrets, is masked as well, in case the Portal's answer quotes it.
 set -euo pipefail
 bundle="$1"
 portal="${CENTRAL_PORTAL_URL:-https://central.sonatype.com/api/v1/publisher}"
