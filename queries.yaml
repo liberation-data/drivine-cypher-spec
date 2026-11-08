@@ -3188,6 +3188,13 @@ cases:
       - only: [neo4j, sql]
         cypher: "UNWIND [0.0, 0.0, 1.0, 1.0] AS z WITH DISTINCT z / z AS v, 'a' AS w RETURN count(*)"
         rows: [3]
+      - note: "So does NaN worked out as the statement runs by % of a float zero written, or by / of a float zero that may be an integer zero (drivine4j#685)."
+        only: [neo4j, sql]
+        cypher: "UNWIND [5.0, 5.0] AS x WITH DISTINCT x % 0.0 AS v RETURN count(*)"
+        rows: [2]
+      - only: [neo4j, sql]
+        cypher: "UNWIND [0.0, 0.0] AS z RETURN DISTINCT 0.0 / z AS v"
+        rows: [{$float: "NaN"}, {$float: "NaN"}]
       - note: "So are they ordered, skipped and limited, beside a node, and in a part of a UNION in CALL { } (drivine4j#685)."
         only: [neo4j, sql]
         cypher: "UNWIND [0.0, 0.0, 1.0, 1.0] AS z RETURN DISTINCT z / z AS v ORDER BY v SKIP 1 LIMIT 2"

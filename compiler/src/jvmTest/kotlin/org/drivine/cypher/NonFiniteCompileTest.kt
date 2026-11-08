@@ -97,6 +97,12 @@ class NonFiniteCompileTest {
         assertTrue(numbered(PostgresCypherCompiler("g").compile("UNWIND \$l AS x RETURN DISTINCT x", nan).sql))
         assertTrue(numbered(SqliteCypherCompiler("g").compile("UNWIND \$l AS x WITH DISTINCT x RETURN count(*)", nan).sql))
         assertTrue(numbered(OracleCypherCompiler("g").compile("UNWIND [0.0, 1.0] AS z RETURN DISTINCT z / z").sql))
+        // NaN worked out by % of a float zero, or by / of one beside the test for an integer zero (drivine4j#554, drivine4j#559).
+        listOf(SqliteCypherCompiler("g"), OracleCypherCompiler("g")).forEach { compiler ->
+            listOf("UNWIND [5.0, 5.0] AS x WITH DISTINCT x % 0.0 AS v RETURN count(*)", "UNWIND [0.0, 0.0] AS z RETURN DISTINCT 0.0 / z AS v").forEach { cypher ->
+                assertTrue(numbered(compiler.compile(cypher, emptyMap()).sql), cypher)
+            }
+        }
         // Not where the statement works out none, nor of a value made a text or a list, nor where the projection aggregates.
         listOf(PostgresCypherCompiler("g"), SqliteCypherCompiler("g"), OracleCypherCompiler("g")).forEach { compiler ->
             assertFalse(numbered(compiler.compile("MATCH (n:A) RETURN DISTINCT n.x").sql))
