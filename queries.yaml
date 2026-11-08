@@ -1584,6 +1584,26 @@ cases:
         only: [neo4j, sql]
         unordered: true
         rows: [[1, 1], [null, 2]]
+      - note: "A statement's UNION gives a list or a map one query writes beside a number another gives (drivine4j#679)."
+        cypher: "RETURN [10] AS v UNION ALL RETURN 10 AS v"
+        only: [neo4j, sql]
+        unordered: true
+        rows: [[10], 10]
+      - cypher: "RETURN {a: 1} AS v UNION RETURN 10 AS v"
+        only: [neo4j, sql]
+        unordered: true
+        rows: [{a: 1}, 10]
+      - cypher: "RETURN [10] AS v UNION RETURN 10 AS v UNION RETURN [10] AS v"
+        only: [neo4j, sql]
+        unordered: true
+        rows: [[10], 10]
+      - note: "And a subquery's."
+        cypher: "MATCH (p:Person {name: 'Keanu'}) WHERE EXISTS { RETURN [1] AS v UNION ALL RETURN 1 AS v } RETURN p.name"
+        only: [neo4j, sql]
+        rows: ["Keanu"]
+      - cypher: "MATCH (p:Person {name: 'Keanu'}) RETURN COUNT { RETURN [1] AS v UNION ALL RETURN 1 AS v } AS c"
+        only: [neo4j, sql]
+        rows: [2]
       - note: "A UNION in a CALL gives a list or a map one query writes beside a number another gives (drivine4j#516)."
         cypher: "CALL { RETURN [10] AS v UNION ALL RETURN 10 AS v } RETURN v"
         only: [neo4j, sql]

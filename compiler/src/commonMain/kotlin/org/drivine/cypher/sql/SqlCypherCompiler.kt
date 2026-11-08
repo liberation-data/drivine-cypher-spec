@@ -303,15 +303,17 @@ abstract class SqlCypherCompiler(
         writer.give(query)
         // Its rows are compared, as a UNION without ALL compares them: see [Writer.distinctParts].
         writer.distinctParts = !query.unions.first().all
+        // Each query's result is of one type, as one may build a list or a map, Postgres's `json`, and another give a `jsonb`
+        // (drivine4j#679, as drivine4j#516 for a UNION in CALL { … }). Without ALL, it is as JSON compares it.
+        val result = if (query.unions.first().all) orderedJson("q.result") else comparable(Value.Json("q.result", ordered = true))
         val rows = parts.mapIndexed { i, clauses ->
-            "SELECT ${i + 1} AS part, $rowNumber AS n, q.result FROM (\n${indent(writer.query(Query(clauses)))}\n) q"
+            "SELECT ${i + 1} AS part, $rowNumber AS n, $result AS result FROM (\n${indent(writer.query(Query(clauses)))}\n) q"
         }.joinToString("\nUNION ALL\n")
         val sql = if (query.unions.first().all) {
             "SELECT u.result FROM (\n${indent(rows)}\n) u\nORDER BY u.part, u.n"
         } else {
             // A row is given once, where it is first given: its rows are compared as JSON compares them.
-            val key = comparable(Value.Json("u.result", ordered = true))
-            "SELECT d.result FROM (\n${indent("SELECT $key AS result, MIN(u.part * 1000000000.0 + u.n) AS k FROM (\n${indent(rows)}\n) u\nGROUP BY $key")}\n) d\nORDER BY d.k"
+            "SELECT d.result FROM (\n${indent("SELECT u.result, MIN(u.part * 1000000000.0 + u.n) AS k FROM (\n${indent(rows)}\n) u\nGROUP BY u.result")}\n) d\nORDER BY d.k"
         }
         return CompiledCypher(planned(sql), writer.parameters.values, nonFinite)
     }
@@ -342,7 +344,8 @@ abstract class SqlCypherCompiler(
 
     /**
      * The JSON value [json], one not [Value.Json.ordered], of the type a value that is: Postgres's `json` of its `jsonb`, so that
-     * the two may be the columns of one `UNION` (drivine4j#516). Oracle's JSON and SQLite's text are of one type.
+     * the two may be the columns of one `UNION`, in `CALL { … }` (drivine4j#516), a statement's or a subquery's (drivine4j#679).
+     * Of a value that is `json` already, the same value. Oracle's JSON and SQLite's text are of one type.
      */
     protected open fun orderedJson(json: String) = json
 
@@ -1452,7 +1455,8 @@ abstract class SqlCypherCompiler(
                             var select = Select(scope)
                             clauses.dropLast(1).forEach { select = read(select, it, scope) }
                             val sql = project(select, (clauses.last() as Clause.Return).projection, final = true).sql
-                            val result = if (distinct) comparable(Value.Json("q.result", ordered = true)) else "q.result"
+                            // Of one type in each query, compared or not (drivine4j#679).
+                            val result = if (distinct) comparable(Value.Json("q.result", ordered = true)) else orderedJson("q.result")
                             "SELECT $result AS result FROM (\n${indent(sql)}\n) q"
                         }
                     }
