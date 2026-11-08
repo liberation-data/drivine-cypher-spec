@@ -2980,11 +2980,36 @@ cases:
         cypher: "RETURN $x % $z"
         parameters: {x: 5, z: 0}
         error: true
-      - note: "NaN or an infinity taken % by an integer zero at run time fails too (drivine4j#550). On Postgres NaN doesn't (drivine4j#687)."
-        only: [neo4j, oracle]
+      - note: "NaN or an infinity taken % by an integer zero at run time fails too (drivine4j#550, drivine4j#687)."
+        only: [neo4j, postgres, oracle]
         cypher: "RETURN $x % $z"
         parameters: {x: {$float: "NaN"}, z: 0}
         error: true
+      - note: "Null taken % by an integer zero in an aggregate is null still, where the statement is given NaN (drivine4j#687)."
+        only: [neo4j, postgres]
+        cypher: "UNWIND [null] AS i RETURN [$x, sum(i % 0)]"
+        parameters: {x: {$float: "NaN"}}
+        rows: [[{$float: "NaN"}, 0]]
+      - note: "And divided by one (drivine4j#687). Oracle and SQLite are drivine4j#559 and drivine4j#554."
+        only: [neo4j, postgres]
+        cypher: "RETURN $x / $z"
+        parameters: {x: {$float: "NaN"}, z: 0}
+        error: true
+      - only: [neo4j, postgres]
+        cypher: "UNWIND [0.0 / 0.0] AS x WITH x, 0 AS z RETURN x / z"
+        error: true
+      - only: [neo4j, postgres]
+        cypher: "UNWIND [0.0 / 0.0] AS x WITH x, 0 AS z RETURN x % z"
+        error: true
+      - only: [neo4j, postgres]
+        cypher: "RETURN $x / $z"
+        parameters: {x: {$float: "Infinity"}, z: 0}
+        error: true
+      - note: "NaN by a float zero is NaN still, and null by an integer zero null (drivine4j#687)."
+        only: [neo4j, postgres]
+        cypher: "RETURN [$x / $f, -$x / $f, $x % $f, $n / $z, $n % $z]"
+        parameters: {x: {$float: "NaN"}, f: 0.0, n: null, z: 0}
+        rows: [[{$float: "NaN"}, {$float: "NaN"}, {$float: "NaN"}, null, null]]
       - only: [neo4j, postgres, oracle]
         cypher: "RETURN $x % $z"
         parameters: {x: {$float: "Infinity"}, z: 0}
