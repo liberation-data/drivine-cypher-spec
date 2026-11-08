@@ -48,6 +48,15 @@ class CalledUnionColumnsTest {
     }
 
     @Test
+    fun `collect leaves out JSON's null that one query gives beside a list another builds`() {
+        val cypher = "CALL { UNWIND [{a: null}] AS x RETURN x.a AS v UNION ALL RETURN [10] AS v } RETURN collect(v) AS c"
+        val postgres = PostgresCypherCompiler("g").compile(cypher).sql
+        assertTrue(Regex("""json_agg\(CASE WHEN NOT COALESCE\(jsonb_typeof\(CAST\(c\d+\.c1 AS jsonb\)\), 'null'\) = 'null' THEN c\d+\.c1 END\)""").containsMatchIn(postgres), postgres)
+        val oracle = OracleCypherCompiler("g").compile(cypher).sql
+        assertTrue(Regex("""JSON_ARRAYAGG\(CASE WHEN NOT NVL\(JSON_VALUE\(c\d+\.c1, '\$\.type\(\)'\), 'null'\) = 'null' THEN c\d+\.c1 END""").containsMatchIn(oracle), oracle)
+    }
+
+    @Test
     fun `on SQLite, whose JSON is text, a map one query builds beside a number is read as it is`() {
         val sql = SqliteCypherCompiler("g").compile("CALL { RETURN {b: 1, a: 2} AS v UNION ALL RETURN 10 AS v } RETURN v").sql
         assertEquals(listOf("q", "q"), partHeads(sql).map { it.take(1) }, sql)

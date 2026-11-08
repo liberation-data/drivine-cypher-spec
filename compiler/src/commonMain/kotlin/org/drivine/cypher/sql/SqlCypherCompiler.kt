@@ -5578,6 +5578,8 @@ abstract class SqlCypherCompiler(
         private fun collectable(value: Value): String = when {
             value is Value.Node -> "CASE WHEN ${value.nid} IS NOT NULL THEN ${json(value).sql} END"
             value is Value.Json && !value.ordered -> nullIfJsonNull(value.sql)
+            // One that keeps its keys' order and may be JSON's null, as a UNION in a CALL gives beside a list one query builds (drivine4j#516).
+            value is Value.Json && value.jsonNull -> "CASE WHEN NOT ${isJsonNull(comparable(value))} THEN ${value.sql} END"
             else -> json(value).sql
         }
 

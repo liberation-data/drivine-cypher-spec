@@ -1573,6 +1573,10 @@ cases:
         only: [neo4j, sql]
         unordered: true
         rows: [[10], 10]
+      - note: "collect leaves out the null one query gives beside a list another builds."
+        cypher: "CALL { UNWIND [{a: null}] AS x RETURN x.a AS v UNION ALL RETURN [10] AS v } RETURN collect(v) AS c, count(v) AS n"
+        only: [neo4j, sql]
+        rows: [[[[10]], 1]]
       - note: "A UNION in a CALL whose queries order their rows differently, as an UNWIND's places and a CALL's, gives each query's rows (drivine4j#506)."
         cypher: "CALL { UNWIND [{a: null}] AS x RETURN x.a AS v UNION ALL CALL { UNWIND [{a: null}] AS y RETURN y.a AS w UNION UNWIND [{b: 1}] AS z RETURN z.a AS w } RETURN w AS v } RETURN v, count(*)"
         only: [neo4j, sql]
