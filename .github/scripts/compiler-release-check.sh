@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Checks the compiler's Central Portal bundle before it is kept or uploaded: exactly the artifacts in $ARTIFACTS, each
-# with the files Maven Central asks for at the version given, and with verify a signature beside every file. Copies the bundle to
+# with the files Maven Central asks for at the version given, and with verify a signature beside every file. It holds
+# nothing else: no link, no other version, no file an artifact's publication doesn't make, nothing outside org/drivine. Copies the bundle to
 # <out>/publicationAggregated.zip and unpacks it to <out>/maven-repo, and writes what it staged to the job's summary.
 #   compiler-release-check.sh <bundle zip> <version> verify|none <out>
 # verify checks each signature with the key in the keyring GNUPGHOME names (compiler-release-sign.sh's, of the key it
@@ -16,6 +17,26 @@ mkdir -p "$out/maven-repo"
 cp "$zip" "$out/publicationAggregated.zip"
 unzip -q "$out/publicationAggregated.zip" -d "$out/maven-repo"
 repo="$out/maven-repo/org/drivine"
+
+# Only files and directories: asked of find alone, which stops at the first, not piped (see compiler-release-sign.sh).
+[[ -z "$(find "$out/maven-repo" ! -type f ! -type d -print -quit)" ]] || fail "The bundle holds an entry that is neither a file nor a directory, such as a link."
+# Only what each artifact's publication makes at this version: its files (a target's metadata jar, the root's Kotlin
+# tooling metadata, where it makes them), each file's checksums, and with verify each file's signature.
+allowed="$out/allowed.txt" present="$out/present.txt" extra="$out/extra.txt"
+{
+    printf '%s\n' org org/drivine
+    for a in $ARTIFACTS; do
+        d="org/drivine/$a/$version"
+        printf '%s\n' "org/drivine/$a" "$d"
+        for s in .pom .module -sources.jar -javadoc.jar .jar .klib -metadata.jar -kotlin-tooling-metadata.json; do
+            for c in "" .md5 .sha1 .sha256 .sha512; do printf '%s\n' "$d/$a-$version$s$c"; done
+            if [[ "$signatures" == verify ]]; then printf '%s\n' "$d/$a-$version$s.asc"; fi
+        done
+    done
+} | LC_ALL=C sort -u > "$allowed"
+(cd "$out/maven-repo" && find . -mindepth 1 | sed 's#^\./##' | LC_ALL=C sort) > "$present"
+LC_ALL=C comm -13 "$allowed" "$present" > "$extra"
+[[ ! -s "$extra" ]] || fail "The bundle holds what no artifact's publication at $version makes: $(head -5 "$extra" | tr '\n' ' ')"
 
 staged=$(ls "$repo" | sort | tr '\n' ' ')
 expected=$(tr ' ' '\n' <<< "$ARTIFACTS" | grep . | sort | tr '\n' ' ')

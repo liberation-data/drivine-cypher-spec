@@ -29,6 +29,7 @@ on:
       - .github/workflows/compiler.yml
       - .github/scripts/compiler-release-check.sh
       - .github/scripts/compiler-release-sign.sh
+      - .github/scripts/compiler-release-sign-test.sh
       - .github/scripts/compiler-release-upload.sh
       - .github/actions/pinned-toolchain/**
       - compiler/build.gradle.kts
@@ -117,9 +118,11 @@ jobs:
       PUBLISH: ${{ needs.check.outputs.publish }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # No Gradle cache: the release is built from nothing but the checked-out ref, and the JDK and Gradle archives it
-      # pins, each checked against its SHA-256 there.
+      # No cache: the release is built from nothing but the checked-out ref, and the JDK and Gradle archives it pins,
+      # fetched and checked against their SHA-256s. A cache entry is unpacked before its archive is checked, and an
+      # earlier job of a tag's run (the gate's, with third-party actions) can save one in the tag's scope.
       - uses: ./.github/actions/pinned-toolchain
+        with: { cache: 'false' }
       - name: Maven Central doesn't have this version yet
         run: |
           # Only an answer of 200 stops a release. When Maven Central can't be asked, the step goes on: the portal
@@ -153,6 +156,8 @@ jobs:
     if: needs.check.outputs.publish == 'true'
     runs-on: ubuntu-latest
     environment: release
+    # The upload's poll gives up after an hour; the signing takes a minute.
+    timeout-minutes: 90
     permissions:
       contents: read
     env:
@@ -191,8 +196,8 @@ jobs:
         env:
           CENTRAL_PORTAL_USERNAME: ${{ secrets.CENTRAL_PORTAL_USERNAME }}
           CENTRAL_PORTAL_PASSWORD: ${{ secrets.CENTRAL_PORTAL_PASSWORD }}
+      # Only once published: a bundle a failed step left is not kept.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: always()
         with:
           name: compiler-maven-central-uploaded-${{ env.VERSION }}
           path: ${{ runner.temp }}/signed.zip
@@ -235,6 +240,14 @@ jobs:
         run: |
           SIGNING_KEY="$(cat "$RUNNER_TEMP/dry-run-key.asc")" \
             ../.github/scripts/compiler-release-sign.sh "$RUNNER_TEMP/unsigned/publicationAggregated.zip" "$VERSION" "$RUNNER_TEMP/signed.zip" "$RUNNER_TEMP/signed"
+        env:
+          SIGNING_PASSWORD: dry-run
+      # On Linux, whose unzip makes the links a zip holds: a bundle with a link among thousands, a file, a version or a path
+      # no artifact's publication makes is refused, and leaves no signed bundle.
+      - name: The sign script refuses a bundle it must not sign
+        run: |
+          SIGNING_KEY="$(cat "$RUNNER_TEMP/dry-run-key.asc")" \
+            ../.github/scripts/compiler-release-sign-test.sh "$RUNNER_TEMP/unsigned/publicationAggregated.zip" "$VERSION"
         env:
           SIGNING_PASSWORD: dry-run
       # The signed bundle is build's, file for file and byte for byte, with a signature beside each file.

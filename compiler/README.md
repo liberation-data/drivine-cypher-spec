@@ -151,8 +151,8 @@ reviewed pull request. To bump it:
 1. Set `version` to the new Temurin 21 release, and each `sha256.<os>-<arch>` to Adoptium's checksum of that release's
    archive (`https://api.adoptium.net/v3/assets/release_name/eclipse/jdk-<version>?os=<os>&architecture=<arch>&image_type=jdk`).
 2. Nothing else names it but this section's first line (with `tzdb`): CI installs the JDK from Adoptium's archive of
-   `version`, checked against its `sha256` (`.github/actions/pinned-toolchain`). Merge the bump to `main` before the next tag, so main's run fetches the new
-   archive into the cache a tag's run reads (see [Releasing](#releasing)).
+   `version`, checked against its `sha256` (`.github/actions/pinned-toolchain`). Merge the bump to `main` before the next
+   tag, so main's run fetches the new archive into the cache a tag's gate reads (see [Releasing](#releasing)).
 3. Run `./gradlew generateTables`. Where the JDK brings another tzdb, it stops and names it: set `tzdb` to that.
 4. Open the pull request, and say in it which zones the new tzdb adds or removes (the diff of the generated
    `build/generated/tables/org/drivine/cypher/time/JvmZoneIds.kt` against the old one's).
@@ -271,11 +271,14 @@ number.
 
 What is published is the bundle step 2 checked, byte for byte, with a signature beside each file. Step 3 builds nothing,
 and needs no JDK, Gradle or dependency: only the bundle, this commit's scripts, and the runner's gpg, curl, jq and zip.
-Before it signs, it checks each file's checksums in the bundle, and refuses a bundle holding a link, which zip would
-follow into the job's keyring or environment; after, each signature against the key, and the signed
-bundle as step 2 checked it. The key is imported into a keyring made for the job and deleted after it, and neither the
+Before it imports the key, it checks the bundle holds every artifact at the tag's version and nothing else: no link,
+which zip would follow into the job's keyring or environment, no file the publications don't make, no other version,
+nothing outside `org/drivine`. Then it checks each file's checksums in the bundle; after signing, each signature against
+the key, and the signed bundle as step 2 checked it. The key is imported into a keyring made for the job and deleted
+after it, and the key's variables are unset once it is, so no process the signing starts is given them. Neither the
 key, its passphrase nor the Portal token is passed on a command line or written to the log: the token's base64, which
-GitHub doesn't mask as it masks the secrets, is masked too. A failed upload is re-run
+GitHub doesn't mask as it masks the secrets, is masked too. The signed bundle is kept as the run's artifact only once
+it is published. A failed upload is re-run
 alone ("Re-run failed jobs"), and waits for the reviewer again; the upload itself isn't retried, as a second would make
 a second deployment of the version, so look at https://central.sonatype.com/publishing/deployments before re-running one
 that failed without the Portal's answer.
@@ -283,14 +286,18 @@ that failed without the Portal's answer.
 The jobs that build install the pinned JDK and Gradle with `.github/actions/pinned-toolchain`: from Adoptium's archive
 of `gradle/pinned-jdk.properties`'s `version` and the zip `gradle/wrapper/gradle-wrapper.properties` names, each checked
 against the SHA-256 pinned beside it, so a cache can't bring another. Adoptium and services.gradle.org serve those
-archives as GitHub release assets, whose outage failed v0.31.0's upload three times, so they're kept in the repository's
-Actions cache, each under its checksum, and saved as soon as it is fetched, so a re-run keeps what an earlier attempt
-got. A tag's run reads the caches of `main`, so the first tag after a bump of the JDK or of Gradle needs a run on `main`
-since the bump (its merge, or workflow_dispatch of `Compiler` on `main`) to have fetched them. GitHub drops a cache no
-run has read for 7 days, so after a quiet week, run `Compiler` on `main` before tagging too. Where nothing is cached,
-the job fetches them, with retries; where it can't, it fails naming the URL: re-run it once GitHub's release downloads
-work. Maven Central also serves some dependencies through GitHub's release downloads, so up to step 2 an outage can still
-fail a run; it fails before the gate, and is re-run.
+archives as GitHub release assets, whose outage failed v0.31.0's upload three times, so `compiler.yml`'s jobs keep them
+in the repository's Actions cache, each under its checksum, and saved as soon as it is fetched, so a re-run keeps what
+an earlier attempt got. A tag's run reads the caches of `main`, so the first tag after a bump of the JDK or of Gradle
+runs its gate fastest after a run on `main` since the bump (its merge, or workflow_dispatch of `Compiler` on `main`);
+GitHub drops a cache no run has read for 7 days. Where nothing is cached, a job fetches them, with retries; where it
+can't, it fails naming the URL: re-run it once GitHub's release downloads work.
+
+The release's build job (step 2) reads no cache: it fetches the archives each time, and checks them, as a cache entry
+is unpacked before its archive is checked, and an earlier job of a tag's run, the gate's, which runs third-party
+actions, could save one in the tag's scope. Every action `compiler.yml` and this workflow use is pinned to a commit.
+Maven Central also serves some dependencies through GitHub's release downloads. So an outage can fail step 2, or the
+gate; it fails before the reviewer is asked, and is re-run.
 
 To bump Gradle, keep the checksum: `./gradlew wrapper --gradle-version <v> --gradle-distribution-sha256-sum <sum>`,
 with the sum of the `-bin` zip from https://gradle.org/release-checksums/. Without one, every job stops at it.
@@ -299,7 +306,10 @@ A run from workflow_dispatch, or on a pull request that changes the release mach
 under the version `0.0.0-dry-run`, and step 3's signing, with a key made in the job and thrown away with it, with
 GitHub's release downloads and Adoptium's API blocked. It checks that the signed bundle is step 2's, file for file and
 byte for byte, with a signature beside each file, keeps it as the run's artifact, and uploads it as step 3 does, to a
-stand-in for the Central Portal on the runner, which refuses an upload that isn't the one nmcp made.
+stand-in for the Central Portal on the runner, which refuses an upload that isn't the one nmcp made and a status call
+for any other deployment. It also checks that the signing refuses a bundle it must not sign
+(`.github/scripts/compiler-release-sign-test.sh`): one with a link among thousands, a file, a version or a path that no
+publication makes.
 
 The `release` environment is this repository's own, not drivine4j's, and is set up once in its settings before the first
 release: a required reviewer, tags `v*` allowed to deploy to it, and the secrets drivine4j's release uses,

@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Signs the compiler's Central Portal bundle that compiler-release.yml's build job made and checked, unsigned, so that what
 # is uploaded is that bundle, byte for byte, with a signature beside each file: no JDK, Gradle or dependency is fetched
-# after the release's gate. Checks each file's checksums the bundle holds first, then signs each file Maven Central asks
-# a signature of, checks each signature against the key, and checks the signed bundle with compiler-release-check.sh.
-# It refuses a bundle holding a link, or anything else that is neither a file nor a directory, as zip would follow it.
+# after the release's gate. Checks the bundle with compiler-release-check.sh first, before the key is imported: it holds
+# every artifact at the version and nothing else, no link (zip would follow one into the keyring or the environment), no
+# file its publications don't make, nothing outside org/drivine. Then checks each file's checksums the bundle holds,
+# signs each file Maven Central asks a signature of, checks each signature against the key, and checks the signed bundle
+# again. The key's variables are unset once it is imported, so no process this starts is given them.
 #   compiler-release-sign.sh <unsigned bundle zip> <version> <signed bundle zip> <check out dir>
 # The key is SIGNING_KEY, an ASCII-armored private key, with its passphrase in SIGNING_PASSWORD: the release key in the
 # publish job, a throwaway key in a dry run. It is imported into a keyring made for this run alone and deleted after,
@@ -16,6 +18,10 @@ fail() { echo "::error::$*"; exit 1; }
 signed=$(cd "$(dirname "$signed")" && pwd)/$(basename "$signed")
 
 work=$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/compiler-sign.XXXXXX")
+# The bundle is build's, and nothing else, before the key is so much as imported: every artifact at the version, no link,
+# no file its publications don't make, nothing outside org/drivine (see compiler-release-check.sh).
+GITHUB_STEP_SUMMARY=/dev/null "$(dirname "$0")/compiler-release-check.sh" "$unsigned" "$version" none "$work/unsigned" ||
+    { rm -rf "$work"; exit 1; }
 export GNUPGHOME="$work/gnupg"
 mkdir -m 700 "$GNUPGHOME"
 cleanup() {
@@ -26,6 +32,10 @@ trap cleanup EXIT
 
 gpg --batch --quiet --pinentry-mode loopback --passphrase-fd 3 --import 3<<< "$SIGNING_PASSWORD" <<< "$SIGNING_KEY" 2> /dev/null ||
     fail "SIGNING_KEY couldn't be imported."
+# Out of the environment from here on, so no process this script starts (unzip, zip, gpg) is given the key or its
+# passphrase: the passphrase is kept in a variable of this shell alone, for gpg's fd 3.
+passphrase="$SIGNING_PASSWORD"
+unset SIGNING_KEY SIGNING_PASSWORD
 fingerprint=$(gpg --batch --with-colons --list-secret-keys | awk -F: '$1 == "fpr" { print $10; exit }')
 [[ -n "$fingerprint" ]] || fail "SIGNING_KEY holds no secret key."
 
@@ -33,11 +43,13 @@ repo="$work/bundle"
 mkdir "$repo"
 unzip -q "$unsigned" -d "$repo"
 cd "$repo"
-# A link would be skipped below but followed by zip, putting what it names (this keyring, the step's environment) in the bundle.
-find . ! -type f ! -type d | grep -q . && fail "$unsigned holds an entry that is neither a file nor a directory, such as a link."
+# A link would be skipped below but followed by zip, putting what it names (this keyring, the step's environment) in the
+# bundle. Asked of find alone, which stops at the first: piped to grep -q, find killed by SIGPIPE fails the pipeline under
+# pipefail where grep matched, and a bundle of many links got past.
+[[ -z "$(find . ! -type f ! -type d -print -quit)" ]] || fail "$unsigned holds an entry that is neither a file nor a directory, such as a link."
 files=$(find . -type f ! -name '*.md5' ! -name '*.sha1' ! -name '*.sha256' ! -name '*.sha512' ! -name '*.asc' | sort)
 [[ -n "$files" ]] || fail "$unsigned holds no file to sign."
-find . -name '*.asc' | grep -q . && fail "$unsigned is already signed: build makes it unsigned."
+[[ -z "$(find . -name '*.asc' -print -quit)" ]] || fail "$unsigned is already signed: build makes it unsigned."
 
 # Each checksum the bundle holds is the file's, as the build wrote them.
 digest() { case "$1" in md5) md5sum "$2" 2> /dev/null || md5 -r "$2" ;; *) shasum -a "${1#sha}" "$2" ;; esac | cut -d' ' -f1; }
@@ -50,12 +62,13 @@ done <<< "$files"
 
 while read -r f; do
     gpg --batch --quiet --pinentry-mode loopback --passphrase-fd 3 --local-user "$fingerprint" --armor --detach-sign \
-        --output "$f.asc" "$f" 3<<< "$SIGNING_PASSWORD" 2> /dev/null || fail "${f#./} couldn't be signed."
+        --output "$f.asc" "$f" 3<<< "$passphrase" 2> /dev/null || fail "${f#./} couldn't be signed."
     gpg --batch --quiet --verify "$f.asc" "$f" 2> /dev/null || fail "${f#./}'s signature doesn't verify."
 done <<< "$files"
 
 rm -f "$signed"
-zip -q -X -r "$signed" org
+# -y: a link, which there is none of, would be stored as one, never followed.
+zip -q -X -y -r "$signed" org
 cd - > /dev/null
 # As the build's check, with this keyring's key: every artifact, each signed.
 "$(dirname "$0")/compiler-release-check.sh" "$signed" "$version" verify "$out"
