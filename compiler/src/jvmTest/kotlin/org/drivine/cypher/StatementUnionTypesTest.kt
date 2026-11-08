@@ -10,17 +10,19 @@ import kotlin.test.assertTrue
 
 /**
  * A statement's `UNION`, and a subquery's, gives each query's result as one type: on Postgres a list or a map one query builds
- * is `json` and a number another gives `jsonb`, so each is written as `json` (drivine4j#679, as drivine4j#516 for a `UNION` in
- * `CALL { … }`). What the stores give is the spec's, in `queries.yaml` ("A null in a map and a missing key are one null").
+ * is `json` and a number another gives `jsonb`, so each is written as `json`, or where the rows are compared as `jsonb`
+ * (drivine4j#679, as drivine4j#516 for a `UNION` in `CALL { … }`). What the stores give is the spec's, in `queries.yaml` ("A null in a map and a missing key are one null").
  */
 class StatementUnionTypesTest {
 
     @Test
-    fun `on Postgres, each query of a statement's UNION gives its result as json`() {
-        listOf("UNION ALL", "UNION").forEach { union ->
-            val sql = PostgresCypherCompiler("g").compile("RETURN [10] AS v $union RETURN 10 AS v").sql
-            assertEquals(2, Regex("""CAST\(q\.result AS json\) AS result""").findAll(sql).count(), "$union: $sql")
-        }
+    fun `on Postgres, each query of a statement's UNION ALL gives its result as json, and of a UNION as it compares`() {
+        val all = PostgresCypherCompiler("g").compile("RETURN [10] AS v UNION ALL RETURN 10 AS v").sql
+        assertEquals(2, Regex("""CAST\(q\.result AS json\) AS result""").findAll(all).count(), all)
+        val distinct = PostgresCypherCompiler("g").compile("RETURN [10] AS v UNION RETURN 10 AS v").sql
+        assertEquals(2, Regex("""CAST\(q\.result AS jsonb\) AS result""").findAll(distinct).count(), distinct)
+        // Compared as each query gives it, not cast to json and back.
+        assertTrue("GROUP BY u.result" in distinct, distinct)
     }
 
     @Test
