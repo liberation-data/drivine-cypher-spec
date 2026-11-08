@@ -658,6 +658,22 @@ abstract class SqlCypherCompiler(
      */
     protected abstract fun failure(message: String, value: String): String
 
+    /**
+     * [round] of [value], whose JSON [json] gives, or [value] itself where it is an infinity, as Neo4j rounds one, to any
+     * places in range, by a precision and mode that are not null: on a store whose JSON holds the infinities, where its
+     * SQL number, which [round] reads, holds none (Oracle's). There [round] is given the value to read as JSON bound where
+     * it is long, so a round of a round doesn't write the value out twice at each level.
+     */
+    protected open fun infinitiesKept(value: Value, json: () -> String, round: (Value) -> Value.Json): Value.Json = round(value)
+
+    /**
+     * `keys()` of a JSON value whose kind is [kind] as text: [keysOf], its keys, where it is a map (a node's or a relationship's
+     * properties are one), null where it is null, and otherwise a failure naming the kind, as Neo4j fails on a value
+     * that is no map, node or relationship (drivine4j#669).
+     */
+    protected fun keysOrFailure(kind: String, keysOf: String) =
+        "CASE WHEN $kind = 'object' THEN $keysOf WHEN $kind <> 'null' THEN ${scalar(failure(KEYS_OF_NO_MAP, kind))} END"
+
     /** What an order sorts the JSON value [json] by where the statement makes it a list ([Value.Json.list]): as [sortKey] where the store orders lists as Cypher does. */
     protected open fun listSortKey(json: String) = sortKey(json)
 
@@ -5276,14 +5292,17 @@ abstract class SqlCypherCompiler(
                 })
                 // A float, as Cypher gives these; round as Java rounds, half up.
                 // The precision is read as a whole number toward zero, as Neo4j reads it: 1.7 places is 1.
-                "round" -> when (arguments.size) {
-                    3 -> roundingMode(function.arguments[2])?.let { mode ->
-                        Value.Json(scalar(float(rounded(arguments[0], arguments[1], function.arguments[1]) { n, p -> roundTo(n, p, mode) })))
-                    } ?: Value.Json(literalJson(null))
-                    // To 0 places Neo4j rounds as round(x) does, half toward +infinity, as Java's Math.round; to more, half away from zero.
-                    2 -> Value.Json(scalar(float(rounded(arguments[0], arguments[1], function.arguments[1], { roundWhole(it) }) { n, p -> roundPlaces(n, p) })))
-                    else -> Value.Json(scalar(float(roundWhole(number(comparable(json(one())))))))
-                }
+                "round" -> (arguments.firstOrNull() ?: one()).let { rounding -> infinitiesKept(rounding, { comparable(json(rounding)) }) { value ->
+                    when (arguments.size) {
+                        3 -> roundingMode(function.arguments[2])?.let { mode ->
+                            Value.Json(scalar(float(rounded(value, arguments[1], function.arguments[1]) { n, p -> roundTo(n, p, mode) })))
+                        } ?: Value.Json(literalJson(null))
+                        // To 0 places Neo4j rounds as round(x) does, half toward +infinity, as Java's Math.round; to more, half away from zero.
+                        2 -> Value.Json(scalar(float(rounded(value, arguments[1], function.arguments[1], { roundWhole(it) }) { n, p -> roundPlaces(n, p) })))
+                        // one() fails a round() of more than three arguments, as it did before the value was bound.
+                        else -> one().let { Value.Json(scalar(float(roundWhole(number(comparable(json(value))))))) }
+                    }
+                } }
                 "floor", "ceil" -> Value.Json(scalar(float("${name.uppercase()}(${number(comparable(json(one())))})")))
                 in MATH_FUNCTIONS -> Value.Json(scalar(math(name, listOf(number(comparable(json(one())))))))
                 "atan2" -> if (arguments.size == 2) Value.Json(scalar(math(name, arguments.map { number(comparable(json(it))) })))
@@ -5702,6 +5721,9 @@ abstract class SqlCypherCompiler(
          * call of a function past them, as a literal of more than 100 items or 50 entries is, is written in parts (#332).
          */
         const val MOST_ARGUMENTS = 100
+
+        /** What `keys()` fails with, as Neo4j fails it, of a value that is no map, node or relationship: its kind follows. */
+        const val KEYS_OF_NO_MAP = "keys() takes a map, a node or a relationship, as in Neo4j, not a"
 
         /** What `round()` fails with, as Neo4j fails it, a precision below 0 or past [MAX_COUNT]. */
         const val PRECISION_OUT_OF_RANGE = "round() takes a precision from 0 to 2147483647, as in Neo4j."

@@ -1,0 +1,204 @@
+# Releases the Cypher compiler (compiler/) to Maven Central, as org.drivine:drivine-cypher-compiler. compiler/README.md
+# ("Releasing") describes the process.
+#
+# - A push of a tag vX.Y.Z on main publishes the compiler as version X.Y.Z: a spec tag is a compiler release, so the
+#   compiler and the spec it was checked against share one number. A tag that changes only the spec publishes the
+#   compiler again, unchanged, under the new number.
+# - The compiler's CI (compiler.yml) runs first, and every target's publication is built, signed and checked. The
+#   upload waits in the `release` environment for its reviewer's approval, then nmcp uploads every target in one
+#   bundle, as one deployment: the Central Portal releases all of them or none.
+# - workflow_dispatch, and a pull request that changes the release machinery, are dry runs: everything but the upload,
+#   signed with a throwaway key, with the bundle left as the run's artifact to inspect.
+name: Compiler release
+
+on:
+  push:
+    tags: ['v*']
+  # Always a dry run. Pick the branch or tag to try in "Use workflow from".
+  workflow_dispatch:
+  # A dry run, so a change to the release machinery is tested on its pull request.
+  pull_request:
+    paths:
+      - .github/workflows/compiler-release.yml
+      - .github/workflows/compiler.yml
+      - .github/scripts/compiler-release-check.sh
+      - compiler/build.gradle.kts
+      - compiler/settings.gradle.kts
+      - compiler/gradle.properties
+      - compiler/gradle/wrapper/gradle-wrapper.properties
+      - compiler/gradle/wrapper/gradle-wrapper.jar
+
+permissions:
+  contents: read
+
+# A release waits for the one before it on the same tag. A dry run has a group of its own, so it never cancels a
+# release that is waiting.
+concurrency:
+  group: ${{ github.event_name == 'push' && format('compiler-release-{0}', github.ref) || format('compiler-release-dry-run-{0}', github.run_id) }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+    working-directory: compiler
+
+env:
+  # The artifacts published to Maven Central: the root publication, which names the others, and one for each target.
+  ARTIFACTS: >-
+    drivine-cypher-compiler
+    drivine-cypher-compiler-jvm
+    drivine-cypher-compiler-wasm-js
+    drivine-cypher-compiler-macosarm64
+    drivine-cypher-compiler-linuxx64
+    drivine-cypher-compiler-linuxarm64
+    drivine-cypher-compiler-mingwx64
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      publish: ${{ steps.version.outputs.publish }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      # The build and publish jobs run this commit's ./gradlew, the publish job with the release secrets: its
+      # gradle-wrapper.jar, a binary a review can't read, has to be one Gradle released.
+      - uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+      - name: The version
+        id: version
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
+            tag="$GITHUB_REF_NAME"
+            if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+              echo "::error::The tag $tag isn't vX.Y.Z (or vX.Y.Z-suffix), so it releases nothing. Delete it and tag the commit vX.Y.Z."
+              exit 1
+            fi
+            if ! git merge-base --is-ancestor "$GITHUB_SHA" "origin/$DEFAULT_BRANCH"; then
+              echo "::error::The tag $tag is on $GITHUB_SHA, which isn't on $DEFAULT_BRANCH. Tag a commit on $DEFAULT_BRANCH, or, if the tag was pushed before $DEFAULT_BRANCH, push $DEFAULT_BRANCH and re-run this workflow."
+              exit 1
+            fi
+            version="${tag#v}"
+            publish=true
+          else
+            # A dry run builds a version no release has, so it can't be mistaken for one.
+            version=0.0.0-dry-run
+            publish=false
+          fi
+          echo "Version $version, publish: $publish"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+
+  # The compiler's CI, as compiler.yml runs it on a pull request: the JVM tests, and every other target checked against
+  # the JVM, byte for byte.
+  gate:
+    needs: check
+    uses: ./.github/workflows/compiler.yml
+
+  build:
+    needs: [check, gate]
+    # macOS builds every target: macosArm64 only builds there, and Kotlin/Native cross-compiles the others.
+    runs-on: macos-latest
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+      PUBLISH: ${{ needs.check.outputs.publish }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # No Gradle cache: the release is built from nothing but the checked-out ref.
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with: { distribution: temurin, java-version: '21.0.13+9.0.LTS' }
+      - name: Maven Central doesn't have this version yet
+        run: |
+          # Only an answer of 200 stops a release. When Maven Central can't be asked, the step goes on: the portal
+          # rejects a version it already has.
+          status=$(curl -s --retry 3 -o /dev/null -w '%{http_code}' "https://repo1.maven.org/maven2/org/drivine/drivine-cypher-compiler/$VERSION/drivine-cypher-compiler-$VERSION.pom" || true)
+          if [[ "$status" == 200 ]]; then
+            if [[ "$PUBLISH" == true ]]; then
+              echo "::error::Maven Central already has org.drivine:drivine-cypher-compiler:$VERSION, so this run publishes nothing. Tag the next version."
+              exit 1
+            fi
+            echo "::warning::Maven Central already has org.drivine:drivine-cypher-compiler:$VERSION."
+          elif [[ "$status" != 404 ]]; then
+            echo "::warning::Couldn't ask Maven Central whether it has org.drivine:drivine-cypher-compiler:$VERSION (HTTP $status). Going on: the Central Portal rejects a version it already has."
+          fi
+      # The dry run signs as the release does, but with a key made here and thrown away with the runner. A release
+      # signs here with it too: this job never sees the release secrets, which only the publish job's environment holds.
+      - name: Make a throwaway signing key
+        run: |
+          gpg --batch --pinentry-mode loopback --passphrase dry-run \
+            --quick-gen-key 'Drivine release dry run <dry-run@invalid>' rsa3072 sign 1d
+          gpg --batch --pinentry-mode loopback --passphrase dry-run --armor --export-secret-keys > "$RUNNER_TEMP/dry-run-key.asc"
+      - name: Build, sign and bundle the publications
+        run: |
+          SIGNING_KEY="$(cat "$RUNNER_TEMP/dry-run-key.asc")" \
+            ./gradlew --no-daemon zipAggregationPublication -Pcompiler.version="$VERSION"
+        env:
+          SIGN: 'true'
+          SIGNING_PASSWORD: dry-run
+      - name: Check the publications
+        run: ../.github/scripts/compiler-release-check.sh build/nmcp/zip/publicationAggregated.zip "$VERSION" verify release
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: compiler-maven-central-${{ env.VERSION }}
+          path: compiler/release/
+          if-no-files-found: error
+
+  # nmcp signs and uploads in one Gradle build, so this job builds the bundle again from the same commit, signed with
+  # the release key, checks it as build checked its own, and uploads it as one deployment. It waits in the `release`
+  # environment, which holds the secrets, for its reviewer's approval.
+  publish:
+    needs: [check, build]
+    if: needs.check.outputs.publish == 'true'
+    runs-on: macos-latest
+    environment: release
+    permissions:
+      contents: read
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with: { distribution: temurin, java-version: '21.0.13+9.0.LTS' }
+      - name: The release secrets are set
+        env:
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+          SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
+          CENTRAL_PORTAL_USERNAME: ${{ secrets.CENTRAL_PORTAL_USERNAME }}
+          CENTRAL_PORTAL_PASSWORD: ${{ secrets.CENTRAL_PORTAL_PASSWORD }}
+        run: |
+          missing=()
+          [[ "$SIGNING_KEY" == *'BEGIN PGP PRIVATE KEY BLOCK'* ]] || missing+=('SIGNING_KEY (an ASCII-armored private key)')
+          [[ -n "$SIGNING_PASSWORD" ]] || missing+=(SIGNING_PASSWORD)
+          [[ -n "$CENTRAL_PORTAL_USERNAME" ]] || missing+=(CENTRAL_PORTAL_USERNAME)
+          [[ -n "$CENTRAL_PORTAL_PASSWORD" ]] || missing+=(CENTRAL_PORTAL_PASSWORD)
+          if (( ${#missing[@]} )); then
+            echo "::error::The release environment is missing: ${missing[*]}."
+            exit 1
+          fi
+      - name: Build and sign the bundle
+        run: ./gradlew --no-daemon zipAggregationPublication -Pcompiler.version="$VERSION"
+        env:
+          SIGN: 'true'
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+          SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
+      # The release key's public half isn't on this runner, so the check here asks for a signature beside every file,
+      # and build's check verified that the build signs each one.
+      - name: Check the bundle
+        run: ../.github/scripts/compiler-release-check.sh build/nmcp/zip/publicationAggregated.zip "$VERSION" present uploaded
+      - name: Publish to Maven Central
+        run: ./gradlew --no-daemon publishAggregatedPublicationToCentralPortal -Pcompiler.version="$VERSION"
+        env:
+          SIGN: 'true'
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+          SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
+          CENTRAL_PORTAL_USERNAME: ${{ secrets.CENTRAL_PORTAL_USERNAME }}
+          CENTRAL_PORTAL_PASSWORD: ${{ secrets.CENTRAL_PORTAL_PASSWORD }}
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: compiler-maven-central-uploaded-${{ env.VERSION }}
+          path: compiler/uploaded/publicationAggregated.zip
+          if-no-files-found: warn
