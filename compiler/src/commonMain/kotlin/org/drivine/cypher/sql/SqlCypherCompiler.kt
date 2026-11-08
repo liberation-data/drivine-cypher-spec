@@ -2784,6 +2784,15 @@ abstract class SqlCypherCompiler(
             val compared = projection.distinct || aggregating
             val columns = compiled.mapIndexed { i, (_, value) -> "c${i + 1}" to (if (compared) compared(value) else value) }
             val selectList = columns.flatMap { (column, value) -> value.columns(column) }.toMutableList()
+            // A row of DISTINCT whose item is NaN, equal to nothing, is kept apart, as Neo4j keeps it (drivine4j#685): its own
+            // number beside it, which no other row has. Only where an item may be NaN ([bareNaN]), so a statement given and working
+            // out none compiles as it did.
+            if (projection.distinct && !aggregating) {
+                val nans = compiled.zip(columns).mapNotNull { (item, column) ->
+                    (column.second as? Value.Json)?.takeIf { (item.second as? Value.Json)?.let(::mayBeFloat) == true }?.let { bareNaN(it.sql) }
+                }
+                if (nans.isNotEmpty()) selectList += "CASE WHEN ${nans.joinToString(" OR ") { "($it)" }} THEN ROW_NUMBER() OVER () END AS d1"
+            }
             // An order is written over the items' names, and where nothing is grouped or kept distinct, the variables too.
             val name = alias("p")
             // Where rows are compared, an order term of the items that is no item is read over their columns, once compared:

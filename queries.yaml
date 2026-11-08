@@ -2959,12 +2959,20 @@ cases:
       - only: [sql]
         cypher: "UNWIND [[0.0/0.0], [0.0/0.0], {x: 0.0/0.0}, {x: 0.0/0.0}] AS r RETURN count(DISTINCT r)"
         rows: [2]
-      - note: "WITH DISTINCT keeps NaN once on a SQL store, where Neo4j keeps each apart (drivine4j#685)."
-        only: [neo4j]
+      - note: "WITH DISTINCT and RETURN DISTINCT keep a row whose item is NaN apart, as count(DISTINCT …) does (drivine4j#685)."
+        only: [neo4j, sql]
         cypher: "UNWIND [0.0/0.0, 0.0/0.0] AS r WITH DISTINCT r RETURN count(*)"
         rows: [2]
-      - only: [sql]
-        cypher: "UNWIND [0.0/0.0, 0.0/0.0] AS r WITH DISTINCT r RETURN count(*)"
+      - only: [neo4j, sql]
+        cypher: "UNWIND [0.0, 0.0, 1.0, 1.0] AS z RETURN DISTINCT z / z AS v"
+        unordered: true
+        rows: [{$float: "NaN"}, {$float: "NaN"}, 1.0]
+      - only: [neo4j, sql]
+        cypher: "UNWIND [0.0, 0.0, 1.0, 1.0] AS z WITH DISTINCT z / z AS v, 'a' AS w RETURN count(*)"
+        rows: [3]
+      - note: "A row holding a list with NaN, worked out for each row, is one row to DISTINCT, as Neo4j compares the list."
+        only: [neo4j, sql]
+        cypher: "UNWIND [1, 1] AS k WITH DISTINCT [k, 0.0/0.0] AS l RETURN count(*)"
         rows: [1]
       - note: "A number taken % by an infinity is the number, as a float, as in Java (drivine4j#555, drivine4j#683)."
         only: [neo4j, sql]
