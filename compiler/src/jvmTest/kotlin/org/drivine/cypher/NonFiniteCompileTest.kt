@@ -99,6 +99,35 @@ class NonFiniteCompileTest {
     }
 
     @Test
+    fun `% on Oracle of a side that may be NaN or an infinity works it out as Java does, and of two written numbers as before`() {
+        // drivine4j#683: a number taken % by an infinity is that number as a float, and NaN or an infinity taken % is NaN, where
+        // MOD's NUMBERs, which hold neither, gave null. What each gives on Oracle is the spec's, in queries.yaml ("NaN worked out").
+        val oracle = OracleCypherCompiler("g")
+        listOf(
+            "RETURN 5 % \$i" to mapOf("i" to Double.POSITIVE_INFINITY),
+            "WITH toFloat('Infinity') AS i RETURN [7 % i, 7 % -i]" to emptyMap(),
+            "MATCH (n:A) RETURN n.x % n.y" to emptyMap(),
+            // A write, which Oracle compiles as a procedure.
+            "CREATE (w:W {a: \$x % \$i}) RETURN w.a" to mapOf("x" to 5L, "i" to Double.POSITIVE_INFINITY),
+        ).forEach { (cypher, parameters) ->
+            val sql = oracle.compile(cypher, parameters).sql
+            assertTrue("RETURNING BINARY_DOUBLE) IS INFINITE THEN CASE WHEN" in sql, "$cypher: the number taken is given back by an infinity: $sql")
+            assertTrue("JSON_SCALAR(BINARY_DOUBLE_NAN)" in sql, "$cypher: $sql")
+            assertTrue("MOD(" in sql, "$cypher: any other is taken % by MOD: $sql")
+        }
+        // Taken % by a number written, only the side read is tested: it may be a stored infinity (drivine4j#668).
+        val written = oracle.compile("MATCH (n:A) RETURN n.x % 2").sql
+        assertTrue("IS INFINITE))" in written, written)
+        assertFalse("IS INFINITE THEN" in written, written)
+        // Of two numbers written, neither is NaN or an infinity, so the SQL is MOD's alone.
+        listOf("RETURN 5 % 2", "RETURN 5.5 % 2.0", "RETURN [7 % 3, 0 % 2.5]").forEach { cypher ->
+            val sql = oracle.compile(cypher).sql
+            assertTrue("MOD(" in sql, "$cypher: $sql")
+            assertFalse("IS NAN" in sql || "IS INFINITE" in sql, "$cypher: $sql")
+        }
+    }
+
+    @Test
     fun `x IN a list given with NaN in it finds NaN equal to nothing on Oracle, and a list without compares plainly`() {
         // Oracle's JSON finds NaN equal to itself; a given list of numbers is compared plainly, as #458 compares it, only without NaN.
         val cypher = "MATCH (n:A) WHERE n.x IN \$l RETURN n.x"
