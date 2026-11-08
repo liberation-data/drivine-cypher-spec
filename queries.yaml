@@ -158,6 +158,25 @@ cases:
           - {person: "Keanu", titles: ["The Matrix", "The Matrix Reloaded", "Johnny Mnemonic"], first: 1995, years: 5997}
           - {person: "Laurence", titles: ["The Matrix"], first: 1999, years: 1999}
 
+  - name: "Item of a quoted variable"
+    description: "An item that is a variable, quoted or not, is named as the variable, so a WITH passes it on under that name (drivine4j#499)."
+    steps:
+      - cypher: "WITH 1 AS a WITH `a` RETURN a"
+        only: [neo4j, sql]
+        rows: [1]
+      - note: "So a UNION and a CALL's importing WITH read it by that name."
+        cypher: "WITH 1 AS a RETURN `a` UNION RETURN 2 AS a"
+        only: [neo4j, sql]
+        unordered: true
+        rows: [1, 2]
+      - cypher: "WITH 1 AS a CALL { WITH `a` RETURN a + 1 AS b } RETURN b"
+        only: [neo4j, sql]
+        rows: [2]
+      - cypher: "UNWIND [1, 1, 2] AS i WITH `i`, count(*) AS c RETURN i, c"
+        only: [neo4j, sql]
+        unordered: true
+        rows: [[1, 2], [2, 1]]
+
   - name: "Map key order"
     description: "A returned map keeps its keys in the order they were written."
     steps:
@@ -798,7 +817,7 @@ cases:
         error: true
 
   - name: "keys()"
-    description: "keys() gives a map's or node's keys, whatever they're called."
+    description: "keys() gives a map's or node's keys, whatever they're called, and fails of any other value but null (drivine4j#669)."
     steps:
       - cypher: "RETURN keys({b: 1, a: {x: 2}, `odd key`: [1], `q\"t`: null})"
         unorderedLists: true
@@ -808,6 +827,13 @@ cases:
         rows: ["born", "name"]
       - cypher: "RETURN keys({})"
         rows: [[]]
+      - note: "A value read from data that is no map, node or relationship: Neo4j fails as the statement runs."
+        cypher: "MATCH (p:Person {name: 'Keanu'}) RETURN keys(p.born)"
+        error: true
+      - cypher: "MATCH (p:Person {name: 'Keanu'}) RETURN keys(p.name)"
+        error: true
+      - cypher: "UNWIND [[1], 1.5] AS x RETURN keys(x)"
+        error: true
 
   - name: "Regular expressions and more functions"
     description: "=~ matches the whole text, Java-style; split, reverse, toBoolean, round and others give the values Neo4j gives."
@@ -1114,6 +1140,11 @@ cases:
       - cypher: "MATCH (a:Person {name: 'Keanu'}) CALL (*) { MATCH (a)-[:ACTED_IN]->(m) WITH m MATCH (a)-[:ACTED_IN]->(m) RETURN count(m) AS n } RETURN n"
         only: [neo4j, sql]
         rows: [3]
+      - note: "In a WITH's WHERE, CALL (*) imports what the WITH passes on (and a pattern naming what it drops is refused, see refusals.yaml, drivine4j#504)."
+        cypher: "MATCH (p:Person) WITH p AS q WHERE EXISTS { CALL (*) { MATCH (q)-->() RETURN 1 AS x } RETURN x } RETURN q.name"
+        only: [neo4j, sql]
+        unordered: true
+        rows: ["Keanu", "Carrie", "Laurence"]
       - cypher: "MATCH (a:Person {name: 'Keanu'}) CALL { WITH * MATCH (a)-[:ACTED_IN]->(m) RETURN count(m) AS n } RETURN n"
         only: [neo4j, sql]
         rows: [3]
@@ -1553,6 +1584,51 @@ cases:
         only: [neo4j, sql]
         unordered: true
         rows: [[1, 1], [null, 2]]
+      - note: "A statement's UNION gives a list or a map one query writes beside a number another gives (drivine4j#679)."
+        cypher: "RETURN [10] AS v UNION ALL RETURN 10 AS v"
+        only: [neo4j, sql]
+        unordered: true
+        rows: [[10], 10]
+      - cypher: "RETURN {a: 1} AS v UNION RETURN 10 AS v"
+        only: [neo4j, sql]
+        unordered: true
+        rows: [{a: 1}, 10]
+      - cypher: "RETURN [10] AS v UNION RETURN 10 AS v UNION RETURN [10] AS v"
+        only: [neo4j, sql]
+        unordered: true
+        rows: [[10], 10]
+      - note: "And a subquery's."
+        cypher: "MATCH (p:Person {name: 'Keanu'}) WHERE EXISTS { RETURN [1] AS v UNION ALL RETURN 1 AS v } RETURN p.name"
+        only: [neo4j, sql]
+        rows: ["Keanu"]
+      - cypher: "MATCH (p:Person {name: 'Keanu'}) RETURN COUNT { RETURN [1] AS v UNION ALL RETURN 1 AS v } AS c"
+        only: [neo4j, sql]
+        rows: [2]
+      - note: "A UNION in a CALL gives a list or a map one query writes beside a number another gives (drivine4j#516)."
+        cypher: "CALL { RETURN [10] AS v UNION ALL RETURN 10 AS v } RETURN v"
+        only: [neo4j, sql]
+        unordered: true
+        rows: [[10], 10]
+      - cypher: "CALL { RETURN {a: 1} AS v UNION ALL RETURN 10 AS v } RETURN v"
+        only: [neo4j, sql]
+        unordered: true
+        rows: [{a: 1}, 10]
+      - cypher: "CALL { RETURN [10] AS v UNION RETURN 10 AS v UNION RETURN [10] AS v } RETURN v"
+        only: [neo4j, sql]
+        unordered: true
+        rows: [[10], 10]
+      - note: "collect leaves out the null one query gives beside a list another builds."
+        cypher: "CALL { UNWIND [{a: null}] AS x RETURN x.a AS v UNION ALL RETURN [10] AS v } RETURN collect(v) AS c, count(v) AS n"
+        only: [neo4j, sql]
+        rows: [[[[10]], 1]]
+      - note: "A UNION in a CALL whose queries order their rows differently, as an UNWIND's places and a CALL's, gives each query's rows (drivine4j#506)."
+        cypher: "CALL { UNWIND [{a: null}] AS x RETURN x.a AS v UNION ALL CALL { UNWIND [{a: null}] AS y RETURN y.a AS w UNION UNWIND [{b: 1}] AS z RETURN z.a AS w } RETURN w AS v } RETURN v, count(*)"
+        only: [neo4j, sql]
+        rows: [[null, 2]]
+      - cypher: "CALL { UNWIND [1, 2] AS x RETURN x AS v UNION ALL CALL { RETURN 3 AS w } RETURN w AS v } RETURN v"
+        only: [neo4j, sql]
+        unordered: true
+        rows: [1, 2, 3]
       - note: "A null written is the same null as a property a node has not."
         cypher: "MATCH (p:Person) RETURN CASE WHEN p.born > 1960 THEN p.nickname ELSE null END AS v, count(*) AS c"
         only: [neo4j, sql]
@@ -1871,6 +1947,24 @@ cases:
       - cypher: "UNWIND [1, 1, 2] AS i WITH i, count(*) AS c WHERE count(*) > 1 RETURN i"
         only: [neo4j, sql]
         rows: [1]
+      - note: "A pattern in the WHERE names an item, which is the variable it passes on (drivine4j#504)."
+        cypher: "MATCH (p:Person) WITH p, count(*) AS c WHERE (p)-[:KNOWS]->() RETURN p.name, c"
+        only: [neo4j, sql]
+        unordered: true
+        rows: [["Keanu", 1], ["Laurence", 1]]
+      - cypher: "MATCH (p:Person) WITH DISTINCT p WHERE (p)-->() RETURN p.name"
+        only: [neo4j, sql]
+        unordered: true
+        rows: ["Keanu", "Carrie", "Laurence"]
+      - note: "And a variable a CALL's brackets import, which is in scope after any WITH."
+        cypher: "MATCH (a:Person {name: 'Keanu'}) CALL (a) { WITH 1 AS one WHERE (a)-[:KNOWS]->() RETURN one } RETURN a.name, one"
+        only: [neo4j, sql]
+        rows: [["Keanu", 1]]
+      - note: "And in a subquery, a variable from outside it, which is in scope after any WITH within, as Neo4j has it."
+        cypher: "MATCH (p:Person) WHERE EXISTS { MATCH (p)-[:ACTED_IN]->(m) WITH m WHERE (p)-[:KNOWS]->() RETURN m } RETURN p.name"
+        only: [neo4j, sql]
+        unordered: true
+        rows: ["Keanu", "Laurence"]
       - cypher: "UNWIND [1, 1, 2] AS i WITH i, count(*) AS c WHERE sum(i) > 1 RETURN i"
         only: [neo4j, sql]
         unordered: true
@@ -2458,6 +2552,39 @@ cases:
       - cypher: "MATCH (m:Movie) RETURN [toString(avg(m.released)), toString(sum(m.released * 1.5))]"
         rows: [["1999.0", "8995.5"]]
 
+  - name: "Remainder of floats"
+    description: "% of two integers is an integer, and where either side is a float, a float, whole or not, as Java's % of doubles gives it: 64.0 % 8.0 is 0.0, not 0 (drivine4j#427)."
+    steps:
+      - only: [neo4j, sql]
+        cypher: "RETURN [64.0 % 8.0, 7 % 2.5, 10 % 2.5, 4 ^ 3 % 2 ^ 3, 64 % 8.0, 64.0 % 8, 7.5 % 2, 5.5 % -2.0, -7 % 3, 7 % -3]"
+        rows: [[0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 1.5, 1.5, -1, 1]]
+      - note: "Worked out as the statement runs: given, bound by WITH, and unwound."
+        only: [neo4j, sql]
+        cypher: "RETURN [$a % $b, $c % $d, $c % $e, $f % $e]"
+        parameters: {a: 64.0, b: 8.0, c: 7, d: 2.5, e: 3, f: -7}
+        rows: [[0.0, 2.0, 1, -1]]
+      - only: [neo4j, sql]
+        cypher: "WITH 64.0 AS x, 8 AS y UNWIND [2.5, 3] AS z RETURN [x % y, x % z, 10 % z]"
+        rows: [[0.0, 1.5, 0.0], [0.0, 1.0, 1]]
+      - note: "An integer's remainder is exact past 2^53, as a double's would not be: 9007199254740993 % 10 is 3, not 2."
+        only: [neo4j, sql]
+        cypher: "WITH 9007199254740993 AS x UNWIND [10] AS y RETURN [9007199254740993 % 10, x % 10, x % y, -9007199254740993 % y]"
+        rows: [[3, 3, 3, -3]]
+      - note: "A double's remainder, exact, as Java works it out. Postgres works a float out in exact decimal, not a double (drivine4j#188): 0.3 % 0.1 is 0.0 there."
+        only: [neo4j, oracle, sqlite]
+        cypher: "RETURN [1e300 % 7.0, 0.3 % 0.1, 1e17 % 3.0]"
+        rows: [[1.0, 0.09999999999999998, 1.0]]
+      - note: "A float's remainder keeps the sign of the number taken, as Java's does: -7.5 % 2 is -1.5."
+        only: [neo4j, sql]
+        cypher: "UNWIND [-7.5] AS x RETURN [-7.5 % 2, x % 2.0, x % $d, x % -2]"
+        parameters: {d: 2}
+        rows: [[-1.5, -1.5, -1.5, -1.5]]
+      - note: "A zero keeps the sign of the number taken, as in Java: -7.5 % 2.5 is -0.0, and 1.0 divided by it -Infinity. Postgres, Oracle and SQLite give 0.0, and Infinity (drivine4j#552): none of them keeps a negative zero, given or worked out."
+        only: [neo4j]
+        cypher: "RETURN [1.0 / (-7.5 % 2.5), toString(-7.5 % 2.5), 1.0 / ($x % $y)]"
+        parameters: {x: -7.5, y: 2.5}
+        rows: [[{$float: "-Infinity"}, "-0.0", {$float: "-Infinity"}]]
+
   - name: "Aggregates of floats"
     description: "An aggregate of floats is a float, whole or not, and a sum is a float where any value it sums is one: 2.0 is not 2."
     steps:
@@ -2757,11 +2884,26 @@ cases:
         cypher: "UNWIND [3.0, $p, $i, $n, 1.0] AS x RETURN x ORDER BY x DESC"
         parameters: {p: {$float: "NaN"}, i: {$float: "Infinity"}, n: {$float: "-Infinity"}}
         rows: [{$float: "NaN"}, {$float: "Infinity"}, 3.0, 1.0, {$float: "-Infinity"}]
-      - note: "DISTINCT keeps NaN once."
-        only: [neo4j, sql]
+      - note: "Neo4j's DISTINCT keeps once a NaN given once and read twice, though it keeps NaNs worked out apart (\"NaN worked out\"); a SQL store, which can't tell one NaN from another, keeps each apart (drivine4j#558)."
+        only: [neo4j]
         cypher: "UNWIND [$p, $p, 1.0] AS x RETURN [count(DISTINCT x), collect(DISTINCT x)]"
         parameters: {p: {$float: "NaN"}}
         rows: [[2, [{$float: "NaN"}, 1.0]]]
+      - only: [sql]
+        cypher: "UNWIND [$p, $p, 1.0] AS x RETURN [count(DISTINCT x), collect(DISTINCT x)]"
+        parameters: {p: {$float: "NaN"}}
+        rows: [[3, [{$float: "NaN"}, {$float: "NaN"}, 1.0]]]
+      - note: "So does RETURN DISTINCT (drivine4j#685)."
+        only: [neo4j]
+        cypher: "UNWIND [$p, $p, 1.0] AS x RETURN DISTINCT x"
+        parameters: {p: {$float: "NaN"}}
+        unordered: true
+        rows: [{$float: "NaN"}, 1.0]
+      - only: [sql]
+        cypher: "UNWIND [$p, $p, 1.0] AS x RETURN DISTINCT x"
+        parameters: {p: {$float: "NaN"}}
+        unordered: true
+        rows: [{$float: "NaN"}, {$float: "NaN"}, 1.0]
       - note: "sum() and avg() of a group that holds NaN, or both infinities, are NaN."
         only: [neo4j, sql]
         cypher: "UNWIND $l AS x RETURN [sum(x), avg(x)]"
@@ -2777,7 +2919,7 @@ cases:
         rows: [[{$float: "Infinity"}, {$float: "Infinity"}]]
 
   - name: "NaN worked out"
-    description: "0.0 / 0.0 is NaN and 1.0 / 0.0 an infinity, as Java has them, and so is a number divided or taken % by a float zero, or a text toFloat reads as one: NaN is equal to nothing, itself included (drivine4j#409, drivine4j#408, drivine4j#545). A number divided or taken % by an integer zero fails, except a float divided or taken % by an integer zero where both are written in the statement, which Neo4j works out as it plans, as Java does: 1.0 / 0 is Infinity and 5.0 % 0 NaN, while 1 / 0 fails."
+    description: "0.0 / 0.0 is NaN and 1.0 / 0.0 an infinity, as Java has them, and so is a number divided or taken % by a float zero, or a text toFloat reads as one: NaN is equal to nothing, itself included (drivine4j#409, drivine4j#408, drivine4j#545), and so count(DISTINCT …), collect(DISTINCT …), WITH DISTINCT and RETURN DISTINCT keep each NaN apart, though they compare a list or a map holding one as any other. A number divided or taken % by an integer zero fails, except a float divided or taken % by an integer zero where both are written in the statement, which Neo4j works out as it plans, as Java does: 1.0 / 0 is Infinity and 5.0 % 0 NaN, while 1 / 0 fails."
     steps:
       - cypher: "RETURN [0.0 / 0.0, 1.0 / 0.0, -1.0 / 0.0]"
         rows: [[{$float: "NaN"}, {$float: "Infinity"}, {$float: "-Infinity"}]]
@@ -2795,6 +2937,15 @@ cases:
         cypher: "RETURN [$x / $z, 1 / $z, 0 / $z, -$x / $z]"
         parameters: {x: 3.0, z: 0.0}
         rows: [[{$float: "Infinity"}, {$float: "Infinity"}, {$float: "NaN"}, {$float: "-Infinity"}]]
+      - note: "Taken % by a float zero given, bound by WITH or unwound: NaN, whatever is taken (drivine4j#550)."
+        only: [neo4j, sql]
+        cypher: "WITH 0.0 AS w UNWIND [0.0] AS u RETURN [$x % $z, $f % $z, 0 % $z, 5 % w, -5.5 % u]"
+        parameters: {x: 5, f: 5.5, z: 0.0}
+        rows: [[{$float: "NaN"}, {$float: "NaN"}, {$float: "NaN"}, {$float: "NaN"}, {$float: "NaN"}]]
+      - note: "count(DISTINCT …) and collect(DISTINCT …) keep apart each NaN that % by a float zero works out (drivine4j#550, drivine4j#558)."
+        only: [neo4j, sql]
+        cypher: "UNWIND [0.0, 0.0] AS z RETURN count(DISTINCT 5 % z), size(collect(DISTINCT 5.5 % z))"
+        rows: [[2, 2]]
       - note: "Numbers written in the statement alone, which Neo4j works out as it plans, as Java does: a float by the integer 0 is an infinity."
         only: [neo4j, memgraph, falkordb, sql]
         cypher: "RETURN [1.0 / 0, -1.0 / 0, 1.0 / -0, 1.0 / 0.0, (1.0 + 0) / 0, 1.0 / (1 - 1)]"
@@ -2814,28 +2965,182 @@ cases:
       - only: [neo4j, postgres]
         cypher: "WITH 0 AS z RETURN 1.0 / z"
         error: true
-      - note: "Taken % by an integer zero at run time: Oracle gives the number taken, as its MOD does (drivine4j#550). Memgraph and FalkorDB give NaN, as for a float zero."
-        only: [neo4j, postgres]
+      - note: "Taken % by an integer zero at run time fails, a float as an integer, as on Neo4j (drivine4j#550). SQLite gives null, as for an integer divided by zero (drivine4j#554). Memgraph and FalkorDB give NaN, as for a float zero."
+        only: [neo4j, postgres, oracle]
         cypher: "RETURN 5.0 % $z"
         parameters: {z: 0}
         error: true
+      - only: [neo4j, postgres, oracle]
+        cypher: "WITH 0 AS z RETURN 5.0 % z"
+        error: true
+      - only: [neo4j, postgres, oracle]
+        cypher: "UNWIND [5.0] AS x RETURN x % 0"
+        error: true
+      - only: [neo4j, postgres, oracle]
+        cypher: "RETURN $x % $z"
+        parameters: {x: 5, z: 0}
+        error: true
+      - note: "NaN or an infinity taken % by an integer zero at run time fails too (drivine4j#550, drivine4j#687)."
+        only: [neo4j, postgres, oracle]
+        cypher: "RETURN $x % $z"
+        parameters: {x: {$float: "NaN"}, z: 0}
+        error: true
+      - note: "Null taken % by an integer zero in an aggregate is null still, where the statement is given NaN (drivine4j#687)."
+        only: [neo4j, postgres]
+        cypher: "UNWIND [null] AS i RETURN [$x, sum(i % 0)]"
+        parameters: {x: {$float: "NaN"}}
+        rows: [[{$float: "NaN"}, 0]]
+      - note: "And divided by one (drivine4j#687). Oracle and SQLite are drivine4j#559 and drivine4j#554."
+        only: [neo4j, postgres]
+        cypher: "RETURN $x / $z"
+        parameters: {x: {$float: "NaN"}, z: 0}
+        error: true
+      - only: [neo4j, postgres]
+        cypher: "UNWIND [0.0 / 0.0] AS x WITH x, 0 AS z RETURN x / z"
+        error: true
+      - only: [neo4j, postgres]
+        cypher: "UNWIND [0.0 / 0.0] AS x WITH x, 0 AS z RETURN x % z"
+        error: true
+      - only: [neo4j, postgres]
+        cypher: "RETURN $x / $z"
+        parameters: {x: {$float: "Infinity"}, z: 0}
+        error: true
+      - note: "NaN by a float zero is NaN still, and null by an integer zero null (drivine4j#687)."
+        only: [neo4j, postgres]
+        cypher: "RETURN [$x / $f, -$x / $f, $x % $f, $n / $z, $n % $z]"
+        parameters: {x: {$float: "NaN"}, f: 0.0, n: null, z: 0}
+        rows: [[{$float: "NaN"}, {$float: "NaN"}, {$float: "NaN"}, null, null]]
+      - only: [neo4j, postgres, oracle]
+        cypher: "RETURN $x % $z"
+        parameters: {x: {$float: "Infinity"}, z: 0}
+        error: true
+      - note: "In an aggregate and an ORDER BY too (drivine4j#550)."
+        only: [neo4j, postgres, oracle]
+        cypher: "UNWIND [1, 2] AS i RETURN sum(i % 0)"
+        error: true
+      - only: [neo4j, postgres, oracle]
+        cypher: "UNWIND [1, 2] AS i RETURN i ORDER BY i % 0"
+        error: true
+      - note: "Null taken % by an integer zero is null (drivine4j#550)."
+        only: [neo4j, sql]
+        cypher: "RETURN [null % 0, $n % 0, $n % $z]"
+        parameters: {n: null, z: 0}
+        rows: [[null, null, null]]
       - note: "SQLite gives null for each, as for an integer divided by zero (drivine4j#554), where Neo4j fails."
         only: [sqlite]
         cypher: "WITH 3.0 AS x, 0 AS z RETURN [x / 0, $x / 0, 1.0 / $z, 1.0 / z, 5.0 % $z]"
         parameters: {x: 3.0, z: 0}
         rows: [[null, null, null, null, null]]
-      - note: "Oracle gives the number taken % by zero, as its MOD does (drivine4j#550)."
+      - note: "Any number taken % by a float zero written is NaN."
+        except: [neptune]
+        cypher: "RETURN [5 % 0.0, -5.5 % 0.0]"
+        rows: [[{$float: "NaN"}, {$float: "NaN"}]]
+      - note: "A float and an integer zero written in the statement alone, or worked out from numbers written alone, which Neo4j works out as it plans, as Java does: NaN. Oracle fails on each, as a float taken % by an integer zero at run time does: it can't tell a float written from pi() (drivine4j#686)."
         except: [oracle, neptune]
-        cypher: "RETURN [5.0 % 0, 0.0 % 0, 5 % 0.0, -5.5 % 0.0]"
+        cypher: "RETURN [5.0 % 0, 0.0 % 0]"
+        rows: [[{$float: "NaN"}, {$float: "NaN"}]]
+      - only: [neo4j, postgres, sqlite]
+        cypher: "RETURN [-5.0 % 0, 5.0 % -0, (5.0 + 0) % 0, 5.0 % (1 - 1)]"
         rows: [[{$float: "NaN"}, {$float: "NaN"}, {$float: "NaN"}, {$float: "NaN"}]]
+      - only: [oracle]
+        cypher: "RETURN 5.0 % 0"
+        error: true
+      - only: [oracle]
+        cypher: "RETURN 0.0 % 0"
+        error: true
+      - only: [oracle]
+        cypher: "RETURN -5.0 % 0"
+        error: true
+      - only: [oracle]
+        cypher: "RETURN 5.0 % -0"
+        error: true
+      - only: [oracle]
+        cypher: "RETURN (5.0 + 0) % 0"
+        error: true
+      - only: [oracle]
+        cypher: "RETURN 5.0 % (1 - 1)"
+        error: true
+      - note: "pi() and e() are floats Neo4j doesn't work out as it plans, so taken % by an integer zero they fail, as one at run time does (drivine4j#550). SQLite gives null (drivine4j#554)."
+        only: [neo4j, postgres, oracle]
+        cypher: "RETURN pi() % 0"
+        error: true
+      - only: [neo4j, postgres, oracle]
+        cypher: "RETURN e() % 0"
+        error: true
+      - only: [sqlite]
+        cypher: "RETURN [pi() % 0, e() % 0]"
+        rows: [[null, null]]
       - note: "SQLite gives null for an integer divided by zero (drivine4j#554)."
         only: [neo4j, memgraph, falkordb, postgres, oracle]
         cypher: "RETURN 1 / 0"
         error: true
-      - note: "SQLite gives null (drivine4j#554), and Oracle the number taken % by zero, as its MOD does (drivine4j#550)."
-        only: [neo4j, memgraph, falkordb, postgres]
+      - note: "SQLite gives null (drivine4j#554)."
+        only: [neo4j, memgraph, falkordb, postgres, oracle]
         cypher: "RETURN 5 % 0"
         error: true
+      - note: "count(DISTINCT …) and collect(DISTINCT …) keep each NaN apart, worked out for each row or by separate expressions: NaN is equal to nothing (drivine4j#558)."
+        only: [neo4j, sql]
+        cypher: "UNWIND [0.0, 0.0, 1.0] AS z RETURN count(DISTINCT z / z), size(collect(DISTINCT z / z))"
+        rows: [[3, 3]]
+      - only: [neo4j, sql]
+        cypher: "UNWIND [0.0/0.0, 0.0/0.0, 1.0, 1.0] AS r RETURN count(DISTINCT r), collect(DISTINCT r)"
+        rows: [[3, [{$float: "NaN"}, {$float: "NaN"}, 1.0]]]
+      - note: "So is a NaN read from a map that holds a node, which a SQL store keeps once each by its identity."
+        only: [neo4j, sql]
+        cypher: "UNWIND [0.0, 0.0] AS z MATCH (p:Person {name: 'Keanu'}) WITH {p: p, x: z / z} AS m RETURN count(DISTINCT m.x), collect(DISTINCT m.x)"
+        rows: [[2, [{$float: "NaN"}, {$float: "NaN"}]]]
+      - note: "A list holding NaN worked out for each row is one value to DISTINCT, as Neo4j compares it, and so is a stored one (writes.yaml)."
+        only: [neo4j, sql]
+        cypher: "UNWIND [1, 1, 2] AS k RETURN k, count(DISTINCT [x IN [k, 0.0/0.0] | x]) AS n ORDER BY k"
+        rows: [[1, 1], [2, 1]]
+      - only: [neo4j, sql]
+        cypher: "UNWIND [1, 1, 2] AS k RETURN DISTINCT [x IN [k, 0.0/0.0] | x] AS l ORDER BY l[0]"
+        rows: [[1, {$float: "NaN"}], [2, {$float: "NaN"}]]
+      - note: "Neo4j keeps apart lists and maps holding NaN that separate expressions of one list make; a SQL store compares them as JSON, and keeps them once (drivine4j#558)."
+        only: [neo4j]
+        cypher: "UNWIND [[0.0/0.0], [0.0/0.0], {x: 0.0/0.0}, {x: 0.0/0.0}] AS r RETURN count(DISTINCT r)"
+        rows: [4]
+      - only: [sql]
+        cypher: "UNWIND [[0.0/0.0], [0.0/0.0], {x: 0.0/0.0}, {x: 0.0/0.0}] AS r RETURN count(DISTINCT r)"
+        rows: [2]
+      - note: "WITH DISTINCT and RETURN DISTINCT keep a row whose item is NaN apart, as count(DISTINCT …) does (drivine4j#685)."
+        only: [neo4j, sql]
+        cypher: "UNWIND [0.0/0.0, 0.0/0.0] AS r WITH DISTINCT r RETURN count(*)"
+        rows: [2]
+      - only: [neo4j, sql]
+        cypher: "UNWIND [0.0, 0.0, 1.0, 1.0] AS z RETURN DISTINCT z / z AS v"
+        unordered: true
+        rows: [{$float: "NaN"}, {$float: "NaN"}, 1.0]
+      - only: [neo4j, sql]
+        cypher: "UNWIND [0.0, 0.0, 1.0, 1.0] AS z WITH DISTINCT z / z AS v, 'a' AS w RETURN count(*)"
+        rows: [3]
+      - note: "So are they ordered, skipped and limited, beside a node, and in a part of a UNION in CALL { } (drivine4j#685)."
+        only: [neo4j, sql]
+        cypher: "UNWIND [0.0, 0.0, 1.0, 1.0] AS z RETURN DISTINCT z / z AS v ORDER BY v SKIP 1 LIMIT 2"
+        rows: [{$float: "NaN"}, {$float: "NaN"}]
+      - only: [neo4j, sql]
+        cypher: "UNWIND [0.0, 0.0] AS z MATCH (p:Person {name: 'Keanu'}) WITH DISTINCT p, z / z AS v RETURN count(*)"
+        rows: [2]
+      - only: [neo4j, sql]
+        cypher: "CALL { UNWIND [0.0, 0.0] AS z RETURN DISTINCT z / z AS v UNION ALL RETURN 1.0 AS v } RETURN count(*)"
+        rows: [3]
+      - note: "A row holding a list with NaN, worked out for each row, is one row to DISTINCT, as Neo4j compares the list."
+        only: [neo4j, sql]
+        cypher: "UNWIND [1, 1] AS k WITH DISTINCT [k, 0.0/0.0] AS l RETURN count(*)"
+        rows: [1]
+      - note: "A number taken % by an infinity is the number, as a float, as in Java (drivine4j#555, drivine4j#683)."
+        only: [neo4j, sql]
+        cypher: "RETURN [5 % $i, -5 % $i, 5 % $n, 5.5 % $i, 0 % $n]"
+        parameters: {i: {$float: "Infinity"}, n: {$float: "-Infinity"}}
+        rows: [[5.0, -5.0, 5.0, 5.5, 0.0]]
+      - cypher: "WITH toFloat('Infinity') AS i RETURN [7 % i, 7 % -i]"
+        only: [neo4j, sql]
+        rows: [[7.0, 7.0]]
+      - note: "NaN or an infinity taken % by an infinity is NaN, and null is null, as in Java (drivine4j#555, drivine4j#683)."
+        only: [neo4j, sql]
+        cypher: "RETURN [$z % $i, $i % $i, $n % $i, null % $n]"
+        parameters: {i: {$float: "Infinity"}, n: {$float: "-Infinity"}, z: {$float: "NaN"}}
+        rows: [[{$float: "NaN"}, {$float: "NaN"}, {$float: "NaN"}, null]]
       - note: "toFloat reads a text as Java reads a double: NaN and the infinities by Java's names, spaces around them allowed. Memgraph gives null for each, and FalkorDB reads ' NaN ' as null."
         only: [neo4j, sql]
         cypher: "RETURN [toFloat('NaN'), toFloat('Infinity'), toFloat('-Infinity'), toFloat('+Infinity'), toFloat(' NaN '), toFloat('-NaN'), toFloat('Infinityx')]"

@@ -1,0 +1,119 @@
+# Installs the JDK gradle/pinned-jdk.properties pins and the Gradle distribution gradle-wrapper.properties names, each from
+# the archive its project publishes, checked against the SHA-256 pinned beside it. Adoptium and services.gradle.org serve
+# those archives as GitHub release assets, whose outages failed v0.31.0's release: so the archives are kept, and only
+# fetched where none is kept, with retries.
+#
+# They are kept in this repository's Actions cache, each keyed on its checksum. A run reads the caches of its own ref and
+# of main, so main's runs keep them for pull requests and tags; after a pin moves, the first run on main fetches them.
+# Where nothing is cached, they are fetched, and a run that can't fetch them fails naming the URL. An archive whose
+# SHA-256 isn't the pinned one is refused, so a cache can't bring another JDK.
+name: The pinned JDK and Gradle
+description: Installs the pinned Temurin and Gradle distribution from their checked archives, kept in the cache.
+inputs:
+  cache:
+    description: >-
+      Whether to read and keep the archives in the Actions cache. compiler-release.yml's build job passes false: a cache
+      entry a run's earlier job saved is unpacked before its archive is checked, so it fetches them.
+    default: 'true'
+runs:
+  using: composite
+  steps:
+    - name: The pins
+      id: pins
+      shell: bash
+      run: |
+        props=compiler/gradle/pinned-jdk.properties
+        wrapper=compiler/gradle/wrapper/gradle-wrapper.properties
+        case "$RUNNER_OS-$RUNNER_ARCH" in
+          Linux-X64) platform=linux-x64 ;; Linux-ARM64) platform=linux-aarch64 ;;
+          macOS-ARM64) platform=mac-aarch64 ;; Windows-X64) platform=windows-x64 ;;
+          *) echo "::error::No JDK is pinned for $RUNNER_OS-$RUNNER_ARCH in $props."; exit 1 ;;
+        esac
+        os=${platform%-*} arch=${platform#*-}
+        version=$(sed -n 's/^version=//p' "$props")
+        jdk_sha=$(sed -n "s/^sha256\.$platform=//p" "$props")
+        gradle_url=$(sed -n 's/^distributionUrl=//p' "$wrapper" | sed 's/\\:/:/g')
+        gradle_sha=$(sed -n 's/^distributionSha256Sum=//p' "$wrapper")
+        [[ -n "$version" && -n "$jdk_sha" ]] || { echo "::error::$props pins no JDK for $platform."; exit 1; }
+        [[ -n "$gradle_url" && -n "$gradle_sha" ]] || { echo "::error::$wrapper has no distributionUrl and distributionSha256Sum."; exit 1; }
+        dir="$HOME/.cache/drivine-pinned-toolchain"
+        mkdir -p "$dir"
+        {
+          echo "version=$version"
+          echo "jdk_url=https://api.adoptium.net/v3/binary/version/jdk-${version//+/%2B}/$os/$arch/jdk/hotspot/normal/eclipse"
+          echo "jdk_sha=$jdk_sha"
+          echo "jdk_file=$dir/temurin-$version-$platform.$([[ $os == windows ]] && echo zip || echo tar.gz)"
+          echo "gradle_url=$gradle_url"
+          echo "gradle_sha=$gradle_sha"
+          echo "gradle_file=$dir/${gradle_url##*/}"
+        } >> "$GITHUB_OUTPUT"
+    # Each archive cached under its own checksum, and saved as soon as it is fetched, so a job that fetches one and fails
+    # on the other, as in an outage, leaves the first for its re-run.
+    - if: inputs.cache == 'true'
+      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      with:
+        path: ${{ steps.pins.outputs.jdk_file }}
+        key: pinned-jdk-${{ steps.pins.outputs.jdk_sha }}
+    - if: inputs.cache == 'true'
+      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      with:
+        path: ${{ steps.pins.outputs.gradle_file }}
+        key: pinned-gradle-${{ steps.pins.outputs.gradle_sha }}
+    - name: The JDK's archive, checked
+      id: jdk
+      shell: bash
+      run: '"$GITHUB_ACTION_PATH/archive.sh" "$URL" "$SHA" "$FILE"'
+      env:
+        URL: ${{ steps.pins.outputs.jdk_url }}
+        SHA: ${{ steps.pins.outputs.jdk_sha }}
+        FILE: ${{ steps.pins.outputs.jdk_file }}
+    - if: inputs.cache == 'true' && steps.jdk.outputs.fetched == 'true'
+      uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      with:
+        path: ${{ steps.pins.outputs.jdk_file }}
+        key: pinned-jdk-${{ steps.pins.outputs.jdk_sha }}
+    - name: The Gradle distribution, checked
+      id: gradle
+      shell: bash
+      run: '"$GITHUB_ACTION_PATH/archive.sh" "$URL" "$SHA" "$FILE"'
+      env:
+        URL: ${{ steps.pins.outputs.gradle_url }}
+        SHA: ${{ steps.pins.outputs.gradle_sha }}
+        FILE: ${{ steps.pins.outputs.gradle_file }}
+    - if: inputs.cache == 'true' && steps.gradle.outputs.fetched == 'true'
+      uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      with:
+        path: ${{ steps.pins.outputs.gradle_file }}
+        key: pinned-gradle-${{ steps.pins.outputs.gradle_sha }}
+    # Where ./gradlew looks for the distribution it would fetch: wrapper/dists/<name>/<base 36 of the MD5 of its URL>.
+    # The wrapper checks the zip against distributionSha256Sum again, and unpacks it.
+    - name: The Gradle distribution, where the wrapper looks for it
+      shell: bash
+      env:
+        URL: ${{ steps.pins.outputs.gradle_url }}
+        FILE: ${{ steps.pins.outputs.gradle_file }}
+      run: |
+        hash=$(python3 -c 'import hashlib,sys; n=int.from_bytes(hashlib.md5(sys.argv[1].encode()).digest(),"big"); d="0123456789abcdefghijklmnopqrstuvwxyz"; s=""
+        while n: n,r=divmod(n,36); s=d[r]+s
+        print(s)' "$URL")
+        name=$(basename "$FILE" .zip)
+        mkdir -p "$HOME/.gradle/wrapper/dists/$name/$hash"
+        cp "$FILE" "$HOME/.gradle/wrapper/dists/$name/$hash/"
+    - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+      with:
+        distribution: jdkfile
+        jdkFile: ${{ steps.pins.outputs.jdk_file }}
+        java-version: ${{ steps.pins.outputs.version }}
+    - name: The JDK is the pinned one
+      shell: bash
+      env:
+        PINNED: ${{ steps.pins.outputs.version }}
+      run: |
+        settings=$("$JAVA_HOME/bin/java" -XshowSettings:properties -version 2>&1)
+        runtime=$(sed -n 's/^ *java\.runtime\.version = //p' <<< "$settings")
+        vendor=$(sed -n 's/^ *java\.vendor = //p' <<< "$settings")
+        if [[ "$runtime" != "$PINNED"* || "$vendor" != *Adoptium* ]]; then
+          echo "::error::The JDK installed is $vendor $runtime, not Temurin $PINNED as compiler/gradle/pinned-jdk.properties pins."
+          exit 1
+        fi
+        echo "Temurin $runtime."

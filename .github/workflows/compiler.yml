@@ -1,0 +1,100 @@
+# The Cypher compiler (compiler/): its JVM tests, and every other target checked against the JVM, byte for byte.
+name: Compiler
+
+on:
+  pull_request:
+    paths: ['compiler/**', '*.yaml', '.github/workflows/compiler.yml', '.github/actions/pinned-toolchain/**']
+  push:
+    branches: [main]
+    paths: ['compiler/**', '*.yaml', '.github/workflows/compiler.yml', '.github/actions/pinned-toolchain/**']
+  workflow_dispatch:
+  # compiler-release.yml runs this first, on the tag it releases, so a tag doesn't run it twice.
+  workflow_call:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    # Named, so a step runs with pipefail: a check piped into tee still fails the step.
+    shell: bash
+    working-directory: compiler
+
+# Each job runs on the JDK gradle/pinned-jdk.properties pins, exactly: its tzdb is the zones the compiler takes. It and the
+# Gradle distribution are installed from their checked archives, kept in the cache (.github/actions/pinned-toolchain).
+jobs:
+  jvm:
+    name: JVM tests, double fuzz and metadata compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: ./.github/actions/pinned-toolchain
+      - uses: gradle/actions/setup-gradle@748248ddd2a24f49513d8f472f81c3a07d4d50e1 # v4.4.4
+      # Clean, as the wasm optimize step leaves stale output behind.
+      - run: ./gradlew --no-daemon clean jvmTest metadataCompile
+      - name: The sync from drivine4j, over a made-up drivine4j
+        run: scripts/test-sync.sh
+      # As drivine4j publishes it from a pinned commit, into a repository of its own: the POMs and module metadata build.
+      - name: The Maven publications
+        run: ./gradlew --no-daemon publishJvmPublicationToMavenLocal publishKotlinMultiplatformPublicationToMavenLocal -Pcompiler.version=0.0.0-ci -Dmaven.repo.local="$RUNNER_TEMP/compiler-repo"
+      - name: Summary
+        if: always()
+        run: ../.github/scripts/compiler-summary.sh build/test-results/jvmTest >> "$GITHUB_STEP_SUMMARY"
+
+  wasmjs:
+    name: wasmJs (Node 22) double fuzz and corpus
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: ./.github/actions/pinned-toolchain
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with: { node-version: '22' }
+      - uses: gradle/actions/setup-gradle@748248ddd2a24f49513d8f472f81c3a07d4d50e1 # v4.4.4
+      - run: ./gradlew --no-daemon clean wasmJsNodeTest wasmJsCorpusCheck -Pnode="$(command -v node)" | tee corpus.log
+      - name: Summary
+        if: always()
+        run: ../.github/scripts/compiler-summary.sh build/test-results/wasmJsNodeTest corpus.log >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with: { name: wasmjs-differences, path: compiler/build/oracle/differences-*.jsonl, if-no-files-found: ignore }
+
+  native-linux:
+    name: linuxX64 double fuzz and corpus, and the other native targets built
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: ./.github/actions/pinned-toolchain
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with: { python-version: '3.12' }
+      - uses: gradle/actions/setup-gradle@748248ddd2a24f49513d8f472f81c3a07d4d50e1 # v4.4.4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.konan
+          key: konan-${{ runner.os }}-${{ hashFiles('compiler/build.gradle.kts') }}
+      - run: ./gradlew --no-daemon clean linuxX64Test nativeCorpusCheck -Ppython="$(command -v python)" | tee corpus.log
+      - name: The shared library for linuxArm64 and mingwX64, cross-compiled
+        run: ./gradlew --no-daemon linkDrivinecypherReleaseSharedLinuxArm64 linkDrivinecypherReleaseSharedMingwX64
+      - name: Summary
+        if: always()
+        run: ../.github/scripts/compiler-summary.sh build/test-results/linuxX64Test corpus.log >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with: { name: linux-differences, path: compiler/build/oracle/differences-*.jsonl, if-no-files-found: ignore }
+
+  native-macos:
+    name: macosArm64 double fuzz and corpus
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: ./.github/actions/pinned-toolchain
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with: { python-version: '3.12' }
+      - uses: gradle/actions/setup-gradle@748248ddd2a24f49513d8f472f81c3a07d4d50e1 # v4.4.4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.konan
+          key: konan-${{ runner.os }}-${{ hashFiles('compiler/build.gradle.kts') }}
+      - run: ./gradlew --no-daemon clean macosArm64Test nativeCorpusCheck -Ppython="$(command -v python)" | tee corpus.log
+      - name: Summary
+        if: always()
+        run: ../.github/scripts/compiler-summary.sh build/test-results/macosArm64Test corpus.log >> "$GITHUB_STEP_SUMMARY"
