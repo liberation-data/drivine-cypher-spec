@@ -1612,7 +1612,7 @@ abstract class SqlCypherCompiler(
                 val compared = mixed.mapNotNull { variable ->
                     (part.scope.getValue(variable) as? Value.Json)?.takeIf { it.ordered }?.let { PENDING_COLUMN.find(it.sql)?.groupValues?.get(1) }
                 }.toSet()
-                val columns = part.columns.joinToString(", ") { (column, _) ->
+                val columns = returned(part).joinToString(", ") { (column, _) ->
                     if (column in compared) "${comparable(Value.Json("$q.$column", ordered = true))} AS $column" else "$q.$column"
                 }
                 "SELECT $columns FROM (\n${indent(part.sql)}\n) $q"
@@ -1637,7 +1637,13 @@ abstract class SqlCypherCompiler(
                     list = all.all { it?.list == true }, itemLists = all.all { it?.itemLists == true }, flat = all.all { it?.flat == true },
                 )
             }
-            return Projected(sql, scope, emptyList(), projected.first().columns)
+            return Projected(sql, scope, emptyList(), returned(projected.first()))
+        }
+
+        /** The columns of [part], a query of a `UNION` in `CALL { … }`, that carry what it returns: not those it orders its rows by. */
+        private fun returned(part: Projected): List<Pair<String, Boolean>> {
+            val order = part.order.map { it.first }.toSet()
+            return part.columns.filterNot { it.first in order }
         }
 
         private fun unwind(select: Select, unwind: Clause.Unwind) {
