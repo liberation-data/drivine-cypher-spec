@@ -627,7 +627,7 @@ cases:
         rows: [[250, 31375]]
 
   - name: "A write that returns a row past 32 KB"
-    description: "A statement that writes returns a row past 32 KB whole: a text of 40,000 characters it stores, alone and in a list, and one it works out of 80,000. On Oracle a compiled write's block returns each row as JSON, which a driver may read in parts of 32 KB. Two rows are covered once an Oracle fix ships."
+    description: "A statement that writes returns a row past 32 KB whole: a text of 40,000 characters it stores, alone, and one it works out of 80,000, in a list. On Oracle a compiled write's block returns each row as JSON, which a driver may read in parts of 32 KB. Two rows are covered once an Oracle fix ships (drivine4j#670)."
     steps:
       - cypher: "CREATE (n:CyWrite {i: 1, t: $t}) RETURN n.t"
         parameters: {t: {$repeat: "x", times: 40000}}
