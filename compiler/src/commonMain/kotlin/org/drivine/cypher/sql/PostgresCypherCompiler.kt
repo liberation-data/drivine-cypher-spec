@@ -417,10 +417,12 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
 
     /**
      * Where the statement may work NaN or an infinity out ([nonFinite]), NaN for a number by a float zero, as in Java, where `numeric`
-     * fails: a float has a scale, an integer none (#408). By an integer zero it fails still, as on Neo4j.
+     * fails: a float has a scale, an integer none (#408). By an integer zero it fails still, as on Neo4j. By an infinity, the
+     * number as a float, as in Java, where `numeric` keeps an integer's scale of 0 (drivine4j#555).
      */
     override fun modulo(a: String, b: String) = if (!nonFinite) "($a % $b)" else shared(a, b) { (x, y) ->
-        "CASE WHEN $y = 0 AND $x IS NOT NULL AND scale($y) > 0 THEN 'NaN'::numeric ELSE $x % $y END"
+        "CASE WHEN $y = 0 AND $x IS NOT NULL AND scale($y) > 0 THEN 'NaN'::numeric " +
+            "WHEN $y IN ('Infinity'::numeric, '-Infinity'::numeric) THEN ${float("$x % $y")} ELSE $x % $y END"
     }
 
     override fun startsWith(a: String, b: String) = "starts_with($a, $b)"
