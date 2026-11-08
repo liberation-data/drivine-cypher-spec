@@ -3,10 +3,10 @@ name: Compiler
 
 on:
   pull_request:
-    paths: ['compiler/**', '*.yaml', '.github/workflows/compiler.yml']
+    paths: ['compiler/**', '*.yaml', '.github/workflows/compiler.yml', '.github/actions/pinned-toolchain/**']
   push:
     branches: [main]
-    paths: ['compiler/**', '*.yaml', '.github/workflows/compiler.yml']
+    paths: ['compiler/**', '*.yaml', '.github/workflows/compiler.yml', '.github/actions/pinned-toolchain/**']
   workflow_dispatch:
   # compiler-release.yml runs this first, on the tag it releases, so a tag doesn't run it twice.
   workflow_call:
@@ -20,15 +20,15 @@ defaults:
     shell: bash
     working-directory: compiler
 
-# Each job runs on the JDK gradle/pinned-jdk.properties pins, exactly: its tzdb is the zones the compiler takes.
+# Each job runs on the JDK gradle/pinned-jdk.properties pins, exactly: its tzdb is the zones the compiler takes. It and the
+# Gradle distribution are installed from their checked archives, kept in the cache (.github/actions/pinned-toolchain).
 jobs:
   jvm:
     name: JVM tests, double fuzz and metadata compile
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v5
-        with: { distribution: temurin, java-version: '21.0.13+9.0.LTS' }
+      - uses: ./.github/actions/pinned-toolchain
       - uses: gradle/actions/setup-gradle@v4
       # Clean, as the wasm optimize step leaves stale output behind.
       - run: ./gradlew --no-daemon clean jvmTest metadataCompile
@@ -46,8 +46,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v5
-        with: { distribution: temurin, java-version: '21.0.13+9.0.LTS' }
+      - uses: ./.github/actions/pinned-toolchain
       - uses: actions/setup-node@v4
         with: { node-version: '22' }
       - uses: gradle/actions/setup-gradle@v4
@@ -64,8 +63,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v5
-        with: { distribution: temurin, java-version: '21.0.13+9.0.LTS' }
+      - uses: ./.github/actions/pinned-toolchain
       - uses: actions/setup-python@v5
         with: { python-version: '3.12' }
       - uses: gradle/actions/setup-gradle@v4
@@ -88,8 +86,7 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v5
-        with: { distribution: temurin, java-version: '21.0.13+9.0.LTS' }
+      - uses: ./.github/actions/pinned-toolchain
       - uses: actions/setup-python@v5
         with: { python-version: '3.12' }
       - uses: gradle/actions/setup-gradle@v4

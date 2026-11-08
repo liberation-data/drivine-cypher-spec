@@ -9,7 +9,10 @@
 #   bundle, as one deployment: the Central Portal releases all of them or none.
 # - workflow_dispatch, and a pull request that changes the release machinery, are dry runs: everything but the upload,
 #   signed with a throwaway key, with the bundle left as the run's artifact to inspect. A dry run also rebuilds the
-#   bundle as publish does, on the JDK and Gradle distribution build kept, with GitHub's release downloads blocked.
+#   bundle as publish does, from the JDK and Gradle archives build kept, with GitHub's release downloads blocked.
+# - Every job installs the pinned JDK and Gradle with .github/actions/pinned-toolchain, from archives kept in the cache
+#   (before the gate) or in this run's artifact (after it), so a GitHub release-download outage, which failed v0.31.0's
+#   publish, can't hold up a release whose cache is warm.
 name: Compiler release
 
 on:
@@ -23,7 +26,7 @@ on:
       - .github/workflows/compiler-release.yml
       - .github/workflows/compiler.yml
       - .github/scripts/compiler-release-check.sh
-      - .github/actions/release-jdk/action.yml
+      - .github/actions/pinned-toolchain/action.yml
       - compiler/build.gradle.kts
       - compiler/settings.gradle.kts
       - compiler/gradle.properties
@@ -110,18 +113,18 @@ jobs:
       PUBLISH: ${{ needs.check.outputs.publish }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # No Gradle cache: the release is built from nothing but the checked-out ref.
-      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
-        with: { distribution: temurin, java-version: '21.0.13+9.0.LTS' }
-      # The publish job rebuilds the bundle on this JDK, installed from this artifact (.github/actions/release-jdk), so
-      # it fetches no JDK after the gate: Adoptium serves its JDKs as GitHub release assets, whose outage failed
-      # v0.31.0's publish twice. The archive holds the JDK's folder as setup-java installed it: on macOS, the
-      # architecture's folder, which holds Contents/Home ($JAVA_HOME).
-      - name: Keep the JDK for publish
-        run: |
-          jdk=$(cd "$JAVA_HOME/../.." && pwd)
-          mkdir -p "$RUNNER_TEMP/release-jdk"
-          tar -czf "$RUNNER_TEMP/release-jdk/jdk.tar.gz" -C "$(dirname "$jdk")" "$(basename "$jdk")"
+      # No Gradle cache: the release is built from nothing but the checked-out ref, and the JDK and Gradle archives it
+      # pins, each checked against its SHA-256 there.
+      - uses: ./.github/actions/pinned-toolchain
+        id: toolchain
+      # The archives, kept for the jobs after the gate, which install them from here and fetch nothing.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: compiler-release-toolchain
+          path: ${{ steps.toolchain.outputs.dir }}
+          if-no-files-found: error
+          # Already compressed.
+          compression-level: 0
       - name: Maven Central doesn't have this version yet
         run: |
           # Only an answer of 200 stops a release. When Maven Central can't be asked, the step goes on: the portal
@@ -152,19 +155,6 @@ jobs:
           SIGNING_PASSWORD: dry-run
       - name: Check the publications
         run: ../.github/scripts/compiler-release-check.sh build/nmcp/zip/publicationAggregated.zip "$VERSION" verify release
-      # The Gradle distribution ./gradlew fetched, kept beside the JDK: services.gradle.org serves it as a GitHub release
-      # asset too.
-      - name: Keep the Gradle distribution for publish
-        run: tar -czf "$RUNNER_TEMP/release-jdk/gradle.tar.gz" -C "$HOME/.gradle/wrapper/dists" .
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: compiler-release-jdk
-          path: |
-            ${{ runner.temp }}/release-jdk/jdk.tar.gz
-            ${{ runner.temp }}/release-jdk/gradle.tar.gz
-          if-no-files-found: error
-          # Already compressed.
-          compression-level: 0
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: compiler-maven-central-${{ env.VERSION }}
@@ -185,8 +175,9 @@ jobs:
       VERSION: ${{ needs.check.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # build's JDK and Gradle distribution, so nothing is fetched from GitHub's release downloads after the gate.
-      - uses: ./.github/actions/release-jdk
+      # build's JDK and Gradle archives, checked again, so nothing is fetched from GitHub's release downloads after the gate.
+      - uses: ./.github/actions/pinned-toolchain
+        with: { artifact: compiler-release-toolchain }
       - name: The release secrets are set
         env:
           SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
@@ -228,9 +219,9 @@ jobs:
           path: compiler/uploaded/publicationAggregated.zip
           if-no-files-found: warn
 
-  # A dry run's stand-in for publish, which it skips: the bundle rebuilt from the same commit on the JDK and Gradle
-  # distribution build kept, as publish rebuilds it, with GitHub's release downloads and Adoptium's API blocked, so a
-  # dry run shows that publish needs neither. Unsigned: this job has no key, and build checked the signing.
+  # A dry run's stand-in for publish, which it skips: the JDK and Gradle installed from the archives build kept, and the
+  # bundle rebuilt from the same commit, as publish does, with GitHub's release downloads and Adoptium's API blocked
+  # throughout, so a dry run shows that publish needs neither. Unsigned: this job has no key, and build checked the signing.
   publish-dry-run:
     needs: [check, build]
     if: needs.check.outputs.publish != 'true'
@@ -239,7 +230,6 @@ jobs:
       VERSION: ${{ needs.check.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ./.github/actions/release-jdk
       - name: Block GitHub's release downloads and Adoptium's API
         run: |
           for host in objects.githubusercontent.com release-assets.githubusercontent.com api.adoptium.net api.foojay.io; do
@@ -249,6 +239,8 @@ jobs:
             echo "::error::api.adoptium.net is still reachable, so this job shows nothing."
             exit 1
           fi
+      - uses: ./.github/actions/pinned-toolchain
+        with: { artifact: compiler-release-toolchain }
       - name: Build the bundle as publish does
         run: ./gradlew --no-daemon zipAggregationPublication -Pcompiler.version="$VERSION"
       - name: Check the bundle
