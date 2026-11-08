@@ -26,7 +26,7 @@ on:
       - .github/workflows/compiler-release.yml
       - .github/workflows/compiler.yml
       - .github/scripts/compiler-release-check.sh
-      - .github/actions/pinned-toolchain/action.yml
+      - .github/actions/pinned-toolchain/**
       - compiler/build.gradle.kts
       - compiler/settings.gradle.kts
       - compiler/gradle.properties

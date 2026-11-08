@@ -150,8 +150,8 @@ reviewed pull request. To bump it:
 
 1. Set `version` to the new Temurin 21 release, and each `sha256.<os>-<arch>` to Adoptium's checksum of that release's
    archive (`https://api.adoptium.net/v3/assets/release_name/eclipse/jdk-<version>?os=<os>&architecture=<arch>&image_type=jdk`).
-2. Nothing else names it: CI installs the JDK from Adoptium's archive of `version`, checked against its `sha256`
-   (`.github/actions/pinned-toolchain`). Merge the bump to `main` before the next tag, so main's run fetches the new
+2. Nothing else names it but this section's first line (with `tzdb`): CI installs the JDK from Adoptium's archive of
+   `version`, checked against its `sha256` (`.github/actions/pinned-toolchain`). Merge the bump to `main` before the next tag, so main's run fetches the new
    archive into the cache a tag's run reads (see [Releasing](#releasing)).
 3. Run `./gradlew generateTables`. Where the JDK brings another tzdb, it stops and names it: set `tzdb` to that.
 4. Open the pull request, and say in it which zones the new tzdb adds or removes (the diff of the generated
@@ -274,7 +274,7 @@ Every job installs the pinned JDK and Gradle with `.github/actions/pinned-toolch
 against the SHA-256 pinned beside it, so a cache or an artifact can't bring another. Adoptium and services.gradle.org
 serve those archives as GitHub release assets, whose outage failed v0.31.0's upload three times, so they're kept:
 
-- Up to step 2, in the repository's Actions cache, keyed on both checksums. A tag's run reads the caches of `main`, so
+- Up to step 2, in the repository's Actions cache, each under its checksum, and saved as soon as it is fetched, so a re-run keeps what an earlier attempt got. A tag's run reads the caches of `main`, so
   the first tag after a bump of the JDK or of Gradle needs a run on `main` since the bump (its merge, or
   workflow_dispatch of `Compiler` on `main`) to have fetched them. GitHub drops a cache no run has read for 7 days, so
   after a quiet week, run `Compiler` on `main` before tagging too. Where nothing is cached, the job fetches them, with
