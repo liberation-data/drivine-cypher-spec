@@ -170,6 +170,14 @@ abstract class SqlCypherCompiler(
     protected open fun writtenNaN(json: String): String? = null
 
     /**
+     * Whether the JSON [json] is NaN itself, not a list or a map holding it: null where it can't be, as the statement is given or
+     * works out none and the store holds none. `count(DISTINCT …)` and `collect(DISTINCT …)` keep each such value apart, as
+     * Neo4j does, NaN being equal to nothing, while a list or a map holding NaN is compared as any other, as Neo4j compares one
+     * stored or worked out for each row (drivine4j#558).
+     */
+    protected open fun bareNaN(json: String): String? = null
+
+    /**
      * Whether a statement given no NaN or infinity, one that writes where [writes], is compiled as one given one ([nonFinite])
      * where it may work one out ([worksOutNonFinite]): a float divided by zero, or `toFloat` of a text that names one; or, where
      * [infinitiesStored], NaN out of an infinity it reads ([worksOutNaN]). By default not: a store whose floats hold them works
@@ -5259,7 +5267,7 @@ abstract class SqlCypherCompiler(
                     temporals = arguments.any(::hasTemporals),
                     text = arguments.all(::isText), texts = arguments.all(::holdsTexts),
                 )
-                "count" -> Value.Json(scalar("count($distinct${countable(one())})"))
+                "count" -> Value.Json(scalar(counted(one(), function.distinct)))
                 // collect(DISTINCT …) is collected in a WITH of its own, then kept once each: see aggregatesFirst.
                 "collect" -> if (function.distinct) error("collect(DISTINCT …) is gathered by aggregatesFirst") else when (val gathered = one()) {
                     // Nodes or relationships are gathered as their ids, so a list of them is still of them.
@@ -5571,7 +5579,25 @@ abstract class SqlCypherCompiler(
         /** The ids [id] of a group, gathered as `collect` gathers them, as JSON that compares. */
         private fun gatheredIds(id: String) = comparable(Value.Json(collect(id, rowOrder), ordered = true))
 
+        /**
+         * `count` of [value], with [distinct] once each: a value that is NaN ([bareNaN]), equal to nothing, is counted
+         * each time, beside the others once each.
+         */
+        private fun counted(value: Value, distinct: Boolean): String {
+            val counted = countable(value)
+            // Not asked of a value the statement makes of a kind that is no float, nor of a temporal value, which is none.
+            val nan = (value as? Value.Json)?.takeIf { distinct && mayBeFloat(it) }?.let { bareNaN(counted) }
+                ?: return "count(${if (distinct) "DISTINCT " else ""}$counted)"
+            // Asked as WHEN, not NOT: a store's test may be null where a value holds no NaN (SQLite's of a map without its key),
+            // and such a value is counted among the others, not left out.
+            return "(count(DISTINCT CASE WHEN $nan THEN NULL ELSE $counted END) + count(CASE WHEN $nan THEN 1 END))"
+        }
+
         /** What `count` counts of a value: a node by its row, anything else by its value, nulls not counted. */
+        /** Whether [value] may be a float, and so NaN: not where the statement makes it of another kind, a text, a list or a temporal value. */
+        private fun mayBeFloat(value: Value.Json) =
+            (value.known == null || value.known == Value.Known.FLOAT) && !value.text && !value.list && value.temporal == null
+
         private fun countable(value: Value): String = when (value) {
             is Value.Node -> value.nid
             is Value.Relationship -> value.eid

@@ -870,12 +870,12 @@ class OracleCypherCompiler(
     /**
      * Each item where it is first among those equal to it as `JSON` compares them, kept as it is: not by its text, which is
      * at most 4,000 bytes and keeps a map's keys in the order written, and not read back from it, which would read a float
-     * that is a whole number, `2.0`, as the number 2.
+     * that is a whole number, `2.0`, as the number 2. Each that is NaN, equal to nothing, is kept ([bareNaN]).
      */
     override fun distinctItems(list: String, temporal: Boolean) =
         "(SELECT COALESCE(JSON_ARRAYAGG(d.item ORDER BY d.item_no RETURNING JSON), JSON('[]')) " +
-            "FROM (SELECT e.item_no, e.item, ROW_NUMBER() OVER (PARTITION BY e.item ORDER BY e.item_no) AS n " +
-            "FROM ${elements(list, "e", temporal)}) d WHERE d.n = 1)"
+            "FROM (SELECT e.item_no, e.item, ROW_NUMBER() OVER (PARTITION BY e.item${bareNaN("e.item")?.let { ", CASE WHEN $it THEN e.item_no END" }.orEmpty()} " +
+            "ORDER BY e.item_no) AS n FROM ${elements(list, "e", temporal)}) d WHERE d.n = 1)"
 
     override fun firstOfEach(list: String, identities: String) =
         "(SELECT ${aggregateList("v.item", "v.item_no")} FROM ${elements(list, "v")} JOIN (SELECT d.item_no FROM (SELECT e.item_no, " +
@@ -1015,6 +1015,9 @@ class OracleCypherCompiler(
 
     /** Oracle's JSON holds NaN, which a write may store. */
     override fun writtenNaN(json: String) = isNaN(json)
+
+    /** Whatever the statement is given: Oracle's JSON holds NaN, which a write may store. None in what the statement writes alone. */
+    override fun bareNaN(json: String) = if (nanFree(json)) null else isNaN(json)
 
     /**
      * Whether the JSON [json] is or holds NaN, at any depth: a list or a map by its text as extended JSON writes it, where a
