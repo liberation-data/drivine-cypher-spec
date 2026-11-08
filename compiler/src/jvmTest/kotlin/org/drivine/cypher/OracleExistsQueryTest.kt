@@ -9,7 +9,9 @@ import kotlin.test.assertTrue
 /**
  * On Oracle, the query of an `EXISTS { … }` is read from a derived table, as a `COUNT { … }`'s is: Oracle refuses an `ORDER BY`
  * that ends the query of an `EXISTS` (ORA-00907), and one whose body unwinds a list or sorts its rows ends in one
- * (drivine4j#449). A body of a `UNION` is read the same way. The spec's "EXISTS { } over UNWIND" case runs them on each store. Postgres and SQLite read the query as it is.
+ * (drivine4j#449). A body of a `UNION` is read the same way, and so is one in a `CASE`, a list comprehension or a write. The
+ * spec's "EXISTS { } over UNWIND" and "SET and MERGE with EXISTS { } over UNWIND" cases run them on each store. Postgres
+ * and SQLite read the query as it is.
  */
 class OracleExistsQueryTest {
 
@@ -21,6 +23,14 @@ class OracleExistsQueryTest {
         "UNWIND [1, 2, 3] AS o RETURN o, EXISTS { UNWIND range(1, o) AS j WITH j WHERE EXISTS { UNWIND [2, 3] AS k WITH k WHERE k = j RETURN k } RETURN j }",
         "UNWIND [1, 2, 3] AS o RETURN o, EXISTS { UNWIND [1] AS j WITH j WHERE j = o RETURN j UNION UNWIND [3] AS j WITH j WHERE j = o RETURN j }",
         "UNWIND [1, 2, 3] AS o CALL (o) { RETURN EXISTS { UNWIND [1, 2] AS j WITH j WHERE j = o RETURN j } AS e } RETURN o, e",
+        "UNWIND [1, 2, 3] AS o RETURN o, CASE WHEN EXISTS { UNWIND [1, 2] AS j WITH j WHERE j = o RETURN j } THEN 'y' ELSE 'n' END",
+        "UNWIND [1, 2] AS o RETURN o, [x IN [1, 2, 3] WHERE EXISTS { UNWIND [2, 3] AS j WITH j WHERE j = x + o RETURN j } | x]",
+    )
+
+    /** Writes, which SQLite compiles to steps in a JSON text, where its `EXISTS (` isn't found as it is in [existsBodies]. */
+    private val writes = listOf(
+        "MATCH (n:CyWrite) WHERE EXISTS { UNWIND keys(n) AS k WITH k WHERE k = 'a' RETURN k } SET n.hasA = true RETURN n.id",
+        "MERGE (n:CyWrite {id: 3}) SET n.e = EXISTS { UNWIND [1, 3] AS j WITH j WHERE j = n.id RETURN j ORDER BY j } RETURN n.e",
     )
 
     /** Each `EXISTS (` of [sql] that opens a subquery, and the text that follows it. */
@@ -28,7 +38,7 @@ class OracleExistsQueryTest {
 
     @Test
     fun `each EXISTS query is read from a derived table on Oracle`() {
-        for (cypher in statements) {
+        for (cypher in statements + writes) {
             val sql = OracleCypherCompiler("g").compile(cypher).sql
             val bodies = existsBodies(sql)
             assertTrue(bodies.isNotEmpty() && bodies.all { it == "SELECT 1 FROM (" }, sql)
@@ -46,8 +56,9 @@ class OracleExistsQueryTest {
 
     @Test
     fun `Postgres and SQLite read the EXISTS query as it is`() {
-        for (cypher in statements) {
-            for (sql in listOf(PostgresCypherCompiler("g").compile(cypher).sql, SqliteCypherCompiler("g").compile(cypher).sql)) {
+        for (cypher in statements + writes) {
+            val compilers = if (cypher in writes) listOf(PostgresCypherCompiler("g")) else listOf(PostgresCypherCompiler("g"), SqliteCypherCompiler("g"))
+            for (sql in compilers.map { it.compile(cypher).sql }) {
                 val bodies = existsBodies(sql)
                 assertTrue(bodies.isNotEmpty() && bodies.none { it.startsWith("SELECT 1 FROM (") }, sql)
             }
