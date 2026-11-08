@@ -1095,14 +1095,29 @@ class OracleCypherCompiler(
     override fun modulo(a: String, b: String) = "MOD($a, $b)"
 
     /**
-     * As Java's `%` gives it where either side is NaN or an infinity, which [modulo]'s `NUMBER`s hold neither of, so `%` gave
-     * null (drivine4j#683): a finite number taken % by an infinity is that number, as a float, and NaN or an infinity taken %
-     * by any number, or any number taken % by NaN, is NaN. A side the statement writes ([written]) is neither, so it isn't
-     * tested, and `%` of two such sides is as it was.
+     * As Java's `%` gives it, as Neo4j does, where [modulo]'s `MOD` of `NUMBER`s gives otherwise:
+     * - Where either side is NaN or an infinity, which `NUMBER`s hold neither of, so `%` gave null (drivine4j#683): a finite
+     *   number taken % by an infinity is that number, as a float, and NaN or an infinity taken % by any number, or any number
+     *   taken % by NaN, is NaN.
+     * - By an integer zero it fails, as `/` by one does (ORA-01476), where `MOD` gives the number taken (drivine4j#550): a
+     *   float too, as Neo4j fails at run time. Neo4j gives NaN where it works a float and an integer zero written in the
+     *   statement out as it plans, as Java does (`5.0 % 0`), but here a float written is no different from `pi()`, which
+     *   Neo4j fails on, so both fail (drivine4j#686).
+     * - Where either side is a float, in `BINARY_DOUBLE`, so the remainder is a float, as in Cypher (drivine4j#427): `NUMBER`
+     *   keeps no such kind, so `64.0 % 8.0` and `7 % 2.5` were the integers 0 and 2. By a float zero it is NaN.
+     *
+     * A number the statement writes ([writtenNumber]) is finite and of a kind known here, so it isn't tested for what it is not,
+     * and `%` of two integers written, the divisor not zero, is `MOD`'s alone, as before.
      */
     override fun remainder(a: String, b: String): String {
+        val (left, right) = writtenNumber(a) to writtenNumber(b)
+        // By an integer zero written: `NUMBER`'s division by zero, which fails as `1 / 0` does, where `MOD` would give the number
+        // taken. A null taken % by zero is null.
+        if (right == WrittenNumber.ZERO) return byZero(a, b)
+        val floats = left == WrittenNumber.FLOAT || right == WrittenNumber.FLOAT
+        val byFloatZero = right != WrittenNumber.INTEGER
+        if (left != null && right != null) return if (floats) "JSON_SCALAR(${floatRemainder(writtenDouble(a), writtenDouble(b), byFloatZero)})" else super.remainder(a, b)
         val (dividend, divisor) = mayBeNonFinite(a) to mayBeNonFinite(b)
-        if (!dividend && !divisor) return super.remainder(a, b)
         return shared(a, b) { (x, y) ->
             fun double(json: String) = "JSON_VALUE($json, '\$' RETURNING BINARY_DOUBLE)"
             val numbers = "${typeOf(x)} = 'number' AND ${typeOf(y)} = 'number'"
@@ -1110,13 +1125,59 @@ class OracleCypherCompiler(
                 "(${kind(x)} = 'double' AND (${double(x)} IS NAN OR ${double(x)} IS INFINITE))".takeIf { dividend },
                 isNaN(y).takeIf { divisor },
             ).joinToString(" OR ")
+            val nonFinite = if (nan.isEmpty()) "" else "WHEN $nan THEN CASE WHEN $numbers THEN JSON_SCALAR(BINARY_DOUBLE_NAN) END "
             val infinite = if (divisor) "WHEN ${kind(y)} = 'double' AND ${double(y)} IS INFINITE THEN CASE WHEN $numbers THEN JSON_SCALAR(${binaryDouble(x)}) END " else ""
-            "CASE WHEN $nan THEN CASE WHEN $numbers THEN JSON_SCALAR(BINARY_DOUBLE_NAN) END ${infinite}ELSE ${super.remainder(x, y)} END"
+            // The divisor isn't written, so it may be an integer zero, which is tested first: Neo4j fails on one whatever is taken % by it.
+            val zero = if (right == null) "WHEN ${kind(y)} = 'number' AND ${number(y)} = 0 THEN ${byZero(x, y)} " else ""
+            // A side written is a number of a kind known here, which isn't tested: a float makes the remainder one, and an integer
+            // leaves it to the other side. Its double is written out, short, as `TO_BINARY_DOUBLE('2')`.
+            val tests = listOfNotNull(
+                "${typeOf(x)} = 'number'".takeIf { left == null }, "${typeOf(y)} = 'number'".takeIf { right == null },
+                if (floats) null else "NOT (${listOfNotNull(integral(x).takeIf { left == null }, integral(y).takeIf { right == null }).joinToString(" AND ")})",
+            ).joinToString(" AND ")
+            val doubles = (if (left == null) binaryDouble(x) else writtenDouble(a)) to (if (right == null) binaryDouble(y) else writtenDouble(b))
+            val float = "WHEN $tests THEN JSON_SCALAR(${floatRemainder(doubles.first, doubles.second, byFloatZero)}) "
+            "CASE $zero$nonFinite$infinite${float}ELSE ${super.remainder(x, y)} END"
         }
     }
 
+    /**
+     * `a % b` of the JSON values [a] and [b], [b] an integer zero: where [a] is a number, NaN and the infinities among them,
+     * `NUMBER`'s division by zero, which fails as `1 / 0` does (ORA-01476); else null, as `MOD` of no number gives.
+     */
+    private fun byZero(a: String, b: String) = shared(a, b) { (x, y) -> "JSON_SCALAR(CASE WHEN ${typeOf(x)} = 'number' THEN TRUNC(1 / ${number(y)}) END)" }
+
+    /** The `BINARY_DOUBLE` of the JSON [json], a finite number the statement writes ([writtenNumber]). */
+    private fun writtenDouble(json: String) =
+        if (WRITTEN_FLOAT.matches(json)) json.removePrefix("JSON_SCALAR(").removeSuffix(")") else "TO_BINARY_DOUBLE(${json.removePrefix("JSON(").removeSuffix(")")})"
+
+    /**
+     * `x % y` of the finite `BINARY_DOUBLE`s [x] and [y], as Java's: NaN by zero, where `MOD` gives [x], unless [y] can't be
+     * zero ([byZero] false). A zero is 0.0, whatever the sign of [x]: Oracle holds no negative zero, so `-7.5 % 2.5` is 0.0
+     * where Java's is -0.0 (drivine4j#552).
+     */
+    private fun floatRemainder(x: String, y: String, byZero: Boolean) = if (byZero) "CASE WHEN $y = 0 THEN BINARY_DOUBLE_NAN ELSE MOD($x, $y) END" else "MOD($x, $y)"
+
     /** Whether the JSON [json] may be NaN or an infinity: where it is no value the statement writes, which is neither, or one written so. */
     private fun mayBeNonFinite(json: String) = !written(json) || json.contains("TO_BINARY_DOUBLE('NaN')") || json.contains("Infinity')")
+
+    /** The kind of number the JSON [json] is, where the statement writes it as a finite one ([literalJson]); else null. */
+    private fun writtenNumber(json: String): WrittenNumber? {
+        if (WRITTEN_FLOAT.matches(json)) {
+            val value = org.drivine.cypher.json.parseDoubleOrNull(json.substringAfter("('").substringBefore("')"))
+            return WrittenNumber.FLOAT.takeIf { value != null && value.isFinite() }
+        }
+        if (writtenScalar(json) != true || !json.startsWith("JSON('")) return null
+        val value = runCatching { CypherJson.readTree(json.substring(6, json.length - 2).replace("''", "'")) }.getOrNull() ?: return null
+        return when {
+            !value.isIntegralNumber -> null
+            value.bigIntegerValue().isZero() -> WrittenNumber.ZERO
+            else -> WrittenNumber.INTEGER
+        }
+    }
+
+    /** What [writtenNumber] finds a side of `%` written as. */
+    private enum class WrittenNumber { FLOAT, ZERO, INTEGER }
 
     /** CLOBs, which `=` does not compare (ORA-22848), by `DBMS_LOB.COMPARE`: see [texts]. */
     override fun startsWith(a: String, b: String) = shared(b) { (x) ->
