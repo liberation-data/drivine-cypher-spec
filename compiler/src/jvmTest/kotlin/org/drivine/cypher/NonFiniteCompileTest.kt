@@ -219,6 +219,46 @@ class NonFiniteCompileTest {
     }
 
     @Test
+    fun `a number divided by an integer zero fails on Oracle, a float too, and by any other number divides as before`() {
+        // drivine4j#559: BINARY_DOUBLE's division gave a float divided by an integer zero as an infinity or NaN, where Neo4j fails at
+        // run time. What each gives on Oracle is the spec's, in queries.yaml ("NaN worked out").
+        val oracle = OracleCypherCompiler("g")
+        fun sql(cypher: String, parameters: Map<String, Any?> = emptyMap()) = oracle.compile(cypher, parameters).sql
+        val byZero = "THEN TRUNC(1 / "
+        val divided = "= 'double' OR "
+        // An integer zero written: NUMBER's division by it, which fails as 1 / 0 does, and no BINARY_DOUBLE's. A float written too,
+        // as pi() is written, which Neo4j fails on where it gives an infinity for 1.0 / 0 (drivine4j#686).
+        listOf("RETURN 1.0 / 0", "RETURN 0.0 / 0", "RETURN pi() / 0", "RETURN e() / 0", "MATCH (n:A) RETURN n.x / 0", "RETURN \$x / 0").forEach { cypher ->
+            val compiled = sql(cypher, mapOf("x" to 3.0))
+            assertTrue(byZero in compiled, "$cypher: $compiled")
+            assertFalse(divided in compiled, "$cypher: $compiled")
+        }
+        // A divisor not written may be an integer zero, tested first, and else divides as before.
+        listOf(
+            "RETURN \$x / \$z" to mapOf("x" to 3.0, "z" to 0L),
+            "WITH 0 AS z RETURN 1.0 / z" to emptyMap(),
+            "MATCH (n:A) RETURN n.x / n.y" to emptyMap(),
+            "RETURN 1.0 / (1 - 1)" to emptyMap(),
+            // A dividend long enough to be bound binds the divisor beside it, which is read as any other there.
+            "RETURN -1.0 / 0" to emptyMap(),
+            // A write, which Oracle compiles as a procedure.
+            "CREATE (w:W {a: \$x / \$z}) RETURN w.a" to mapOf("x" to 3.0, "z" to 0L),
+        ).forEach { (cypher, parameters) ->
+            val compiled = sql(cypher, parameters)
+            assertTrue("= 0 THEN JSON_SCALAR(CASE WHEN" in compiled && byZero in compiled, "$cypher: $compiled")
+            assertTrue(divided in compiled, "$cypher: $compiled")
+        }
+        // A divisor written as any other number, a float zero among them, isn't tested for a zero.
+        listOf("MATCH (n:A) RETURN n.x / 2", "MATCH (n:A) RETURN n.x / 2.5", "RETURN 1.0 / 0.0", "MATCH (n:A) RETURN n.x / 0.0").forEach { cypher ->
+            val compiled = sql(cypher)
+            assertFalse(byZero in compiled, "$cypher: $compiled")
+            assertTrue(divided in compiled, "$cypher: $compiled")
+        }
+        // The other operators are as before.
+        listOf("MATCH (n:A) RETURN n.x * 0", "MATCH (n:A) RETURN n.x - 0").forEach { cypher -> assertFalse(byZero in sql(cypher), cypher) }
+    }
+
+    @Test
     fun `x IN a list given with NaN in it finds NaN equal to nothing on Oracle, and a list without compares plainly`() {
         // Oracle's JSON finds NaN equal to itself; a given list of numbers is compared plainly, as #458 compares it, only without NaN.
         val cypher = "MATCH (n:A) WHERE n.x IN \$l RETURN n.x"

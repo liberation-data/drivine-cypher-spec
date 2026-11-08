@@ -920,11 +920,24 @@ class OracleCypherCompiler(
     /**
      * In `BINARY_DOUBLE` where either is one, so a float stays a float, as in Cypher: `NUMBER` keeps no such kind. Each is read as
      * a `BINARY_DOUBLE` there, which NaN and the infinities are, where [number] reads them as no `NUMBER`.
+     *
+     * A number divided by an integer zero fails, as Neo4j fails one at run time ("/ by zero"), where `BINARY_DOUBLE`'s division
+     * gives a float NaN or an infinity (drivine4j#559): NaN and the infinities too. An integer divided by one fails already, as
+     * `NUMBER`'s division does. Neo4j gives an infinity or NaN where it works a float and an integer zero written in the
+     * statement out as it plans, as Java does (`1.0 / 0`), but here a float written is no different from `pi()`, which Neo4j
+     * fails on, so both fail, as for `%` ([remainder], drivine4j#686). A divisor written as any other number isn't tested.
      */
-    override fun arithmetic(a: String, b: String, operator: String) =
-        "CASE WHEN ${kind(a)} = 'double' OR ${kind(b)} = 'double' " +
+    override fun arithmetic(a: String, b: String, operator: String): String {
+        val result = "CASE WHEN ${kind(a)} = 'double' OR ${kind(b)} = 'double' " +
             "THEN JSON_SCALAR(${binaryDouble(a)} $operator ${binaryDouble(b)}) " +
             "ELSE JSON_SCALAR(${number(a)} $operator ${number(b)}) END"
+        if (operator != "/") return result
+        return when (writtenNumber(b)) {
+            WrittenNumber.ZERO -> byZero(a, b)
+            null -> "CASE WHEN ${kind(b)} = 'number' AND ${number(b)} = 0 THEN ${byZero(a, b)} ELSE $result END"
+            else -> result
+        }
+    }
 
     /**
      * The JSON [json] as a `BINARY_DOUBLE`, where it is a number: a double, NaN and the infinities among them, as it is, and a
@@ -1142,8 +1155,8 @@ class OracleCypherCompiler(
     }
 
     /**
-     * `a % b` of the JSON values [a] and [b], [b] an integer zero: where [a] is a number, NaN and the infinities among them,
-     * `NUMBER`'s division by zero, which fails as `1 / 0` does (ORA-01476); else null, as `MOD` of no number gives.
+     * `a % b` or `a / b` of the JSON values [a] and [b], [b] an integer zero: where [a] is a number, NaN and the infinities among
+     * them, `NUMBER`'s division by zero, which fails as `1 / 0` does (ORA-01476); else null, as `MOD` or `/` of no number gives.
      */
     private fun byZero(a: String, b: String) = shared(a, b) { (x, y) -> "JSON_SCALAR(CASE WHEN ${typeOf(x)} = 'number' THEN TRUNC(1 / ${number(y)}) END)" }
 
@@ -1176,7 +1189,7 @@ class OracleCypherCompiler(
         }
     }
 
-    /** What [writtenNumber] finds a side of `%` written as. */
+    /** What [writtenNumber] finds a side of `%` or `/` written as. */
     private enum class WrittenNumber { FLOAT, ZERO, INTEGER }
 
     /** CLOBs, which `=` does not compare (ORA-22848), by `DBMS_LOB.COMPARE`: see [texts]. */
