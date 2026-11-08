@@ -731,7 +731,7 @@ cases:
         error: "r is bound already, so a MERGE makes no relationship of it, as in Neo4j."
 
   - name: "Pattern in a WITH's WHERE naming a variable the WITH drops"
-    description: "A pattern in the WHERE of a WITH that neither groups nor is DISTINCT, and names a variable from before the WITH that the WITH does not pass on, is refused, as a value read there from such a variable is (drivine4j#426). Neo4j takes both, reading the variable from before the WITH; read as a new node, the pattern would match every row (drivine4j#504). After a WITH that groups or is DISTINCT, Neo4j refuses it too (see \"Variable before a WITH that groups, in its WHERE\")."
+    description: "A pattern in the WHERE of a WITH that neither groups nor is DISTINCT, or in an EXISTS { … }, a COUNT { … } or a pattern comprehension there, that names a variable from before the WITH that the WITH does not pass on, is refused, as a value read there from such a variable is (drivine4j#426). Neo4j takes both, reading the variable from before the WITH; read as a new node, the pattern would match every row (drivine4j#504). After a WITH that groups or is DISTINCT, Neo4j refuses it too (see \"Variable before a WITH that groups, in its WHERE\")."
     steps:
       - cypher: "MATCH (p:Person) WITH p AS q WHERE (p)-->() RETURN q.name"
         error: "p is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used."
@@ -739,9 +739,16 @@ cases:
         error: "p is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used."
       - cypher: "MATCH (p:Person) WITH p AS q WHERE p.name = 'Keanu' RETURN q.name"
         error: "p is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used."
+      - note: "And a pattern within the WHERE's EXISTS { … }, COUNT { … } or pattern comprehension, which would match every row too."
+        cypher: "MATCH (p:Person) WITH p AS q WHERE EXISTS { (p)-->() } RETURN q.name"
+        error: "p is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used."
+      - cypher: "MATCH (p:Person) WITH p AS q WHERE COUNT { MATCH (p)-->() } > 0 RETURN q.name"
+        error: "p is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used."
+      - cypher: "MATCH (p:Person) WITH p AS q WHERE size([(p)-->(x) | x]) > 0 RETURN q.name"
+        error: "p is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used."
 
   - name: "Two items of one name"
-    description: "A WITH or a RETURN names each item once, as Neo4j has it (its 42N38, \"column name conflict\"): an item's name is its alias, or its expression as written, and a map projection's is its variable's (drivine4j#499)."
+    description: "A WITH or a RETURN names each item once, as Neo4j has it (its 42N38, \"column name conflict\"): an item's name is its alias, or its expression as written, and a variable's or a map projection's is its variable's (drivine4j#499)."
     steps:
       - cypher: "RETURN 1 AS a, 2 AS a"
         error: "Two items are named a, as Cypher refuses: name each item of a WITH or a RETURN once, with AS."
@@ -755,6 +762,9 @@ cases:
         error: "Two items are named p.name, as Cypher refuses: name each item of a WITH or a RETURN once, with AS."
       - cypher: "UNWIND [1] AS x RETURN x, x AS x"
         error: "Two items are named x, as Cypher refuses: name each item of a WITH or a RETURN once, with AS."
+      - note: "A variable quoted is named as it is unquoted."
+        cypher: "WITH 1 AS a RETURN a, `a`"
+        error: "Two items are named a, as Cypher refuses: name each item of a WITH or a RETURN once, with AS."
       - note: "In a query of a UNION, and of a CALL { … }, too."
         cypher: "RETURN 1 AS a UNION RETURN 2 AS a, 3 AS a"
         error: "Two items are named a, as Cypher refuses: name each item of a WITH or a RETURN once, with AS."

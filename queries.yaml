@@ -158,6 +158,13 @@ cases:
           - {person: "Keanu", titles: ["The Matrix", "The Matrix Reloaded", "Johnny Mnemonic"], first: 1995, years: 5997}
           - {person: "Laurence", titles: ["The Matrix"], first: 1999, years: 1999}
 
+  - name: "Item of a quoted variable"
+    description: "An item that is a variable, quoted or not, is named as the variable, so a WITH passes it on under that name (drivine4j#499)."
+    steps:
+      - cypher: "WITH 1 AS a WITH `a` RETURN a"
+        only: [neo4j, sql]
+        rows: [1]
+
   - name: "Map key order"
     description: "A returned map keeps its keys in the order they were written."
     steps:
@@ -1891,6 +1898,11 @@ cases:
         cypher: "MATCH (a:Person {name: 'Keanu'}) CALL (a) { WITH 1 AS one WHERE (a)-[:KNOWS]->() RETURN one } RETURN a.name, one"
         only: [neo4j, sql]
         rows: [["Keanu", 1]]
+      - note: "And in a subquery, a variable from outside it, which is in scope after any WITH within, as Neo4j has it."
+        cypher: "MATCH (p:Person) WHERE EXISTS { MATCH (p)-[:ACTED_IN]->(m) WITH m WHERE (p)-[:KNOWS]->() RETURN m } RETURN p.name"
+        only: [neo4j, sql]
+        unordered: true
+        rows: ["Keanu", "Laurence"]
       - cypher: "UNWIND [1, 1, 2] AS i WITH i, count(*) AS c WHERE sum(i) > 1 RETURN i"
         only: [neo4j, sql]
         unordered: true

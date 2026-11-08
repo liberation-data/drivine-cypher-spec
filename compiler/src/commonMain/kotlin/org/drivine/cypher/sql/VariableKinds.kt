@@ -34,7 +34,7 @@ internal object VariableKinds {
 
     /**
      * The variables in scope, by name, each of its kind. Of them, those a `WITH` passes on not, read in its `WHERE` ([dropped]):
-     * a value there may read them, but a pattern names none of them (see [predicated]). One bound again within, as a
+     * a value there may read them, but a pattern names none of them (see [use]), in a subquery's too. One bound again within, as a
      * comprehension's variable, is no longer one of them.
      */
     private class Scope(val kinds: MutableMap<String, Kind> = LinkedHashMap(), val dropped: MutableSet<String> = LinkedHashSet()) {
@@ -53,7 +53,8 @@ internal object VariableKinds {
 
     /** [query]'s variables, from those of [outer] it reads: what each part of it returns. */
     private fun query(query: Query, outer: Scope): List<Map<String, Kind>> =
-        (listOf(query.clauses) + query.unions.map { it.clauses }).map { clauses(it, outer.copy()) }
+        // Those of [outer] stay in scope after each WITH within, as Neo4j has a subquery read them, but those a WITH outside drops.
+        (listOf(query.clauses) + query.unions.map { it.clauses }).map { clauses(it, outer.copy(), kept = outer.kinds.filterKeys { name -> name !in outer.dropped }) }
 
     /**
      * [clauses] in turn, over [scope]: what their `RETURN` returns, of the kinds it returns. Within a `FOREACH`, [foreach],
@@ -205,6 +206,8 @@ internal object VariableKinds {
 
     /** [variable] where a pattern binds it as [kind]: bound so, or used so where it is bound already as that kind. */
     private fun use(variable: String, kind: Kind, scope: Scope) {
+        // One a WITH does not pass on, in its WHERE: read there as a new node, it would match every row (drivine4j#504).
+        if (variable in scope.dropped) throw CompilerException("$variable is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used.")
         val bound = scope[variable] ?: return scope.set(variable, kind)
         if (!fits(bound, kind)) throw conflict(variable, bound, kind)
     }
@@ -341,10 +344,6 @@ internal object VariableKinds {
      */
     private fun predicated(pattern: Pattern, scope: Scope) {
         val names = pattern.nodes.indices.flatMap { i -> listOfNotNull(pattern.nodes[i].variable, pattern.relationships.getOrNull(i)?.variable) }
-        // One a WITH does not pass on, in its WHERE: read there as a new node, it would match every row (drivine4j#504).
-        names.firstOrNull { it in scope.dropped }?.let {
-            throw CompilerException("$it is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used.")
-        }
         names.firstOrNull { scope[it] == null }?.let {
             throw CompilerException("$it is not defined: a pattern used as an expression binds no new variable, as in Neo4j. Bind it in a MATCH, or test the pattern with EXISTS { … }.")
         }
