@@ -44,13 +44,31 @@ class KeysAndInfiniteRoundTest {
     }
 
     @Test
-    fun `round() on Oracle gives back an infinity, with its precision read only for any other value`() {
+    fun `round() on Oracle gives back an infinity, and rounds any other value`() {
         val oracle = OracleCypherCompiler("g")
         listOf("round(n.b)", "round(n.b, 2)", "round(n.b, 2, 'HALF_DOWN')", "round(n.c[0], 0, 'UP')", "round(n.b, n.p)").forEach { round ->
             val sql = oracle.compile("MATCH (n:A) RETURN $round").sql
             val kept = sql.indexOf("RETURNING BINARY_DOUBLE) IS INFINITE THEN")
             assertTrue(kept >= 0, "$round: $sql")
             assertTrue(sql.indexOf(" ELSE JSON_SCALAR(TO_BINARY_DOUBLE(", kept) > kept, "$round: the rounding follows the test: $sql")
+        }
+    }
+
+    @Test
+    fun `round() of an infinity on Oracle still fails a precision out of range, and is null by a null precision or mode`() {
+        val oracle = OracleCypherCompiler("g")
+        // As Postgres and SQLite read them for an infinity: the infinity is given back only where a round of 0 by them is no null.
+        mapOf(
+            "round(n.b, -1)" to "round() takes a precision from 0 to 2147483647",
+            "round(n.b, -1, 'UP')" to "round() takes a precision from 0 to 2147483647",
+            "round(n.b, 2, null)" to "JSON('null')",
+            "round(n.b, null)" to "JSON('null')",
+        ).forEach { (round, read) ->
+            val sql = oracle.compile("MATCH (n:A) RETURN $round").sql
+            val kept = sql.indexOf("RETURNING BINARY_DOUBLE) IS INFINITE THEN CASE WHEN NOT (")
+            assertTrue(kept >= 0, "$round: $sql")
+            val infinity = sql.substring(kept, sql.indexOf(" ELSE JSON", kept + 1).takeIf { it > 0 } ?: sql.length)
+            assertTrue(read in infinity, "$round: the infinity's branch reads $read: $sql")
         }
     }
 

@@ -1620,12 +1620,15 @@ class OracleCypherCompiler(
 
     /**
      * NUMBER holds no infinity, so `JSON_VALUE(… RETURNING NUMBER)` of a stored one is null: round() gives an infinity
-     * back, as Neo4j does, from the `BINARY_DOUBLE` it is (drivine4j#669). It is given back before the precision is read,
-     * so a precision out of range fails only a row whose value is no infinity.
+     * back, as Neo4j does, from the `BINARY_DOUBLE` it is (drivine4j#669). Its precision and mode are still read, by a
+     * round of 0 by them, as Postgres and SQLite read them for an infinity: a null one gives null, and a precision out of
+     * range fails.
      */
     override fun infinitiesKept(value: Value, json: () -> String, round: (Value) -> Value.Json): Value.Json =
         Value.Json(shared(json()) { (x) ->
-            "CASE WHEN ${kind(x)} = 'double' AND JSON_VALUE($x, '\$' RETURNING BINARY_DOUBLE) IS INFINITE THEN $x ELSE ${round(Value.Json(x)).sql} END"
+            val zero = round(Value.Json(literalJson(0))).sql
+            "CASE WHEN ${kind(x)} = 'double' AND JSON_VALUE($x, '\$' RETURNING BINARY_DOUBLE) IS INFINITE " +
+                "THEN CASE WHEN NOT (${isJsonNull(zero)}) THEN $x END ELSE ${round(Value.Json(x)).sql} END"
         })
 
     /** A text that is no number, read as one: Oracle fails with ORA-01722, whose ORA-03302 detail gives the text. */
