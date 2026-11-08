@@ -2860,6 +2860,17 @@ cases:
         cypher: "UNWIND [$p, $p, 1.0] AS x RETURN [count(DISTINCT x), collect(DISTINCT x)]"
         parameters: {p: {$float: "NaN"}}
         rows: [[3, [{$float: "NaN"}, {$float: "NaN"}, 1.0]]]
+      - note: "So does RETURN DISTINCT (drivine4j#685)."
+        only: [neo4j]
+        cypher: "UNWIND [$p, $p, 1.0] AS x RETURN DISTINCT x"
+        parameters: {p: {$float: "NaN"}}
+        unordered: true
+        rows: [{$float: "NaN"}, 1.0]
+      - only: [sql]
+        cypher: "UNWIND [$p, $p, 1.0] AS x RETURN DISTINCT x"
+        parameters: {p: {$float: "NaN"}}
+        unordered: true
+        rows: [{$float: "NaN"}, {$float: "NaN"}, 1.0]
       - note: "sum() and avg() of a group that holds NaN, or both infinities, are NaN."
         only: [neo4j, sql]
         cypher: "UNWIND $l AS x RETURN [sum(x), avg(x)]"
