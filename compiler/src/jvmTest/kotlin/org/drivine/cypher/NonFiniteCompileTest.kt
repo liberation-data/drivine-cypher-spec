@@ -73,6 +73,8 @@ class NonFiniteCompileTest {
         assertTrue(counted(PostgresCypherCompiler("g").compile("UNWIND \$l AS x RETURN count(DISTINCT x)", nan).sql))
         assertTrue(counted(SqliteCypherCompiler("g").compile("UNWIND \$l AS x RETURN count(DISTINCT x)", nan).sql))
         assertTrue(counted(OracleCypherCompiler("g").compile("UNWIND [0.0, 1.0] AS z RETURN count(DISTINCT z / z)").sql))
+        // So is NaN worked out of an infinity Oracle stores, as ∞ - ∞ is.
+        assertTrue(counted(OracleCypherCompiler("g").compile("MATCH (n:A) RETURN count(DISTINCT n.x - n.x)").sql))
         // Not where the statement works out none, nor of a value made a text, a list or a map: on Oracle, which may store NaN, too,
         // as testing each value read cost a count(DISTINCT …) 2.6 times as long.
         assertFalse(counted(OracleCypherCompiler("g").compile("MATCH (n:A) RETURN count(DISTINCT n.x)").sql))

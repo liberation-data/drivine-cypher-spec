@@ -814,6 +814,10 @@ cases:
       - only: [neo4j, oracle, sqlite]
         cypher: "MATCH (n:CyWrite) RETURN [min(n.b), max(n.b), sum(n.b), avg(n.b)]"
         rows: [[{$float: "-Infinity"}, {$float: "Infinity"}, {$float: "NaN"}, {$float: "NaN"}]]
+      - note: "Each NaN worked out of a stored infinity is kept apart by count(DISTINCT …) and collect(DISTINCT …), as ∞ - ∞ is (drivine4j#558)."
+        only: [neo4j, oracle, sqlite]
+        cypher: "MATCH (n:CyWrite) WHERE n.b IS NOT NULL RETURN count(DISTINCT n.b - n.b), size(collect(DISTINCT n.b - n.b))"
+        rows: [[2, 2]]
 
   - name: "MERGE of a null or NaN property"
     description: "A MERGE fails where it makes a node or relationship whose pattern gives a property that is null or NaN, which is equal to nothing, which no MERGE would find again; over no rows it does not fail. ON CREATE SET and ON MATCH SET write NaN, and a list that holds NaN is merged, and made again each time, though DISTINCT keeps two such lists once, and Neo4j two stored NaNs apart."

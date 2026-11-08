@@ -158,7 +158,8 @@ abstract class SqlCypherCompiler(
     protected var nonFinite = false
 
     /**
-     * Whether the statement is given NaN or an infinity, or may work one out ([worksOutNonFinite]): set as [compile] starts, on
+     * Whether the statement is given NaN or an infinity, or may work one out ([worksOutNonFinite]), NaN out of an infinity it reads
+     * among them ([worksOutNaN]), as `n.b - n.b` does of one stored: set as [compile] starts, on
      * every store, where [nonFinite] is only where the store compiles anything more for it. Oracle, whose floats hold NaN, keeps
      * NaN apart in `count(DISTINCT …)` only then ([bareNaN]), not for every value it reads, which made such a count 2.6 times
      * as slow.
@@ -213,7 +214,7 @@ abstract class SqlCypherCompiler(
         val given = parameters.values.any { holdsNonFinite(it) }
         val writes = query.unions.isEmpty() && query.clauses.any(::writes)
         nonFinite = given || (nonFiniteWorkedOut(writes) && (worksOutNonFinite(query, parameters) || (infinitiesStored && worksOutNaN(query, parameters))))
-        nanWorkedOut = given || worksOutNonFinite(query, parameters)
+        nanWorkedOut = given || worksOutNonFinite(query, parameters) || worksOutNaN(query, parameters)
         if (query.unions.isNotEmpty()) return withFunctions(union(query, parameters))
         if (!writes) {
             val writer = Writer(Parameters(parameters, ::parameterJson, ::parameterCount, text = ::parameterText, asPath = parameterPath))
