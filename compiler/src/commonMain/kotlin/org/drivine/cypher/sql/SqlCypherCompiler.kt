@@ -1625,7 +1625,8 @@ abstract class SqlCypherCompiler(
         }
 
         private fun unwind(select: Select, unwind: Clause.Unwind) {
-            val list = expression(unwind.list, select.scope)
+            // A list or a map the list is, or holds, reads its members as an item's do (see [routes]): #670.
+            val list = if (routes(unwind.list)) item(unwind.list, select) else expression(unwind.list, select.scope)
             val name = alias("u")
             // A list of nodes or relationships unwinds to them, as they are now, so a write reaches them; a null item is a null one.
             if (list is Value.Entities) {
@@ -1991,15 +1992,15 @@ abstract class SqlCypherCompiler(
             }
         }
 
-        /** A list comprehension over a list of values. */
-        private fun listComprehension(comprehension: Expression.ListComprehension, listed: Value, scope: Map<String, Value>): Value {
+        /** A list comprehension over a list of values, its projection read as [member] reads one where [routed]. */
+        private fun listComprehension(comprehension: Expression.ListComprehension, listed: Value, scope: Map<String, Value>, routed: Boolean): Value {
             val list = comparable(json(listed))
             val name = alias("x")
             val inner = scope + (
                 comprehension.variable to
                     Value.Json(item(name), temporal = itemsOf(listed), items = itemItemsOf(listed), temporals = itemTemporalsOf(listed), list = holdsLists(listed))
                 )
-            val projected = comprehension.projection?.let { expression(it, inner) }
+            val projected = comprehension.projection?.let { member(it, inner, routed) }
             val projection = projected?.let { json(it).sql } ?: item(name)
             val filter = comprehension.where?.let { " WHERE ${condition(it, inner)}" }.orEmpty()
             // Of null, null, as in Cypher, and not an empty list.
@@ -2018,15 +2019,16 @@ abstract class SqlCypherCompiler(
 
         /**
          * A list comprehension over a list of nodes or relationships: each item is the node or the relationship, and
-         * what it keeps of them, with no projection or one of nodes or relationships, is a list of them.
+         * what it keeps of them, with no projection or one of nodes or relationships, is a list of them. Its projection is
+         * read as [member] reads one where [routed].
          */
-        private fun entityComprehension(comprehension: Expression.ListComprehension, listed: Value.Entities, scope: Map<String, Value>): Value {
+        private fun entityComprehension(comprehension: Expression.ListComprehension, listed: Value.Entities, scope: Map<String, Value>, routed: Boolean): Value {
             val name = alias("x")
             var kind: Value? = null
             val list = shared(listed.ids) { (ids) ->
                 val (from, item) = entityItems(ids, listed.relationships, name)
                 val inner = scope + (comprehension.variable to item)
-                val projected = comprehension.projection?.let { expression(it, inner) } ?: item
+                val projected = comprehension.projection?.let { member(it, inner, routed) } ?: item
                 kind = projected
                 val filter = comprehension.where?.let { " WHERE ${condition(it, inner)}" }.orEmpty()
                 val value = when (projected) {
@@ -3473,6 +3475,14 @@ abstract class SqlCypherCompiler(
         private var conjoined = false
 
         /**
+         * Whether the list or the map literal, the map projection, the list comprehension or the `collect()` being compiled
+         * ([routes]) is an item of a `RETURN` or a `WITH`, or a member of one, so that a property among its members is read as
+         * [storedProperty] reads it: see [item] and [member]. Its compile takes it ([membersRouted]) before it compiles
+         * anything, so a value worked out of a member reads its properties as elsewhere: a workaround for #670.
+         */
+        private var routesMembers = false
+
+        /**
          * The value [expression] gives in [scope]: see [evaluate]. Marked [Value.Json.flat] where it is known to hold no null in a list or a map,
          * and with its [Value.Json.known] kind where the statement writes it as a value of one.
          */
@@ -3511,7 +3521,8 @@ abstract class SqlCypherCompiler(
                 else -> throw CompilerException("A label is tested of a node.")
             }
             is Expression.ListLiteral -> {
-                val items = expression.items.map { expression(it, scope) }
+                val routed = membersRouted()
+                val items = expression.items.map { member(it, scope, routed) }
                 // A null written among nodes or relationships is an item of a list of them, as a node that is null is.
                 val entities = items.filterIndexed { i, _ -> expression.items[i] != Expression.Literal(null) }
                 fun ids(relationships: Boolean): Value.Entities {
@@ -3541,7 +3552,8 @@ abstract class SqlCypherCompiler(
                 }
             }
             is Expression.MapLiteral -> {
-                val entries = expression.entries.map { (key, value) -> key to expression(value, scope) }
+                val routed = membersRouted()
+                val entries = expression.entries.map { (key, value) -> key to member(value, scope, routed) }
                 Value.Json(
                     jsonObject(entries.map { (key, value) -> key to json(value).sql }),
                     ordered = true,
@@ -3592,9 +3604,12 @@ abstract class SqlCypherCompiler(
             is Expression.Function -> function(expression, scope)
             Expression.CountStar -> Value.Json(scalar("count(*)"))
             is Expression.Case -> case(expression, scope)
-            is Expression.ListComprehension -> when (val listed = expression(expression.list, scope)) {
-                is Value.Entities -> entityComprehension(expression, listed, scope)
-                else -> listComprehension(expression, listed, scope)
+            is Expression.ListComprehension -> {
+                val routed = membersRouted()
+                when (val listed = expression(expression.list, scope)) {
+                    is Value.Entities -> entityComprehension(expression, listed, scope, routed)
+                    else -> listComprehension(expression, listed, scope, routed)
+                }
             }
             is Expression.Reduce -> {
                 val start = expression(expression.initial, scope)
@@ -3869,27 +3884,75 @@ abstract class SqlCypherCompiler(
 
         /**
          * The item [expression] of a `RETURN` or a `WITH` over [select]: a property of a node or a relationship, the item
-         * itself, read as [itemProperty] reads it, and a property of an unwound item ([Value.Json.fromList]) as [itemValue] reads
-         * it, but beside a variable-length walk; anything else as elsewhere. A node or a
+         * itself or a member of a list or a map literal the item is (`[n.i, n.t]`, `{t: n.t}`, and so on in a literal it
+         * holds), read as [itemProperty] reads it (#670), and a property of an unwound item ([Value.Json.fromList]) as
+         * [itemValue] reads it, but beside a variable-length walk; anything else as elsewhere. A node or a
          * relationship is compiled once here: compiling the item over it again lost the rows of statements that match a
          * relationship.
          */
         private fun item(expression: Expression, select: Select): Value {
-            if (expression is Expression.Property && !select.walks) {
-                // A property of a node or a relationship holds no null in a list, as expression() marks it (see flat).
-                when (val subject = expression(expression.subject, select.scope)) {
-                    is Value.Node -> if (expression.key != Stamps.PROPERTY) return Value.Json(itemProperty(subject.props, expression.key), flat = true)
-                    is Value.Relationship -> return Value.Json(itemProperty(subject.props, expression.key), flat = true)
-                    // A value of an unwound item, but a temporal value's field, and one a write reads from its row as rowValue does.
-                    // It may hold temporal values deeper, as property() has it, so that a list of them is read by its places (#369).
-                    // One of a kind known other than a map is left to property(), which refuses it.
-                    is Value.Json -> if (subject.fromList && subject.temporal == null && subject.rowKeys == null && expression.key !in temporals.fieldNames &&
-                        (subject.known == null || subject.known == Value.Known.MAP))
-                        return Value.Json(itemValue(comparable(subject), expression.key), temporals = subject.temporals, jsonNull = !subject.flat)
-                    else -> {}
+            if (routes(expression) && !select.walks) {
+                routesMembers = true
+                try {
+                    return expression(expression, select.scope)
+                } finally {
+                    routesMembers = false
                 }
             }
+            if (expression is Expression.Property && !select.walks) storedProperty(expression(expression.subject, select.scope), expression.key)?.let { return it }
             return expression(expression, select.scope)
+        }
+
+        /**
+         * The property [key] of the node or the relationship [subject], read as [itemProperty] reads it, and of an unwound item
+         * ([Value.Json.fromList]) as [itemValue] reads it, where it is an item or a member of one (see [item]); null where it is
+         * a node's stamp, read from its column, or [subject] is neither, or a value of an unwound item [itemValue] doesn't read.
+         * A property of a node or a relationship holds no null in a list, as expression() marks it (see flat).
+         */
+        private fun storedProperty(subject: Value, key: String): Value? = when (subject) {
+            is Value.Node -> if (key != Stamps.PROPERTY) Value.Json(itemProperty(subject.props, key), flat = true) else null
+            is Value.Relationship -> Value.Json(itemProperty(subject.props, key), flat = true)
+            // A value of an unwound item, but a temporal value's field, and one a write reads from its row as rowValue does.
+            // It may hold temporal values deeper, as property() has it, so that a list of them is read by its places (#369).
+            // One of a kind known other than a map is left to property(), which refuses it.
+            is Value.Json -> if (subject.fromList && subject.temporal == null && subject.rowKeys == null && key !in temporals.fieldNames &&
+                (subject.known == null || subject.known == Value.Known.MAP))
+                Value.Json(itemValue(comparable(subject), key), temporals = subject.temporals, jsonNull = !subject.flat)
+            else null
+            else -> null
+        }
+
+        /**
+         * Whether [expression] reads its members as [member] routes them, where it is an item or a member of one: a list or a
+         * map literal, a map projection, a list comprehension's projection, and the argument of a `collect()` (#670).
+         */
+        private fun routes(expression: Expression) = expression is Expression.ListLiteral || expression is Expression.MapLiteral ||
+            expression is Expression.MapProjection || expression is Expression.ListComprehension ||
+            expression is Expression.Function && !expression.distinct && expression.name.lowercase() == "collect"
+
+        /** Whether the expression [evaluate] has begun ([routes]) reads its members as [member] routes them; taken once, by it. */
+        private fun membersRouted() = routesMembers.also { routesMembers = false }
+
+        /**
+         * The member [member] in [scope] of what [routes]: a list or a map literal's member, a map projection's entry, a list
+         * comprehension's projection or a `collect()`'s argument. Where that is an item, or a member of one, and [routed] says
+         * so, a property a variable holds (`n.t`, `r.t`, `m.t` of an unwound map) is read as [storedProperty] reads it, and
+         * what [routes] routes its own members so; anything else as elsewhere.
+         *
+         * **A workaround, to be removed with [itemProperty]'s.** A long text property read as a direct member of a list or
+         * map (`[n.i, n.t]`, `{t: n.t}`, `n {.t}`, `collect(n.t)`, `[x IN [n] | x.t]`, `[m.t]` of an unwound map) is routed
+         * the CLOB way on Oracle, to avoid an Oracle server defect (#670). A value worked out of a property (`[size(n.t)]`,
+         * `[n.t + 'x']`) is read as before.
+         */
+        private fun member(member: Expression, scope: Map<String, Value>, routed: Boolean): Value {
+            if (routed) {
+                // Only a variable's node or relationship, looked up and not compiled: compiled twice, another subject would
+                // take new aliases and bindings, and change what the rest of the statement compiles to.
+                val subject = ((member as? Expression.Property)?.subject as? Expression.Variable)?.let { scope[it.name] }
+                if (subject != null) storedProperty(subject, (member as Expression.Property).key)?.let { return it }
+                if (routes(member)) routesMembers = true
+            }
+            return expression(member, scope)
         }
 
         /**
@@ -4331,12 +4394,15 @@ abstract class SqlCypherCompiler(
             return Temporals.Overrides(numbers, timezone)
         }
 
+        /** A map projection, its selected properties and its entries read as [member] reads one where it is routed ([routes]). */
         private fun mapProjection(projection: Expression.MapProjection, scope: Map<String, Value>): Value {
+            val routed = membersRouted()
             val subject = scope[projection.variable] ?: throw CompilerException("${projection.variable} is not defined.")
             val values = projection.elements.filterNot { it is Expression.MapProjection.Element.All }.map { element ->
                 when (element) {
-                    is Expression.MapProjection.Element.Selected -> element.key to property(subject, element.key)
-                    is Expression.MapProjection.Element.Entry -> element.key to expression(element.value, scope)
+                    is Expression.MapProjection.Element.Selected ->
+                        element.key to ((if (routed) storedProperty(subject, element.key) else null) ?: property(subject, element.key))
+                    is Expression.MapProjection.Element.Entry -> element.key to member(element.value, scope, routed)
                     is Expression.MapProjection.Element.Variable -> element.name to (scope[element.name] ?: throw CompilerException("${element.name} is not defined."))
                     Expression.MapProjection.Element.All -> error("filtered")
                 }
@@ -5123,7 +5189,9 @@ abstract class SqlCypherCompiler(
         private fun mayBeJsonNull(value: Value) = (value as? Value.Json)?.jsonNull == true
 
         private fun function(function: Expression.Function, scope: Map<String, Value>): Value {
-            val arguments = function.arguments.map { expression(it, scope) }
+            // A collect() that is an item, or a member of one, reads its argument as [member] reads one (see [routes]).
+            val routed = routes(function) && membersRouted()
+            val arguments = function.arguments.map { member(it, scope, routed) }
             fun one(): Value = arguments.singleOrNull() ?: throw CompilerException("${function.name}() takes one argument.")
             val distinct = if (function.distinct) "DISTINCT " else ""
             return when (val name = function.name.lowercase()) {
