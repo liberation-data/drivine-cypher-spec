@@ -2675,6 +2675,9 @@ cases:
         cypher: "RETURN [toString(0.0 / 0.0), toString(1.0 / 0), toString(-1.0 / 0)]"
         except: [memgraph, falkordb, oracle]
         rows: [["NaN", "Infinity", "-Infinity"]]
+      - only: [oracle]
+        cypher: "RETURN [toString(0.0 / 0.0), toString(1.0 / 0.0), toString(-1.0 / 0.0)]"
+        rows: [["NaN", "Infinity", "-Infinity"]]
 
   - name: "Sorted by a list"
     description: "A sort by a list compares two lists item by item, the shorter first where one begins the other, items of different kinds as Cypher orders kinds and null last, as by what collect gathered."
@@ -3033,6 +3036,10 @@ cases:
         cypher: "RETURN $x % $z"
         parameters: {x: {$float: "Infinity"}, z: 0}
         error: true
+      - only: [neo4j, sql]
+        cypher: "RETURN $x % $z"
+        parameters: {x: {$float: "-Infinity"}, z: 0}
+        error: true
       - note: "In an aggregate and an ORDER BY too (drivine4j#550, drivine4j#554)."
         only: [neo4j, sql]
         cypher: "UNWIND [1, 2] AS i RETURN sum(i % 0)"
@@ -3040,7 +3047,8 @@ cases:
       - only: [neo4j, sql]
         cypher: "UNWIND [1, 2] AS i RETURN i ORDER BY i % 0"
         error: true
-      - only: [neo4j, sql]
+      - note: "And read from the store."
+        only: [neo4j, sql]
         cypher: "MATCH (p:Person {name: 'Keanu'}) RETURN p.born % 0"
         error: true
       - note: "Null taken % by an integer zero is null (drivine4j#550)."
