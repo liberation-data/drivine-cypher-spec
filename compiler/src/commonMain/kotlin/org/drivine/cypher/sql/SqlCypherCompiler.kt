@@ -184,7 +184,12 @@ abstract class SqlCypherCompiler(
     protected open val infinitiesStored = false
 
     /** The statement [query], read already, with its parameters' values [parameters], as SQL: a query, or a procedure where it writes. */
-    fun compile(query: Query, parameters: Map<String, Any?>): CompiledCypher {
+    fun compile(query: Query, parameters: Map<String, Any?>): CompiledCypher = finished(compiled(query, parameters))
+
+    /** The statement [compiled] as the store runs it, after the last pass the store makes over it: none here. */
+    protected open fun finished(compiled: CompiledCypher): CompiledCypher = compiled
+
+    private fun compiled(query: Query, parameters: Map<String, Any?>): CompiledCypher {
         // A variable used as two kinds, or made where it is bound already, is refused for that, before what is not compiled yet.
         VariableKinds.check(query)
         // An aggregate in a WHERE too.
@@ -3977,7 +3982,8 @@ abstract class SqlCypherCompiler(
          * **A workaround, to be removed with [itemProperty]'s.** A long text property read as a direct member of a list or
          * map (`[n.i, n.t]`, `{t: n.t}`, `n {.t}`, `collect(n.t)`, `[x IN [n] | x.t]`, `[m.t]` of an unwound map) is routed
          * the CLOB way on Oracle, to avoid an Oracle server defect (#670). A value worked out of a property (`[size(n.t)]`,
-         * `[n.t + 'x']`) is read as before.
+         * `[n.t + 'x']`) is read as elsewhere, and on Oracle its read of the property takes the guarded route the last pass
+         * gives it (see `OracleCypherCompiler.finished`).
          */
         private fun member(member: Expression, scope: Map<String, Value>, routed: Boolean): Value {
             if (routed) {

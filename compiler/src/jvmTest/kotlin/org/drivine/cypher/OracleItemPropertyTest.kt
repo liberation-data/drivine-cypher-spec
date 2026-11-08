@@ -1,5 +1,6 @@
 package org.drivine.cypher
 
+import org.drivine.cypher.oracle.OracleReads
 import org.drivine.cypher.sql.OracleCypherCompiler
 import org.drivine.cypher.sql.PostgresCypherCompiler
 import org.junit.jupiter.api.Test
@@ -20,10 +21,11 @@ class OracleItemPropertyTest {
     private val long = "JSON(JSON_QUERY(JSON_SERIALIZE(JSON_TRANSFORM(n1.props, KEEP '\$.a') RETURNING CLOB EXTENDED), '\$.a' RETURNING CLOB) EXTENDED)"
 
     @Test
-    fun `a property an item returns or passes on is read through its text, and one sorted, tested or nested in an item as it was`() {
+    fun `a property an item returns or passes on is read through its text, one sorted by takes the guarded route, and a short one tested is read as it was`() {
         val returned = OracleCypherCompiler("g").compile("MATCH (n:Doc) WHERE n.b = 1 RETURN n.a ORDER BY n.id").sql
         assertTrue(returned.contains("$long AS c1"), returned)
-        assertTrue(returned.contains("JSON_QUERY(n1.props, '\$.id' RETURNING JSON) AS s1") && returned.contains("JSON_QUERY(n1.props, '\$.b' RETURNING JSON)"), returned)
+        // A sort key, read so too where it may be a long text; a test of a short text as it was.
+        assertTrue(returned.contains("${OracleReads.routedRead("n1.props", "'\$.id'")} AS s1") && returned.contains("JSON_QUERY(n1.props, '\$.b' RETURNING JSON)"), returned)
         val passed = OracleCypherCompiler("g").compile("MATCH (n:Doc) WITH n.a AS a RETURN [a]").sql
         assertEquals(1, Regex(Regex.escape(long)).findAll(passed).count(), passed)
         // A member of a list an item is, through its text too (#670), and a map projection's in it.
@@ -87,25 +89,25 @@ class OracleItemPropertyTest {
         val unwound = OracleCypherCompiler("g").compile("MATCH (n:Doc) UNWIND [{a: n.a}] AS m RETURN m.i").sql
         assertTrue(unwound.contains("JSON_OBJECT('a' VALUE $long NULL ON NULL RETURNING JSON)") && !unwound.contains("JSON_QUERY(n1.props, '\$.a' RETURNING JSON)"), unwound)
         val property = OracleCypherCompiler("g").compile("MATCH (n:Doc) UNWIND n.a AS m RETURN m").sql
-        assertTrue(!property.contains("KEEP '\$.a'"), property)
+        assertTrue(property.contains(OracleReads.routedRead("n1.props", "'\$.a'")), property)
         // A collect(DISTINCT …), gathered by a collect() first, so too; a comprehension's where and list as they were.
         val distinct = OracleCypherCompiler("g").compile("MATCH (n:Doc) RETURN collect(DISTINCT n.a)").sql
         assertTrue(distinct.contains(long), distinct)
         val filtered = OracleCypherCompiler("g").compile("MATCH (n:Doc) RETURN [x IN [n.l] WHERE x.a = 1]").sql
-        assertTrue(filtered.contains("JSON_ARRAY(JSON_QUERY(n1.props, '\$.l' RETURNING JSON) NULL ON NULL RETURNING JSON)") && !filtered.contains("KEEP '\$.l'"), filtered)
+        assertTrue(filtered.contains("JSON_ARRAY(${OracleReads.routedRead("n1.props", "'\$.l'")} NULL ON NULL RETURNING JSON)"), filtered)
     }
 
     @Test
-    fun `a property worked out in a member, a node's stamp, and a member beside a variable-length walk, are read as they were`() {
-        // Only the member that is the property itself is read through its text, as only the item that is the property is.
+    fun `a property worked out in a member and a member beside a variable-length walk take the guarded route, and a node's stamp is read as it was`() {
+        // A member worked out of the property takes the guarded route the last pass gives it.
         val worked = OracleCypherCompiler("g").compile("MATCH (n:Doc) RETURN [size(n.a), n.a + 'x', size([n.a])]").sql
-        assertTrue(!worked.contains("RETURNING CLOB EXTENDED"), worked)
+        assertTrue(OracleReads.unsafe(worked).isEmpty(), worked)
         val headed = OracleCypherCompiler("g").compile("MATCH (n:Doc) RETURN head(collect(n.a))").sql
-        assertTrue(!headed.contains("RETURNING CLOB EXTENDED"), headed)
+        assertTrue(OracleReads.unsafe(headed).isEmpty(), headed)
         val stamp = OracleCypherCompiler("g").compile("MATCH (n:Doc) RETURN [n.`__drivine.stamp`]").sql
         assertTrue(stamp.contains("JSON_ARRAY(JSON_SCALAR(n1.stamp) NULL ON NULL RETURNING JSON)") && !stamp.contains("KEEP"), stamp)
         val walked = OracleCypherCompiler("g").compile("MATCH (:Doc {id: 1})-[:R*]->(n) RETURN [n.a, {a: n.a}]").sql
-        assertTrue(!walked.contains("RETURNING CLOB") && walked.contains(".a' RETURNING JSON)"), walked)
+        assertTrue(OracleReads.unsafe(walked).isEmpty() && walked.contains("KEEP '\$.a'"), walked)
         // Postgres reads a member as it was.
         val postgres = PostgresCypherCompiler("g").compile("MATCH (n:Doc) RETURN [n.i, {a: n.a}]").sql
         assertTrue(postgres.contains("(n1.props -> 'a')") && !postgres.contains("KEEP"), postgres)
@@ -150,8 +152,8 @@ class OracleItemPropertyTest {
             val sql = compiledBeside("MATCH (n:Doc), (m:Doc) RETURN ${shape.replace("#", long)}")
             assertTrue(sql.contains("JSON_VALUE(n1.props, '\$.a.type()') AS v"), "$shape: $sql")
             assertTrue(sql.contains("JSON_VALUE(n1.props, '\$.a' RETURNING CLOB) AS v"), "$shape: $sql")
-            assertTrue(sql.contains("CASE WHEN JSON_VALUE(n1.props, '\$.a.length()' RETURNING NUMBER) > 32767 THEN NULL ELSE JSON_QUERY(n1.props, '\$.a' RETURNING JSON) END AS v"), "$shape: $sql")
-            // Read nowhere else: its length, its JSON, its kind and its CLOB.
+            assertTrue(sql.contains("CASE WHEN JSON_VALUE(n1.props, '\$.a.length()' RETURNING NUMBER) > 32767 THEN NULL ELSE ${OracleReads.routedRead("n1.props", "'\$.a'")} END AS v"), "$shape: $sql")
+            // Read nowhere else: its length, its JSON (the CLOB way, by the map's filter, and its being there), its kind and its CLOB.
             assertEquals(4, Regex(Regex.escape("n1.props, '\$.a")).findAll(sql).count(), "$shape: $sql")
             // Its kind and its CLOB are read from their own columns, not from its JSON, which is null past 32,767 characters.
             val (json, kind) = Regex("END AS (v\\d+), JSON_VALUE\\(n1.props, '\\$.a.type\\(\\)'\\) AS (v\\d+)").find(sql)!!.destructured
@@ -182,7 +184,7 @@ class OracleItemPropertyTest {
         assertTrue(Regex(" AS v1\\b").containsMatchIn(sql), "$cypher binds the long value: $sql")
         assertTrue(!Regex("JSON_QUERY\\([\\w.]+props, '\\$.[ab]' RETURNING JSON\\) AS v").containsMatchIn(sql), "$cypher: $sql")
         assertTrue(!Regex("JSON_VALUE\\(JSON_QUERY\\([\\w.]+props, '\\$.[ab]' RETURNING JSON\\)").containsMatchIn(sql), "$cypher: $sql")
-        assertEquals(2, Regex(Regex.escape("JSON_EXISTS(")).findAll(sql).count(), "$cypher: $sql")
+        assertEquals(2, Regex("""JSON_EXISTS\(\w+\.labels""").findAll(sql).count(), "$cypher: $sql")
         return sql
     }
 
@@ -195,13 +197,13 @@ class OracleItemPropertyTest {
         assertTrue(quoted.contains("JSON_VALUE(n1.props, '\$.\"x'' RETURNING JSON) y\".type()')"), quoted)
         // A key in a map is read by its path in the map, the map taken out of the properties as it was.
         val nested = read("MATCH (n:Doc) RETURN size(n.m.a)")
-        assertTrue(nested.contains("JSON_VALUE(JSON_QUERY(n1.props, '\$.m' RETURNING JSON), '\$.a.size()' RETURNING NUMBER)"), nested)
+        assertTrue(nested.contains("JSON_VALUE(n1.props, '\$.m.a.size()' RETURNING NUMBER)"), nested)
     }
 
     @Test
     fun `a property returned beside a variable-length walk is read as elsewhere`() {
         val sql = OracleCypherCompiler("g").compile("MATCH (:Doc {id: 1})-[:R*]->(n) RETURN n.a").sql
-        assertTrue(!sql.contains("RETURNING CLOB") && sql.contains(".a' RETURNING JSON)"), sql)
+        assertTrue(OracleReads.unsafe(sql).isEmpty() && sql.contains("${OracleReads.routedRead("n2.props", "'\$.a'")} AS c1"), sql)
     }
 
     @Test
@@ -248,7 +250,7 @@ class OracleItemPropertyTest {
         assertTrue(set.contains("SELECT ${read("\$.v1.m.\"k.j\"")} INTO cy_value"), set)
         assertTrue(!set.contains("JSON_QUERY(JSON_QUERY(cy_row"), set)
         val merged = OracleCypherCompiler("g").compile("UNWIND \$ts AS t MERGE (n:Doc {id: t.id}) ON CREATE SET n.a = t.a", mapOf("ts" to emptyList<Any>())).sql
-        assertTrue(merged.contains("= JSON_QUERY(JSON_QUERY(cy_row, '\$.v1' RETURNING JSON), '\$.id' RETURNING JSON)"), merged)
+        assertTrue(merged.contains("= ${read("\$.v1.id")}"), merged)
         assertTrue(merged.contains("JSON_OBJECT('id' VALUE ${read("\$.v1.id")} NULL ON NULL RETURNING JSON) INTO cy_value"), merged)
         assertTrue(merged.contains("SELECT ${read("\$.v1.a")} INTO cy_value"), merged)
     }
@@ -268,7 +270,8 @@ class OracleItemPropertyTest {
         val carried = compiled("UNWIND \$ts AS t WITH t RETURN t.a")
         assertTrue(carried.contains("${read("w3.c1")} AS c1"), carried)
         val written = compiled("UNWIND \$ts AS t MATCH (n:Doc {id: t.id}) SET n.b = 1 RETURN t.a")
-        assertTrue(written.contains("${read("JSON_QUERY(r4.item, '\$.v1' RETURNING JSON)")} AS c1"), written)
+        // The carried value's key by its whole path from the row, its kind tested first.
+        assertTrue(Regex("""CASE WHEN JSON_VALUE\((r\d+)\.item, '\$\.(v\d+)\.a\.type\(\)'\) = 'string' THEN .*ELSE JSON_QUERY\(\1\.item, '\$\.\2\.a' RETURNING JSON\) END AS c1""").containsMatchIn(written), written)
         // Tested, sorted, nested in an item, or matched by a pattern, as it was.
         val other = compiled("UNWIND \$ts AS t WITH t WHERE t.b = 1 RETURN size(t.a) ORDER BY t.c")
         assertTrue(!other.contains("SERIALIZE"), other)
@@ -276,23 +279,23 @@ class OracleItemPropertyTest {
         val listed = compiled("UNWIND \$ts AS t WITH t RETURN [t.a]")
         assertTrue(listed.contains("JSON_ARRAY(${read("w3.c1")} NULL ON NULL RETURNING JSON) AS c1"), listed)
         val merged = compiled("UNWIND \$ts AS t MERGE (n:Doc {a: t.a})")
-        assertTrue(merged.contains("= JSON_QUERY(JSON_QUERY(cy_row, '\$.v1' RETURNING JSON), '\$.a' RETURNING JSON)"), merged)
+        assertTrue(!merged.contains("JSON_QUERY(JSON_QUERY(cy_row") && OracleReads.unsafe(merged).isEmpty(), merged)
         // A UNION whose every query returns an unwound item gives one, read so too.
         val unioned = compiled("CALL { UNWIND \$ts AS m RETURN m UNION ALL UNWIND \$ts AS m RETURN m } RETURN m.a")
         assertTrue(unioned.contains("JSON_SERIALIZE(") && unioned.contains("'\$.a.type()'"), unioned)
         // A map made of a node's properties and carried past a write is read from the write's rows, so read so too.
         val past = compiled("MATCH (n:Doc) WITH n, n {.a} AS m SET n.b = 1 RETURN m.a")
-        assertTrue(past.contains("JSON_SERIALIZE(") && past.contains("'\$.a.type()'"), past)
+        assertTrue(past.contains("JSON_SERIALIZE(") && past.contains(".a.type()'") && OracleReads.unsafe(past).isEmpty(), past)
         // So does a CALL that returns one, an OPTIONAL one among them.
         listOf("CALL { UNWIND \$ts AS m RETURN m } RETURN m.a", "OPTIONAL CALL { UNWIND \$ts AS m RETURN m } RETURN m.a").forEach { cypher ->
             val sql = compiled(cypher)
             assertTrue(sql.contains("JSON_SERIALIZE(") && sql.contains("'\$.a.type()'"), sql)
         }
-        // A temporal value's field, or a key that may name one, is read as a temporal field is.
-        listOf("UNWIND \$ts AS t RETURN t.year", "UNWIND [date('2020-01-02')] AS t RETURN t.year").forEach { cypher ->
-            val sql = compiled(cypher)
-            assertTrue(!sql.contains("'\$.year.type()'"), sql)
-        }
+        // A temporal value's field, or a key that may name one, is read as a temporal field is: a map's key the CLOB way.
+        val field = compiled("UNWIND [date('2020-01-02')] AS t RETURN t.year")
+        assertTrue(!field.contains("'\$.year.type()'"), field)
+        val keyed = compiled("UNWIND \$ts AS t RETURN t.year")
+        assertTrue(OracleReads.unsafe(keyed).isEmpty() && keyed.contains("ELSE ${OracleReads.routedItem("u1.item", "'\$.year'")} END AS c1"), keyed)
     }
 
     @Test
@@ -352,7 +355,7 @@ class OracleItemPropertyTest {
         // #413: worked out in the query that groups, the term read the key's text again at each level of the sum, 52 times.
         val sql = OracleCypherCompiler("g").compile("MATCH (me:P)--(you:P) RETURN me.age AS age, count(you.age) AS cnt ORDER BY me.age + count(you.age)").sql
         // Each end's labels, read by their keys (#581), are tested through their text too: those are not the key's.
-        assertEquals(2, Regex("""JSON_SERIALIZE\((?!\w+\.labels\))""").findAll(sql).count(), sql)
+        assertEquals(2, Regex("""JSON_SERIALIZE\(JSON_TRANSFORM\(n1\.props, KEEP '\$\.age'\)""").findAll(sql).count(), sql)
     }
 
     @Test
@@ -438,11 +441,11 @@ class OracleItemPropertyTest {
         for (shape in shapes) {
             val sql = OracleCypherCompiler("g").compile("MATCH (n:Doc) $shape").sql
             // Each read of the item is its kind's, its text's, and in the ELSE, its JSON's.
-            val (kinds, texts, all) = listOf("'\$[\$i].type()' PASSING ", "RETURNING CLOB), '\$[\$i]' PASSING ", "'\$[\$i]' PASSING ").map { Regex.escape(it).toRegex().findAll(sql).count() }
+            val (kinds, texts, all) = listOf("[\$i].type()' PASSING ", "RETURNING CLOB), '\$[\$i]' PASSING ", "[\$i]' PASSING ").map { Regex.escape(it).toRegex().findAll(sql).count() }
             assertTrue(kinds > 0 && texts == kinds && all == 2 * kinds, "$shape: $sql")
             assertTrue(Regex(Regex.escape("ELSE JSON_QUERY(")).findAll(sql).count() >= kinds, "$shape: $sql")
             // The node's label test stays.
-            assertEquals(1, Regex(Regex.escape("JSON_EXISTS(")).findAll(sql).count(), "$shape: $sql")
+            assertEquals(1, Regex("""JSON_EXISTS\(\w+\.labels""").findAll(sql).count(), "$shape: $sql")
         }
         // By head and last; of a stored list, its kind read by the property's own path (see direct).
         val ends = OracleCypherCompiler("g").compile("MATCH (n:Doc) RETURN [size(head(split(n.a, 'x'))), last(split(n.a, 'x')), head(n.tags)]").sql

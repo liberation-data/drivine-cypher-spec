@@ -49,37 +49,41 @@ object Oracle {
     }
 
     private val FILES = listOf("queries.yaml", "writes.yaml", "temporal.yaml", "refusals.yaml", "schema.yaml")
-    private val STORES = listOf("postgres", "oracle", "sqlite")
+    internal val STORES = listOf("postgres", "oracle", "sqlite")
 
     /** Writes the corpus to [into]: how many lines, and how many statements left out for the clock. */
     private fun corpus(spec: File, into: File): Pair<Int, Int> {
         var lines = 0
         var clocked = 0
         into.printWriter().use { w ->
-            fun emit(request: String) {
+            for (request in corpusRequests(spec)) {
                 val answer = answerUnlessClocked(request) ?: run {
                     clocked++
-                    return
+                    continue
                 }
                 w.println(json.writeValueAsString(linkedMapOf("request" to request, "answer" to answer)))
                 lines++
             }
-            for ((cypher, parameters) in statements(spec)) for (store in STORES) emit(request(store, cypher, parameters))
-            for ((cypher, parameters) in TYPED) for (store in STORES) emit(request(store, cypher, parameters))
-            // Oracle's graph options.
-            for (options in ORACLE_OPTIONS) {
-                emit(json.writeValueAsString(linkedMapOf("store" to "oracle", "graph" to options, "cypher" to "MATCH (p:Person {name: \$name}) WHERE p.age = \$age RETURN p.name, p.born", "parameters" to mapOf("name" to "Ada", "age" to 36))))
-                emit(json.writeValueAsString(linkedMapOf("store" to "oracle", "graph" to options, "cypher" to "MATCH (p:Person) WHERE p.nick = \$nick RETURN p", "parameters" to mapOf("nick" to null))))
-                emit(json.writeValueAsString(linkedMapOf("store" to "oracle", "graph" to options, "cypher" to "RETURN date({year: -44, month: 3, day: 15}) AS d")))
-            }
-            // Requests that are no request.
-            for (request in listOf("", "[]", "{\"store\": \"neo4j\", \"graph\": {\"name\": \"g\"}, \"cypher\": \"RETURN 1\"}", "{\"store\": \"postgres\", \"cypher\": \"RETURN 1\"}")) emit(request)
         }
         return lines to clocked
     }
 
+    /** The corpus's requests, in its order: each spec statement for each store, the typed ones, Oracle's graph options, and requests that are no request. */
+    internal fun corpusRequests(spec: File): List<String> = buildList {
+        for ((cypher, parameters) in statements(spec)) for (store in STORES) add(request(store, cypher, parameters))
+        for ((cypher, parameters) in TYPED) for (store in STORES) add(request(store, cypher, parameters))
+        // Oracle's graph options.
+        for (options in ORACLE_OPTIONS) {
+            add(json.writeValueAsString(linkedMapOf("store" to "oracle", "graph" to options, "cypher" to "MATCH (p:Person {name: \$name}) WHERE p.age = \$age RETURN p.name, p.born", "parameters" to mapOf("name" to "Ada", "age" to 36))))
+            add(json.writeValueAsString(linkedMapOf("store" to "oracle", "graph" to options, "cypher" to "MATCH (p:Person) WHERE p.nick = \$nick RETURN p", "parameters" to mapOf("nick" to null))))
+            add(json.writeValueAsString(linkedMapOf("store" to "oracle", "graph" to options, "cypher" to "RETURN date({year: -44, month: 3, day: 15}) AS d")))
+        }
+        // Requests that are no request.
+        addAll(listOf("", "[]", "{\"store\": \"neo4j\", \"graph\": {\"name\": \"g\"}, \"cypher\": \"RETURN 1\"}", "{\"store\": \"postgres\", \"cypher\": \"RETURN 1\"}"))
+    }
+
     /** Every statement in the spec's files, with its parameters, in the files' order. */
-    private fun statements(spec: File): List<Mutants.Statement> = buildList {
+    internal fun statements(spec: File): List<Mutants.Statement> = buildList {
         for (file in FILES) {
             val tree = yaml.readTree(File(spec, file))
             val cases = if (tree.isArray) tree else tree["cases"]
@@ -92,7 +96,7 @@ object Oracle {
     }
 
     /** [request]'s answer on the JVM, or null where it embeds the moment it was compiled (see [embedsClock]). */
-    private fun answerUnlessClocked(request: String): String? {
+    internal fun answerUnlessClocked(request: String): String? {
         val before = LocalDateTime.now(ZoneOffset.UTC)
         val answer = CompileJson.compile(request)
         return answer.takeUnless { embedsClock(it, before, LocalDateTime.now(ZoneOffset.UTC)) }
