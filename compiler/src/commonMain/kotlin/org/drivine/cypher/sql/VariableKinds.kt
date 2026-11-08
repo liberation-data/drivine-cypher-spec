@@ -111,7 +111,9 @@ internal object VariableKinds {
         val parts = (listOf(query.clauses) + query.unions.map { it.clauses }).map { clauses ->
             val imported = imports(call, clauses, scope.kinds.keys)
             val inner = scope.kinds.filterTo(LinkedHashMap()) { (name, _) -> name in imported }
-            clauses(clauses, Scope(inner), kept = if (call.imports != null || call.importsAll) inner.toMap() else emptyMap())
+            // What a WITH outside drops, imported by a CALL within its WHERE, CALL (*) { … }, stays dropped in the call (drivine4j#504).
+            val dropped = scope.dropped.filterTo(LinkedHashSet()) { it in imported }
+            clauses(clauses, Scope(inner, dropped), kept = if (call.imports != null || call.importsAll) inner.filterKeys { it !in dropped } else emptyMap())
         }
         return parts.first().mapValues { (name, kind) -> if (parts.all { it[name] == kind }) kind else Kind.ANY }
     }

@@ -758,6 +758,11 @@ cases:
         error: "p is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used."
       - cypher: "MATCH (p:Person) WITH p AS q WHERE EXISTS { MATCH (q)-->(m) WITH * WHERE (p)-->() RETURN m } RETURN q.name"
         error: "p is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used."
+      - note: "And within a CALL (*) { … } there, which imports it still dropped, after a WITH of its own too (see queries.yaml, \"CALL imports only what it names\", for one naming only what the WITH passes on)."
+        cypher: "MATCH (p:Person) WITH p AS q WHERE EXISTS { CALL (*) { MATCH (p)-->() RETURN 1 AS x } RETURN x } RETURN q.name"
+        error: "p is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used."
+      - cypher: "MATCH (p:Person) WITH p AS q WHERE EXISTS { CALL (*) { WITH 1 AS one MATCH (p)-->() RETURN one } RETURN one } RETURN q.name"
+        error: "p is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used."
 
   - name: "Two items of one name"
     description: "A WITH or a RETURN names each item once, as Neo4j has it (its 42N38, \"column name conflict\"): an item's name is its alias, or its expression as written, and a variable's or a map projection's is its variable's (drivine4j#499)."

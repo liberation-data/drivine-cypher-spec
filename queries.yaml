@@ -1140,6 +1140,11 @@ cases:
       - cypher: "MATCH (a:Person {name: 'Keanu'}) CALL (*) { MATCH (a)-[:ACTED_IN]->(m) WITH m MATCH (a)-[:ACTED_IN]->(m) RETURN count(m) AS n } RETURN n"
         only: [neo4j, sql]
         rows: [3]
+      - note: "In a WITH's WHERE, CALL (*) imports what the WITH passes on (and a pattern naming what it drops is refused, see refusals.yaml, drivine4j#504)."
+        cypher: "MATCH (p:Person) WITH p AS q WHERE EXISTS { CALL (*) { MATCH (q)-->() RETURN 1 AS x } RETURN x } RETURN q.name"
+        only: [neo4j, sql]
+        unordered: true
+        rows: ["Keanu", "Carrie", "Laurence"]
       - cypher: "MATCH (a:Person {name: 'Keanu'}) CALL { WITH * MATCH (a)-[:ACTED_IN]->(m) RETURN count(m) AS n } RETURN n"
         only: [neo4j, sql]
         rows: [3]
