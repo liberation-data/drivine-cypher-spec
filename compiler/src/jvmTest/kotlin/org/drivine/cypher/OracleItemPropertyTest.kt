@@ -26,10 +26,89 @@ class OracleItemPropertyTest {
         assertTrue(returned.contains("JSON_QUERY(n1.props, '\$.id' RETURNING JSON) AS s1") && returned.contains("JSON_QUERY(n1.props, '\$.b' RETURNING JSON)"), returned)
         val passed = OracleCypherCompiler("g").compile("MATCH (n:Doc) WITH n.a AS a RETURN [a]").sql
         assertEquals(1, Regex(Regex.escape(long)).findAll(passed).count(), passed)
+        // A member of a list an item is, through its text too (#670), and a map projection's in it.
         val nested = OracleCypherCompiler("g").compile("MATCH (n:Doc) RETURN [n.a, n {.a}]").sql
-        assertTrue(!nested.contains("RETURNING CLOB"), nested)
+        assertEquals(2, Regex(Regex.escape(long)).findAll(nested).count(), nested)
+        assertTrue(nested.contains("JSON_ARRAY($long, "), nested)
         val sorted = OracleCypherCompiler("g").compile("MATCH (n:Doc) RETURN n.a ORDER BY n.a").sql
         assertTrue(sorted.contains("$long AS c1") && sorted.contains("$long AS s1"), sorted)
+    }
+
+    /** [long], the read of `n.a` through its text, of the key [key] of the properties [props]. */
+    private fun longOf(key: String, props: String = "n1.props") = long.replace("n1.props", props).replace("'\$.a'", "'\$.$key'")
+
+    @Test
+    fun `a property that is a member of a list an item is, is read through its text`() {
+        // #670.
+        val returned = OracleCypherCompiler("g").compile("MATCH (n:Doc) WHERE n.i IN [2, 3] RETURN [n.i, n.a]").sql
+        assertTrue(returned.contains("JSON_ARRAY(${longOf("i")}, $long NULL ON NULL RETURNING JSON) AS c1"), returned)
+        assertTrue(!returned.contains("JSON_QUERY(n1.props, '\$.a' RETURNING JSON)"), returned)
+        // A relationship's too, a WITH's item, and a write's.
+        val related = OracleCypherCompiler("g").compile("MATCH (n:Doc)-[r:R]->() RETURN [r.a]").sql
+        val edge = Regex("JSON_TRANSFORM\\((\\w+)\\.props, KEEP").find(related)?.groupValues?.get(1)
+        assertTrue(edge != null && edge != "n1" && related.contains("JSON_ARRAY(${longOf("a", "$edge.props")} NULL ON NULL RETURNING JSON)"), related)
+        assertTrue(!related.contains(".props, '\$.a' RETURNING JSON)"), related)
+        val passed = OracleCypherCompiler("g").compile("MATCH (n:Doc) WITH [n.a] AS l RETURN l").sql
+        assertTrue(passed.contains("JSON_ARRAY($long NULL ON NULL RETURNING JSON)"), passed)
+        val written = OracleCypherCompiler("g").compile("MATCH (n:Doc) SET n.b = 1 RETURN [n.i, n.a]").sql
+        assertTrue(written.contains("KEEP '\$.a') RETURNING CLOB EXTENDED), '\$.a' RETURNING CLOB) EXTENDED) NULL ON NULL RETURNING JSON)"), written)
+    }
+
+    @Test
+    fun `a property that is a member of a map an item is, or of a literal such a member is, is read through its text`() {
+        // As a member of a list (#670).
+        val map = OracleCypherCompiler("g").compile("MATCH (n:Doc) RETURN {i: n.i, a: n.a}").sql
+        assertTrue(map.contains("JSON_OBJECT('i' VALUE ${longOf("i")}, 'a' VALUE $long NULL ON NULL RETURNING JSON) AS c1"), map)
+        assertTrue(!map.contains("JSON_QUERY(n1.props, '\$.a' RETURNING JSON)"), map)
+        val nested = OracleCypherCompiler("g").compile("MATCH (n:Doc) RETURN {l: [n.a], m: {a: n.a}}").sql
+        assertEquals(2, Regex(Regex.escape(long)).findAll(nested).count(), nested)
+        assertTrue(!nested.contains("JSON_QUERY(n1.props, '\$.a' RETURNING JSON)"), nested)
+    }
+
+    @Test
+    fun `a property that is selected by a map projection, collected, or projected by a list comprehension an item is, is read through its text`() {
+        // As a member of a list (#670).
+        val projected = OracleCypherCompiler("g").compile("MATCH (n:Doc) RETURN n {.i, a: n.a}").sql
+        assertTrue(projected.contains("JSON_OBJECT('i' VALUE ${longOf("i")}, 'a' VALUE $long NULL ON NULL RETURNING JSON)"), projected)
+        val collected = OracleCypherCompiler("g").compile("MATCH (n:Doc) RETURN collect(n.a)").sql
+        assertTrue(collected.contains(long) && !collected.contains("JSON_QUERY(n1.props, '\$.a' RETURNING JSON)"), collected)
+        val passed = OracleCypherCompiler("g").compile("MATCH (n:Doc) WITH n.i AS i, collect(n.a) AS l RETURN i, l").sql
+        assertTrue(passed.contains(long), passed)
+        val comprehended = OracleCypherCompiler("g").compile("MATCH (n:Doc) RETURN [x IN [n] | x.a]").sql
+        assertTrue(Regex("JSON_ARRAYAGG\\(JSON\\(JSON_QUERY\\(JSON_SERIALIZE\\(JSON_TRANSFORM\\(n\\d+\\.props, KEEP '\\$\\.a'\\)").containsMatchIn(comprehended), comprehended)
+        // So too where a list or a map holds them: a collect() in a list, a comprehension in a map, a selected property beside `.*`.
+        val listed = OracleCypherCompiler("g").compile("MATCH (n:Doc) RETURN [collect(n.a)]").sql
+        assertTrue(listed.contains("JSON_ARRAY(COALESCE(JSON_ARRAYAGG(") && listed.contains(long) && !listed.contains("JSON_QUERY(n1.props, '\$.a' RETURNING JSON)"), listed)
+        val mapped = OracleCypherCompiler("g").compile("MATCH (n:Doc) RETURN {l: [x IN [n] | x.a]}").sql
+        assertTrue(Regex("JSON_ARRAYAGG\\(JSON\\(JSON_QUERY\\(JSON_SERIALIZE\\(JSON_TRANSFORM\\(n\\d+\\.props, KEEP '\\$\\.a'\\)").containsMatchIn(mapped), mapped)
+        val all = OracleCypherCompiler("g").compile("MATCH (n:Doc) RETURN n {.*, .a}").sql
+        assertTrue(all.contains("SET '\$.a' = $long"), all)
+        // A list an UNWIND unwinds, so too; a property an UNWIND unwinds as it was.
+        val unwound = OracleCypherCompiler("g").compile("MATCH (n:Doc) UNWIND [{a: n.a}] AS m RETURN m.i").sql
+        assertTrue(unwound.contains("JSON_OBJECT('a' VALUE $long NULL ON NULL RETURNING JSON)") && !unwound.contains("JSON_QUERY(n1.props, '\$.a' RETURNING JSON)"), unwound)
+        val property = OracleCypherCompiler("g").compile("MATCH (n:Doc) UNWIND n.a AS m RETURN m").sql
+        assertTrue(!property.contains("KEEP '\$.a'"), property)
+        // A collect(DISTINCT …), gathered by a collect() first, so too; a comprehension's where and list as they were.
+        val distinct = OracleCypherCompiler("g").compile("MATCH (n:Doc) RETURN collect(DISTINCT n.a)").sql
+        assertTrue(distinct.contains(long), distinct)
+        val filtered = OracleCypherCompiler("g").compile("MATCH (n:Doc) RETURN [x IN [n.l] WHERE x.a = 1]").sql
+        assertTrue(filtered.contains("JSON_ARRAY(JSON_QUERY(n1.props, '\$.l' RETURNING JSON) NULL ON NULL RETURNING JSON)") && !filtered.contains("KEEP '\$.l'"), filtered)
+    }
+
+    @Test
+    fun `a property worked out in a member, a node's stamp, and a member beside a variable-length walk, are read as they were`() {
+        // Only the member that is the property itself is read through its text, as only the item that is the property is.
+        val worked = OracleCypherCompiler("g").compile("MATCH (n:Doc) RETURN [size(n.a), n.a + 'x', size([n.a])]").sql
+        assertTrue(!worked.contains("RETURNING CLOB EXTENDED"), worked)
+        val headed = OracleCypherCompiler("g").compile("MATCH (n:Doc) RETURN head(collect(n.a))").sql
+        assertTrue(!headed.contains("RETURNING CLOB EXTENDED"), headed)
+        val stamp = OracleCypherCompiler("g").compile("MATCH (n:Doc) RETURN [n.`__drivine.stamp`]").sql
+        assertTrue(stamp.contains("JSON_ARRAY(JSON_SCALAR(n1.stamp) NULL ON NULL RETURNING JSON)") && !stamp.contains("KEEP"), stamp)
+        val walked = OracleCypherCompiler("g").compile("MATCH (:Doc {id: 1})-[:R*]->(n) RETURN [n.a, {a: n.a}]").sql
+        assertTrue(!walked.contains("RETURNING CLOB") && walked.contains(".a' RETURNING JSON)"), walked)
+        // Postgres reads a member as it was.
+        val postgres = PostgresCypherCompiler("g").compile("MATCH (n:Doc) RETURN [n.i, {a: n.a}]").sql
+        assertTrue(postgres.contains("(n1.props -> 'a')") && !postgres.contains("KEEP"), postgres)
     }
 
     @Test
@@ -191,8 +270,11 @@ class OracleItemPropertyTest {
         val written = compiled("UNWIND \$ts AS t MATCH (n:Doc {id: t.id}) SET n.b = 1 RETURN t.a")
         assertTrue(written.contains("${read("JSON_QUERY(r4.item, '\$.v1' RETURNING JSON)")} AS c1"), written)
         // Tested, sorted, nested in an item, or matched by a pattern, as it was.
-        val other = compiled("UNWIND \$ts AS t WITH t WHERE t.b = 1 RETURN [t.a] ORDER BY t.c")
-        assertTrue(!other.contains("SERIALIZE") && other.contains("JSON_QUERY(w3.c1, '\$.a' RETURNING JSON)"), other)
+        val other = compiled("UNWIND \$ts AS t WITH t WHERE t.b = 1 RETURN size(t.a) ORDER BY t.c")
+        assertTrue(!other.contains("SERIALIZE"), other)
+        // A member of a list an item is, read so too (#670).
+        val listed = compiled("UNWIND \$ts AS t WITH t RETURN [t.a]")
+        assertTrue(listed.contains("JSON_ARRAY(${read("w3.c1")} NULL ON NULL RETURNING JSON) AS c1"), listed)
         val merged = compiled("UNWIND \$ts AS t MERGE (n:Doc {a: t.a})")
         assertTrue(merged.contains("= JSON_QUERY(JSON_QUERY(cy_row, '\$.v1' RETURNING JSON), '\$.a' RETURNING JSON)"), merged)
         // A UNION whose every query returns an unwound item gives one, read so too.

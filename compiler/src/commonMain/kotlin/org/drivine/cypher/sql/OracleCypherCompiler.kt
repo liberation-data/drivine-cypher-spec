@@ -567,8 +567,10 @@ class OracleCypherCompiler(
      * `CASE` on `$.a.type()` or on the value's length that reads the properties twice, made Oracle drop the row's label
      * test and return nodes it had ruled out. Beside a variable-length walk the plain read is kept: Oracle has closed
      * the session over this form in the more involved statements a walk writes. Only an item that is the property itself
-     * is read so: a property inside an item (`[n.a]`, `collect(n.a)`) is read as [propertyOf] reads it, and isn't worked
-     * around. Read so, a text past 32 KB still can't be sorted by, grouped by or made `DISTINCT`: Oracle refuses it
+     * is read so, and a property that is a direct member of a list or a map an item is (`[n.i, n.a]`, `{a: n.a}`, `n {.a}`,
+     * `collect(n.a)`, `[x IN [n] | x.a]`): a long text property read as such a member is routed so on Oracle, to avoid an
+     * Oracle server defect (#670). A property worked out inside an item (`[size(n.a)]`) is read as [propertyOf] reads it,
+     * and isn't worked around. Read so, a text past 32 KB still can't be sorted by, grouped by or made `DISTINCT`: Oracle refuses it
      * (ORA-40180), as it does any JSON that large, and the session stays open. A write's block is worked around too, where
      * it takes a text from the row it is writing: see [rowValue]; so is an unwound item's value an item gives: see [itemValue];
      * so is an item of a list read by its place: see [listItem]; and so is a property that is an argument of `coalesce()`:
