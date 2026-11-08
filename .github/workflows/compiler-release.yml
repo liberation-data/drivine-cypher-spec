@@ -4,11 +4,18 @@
 # - A push of a tag vX.Y.Z on main publishes the compiler as version X.Y.Z: a spec tag is a compiler release, so the
 #   compiler and the spec it was checked against share one number. A tag that changes only the spec publishes the
 #   compiler again, unchanged, under the new number.
-# - The compiler's CI (compiler.yml) runs first, and every target's publication is built, signed and checked. The
-#   upload waits in the `release` environment for its reviewer's approval, then nmcp uploads every target in one
-#   bundle, as one deployment: the Central Portal releases all of them or none.
-# - workflow_dispatch, and a pull request that changes the release machinery, are dry runs: everything but the upload,
-#   signed with a throwaway key, with the bundle left as the run's artifact to inspect.
+# - The compiler's CI (compiler.yml) runs first, then every target's publication is built once, unsigned, into one
+#   bundle, which is checked and kept as the run's artifact. The upload waits in the `release` environment for its
+#   reviewer's approval, then signs that bundle with the release key and uploads it to the Central Portal as one
+#   deployment, which releases every target or none. What is published is the bundle that was checked, byte for byte,
+#   with a signature beside each file; nothing is built, and no JDK, Gradle or dependency fetched, after the gate.
+# - workflow_dispatch, and a pull request that changes the release machinery, are dry runs: everything but the upload
+#   to the Portal, the bundle signed with a throwaway key, with GitHub's release downloads blocked, kept as the run's
+#   artifact, and uploaded to a stand-in for the Portal on the runner.
+# - The jobs that build install the pinned JDK and Gradle with .github/actions/pinned-toolchain, from checked archives:
+#   the gate's jobs keep them in the cache, so a GitHub release-download outage, which failed v0.31.0's publish, doesn't
+#   hold up a gate whose cache is warm; the build job reads no cache and fetches them, so an outage fails it, before the
+#   reviewer is asked, and it is re-run.
 name: Compiler release
 
 on:
@@ -22,9 +29,14 @@ on:
       - .github/workflows/compiler-release.yml
       - .github/workflows/compiler.yml
       - .github/scripts/compiler-release-check.sh
+      - .github/scripts/compiler-release-sign.sh
+      - .github/scripts/compiler-release-sign-test.sh
+      - .github/scripts/compiler-release-upload.sh
+      - .github/actions/pinned-toolchain/**
       - compiler/build.gradle.kts
       - compiler/settings.gradle.kts
       - compiler/gradle.properties
+      - compiler/gradle/pinned-jdk.properties
       - compiler/gradle/wrapper/gradle-wrapper.properties
       - compiler/gradle/wrapper/gradle-wrapper.jar
 
@@ -63,8 +75,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      # The build and publish jobs run this commit's ./gradlew, the publish job with the release secrets: its
-      # gradle-wrapper.jar, a binary a review can't read, has to be one Gradle released.
+      # The build job runs this commit's ./gradlew, and builds the bundle publish signs: its gradle-wrapper.jar, a
+      # binary a review can't read, has to be one Gradle released.
       - uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
       - name: The version
         id: version
@@ -102,14 +114,18 @@ jobs:
     needs: [check, gate]
     # macOS builds every target: macosArm64 only builds there, and Kotlin/Native cross-compiles the others.
     runs-on: macos-latest
+    outputs:
+      bundle-sha256: ${{ steps.bundle.outputs.sha256 }}
     env:
       VERSION: ${{ needs.check.outputs.version }}
       PUBLISH: ${{ needs.check.outputs.publish }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # No Gradle cache: the release is built from nothing but the checked-out ref.
-      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
-        with: { distribution: temurin, java-version: '21.0.13+9.0.LTS' }
+      # No cache: the release is built from nothing but the checked-out ref, and the JDK and Gradle archives it pins,
+      # fetched and checked against their SHA-256s. A cache entry is unpacked before its archive is checked, and an
+      # earlier job of a tag's run (the gate's, with third-party actions) can save one in the tag's scope.
+      - uses: ./.github/actions/pinned-toolchain
+        with: { cache: 'false' }
       - name: Maven Central doesn't have this version yet
         run: |
           # Only an answer of 200 stops a release. When Maven Central can't be asked, the step goes on: the portal
@@ -124,44 +140,53 @@ jobs:
           elif [[ "$status" != 404 ]]; then
             echo "::warning::Couldn't ask Maven Central whether it has org.drivine:drivine-cypher-compiler:$VERSION (HTTP $status). Going on: the Central Portal rejects a version it already has."
           fi
-      # The dry run signs as the release does, but with a key made here and thrown away with the runner. A release
-      # signs here with it too: this job never sees the release secrets, which only the publish job's environment holds.
-      - name: Make a throwaway signing key
-        run: |
-          gpg --batch --pinentry-mode loopback --passphrase dry-run \
-            --quick-gen-key 'Drivine release dry run <dry-run@invalid>' rsa3072 sign 1d
-          gpg --batch --pinentry-mode loopback --passphrase dry-run --armor --export-secret-keys > "$RUNNER_TEMP/dry-run-key.asc"
-      - name: Build, sign and bundle the publications
-        run: |
-          SIGNING_KEY="$(cat "$RUNNER_TEMP/dry-run-key.asc")" \
-            ./gradlew --no-daemon zipAggregationPublication -Pcompiler.version="$VERSION"
-        env:
-          SIGN: 'true'
-          SIGNING_PASSWORD: dry-run
-      - name: Check the publications
-        run: ../.github/scripts/compiler-release-check.sh build/nmcp/zip/publicationAggregated.zip "$VERSION" verify release
+      # Unsigned: the job after the gate signs it, so this one never holds a key, and every file it checks is published.
+      - name: Build the bundle
+        run: ./gradlew --no-daemon zipAggregationPublication -Pcompiler.version="$VERSION"
+      - name: Check the bundle
+        run: ../.github/scripts/compiler-release-check.sh build/nmcp/zip/publicationAggregated.zip "$VERSION" none release
+      # A job output, which no other job of the run can set: publish signs only this bundle, not an artifact of the same
+      # name put in its place.
+      - name: The bundle's SHA-256
+        id: bundle
+        run: echo "sha256=$(shasum -a 256 release/publicationAggregated.zip | cut -d' ' -f1)" | tee -a "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: compiler-maven-central-${{ env.VERSION }}
-          path: compiler/release/
+          path: compiler/release/publicationAggregated.zip
           if-no-files-found: error
 
-  # nmcp signs and uploads in one Gradle build, so this job builds the bundle again from the same commit, signed with
-  # the release key, checks it as build checked its own, and uploads it as one deployment. It waits in the `release`
-  # environment, which holds the secrets, for its reviewer's approval.
+  # Signs build's bundle with the release key and uploads it, as one deployment, followed until the Portal publishes it.
+  # It waits in the `release` environment, which holds the secrets, for its reviewer's approval. It needs nothing but the
+  # bundle, this commit's scripts, and gpg, curl, jq and zip, which the runner has.
   publish:
     needs: [check, build]
     if: needs.check.outputs.publish == 'true'
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
     environment: release
+    # The upload's poll gives up after an hour; the signing takes a minute.
+    timeout-minutes: 90
     permissions:
       contents: read
     env:
       VERSION: ${{ needs.check.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
-        with: { distribution: temurin, java-version: '21.0.13+9.0.LTS' }
+        # Its scripts alone: the job holds the release secrets, and needs no token of the repository's after checkout.
+        with: { persist-credentials: false }
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: compiler-maven-central-${{ env.VERSION }}
+          path: ${{ runner.temp }}/unsigned
+      - name: The bundle is build's
+        env:
+          BUNDLE_SHA256: ${{ needs.build.outputs.bundle-sha256 }}
+        run: |
+          got=$(shasum -a 256 "$RUNNER_TEMP/unsigned/publicationAggregated.zip" | cut -d' ' -f1)
+          if [[ -z "$BUNDLE_SHA256" || "$got" != "$BUNDLE_SHA256" ]]; then
+            echo "::error::The bundle downloaded has SHA-256 $got, not ${BUNDLE_SHA256:-none} as build made it."
+            exit 1
+          fi
       - name: The release secrets are set
         env:
           SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
@@ -178,27 +203,128 @@ jobs:
             echo "::error::The release environment is missing: ${missing[*]}."
             exit 1
           fi
-      - name: Build and sign the bundle
-        run: ./gradlew --no-daemon zipAggregationPublication -Pcompiler.version="$VERSION"
+      - name: Sign the bundle
+        run: ../.github/scripts/compiler-release-sign.sh "$RUNNER_TEMP/unsigned/publicationAggregated.zip" "$VERSION" "$RUNNER_TEMP/signed.zip" "$RUNNER_TEMP/signed"
         env:
-          SIGN: 'true'
           SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
           SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
-      # The release key's public half isn't on this runner, so the check here asks for a signature beside every file,
-      # and build's check verified that the build signs each one.
-      - name: Check the bundle
-        run: ../.github/scripts/compiler-release-check.sh build/nmcp/zip/publicationAggregated.zip "$VERSION" present uploaded
       - name: Publish to Maven Central
-        run: ./gradlew --no-daemon publishAggregatedPublicationToCentralPortal -Pcompiler.version="$VERSION"
+        run: ../.github/scripts/compiler-release-upload.sh "$RUNNER_TEMP/signed.zip"
         env:
-          SIGN: 'true'
-          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
-          SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
           CENTRAL_PORTAL_USERNAME: ${{ secrets.CENTRAL_PORTAL_USERNAME }}
           CENTRAL_PORTAL_PASSWORD: ${{ secrets.CENTRAL_PORTAL_PASSWORD }}
+      # Only once published: a bundle a failed step left is not kept.
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: always()
         with:
           name: compiler-maven-central-uploaded-${{ env.VERSION }}
-          path: compiler/uploaded/publicationAggregated.zip
+          path: ${{ runner.temp }}/signed.zip
           if-no-files-found: warn
+
+  # A dry run's stand-in for publish, which it skips: build's bundle signed as publish signs it, but with a key made here
+  # and thrown away with the runner, with GitHub's release downloads blocked throughout, then checked to be build's bundle
+  # with a signature beside each file, uploaded as publish uploads it to a stand-in for the Portal on the runner, and kept
+  # as the run's artifact. It uploads nothing to the Portal.
+  publish-dry-run:
+    needs: [check, build]
+    if: needs.check.outputs.publish != 'true'
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: compiler-maven-central-${{ env.VERSION }}
+          path: ${{ runner.temp }}/unsigned
+      - name: The bundle is build's
+        env:
+          BUNDLE_SHA256: ${{ needs.build.outputs.bundle-sha256 }}
+        run: |
+          got=$(shasum -a 256 "$RUNNER_TEMP/unsigned/publicationAggregated.zip" | cut -d' ' -f1)
+          if [[ -z "$BUNDLE_SHA256" || "$got" != "$BUNDLE_SHA256" ]]; then
+            echo "::error::The bundle downloaded has SHA-256 $got, not ${BUNDLE_SHA256:-none} as build made it."
+            exit 1
+          fi
+      - name: Block GitHub's release downloads and Adoptium's API
+        run: |
+          for host in objects.githubusercontent.com release-assets.githubusercontent.com api.adoptium.net api.foojay.io; do
+            printf '0.0.0.0 %s\n:: %s\n' "$host" "$host" | sudo tee -a /etc/hosts > /dev/null
+          done
+          if curl -s --max-time 10 -o /dev/null https://api.adoptium.net; then
+            echo "::error::api.adoptium.net is still reachable, so this job shows nothing."
+            exit 1
+          fi
+      - name: Make a throwaway signing key
+        run: |
+          export GNUPGHOME="$RUNNER_TEMP/dry-run-gnupg"
+          mkdir -m 700 "$GNUPGHOME"
+          gpg --batch --pinentry-mode loopback --passphrase dry-run \
+            --quick-gen-key 'Drivine release dry run <dry-run@invalid>' rsa3072 sign 1d
+          gpg --batch --pinentry-mode loopback --passphrase dry-run --armor --export-secret-keys > "$RUNNER_TEMP/dry-run-key.asc"
+          gpgconf --kill gpg-agent
+      - name: Sign the bundle as publish does
+        run: |
+          SIGNING_KEY="$(cat "$RUNNER_TEMP/dry-run-key.asc")" \
+            ../.github/scripts/compiler-release-sign.sh "$RUNNER_TEMP/unsigned/publicationAggregated.zip" "$VERSION" "$RUNNER_TEMP/signed.zip" "$RUNNER_TEMP/signed"
+        env:
+          SIGNING_PASSWORD: dry-run
+      # On Linux, whose unzip makes the links a zip holds: a bundle with a link among thousands, a file, a version or a path
+      # no artifact's publication makes is refused, and leaves no signed bundle.
+      - name: The sign script refuses a bundle it must not sign
+        run: |
+          SIGNING_KEY="$(cat "$RUNNER_TEMP/dry-run-key.asc")" \
+            ../.github/scripts/compiler-release-sign-test.sh "$RUNNER_TEMP/unsigned/publicationAggregated.zip" "$VERSION"
+        env:
+          SIGNING_PASSWORD: dry-run
+      # The signed bundle is build's, file for file and byte for byte, with a signature beside each file.
+      - name: The signed bundle is build's, signed
+        run: |
+          mkdir "$RUNNER_TEMP/a" "$RUNNER_TEMP/b"
+          unzip -q "$RUNNER_TEMP/unsigned/publicationAggregated.zip" -d "$RUNNER_TEMP/a"
+          unzip -q "$RUNNER_TEMP/signed.zip" -d "$RUNNER_TEMP/b"
+          signatures=$(find "$RUNNER_TEMP/b" -name '*.asc' | wc -l)
+          find "$RUNNER_TEMP/b" -name '*.asc' -delete
+          if ! diff -r "$RUNNER_TEMP/a" "$RUNNER_TEMP/b"; then
+            echo "::error::The signed bundle isn't build's bundle with signatures beside it."
+            exit 1
+          fi
+          echo "The signed bundle is build's, with $signatures signatures."
+      # The upload as publish makes it, to a stand-in for the Central Portal on this runner. It refuses an upload that
+      # isn't nmcp's (the token's header, AUTOMATIC, the bundle's field, filename and type, the signed bundle's bytes),
+      # then answers the status as the Portal does, and fails a status request for anything but that deployment's id.
+      - name: Upload the bundle as publish does, to a stand-in Portal
+        run: |
+          python3 -I - "$RUNNER_TEMP/signed.zip" <<'EOF' &
+          import base64, http.server, json, sys
+          bundle = open(sys.argv[1], "rb").read()
+          token = "UserToken " + base64.b64encode(b"dry-run:dry-run").decode()
+          class Portal(http.server.BaseHTTPRequestHandler):
+              def do_POST(self):
+                  body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+                  upload = self.path.split("?")[0] == "/upload"
+                  ok = self.headers.get("Authorization") == token and (
+                      self.path == "/upload?publishingType=AUTOMATIC"
+                      and b'name="bundle"; filename="publicationAggregated.zip"\r\nContent-Type: application/zip\r\n' in body
+                      and bundle in body if upload else self.path == "/status?id=0f0e1d2c-0000-4000-8000-00000000d0d0")
+                  self.send_response((201 if upload else 200) if ok or not upload else 400)
+                  self.end_headers()
+                  if not ok and upload:
+                      self.wfile.write(b"Not the upload nmcp makes.")
+                  elif upload:
+                      self.wfile.write(b"0f0e1d2c-0000-4000-8000-00000000d0d0")
+                  else:
+                      self.wfile.write(json.dumps({"deploymentState": "PUBLISHED"} if ok else
+                          {"deploymentState": "FAILED", "errors": ["Not the Portal's status request."]}).encode())
+          http.server.HTTPServer(("127.0.0.1", 18080), Portal).serve_forever()
+          EOF
+          for _ in $(seq 1 20); do curl -s -o /dev/null http://127.0.0.1:18080/ && break; sleep 1; done
+          ../.github/scripts/compiler-release-upload.sh "$RUNNER_TEMP/signed.zip"
+        env:
+          CENTRAL_PORTAL_URL: http://127.0.0.1:18080
+          CENTRAL_PORTAL_USERNAME: dry-run
+          CENTRAL_PORTAL_PASSWORD: dry-run
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: compiler-maven-central-signed-${{ env.VERSION }}
+          path: ${{ runner.temp }}/signed.zip
+          if-no-files-found: error
