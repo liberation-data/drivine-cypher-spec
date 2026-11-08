@@ -146,7 +146,7 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
         !nonFinite -> scalar(float("(${number(a)} / ${number(b)})"))
         else -> scalar(float(shared(number(a), number(b)) { (x, y) ->
             "CASE WHEN $y = 0 AND scale($y) > 0 THEN CASE WHEN $x = 'NaN' OR $x = 0 THEN 'NaN'::numeric WHEN $x > 0 THEN 'Infinity'::numeric " +
-                "WHEN $x < 0 THEN '-Infinity'::numeric END ELSE $x / $y END"
+                "WHEN $x < 0 THEN '-Infinity'::numeric END ${nanByIntegerZero(x, y, "/")}ELSE $x / $y END"
         }))
     }
 
@@ -427,9 +427,16 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
      * number as a float, as in Java, where `numeric` keeps an integer's scale of 0 (drivine4j#555).
      */
     override fun modulo(a: String, b: String) = if (!nonFinite) "($a % $b)" else shared(a, b) { (x, y) ->
-        "CASE WHEN $y = 0 AND $x IS NOT NULL AND scale($y) > 0 THEN 'NaN'::numeric " +
+        "CASE WHEN $y = 0 AND $x IS NOT NULL AND scale($y) > 0 THEN 'NaN'::numeric ${nanByIntegerZero(x, y, "%")}" +
             "WHEN $y IN ('Infinity'::numeric, '-Infinity'::numeric) THEN ${float("$x % $y")} ELSE $x % $y END"
     }
+
+    /**
+     * NaN divided or taken % by an integer zero fails, as any number does on Neo4j (`/ by zero`), where `numeric` gives NaN:
+     * the store's own failure of a division by zero, of 1 by it (drivine4j#687). A branch of [arithmetic]'s and [modulo]'s CASE,
+     * after a float zero's.
+     */
+    private fun nanByIntegerZero(x: String, y: String, operator: String) = "WHEN $y = 0 AND $x = 'NaN' THEN 1 $operator $y "
 
     override fun startsWith(a: String, b: String) = "starts_with($a, $b)"
 

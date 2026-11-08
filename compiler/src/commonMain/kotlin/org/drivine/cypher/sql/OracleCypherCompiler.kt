@@ -1402,8 +1402,18 @@ class OracleCypherCompiler(
     /**
      * Oracle merges a `CALL { … }` query into the row's query that joins it, and a value bound in that row from what
      * the query returns is then read as null (`CALL { WITH n RETURN n.day AS d } RETURN d + duration('P1D')`).
+     *
+     * One that keeps its rows distinct is not decorrelated either (`NO_DECORRELATE`): where it keeps distinct a value of the
+     * row's own `UNWIND`, or one worked out of it, Oracle reads the outer value as null when it decorrelates the lateral
+     * (drivine4j#502). `UNWIND [1, 1, 2] AS i CALL (i) { WITH DISTINCT i RETURN i AS j } RETURN i, j` gave j null on each row,
+     * and the `WHERE` of a `WITH DISTINCT i WHERE i > 1` kept none; a node or a property of the row was read right. Seen on
+     * Oracle 23.26 (gvenzl/oracle-free 23). Any other query is decorrelated as before. Such a query is told by its text, a
+     * `SELECT DISTINCT` at any depth ([DISTINCT_SELECT]), so the parts of a `UNION` in a `CALL` and `db.labels()`'s query are
+     * hinted too, though each read right without, and so are a query [once] keeps apart, a `WITH`'s query kept apart, as
+     * one that passes a path on is, and one whose string holds those words: the hint changes a plan, not its rows. `count(DISTINCT …)` read right, and is not hinted.
      */
-    override fun called(query: String) = "SELECT /*+ NO_MERGE */ * FROM (\n${indent(query)}\n)"
+    override fun called(query: String) =
+        "SELECT /*+ NO_MERGE${if (DISTINCT_SELECT.containsMatchIn(query)) " NO_DECORRELATE" else ""} */ * FROM (\n${indent(query)}\n)"
 
     /**
      * Each read of a stored value as JSON left off the CLOB route is routed it: a long text property read as a direct member of
@@ -1817,6 +1827,9 @@ class OracleCypherCompiler(
          * and the label, written as JSON writes a string and then as SQL quotes one: see [deletedIds].
          */
         private val INDEXED_LABEL = Regex("""JSON_EXISTS\(([\w.]+\.labels), '\$\[\*\]\?\(@ == "((?:[^"\\]|\\.)*)"\)'\)""")
+
+        /** A query, or a subquery of one, that keeps its rows distinct, hinted or not: see [called]. */
+        private val DISTINCT_SELECT = Regex("""\bSELECT (?:/\*\+ .*? \*/ )?DISTINCT\b""")
 
         /** A query that opens with hints, and those hints: Oracle reads the first hint comment of a query alone. */
         private val HINTED = Regex("""SELECT /\*\+ (.*?) \*/""")
