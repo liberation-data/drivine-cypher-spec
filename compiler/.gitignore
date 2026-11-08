@@ -1,0 +1,9 @@
+build/
+.gradle/
+.kotlin/
+node_modules/
+package.json
+package-lock.json
+kotlin-js-store/
+corpus.log
+__pycache__/
