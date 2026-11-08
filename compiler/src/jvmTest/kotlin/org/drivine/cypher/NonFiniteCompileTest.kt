@@ -45,13 +45,16 @@ class NonFiniteCompileTest {
         assertTrue(postgres("RETURN 1.0 / \$z", mapOf("z" to 0)))
         assertTrue(postgres("RETURN toFloat(\$s)", mapOf("s" to "Infinity")))
         listOf(
-            "RETURN 1.0 / 2", "RETURN 1.0 / -2.5", "MATCH (n:A) RETURN n.x / 3 + n.x % 2", "RETURN toFloat('1.5')", "RETURN toFloat(2)",
+            "RETURN 1.0 / 2", "RETURN 1.0 / -2.5", "RETURN toFloat('1.5')", "RETURN toFloat(2)",
             "RETURN toFloat(null)", "MATCH (n:A) WHERE n.x = 1 RETURN n.x * 2",
         ).forEach { cypher ->
             assertFalse(postgres(cypher), cypher)
             assertFalse(sqlite(cypher), cypher)
         }
         assertFalse(postgres("RETURN [1.0 / \$z, toFloat(\$s)]", mapOf("z" to 4, "s" to "1e3")))
+        // `%` of a stored infinity is NaN, which SQLite, whose JSON holds one, works out (drivine4j#668): Postgres's holds none.
+        assertFalse(postgres("MATCH (n:A) RETURN n.x / 3 + n.x % 2"))
+        assertTrue(sqlite("MATCH (n:A) RETURN n.x / 3 + n.x % 2"))
         // A statement that writes on Postgres stores no such number, and fails as `numeric` does; SQLite stores an infinity.
         assertFalse(postgres("MATCH (n:A) SET n.q = n.x / n.y"))
         assertTrue(sqlite("MATCH (n:A) SET n.q = n.x / n.y"))

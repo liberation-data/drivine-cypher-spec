@@ -171,10 +171,17 @@ abstract class SqlCypherCompiler(
 
     /**
      * Whether a statement given no NaN or infinity, one that writes where [writes], is compiled as one given one ([nonFinite])
-     * where it may work one out ([worksOutNonFinite]): a float divided by zero, or `toFloat` of a text that names one. By default
-     * not: a store whose floats hold them works them out as any other.
+     * where it may work one out ([worksOutNonFinite]): a float divided by zero, or `toFloat` of a text that names one; or, where
+     * [infinitiesStored], NaN out of an infinity it reads ([worksOutNaN]). By default not: a store whose floats hold them works
+     * them out as any other.
      */
     protected open fun nonFiniteWorkedOut(writes: Boolean) = false
+
+    /**
+     * Whether the store holds an infinity a statement may read, and so work NaN out of with no NaN or infinity given
+     * ([worksOutNaN]). By default not: Postgres's JSON holds none, and Oracle's floats hold NaN too.
+     */
+    protected open val infinitiesStored = false
 
     /** The statement [query], read already, with its parameters' values [parameters], as SQL: a query, or a procedure where it writes. */
     fun compile(query: Query, parameters: Map<String, Any?>): CompiledCypher {
@@ -184,7 +191,7 @@ abstract class SqlCypherCompiler(
         Aggregates(::isAggregate, ::children).check(query)
         val given = parameters.values.any { holdsNonFinite(it) }
         val writes = query.unions.isEmpty() && query.clauses.any(::writes)
-        nonFinite = given || (nonFiniteWorkedOut(writes) && worksOutNonFinite(query, parameters))
+        nonFinite = given || (nonFiniteWorkedOut(writes) && (worksOutNonFinite(query, parameters) || (infinitiesStored && worksOutNaN(query, parameters))))
         if (query.unions.isNotEmpty()) return withFunctions(union(query, parameters))
         if (!writes) {
             val writer = Writer(Parameters(parameters, ::parameterJson, ::parameterCount, text = ::parameterText, asPath = parameterPath))
@@ -5836,6 +5843,15 @@ abstract class SqlCypherCompiler(
         /** The functions whose value holds no null in a list or a map: see [Value.Json.flat]. */
         val FLAT_FUNCTIONS = SCALAR_FUNCTIONS + setOf("labels", "keys", "nodes", "relationships", "range", "split")
 
+        /**
+         * The functions whose value, null aside, is no infinity, whatever they are given: no float, or a float [math] works out, which
+         * fails where it is not finite, as SQLite's does. See [worksOutNaN].
+         */
+        val FINITE_FUNCTIONS = FLAT_FUNCTIONS - setOf("sum", "avg", "tofloat", "round", "floor", "ceil") + "collect"
+
+        /** The functions whose value, null aside, is no number: a text, a list or a temporal value. See [worksOutNaN]. */
+        val NO_NUMBER_FUNCTIONS = TEXT_FUNCTIONS + setOf("collect", "keys", "labels", "nodes", "relationships", "range", "split")
+
         /** The functions whose value holds a null in a list or a map only where an argument does: see [Value.Json.flat]. */
         val CARRYING_FUNCTIONS = setOf("collect", "min", "max", "coalesce", "head", "last", "tail", "reverse", "properties", DISTINCT_ITEMS)
 
@@ -6126,15 +6142,8 @@ abstract class SqlCypherCompiler(
          * in it, as [textsIn] reads it through.
          */
         fun worksOutNonFinite(query: Query, parameters: Map<String, Any?>): Boolean {
-            fun given(expression: Expression): Any? = when (expression) {
-                is Expression.Literal -> expression.value
-                is Expression.Parameter -> parameters[expression.name]
-                is Expression.Unary -> if (expression.operator == Expression.Unary.Operator.NEGATE) given(expression.operand) else null
-                else -> null
-            }
+            fun given(expression: Expression) = givenValue(expression, parameters)
             fun nonZero(expression: Expression) = (given(expression) as? Number)?.toDouble()?.let { it != 0.0 } == true
-            fun known(expression: Expression): Boolean = expression is Expression.Literal || expression is Expression.Parameter ||
-                (expression is Expression.Unary && expression.operator == Expression.Unary.Operator.NEGATE && known(expression.operand))
             fun number(expression: Expression) = known(expression) && (given(expression) as? String)?.let(::nonFiniteText) != true
             var found = false
             Texts(mutableSetOf()) { expression ->
@@ -6147,6 +6156,104 @@ abstract class SqlCypherCompiler(
             return found
         }
 
+        /**
+         * Whether [query], with its parameters' values [parameters], given no NaN or infinity, may work NaN out of an infinity it
+         * reads, where the store holds infinities (drivine4j#668), as [worksOutNonFinite] does not find: it adds or subtracts two
+         * values that may be infinities, as `∞ - ∞` is; multiplies one by a value not given as a finite number other than 0, as
+         * `∞ * 0` is; takes `%` of one, as `∞ % 2` is; or sums or averages them, as a group that holds both infinities is.
+         *
+         * A value may be an infinity unless its form says it is none: a literal or a parameter given finite, a value that is no
+         * number, a function whose value is none ([FINITE_FUNCTIONS]), or a variable bound only to such values, as the statement
+         * binds each name anywhere in it (`UNWIND`, `AS`, `IN`, a `reduce`'s accumulator). So a statement over values it is given
+         * compiles as it did, and one over values it reads may work NaN out.
+         */
+        fun worksOutNaN(query: Query, parameters: Map<String, Any?>): Boolean {
+            fun given(expression: Expression) = givenValue(expression, parameters)
+            fun finite(expression: Expression) = known(expression) && (given(expression) as? Number)?.toDouble()?.isFinite() != false
+            fun finiteNonZero(expression: Expression) = (given(expression) as? Number)?.toDouble()?.let { it.isFinite() && it != 0.0 } == true
+            // What each is, kept so that a long chain of `+` is read once: by its form, so a form read again is the same.
+            val noNumbers = HashMap<Expression, Boolean>()
+            val infinities = HashMap<Expression, Boolean>()
+            // A value that is no number, so that `+` of it is none either: a text, a list, a map, or a temporal value.
+            fun noNumber(expression: Expression): Boolean = noNumbers.getOrPut(expression) {
+                when (expression) {
+                    is Expression.Literal, is Expression.Parameter -> given(expression).let { it != null && it !is Number }
+                    is Expression.ListLiteral, is Expression.MapLiteral, is Expression.MapProjection, is Expression.ListComprehension,
+                    is Expression.PatternComprehension -> true
+                    is Expression.Function -> expression.name.lowercase() in NO_NUMBER_FUNCTIONS
+                    is Expression.Binary -> expression.operator == Operator.ADD && (noNumber(expression.left) || noNumber(expression.right))
+                    else -> false
+                }
+            }
+            // Each value a name is bound to, and whether it is bound to each item of it, a list, in place of it.
+            val bindings = mutableMapOf<String, MutableList<Pair<Expression, Boolean>>>()
+            Texts(mutableSetOf(), bind = { name, value, items -> bindings.getOrPut(name) { mutableListOf() } += value to items }).query(query)
+            val infiniteNames = mutableSetOf<String>()
+            fun infinite(expression: Expression): Boolean = infinities.getOrPut(expression) {
+                when (expression) {
+                    is Expression.Literal, is Expression.Parameter -> !finite(expression)
+                    is Expression.Unary -> expression.operator == Expression.Unary.Operator.NEGATE && infinite(expression.operand)
+                    is Expression.Binary -> when (expression.operator) {
+                        Operator.ADD -> !noNumber(expression.left) && !noNumber(expression.right) && (infinite(expression.left) || infinite(expression.right))
+                        Operator.SUBTRACT, Operator.MULTIPLY -> infinite(expression.left) || infinite(expression.right)
+                        Operator.DIVIDE, Operator.POWER -> true
+                        else -> false
+                    }
+                    is Expression.Function -> expression.name.lowercase() !in FINITE_FUNCTIONS
+                    is Expression.Case -> expression.alternatives.any { infinite(it.second) } || expression.otherwise?.let(::infinite) == true
+                    is Expression.Variable -> expression.name !in bindings || expression.name in infiniteNames
+                    is Expression.Reduce -> infinite(expression.initial) || infinite(expression.expression)
+                    is Expression.Property, is Expression.Index -> true
+                    else -> false
+                }
+            }
+            fun itemsInfinite(list: Expression): Boolean = when (list) {
+                is Expression.Literal, is Expression.Parameter -> holdsNonFinite(given(list))
+                is Expression.ListLiteral -> list.items.any(::infinite)
+                is Expression.ListComprehension -> list.projection?.let(::infinite) ?: itemsInfinite(list.list)
+                is Expression.Function -> when (list.name.lowercase()) {
+                    "collect" -> list.arguments.any(::infinite)
+                    else -> list.name.lowercase() !in NO_NUMBER_FUNCTIONS
+                }
+                else -> true
+            }
+            // The names that may be infinities: none to start with, and each bound to one, until no more are.
+            do {
+                val before = infiniteNames.size
+                bindings.forEach { (name, bound) ->
+                    if (name !in infiniteNames && bound.any { (value, items) -> if (items) itemsInfinite(value) else infinite(value) }) {
+                        infiniteNames += name
+                        infinities.clear()
+                    }
+                }
+            } while (infiniteNames.size != before)
+            var found = false
+            Texts(mutableSetOf()) { expression ->
+                found = found || when {
+                    expression is Expression.Function -> expression.name.lowercase() in setOf("sum", "avg") && expression.arguments.any(::infinite)
+                    expression !is Expression.Binary -> false
+                    expression.operator == Operator.ADD || expression.operator == Operator.SUBTRACT -> infinite(expression.left) && infinite(expression.right)
+                    expression.operator == Operator.MULTIPLY ->
+                        (infinite(expression.left) && !finiteNonZero(expression.right)) || (infinite(expression.right) && !finiteNonZero(expression.left))
+                    expression.operator == Operator.MODULO -> infinite(expression.left)
+                    else -> false
+                }
+            }.query(query)
+            return found
+        }
+
+        /** The value [expression] is, where it is a literal, a parameter or one negated: its parameters' values are [parameters]. */
+        private fun givenValue(expression: Expression, parameters: Map<String, Any?>): Any? = when (expression) {
+            is Expression.Literal -> expression.value
+            is Expression.Parameter -> parameters[expression.name]
+            is Expression.Unary -> if (expression.operator == Expression.Unary.Operator.NEGATE) givenValue(expression.operand, parameters) else null
+            else -> null
+        }
+
+        /** Whether [expression] is a literal, a parameter or one negated: see [givenValue]. */
+        private fun known(expression: Expression): Boolean = expression is Expression.Literal || expression is Expression.Parameter ||
+            (expression is Expression.Unary && expression.operator == Expression.Unary.Operator.NEGATE && known(expression.operand))
+
         /** Whether [text] names NaN or an infinity, as Java reads a double, which Neo4j's `toFloat` takes it as. */
         fun nonFiniteText(text: String) = org.drivine.cypher.json.parseDoubleOrNull(text.trim { it <= ' ' })?.isFinite() == false
 
@@ -6155,8 +6262,11 @@ abstract class SqlCypherCompiler(
         const val INFINITY_NAME = """^\s*\+?Infinity\s*$"""
         const val NEGATIVE_INFINITY_NAME = """^\s*-Infinity\s*$"""
 
-        /** What [textsIn] adds each text to, [texts], as it reads a statement through, and what it gives each expression it reads, [read]. */
-        private class Texts(val texts: MutableSet<String>, val read: (Expression) -> Unit = {}) {
+        /**
+         * What [textsIn] adds each text to, [texts], as it reads a statement through, what it gives each name it binds, with the value
+         * bound and whether to each item of it, a list, [bind], and what it gives each expression it reads, [read].
+         */
+        private class Texts(val texts: MutableSet<String>, val bind: (String, Expression, Boolean) -> Unit = { _, _, _ -> }, val read: (Expression) -> Unit = {}) {
             fun text(text: String?) {
                 if (text != null) texts += text.substringBefore(' ')
             }
@@ -6178,7 +6288,7 @@ abstract class SqlCypherCompiler(
             fun clauses(clauses: List<Clause>): Unit = clauses.forEach { clause ->
                 when (clause) {
                     is Clause.Match -> { clause.patterns.forEach(::pattern); expression(clause.where) }
-                    is Clause.Unwind -> { expression(clause.list); text(clause.variable) }
+                    is Clause.Unwind -> { expression(clause.list); text(clause.variable); bind(clause.variable, clause.list, true) }
                     is Clause.With -> { projection(clause.projection); expression(clause.where) }
                     is Clause.Create -> clause.patterns.forEach(::pattern)
                     is Clause.Merge -> { pattern(clause.pattern); (clause.onCreate + clause.onMatch).forEach(::setItem) }
@@ -6191,7 +6301,7 @@ abstract class SqlCypherCompiler(
                     }
                     is Clause.Delete -> clause.expressions.forEach(::expression)
                     is Clause.Call -> { query(clause.query); clause.imports?.forEach(::text) }
-                    is Clause.Foreach -> { text(clause.variable); expression(clause.list); clauses(clause.clauses) }
+                    is Clause.Foreach -> { text(clause.variable); expression(clause.list); bind(clause.variable, clause.list, true); clauses(clause.clauses) }
                     is Clause.Return -> projection(clause.projection)
                 }
             }
@@ -6206,7 +6316,7 @@ abstract class SqlCypherCompiler(
             }
 
             fun projection(projection: Projection) {
-                projection.items.forEach { expression(it.expression); text(it.name) }
+                projection.items.forEach { expression(it.expression); text(it.name); bind(it.name, it.expression, false) }
                 projection.orderBy.forEach { expression(it.expression) }
                 expression(projection.skip)
                 expression(projection.limit)
@@ -6247,11 +6357,13 @@ abstract class SqlCypherCompiler(
                     is Expression.Function -> { text(expression.name); expression.arguments.forEach(::expression) }
                     is Expression.ListComprehension -> {
                         text(expression.variable); expression(expression.list); expression(expression.where); expression(expression.projection)
+                        bind(expression.variable, expression.list, true)
                     }
-                    is Expression.Quantifier -> { text(expression.variable); expression(expression.list); expression(expression.where) }
+                    is Expression.Quantifier -> { text(expression.variable); expression(expression.list); expression(expression.where); bind(expression.variable, expression.list, true) }
                     is Expression.Reduce -> {
                         text(expression.accumulator); text(expression.variable)
                         expression(expression.initial); expression(expression.list); expression(expression.expression)
+                        bind(expression.accumulator, expression.initial, false); bind(expression.accumulator, expression.expression, false); bind(expression.variable, expression.list, true)
                     }
                     is Expression.PatternComprehension -> { pattern(expression.pattern); expression(expression.where); expression(expression.projection) }
                     is Expression.PatternPredicate -> pattern(expression.pattern)
