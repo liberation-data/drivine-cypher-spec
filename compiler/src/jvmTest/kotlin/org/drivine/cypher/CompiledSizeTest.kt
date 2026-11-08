@@ -272,16 +272,20 @@ class CompiledSizeTest {
         val write = "MATCH (c:Claim) WITH c, [c.a, null] AS l, [c.b] AS m SET c.e = l = m"
         val stored = OracleCypherCompiler("g")
         val sql = stored.compile(write).sql
-        assertTrue(stored.callsStoredNullsEqual && "THEN NULL ELSE (g_nulls_equal(" in sql && "cy_nulls_equal" !in sql, sql)
+        assertTrue(stored.callsStoredNullsEqual && "THEN FALSE ELSE (g_nulls_equal(" in sql && "cy_nulls_equal" !in sql, sql)
         val folded = OracleCypherCompiler("g")
         val reduced = folded.compile("MATCH (c:Claim) WITH [c.a, null] AS l RETURN reduce(acc = true, x IN [[1]] | acc AND x = l)").sql
-        assertTrue(folded.callsStoredNullsEqual && "THEN NULL ELSE (g_nulls_equal(" in reduced && "cy_nulls_equal" !in reduced, reduced)
+        assertTrue(folded.callsStoredNullsEqual && "THEN FALSE ELSE (g_nulls_equal(" in reduced && "cy_nulls_equal" !in reduced, reduced)
         // Without it, two that differ as JSON are false in a procedure, and a read declares the function itself.
         val none = OracleCypherCompiler("g", nullsEqualStored = false)
         val fallback = none.compile(write).sql
         assertTrue(!none.callsStoredNullsEqual && "nulls_equal" !in fallback && "THEN NULL ELSE FALSE END" in fallback, fallback)
         val read = OracleCypherCompiler("g", nullsEqualStored = false).compile("MATCH (c:Claim) WITH [c.a, null] AS l, [c.b] AS m RETURN l = m").sql
-        assertTrue(read.startsWith("WITH\nFUNCTION cy_nulls_equal(") && "THEN NULL ELSE (cy_nulls_equal(" in read, read)
+        assertTrue(read.startsWith("WITH\nFUNCTION cy_nulls_equal(") && "THEN FALSE ELSE (cy_nulls_equal(" in read, read)
+        // Two of different kinds are false before the walk, which parses each as a list or a map: a number, a text or a truth
+        // value it fails on (drivine4j#518).
+        val mixed = OracleCypherCompiler("g").compile("CALL { RETURN 1 AS v UNION ALL RETURN [1] AS v } RETURN v = [null] AS r").sql
+        assertTrue(Regex("""WHEN JSON_VALUE\(([\w.]+), '\$\.type\(\)'\) <> JSON_VALUE\([^\n]*?'\$\.type\(\)'\) THEN FALSE ELSE \(g_nulls_equal\(\1, """).containsMatchIn(mixed), mixed)
         // A statement that compares no value that may hold a null calls no function.
         val flat = OracleCypherCompiler("g")
         flat.compile("MATCH (c:Claim) SET c.e = c.a = c.b, c.f = c.list = [1]")
@@ -504,7 +508,7 @@ class CompiledSizeTest {
         ).forEach { statement ->
             val sql = OracleCypherCompiler("g", nullsEqualStored = false).compile(statement).sql
             assertEquals(1, Regex("FUNCTION cy_nulls_equal\\(").findAll(sql).count(), "$statement: $sql")
-            assertTrue("THEN NULL ELSE (cy_nulls_equal(" in sql, "$statement: $sql")
+            assertTrue("THEN FALSE ELSE (cy_nulls_equal(" in sql, "$statement: $sql")
         }
         // Two lists compared, in an aggregate's argument that binds a value or not, and in an order term beside a walk (#349).
         listOf(

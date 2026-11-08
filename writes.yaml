@@ -852,6 +852,10 @@ cases:
       - note: "A node OPTIONAL MATCH finds none of is null in the list that holds it."
         cypher: "OPTIONAL MATCH (x:Nope) CREATE (n:CyWrite) WITH n, [x] AS a, [n] AS b RETURN [a = b, a = a]"
         rows: [[null, null]]
+      - note: "A value of another kind than the one that holds a null is not equal to it, where a column holds values of several kinds (drivine4j#518)."
+        cypher: "UNWIND [1, [1], 'x', 1.5, true, {a: 1}] AS v CREATE (:CyWrite) RETURN [v = [null], v = {a: null}, v IN [[null]], v <> [1, null]] AS r"
+        only: [neo4j, sql]
+        rows: [[false, false, false, true], [null, false, null, true], [false, false, false, true], [false, false, false, true], [false, false, false, true], [false, null, false, true]]
 
   - name: "A property stored as several kinds sorts in Cypher's order of kinds"
     description: "A property read from the store may be of any kind: ORDER BY sorts a list, then a text, a truth value, a number, and a missing property last."

@@ -1100,7 +1100,9 @@ class OracleCypherCompiler(
      * with, so a procedure's queries and a `reduce`'s step's call it too. Where the store has none (see
      * [callsStoredNullsEqual]), a query declares it (see [reduce]); a procedure's queries call no function it declares, nor
      * do a `reduce`'s step's, so there two equal as JSON are null and any other two false, as before null was compared item
-     * by item: `[null] = [1]` is false there, where Cypher's is null.
+     * by item: `[null] = [1]` is false there, where Cypher's is null. Two of different kinds, a list beside a map or a
+     * number, are false before either is walked: one that holds a null is a list or a map, and the function parses each
+     * as one, which a number, a text or a truth value fails with ORA-40587 (drivine4j#518).
      */
     override fun nullsEqual(x: String, y: String, equals: (String, String) -> String): String {
         if (!nullsEqualStored && (procedural || folding)) return "CASE WHEN ${equals(x, y)} THEN NULL ELSE FALSE END"
@@ -1114,7 +1116,7 @@ class OracleCypherCompiler(
         }
         fun text(json: String) = "JSON_SERIALIZE($json RETURNING VARCHAR2(4000) NULL ON ERROR)"
         // Two of one text that hold NaN are not equal where it is: the pair it is in is not (#409).
-        return "CASE WHEN ${text(x)} = ${text(y)} AND ${holdsNaN(x)} THEN FALSE WHEN ${text(x)} = ${text(y)} THEN NULL ELSE $walked END"
+        return "CASE WHEN ${text(x)} = ${text(y)} AND ${holdsNaN(x)} THEN FALSE WHEN ${text(x)} = ${text(y)} THEN NULL WHEN ${kind(x)} <> ${kind(y)} THEN FALSE ELSE $walked END"
     }
 
     /**
