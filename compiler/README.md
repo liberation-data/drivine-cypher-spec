@@ -271,7 +271,9 @@ number.
 
 What is published is the bundle step 2 checked, byte for byte, with a signature beside each file. Step 3 builds nothing,
 and needs no JDK, Gradle or dependency: only the bundle, this commit's scripts, and the runner's gpg, curl, jq and zip.
-Before it imports the key, it checks the bundle holds every artifact at the tag's version and nothing else: no link,
+Before it is given a secret, it refuses a bundle whose SHA-256 isn't the one step 2 gave as its job's output, which no
+other job of the run can set, so an artifact of the same name put in the bundle's place is never signed; a re-run of the
+failed upload alone keeps step 2's output, and its bundle. Before it imports the key, it checks the bundle holds every artifact at the tag's version and nothing else: no link,
 which zip would follow into the job's keyring or environment, no file the publications don't make, no other version,
 nothing outside `org/drivine`. Then it checks each file's checksums in the bundle; after signing, each signature against
 the key, and the signed bundle as step 2 checked it. The key is imported into a keyring made for the job and deleted
@@ -304,7 +306,7 @@ with the sum of the `-bin` zip from https://gradle.org/release-checksums/. Witho
 
 A run from workflow_dispatch, or on a pull request that changes the release machinery, is a dry run: steps 1 and 2,
 under the version `0.0.0-dry-run`, and step 3's signing, with a key made in the job and thrown away with it, with
-GitHub's release downloads and Adoptium's API blocked. It checks that the signed bundle is step 2's, file for file and
+GitHub's release downloads and Adoptium's API blocked. It checks the bundle's SHA-256 as step 3 does, and that the signed bundle is step 2's, file for file and
 byte for byte, with a signature beside each file, keeps it as the run's artifact, and uploads it as step 3 does, to a
 stand-in for the Central Portal on the runner, which refuses an upload that isn't the one nmcp made and a status call
 for any other deployment. It also checks that the signing refuses a bundle it must not sign
