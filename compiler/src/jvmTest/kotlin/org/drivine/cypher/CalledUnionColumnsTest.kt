@@ -11,7 +11,8 @@ import kotlin.test.assertTrue
 /**
  * The queries of a `UNION` in `CALL { … }` give it columns of one number and one type: each query's own columns, not what it
  * orders its rows by too (drivine4j#506), and on Postgres, a `jsonb` one query gives is `json` where another query builds a list
- * or a map as `json` (drivine4j#516). What the stores give is the spec's, in `queries.yaml` (a UNION ALL in a CALL).
+ * or a map as `json` (drivine4j#516). What the stores give is the spec's, in `queries.yaml` ("A null in a map and a missing key
+ * are one null").
  */
 class CalledUnionColumnsTest {
 
@@ -39,6 +40,20 @@ class CalledUnionColumnsTest {
             val heads = partHeads(postgres.compile("CALL { RETURN $built AS v UNION ALL RETURN 10 AS v } RETURN v").sql)
             assertEquals(listOf(false, true), heads.map { it.startsWith("CAST(") && it.endsWith(" AS json) AS c1") }, "$built: $heads")
         }
+    }
+
+    @Test
+    fun `on Postgres, only that jsonb is cast, not a node's columns or a map's identity beside it`() {
+        val postgres = PostgresCypherCompiler("g")
+        fun heads(cypher: String) = partHeads(postgres.compile(cypher).sql).map { it.replace(Regex("""q\d+\."""), "q.") }
+        assertEquals(
+            listOf("q.c1_nid, q.c1_labels, q.c1_props, q.c1_stamp, q.c2", "q.c1_nid, q.c1_labels, q.c1_props, q.c1_stamp, CAST(q.c2 AS json) AS c2"),
+            heads("CALL { MATCH (p:Person) RETURN p AS n, [1] AS v UNION ALL MATCH (p:Person) RETURN p AS n, 1 AS v } RETURN n, v"),
+        )
+        assertEquals(
+            listOf("q.c1, q.c1_identity", "CAST(q.c1 AS json) AS c1, q.c1_identity"),
+            heads("MATCH (p:Person) CALL { WITH p RETURN {n: p} AS v UNION ALL WITH p RETURN CASE WHEN true THEN {n: p} END AS v } RETURN count(DISTINCT v)"),
+        )
     }
 
     @Test
