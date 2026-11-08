@@ -2,13 +2,14 @@
 # Checks the compiler's Central Portal bundle before it is kept or uploaded: exactly the artifacts in $ARTIFACTS, each
 # with the files Maven Central asks for at the version given, and a signature beside every file. Copies the bundle to
 # <out>/publicationAggregated.zip and unpacks it to <out>/maven-repo, and writes what it staged to the job's summary.
-#   compiler-release-check.sh <bundle zip> <version> verify|present <out>
+#   compiler-release-check.sh <bundle zip> <version> verify|present|none <out>
 # verify checks each signature with the key in the runner's keyring (the build job's throwaway key); present only asks
-# that each signature is there (the publish job, whose release key's public half isn't on the runner).
+# that each signature is there (the publish job, whose release key's public half isn't on the runner); none asks for no
+# signature (the dry run's unsigned rebuild in publish-dry-run).
 set -euo pipefail
 zip="$1" version="$2" signatures="$3" out="$4"
 fail() { echo "::error::$*"; exit 1; }
-[[ "$signatures" == verify || "$signatures" == present ]] || fail "The third argument is verify or present, not $signatures."
+[[ "$signatures" == verify || "$signatures" == present || "$signatures" == none ]] || fail "The third argument is verify, present or none, not $signatures."
 [[ -n "${ARTIFACTS:-}" ]] || fail "ARTIFACTS, the artifacts to publish, isn't set."
 
 rm -rf "$out"
@@ -36,6 +37,7 @@ for a in $ARTIFACTS; do
     # Every file Maven Central serves, not its checksums, is signed.
     for f in "$dir"/*; do
         case "$f" in *.asc|*.md5|*.sha1|*.sha256|*.sha512) continue ;; esac
+        [[ "$signatures" == none ]] && continue
         [[ -f "$f.asc" ]] || fail "$(basename "$f") has no signature."
         if [[ "$signatures" == verify ]]; then
             gpg --batch --verify "$f.asc" "$f" 2> /dev/null || fail "$(basename "$f")'s signature doesn't verify."
@@ -49,4 +51,4 @@ done
     (cd "$out/maven-repo" && find . -type f ! -name '*.md5' ! -name '*.sha*' ! -name '*.asc' | sort)
     echo '```'
 } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
-echo "The bundle holds every artifact of $version, each signed."
+echo "The bundle holds every artifact of $version$([[ "$signatures" == none ]] || echo ", each signed")."

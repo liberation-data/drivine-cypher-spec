@@ -2,9 +2,10 @@
 # that rebuilds the release needs no download of a JDK. Adoptium serves its JDKs as GitHub release assets, and an outage
 # of those must not hold up a release that already passed its gate (v0.31.0's publish failed twice on a 504 fetching
 # Temurin). The JDK is gradle/pinned-jdk.properties's exactly, which the build writes the zone ids with; the step that
-# checks it fails here, not in Gradle, where Gradle would try to fetch the pinned JDK.
+# checks it fails here, not in Gradle, where Gradle would try to fetch the pinned JDK. The archive also holds the Gradle
+# distribution ./gradlew fetched in the build job, which services.gradle.org serves as a GitHub release asset too.
 name: The release build's JDK
-description: Installs the JDK the build job kept as an artifact, and checks it is the pinned one.
+description: Installs the JDK and Gradle distribution the build job kept as an artifact, and checks the JDK is the pinned one.
 runs:
   using: composite
   steps:
@@ -12,6 +13,11 @@ runs:
       with:
         name: compiler-release-jdk
         path: ${{ runner.temp }}/release-jdk
+    - name: The build job's Gradle distribution
+      shell: bash
+      run: |
+        mkdir -p "$HOME/.gradle/wrapper/dists"
+        tar -xzf "$RUNNER_TEMP/release-jdk/gradle.tar.gz" -C "$HOME/.gradle/wrapper/dists"
     - name: The pinned version
       id: pinned
       shell: bash

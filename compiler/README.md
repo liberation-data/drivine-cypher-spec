@@ -264,18 +264,19 @@ number.
 2. On macOS, which builds every target, it builds every publication, signs each with a throwaway key, and checks the
    bundle (`.github/scripts/compiler-release-check.sh`): exactly the artifacts above, each with its jar or klib, sources,
    javadoc, POM and module at the tag's version, and every file's signature verified. The bundle is kept as the run's
-   artifact, and so is the JDK it was built on.
+   artifact, and so are the JDK it was built on and the Gradle distribution it ran.
 3. The upload waits in the `release` environment for its reviewer. It builds the bundle again from the same commit,
-   on the JDK step 2 kept (`.github/actions/release-jdk`), signed with the release key, checks it, and uploads every
+   on the JDK and Gradle step 2 kept (`.github/actions/release-jdk`), signed with the release key, checks it, and uploads every
    target as one deployment: the Central Portal releases all of them or none.
 
-Step 3 fetches no JDK: Adoptium serves its JDKs as GitHub release assets, and an outage of those, which failed v0.31.0's
-upload twice, would otherwise hold up a release that already passed its gate. A failed upload is re-run alone ("Re-run
-failed jobs"), which installs the JDK step 2 kept, and waits for the reviewer again.
+Step 3 fetches no JDK and no Gradle: Adoptium serves its JDKs, and services.gradle.org its distributions, as GitHub
+release assets, and an outage of those, which failed v0.31.0's upload twice, would otherwise hold up a release that
+already passed its gate. A failed upload is re-run alone ("Re-run failed jobs"), which installs the JDK and Gradle step 2
+kept, and waits for the reviewer again.
 
 A run from workflow_dispatch, or on a pull request that changes the release machinery, is a dry run: steps 1 and 2,
-under the version `0.0.0-dry-run`, and step 3's rebuild of the bundle on the JDK step 2 kept, unsigned, with GitHub's
-release downloads and Adoptium's API blocked.
+under the version `0.0.0-dry-run`, and step 3's rebuild of the bundle on the JDK and Gradle step 2 kept, unsigned and
+checked without signatures, with GitHub's release downloads and Adoptium's API blocked.
 
 The `release` environment is this repository's own, not drivine4j's, and is set up once in its settings before the first
 release: a required reviewer, tags `v*` allowed to deploy to it, and the secrets drivine4j's release uses,
