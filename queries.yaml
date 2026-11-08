@@ -2930,6 +2930,23 @@ cases:
         only: [neo4j, memgraph, falkordb, postgres]
         cypher: "RETURN 5 % 0"
         error: true
+      - note: "NaN worked out for each row is one value to count(DISTINCT …), as a NaN given twice is (\"NaN and the infinities as parameters\"), and a NaN stored (writes.yaml) (drivine4j#558)."
+        only: [neo4j, sql]
+        cypher: "UNWIND [1, 1, 2] AS k RETURN k, count(DISTINCT [x IN [k, 0.0/0.0] | x]) AS n ORDER BY k"
+        rows: [[1, 1], [2, 1]]
+      - note: "Neo4j keeps apart NaNs that separate expressions of one list work out, and lists and maps holding them; a SQL store, which sees one value in each, keeps them once (drivine4j#558, drivine4j#685)."
+        only: [neo4j]
+        cypher: "UNWIND [0.0/0.0, 0.0/0.0, 1.0, 1.0] AS r RETURN count(DISTINCT r), size(collect(DISTINCT r))"
+        rows: [[3, 3]]
+      - only: [sql]
+        cypher: "UNWIND [0.0/0.0, 0.0/0.0, 1.0, 1.0] AS r RETURN count(DISTINCT r), size(collect(DISTINCT r))"
+        rows: [[2, 2]]
+      - only: [neo4j]
+        cypher: "UNWIND [[0.0/0.0], [0.0/0.0]] AS r WITH DISTINCT r RETURN count(*)"
+        rows: [2]
+      - only: [sql]
+        cypher: "UNWIND [[0.0/0.0], [0.0/0.0]] AS r WITH DISTINCT r RETURN count(*)"
+        rows: [1]
       - note: "A number taken % by an infinity is the number, as a float, as in Java (drivine4j#555). Oracle gives null for each, given the infinity (drivine4j#683)."
         only: [neo4j, postgres, sqlite]
         cypher: "RETURN [5 % $i, -5 % $i, 5 % $n, 5.5 % $i, 0 % $n]"
