@@ -276,7 +276,8 @@ serve those archives as GitHub release assets, whose outage failed v0.31.0's upl
 
 - Up to step 2, in the repository's Actions cache, keyed on both checksums. A tag's run reads the caches of `main`, so
   the first tag after a bump of the JDK or of Gradle needs a run on `main` since the bump (its merge, or
-  workflow_dispatch of `Compiler` on `main`) to have fetched them. Where nothing is cached, the job fetches them, with
+  workflow_dispatch of `Compiler` on `main`) to have fetched them. GitHub drops a cache no run has read for 7 days, so
+  after a quiet week, run `Compiler` on `main` before tagging too. Where nothing is cached, the job fetches them, with
   retries; where it can't, it fails naming the URL: re-run it once GitHub's release downloads work.
 - From step 3, in the run's artifact, so the upload fetches nothing after its gate. A failed upload is re-run alone
   ("Re-run failed jobs"), which installs the archives step 2 kept, and waits for the reviewer again.
