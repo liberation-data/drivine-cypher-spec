@@ -180,9 +180,9 @@ abstract class SqlCypherCompiler(
 
     /**
      * Whether the JSON [json] is NaN itself, not a list or a map holding it: null where it can't be, as the statement is given or
-     * works out none and the store holds none. `count(DISTINCT …)` and `collect(DISTINCT …)` keep each such value apart, as
-     * Neo4j does, NaN being equal to nothing, while a list or a map holding NaN is compared as any other, as Neo4j compares one
-     * stored or worked out for each row (drivine4j#558).
+     * works out none and the store holds none. `count(DISTINCT …)`, `collect(DISTINCT …)` and `WITH DISTINCT` or `RETURN DISTINCT`
+     * keep each such value apart, as Neo4j does, NaN being equal to nothing, while a list or a map holding NaN is compared as any
+     * other, as Neo4j compares one stored or worked out for each row (drivine4j#558, drivine4j#685).
      */
     protected open fun bareNaN(json: String): String? = null
 
