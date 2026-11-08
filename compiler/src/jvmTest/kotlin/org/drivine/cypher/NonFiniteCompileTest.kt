@@ -90,6 +90,24 @@ class NonFiniteCompileTest {
     }
 
     @Test
+    fun `WITH DISTINCT and RETURN DISTINCT number a row apart only where an item may be NaN`() {
+        // drivine4j#685: what each gives is the spec's, in "NaN worked out"; here, where the row's number is compiled at all.
+        val nan = mapOf("l" to listOf(Double.NaN, 1.0))
+        fun numbered(sql: String) = sql.contains(" AS d1")
+        assertTrue(numbered(PostgresCypherCompiler("g").compile("UNWIND \$l AS x RETURN DISTINCT x", nan).sql))
+        assertTrue(numbered(SqliteCypherCompiler("g").compile("UNWIND \$l AS x WITH DISTINCT x RETURN count(*)", nan).sql))
+        assertTrue(numbered(OracleCypherCompiler("g").compile("UNWIND [0.0, 1.0] AS z RETURN DISTINCT z / z").sql))
+        // Not where the statement works out none, nor of a value made a text or a list, nor where the projection aggregates.
+        listOf(PostgresCypherCompiler("g"), SqliteCypherCompiler("g"), OracleCypherCompiler("g")).forEach { compiler ->
+            assertFalse(numbered(compiler.compile("MATCH (n:A) RETURN DISTINCT n.x").sql))
+        }
+        listOf("toString(x)", "[x]", "x, count(*)").forEach { items ->
+            val cypher = "UNWIND \$l AS x RETURN DISTINCT $items"
+            assertFalse(numbered(PostgresCypherCompiler("g").compile(cypher, nan).sql), cypher)
+        }
+    }
+
+    @Test
     fun `NaN and the infinities are bound as each store holds them, alone and in a list or a map`() {
         val given = mapOf("p" to Double.NaN, "l" to listOf(1.0, Double.POSITIVE_INFINITY), "m" to mapOf("x" to Double.NEGATIVE_INFINITY))
         val cypher = "RETURN [\$p, \$l, \$m]"
