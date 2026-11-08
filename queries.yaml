@@ -2985,6 +2985,15 @@ cases:
       - only: [neo4j, postgres]
         cypher: "UNWIND [0.0 / 0.0] AS x WITH x, 0 AS z RETURN x % z"
         error: true
+      - only: [neo4j, postgres]
+        cypher: "RETURN $x / $z"
+        parameters: {x: {$float: "Infinity"}, z: 0}
+        error: true
+      - note: "NaN by a float zero is NaN still, and null by an integer zero null (drivine4j#687)."
+        only: [neo4j, postgres]
+        cypher: "RETURN [$x / $f, -$x / $f, $x % $f, $n / $z, $n % $z]"
+        parameters: {x: {$float: "NaN"}, f: 0.0, n: null, z: 0}
+        rows: [[{$float: "NaN"}, {$float: "NaN"}, {$float: "NaN"}, null, null]]
       - only: [neo4j, postgres, oracle]
         cypher: "RETURN $x % $z"
         parameters: {x: {$float: "Infinity"}, z: 0}
