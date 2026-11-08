@@ -1088,6 +1088,89 @@ cases:
       - cypher: "MATCH (p:Person {name: 'Hugo'}) RETURN COUNT { OPTIONAL MATCH (p)-[:KNOWS]->(f) RETURN f }"
         rows: [1]
 
+  - name: "DISTINCT in a CALL"
+    description: "A CALL runs for each row on its own, so a DISTINCT in it keeps the rows of that one row distinct: an imported value is still itself (drivine4j#502)."
+    steps:
+      - cypher: "UNWIND [1, 1, 2] AS i CALL (i) { WITH DISTINCT i RETURN i AS j } RETURN i, j"
+        only: [neo4j, sql]
+        rows: [[1, 1], [1, 1], [2, 2]]
+      - cypher: "UNWIND [1, 1, 2] AS i CALL (i) { WITH DISTINCT i, i * 2 AS k RETURN i AS j, k } RETURN i, j, k"
+        only: [neo4j, sql]
+        rows: [[1, 1, 2], [1, 1, 2], [2, 2, 4]]
+      - cypher: "UNWIND [1, 1, 2] AS i CALL { WITH i WITH DISTINCT i RETURN i AS j } RETURN i, j"
+        only: [neo4j, sql]
+        rows: [[1, 1], [1, 1], [2, 2]]
+      - cypher: "UNWIND [1, 1, 2] AS i CALL (i) { RETURN DISTINCT i AS j } RETURN i, j"
+        only: [neo4j, sql]
+        rows: [[1, 1], [1, 1], [2, 2]]
+      - cypher: "UNWIND ['a', 'a', 'b'] AS i CALL (i) { WITH DISTINCT i RETURN i + 'x' AS j } RETURN i, j"
+        only: [neo4j, sql]
+        rows: [["a", "ax"], ["a", "ax"], ["b", "bx"]]
+      - cypher: "UNWIND [{a: 1}, {a: 1}] AS r CALL (r) { WITH DISTINCT r RETURN r.a AS j } RETURN j"
+        only: [neo4j, sql]
+        rows: [1, 1]
+      - cypher: "UNWIND [1, 1, 2] AS i CALL (i) { UNWIND [i, i] AS y WITH DISTINCT y RETURN y AS j } RETURN i, j"
+        only: [neo4j, sql]
+        rows: [[1, 1], [1, 1], [2, 2]]
+      - cypher: "UNWIND [1, 1, 2] AS i CALL (i) { WITH DISTINCT i WHERE i > 1 RETURN i AS j } RETURN i, j"
+        only: [neo4j, sql]
+        rows: [[2, 2]]
+      - cypher: "UNWIND [1, 1, 2] AS i CALL (i) { WITH DISTINCT i ORDER BY i RETURN i AS j } RETURN i, j"
+        only: [neo4j, sql]
+        rows: [[1, 1], [1, 1], [2, 2]]
+      - cypher: "UNWIND [1, 1, 2] AS i OPTIONAL CALL (i) { WITH DISTINCT i RETURN i AS j } RETURN i, j"
+        only: [neo4j, sql]
+        rows: [[1, 1], [1, 1], [2, 2]]
+      - cypher: "UNWIND [1, 1, 2] AS i CALL (i) { CALL (i) { WITH DISTINCT i RETURN i AS j } RETURN j } RETURN i, j"
+        only: [neo4j, sql]
+        rows: [[1, 1], [1, 1], [2, 2]]
+      - cypher: "UNWIND [1, 1, 2] AS i CALL (i) { WITH DISTINCT i RETURN i AS j UNION WITH DISTINCT i RETURN i * 10 AS j } RETURN i, j ORDER BY i, j"
+        only: [neo4j, sql]
+        rows: [[1, 1], [1, 1], [1, 10], [1, 10], [2, 2], [2, 20]]
+      - note: "A UNION keeps its rows distinct with no DISTINCT in it."
+        only: [neo4j, sql]
+        cypher: "UNWIND [1, 1, 2] AS i CALL (i) { UNWIND [i, i] AS y RETURN y AS j UNION RETURN i AS j } RETURN i, j ORDER BY i, j"
+        rows: [[1, 1], [1, 1], [2, 2]]
+      - cypher: "UNWIND [1, 1, 2] AS i CALL (i) { RETURN i AS j UNION RETURN i * 10 AS j } RETURN i, j ORDER BY i, j"
+        only: [neo4j, sql]
+        rows: [[1, 1], [1, 1], [1, 10], [1, 10], [2, 2], [2, 20]]
+      - note: "A grouping key is an imported value too."
+        only: [neo4j, sql]
+        cypher: "UNWIND [1, 1, 2] AS i CALL (i) { WITH i, count(*) AS c RETURN i AS j, c } RETURN i, j, c"
+        rows: [[1, 1, 1], [1, 1, 1], [2, 2, 1]]
+      - cypher: "UNWIND [1, 1, 2] AS i CALL (i) { UNWIND [i, i] AS y WITH y, count(*) AS c RETURN y AS j, c } RETURN i, j, c"
+        only: [neo4j, sql]
+        rows: [[1, 1, 2], [1, 1, 2], [2, 2, 2]]
+      - note: "db.labels() gives each label once."
+        only: [neo4j, sql]
+        cypher: "UNWIND [1, 1, 2] AS i CALL (i) { CALL db.labels() YIELD label WITH i, label WHERE label = 'Person' RETURN i AS j, label } RETURN i, j, label ORDER BY i, j"
+        rows: [[1, 1, "Person"], [1, 1, "Person"], [2, 2, "Person"]]
+      - cypher: "MATCH (p:Person) CALL (p) { CALL db.labels() YIELD label WITH p, label WHERE label IN labels(p) RETURN label } RETURN p.name, label ORDER BY p.name, label"
+        only: [neo4j, sql]
+        rows: [["Carrie", "CyTest"], ["Carrie", "Person"], ["Hugo", "CyTest"], ["Hugo", "Person"], ["Keanu", "CyTest"], ["Keanu", "Person"], ["Laurence", "CyTest"], ["Laurence", "Person"]]
+      - note: "A node of the row kept distinct."
+        only: [neo4j, sql]
+        cypher: "MATCH (p:Person)-[:ACTED_IN]->(m) CALL (p) { WITH DISTINCT p RETURN p.name AS n } RETURN m.title, n ORDER BY m.title, n"
+        rows: [["Johnny Mnemonic", "Keanu"], ["The Matrix", "Carrie"], ["The Matrix", "Keanu"], ["The Matrix", "Laurence"], ["The Matrix Reloaded", "Carrie"], ["The Matrix Reloaded", "Keanu"]]
+      - note: "A CALL that imports nothing keeps its own rows distinct."
+        only: [neo4j, sql]
+        cypher: "CALL { UNWIND [1, 1] AS x WITH DISTINCT x RETURN x } RETURN x"
+        rows: [1]
+      - note: "A row whose item is NaN, kept apart (drivine4j#685), is the imported value too."
+        only: [neo4j, sql]
+        cypher: "UNWIND [$p, $p, 1.0] AS i CALL (i) { WITH DISTINCT i RETURN i AS j } RETURN i, j"
+        parameters: {p: {$float: "NaN"}}
+        rows: [[{$float: "NaN"}, {$float: "NaN"}], [{$float: "NaN"}, {$float: "NaN"}], [1.0, 1.0]]
+      - cypher: "UNWIND [0.0, 0.0, 1.0] AS z CALL (z) { RETURN DISTINCT z / z AS v } RETURN z, v"
+        only: [neo4j, sql]
+        rows: [[0.0, {$float: "NaN"}], [0.0, {$float: "NaN"}], [1.0, 1.0]]
+      - cypher: "UNWIND [0.0, 0.0, 1.0] AS z CALL (z) { WITH DISTINCT z, z / z AS v RETURN v } RETURN z, v"
+        only: [neo4j, sql]
+        rows: [[0.0, {$float: "NaN"}], [0.0, {$float: "NaN"}], [1.0, 1.0]]
+      - cypher: "UNWIND [0.0, 1.0] AS z CALL (z) { UNWIND [z / z, z / z] AS y WITH DISTINCT y RETURN count(*) AS c } RETURN z, c"
+        only: [neo4j, sql]
+        rows: [[0.0, 2], [1.0, 1]]
+
   - name: "CALL imports only what it names"
     description: "A CALL sees only what its brackets or its leading WITH import: any other name in it is a new variable."
     steps:
