@@ -158,6 +158,25 @@ cases:
           - {person: "Keanu", titles: ["The Matrix", "The Matrix Reloaded", "Johnny Mnemonic"], first: 1995, years: 5997}
           - {person: "Laurence", titles: ["The Matrix"], first: 1999, years: 1999}
 
+  - name: "Item of a quoted variable"
+    description: "An item that is a variable, quoted or not, is named as the variable, so a WITH passes it on under that name (drivine4j#499)."
+    steps:
+      - cypher: "WITH 1 AS a WITH `a` RETURN a"
+        only: [neo4j, sql]
+        rows: [1]
+      - note: "So a UNION and a CALL's importing WITH read it by that name."
+        cypher: "WITH 1 AS a RETURN `a` UNION RETURN 2 AS a"
+        only: [neo4j, sql]
+        unordered: true
+        rows: [1, 2]
+      - cypher: "WITH 1 AS a CALL { WITH `a` RETURN a + 1 AS b } RETURN b"
+        only: [neo4j, sql]
+        rows: [2]
+      - cypher: "UNWIND [1, 1, 2] AS i WITH `i`, count(*) AS c RETURN i, c"
+        only: [neo4j, sql]
+        unordered: true
+        rows: [[1, 2], [2, 1]]
+
   - name: "Map key order"
     description: "A returned map keeps its keys in the order they were written."
     steps:
@@ -1121,6 +1140,11 @@ cases:
       - cypher: "MATCH (a:Person {name: 'Keanu'}) CALL (*) { MATCH (a)-[:ACTED_IN]->(m) WITH m MATCH (a)-[:ACTED_IN]->(m) RETURN count(m) AS n } RETURN n"
         only: [neo4j, sql]
         rows: [3]
+      - note: "In a WITH's WHERE, CALL (*) imports what the WITH passes on (and a pattern naming what it drops is refused, see refusals.yaml, drivine4j#504)."
+        cypher: "MATCH (p:Person) WITH p AS q WHERE EXISTS { CALL (*) { MATCH (q)-->() RETURN 1 AS x } RETURN x } RETURN q.name"
+        only: [neo4j, sql]
+        unordered: true
+        rows: ["Keanu", "Carrie", "Laurence"]
       - cypher: "MATCH (a:Person {name: 'Keanu'}) CALL { WITH * MATCH (a)-[:ACTED_IN]->(m) RETURN count(m) AS n } RETURN n"
         only: [neo4j, sql]
         rows: [3]
@@ -1560,6 +1584,31 @@ cases:
         only: [neo4j, sql]
         unordered: true
         rows: [[1, 1], [null, 2]]
+      - note: "A UNION in a CALL gives a list or a map one query writes beside a number another gives (drivine4j#516)."
+        cypher: "CALL { RETURN [10] AS v UNION ALL RETURN 10 AS v } RETURN v"
+        only: [neo4j, sql]
+        unordered: true
+        rows: [[10], 10]
+      - cypher: "CALL { RETURN {a: 1} AS v UNION ALL RETURN 10 AS v } RETURN v"
+        only: [neo4j, sql]
+        unordered: true
+        rows: [{a: 1}, 10]
+      - cypher: "CALL { RETURN [10] AS v UNION RETURN 10 AS v UNION RETURN [10] AS v } RETURN v"
+        only: [neo4j, sql]
+        unordered: true
+        rows: [[10], 10]
+      - note: "collect leaves out the null one query gives beside a list another builds."
+        cypher: "CALL { UNWIND [{a: null}] AS x RETURN x.a AS v UNION ALL RETURN [10] AS v } RETURN collect(v) AS c, count(v) AS n"
+        only: [neo4j, sql]
+        rows: [[[[10]], 1]]
+      - note: "A UNION in a CALL whose queries order their rows differently, as an UNWIND's places and a CALL's, gives each query's rows (drivine4j#506)."
+        cypher: "CALL { UNWIND [{a: null}] AS x RETURN x.a AS v UNION ALL CALL { UNWIND [{a: null}] AS y RETURN y.a AS w UNION UNWIND [{b: 1}] AS z RETURN z.a AS w } RETURN w AS v } RETURN v, count(*)"
+        only: [neo4j, sql]
+        rows: [[null, 2]]
+      - cypher: "CALL { UNWIND [1, 2] AS x RETURN x AS v UNION ALL CALL { RETURN 3 AS w } RETURN w AS v } RETURN v"
+        only: [neo4j, sql]
+        unordered: true
+        rows: [1, 2, 3]
       - note: "A null written is the same null as a property a node has not."
         cypher: "MATCH (p:Person) RETURN CASE WHEN p.born > 1960 THEN p.nickname ELSE null END AS v, count(*) AS c"
         only: [neo4j, sql]
@@ -1878,6 +1927,24 @@ cases:
       - cypher: "UNWIND [1, 1, 2] AS i WITH i, count(*) AS c WHERE count(*) > 1 RETURN i"
         only: [neo4j, sql]
         rows: [1]
+      - note: "A pattern in the WHERE names an item, which is the variable it passes on (drivine4j#504)."
+        cypher: "MATCH (p:Person) WITH p, count(*) AS c WHERE (p)-[:KNOWS]->() RETURN p.name, c"
+        only: [neo4j, sql]
+        unordered: true
+        rows: [["Keanu", 1], ["Laurence", 1]]
+      - cypher: "MATCH (p:Person) WITH DISTINCT p WHERE (p)-->() RETURN p.name"
+        only: [neo4j, sql]
+        unordered: true
+        rows: ["Keanu", "Carrie", "Laurence"]
+      - note: "And a variable a CALL's brackets import, which is in scope after any WITH."
+        cypher: "MATCH (a:Person {name: 'Keanu'}) CALL (a) { WITH 1 AS one WHERE (a)-[:KNOWS]->() RETURN one } RETURN a.name, one"
+        only: [neo4j, sql]
+        rows: [["Keanu", 1]]
+      - note: "And in a subquery, a variable from outside it, which is in scope after any WITH within, as Neo4j has it."
+        cypher: "MATCH (p:Person) WHERE EXISTS { MATCH (p)-[:ACTED_IN]->(m) WITH m WHERE (p)-[:KNOWS]->() RETURN m } RETURN p.name"
+        only: [neo4j, sql]
+        unordered: true
+        rows: ["Keanu", "Laurence"]
       - cypher: "UNWIND [1, 1, 2] AS i WITH i, count(*) AS c WHERE sum(i) > 1 RETURN i"
         only: [neo4j, sql]
         unordered: true

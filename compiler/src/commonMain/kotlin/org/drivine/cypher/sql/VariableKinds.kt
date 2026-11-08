@@ -32,28 +32,37 @@ internal object VariableKinds {
         ANY("a value"),
     }
 
-    /** The variables in scope, by name, each of its kind. */
-    private class Scope(val kinds: MutableMap<String, Kind> = LinkedHashMap()) {
-        fun copy() = Scope(LinkedHashMap(kinds))
+    /**
+     * The variables in scope, by name, each of its kind. Of them, those a `WITH` passes on not, read in its `WHERE` ([dropped]):
+     * a value there may read them, but a pattern names none of them (see [use]), in a subquery's too. One bound again within, as a
+     * comprehension's variable, is no longer one of them.
+     */
+    private class Scope(val kinds: MutableMap<String, Kind> = LinkedHashMap(), val dropped: MutableSet<String> = LinkedHashSet()) {
+        fun copy() = Scope(LinkedHashMap(kinds), LinkedHashSet(dropped))
         operator fun get(name: String) = kinds[name]
         operator fun set(name: String, kind: Kind) {
             kinds[name] = kind
+            dropped -= name
         }
     }
 
-    /** Refuses [query] where a variable of it is used as two kinds, or made where it is bound already. */
+    /**
+     * Refuses [query] where a variable of it is used as two kinds, or made where it is bound already; where a pattern in a
+     * `WITH`'s `WHERE` names a variable the `WITH` drops (see [Scope]); and where a `WITH` or a `RETURN` names two items alike.
+     */
     fun check(query: Query) {
         query(query, Scope())
     }
 
     /** [query]'s variables, from those of [outer] it reads: what each part of it returns. */
     private fun query(query: Query, outer: Scope): List<Map<String, Kind>> =
-        (listOf(query.clauses) + query.unions.map { it.clauses }).map { clauses(it, outer.copy()) }
+        // Those of [outer] stay in scope after each WITH within, as Neo4j has a subquery read them, but those a WITH outside drops.
+        (listOf(query.clauses) + query.unions.map { it.clauses }).map { clauses(it, outer.copy(), kept = outer.kinds.filterKeys { name -> name !in outer.dropped }) }
 
     /**
      * [clauses] in turn, over [scope]: what their `RETURN` returns, of the kinds it returns. Within a `FOREACH`, [foreach],
      * a `CREATE` or a `MERGE` may name a variable bound already, as Neo4j takes it there. [kept] stay in scope after each
-     * `WITH` that does not name them, as what a `CALL`'s brackets import does.
+     * `WITH` that does not name them, as what a `CALL`'s brackets import does, and a subquery's variables from outside it.
      */
     private fun clauses(clauses: List<Clause>, scope: Scope, foreach: Boolean = false, kept: Map<String, Kind> = emptyMap()): Map<String, Kind> {
         var current = scope
@@ -68,7 +77,7 @@ internal object VariableKinds {
                     expression(clause.list, current)
                     current[clause.variable] = Kind.ANY
                 }
-                is Clause.With -> current = projected(clause.projection, current, clause.where).also { next ->
+                is Clause.With -> current = projected(clause.projection, current, clause.where, kept.keys).also { next ->
                     kept.forEach { (name, kind) -> if (next[name] == null) next[name] = kind }
                 }
                 is Clause.Return -> returned = projected(clause.projection, current, null).kinds
@@ -105,7 +114,9 @@ internal object VariableKinds {
         val parts = (listOf(query.clauses) + query.unions.map { it.clauses }).map { clauses ->
             val imported = imports(call, clauses, scope.kinds.keys)
             val inner = scope.kinds.filterTo(LinkedHashMap()) { (name, _) -> name in imported }
-            clauses(clauses, Scope(inner), kept = if (call.imports != null || call.importsAll) inner.toMap() else emptyMap())
+            // What a WITH outside drops, imported by a CALL within its WHERE, CALL (*) { … }, stays dropped in the call (drivine4j#504).
+            val dropped = scope.dropped.filterTo(LinkedHashSet()) { it in imported }
+            clauses(clauses, Scope(inner, dropped), kept = if (call.imports != null || call.importsAll) inner.filterKeys { it !in dropped } else emptyMap())
         }
         return parts.first().mapValues { (name, kind) -> if (parts.all { it[name] == kind }) kind else Kind.ANY }
     }
@@ -140,14 +151,24 @@ internal object VariableKinds {
 
     /**
      * The scope after a `WITH` or a `RETURN` of [projection] over [scope]: each item of the kind its expression is, and with
-     * `*` each variable in scope. Its `WHERE`, [where], and its order read the items, and a variable before it as of any kind.
+     * `*` each variable in scope. Its `WHERE`, [where], and its order read the items, and a variable before it as of any kind;
+     * but a pattern in the `WHERE` names only what the `WITH` passes on, and what a `CALL`'s brackets import or a subquery
+     * reads from outside it, [kept], as Neo4j has it after a `WITH` that groups or is DISTINCT (drivine4j#504). Refuses two
+     * items of one name (Neo4j's 42N38).
      */
-    private fun projected(projection: Projection, scope: Scope, where: Expression?): Scope {
+    private fun projected(projection: Projection, scope: Scope, where: Expression?, kept: Set<String> = emptySet()): Scope {
+        projection.items.groupBy { it.name }.entries.firstOrNull { it.value.size > 1 }?.let { (name, _) ->
+            throw CompilerException("Two items are named $name, as Cypher refuses: name each item of a WITH or a RETURN once, with AS.")
+        }
         projection.items.forEach { expression(it.expression, scope) }
-        val next = if (projection.star) scope.copy() else Scope()
+        // What a WITH outside drops stays dropped after a subquery's own WITH, but for an item that names it again.
+        val next = if (projection.star) scope.copy() else Scope(dropped = LinkedHashSet(scope.dropped))
         projection.items.forEach { next[it.name] = kindOf(it.expression, scope) }
         val reading = Scope(scope.kinds.mapValuesTo(LinkedHashMap()) { Kind.ANY }.apply { putAll(next.kinds) })
-        where?.let { expression(it, reading) }
+        where?.let {
+            val dropped = scope.kinds.keys.filterTo(LinkedHashSet(next.dropped)) { name -> next[name] == null && name !in kept }
+            expression(it, Scope(LinkedHashMap(reading.kinds), dropped))
+        }
         projection.orderBy.forEach { expression(it.expression, reading) }
         projection.skip?.let { expression(it, scope) }
         projection.limit?.let { expression(it, scope) }
@@ -192,6 +213,8 @@ internal object VariableKinds {
 
     /** [variable] where a pattern binds it as [kind]: bound so, or used so where it is bound already as that kind. */
     private fun use(variable: String, kind: Kind, scope: Scope) {
+        // One a WITH does not pass on, in its WHERE: read there as a new node, it would match every row (drivine4j#504).
+        if (variable in scope.dropped) throw CompilerException("$variable is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used.")
         val bound = scope[variable] ?: return scope.set(variable, kind)
         if (!fits(bound, kind)) throw conflict(variable, bound, kind)
     }

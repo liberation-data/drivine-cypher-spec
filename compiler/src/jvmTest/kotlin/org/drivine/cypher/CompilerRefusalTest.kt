@@ -103,6 +103,38 @@ class CompilerRefusalTest {
     }
 
     @Test
+    fun `a pattern in a subquery's WHERE after its own WITH reads a variable from outside the subquery`() {
+        // drivine4j#504: the WITH within drops no variable of the row outside, which Neo4j keeps in scope in a subquery.
+        listOf(PostgresCypherCompiler("g"), OracleCypherCompiler("g"), SqliteCypherCompiler("g")).forEach { compiler ->
+            listOf(
+                "MATCH (p:Person) WHERE EXISTS { MATCH (p)-[:ACTED_IN]->(m) WITH m WHERE (p)-[:KNOWS]->() RETURN m } RETURN p.name",
+                "MATCH (p:Person) WHERE COUNT { MATCH (p)-[:ACTED_IN]->(m) WITH m WHERE EXISTS { (p)-[:KNOWS]->() } RETURN m } > 0 RETURN p.name",
+            ).forEach { cypher -> compiler.compile(cypher) }
+            // But not one a WITH outside it drops.
+            val refused = assertThrows<CompilerException> {
+                compiler.compile("MATCH (p:Person) WITH p AS q WHERE EXISTS { MATCH (q)-->(m) WITH m WHERE (p)-->() RETURN m } RETURN q.name")
+            }.message!!
+            assertTrue(refused.startsWith("p is not defined"), refused)
+        }
+    }
+
+    @Test
+    fun `a CALL in a WITH's WHERE imports what the WITH passes on, and refuses a pattern naming what it drops`() {
+        // drivine4j#504: CALL (*) imports a variable the WITH drops still dropped, so a pattern in the call reads none as a new node.
+        listOf(PostgresCypherCompiler("g"), OracleCypherCompiler("g"), SqliteCypherCompiler("g")).forEach { compiler ->
+            compiler.compile("MATCH (p:Person) WITH p AS q WHERE EXISTS { CALL (*) { MATCH (q)-->() RETURN 1 AS x } RETURN x } RETURN q.name")
+            listOf(
+                "MATCH (p:Person) WITH p AS q WHERE EXISTS { CALL (*) { MATCH (p)-->() RETURN 1 AS x } RETURN x } RETURN q.name",
+                "MATCH (p:Person) WITH p AS q WHERE EXISTS { CALL (p) { MATCH (p)-->() RETURN 1 AS x } RETURN x } RETURN q.name",
+                "MATCH (p:Person) WITH p AS q WHERE EXISTS { CALL { WITH p MATCH (p)-->() RETURN 1 AS x } RETURN x } RETURN q.name",
+            ).forEach { cypher ->
+                val refused = assertThrows<CompilerException>(cypher) { compiler.compile(cypher) }.message!!
+                assertTrue(refused.startsWith("p is not defined"), "$cypher: $refused")
+            }
+        }
+    }
+
+    @Test
     fun `size() of a pattern is refused, as Neo4j refuses it, for COUNT { }`() {
         // Neo4j (2026.x): 42I52 "... It can no longer be used inside the function size(), an alternative is to replace size() with COUNT {}." The TCK's List6 [6].
         listOf(PostgresCypherCompiler("g"), OracleCypherCompiler("g"), SqliteCypherCompiler("g")).forEach { compiler ->
