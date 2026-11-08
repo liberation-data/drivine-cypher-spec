@@ -2919,7 +2919,7 @@ cases:
         rows: [[{$float: "Infinity"}, {$float: "Infinity"}]]
 
   - name: "NaN worked out"
-    description: "0.0 / 0.0 is NaN and 1.0 / 0.0 an infinity, as Java has them, and so is a number divided or taken % by a float zero, or a text toFloat reads as one: NaN is equal to nothing, itself included (drivine4j#409, drivine4j#408, drivine4j#545), and so count(DISTINCT …), collect(DISTINCT …), WITH DISTINCT and RETURN DISTINCT keep each NaN apart, though they compare a list or a map holding one as any other. A number divided or taken % by an integer zero fails, except a float divided or taken % by an integer zero where both are written in the statement, which Neo4j works out as it plans, as Java does: 1.0 / 0 is Infinity and 5.0 % 0 NaN, while 1 / 0 fails."
+    description: "0.0 / 0.0 is NaN and 1.0 / 0.0 an infinity, as Java has them, and so is a number divided or taken % by a float zero, or a text toFloat reads as one: NaN is equal to nothing, itself included (drivine4j#409, drivine4j#408, drivine4j#545), and so count(DISTINCT …), collect(DISTINCT …), WITH DISTINCT and RETURN DISTINCT, a projection's grouping keys and a statement's UNION without ALL keep each NaN apart, though they compare a list or a map holding one as any other. A number divided or taken % by an integer zero fails, except a float divided or taken % by an integer zero where both are written in the statement, which Neo4j works out as it plans, as Java does: 1.0 / 0 is Infinity and 5.0 % 0 NaN, while 1 / 0 fails."
     steps:
       - cypher: "RETURN [0.0 / 0.0, 1.0 / 0.0, -1.0 / 0.0]"
         rows: [[{$float: "NaN"}, {$float: "Infinity"}, {$float: "-Infinity"}]]
