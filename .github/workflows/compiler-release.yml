@@ -27,6 +27,7 @@ on:
       - compiler/build.gradle.kts
       - compiler/settings.gradle.kts
       - compiler/gradle.properties
+      - compiler/gradle/pinned-jdk.properties
       - compiler/gradle/wrapper/gradle-wrapper.properties
       - compiler/gradle/wrapper/gradle-wrapper.jar
 
