@@ -78,7 +78,7 @@ jobs:
               exit 1
             fi
             if ! git merge-base --is-ancestor "$GITHUB_SHA" "origin/$DEFAULT_BRANCH"; then
-              echo "::error::The tag $tag is on $GITHUB_SHA, which isn't on $DEFAULT_BRANCH. Tag a commit on $DEFAULT_BRANCH."
+              echo "::error::The tag $tag is on $GITHUB_SHA, which isn't on $DEFAULT_BRANCH. Tag a commit on $DEFAULT_BRANCH, or, if the tag was pushed before $DEFAULT_BRANCH, push $DEFAULT_BRANCH and re-run this workflow."
               exit 1
             fi
             version="${tag#v}"

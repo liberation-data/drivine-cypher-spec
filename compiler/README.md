@@ -268,8 +268,15 @@ number.
    of them or none.
 
 A run from workflow_dispatch, or on a pull request that changes the release machinery, is a dry run: steps 1 and 2,
-under the version `0.0.0-dry-run`. The `release` environment holds the secrets drivine4j's release uses:
-`CENTRAL_PORTAL_USERNAME`, `CENTRAL_PORTAL_PASSWORD`, `SIGNING_KEY` and `SIGNING_PASSWORD`.
+under the version `0.0.0-dry-run`.
+
+The `release` environment is this repository's own, not drivine4j's, and is set up once in its settings before the first
+release: a required reviewer, tags `v*` allowed to deploy to it, and the secrets drivine4j's release uses,
+`CENTRAL_PORTAL_USERNAME`, `CENTRAL_PORTAL_PASSWORD`, `SIGNING_KEY` and `SIGNING_PASSWORD`. Without it, a tag's run makes
+an empty one, with no reviewer, and step 3 stops at its check of the secrets.
+
+Push the tag with or after `main`: a tag pushed before the commit is on `main` is refused at step 1; push `main` and
+re-run the workflow.
 
 To build the bundle yourself, unsigned: `./gradlew zipAggregationPublication -Pcompiler.version=<v>`, which writes
 `build/nmcp/zip/publicationAggregated.zip`. `SIGN=true`, with `SIGNING_KEY` and `SIGNING_PASSWORD`, signs it.
