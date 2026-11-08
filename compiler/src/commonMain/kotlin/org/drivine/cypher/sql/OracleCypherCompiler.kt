@@ -1088,6 +1088,30 @@ class OracleCypherCompiler(
 
     override fun modulo(a: String, b: String) = "MOD($a, $b)"
 
+    /**
+     * As Java's `%` gives it where either side is NaN or an infinity, which [modulo]'s `NUMBER`s hold neither of, so `%` gave
+     * null (drivine4j#683): a finite number taken % by an infinity is that number, as a float, and NaN or an infinity taken %
+     * by any number, or any number taken % by NaN, is NaN. A side the statement writes ([written]) is neither, so it isn't
+     * tested, and `%` of two such sides is as it was.
+     */
+    override fun remainder(a: String, b: String): String {
+        val (dividend, divisor) = mayBeNonFinite(a) to mayBeNonFinite(b)
+        if (!dividend && !divisor) return super.remainder(a, b)
+        return shared(a, b) { (x, y) ->
+            fun double(json: String) = "JSON_VALUE($json, '\$' RETURNING BINARY_DOUBLE)"
+            val numbers = "${typeOf(x)} = 'number' AND ${typeOf(y)} = 'number'"
+            val nan = listOfNotNull(
+                "(${kind(x)} = 'double' AND (${double(x)} IS NAN OR ${double(x)} IS INFINITE))".takeIf { dividend },
+                isNaN(y).takeIf { divisor },
+            ).joinToString(" OR ")
+            val infinite = if (divisor) "WHEN ${kind(y)} = 'double' AND ${double(y)} IS INFINITE THEN CASE WHEN $numbers THEN JSON_SCALAR(${binaryDouble(x)}) END " else ""
+            "CASE WHEN $nan THEN CASE WHEN $numbers THEN JSON_SCALAR(BINARY_DOUBLE_NAN) END ${infinite}ELSE ${super.remainder(x, y)} END"
+        }
+    }
+
+    /** Whether the JSON [json] may be NaN or an infinity: where it is no value the statement writes, which is neither, or one written so. */
+    private fun mayBeNonFinite(json: String) = !written(json) || json.contains("TO_BINARY_DOUBLE('NaN')") || json.contains("Infinity')")
+
     /** CLOBs, which `=` does not compare (ORA-22848), by `DBMS_LOB.COMPARE`: see [texts]. */
     override fun startsWith(a: String, b: String) = shared(b) { (x) ->
         if (long) "(DBMS_LOB.COMPARE($a, $x, LENGTH($x), 1, 1) = 0)" else "(SUBSTR($a, 1, LENGTH($x)) = $x)"
