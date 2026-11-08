@@ -260,7 +260,8 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
     /** Each item read at its place: `json_each` is no table a join can look a place up in, so a join reads it whole for each. */
     override fun firstOfEach(list: String, identities: String) =
         "(SELECT json_group_array(json($list -> ('\$[' || f.first || ']')) ORDER BY f.first) " +
-            "FROM (SELECT min(e.key) AS first FROM ${elements(identities, "e")} GROUP BY ${SqliteFunctions.CANONICAL}(${item("e")})) f)"
+            "FROM (SELECT min(e.key) AS first FROM ${elements(identities, "e")} GROUP BY ${SqliteFunctions.CANONICAL}(${item("e")})" +
+            "${bareNaN(item("e"))?.let { ", CASE WHEN $it THEN ${itemNo("e")} END" }.orEmpty()}) f)"
 
     /** The first of the values in order, the nulls left out: SQLite's `min` and `max` order no JSON. */
     override fun extreme(value: String, min: Boolean, key: String?): String {

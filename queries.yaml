@@ -2941,6 +2941,10 @@ cases:
       - only: [neo4j, sql]
         cypher: "UNWIND [0.0/0.0, 0.0/0.0, 1.0, 1.0] AS r RETURN count(DISTINCT r), collect(DISTINCT r)"
         rows: [[3, [{$float: "NaN"}, {$float: "NaN"}, 1.0]]]
+      - note: "So is a NaN read from a map that holds a node, which a SQL store keeps once each by its identity."
+        only: [neo4j, sql]
+        cypher: "UNWIND [0.0, 0.0] AS z MATCH (p:Person {name: 'Keanu'}) WITH {p: p, x: z / z} AS m RETURN count(DISTINCT m.x), collect(DISTINCT m.x)"
+        rows: [[2, [{$float: "NaN"}, {$float: "NaN"}]]]
       - note: "A list holding NaN worked out for each row is one value to DISTINCT, as Neo4j compares it, and so is a stored one (writes.yaml)."
         only: [neo4j, sql]
         cypher: "UNWIND [1, 1, 2] AS k RETURN k, count(DISTINCT [x IN [k, 0.0/0.0] | x]) AS n ORDER BY k"

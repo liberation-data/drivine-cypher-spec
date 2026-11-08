@@ -816,7 +816,7 @@ cases:
         rows: [[{$float: "-Infinity"}, {$float: "Infinity"}, {$float: "NaN"}, {$float: "NaN"}]]
 
   - name: "MERGE of a null or NaN property"
-    description: "A MERGE fails where it makes a node or relationship whose pattern gives a property that is null or NaN, which is equal to nothing, which no MERGE would find again; over no rows it does not fail. ON CREATE SET and ON MATCH SET write NaN, and a list that holds NaN is merged, and made again each time, though DISTINCT keeps two such lists once, and two stored NaNs apart."
+    description: "A MERGE fails where it makes a node or relationship whose pattern gives a property that is null or NaN, which is equal to nothing, which no MERGE would find again; over no rows it does not fail. ON CREATE SET and ON MATCH SET write NaN, and a list that holds NaN is merged, and made again each time, though DISTINCT keeps two such lists once, and Neo4j two stored NaNs apart."
     steps:
       - note: "A SQL store made a new node on every run (drivine4j#543)."
         except: [neptune]
@@ -876,9 +876,13 @@ cases:
         only: [neo4j, oracle]
         cypher: "MATCH (n:CyWrite) WHERE n.l IS NOT NULL RETURN count(DISTINCT n.l), size(collect(DISTINCT n.l))"
         rows: [[1, 1]]
-      - only: [neo4j, oracle]
+      - note: "Neo4j keeps two stored NaNs apart. Oracle keeps them once where the statement works out no NaN: testing every value it reads for NaN made count(DISTINCT …) 2.6 times as slow (drivine4j#558)."
+        only: [neo4j]
         cypher: "MATCH (n:CyWrite) WHERE n.l IS NOT NULL RETURN count(DISTINCT n.l[0]), size(collect(DISTINCT n.l[0]))"
         rows: [[2, 2]]
+      - only: [oracle]
+        cypher: "MATCH (n:CyWrite) WHERE n.l IS NOT NULL RETURN count(DISTINCT n.l[0]), size(collect(DISTINCT n.l[0]))"
+        rows: [[1, 1]]
 
   - name: "Relationships as APOC's export writes them"
     description: "apoc.export.cypher writes each batch of relationships as an UNWIND of rows that names its nodes start and end by a key of spaces, and the stores make them (drivine4j#635, drivine4j#617)."

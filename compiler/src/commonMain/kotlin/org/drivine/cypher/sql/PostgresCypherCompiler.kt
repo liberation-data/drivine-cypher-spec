@@ -275,7 +275,8 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
 
     override fun firstOfEach(list: String, identities: String) =
         "(SELECT ${aggregateList("v.item", "v.item_no")} FROM ${elements(list, "v")} " +
-            "JOIN (SELECT min(e.item_no) AS first FROM ${elements(identities, "e")} GROUP BY e.item) f ON f.first = v.item_no)"
+            "JOIN (SELECT min(e.item_no) AS first FROM ${elements(identities, "e")} " +
+            "GROUP BY e.item${bareNaN("e.item")?.let { ", CASE WHEN $it THEN e.item_no END" }.orEmpty()}) f ON f.first = v.item_no)"
 
     /**
      * Postgres has no min or max of jsonb, which orders: the first of the values in order is the least. Texts are first ordered

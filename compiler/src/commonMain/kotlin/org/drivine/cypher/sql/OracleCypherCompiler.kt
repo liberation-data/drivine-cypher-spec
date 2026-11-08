@@ -879,7 +879,8 @@ class OracleCypherCompiler(
 
     override fun firstOfEach(list: String, identities: String) =
         "(SELECT ${aggregateList("v.item", "v.item_no")} FROM ${elements(list, "v")} JOIN (SELECT d.item_no FROM (SELECT e.item_no, " +
-            "ROW_NUMBER() OVER (PARTITION BY e.item ORDER BY e.item_no) AS n FROM ${elements(identities, "e")}) d WHERE d.n = 1) f ON f.item_no = v.item_no)"
+            "ROW_NUMBER() OVER (PARTITION BY e.item${bareNaN("e.item")?.let { ", CASE WHEN $it THEN e.item_no END" }.orEmpty()} ORDER BY e.item_no) AS n " +
+            "FROM ${elements(identities, "e")}) d WHERE d.n = 1) f ON f.item_no = v.item_no)"
 
     /** Of the values of the kind that comes first, or last, as [kindOrder] orders them; by [key] first where there is one. */
     override fun extreme(value: String, min: Boolean, key: String?): String {
@@ -1016,8 +1017,13 @@ class OracleCypherCompiler(
     /** Oracle's JSON holds NaN, which a write may store. */
     override fun writtenNaN(json: String) = isNaN(json)
 
-    /** Whatever the statement is given: Oracle's JSON holds NaN, which a write may store. None in what the statement writes alone. */
-    override fun bareNaN(json: String) = if (nanFree(json)) null else isNaN(json)
+    /**
+     * Only where the statement is given or may work out NaN or an infinity ([nanWorkedOut]), as on the other stores: a NaN stored
+     * and read by a statement that works none out is kept once, where Neo4j keeps each apart, as testing every value read made
+     * `count(DISTINCT …)` 2.6 times as slow (see writes.yaml, "MERGE of a null or NaN property"). None in what the statement
+     * writes alone.
+     */
+    override fun bareNaN(json: String) = if (!nanWorkedOut || nanFree(json)) null else isNaN(json)
 
     /**
      * Whether the JSON [json] is or holds NaN, at any depth: a list or a map by its text as extended JSON writes it, where a
