@@ -1064,3 +1064,81 @@ cases:
       - only: [neo4j, sql]
         cypher: "DROP CONSTRAINT `cy ddl ``quoted`` key` IF EXISTS"
         rows: []
+
+  - name: "NaN and the infinities worked out and written"
+    description: "Neo4j and Oracle store NaN and the infinities a statement works out, as the floats they are, and MERGE of NaN fails as of NaN given. SQLite's JSON holds no NaN, so SQLite refuses a statement that writes NaN it works out, and stores nothing in its place; it stores an infinity."
+    steps:
+      - only: [neo4j, oracle]
+        cypher: "CREATE (n:CyWrite {a: 0.0 / 0.0, b: 1.0 / 0.0, l: [0.0 / 0.0]}) RETURN [n.a, n.b, n.l]"
+        rows: [[{$float: "NaN"}, {$float: "Infinity"}, [{$float: "NaN"}]]]
+      - note: "Oracle held a stored NaN equal to NaN."
+        only: [neo4j, oracle]
+        cypher: "MATCH (n:CyWrite) RETURN [n.a = n.a, n.a <> n.a, n.a > 1.0, n.a < 1.0, n.b > 1e308, n.a + 1, n.b - 1, n.l = n.l, n.a IN n.l]"
+        rows: [[false, true, false, false, true, {$float: "NaN"}, {$float: "Infinity"}, false, false]]
+      - note: "Neo4j: 22N31."
+        only: [neo4j, oracle]
+        cypher: "MATCH (n:CyWrite) MERGE (:CyWrite {x: n.a})"
+        error: true
+      - only: [neo4j, oracle]
+        cypher: "MATCH (n) RETURN count(n)"
+        rows: [1]
+      - note: "The store fails as the statement runs: \"A statement that writes works out NaN, which SQLite's JSON holds as no number: it would store another value in its place.\""
+        only: [sqlite]
+        cypher: "CREATE (n:CyWrite {a: 0.0 / 0.0})"
+        error: true
+      - only: [sqlite]
+        cypher: "MATCH (n) RETURN count(n)"
+        rows: [0]
+      - only: [sqlite]
+        cypher: "CREATE (n:CyWrite {b: 1.0 / 0.0, l: [-1.0 / 0.0]}) RETURN [n.b, n.l]"
+        rows: [[{$float: "Infinity"}, [{$float: "-Infinity"}]]]
+      - only: [sqlite]
+        cypher: "MATCH (n:CyWrite) SET n.a = n.b + n.l[0]"
+        error: true
+      - only: [sqlite]
+        cypher: "MATCH (n:CyWrite) RETURN [n.a, n.b + n.l[0]]"
+        rows: [[null, {$float: "NaN"}]]
+
+  - name: "NaN and the infinities given to SET and MERGE"
+    description: "Postgres's JSON holds neither NaN nor an infinity, and SQLite's no NaN, so each refuses a statement given one that SET, ON CREATE SET or a MERGE's pattern would write, as it refuses a CREATE given one, and stores nothing."
+    steps:
+      - only: [postgres, sqlite]
+        cypher: "CREATE (:CyWrite {id: 1})"
+      - only: [postgres]
+        cypher: "MATCH (n:CyWrite {id: 1}) SET n.a = $p"
+        parameters: {p: {$float: "NaN"}}
+        error: "A statement that writes is given NaN or an infinity, which Postgres's `jsonb` holds as no number: it would store another value in its place."
+      - only: [postgres]
+        cypher: "MERGE (n:CyWrite {id: 2}) ON CREATE SET n.a = [$i]"
+        parameters: {i: {$float: "-Infinity"}}
+        error: "A statement that writes is given NaN or an infinity, which Postgres's `jsonb` holds as no number: it would store another value in its place."
+      - only: [sqlite]
+        cypher: "MATCH (n:CyWrite {id: 1}) SET n.a = $p"
+        parameters: {p: {$float: "NaN"}}
+        error: "A statement that writes is given NaN, which SQLite's JSON holds as no number: it would store another value in its place."
+      - only: [sqlite]
+        cypher: "MERGE (n:CyWrite {id: 2}) ON CREATE SET n.a = [$p]"
+        parameters: {p: {$float: "NaN"}}
+        error: "A statement that writes is given NaN, which SQLite's JSON holds as no number: it would store another value in its place."
+      - only: [postgres]
+        cypher: "MERGE (n:CyWrite {id: 3, a: $p})"
+        parameters: {p: {$float: "Infinity"}}
+        error: "A statement that writes is given NaN or an infinity, which Postgres's `jsonb` holds as no number: it would store another value in its place."
+      - only: [sqlite]
+        cypher: "MERGE (n:CyWrite {id: 3, a: $p})"
+        parameters: {p: {$float: "NaN"}}
+        error: "A statement that writes is given NaN, which SQLite's JSON holds as no number: it would store another value in its place."
+      - only: [postgres, sqlite]
+        cypher: "MATCH (n:CyWrite) RETURN [count(n), collect(n.a)]"
+        rows: [[1, []]]
+
+  - name: "A long text a function gives a property of"
+    description: "A text past 32 KB that is a property of a node a function or an index gives, or of its properties() map, is read whole, on each of several rows."
+    steps:
+      - cypher: "UNWIND [1, 2] AS i CREATE (:CyWrite {i: i, t: $t})"
+        parameters: {t: {$repeat: "x", times: 40001}}
+      - note: "Oracle closed the session (drivine4j#531)."
+        cypher: "MATCH (n:CyWrite) WITH n ORDER BY n.i RETURN [n.i, size(head([n]).t), size([n][0].t), size(properties(n).t)]"
+        rows: [[1, 40001, 40001, 40001], [2, 40001, 40001, 40001]]
+      - cypher: "MATCH (n:CyWrite) WHERE head([n]).t ENDS WITH 'x' RETURN count(*)"
+        rows: [2]

@@ -1063,3 +1063,9 @@ cases:
         error: "The statement is a schema command, which is not compiled to SQL: run it through a PersistenceManager, which applies it to the store's schema."
       - cypher: "CALL db.awaitIndexes(300)"
         error: "The statement is a schema command, which is not compiled to SQL: run it through a PersistenceManager, which applies it to the store's schema."
+
+  - name: "Temporal map field of a text worked out"
+    description: "A text from the rows given as the time of localtime({time: …}) is refused, as an integer is, rather than read as the store reads it."
+    steps:
+      - cypher: "UNWIND ['hello'] AS t RETURN localtime({time: t})"
+        error: "localtime() takes a localtime, a time, a localdatetime or a datetime for time, not a text."
