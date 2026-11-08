@@ -1878,6 +1878,19 @@ cases:
       - cypher: "UNWIND [1, 1, 2] AS i WITH i, count(*) AS c WHERE count(*) > 1 RETURN i"
         only: [neo4j, sql]
         rows: [1]
+      - note: "A pattern in the WHERE names an item, which is the variable it passes on (drivine4j#504)."
+        cypher: "MATCH (p:Person) WITH p, count(*) AS c WHERE (p)-[:KNOWS]->() RETURN p.name, c"
+        only: [neo4j, sql]
+        unordered: true
+        rows: [["Keanu", 1], ["Laurence", 1]]
+      - cypher: "MATCH (p:Person) WITH DISTINCT p WHERE (p)-->() RETURN p.name"
+        only: [neo4j, sql]
+        unordered: true
+        rows: ["Keanu", "Carrie", "Laurence"]
+      - note: "And a variable a CALL's brackets import, which is in scope after any WITH."
+        cypher: "MATCH (a:Person {name: 'Keanu'}) CALL (a) { WITH 1 AS one WHERE (a)-[:KNOWS]->() RETURN one } RETURN a.name, one"
+        only: [neo4j, sql]
+        rows: [["Keanu", 1]]
       - cypher: "UNWIND [1, 1, 2] AS i WITH i, count(*) AS c WHERE sum(i) > 1 RETURN i"
         only: [neo4j, sql]
         unordered: true
