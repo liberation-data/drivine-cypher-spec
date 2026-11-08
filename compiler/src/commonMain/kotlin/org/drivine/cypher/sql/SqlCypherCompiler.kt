@@ -180,9 +180,10 @@ abstract class SqlCypherCompiler(
 
     /**
      * Whether the JSON [json] is NaN itself, not a list or a map holding it: null where it can't be, as the statement is given or
-     * works out none and the store holds none. `count(DISTINCT …)`, `collect(DISTINCT …)` and `WITH DISTINCT` or `RETURN DISTINCT`
-     * keep each such value apart, as Neo4j does, NaN being equal to nothing, while a list or a map holding NaN is compared as any
-     * other, as Neo4j compares one stored or worked out for each row (drivine4j#558, drivine4j#685).
+     * works out none and the store holds none. `count(DISTINCT …)`, `collect(DISTINCT …)`, `WITH DISTINCT` or `RETURN DISTINCT`,
+     * a projection's grouping keys and a statement's `UNION` without `ALL` keep each such value apart, as Neo4j does, NaN being
+     * equal to nothing, while a list or a map holding NaN is compared as any other, as Neo4j compares one stored or worked out for
+     * each row (drivine4j#558, drivine4j#685, drivine4j#688). A `UNION` in `CALL { … }` or a subquery still keeps them once.
      */
     protected open fun bareNaN(json: String): String? = null
 
@@ -193,6 +194,13 @@ abstract class SqlCypherCompiler(
      * them out as any other.
      */
     protected open fun nonFiniteWorkedOut(writes: Boolean) = false
+
+    /**
+     * Whether a float written divided or taken % by an integer written is worked out as by a float, as Neo4j's planner does
+     * (`divisor`): where the statement is compiled as one given NaN or an infinity ([nonFinite]). A store whose floats hold
+     * them, which compiles none so, does it wherever the statement may work one out ([nanWorkedOut]).
+     */
+    protected open fun foldsWrittenDivisor() = nonFinite
 
     /**
      * Whether the store holds an infinity a statement may read, and so work NaN out of with no NaN or infinity given
@@ -310,8 +318,14 @@ abstract class SqlCypherCompiler(
     protected open fun once(query: String) = called(query)
 
     /**
+     * The query of an `EXISTS { … }`, [query], as the `EXISTS` reads it: its rows, in the order its body or its `UNWIND`s
+     * give them, which the `EXISTS` asks for none of.
+     */
+    protected open fun existsQuery(query: String) = query
+
+    /**
      * A `UNION`: each query's rows, in the order of the queries and each query's own order, as a graph engine
-     * gives them; without `ALL`, each row once, where it is first given.
+     * gives them; without `ALL`, each row once, where it is first given, but one whose item is NaN each time ([bareNaN]).
      */
     private fun union(query: Query, parameters: Map<String, Any?>): CompiledCypher {
         val parts = listOf(query.clauses) + query.unions.map { it.clauses }
@@ -335,8 +349,11 @@ abstract class SqlCypherCompiler(
         val sql = if (query.unions.first().all) {
             "SELECT u.result FROM (\n${indent(rows)}\n) u\nORDER BY u.part, u.n"
         } else {
-            // A row is given once, where it is first given: its rows are compared as JSON compares them.
-            "SELECT d.result FROM (\n${indent("SELECT u.result, MIN(u.part * 1000000000.0 + u.n) AS k FROM (\n${indent(rows)}\n) u\nGROUP BY u.result")}\n) d\nORDER BY d.k"
+            // A row is given once, where it is first given: its rows are compared as JSON compares them. One whose item is NaN,
+            // equal to nothing, is given each time, as Neo4j gives it (drivine4j#688): by its own place beside the result.
+            val nan = (if (names.first().size == 1) listOf("u.result") else names.first().indices.map { itemAt("u.result", it) }).mapNotNull(::bareNaN)
+            val apart = if (nan.isEmpty()) "" else ", CASE WHEN ${nan.joinToString(" OR ") { "($it)" }} THEN u.part * 1000000000.0 + u.n END"
+            "SELECT d.result FROM (\n${indent("SELECT u.result, MIN(u.part * 1000000000.0 + u.n) AS k FROM (\n${indent(rows)}\n) u\nGROUP BY u.result$apart")}\n) d\nORDER BY d.k"
         }
         return CompiledCypher(planned(sql), writer.parameters.values, nonFinite)
     }
@@ -2864,6 +2881,22 @@ abstract class SqlCypherCompiler(
                     if (!contains(item.expression, ::isAggregate)) keys += pair.second.groupKeys()
                     else variablesOutsideAggregates(item.expression).forEach { variable -> select.scope[variable]?.let { keys += it.groupKeys() } }
                 }
+                // A key that is NaN, equal to nothing, makes a group of each row, as Neo4j groups it (drivine4j#688): by a value made
+                // for each row beside it. Only where a key may be NaN ([bareNaN]), so a statement given and working out none compiles
+                // as it did. One value for the row, where any of its keys is NaN.
+                val nans = compiled.zip(columns).mapNotNull { (item, pair) ->
+                    val (name, value) = item
+                    if (items.first { it.name == name }.expression.let { contains(it, ::isAggregate) }) return@mapNotNull null
+                    // Written out, not bound in a subquery as Oracle's test binds a long value: Oracle groups by no subquery (ORA-22818).
+                    (pair.second as? Value.Json)?.takeIf { (value as? Value.Json)?.let(::mayBeFloat) == true }?.let { unshared { bareNaN(it.sql) } }
+                }
+                if (nans.isNotEmpty()) {
+                    val apart = "CASE WHEN ${nans.joinToString(" OR ") { "($it)" }} THEN ${uuid()} END"
+                    keys += apart
+                    // DISTINCT over the groups keeps each such group apart too, as Neo4j keeps it (drivine4j#685): by that value, the
+                    // one row's of its group, as an aggregate, which the select list may read where it may not read a key it groups by.
+                    if (projection.distinct) selectList += "MIN($apart) AS d1"
+                }
                 keys.distinct()
             }
             val inner = buildList {
@@ -3753,7 +3786,7 @@ abstract class SqlCypherCompiler(
             is Expression.PatternPredicate -> exists(listOf(expression.pattern), null, scope)
             is Expression.Exists -> exists(expression.patterns, expression.where, scope)
             is Expression.Subquery -> when (expression.kind) {
-                Expression.Subquery.Kind.EXISTS -> Value.Bool("EXISTS (\n${indent(correlated(expression.query, scope, "EXISTS { … }"))}\n)")
+                Expression.Subquery.Kind.EXISTS -> Value.Bool("EXISTS (\n${indent(existsQuery(correlated(expression.query, scope, "EXISTS { … }")))}\n)")
                 Expression.Subquery.Kind.COUNT ->
                     Value.Json(scalar("(SELECT count(*) FROM (\n${indent(correlated(expression.query, scope, "COUNT { … }"))}\n) ${alias("q")})"))
             }
@@ -3853,13 +3886,14 @@ abstract class SqlCypherCompiler(
         }
 
         /**
-         * The divisor [b] of [binary], `/` or `%`, as a float where the statement may work NaN or an infinity out ([nonFinite]) and
-         * both sides are numbers worked out from numbers written in it alone, the dividend a float and the divisor an integer
-         * ([writtenNumber]): Neo4j's planner works those out before it runs, as Java does, so `1.0 / 0` is an infinity there,
-         * where a float divided by an integer 0 it runs fails (#408).
+         * The divisor [b] of [binary], `/` or `%`, as a float where the statement may work NaN or an infinity out
+         * ([foldsWrittenDivisor]) and both sides are numbers worked out from numbers written in it alone, the dividend a float and
+         * the divisor an integer ([writtenNumber]): Neo4j's planner works those out before it runs, as Java does, so `1.0 / 0` is
+         * an infinity there and `5.0 % 0` NaN, where a float divided or taken % by an integer 0 it runs fails (#408, #686), as
+         * `pi() % 0` does.
          */
         private fun divisor(binary: Expression.Binary, b: String) =
-            if (nonFinite && writtenNumber(binary.left) == Value.Known.FLOAT && writtenNumber(binary.right) == Value.Known.INTEGER) scalar(float(number(b))) else b
+            if (foldsWrittenDivisor() && writtenNumber(binary.left) == Value.Known.FLOAT && writtenNumber(binary.right) == Value.Known.INTEGER) scalar(float(number(b))) else b
 
         /** The kind of [expression] where it is a number worked out from numbers written in the statement alone (`1.0`, `-0`, `1 - 1`), as Java does. */
         private fun writtenNumber(expression: Expression): Value.Known? = when (expression) {
