@@ -200,6 +200,9 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
     /** In a statement that writes too: an infinity it works out is stored, and NaN fails ([finite]), as for one given. */
     override fun nonFiniteWorkedOut(writes: Boolean) = true
 
+    /** An infinity, which SQLite's JSON holds: NaN worked out of one read (`n.inf + n.negative`) is compiled for (drivine4j#668). */
+    override val infinitiesStored = true
+
     /**
      * NaN, where it holds both infinities, whatever the statement is given, as an infinity may be stored (#544); and where the
      * statement is given NaN or an infinity, or may work one out, where a number of the group is NaN. SQLite's own `sum` passes
