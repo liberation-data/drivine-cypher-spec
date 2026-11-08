@@ -209,12 +209,18 @@ class NonFiniteCompileTest {
         fun sql(cypher: String, parameters: Map<String, Any?> = emptyMap()) = oracle.compile(cypher, parameters).sql
         val byZero = "THEN TRUNC(1 / "
         val floats = "THEN BINARY_DOUBLE_NAN ELSE MOD("
-        // An integer zero written: NUMBER's division by it, which fails as 1 / 0 does, and no MOD. A float written too, as
-        // pi() is written, which Neo4j fails on where it gives NaN for 5.0 % 0 (drivine4j#686).
-        listOf("RETURN 5 % 0", "MATCH (n:A) RETURN n.x % 0", "RETURN \$x % 0", "RETURN 5.0 % 0", "RETURN 0.0 % 0", "RETURN pi() % 0", "RETURN e() % 0").forEach { cypher ->
+        // An integer zero written: NUMBER's division by it, which fails as 1 / 0 does, and no MOD. pi() and e() too, which Neo4j
+        // fails on.
+        listOf("RETURN 5 % 0", "MATCH (n:A) RETURN n.x % 0", "RETURN \$x % 0", "RETURN pi() % 0", "RETURN e() % 0").forEach { cypher ->
             val compiled = sql(cypher, mapOf("x" to 5.0))
             assertTrue(byZero in compiled, "$cypher: $compiled")
             assertFalse("MOD(" in compiled || "BINARY_DOUBLE_NAN" in compiled, "$cypher: $compiled")
+        }
+        // A float written taken % by an integer written, worked out of numbers written alone, is taken % by that integer as a
+        // float, which is NaN by zero, as Neo4j works it out as it plans (drivine4j#686).
+        listOf("RETURN 5.0 % 0", "RETURN 0.0 % 0", "RETURN -5.0 % 0", "RETURN 5.0 % -0", "RETURN (5.0 + 0) % 0", "RETURN 5.0 % (1 - 1)").forEach { cypher ->
+            val compiled = sql(cypher)
+            assertTrue(floats in compiled, "$cypher: $compiled")
         }
         // A divisor not written may be an integer zero, tested first, and either side may be a float, taken % as BINARY_DOUBLEs.
         listOf(
@@ -250,12 +256,18 @@ class NonFiniteCompileTest {
         fun sql(cypher: String, parameters: Map<String, Any?> = emptyMap()) = oracle.compile(cypher, parameters).sql
         val byZero = "THEN TRUNC(1 / "
         val divided = "= 'double' OR "
-        // An integer zero written: NUMBER's division by it, which fails as 1 / 0 does, and no BINARY_DOUBLE's. A float written too,
-        // as pi() is written, which Neo4j fails on where it gives an infinity for 1.0 / 0 (drivine4j#686).
-        listOf("RETURN 1.0 / 0", "RETURN 0.0 / 0", "RETURN pi() / 0", "RETURN e() / 0", "MATCH (n:A) RETURN n.x / 0", "RETURN \$x / 0").forEach { cypher ->
+        // An integer zero written: NUMBER's division by it, which fails as 1 / 0 does, and no BINARY_DOUBLE's. pi() and e() too,
+        // which Neo4j fails on.
+        listOf("RETURN pi() / 0", "RETURN e() / 0", "MATCH (n:A) RETURN n.x / 0", "RETURN \$x / 0").forEach { cypher ->
             val compiled = sql(cypher, mapOf("x" to 3.0))
             assertTrue(byZero in compiled, "$cypher: $compiled")
             assertFalse(divided in compiled, "$cypher: $compiled")
+        }
+        // A float written divided by an integer written, worked out of numbers written alone, is divided by that integer as a
+        // float, an infinity or NaN by zero, as Neo4j works it out as it plans (drivine4j#686).
+        listOf("RETURN 1.0 / 0", "RETURN 0.0 / 0", "RETURN 1.0 / -0", "RETURN (1.0 + 0) / 0").forEach { cypher ->
+            val compiled = sql(cypher)
+            assertTrue(divided in compiled, "$cypher: $compiled")
         }
         // A divisor not written may be an integer zero, tested first, and else divides as before.
         listOf(

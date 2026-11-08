@@ -2754,12 +2754,9 @@ cases:
       - cypher: "RETURN [toString($f), toString($g), $f + 'a']"
         parameters: {f: 0.00012, g: 12345678.5}
         rows: [["1.2E-4", "1.23456785E7", "1.2E-4a"]]
-      - note: "NaN and the infinities are written by Java's names. Memgraph writes them nan, inf and -inf, and FalkorDB NaN, inf and -inf. Oracle fails on a float written divided by an integer zero written (drivine4j#686)."
+      - note: "NaN and the infinities are written by Java's names. Memgraph writes them nan, inf and -inf, and FalkorDB NaN, inf and -inf."
         cypher: "RETURN [toString(0.0 / 0.0), toString(1.0 / 0), toString(-1.0 / 0)]"
-        except: [memgraph, falkordb, oracle]
-        rows: [["NaN", "Infinity", "-Infinity"]]
-      - only: [oracle]
-        cypher: "RETURN [toString(0.0 / 0.0), toString(1.0 / 0.0), toString(-1.0 / 0.0)]"
+        except: [memgraph, falkordb]
         rows: [["NaN", "Infinity", "-Infinity"]]
 
   - name: "Sorted by a list"
@@ -3032,32 +3029,14 @@ cases:
         only: [neo4j, sql]
         cypher: "UNWIND [0.0, 0.0] AS z RETURN count(DISTINCT 5 % z), size(collect(DISTINCT 5.5 % z))"
         rows: [[2, 2]]
-      - note: "Numbers written in the statement alone, which Neo4j works out as it plans, as Java does: a float by the integer 0 is an infinity. Oracle fails on each by an integer zero, as a float divided by one at run time does: it can't tell a float written from pi() (drivine4j#686)."
-        only: [neo4j, memgraph, falkordb, postgres, sqlite]
+      - note: "Numbers written in the statement alone, which Neo4j works out as it plans, as Java does: a float by the integer 0 is an infinity (drivine4j#686)."
+        only: [neo4j, memgraph, falkordb, sql]
         cypher: "RETURN [1.0 / 0, -1.0 / 0, 1.0 / -0, 1.0 / 0.0, (1.0 + 0) / 0, 1.0 / (1 - 1)]"
         rows: [[{$float: "Infinity"}, {$float: "-Infinity"}, {$float: "Infinity"}, {$float: "Infinity"}, {$float: "Infinity"}, {$float: "Infinity"}]]
       - note: "And a float zero by the integer 0 is NaN."
-        only: [neo4j, postgres, sqlite]
+        only: [neo4j, sql]
         cypher: "RETURN 0.0 / 0"
         rows: [{$float: "NaN"}]
-      - only: [oracle]
-        cypher: "RETURN 1.0 / 0"
-        error: true
-      - only: [oracle]
-        cypher: "RETURN -1.0 / 0"
-        error: true
-      - only: [oracle]
-        cypher: "RETURN 1.0 / -0"
-        error: true
-      - only: [oracle]
-        cypher: "RETURN (1.0 + 0) / 0"
-        error: true
-      - only: [oracle]
-        cypher: "RETURN 1.0 / (1 - 1)"
-        error: true
-      - only: [oracle]
-        cypher: "RETURN 0.0 / 0"
-        error: true
       - note: "A float divided by an integer zero worked out as the statement runs fails, as on Neo4j (drivine4j#554, drivine4j#559). Memgraph and FalkorDB give the infinity, as for a float zero."
         only: [neo4j, sql]
         cypher: "WITH 3.0 AS x RETURN x / 0"
@@ -3171,31 +3150,13 @@ cases:
         except: [neptune]
         cypher: "RETURN [5 % 0.0, -5.5 % 0.0]"
         rows: [[{$float: "NaN"}, {$float: "NaN"}]]
-      - note: "A float and an integer zero written in the statement alone, or worked out from numbers written alone, which Neo4j works out as it plans, as Java does: NaN. Oracle fails on each, as a float taken % by an integer zero at run time does: it can't tell a float written from pi() (drivine4j#686)."
-        except: [oracle, neptune]
+      - note: "A float and an integer zero written in the statement alone, or worked out from numbers written alone, which Neo4j works out as it plans, as Java does: NaN (drivine4j#686)."
+        except: [neptune]
         cypher: "RETURN [5.0 % 0, 0.0 % 0]"
         rows: [[{$float: "NaN"}, {$float: "NaN"}]]
-      - only: [neo4j, postgres, sqlite]
+      - only: [neo4j, sql]
         cypher: "RETURN [-5.0 % 0, 5.0 % -0, (5.0 + 0) % 0, 5.0 % (1 - 1)]"
         rows: [[{$float: "NaN"}, {$float: "NaN"}, {$float: "NaN"}, {$float: "NaN"}]]
-      - only: [oracle]
-        cypher: "RETURN 5.0 % 0"
-        error: true
-      - only: [oracle]
-        cypher: "RETURN 0.0 % 0"
-        error: true
-      - only: [oracle]
-        cypher: "RETURN -5.0 % 0"
-        error: true
-      - only: [oracle]
-        cypher: "RETURN 5.0 % -0"
-        error: true
-      - only: [oracle]
-        cypher: "RETURN (5.0 + 0) % 0"
-        error: true
-      - only: [oracle]
-        cypher: "RETURN 5.0 % (1 - 1)"
-        error: true
       - note: "pi() and e() are floats Neo4j doesn't work out as it plans, so taken % by an integer zero they fail, as one at run time does (drivine4j#550, drivine4j#554)."
         only: [neo4j, sql]
         cypher: "RETURN pi() % 0"
