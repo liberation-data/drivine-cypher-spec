@@ -2930,16 +2930,16 @@ cases:
         only: [neo4j, memgraph, falkordb, postgres]
         cypher: "RETURN 5 % 0"
         error: true
-      - note: "A number taken % by an infinity is the number, as a float, as in Java (drivine4j#555). Oracle gives null for each, given the infinity (drivine4j#683)."
-        only: [neo4j, postgres, sqlite]
+      - note: "A number taken % by an infinity is the number, as a float, as in Java (drivine4j#555, drivine4j#683)."
+        only: [neo4j, sql]
         cypher: "RETURN [5 % $i, -5 % $i, 5 % $n, 5.5 % $i, 0 % $n]"
         parameters: {i: {$float: "Infinity"}, n: {$float: "-Infinity"}}
         rows: [[5.0, -5.0, 5.0, 5.5, 0.0]]
       - cypher: "WITH toFloat('Infinity') AS i RETURN [7 % i, 7 % -i]"
-        only: [neo4j, postgres, sqlite]
+        only: [neo4j, sql]
         rows: [[7.0, 7.0]]
-      - note: "NaN or an infinity taken % by an infinity is NaN, and null is null, as in Java (drivine4j#555). Oracle is off, as for the number (drivine4j#683)."
-        only: [neo4j, postgres, sqlite]
+      - note: "NaN or an infinity taken % by an infinity is NaN, and null is null, as in Java (drivine4j#555, drivine4j#683)."
+        only: [neo4j, sql]
         cypher: "RETURN [$z % $i, $i % $i, $n % $i, null % $n]"
         parameters: {i: {$float: "Infinity"}, n: {$float: "-Infinity"}, z: {$float: "NaN"}}
         rows: [[{$float: "NaN"}, {$float: "NaN"}, {$float: "NaN"}, null]]
