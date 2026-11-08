@@ -169,12 +169,53 @@ class NonFiniteCompileTest {
         val written = oracle.compile("MATCH (n:A) RETURN n.x % 2").sql
         assertTrue("IS INFINITE))" in written, written)
         assertFalse("IS INFINITE THEN" in written, written)
-        // Of two numbers written, neither is NaN or an infinity, so the SQL is MOD's alone.
+        // Of two numbers written, neither is NaN or an infinity, so the SQL is MOD's alone, of NUMBERs or of BINARY_DOUBLEs.
         listOf("RETURN 5 % 2", "RETURN 5.5 % 2.0", "RETURN [7 % 3, 0 % 2.5]").forEach { cypher ->
             val sql = oracle.compile(cypher).sql
             assertTrue("MOD(" in sql, "$cypher: $sql")
             assertFalse("IS NAN" in sql || "IS INFINITE" in sql, "$cypher: $sql")
         }
+    }
+
+    @Test
+    fun `% on Oracle fails by an integer zero, is NaN by a float zero, and is a float where either side is one`() {
+        // drivine4j#550 and drivine4j#427: MOD gave the number taken by zero, and a whole remainder of floats as an integer. What
+        // each gives on Oracle is the spec's, in queries.yaml ("NaN worked out" and "Remainder of floats").
+        val oracle = OracleCypherCompiler("g")
+        fun sql(cypher: String, parameters: Map<String, Any?> = emptyMap()) = oracle.compile(cypher, parameters).sql
+        val byZero = "THEN TRUNC(1 / "
+        val floats = "THEN BINARY_DOUBLE_NAN ELSE MOD("
+        // An integer zero written: NUMBER's division by it, which fails as 1 / 0 does, and no MOD. A float written too, as
+        // pi() is written, which Neo4j fails on where it gives NaN for 5.0 % 0 (drivine4j#686).
+        listOf("RETURN 5 % 0", "MATCH (n:A) RETURN n.x % 0", "RETURN \$x % 0", "RETURN 5.0 % 0", "RETURN 0.0 % 0", "RETURN pi() % 0", "RETURN e() % 0").forEach { cypher ->
+            val compiled = sql(cypher, mapOf("x" to 5.0))
+            assertTrue(byZero in compiled, "$cypher: $compiled")
+            assertFalse("MOD(" in compiled || "BINARY_DOUBLE_NAN" in compiled, "$cypher: $compiled")
+        }
+        // A divisor not written may be an integer zero, tested first, and either side may be a float, taken % as BINARY_DOUBLEs.
+        listOf(
+            "RETURN \$x % \$z" to mapOf("x" to 5L, "z" to 0L),
+            "WITH 0 AS z RETURN 5.0 % z" to emptyMap(),
+            "MATCH (n:A) RETURN n.x % n.y" to emptyMap(),
+            // A write, which Oracle compiles as a procedure.
+            "CREATE (w:W {a: \$x % \$z}) RETURN w.a" to mapOf("x" to 5.0, "z" to 0L),
+        ).forEach { (cypher, parameters) ->
+            val compiled = sql(cypher, parameters)
+            assertTrue(byZero in compiled, "$cypher: $compiled")
+            assertTrue(floats in compiled, "$cypher: $compiled")
+        }
+        // A divisor written, an integer not zero, isn't tested for either zero, and its double is written out.
+        val written = sql("MATCH (n:A) RETURN n.x % 2")
+        assertFalse(byZero in written || floats in written, written)
+        assertTrue(", TO_BINARY_DOUBLE('2')))" in written, written)
+        // Where a float is written, the remainder is a float whatever the other side: neither is tested for being an integer.
+        listOf("RETURN 64.0 % 8.0", "RETURN 7 % 2.5", "MATCH (n:A) RETURN n.x % 2.5").forEach { cypher ->
+            val compiled = sql(cypher)
+            assertTrue(floats in compiled, "$cypher: $compiled")
+            assertFalse("= TRUNC(" in compiled, "$cypher: $compiled")
+        }
+        // Of two integers written, the divisor not zero, MOD's of NUMBERs alone, as before.
+        assertFalse("BINARY_DOUBLE" in sql("RETURN [7 % 3, 70 % 4]"))
     }
 
     @Test
