@@ -565,12 +565,11 @@ class OracleCypherCompiler(
      * It costs about 2.4 to 3.8 times the plain read on short values: 100,000 rows of `RETURN n.name` took 493 ms against
      * 147 ms. Cheaper forms were tried and rejected: each crashed, read a CLOB column back as text (5.0 as 5), or, as a
      * `CASE` on `$.a.type()` or on the value's length that reads the properties twice, made Oracle drop the row's label
-     * test and return nodes it had ruled out. Beside a variable-length walk the plain read is kept: Oracle has closed
-     * the session over this form in the more involved statements a walk writes. Only an item that is the property itself
-     * is read so, and a property that is a direct member of a list or a map an item is (`[n.i, n.a]`, `{a: n.a}`, `n {.a}`,
-     * `collect(n.a)`, `[x IN [n] | x.a]`): a long text property read as such a member is routed so on Oracle, to avoid an
-     * Oracle server defect (#670). A property worked out inside an item (`[size(n.a)]`) is read as [propertyOf] reads it,
-     * and isn't worked around. Read so, a text past 32 KB still can't be sorted by, grouped by or made `DISTINCT`: Oracle refuses it
+     * test and return nodes it had ruled out. Only an item that is the property itself is read so, and a property that is a
+     * direct member of a list or a map an item is (`[n.i, n.a]`, `{a: n.a}`, `n {.a}`, `collect(n.a)`, `[x IN [n] | x.a]`): a
+     * long text property read as such a member is routed so on Oracle, to avoid an Oracle server defect (#670). Any other
+     * read of a stored value as JSON that may give a long text, beside a variable-length walk among them, takes the guarded
+     * route the last pass, [finished], gives it, to avoid the same defect. Read so, a text past 32 KB still can't be sorted by, grouped by or made `DISTINCT`: Oracle refuses it
      * (ORA-40180), as it does any JSON that large, and the session stays open. A write's block is worked around too, where
      * it takes a text from the row it is writing: see [rowValue]; so is an unwound item's value an item gives: see [itemValue];
      * so is an item of a list read by its place: see [listItem]; and so is a property that is an argument of `coalesce()`:
@@ -582,8 +581,7 @@ class OracleCypherCompiler(
      * once an Oracle release no longer crashes on the repro, and `CypherWriteOracleTest`'s "a property past 32 KB read on
      * two nodes" test still passes without it. `OracleItemPropertyTest`, which pins this SQL, goes with it.
      */
-    override fun itemProperty(props: String, key: String) =
-        "JSON(JSON_QUERY(JSON_SERIALIZE(JSON_TRANSFORM($props, KEEP ${OracleSql.path(key)}) RETURNING CLOB EXTENDED), ${OracleSql.path(key)} RETURNING CLOB) EXTENDED)"
+    override fun itemProperty(props: String, key: String) = keptText(props, OracleSql.path(key))
 
     /**
      * A property that is an argument of `coalesce()`, `coalesce(${'$'}p.q, n.a)`, by its kind, read by the property's own path: a
@@ -625,9 +623,9 @@ class OracleCypherCompiler(
      * on the first run of the statement or a later one: returned, passed on, measured, searched, compared, in a `WHERE` and
      * in an `ORDER BY`. A property of an unwound item, which `JSON_TABLE` takes out, is read as before, and so is a key of a
      * map that is itself a property (`n.m.a`), which [direct] reads from the map where a text function, a measure or a
-     * comparison reads it; returned as it is, `RETURN n.m.a`, a text past 32 KB there still closes the session. So do a map
-     * made of a long property and then read (`head([n {.a}]).a`), and `=` of a long property with a value that may hold a
-     * null (`head([n]).a = n.a`), which takes the stored property out as JSON to compare it. Read by its kind, as
+     * comparison reads it, and elsewhere by its whole path from the properties, as [finished] routes it, as it routes a map
+     * made of a long property and then read (`head([n {.a}]).a`), and `=` of a long property with a value that may hold a null
+     * (`head([n]).a = n.a`) (#533, #534, #536). Read by its kind, as
      * [coalescedProperty] reads one, a property of a map a `WITH` passes on cost about 1.5 times the plain read on short
      * texts, as the map was worked out again for each of the reads; read so, 20,000 rows of `WITH properties(n) AS m RETURN
      * m.t` take as long as before.
@@ -691,14 +689,6 @@ class OracleCypherCompiler(
 
     /** The value at [keys] in the JSON [json]: a text read with one path from [json] written out as text, anything else as JSON. */
     private fun throughText(json: String, keys: List<String>) = shared(json) { (x) -> throughText(x, OracleSql.path(keys), OracleSql.path(keys, ".type()")) }
-
-    /**
-     * The value at the path [path] in the JSON [json], with [passing] its `PASSING` clause where it has one: a text read with
-     * that path from [json] written out as text, anything else as JSON. [typed] is the path to its kind, `.type()`.
-     */
-    private fun throughText(json: String, path: String, typed: String, passing: String = "") =
-        "CASE WHEN JSON_VALUE($json, $typed$passing) = 'string' " +
-            "THEN JSON(JSON_QUERY(JSON_SERIALIZE($json RETURNING CLOB), $path$passing RETURNING CLOB)) ELSE JSON_QUERY($json, $path$passing RETURNING JSON) END"
 
     /**
      * The item at the path [path] of the JSON list [json], `'$[0]'`, read as [throughText] reads a value: a text from the list
@@ -1346,6 +1336,13 @@ class OracleCypherCompiler(
     override fun called(query: String) = "SELECT /*+ NO_MERGE */ * FROM (\n${indent(query)}\n)"
 
     /**
+     * Each read of a stored value as JSON left off the CLOB route is routed it: a long text property read as a direct member of
+     * a list or a map, or as a nested property, is routed the CLOB way on Oracle, to avoid an Oracle server defect
+     * (drivine4j#670). See [OracleLongReads].
+     */
+    override fun finished(compiled: CompiledCypher) = compiled.copy(sql = OracleLongReads.routed(compiled.sql))
+
+    /**
      * A query that reads the graph's tables twice or more is not rewritten by Oracle's JSON table transformation
      * (`NO_JSON_TABLE_TRANSFORM`), which reads several JSON values of a column, `n1.props`, by one `JSON_TABLE`: so
      * rewritten, a node's table beside another table, or beside a subquery of one, lost the tests of that node's labels
@@ -1706,6 +1703,22 @@ class OracleCypherCompiler(
 
         /** The words of a literal ([literalJson]), and of a list or a map made of them ([jsonArray], [jsonObject]): see [nanFree]. */
         private val WRITTEN_WORDS = setOf("JSON", "JSON_SCALAR", "TO_BINARY_DOUBLE", "JSON_ARRAY", "JSON_OBJECT", "VALUE", "NULL", "ON", "RETURNING")
+
+        /**
+         * The value at the path [path] in the JSON [json], with [passing] its `PASSING` clause where it has one: a text read with
+         * that path from [json] written out as text, anything else as JSON. [typed] is the path to its kind, `.type()`. Read so
+         * by [itemValue], [rowValue] and [listItem], and by [OracleLongReads] for an item's or a row's value.
+         */
+        internal fun throughText(json: String, path: String, typed: String, passing: String = "") =
+            "CASE WHEN JSON_VALUE($json, $typed$passing) = 'string' " +
+                "THEN JSON(JSON_QUERY(JSON_SERIALIZE($json RETURNING CLOB), $path$passing RETURNING CLOB)) ELSE JSON_QUERY($json, $path$passing RETURNING JSON) END"
+
+        /**
+         * The value at the path [path] in the stored properties [props], read through its text as [itemProperty] reads one:
+         * only that path kept, written out as extended JSON, and read back from that text. Read so by [OracleLongReads] too.
+         */
+        internal fun keptText(props: String, path: String) =
+            "JSON(JSON_QUERY(JSON_SERIALIZE(JSON_TRANSFORM($props, KEEP $path) RETURNING CLOB EXTENDED), $path RETURNING CLOB) EXTENDED)"
 
         /** The most bytes a `VARCHAR2` holds in SQL, as a database is made by default (`MAX_STRING_SIZE = STANDARD`). */
         const val SHORT_TEXT = 4000

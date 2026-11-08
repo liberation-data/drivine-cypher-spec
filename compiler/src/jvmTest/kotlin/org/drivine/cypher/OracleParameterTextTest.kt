@@ -1,5 +1,6 @@
 package org.drivine.cypher
 
+import org.drivine.cypher.oracle.OracleReads
 import org.drivine.cypher.sql.OracleCypherCompiler
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
@@ -59,9 +60,9 @@ class OracleParameterTextTest {
         val write = OracleCypherCompiler("g").compile("MATCH (n) SET n.t = \$p['text'], n.b = \$p['m']['b'], n.k = \$p[\$k]", p).sql
         assertTrue(write.contains("JSON_QUERY(cy_params, '\$.p.text' RETURNING JSON)") && write.contains("JSON_QUERY(cy_params, '\$.p.m.b' RETURNING JSON)"), write)
         assertTrue(!write.contains("'\$.p' RETURNING") && !write.contains("CASE"), write)
-        // A reduce() step reads its parameters from the map its function is given, so a subscript there is read as it was.
+        // A reduce() step reads its parameters from the map its function is given, so a subscript there is read from that map, by the parameter's whole path.
         val reduced = OracleCypherCompiler("g").compile("RETURN reduce(s = '', x IN [1, 2] | s + \$p['text'])", p).sql
-        assertTrue(reduced.contains("JSON_QUERY(JSON_QUERY(cy_context, '\$.\"\$p\"' RETURNING JSON), '\$.text' RETURNING JSON)") && !reduced.contains("JSON_QUERY(\$_cy_p, '\$.text'"), reduced)
+        assertTrue(reduced.contains("cy_context, '\$.\"\$p\".text") && OracleReads.unsafe(reduced).isEmpty() && !reduced.contains("JSON_QUERY(\$_cy_p, '\$.text'"), reduced)
     }
 
     @Test
@@ -71,13 +72,13 @@ class OracleParameterTextTest {
     }
 
     @Test
-    fun `a value in a parameter that is no map, or that a reduce() step is given, is read from the parameter as JSON, as it was`() {
+    fun `a value in a parameter that is no map, or that a reduce() step is given, is read from the parameter as JSON, or from the step's map`() {
         // A list or a date on the way to the key is no map to take one path into, and a reduce() step reads its
         // parameters from the map its function is given, not from the text they are bound as.
         val given = mapOf("p" to mapOf("text" to "x", "l" to listOf(1)), "d" to LocalDate.of(2020, 1, 2))
         val read = OracleCypherCompiler("g").compile("RETURN [\$p.l.x, \$d.year]", given).sql
         assertTrue(read.contains("JSON_QUERY(JSON_QUERY(\$_cy_p, '\$.l' RETURNING JSON), '\$.x' RETURNING JSON)") && read.contains("JSON(\$_cy_d)"), read)
         val reduced = OracleCypherCompiler("g").compile("RETURN reduce(s = '', x IN [1, 2] | s + \$p.text)", given).sql
-        assertTrue(reduced.contains("JSON_QUERY(JSON_QUERY(cy_context, '\$.\"\$p\"' RETURNING JSON), '\$.text' RETURNING JSON)") && !reduced.contains("JSON_QUERY(\$_cy_p, '\$.text'"), reduced)
+        assertTrue(reduced.contains("cy_context, '\$.\"\$p\".text") && OracleReads.unsafe(reduced).isEmpty() && !reduced.contains("JSON_QUERY(\$_cy_p, '\$.text'"), reduced)
     }
 }
