@@ -275,7 +275,7 @@ Before it is given a secret, it refuses a bundle whose SHA-256 isn't the one ste
 other job of the run can set, so an artifact of the same name put in the bundle's place is never signed; a re-run of the
 failed upload alone keeps step 2's output, and its bundle. Before it imports the key, it checks the bundle holds every artifact at the tag's version and nothing else: no link,
 which zip would follow into the job's keyring or environment, no file the publications don't make, no other version,
-nothing outside `org/drivine`. Then it checks each file's checksums in the bundle; after signing, each signature against
+no checksum or signature of a file it doesn't hold, nothing outside `org/drivine`. Then it checks each file's checksums in the bundle; after signing, each signature against
 the key, and the signed bundle as step 2 checked it. The key is imported into a keyring made for the job and deleted
 after it, and the key's variables are unset before the signing runs anything, so no process the signing starts is given them. Neither the
 key, its passphrase nor the Portal token is passed on a command line or written to the log: the token's base64, which
@@ -311,7 +311,7 @@ byte for byte, with a signature beside each file, keeps it as the run's artifact
 stand-in for the Central Portal on the runner, which refuses an upload that isn't the one nmcp made and a status call
 for any other deployment. It also checks that the signing refuses a bundle it must not sign
 (`.github/scripts/compiler-release-sign-test.sh`): one with a link among thousands, a file, a version or a path that no
-publication makes.
+publication makes, or a checksum of a file it doesn't hold.
 
 The `release` environment is this repository's own, not drivine4j's, and is set up once in its settings before the first
 release: a required reviewer, tags `v*` allowed to deploy to it, and the secrets drivine4j's release uses,

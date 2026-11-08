@@ -2,7 +2,7 @@
 # Tests that compiler-release-sign.sh refuses a bundle it must not sign, made from build's unsigned bundle with one thing
 # added: a link among thousands (which once got past its check, find killed by SIGPIPE under pipefail), a file no
 # artifact's publication makes, a version other than the one released, a path outside org/drivine, and a checksum of a
-# file the bundle doesn't hold. Each must be
+# file the bundle doesn't hold, alone or beside an empty directory of that file's name. Each must be
 # refused, and leave no signed bundle. Run by compiler-release.yml's dry run, with its throwaway key in SIGNING_KEY and
 # SIGNING_PASSWORD, on Linux, whose unzip makes the links a zip holds.
 #   compiler-release-sign-test.sh <unsigned bundle zip> <version>
@@ -12,7 +12,8 @@ here=$(cd "$(dirname "$0")" && pwd)
 work=$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/compiler-sign-test.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 
-# A copy of the bundle with entries added: <kind> <path> [<target>], a file of a few bytes, or a link to <target>.
+# A copy of the bundle with entries added: <kind> <path> [<target>], a file of a few bytes (a directory where <path> ends
+# in /), or a link to <target>.
 made() {
     local out="$1"; shift
     python3 -I - "$unsigned" "$out" "$@" <<'PY'
@@ -29,7 +30,7 @@ with zipfile.ZipFile(src) as zin, zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED
             info.external_attr = (0o120777 << 16)
             zout.writestr(info, rest[0])
         else:
-            zout.writestr(info, "not the compiler's\n")
+            zout.writestr(info, "" if path.endswith("/") else "not the compiler's\n")
 PY
 }
 
@@ -70,6 +71,9 @@ refused "A file at the top" "$work/top.zip" "what no artifact's publication"
 
 made "$work/orphan.zip" "file|$dir/drivine-cypher-compiler-jvm-$version.klib.md5"
 refused "A checksum of a file it doesn't hold" "$work/orphan.zip" "but not the file it is of"
+
+made "$work/orphan-dir.zip" "file|$dir/drivine-cypher-compiler-jvm-$version.klib/" "file|$dir/drivine-cypher-compiler-jvm-$version.klib.md5"
+refused "A checksum beside a directory of its file's name" "$work/orphan-dir.zip" "but not the file it is of"
 
 (( failures == 0 )) || { echo "::error::$failures of the sign script's refusals failed."; exit 1; }
 echo "The sign script refused each bundle it must not sign."

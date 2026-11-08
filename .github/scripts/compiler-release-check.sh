@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Checks the compiler's Central Portal bundle before it is kept or uploaded: exactly the artifacts in $ARTIFACTS, each
 # with the files Maven Central asks for at the version given, and with verify a signature beside every file. It holds
-# nothing else: no link, no other version, no file an artifact's publication doesn't make, nothing outside org/drivine. Copies the bundle to
+# nothing else: no link, no other version, no file an artifact's publication doesn't make, no checksum or signature of a
+# file it doesn't hold, nothing outside org/drivine. Copies the bundle to
 # <out>/publicationAggregated.zip and unpacks it to <out>/maven-repo, and writes what it staged to the job's summary.
 #   compiler-release-check.sh <bundle zip> <version> verify|none <out>
 # verify checks each signature with the key in the keyring GNUPGHOME names (compiler-release-sign.sh's, of the key it
@@ -37,10 +38,11 @@ allowed="$out/allowed.txt" present="$out/present.txt" extra="$out/extra.txt"
 (cd "$out/maven-repo" && find . -mindepth 1 | sed 's#^\./##' | LC_ALL=C sort) > "$present"
 LC_ALL=C comm -13 "$allowed" "$present" > "$extra"
 [[ ! -s "$extra" ]] || fail "The bundle holds what no artifact's publication at $version makes: $(head -5 "$extra" | tr '\n' ' ')"
-# A checksum or a signature beside its own file only: one of a file the bundle doesn't hold would be published unchecked.
+# A checksum or a signature beside its own file only, a file and not a directory of its name: one of a file the bundle
+# doesn't hold would be published unchecked.
 while IFS= read -r f; do
     case "$f" in
-        *.md5|*.sha1|*.sha256|*.sha512|*.asc) grep -qxF -- "${f%.*}" "$present" || fail "The bundle holds ${f##*/}, but not the file it is of." ;;
+        *.md5|*.sha1|*.sha256|*.sha512|*.asc) [[ -f "$out/maven-repo/${f%.*}" ]] || fail "The bundle holds ${f##*/}, but not the file it is of." ;;
     esac
 done < "$present"
 
