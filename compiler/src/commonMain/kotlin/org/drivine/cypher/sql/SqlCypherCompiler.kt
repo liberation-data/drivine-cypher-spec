@@ -1601,7 +1601,22 @@ abstract class SqlCypherCompiler(
                     identities = was
                 }
             }
-            val sql = projected.joinToString(if (distinct) "\nUNION\n" else "\nUNION ALL\n") { "SELECT * FROM (\n${indent(it.sql)}\n) ${alias("q")}" }
+            // A value one query writes as JSON that keeps its keys' order ([Value.Json.ordered]), as Postgres's `json` of a list or a map
+            // it builds, and another as it compares, Postgres's `jsonb`, is written as it compares in each, so the parts' columns are of
+            // one type (drivine4j#516).
+            val mixed = projected.first().scope.keys.filter { variable -> projected.map { (it.scope.getValue(variable) as? Value.Json)?.ordered }.distinct().size > 1 }
+            // Each query's columns, and only those: a query's rows also carry what it orders them by, as an UNWIND's places, which
+            // another query's need not (drivine4j#506).
+            val sql = projected.joinToString(if (distinct) "\nUNION\n" else "\nUNION ALL\n") { part ->
+                val q = alias("q")
+                val compared = mixed.mapNotNull { variable ->
+                    (part.scope.getValue(variable) as? Value.Json)?.takeIf { it.ordered }?.let { PENDING_COLUMN.find(it.sql)?.groupValues?.get(1) }
+                }.toSet()
+                val columns = part.columns.joinToString(", ") { (column, _) ->
+                    if (column in compared) "${comparable(Value.Json("$q.$column", ordered = true))} AS $column" else "$q.$column"
+                }
+                "SELECT $columns FROM (\n${indent(part.sql)}\n) $q"
+            }
             // A value is of a temporal kind where each query makes it of that one. It is at keys of a write's row ([Value.Json.rowKeys])
             // only where each query takes it from those: a property of it is read from the row there, which would read the first
             // query's value for every query's rows (#336). It is read from an unwound item ([Value.Json.fromList]) only where each
@@ -1613,6 +1628,7 @@ abstract class SqlCypherCompiler(
                 val all = projected.map { it.scope.getValue(variable) as? Value.Json }
                 if (value !is Value.Json) value
                 else value.copy(
+                    ordered = all.all { it?.ordered == true },
                     temporal = all.map { it?.temporal }.distinct().singleOrNull(), items = all.map { it?.items }.distinct().singleOrNull(),
                     rowKeys = all.map { it?.rowKeys }.distinct().singleOrNull(), fromList = all.all { it?.fromList == true },
                     itemItems = all.map { it?.itemItems }.distinct().singleOrNull(), temporals = all.any { it?.temporals == true },
