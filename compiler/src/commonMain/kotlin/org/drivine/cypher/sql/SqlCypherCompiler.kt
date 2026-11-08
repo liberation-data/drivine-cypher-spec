@@ -311,6 +311,12 @@ abstract class SqlCypherCompiler(
     protected open fun once(query: String) = called(query)
 
     /**
+     * The query of an `EXISTS { … }`, [query], as the `EXISTS` reads it: its rows, in the order its body or its `UNWIND`s
+     * give them, which the `EXISTS` asks for none of.
+     */
+    protected open fun existsQuery(query: String) = query
+
+    /**
      * A `UNION`: each query's rows, in the order of the queries and each query's own order, as a graph engine
      * gives them; without `ALL`, each row once, where it is first given, but one whose item is NaN each time ([bareNaN]).
      */
@@ -3773,7 +3779,7 @@ abstract class SqlCypherCompiler(
             is Expression.PatternPredicate -> exists(listOf(expression.pattern), null, scope)
             is Expression.Exists -> exists(expression.patterns, expression.where, scope)
             is Expression.Subquery -> when (expression.kind) {
-                Expression.Subquery.Kind.EXISTS -> Value.Bool("EXISTS (\n${indent(correlated(expression.query, scope, "EXISTS { … }"))}\n)")
+                Expression.Subquery.Kind.EXISTS -> Value.Bool("EXISTS (\n${indent(existsQuery(correlated(expression.query, scope, "EXISTS { … }")))}\n)")
                 Expression.Subquery.Kind.COUNT ->
                     Value.Json(scalar("(SELECT count(*) FROM (\n${indent(correlated(expression.query, scope, "COUNT { … }"))}\n) ${alias("q")})"))
             }

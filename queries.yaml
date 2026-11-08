@@ -1063,6 +1063,130 @@ cases:
       - cypher: "MATCH (p:Person {name: 'Keanu'}) RETURN COUNT { MATCH (p)-[:ACTED_IN]->(m) WITH m WHERE m.released < 2000 RETURN m.title }"
         rows: [2]
 
+  - name: "EXISTS { } over UNWIND"
+    description: "An EXISTS { } whose body unwinds a list is true where the body gives a row, in a RETURN, a WHERE, a CASE or a list comprehension, whatever order the body gives its rows in; an ORDER BY that a LIMIT or a SKIP of the body reads still picks the rows they keep (drivine4j#449)."
+    steps:
+      - note: "Oracle refused an EXISTS { } whose query ended in an ORDER BY, as this one did in the order of the list's items, with ORA-00907."
+        cypher: "RETURN EXISTS { UNWIND [1, 2, 3] AS j RETURN j }"
+        rows: [true]
+      - cypher: "RETURN EXISTS { UNWIND [] AS j RETURN j }"
+        rows: [false]
+      - cypher: "MATCH (p:Person) WHERE EXISTS { UNWIND keys(p) AS k WITH k WHERE k = 'born' RETURN k } RETURN p.name ORDER BY p.name"
+        rows: ["Carrie", "Keanu", "Laurence"]
+      - cypher: "MATCH (p:Person) RETURN p.name, EXISTS { UNWIND keys(p) AS k WITH k WHERE k = 'born' RETURN k } ORDER BY p.name"
+        rows: [["Carrie", true], ["Hugo", false], ["Keanu", true], ["Laurence", true]]
+      - note: "The body's own ORDER BY, in its RETURN or a WITH."
+        cypher: "RETURN EXISTS { UNWIND [1, 2, 3] AS j RETURN j ORDER BY j }"
+        rows: [true]
+      - cypher: "UNWIND [1, 2, 3] AS o RETURN o, EXISTS { UNWIND [3, 1, 2] AS j WITH j WHERE j > o RETURN j ORDER BY j DESC }"
+        rows: [[1, true], [2, true], [3, false]]
+      - note: "A DISTINCT in the subquery, beside the row's own value (drivine4j#502)."
+        cypher: "UNWIND [1, 2, 3] AS o RETURN o, EXISTS { UNWIND [1, 1, 2] AS j WITH DISTINCT j WHERE j = o RETURN j }"
+        rows: [[1, true], [2, true], [3, false]]
+      - cypher: "UNWIND [1, 2, 3] AS o RETURN o, EXISTS { UNWIND [3, 1, 2] AS j WITH j ORDER BY j WHERE j > o RETURN j }"
+        rows: [[1, true], [2, true], [3, false]]
+      - note: "The ORDER BY picks the row the LIMIT keeps: the least, not the list's first."
+        cypher: "UNWIND [1, 2, 3] AS o RETURN o, EXISTS { UNWIND [3, 1, 2] AS j WITH j ORDER BY j LIMIT 1 WITH j WHERE j = o RETURN j }"
+        rows: [[1, true], [2, false], [3, false]]
+      - cypher: "UNWIND [1, 2, 3] AS o RETURN o, EXISTS { UNWIND [3, 1, 2] AS j WITH j ORDER BY j DESC SKIP 1 LIMIT 1 WITH j WHERE j = o RETURN j }"
+        rows: [[1, false], [2, true], [3, false]]
+      - cypher: "UNWIND [1, 2, 3] AS o WITH o WHERE EXISTS { UNWIND [3, 1, 2] AS j WITH j ORDER BY j LIMIT 1 WITH j WHERE j = o RETURN j } RETURN o"
+        rows: [1]
+      - cypher: "UNWIND [1, 2, 3] AS o RETURN o, EXISTS { UNWIND [3, 1, 2] AS j WITH j WHERE j >= o RETURN j ORDER BY j LIMIT 1 }"
+        rows: [[1, true], [2, true], [3, true]]
+      - cypher: "UNWIND [1, 2, 3] AS o RETURN o, COUNT { UNWIND [3, 1, 2] AS j WITH j ORDER BY j LIMIT 1 WITH j WHERE j = o RETURN j }"
+        rows: [[1, 1], [2, 0], [3, 0]]
+      - note: "In a RETURN and in a WHERE, and NOT EXISTS."
+        cypher: "UNWIND [1, 2, 3] AS o RETURN o, EXISTS { UNWIND [1, 2] AS j WITH j WHERE j = o RETURN j }"
+        rows: [[1, true], [2, true], [3, false]]
+      - cypher: "UNWIND [1, 2, 3] AS o WITH o WHERE EXISTS { UNWIND [1, 2] AS j WITH j WHERE j = o RETURN j } RETURN o"
+        rows: [1, 2]
+      - cypher: "UNWIND [1, 2, 3] AS o RETURN o, NOT EXISTS { UNWIND [1, 2] AS j WITH j WHERE j = o RETURN j }"
+        rows: [[1, false], [2, false], [3, true]]
+      - cypher: "UNWIND [1, 2, 3] AS o WITH o WHERE NOT EXISTS { UNWIND [1, 2] AS j WITH j WHERE j = o RETURN j } RETURN o"
+        rows: [3]
+      - note: "In a CASE and a list comprehension."
+        cypher: "UNWIND [1, 2, 3] AS o RETURN o, CASE WHEN EXISTS { UNWIND [1, 2] AS j WITH j WHERE j = o RETURN j } THEN 'y' ELSE 'n' END"
+        rows: [[1, "y"], [2, "y"], [3, "n"]]
+      - cypher: "UNWIND [1, 2] AS o RETURN o, [x IN [1, 2, 3] WHERE EXISTS { UNWIND [2, 3] AS j WITH j WHERE j = x + o RETURN j } | x]"
+        rows: [[1, [1, 2]], [2, [1]]]
+      - note: "Nested."
+        cypher: "UNWIND [1, 2, 3] AS o RETURN o, EXISTS { UNWIND range(1, o) AS j WITH j WHERE EXISTS { UNWIND [2, 3] AS k WITH k WHERE k = j RETURN k } RETURN j }"
+        rows: [[1, false], [2, true], [3, true]]
+      - cypher: "UNWIND [1, 2, 3] AS o WITH o WHERE EXISTS { UNWIND range(1, o) AS j WITH j WHERE NOT EXISTS { UNWIND [1, 2] AS k WITH k WHERE k = j RETURN k } RETURN j } RETURN o"
+        rows: [3]
+      - note: "Nested, and the innermost reads the outer row, two and three subqueries out."
+        cypher: "UNWIND [1, 2, 3] AS o RETURN o, EXISTS { UNWIND [1, 2] AS j WITH j WHERE EXISTS { UNWIND [1, 2] AS k WITH k WHERE k = o RETURN k } RETURN j }"
+        rows: [[1, true], [2, true], [3, false]]
+      - cypher: "UNWIND [1, 2, 3] AS o RETURN o, EXISTS { UNWIND [1] AS j WITH j WHERE EXISTS { UNWIND [1] AS k WITH k WHERE EXISTS { UNWIND [2, 3] AS m WITH m WHERE m = o RETURN m } RETURN k } RETURN j }"
+        rows: [[1, false], [2, true], [3, true]]
+      - cypher: "MATCH (p:Person) RETURN p.name, EXISTS { UNWIND [1] AS j WITH j WHERE EXISTS { UNWIND keys(p) AS k WITH k WHERE k = 'born' RETURN k } RETURN j } ORDER BY p.name"
+        rows: [["Carrie", true], ["Hugo", false], ["Keanu", true], ["Laurence", true]]
+      - note: "Over a pattern, then a list."
+        cypher: "MATCH (p:Person) RETURN p.name, EXISTS { MATCH (p)-[:ACTED_IN]->(m) UNWIND [m.released] AS y WITH y WHERE y > 2000 RETURN y } ORDER BY p.name"
+        rows: [["Carrie", true], ["Hugo", false], ["Keanu", true], ["Laurence", false]]
+      - cypher: "MATCH (m:Movie) WHERE EXISTS { MATCH (m)<-[:ACTED_IN]-(p) UNWIND [p.born] AS b WITH b WHERE b < 1962 RETURN b } RETURN m.title ORDER BY m.title"
+        rows: ["The Matrix"]
+      - note: "In a CALL."
+        cypher: "UNWIND [1, 2, 3] AS o CALL (o) { RETURN EXISTS { UNWIND [1, 2] AS j WITH j WHERE j = o RETURN j } AS e } RETURN o, e"
+        rows: [[1, true], [2, true], [3, false]]
+      - cypher: "CALL { UNWIND [1, 2, 3] AS o WITH o WHERE EXISTS { UNWIND [2] AS j WITH j WHERE j = o RETURN j } RETURN o AS x } RETURN x"
+        rows: [2]
+      - note: "A body of a UNION."
+        cypher: "UNWIND [1, 2, 3] AS o RETURN o, EXISTS { UNWIND [1] AS j WITH j WHERE j = o RETURN j UNION UNWIND [3] AS j WITH j WHERE j = o RETURN j }"
+        rows: [[1, true], [2, false], [3, true]]
+      - cypher: "UNWIND [1, 2, 3] AS o RETURN o, EXISTS { UNWIND [1] AS j WITH j WHERE j = o RETURN j UNION ALL UNWIND [3] AS j WITH j WHERE j = o RETURN j }"
+        rows: [[1, true], [2, false], [3, true]]
+      - cypher: "UNWIND [1, 2, 3] AS o WITH o WHERE EXISTS { UNWIND [1] AS j WITH j WHERE j = o RETURN j UNION UNWIND [3] AS j WITH j WHERE j = o RETURN j } RETURN o"
+        rows: [1, 3]
+      - note: "The ORDER BY of a query of the UNION picks the row its LIMIT keeps."
+        cypher: "UNWIND [1, 2, 3] AS o RETURN o, EXISTS { UNWIND [1] AS j WITH j WHERE j = o RETURN j UNION UNWIND [3, 2] AS j WITH j ORDER BY j LIMIT 1 WITH j WHERE j = o RETURN j }"
+        rows: [[1, true], [2, true], [3, false]]
+      - cypher: "MATCH (p:Person) WHERE EXISTS { MATCH (p)-[:KNOWS]->(f) RETURN f.name AS n UNION MATCH (f)-[:KNOWS]->(p) RETURN f.name AS n } RETURN p.name ORDER BY p.name"
+        rows: ["Carrie", "Keanu", "Laurence"]
+
+  - name: "range() over the row's value in a subquery"
+    description: "A range() bounded by a value of the row is worked out for each row, in a COUNT { }, an EXISTS { } and a CALL (drivine4j#411)."
+    steps:
+      - note: "Oracle once worked out the list in the lateral view's select list once, for the first row, and gave [2, 1] here."
+        cypher: "UNWIND [1, 2] AS o RETURN o, COUNT { UNWIND range(1, o) AS j RETURN j }"
+        rows: [[1, 1], [2, 2]]
+      - cypher: "UNWIND [3, 1, 2] AS o RETURN o, COUNT { UNWIND range(1, o) AS j RETURN j }"
+        rows: [[3, 3], [1, 1], [2, 2]]
+      - cypher: "UNWIND [1, 2, 3] AS o RETURN o, COUNT { UNWIND range(o, 3) AS j RETURN j }"
+        rows: [[1, 3], [2, 2], [3, 1]]
+      - cypher: "UNWIND [1, 2, 3, 4, 5] AS o RETURN o, COUNT { UNWIND range(1, o, 2) AS j RETURN j }"
+        rows: [[1, 1], [2, 1], [3, 2], [4, 2], [5, 3]]
+      - cypher: "UNWIND [1, 2, 3] AS o RETURN o, COUNT { UNWIND range(1, o * 2) AS j RETURN j }"
+        rows: [[1, 2], [2, 4], [3, 6]]
+      - cypher: "MATCH (m:Movie) RETURN m.title, COUNT { UNWIND range(1995, m.released) AS y RETURN y } ORDER BY m.title"
+        rows: [["Johnny Mnemonic", 1], ["The Matrix", 5], ["The Matrix Reloaded", 9]]
+      - cypher: "UNWIND [1, 2, 3] AS o RETURN o, COUNT { UNWIND range(o, $n) AS j RETURN j }"
+        parameters: {n: 3}
+        rows: [[1, 3], [2, 2], [3, 1]]
+      - cypher: "UNWIND [1, 2, 3] AS o RETURN o, COUNT { UNWIND range($a, o) AS j RETURN j }"
+        parameters: {a: 1}
+        rows: [[1, 1], [2, 2], [3, 3]]
+      - note: "Nested: the inner range() is bounded by the outer one's item."
+        cypher: "UNWIND [1, 2, 3] AS o RETURN o, COUNT { UNWIND range(1, o) AS j UNWIND range(1, j) AS k RETURN k }"
+        rows: [[1, 1], [2, 3], [3, 6]]
+      - cypher: "UNWIND [1, 2, 3] AS o RETURN o, COUNT { UNWIND [x IN range(1, o) | x] AS j RETURN j }"
+        rows: [[1, 1], [2, 2], [3, 3]]
+      - cypher: "UNWIND [1, 2, 3] AS o WITH o WHERE COUNT { UNWIND range(1, o) AS j RETURN j } >= 2 RETURN o"
+        rows: [2, 3]
+      - cypher: "CALL { UNWIND [1, 2, 3] AS o RETURN sum(COUNT { UNWIND range(1, o) AS j RETURN j }) AS t } RETURN t"
+        rows: [6]
+      - cypher: "UNWIND [1, 2, 3] AS o CALL (o) { UNWIND range(1, o) AS j RETURN sum(j) AS s } RETURN o, s"
+        rows: [[1, 1], [2, 3], [3, 6]]
+      - cypher: "UNWIND [3] AS o CALL { WITH o UNWIND range(1, o) AS i RETURN sum(i) AS s } RETURN s"
+        rows: [6]
+      - cypher: "UNWIND [1, 2, 3] AS o RETURN o, size(range(1, o)), [x IN range(1, o) | x], reduce(s = 0, x IN range(1, o) | s + x)"
+        rows: [[1, 1, [1], 1], [2, 2, [1, 2], 3], [3, 3, [1, 2, 3], 6]]
+      - cypher: "UNWIND [0, 1, 2] AS o RETURN o, EXISTS { UNWIND range(1, o) AS j RETURN j }"
+        rows: [[0, false], [1, true], [2, true]]
+      - cypher: "MATCH (m:Movie) RETURN m.title, EXISTS { UNWIND range(1995, m.released) AS y WITH y WHERE y > 2000 RETURN y } ORDER BY m.title"
+        rows: [["Johnny Mnemonic", false], ["The Matrix", false], ["The Matrix Reloaded", true]]
+
   - name: "CALL subqueries"
     description: "CALL { } runs for each row; OPTIONAL CALL keeps a row it gives nothing for."
     steps:

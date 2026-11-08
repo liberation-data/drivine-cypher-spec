@@ -1540,6 +1540,14 @@ class OracleCypherCompiler(
         if (optional) "LEFT JOIN LATERAL (\n${indent(query)}\n) $name ON 1 = 1" else super.lateral(query, name, optional = false, columns)
 
     /**
+     * Oracle refuses an `ORDER BY` that ends the query of an `EXISTS` (ORA-00907), and the query of an `EXISTS { UNWIND … }`
+     * ends in one, the order of the list's items, as does one whose body has its own `ORDER BY` (drivine4j#449). It is read
+     * from a derived table, as a `COUNT { … }`'s is, where Oracle takes an `ORDER BY`, and where one that a `LIMIT` or a `SKIP`
+     * of the body reads still picks the rows they keep.
+     */
+    override fun existsQuery(query: String) = "SELECT 1 FROM (\n${indent(query)}\n)"
+
+    /**
      * Flags the pattern opens with, `(?i)`, are Oracle's match parameter, Java's `s` its `n`. The whole of the text
      * matches, as `=~` asks: it starts at `\A` and ends at `\z`, the text's start and end, which `(?m)` leaves as they are,
      * and Oracle's `$` also matches before a line break that ends the text. Under `(?m)`, Oracle's own `^` and `$` match
