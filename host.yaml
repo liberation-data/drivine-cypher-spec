@@ -203,6 +203,22 @@ cases:
         args: [2.5, null, "UP"]
         result: null
 
+  - name: "drivine_float_text"
+    description: "drivine_float_text(real) is the text of a SQL float as Java writes a double, as toString() gives it: an infinity, which SQLite stores, as Infinity or -Infinity. Null of null."
+    pairs:
+      writes.yaml: ["NaN worked out from stored infinities"]
+      queries.yaml: ["NaN and the infinities as parameters"]
+    steps:
+      - function: "drivine_float_text"
+        args: [{$float: "Infinity"}]
+        result: "Infinity"
+      - function: "drivine_float_text"
+        args: [{$float: "-Infinity"}]
+        result: "-Infinity"
+      - function: "drivine_float_text"
+        args: [null]
+        result: null
+
   - name: "Postgres rows of a statement given NaN or an infinity"
     description: "Postgres's jsonb holds neither NaN nor an infinity, so a statement given one (nonFinite) writes stand-in numbers past any double's: NaN is exactly 2e309 + 0.5, a number at or past 1e309 is an infinity, and one at or below -1e309 the negative infinity. They are read as such only in the rows of a statement given one; elsewhere a column is read as JSON is. The tag SQLite writes for NaN is a map on Postgres."
     pairs:
