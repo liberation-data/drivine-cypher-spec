@@ -3253,6 +3253,10 @@ cases:
         only: [neo4j, sql]
         cypher: "RETURN [toFloat('+NaN'), toFloat('\\tInfinity\\n'), toFloat(' -Infinity'), toFloat('Infinity ')]"
         rows: [[{$float: "NaN"}, {$float: "Infinity"}, {$float: "-Infinity"}, {$float: "Infinity"}]]
+      - note: "And with the other characters up to a space around them, which Java takes off too. Postgres and SQLite give null (drivine4j#696)."
+        only: [neo4j, oracle]
+        cypher: "RETURN [toFloat('\\u0001NaN'), toFloat('Infinity\\u001F'), toFloat('\\u001C-Infinity\\u000E')]"
+        rows: [[{$float: "NaN"}, {$float: "Infinity"}, {$float: "-Infinity"}]]
       - note: "Unicode's other spaces around a name leave it no name, given in the statement."
         only: [neo4j, sql]
         cypher: "RETURN [toFloat('\\u00A0NaN'), toFloat('\\u3000Infinity'), toFloat('NaN\\u00A0'), toFloat('\\u3000-Infinity')]"

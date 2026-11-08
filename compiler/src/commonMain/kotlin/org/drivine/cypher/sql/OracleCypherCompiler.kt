@@ -1247,12 +1247,14 @@ class OracleCypherCompiler(
                 "ELSE JSON_SCALAR(TRUNC(TO_NUMBER(JSON_VALUE($x, '\$') DEFAULT NULL ON CONVERSION ERROR))) END"
         }
         // TO_BINARY_DOUBLE reads 'nan', 'inf' and 'INFINITY' too, and Neo4j only Java's names, on the text with U+0000 to the
-        // space taken off its ends (drivine4j#551). A text with no N in it, a decimal, is read as before; so is any but a text.
+        // space taken off its ends (drivine4j#551): a name is read so trimmed, as TO_BINARY_DOUBLE takes ASCII's spaces alone
+        // off. A text with no N in it, a decimal, is read as before; so is any but a text.
         "tofloat" -> shared(json) { (x) ->
             val text = "JSON_VALUE($x, '\$')"
+            val trimmed = "LTRIM(RTRIM($text, $JAVA_SPACES), $JAVA_SPACES)"
             val read = "TO_BINARY_DOUBLE($text DEFAULT NULL ON CONVERSION ERROR)"
             "JSON_SCALAR(CASE WHEN ${kind(x)} = 'string' AND INSTR(UPPER($text), 'N') > 0 THEN " +
-                "CASE WHEN REGEXP_LIKE(LTRIM(RTRIM($text, $JAVA_SPACES), $JAVA_SPACES), '$JAVA_NAMES', 'c') THEN $read END ELSE $read END)"
+                "CASE WHEN REGEXP_LIKE($trimmed, '$JAVA_NAMES', 'c') THEN TO_BINARY_DOUBLE($trimmed) END ELSE $read END)"
         }
         // An item read so where it is a text past 32 KB crashed the session: see [listItem].
         "head" -> listItem(json, "'\$[0]'")

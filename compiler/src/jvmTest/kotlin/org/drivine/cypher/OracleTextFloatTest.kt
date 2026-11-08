@@ -20,7 +20,7 @@ class OracleTextFloatTest {
     @Test
     fun `a text with an N in it is NaN or an infinity only by Java's names, matched with case`() {
         val sql = sql("RETURN toFloat(\$s)", mapOf("s" to "nan"))
-        val names = Regex("""'(\^\(\[\+-]\?NaN[^']*)', 'c'\) THEN ${Regex.escape(read)} END""").find(sql)?.groupValues?.get(1)
+        val names = Regex("""'(\^\(\[\+-]\?NaN[^']*)', 'c'\) THEN """).find(sql)?.groupValues?.get(1)
         assertEquals("^([+-]?NaN|[+]?Infinity|-Infinity)\$", names, sql)
         // Oracle reads the pattern as Java's regex does: Java's names alone, each sign as Java takes it.
         val pattern = Regex(names!!)
@@ -36,6 +36,22 @@ class OracleTextFloatTest {
         val spaces = "UNISTR('${(0..0x20).joinToString("") { "\\" + it.toString(16).padStart(4, '0') }}')"
         assertTrue(sql.contains("REGEXP_LIKE(LTRIM(RTRIM(JSON_VALUE(JSON(\$_cy_s), '\$'), $spaces), $spaces), '^("), sql)
         assertFalse(sql.contains("\\0021") || sql.contains("\\00a0"), sql)
+    }
+
+    @Test
+    fun `a name is read from the text with U+0000 to the space taken off its ends, which TO_BINARY_DOUBLE alone gives null for`() {
+        // TO_BINARY_DOUBLE takes only ASCII's spaces off: '\u0001NaN', which Neo4j reads as NaN, it gave null.
+        val sql = sql("RETURN toFloat(\$s)", mapOf("s" to "\u0001NaN"))
+        val spaces = "UNISTR('${(0..0x20).joinToString("") { "\\" + it.toString(16).padStart(4, '0') }}')"
+        val trimmed = "LTRIM(RTRIM(JSON_VALUE(JSON(\$_cy_s), '\$'), $spaces), $spaces)"
+        assertTrue(sql.contains("'c') THEN TO_BINARY_DOUBLE($trimmed) END ELSE $read END)"), sql)
+    }
+
+    @Test
+    fun `toFloat of toFloat compiles to a statement that grows with each, not exponentially`() {
+        fun nested(times: Int) = "MATCH (n:A) RETURN " + "toFloat(".repeat(times) + "n.s" + ")".repeat(times)
+        val (two, four) = listOf(2, 4).map { OracleCypherCompiler("g").compile(nested(it)).sql.length }
+        assertTrue(four < 3 * two, "$two, then $four characters")
     }
 
     @Test
