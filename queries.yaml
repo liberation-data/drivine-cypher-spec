@@ -2574,6 +2574,11 @@ cases:
         only: [neo4j, oracle, sqlite]
         cypher: "RETURN [1e300 % 7.0, 0.3 % 0.1, 1e17 % 3.0]"
         rows: [[1.0, 0.09999999999999998, 1.0]]
+      - note: "A float's remainder keeps the sign of the number taken, as Java's does: -7.5 % 2 is -1.5."
+        only: [neo4j, sql]
+        cypher: "UNWIND [-7.5] AS x RETURN [-7.5 % 2, x % 2.0, x % $d, x % -2]"
+        parameters: {d: 2}
+        rows: [[-1.5, -1.5, -1.5, -1.5]]
       - note: "A zero keeps the sign of the number taken, as in Java: -7.5 % 2.5 is -0.0, and 1.0 divided by it -Infinity. Postgres, Oracle and SQLite give 0.0, and Infinity (drivine4j#552): none of them keeps a negative zero, given or worked out."
         only: [neo4j]
         cypher: "RETURN [1.0 / (-7.5 % 2.5), toString(-7.5 % 2.5), 1.0 / ($x % $y)]"
@@ -2926,6 +2931,10 @@ cases:
         cypher: "WITH 0.0 AS w UNWIND [0.0] AS u RETURN [$x % $z, $f % $z, 0 % $z, 5 % w, -5.5 % u]"
         parameters: {x: 5, f: 5.5, z: 0.0}
         rows: [[{$float: "NaN"}, {$float: "NaN"}, {$float: "NaN"}, {$float: "NaN"}, {$float: "NaN"}]]
+      - note: "count(DISTINCT …) and collect(DISTINCT …) keep apart each NaN that % by a float zero works out (drivine4j#550, drivine4j#558)."
+        only: [neo4j, sql]
+        cypher: "UNWIND [0.0, 0.0] AS z RETURN count(DISTINCT 5 % z), size(collect(DISTINCT 5.5 % z))"
+        rows: [[2, 2]]
       - note: "Numbers written in the statement alone, which Neo4j works out as it plans, as Java does: a float by the integer 0 is an infinity."
         only: [neo4j, memgraph, falkordb, sql]
         cypher: "RETURN [1.0 / 0, -1.0 / 0, 1.0 / -0, 1.0 / 0.0, (1.0 + 0) / 0, 1.0 / (1 - 1)]"
