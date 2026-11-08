@@ -1045,6 +1045,14 @@ cases:
         cypher: "MERGE (n:CyWrite {id: 2}) ON CREATE SET n.a = [$p]"
         parameters: {p: {$float: "NaN"}}
         error: "A statement that writes is given NaN, which SQLite's JSON holds as no number: it would store another value in its place."
+      - only: [postgres]
+        cypher: "MERGE (n:CyWrite {id: 3, a: $p})"
+        parameters: {p: {$float: "Infinity"}}
+        error: "A statement that writes is given NaN or an infinity, which Postgres's `jsonb` holds as no number: it would store another value in its place."
+      - only: [sqlite]
+        cypher: "MERGE (n:CyWrite {id: 3, a: $p})"
+        parameters: {p: {$float: "NaN"}}
+        error: "A statement that writes is given NaN, which SQLite's JSON holds as no number: it would store another value in its place."
       - only: [postgres, sqlite]
         cypher: "MATCH (n:CyWrite) RETURN [count(n), collect(n.a)]"
         rows: [[1, []]]

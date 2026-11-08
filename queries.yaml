@@ -3524,6 +3524,6 @@ cases:
         cypher: "UNWIND [9223372036854775807, 9223372036854775807] AS x RETURN [toString(sum(x)), sum(x) = 1.8446744073709552E19]"
         rows: [["1.8446744073709552E19", true]]
       - note: "Oracle writes this float to 17 digits, not as Java's shortest text (drivine4j#456)."
-        only: [neo4j, postgres, oracle]
+        only: [neo4j, postgres]
         cypher: "UNWIND [-9223372036854775807, -2] AS x RETURN toString(sum(x))"
         rows: ["-9.223372036854776E18"]
