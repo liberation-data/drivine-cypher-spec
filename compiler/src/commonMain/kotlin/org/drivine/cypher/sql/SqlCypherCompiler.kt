@@ -158,6 +158,15 @@ abstract class SqlCypherCompiler(
     protected var nonFinite = false
 
     /**
+     * Whether the statement is given NaN or an infinity, or may work one out ([worksOutNonFinite]), NaN out of an infinity it reads
+     * among them ([worksOutNaN]), as `n.b - n.b` does of one stored: set as [compile] starts, on
+     * every store, where [nonFinite] is only where the store compiles anything more for it. Oracle, whose floats hold NaN, keeps
+     * NaN apart in `count(DISTINCT …)` only then ([bareNaN]), not for every value it reads, which made such a count 2.6 times
+     * as slow.
+     */
+    protected var nanWorkedOut = false
+
+    /**
      * Refuses a statement that writes and is given NaN or an infinity ([nonFinite]), in its [parameters], where the store's JSON
      * holds no such float and would store another value in its place: by default it holds them, as Oracle's does.
      */
@@ -168,6 +177,14 @@ abstract class SqlCypherCompiler(
      * refuse a write of one (see [refuseNonFiniteWrite]).
      */
     protected open fun writtenNaN(json: String): String? = null
+
+    /**
+     * Whether the JSON [json] is NaN itself, not a list or a map holding it: null where it can't be, as the statement is given or
+     * works out none and the store holds none. `count(DISTINCT …)` and `collect(DISTINCT …)` keep each such value apart, as
+     * Neo4j does, NaN being equal to nothing, while a list or a map holding NaN is compared as any other, as Neo4j compares one
+     * stored or worked out for each row (drivine4j#558).
+     */
+    protected open fun bareNaN(json: String): String? = null
 
     /**
      * Whether a statement given no NaN or infinity, one that writes where [writes], is compiled as one given one ([nonFinite])
@@ -197,6 +214,7 @@ abstract class SqlCypherCompiler(
         val given = parameters.values.any { holdsNonFinite(it) }
         val writes = query.unions.isEmpty() && query.clauses.any(::writes)
         nonFinite = given || (nonFiniteWorkedOut(writes) && (worksOutNonFinite(query, parameters) || (infinitiesStored && worksOutNaN(query, parameters))))
+        nanWorkedOut = given || worksOutNonFinite(query, parameters) || worksOutNaN(query, parameters)
         if (query.unions.isNotEmpty()) return withFunctions(union(query, parameters))
         if (!writes) {
             val writer = Writer(Parameters(parameters, ::parameterJson, ::parameterCount, text = ::parameterText, asPath = parameterPath))
@@ -719,7 +737,8 @@ abstract class SqlCypherCompiler(
 
     /**
      * The items of the JSON list [list] whose item in [identities], a list as long, is first among those equal to it, as
-     * [distinctItems] finds them: what `collect(DISTINCT …)` keeps of what holds a node or a relationship, by its identity.
+     * [distinctItems] finds them, each that is NaN kept ([bareNaN]): what `collect(DISTINCT …)` keeps of what holds a node or a
+     * relationship, by its identity.
      * Worked out in one pass, where comparing each identity with those before it took seconds over a few thousand.
      */
     protected abstract fun firstOfEach(list: String, identities: String): String
@@ -5259,7 +5278,7 @@ abstract class SqlCypherCompiler(
                     temporals = arguments.any(::hasTemporals),
                     text = arguments.all(::isText), texts = arguments.all(::holdsTexts),
                 )
-                "count" -> Value.Json(scalar("count($distinct${countable(one())})"))
+                "count" -> Value.Json(scalar(counted(one(), function.distinct)))
                 // collect(DISTINCT …) is collected in a WITH of its own, then kept once each: see aggregatesFirst.
                 "collect" -> if (function.distinct) error("collect(DISTINCT …) is gathered by aggregatesFirst") else when (val gathered = one()) {
                     // Nodes or relationships are gathered as their ids, so a list of them is still of them.
@@ -5570,6 +5589,24 @@ abstract class SqlCypherCompiler(
 
         /** The ids [id] of a group, gathered as `collect` gathers them, as JSON that compares. */
         private fun gatheredIds(id: String) = comparable(Value.Json(collect(id, rowOrder), ordered = true))
+
+        /**
+         * `count` of [value], with [distinct] once each: a value that is NaN ([bareNaN]), equal to nothing, is counted
+         * each time, beside the others once each.
+         */
+        private fun counted(value: Value, distinct: Boolean): String {
+            val counted = countable(value)
+            // Not asked of a value the statement makes of a kind that is no float, nor of a temporal value, which is none.
+            val nan = (value as? Value.Json)?.takeIf { distinct && mayBeFloat(it) }?.let { bareNaN(counted) }
+                ?: return "count(${if (distinct) "DISTINCT " else ""}$counted)"
+            // Asked as WHEN, not NOT: a store's test may be null where a value holds no NaN (SQLite's of a map without its key),
+            // and such a value is counted among the others, not left out.
+            return "(count(DISTINCT CASE WHEN $nan THEN NULL ELSE $counted END) + count(CASE WHEN $nan THEN 1 END))"
+        }
+
+        /** Whether [value] may be a float, and so NaN: not where the statement makes it of another kind, a text, a list or a temporal value. */
+        private fun mayBeFloat(value: Value.Json) =
+            (value.known == null || value.known == Value.Known.FLOAT) && !value.text && !value.list && value.temporal == null
 
         /** What `count` counts of a value: a node by its row, anything else by its value, nulls not counted. */
         private fun countable(value: Value): String = when (value) {

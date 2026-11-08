@@ -2851,11 +2851,15 @@ cases:
         cypher: "UNWIND [3.0, $p, $i, $n, 1.0] AS x RETURN x ORDER BY x DESC"
         parameters: {p: {$float: "NaN"}, i: {$float: "Infinity"}, n: {$float: "-Infinity"}}
         rows: [{$float: "NaN"}, {$float: "Infinity"}, 3.0, 1.0, {$float: "-Infinity"}]
-      - note: "DISTINCT keeps NaN once."
-        only: [neo4j, sql]
+      - note: "Neo4j's DISTINCT keeps once a NaN given once and read twice, though it keeps NaNs worked out apart (\"NaN worked out\"); a SQL store, which can't tell one NaN from another, keeps each apart (drivine4j#558)."
+        only: [neo4j]
         cypher: "UNWIND [$p, $p, 1.0] AS x RETURN [count(DISTINCT x), collect(DISTINCT x)]"
         parameters: {p: {$float: "NaN"}}
         rows: [[2, [{$float: "NaN"}, 1.0]]]
+      - only: [sql]
+        cypher: "UNWIND [$p, $p, 1.0] AS x RETURN [count(DISTINCT x), collect(DISTINCT x)]"
+        parameters: {p: {$float: "NaN"}}
+        rows: [[3, [{$float: "NaN"}, {$float: "NaN"}, 1.0]]]
       - note: "sum() and avg() of a group that holds NaN, or both infinities, are NaN."
         only: [neo4j, sql]
         cypher: "UNWIND $l AS x RETURN [sum(x), avg(x)]"
@@ -2871,7 +2875,7 @@ cases:
         rows: [[{$float: "Infinity"}, {$float: "Infinity"}]]
 
   - name: "NaN worked out"
-    description: "0.0 / 0.0 is NaN and 1.0 / 0.0 an infinity, as Java has them, and so is a number divided or taken % by a float zero, or a text toFloat reads as one: NaN is equal to nothing, itself included (drivine4j#409, drivine4j#408, drivine4j#545). A number divided or taken % by an integer zero fails, except a float divided or taken % by an integer zero where both are written in the statement, which Neo4j works out as it plans, as Java does: 1.0 / 0 is Infinity and 5.0 % 0 NaN, while 1 / 0 fails."
+    description: "0.0 / 0.0 is NaN and 1.0 / 0.0 an infinity, as Java has them, and so is a number divided or taken % by a float zero, or a text toFloat reads as one: NaN is equal to nothing, itself included (drivine4j#409, drivine4j#408, drivine4j#545), and so count(DISTINCT …) and collect(DISTINCT …) keep each NaN apart, though they compare a list or a map holding one as any other. A number divided or taken % by an integer zero fails, except a float divided or taken % by an integer zero where both are written in the statement, which Neo4j works out as it plans, as Java does: 1.0 / 0 is Infinity and 5.0 % 0 NaN, while 1 / 0 fails."
     steps:
       - cypher: "RETURN [0.0 / 0.0, 1.0 / 0.0, -1.0 / 0.0]"
         rows: [[{$float: "NaN"}, {$float: "Infinity"}, {$float: "-Infinity"}]]
@@ -2930,6 +2934,38 @@ cases:
         only: [neo4j, memgraph, falkordb, postgres]
         cypher: "RETURN 5 % 0"
         error: true
+      - note: "count(DISTINCT …) and collect(DISTINCT …) keep each NaN apart, worked out for each row or by separate expressions: NaN is equal to nothing (drivine4j#558)."
+        only: [neo4j, sql]
+        cypher: "UNWIND [0.0, 0.0, 1.0] AS z RETURN count(DISTINCT z / z), size(collect(DISTINCT z / z))"
+        rows: [[3, 3]]
+      - only: [neo4j, sql]
+        cypher: "UNWIND [0.0/0.0, 0.0/0.0, 1.0, 1.0] AS r RETURN count(DISTINCT r), collect(DISTINCT r)"
+        rows: [[3, [{$float: "NaN"}, {$float: "NaN"}, 1.0]]]
+      - note: "So is a NaN read from a map that holds a node, which a SQL store keeps once each by its identity."
+        only: [neo4j, sql]
+        cypher: "UNWIND [0.0, 0.0] AS z MATCH (p:Person {name: 'Keanu'}) WITH {p: p, x: z / z} AS m RETURN count(DISTINCT m.x), collect(DISTINCT m.x)"
+        rows: [[2, [{$float: "NaN"}, {$float: "NaN"}]]]
+      - note: "A list holding NaN worked out for each row is one value to DISTINCT, as Neo4j compares it, and so is a stored one (writes.yaml)."
+        only: [neo4j, sql]
+        cypher: "UNWIND [1, 1, 2] AS k RETURN k, count(DISTINCT [x IN [k, 0.0/0.0] | x]) AS n ORDER BY k"
+        rows: [[1, 1], [2, 1]]
+      - only: [neo4j, sql]
+        cypher: "UNWIND [1, 1, 2] AS k RETURN DISTINCT [x IN [k, 0.0/0.0] | x] AS l ORDER BY l[0]"
+        rows: [[1, {$float: "NaN"}], [2, {$float: "NaN"}]]
+      - note: "Neo4j keeps apart lists and maps holding NaN that separate expressions of one list make; a SQL store compares them as JSON, and keeps them once (drivine4j#558)."
+        only: [neo4j]
+        cypher: "UNWIND [[0.0/0.0], [0.0/0.0], {x: 0.0/0.0}, {x: 0.0/0.0}] AS r RETURN count(DISTINCT r)"
+        rows: [4]
+      - only: [sql]
+        cypher: "UNWIND [[0.0/0.0], [0.0/0.0], {x: 0.0/0.0}, {x: 0.0/0.0}] AS r RETURN count(DISTINCT r)"
+        rows: [2]
+      - note: "WITH DISTINCT keeps NaN once on a SQL store, where Neo4j keeps each apart (drivine4j#685)."
+        only: [neo4j]
+        cypher: "UNWIND [0.0/0.0, 0.0/0.0] AS r WITH DISTINCT r RETURN count(*)"
+        rows: [2]
+      - only: [sql]
+        cypher: "UNWIND [0.0/0.0, 0.0/0.0] AS r WITH DISTINCT r RETURN count(*)"
+        rows: [1]
       - note: "A number taken % by an infinity is the number, as a float, as in Java (drivine4j#555, drivine4j#683)."
         only: [neo4j, sql]
         cypher: "RETURN [5 % $i, -5 % $i, 5 % $n, 5.5 % $i, 0 % $n]"
