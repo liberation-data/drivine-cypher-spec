@@ -876,6 +876,9 @@ cases:
         only: [neo4j, oracle]
         cypher: "MATCH (n:CyWrite) WHERE n.l IS NOT NULL RETURN count(DISTINCT n.l), size(collect(DISTINCT n.l))"
         rows: [[1, 1]]
+      - only: [neo4j, oracle]
+        cypher: "MATCH (n:CyWrite) WHERE n.l IS NOT NULL RETURN count(DISTINCT n.l[0]), size(collect(DISTINCT n.l[0]))"
+        rows: [[1, 1]]
 
   - name: "Relationships as APOC's export writes them"
     description: "apoc.export.cypher writes each batch of relationships as an UNWIND of rows that names its nodes start and end by a key of spaces, and the stores make them (drivine4j#635, drivine4j#617)."
