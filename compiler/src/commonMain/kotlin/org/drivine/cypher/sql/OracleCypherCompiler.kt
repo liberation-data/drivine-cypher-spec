@@ -746,8 +746,9 @@ class OracleCypherCompiler(
      *
      * Each read lists the map's entries again, and a text writes that list out whole, so a read costs the map's size, not
      * the entry's: 20,000 rows of `WITH n, 'name' AS k RETURN n[k]` took 474 ms against 127 ms for `n.name`; over 2,000
-     * nodes of 50 keys `[k IN keys(n) | n[k]]` took 16 s against 35 ms for `keys(n)`, and a node of 1,000 keys read at each took 33 s. A short text first read as a `VARCHAR2`
-     * saved about a quarter of that and cost as much on a number, so it was left out.
+     * nodes of 50 keys `[k IN keys(n) | n[k]]` took 16 s against 35 ms for `keys(n)`, and a node of 1,000 keys read at each
+     * took 33 s. A short text first read as a `VARCHAR2` saved about a quarter of that and cost as much on a number, so it was
+     * left out. The cost is drivine4j#702.
      */
     override fun keyed(json: String, key: String): String {
         val entries = "JSON_QUERY($json, '\$.keyvalue()' RETURNING JSON WITH ARRAY WRAPPER)"
