@@ -2552,6 +2552,39 @@ cases:
       - cypher: "MATCH (m:Movie) RETURN [toString(avg(m.released)), toString(sum(m.released * 1.5))]"
         rows: [["1999.0", "8995.5"]]
 
+  - name: "Remainder of floats"
+    description: "% of two integers is an integer, and where either side is a float, a float, whole or not, as Java's % of doubles gives it: 64.0 % 8.0 is 0.0, not 0 (drivine4j#427)."
+    steps:
+      - only: [neo4j, sql]
+        cypher: "RETURN [64.0 % 8.0, 7 % 2.5, 10 % 2.5, 4 ^ 3 % 2 ^ 3, 64 % 8.0, 64.0 % 8, 7.5 % 2, 5.5 % -2.0, -7 % 3, 7 % -3]"
+        rows: [[0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 1.5, 1.5, -1, 1]]
+      - note: "Worked out as the statement runs: given, bound by WITH, and unwound."
+        only: [neo4j, sql]
+        cypher: "RETURN [$a % $b, $c % $d, $c % $e, $f % $e]"
+        parameters: {a: 64.0, b: 8.0, c: 7, d: 2.5, e: 3, f: -7}
+        rows: [[0.0, 2.0, 1, -1]]
+      - only: [neo4j, sql]
+        cypher: "WITH 64.0 AS x, 8 AS y UNWIND [2.5, 3] AS z RETURN [x % y, x % z, 10 % z]"
+        rows: [[0.0, 1.5, 0.0], [0.0, 1.0, 1]]
+      - note: "An integer's remainder is exact past 2^53, as a double's would not be: 9007199254740993 % 10 is 3, not 2."
+        only: [neo4j, sql]
+        cypher: "WITH 9007199254740993 AS x UNWIND [10] AS y RETURN [9007199254740993 % 10, x % 10, x % y, -9007199254740993 % y]"
+        rows: [[3, 3, 3, -3]]
+      - note: "A double's remainder, exact, as Java works it out. Postgres works a float out in exact decimal, not a double (drivine4j#188): 0.3 % 0.1 is 0.0 there."
+        only: [neo4j, oracle, sqlite]
+        cypher: "RETURN [1e300 % 7.0, 0.3 % 0.1, 1e17 % 3.0]"
+        rows: [[1.0, 0.09999999999999998, 1.0]]
+      - note: "A float's remainder keeps the sign of the number taken, as Java's does: -7.5 % 2 is -1.5."
+        only: [neo4j, sql]
+        cypher: "UNWIND [-7.5] AS x RETURN [-7.5 % 2, x % 2.0, x % $d, x % -2]"
+        parameters: {d: 2}
+        rows: [[-1.5, -1.5, -1.5, -1.5]]
+      - note: "A zero keeps the sign of the number taken, as in Java: -7.5 % 2.5 is -0.0, and 1.0 divided by it -Infinity. Postgres, Oracle and SQLite give 0.0, and Infinity (drivine4j#552): none of them keeps a negative zero, given or worked out."
+        only: [neo4j]
+        cypher: "RETURN [1.0 / (-7.5 % 2.5), toString(-7.5 % 2.5), 1.0 / ($x % $y)]"
+        parameters: {x: -7.5, y: 2.5}
+        rows: [[{$float: "-Infinity"}, "-0.0", {$float: "-Infinity"}]]
+
   - name: "Aggregates of floats"
     description: "An aggregate of floats is a float, whole or not, and a sum is a float where any value it sums is one: 2.0 is not 2."
     steps:
@@ -2893,6 +2926,15 @@ cases:
         cypher: "RETURN [$x / $z, 1 / $z, 0 / $z, -$x / $z]"
         parameters: {x: 3.0, z: 0.0}
         rows: [[{$float: "Infinity"}, {$float: "Infinity"}, {$float: "NaN"}, {$float: "-Infinity"}]]
+      - note: "Taken % by a float zero given, bound by WITH or unwound: NaN, whatever is taken (drivine4j#550)."
+        only: [neo4j, sql]
+        cypher: "WITH 0.0 AS w UNWIND [0.0] AS u RETURN [$x % $z, $f % $z, 0 % $z, 5 % w, -5.5 % u]"
+        parameters: {x: 5, f: 5.5, z: 0.0}
+        rows: [[{$float: "NaN"}, {$float: "NaN"}, {$float: "NaN"}, {$float: "NaN"}, {$float: "NaN"}]]
+      - note: "count(DISTINCT …) and collect(DISTINCT …) keep apart each NaN that % by a float zero works out (drivine4j#550, drivine4j#558)."
+        only: [neo4j, sql]
+        cypher: "UNWIND [0.0, 0.0] AS z RETURN count(DISTINCT 5 % z), size(collect(DISTINCT 5.5 % z))"
+        rows: [[2, 2]]
       - note: "Numbers written in the statement alone, which Neo4j works out as it plans, as Java does: a float by the integer 0 is an infinity."
         only: [neo4j, memgraph, falkordb, sql]
         cypher: "RETURN [1.0 / 0, -1.0 / 0, 1.0 / -0, 1.0 / 0.0, (1.0 + 0) / 0, 1.0 / (1 - 1)]"
@@ -2912,26 +2954,92 @@ cases:
       - only: [neo4j, postgres]
         cypher: "WITH 0 AS z RETURN 1.0 / z"
         error: true
-      - note: "Taken % by an integer zero at run time: Oracle gives the number taken, as its MOD does (drivine4j#550). Memgraph and FalkorDB give NaN, as for a float zero."
-        only: [neo4j, postgres]
+      - note: "Taken % by an integer zero at run time fails, a float as an integer, as on Neo4j (drivine4j#550). SQLite gives null, as for an integer divided by zero (drivine4j#554). Memgraph and FalkorDB give NaN, as for a float zero."
+        only: [neo4j, postgres, oracle]
         cypher: "RETURN 5.0 % $z"
         parameters: {z: 0}
         error: true
+      - only: [neo4j, postgres, oracle]
+        cypher: "WITH 0 AS z RETURN 5.0 % z"
+        error: true
+      - only: [neo4j, postgres, oracle]
+        cypher: "UNWIND [5.0] AS x RETURN x % 0"
+        error: true
+      - only: [neo4j, postgres, oracle]
+        cypher: "RETURN $x % $z"
+        parameters: {x: 5, z: 0}
+        error: true
+      - note: "NaN or an infinity taken % by an integer zero at run time fails too (drivine4j#550). On Postgres NaN doesn't (drivine4j#687)."
+        only: [neo4j, oracle]
+        cypher: "RETURN $x % $z"
+        parameters: {x: {$float: "NaN"}, z: 0}
+        error: true
+      - only: [neo4j, postgres, oracle]
+        cypher: "RETURN $x % $z"
+        parameters: {x: {$float: "Infinity"}, z: 0}
+        error: true
+      - note: "In an aggregate and an ORDER BY too (drivine4j#550)."
+        only: [neo4j, postgres, oracle]
+        cypher: "UNWIND [1, 2] AS i RETURN sum(i % 0)"
+        error: true
+      - only: [neo4j, postgres, oracle]
+        cypher: "UNWIND [1, 2] AS i RETURN i ORDER BY i % 0"
+        error: true
+      - note: "Null taken % by an integer zero is null (drivine4j#550)."
+        only: [neo4j, sql]
+        cypher: "RETURN [null % 0, $n % 0, $n % $z]"
+        parameters: {n: null, z: 0}
+        rows: [[null, null, null]]
       - note: "SQLite gives null for each, as for an integer divided by zero (drivine4j#554), where Neo4j fails."
         only: [sqlite]
         cypher: "WITH 3.0 AS x, 0 AS z RETURN [x / 0, $x / 0, 1.0 / $z, 1.0 / z, 5.0 % $z]"
         parameters: {x: 3.0, z: 0}
         rows: [[null, null, null, null, null]]
-      - note: "Oracle gives the number taken % by zero, as its MOD does (drivine4j#550)."
+      - note: "Any number taken % by a float zero written is NaN."
+        except: [neptune]
+        cypher: "RETURN [5 % 0.0, -5.5 % 0.0]"
+        rows: [[{$float: "NaN"}, {$float: "NaN"}]]
+      - note: "A float and an integer zero written in the statement alone, or worked out from numbers written alone, which Neo4j works out as it plans, as Java does: NaN. Oracle fails on each, as a float taken % by an integer zero at run time does: it can't tell a float written from pi() (drivine4j#686)."
         except: [oracle, neptune]
-        cypher: "RETURN [5.0 % 0, 0.0 % 0, 5 % 0.0, -5.5 % 0.0]"
+        cypher: "RETURN [5.0 % 0, 0.0 % 0]"
+        rows: [[{$float: "NaN"}, {$float: "NaN"}]]
+      - only: [neo4j, postgres, sqlite]
+        cypher: "RETURN [-5.0 % 0, 5.0 % -0, (5.0 + 0) % 0, 5.0 % (1 - 1)]"
         rows: [[{$float: "NaN"}, {$float: "NaN"}, {$float: "NaN"}, {$float: "NaN"}]]
+      - only: [oracle]
+        cypher: "RETURN 5.0 % 0"
+        error: true
+      - only: [oracle]
+        cypher: "RETURN 0.0 % 0"
+        error: true
+      - only: [oracle]
+        cypher: "RETURN -5.0 % 0"
+        error: true
+      - only: [oracle]
+        cypher: "RETURN 5.0 % -0"
+        error: true
+      - only: [oracle]
+        cypher: "RETURN (5.0 + 0) % 0"
+        error: true
+      - only: [oracle]
+        cypher: "RETURN 5.0 % (1 - 1)"
+        error: true
+      - note: "pi() and e() are floats Neo4j doesn't work out as it plans, so taken % by an integer zero they fail, as one at run time does (drivine4j#550). SQLite gives null (drivine4j#554)."
+        only: [neo4j, postgres, oracle]
+        cypher: "RETURN pi() % 0"
+        error: true
+      - only: [neo4j, postgres, oracle]
+        cypher: "RETURN e() % 0"
+        error: true
+      - only: [sqlite]
+        cypher: "RETURN [pi() % 0, e() % 0]"
+        rows: [[null, null]]
       - note: "SQLite gives null for an integer divided by zero (drivine4j#554)."
         only: [neo4j, memgraph, falkordb, postgres, oracle]
         cypher: "RETURN 1 / 0"
         error: true
-      - note: "SQLite gives null (drivine4j#554), and Oracle the number taken % by zero, as its MOD does (drivine4j#550)."
-        only: [neo4j, memgraph, falkordb, postgres]
+      - note: "SQLite gives null (drivine4j#554)."
+        only: [neo4j, memgraph, falkordb, postgres, oracle]
         cypher: "RETURN 5 % 0"
         error: true
       - note: "count(DISTINCT …) and collect(DISTINCT …) keep each NaN apart, worked out for each row or by separate expressions: NaN is equal to nothing (drivine4j#558)."
