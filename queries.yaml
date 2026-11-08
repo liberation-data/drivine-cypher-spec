@@ -3554,8 +3554,8 @@ cases:
         only: [neo4j, sql]
         cypher: "RETURN [toFloat('NaN'), toFloat('Infinity'), toFloat('-Infinity'), toFloat('+Infinity'), toFloat(' NaN '), toFloat('-NaN'), toFloat('Infinityx')]"
         rows: [[{$float: "NaN"}, {$float: "Infinity"}, {$float: "-Infinity"}, {$float: "Infinity"}, {$float: "NaN"}, {$float: "NaN"}, null]]
-      - note: "Other spellings than Java's give null; Oracle reads them as NaN or an infinity (drivine4j#551). So does FalkorDB."
-        only: [neo4j, memgraph, postgres, sqlite]
+      - note: "Other spellings than Java's give null (drivine4j#551). FalkorDB reads them as NaN or an infinity."
+        only: [neo4j, memgraph, sql]
         cypher: "RETURN [toFloat('nan'), toFloat('inf'), toFloat('INFINITY')]"
         rows: [[null, null, null]]
       - note: "Memgraph gives null for each text toFloat reads as NaN or an infinity."
@@ -3567,6 +3567,123 @@ cases:
         cypher: "RETURN [toFloat($s), toString(toFloat($s)), toFloat($s) IN [toFloat($s)]]"
         parameters: {s: "Infinity"}
         rows: [[{$float: "Infinity"}, "Infinity", true]]
+
+  - name: "toFloat() of a text, as Neo4j reads it"
+    description: "Neo4j reads a text first as Java's Double.parseDouble does, on the text with U+0000 to the space taken off its ends, and else as a number written in Cypher, with Cypher's spaces and comments around it. Each step leaves out the SQL stores that don't read it so yet (drivine4j#696)."
+    steps:
+      - note: "Nor do other cases and shortenings of Java's names, or a name with more after it, give NaN or an infinity (drivine4j#551)."
+        only: [neo4j, sql]
+        cypher: "RETURN [toFloat('NAN'), toFloat('Inf'), toFloat('INF'), toFloat('infinity'), toFloat('+inf'), toFloat('-inf'), toFloat('Infinityx'), toFloat('NaNd'), toFloat('Infinityd'), toFloat('- Infinity')]"
+        rows: [[null, null, null, null, null, null, null, null, null, null]]
+      - note: "So such a spelling divided or taken % by an integer zero is null, as null is, where NaN fails (drivine4j#551, drivine4j#559)."
+        only: [neo4j, sql]
+        cypher: "RETURN [toFloat('nan') / 0, toFloat('inf') % 0, toFloat('INFINITY') / 0]"
+        rows: [[null, null, null]]
+      - note: "Java's names are read with Java's spaces around them, and a sign before them."
+        only: [neo4j, sql]
+        cypher: "RETURN [toFloat('+NaN'), toFloat('\\tInfinity\\n'), toFloat(' -Infinity'), toFloat('Infinity ')]"
+        rows: [[{$float: "NaN"}, {$float: "Infinity"}, {$float: "-Infinity"}, {$float: "Infinity"}]]
+      - note: "And with the other characters up to a space around them, which Java takes off too. Postgres and SQLite give null (drivine4j#696)."
+        only: [neo4j, oracle]
+        cypher: "RETURN [toFloat('\\u0001NaN'), toFloat('Infinity\\u001F'), toFloat('\\u001C-Infinity\\u000E')]"
+        rows: [[{$float: "NaN"}, {$float: "Infinity"}, {$float: "-Infinity"}]]
+      - note: "Unicode's other spaces around a name leave it no name, given in the statement."
+        only: [neo4j, sql]
+        cypher: "RETURN [toFloat('\\u00A0NaN'), toFloat('\\u3000Infinity'), toFloat('NaN\\u00A0'), toFloat('\\u3000-Infinity')]"
+        rows: [[null, null, null, null]]
+      - note: "Nor read from a list: Postgres reads them as NaN or an infinity (drivine4j#692), and SQLite too (drivine4j#693)."
+        only: [neo4j, oracle]
+        cypher: "UNWIND ['\\u00A0NaN', '\\u3000Infinity', 'NaN\\u00A0', '\\u3000-Infinity'] AS s RETURN toFloat(s)"
+        rows: [null, null, null, null]
+      - note: "A decimal may end in a type's letter, as Java reads one. The SQL stores give null (drivine4j#696)."
+        only: [neo4j]
+        cypher: "RETURN [toFloat('1d'), toFloat('1f'), toFloat('1.5F'), toFloat('1.5D')]"
+        rows: [[1.0, 1.0, 1.5, 1.5]]
+      - note: "Though not after a space, beside a _, or after a space Java does not take off."
+        only: [neo4j, sql]
+        cypher: "RETURN [toFloat('1.5 F'), toFloat('1_000d'), toFloat('\\u00A01d')]"
+        rows: [[null, null, null]]
+      - note: "A hexadecimal float is read as Java reads one, with its power of 2. The SQL stores give null (drivine4j#696)."
+        only: [neo4j]
+        cypher: "RETURN [toFloat('0x1p3'), toFloat('0X1.8P1'), toFloat('0x1p3d'), toFloat('0x.8p1'), toFloat('0x1.p1'), toFloat('-0x1p-2'), toFloat('0x1p+3'), toFloat('0x1P3F')]"
+        rows: [[8.0, 3.0, 8.0, 1.0, 2.0, -0.25, 8.0, 8.0]]
+      - note: "At the ends of a double's range, and rounded as Java rounds it, though its digits run past a double's. The SQL stores give null (drivine4j#696)."
+        only: [neo4j]
+        cypher: "RETURN [toFloat('0x1.fffffffffffffp1023'), toFloat('0x0.0000000000001p-1022'), toFloat('0x1p-1074'), toFloat('0x1.8p-1074'), toFloat('0x1p-1075'), toFloat('0x1p1024'), toFloat('0x1.00000000000008p0'), toFloat('0x1.00000000000008000001p0'), toFloat('0x1.000000000000080000000000000000000001p0'), toFloat('0x123456789abcdef0123456789abcdef0p-100'), toFloat('0x0p99999999999'), toFloat('0x1p99999999999')]"
+        rows: [[1.7976931348623157e308, 4.9e-324, 4.9e-324, 9.9e-324, 0.0, {$float: "Infinity"}, 1.0, 1.0000000000000002, 1.0000000000000002, 1.9088743537777778e7, 0.0, {$float: "Infinity"}]]
+      - note: "A hexadecimal float with no power, no digits, or a _ in it is no number."
+        only: [neo4j, sql]
+        cypher: "RETURN [toFloat('0xp1'), toFloat('0x1.8'), toFloat('0x1_0p3'), toFloat('0x1p1_0'), toFloat('\\u00A00x1p3')]"
+        rows: [[null, null, null, null, null]]
+      - note: "Else a text is read as Cypher writes a number, with a _ between digits. The SQL stores give null (drivine4j#696)."
+        only: [neo4j]
+        cypher: "RETURN [toFloat('1_000'), toFloat('1_000.5'), toFloat('1.0_5'), toFloat('1e1_0'), toFloat('1_0e1'), toFloat('.5_0'), toFloat('1_2.5e1_0'), toFloat('1e-1_0'), toFloat('1e+1_0'), toFloat('-1_000')]"
+        rows: [[1000.0, 1000.5, 1.05, 1.0e10, 100.0, 0.5, 1.25e11, 1.0e-10, 1.0e10, -1000.0]]
+      - note: "But not a _ at an end, two together, or after a 0 that starts a whole number, or a whole number past a long's range so written."
+        only: [neo4j, sql]
+        cypher: "RETURN [toFloat('1_e5'), toFloat('_1'), toFloat('1_'), toFloat('1__0'), toFloat('0_1'), toFloat('9_223_372_036_854_775_808')]"
+        rows: [[null, null, null, null, null, null]]
+      - note: "A whole number in hexadecimal or octal, as Cypher writes one, to a long's ends. The SQL stores give null (drivine4j#696)."
+        only: [neo4j]
+        cypher: "RETURN [toFloat('0x10'), toFloat('0xFF'), toFloat('0xff'), toFloat('-0x10'), toFloat(' 0x10 '), toFloat('0x1_0'), toFloat('0x_10'), toFloat('0x10d'), toFloat('0x7FFFFFFFFFFFFFFF'), toFloat('-0x8000000000000000'), toFloat('0x00000000000000000000010'), toFloat('0o17'), toFloat('0o1_7'), toFloat('0o_17'), toFloat('-0o17'), toFloat('0o777777777777777777777'), toFloat('-0o1000000000000000000000'), toFloat('0o0000000000000000000000000017')]"
+        rows: [[16.0, 255.0, 255.0, -16.0, 16.0, 16.0, 16.0, 269.0, 9.223372036854776e18, -9.223372036854776e18, 16.0, 15.0, 15.0, 15.0, -15.0, 9.223372036854776e18, -9.223372036854776e18, 15.0]]
+      - note: "Not with a +, a capital X or O, no digits, a digit of another base, two _ together, or past a long's range."
+        only: [neo4j, sql]
+        cypher: "RETURN [toFloat('+0x10'), toFloat('0X10'), toFloat('0x'), toFloat('0xg'), toFloat('0x1__0'), toFloat('0x8000000000000000'), toFloat('0xFFFFFFFFFFFFFFFF'), toFloat('0x10000000000000000'), toFloat('0O17'), toFloat('0o8'), toFloat('0b101'), toFloat('0o'), toFloat('0o7777777777777777777777'), toFloat('0o1000000000000000000000')]"
+        rows: [[null, null, null, null, null, null, null, null, null, null, null, null, null, null]]
+      - note: "A number Cypher writes may have Cypher's spaces around it, Unicode's among them, which Java takes no part of. Oracle gives null (drivine4j#696), Postgres fails on some (drivine4j#692), and SQLite reads some as 0.0 (drivine4j#693)."
+        only: [neo4j]
+        cypher: "RETURN [toFloat('\\u00A01.5'), toFloat('1.5\\u00A0'), toFloat('\\u20031.5'), toFloat('\\u30001.5'), toFloat('\\u00851.5'), toFloat('\\u20281.5'), toFloat('\\u16801.5'), toFloat('\\u20001.5'), toFloat('\\u200A1.5'), toFloat('\\u20291.5'), toFloat('\\u202F1.5'), toFloat('\\u205F1.5'), toFloat('\\u20071.5'), toFloat('\\u20011.5'), toFloat('1.5\\u3000'), toFloat('1.5\\u0085'), toFloat('\\u00A0\\u001C1_0')]"
+        rows: [[1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 10.0]]
+      - note: "So written, a float past a double's range is an infinity or 0.0, and Cypher's exponents and whole numbers are read too. Oracle and Postgres give null (drivine4j#696), and SQLite reads some as 0.0 (drivine4j#693)."
+        only: [neo4j]
+        cypher: "RETURN [toFloat('\\u00A01_000'), toFloat('\\u00A00x10'), toFloat('\\u00A0-0o17'), toFloat('0x10\\u00A0'), toFloat('\\u00A01E3'), toFloat('\\u00A01e-3'), toFloat('\\u00A01e+3'), toFloat('\\u00A01e400'), toFloat('1_0e400'), toFloat('\\u00A0-1e400'), toFloat('\\u00A01e-400'), toFloat('\\u00A0-0')]"
+        rows: [[1000.0, 16.0, -15.0, 16.0, 1000.0, 0.001, 1000.0, {$float: "Infinity"}, {$float: "Infinity"}, {$float: "-Infinity"}, 0.0, 0.0]]
+      - note: "Spaces and comments may come between a minus and a number Cypher writes, and comments around it. The SQL stores give null (drivine4j#696)."
+        only: [neo4j]
+        cypher: "RETURN [toFloat('- 1.5'), toFloat('-\\u00A01.5'), toFloat('- 0x10'), toFloat('- 0o17'), toFloat('-/*c*/1'), toFloat('/*a*/-1'), toFloat('-//x\\n1'), toFloat('1//x'), toFloat('/*a*/1'), toFloat('1 /*a*/'), toFloat('/*a\\nb*/1_0'), toFloat('1_0 //x\\n'), toFloat('1_0\\u0085//x')]"
+        rows: [[-1.5, -1.5, -16.0, -15.0, -1.0, -1.0, -1.0, 1.0, 1.0, 1.0, 10.0, 10.0, 10.0]]
+      - note: "Characters Unicode does not call spaces, and a + Cypher does not write, leave a text no number. SQLite reads some of them as 0.0 (drivine4j#693)."
+        only: [neo4j, postgres, oracle]
+        cypher: "RETURN [toFloat('\\uFEFF1.5'), toFloat('\\u200B1.5'), toFloat('\\u180E1.5'), toFloat('\\u007F1.5'), toFloat('\\u00801.5'), toFloat('\\u009F1.5'), toFloat('\\u00A0'), toFloat('\\u00A0+1.5'), toFloat('\\u00A05.'), toFloat('\\u00A09223372036854775808')]"
+        rows: [[null, null, null, null, null, null, null, null, null, null]]
+      - note: "Nor does more than a number. Oracle reads '1+1' as 1.0 (drivine4j#696)."
+        only: [neo4j, postgres, sqlite]
+        cypher: "RETURN [toFloat('1+1')]"
+        rows: [[null]]
+      - note: "Nor do other texts with more than a number, an unclosed comment, or Java's spaces beside Unicode's."
+        only: [neo4j, sql]
+        cypher: "RETURN [toFloat('(1)'), toFloat('--1'), toFloat('- -1'), toFloat('-(1)'), toFloat('1 2'), toFloat('1/**/0'), toFloat('/*'), toFloat('1/*'), toFloat('/**/'), toFloat('0x1F/*'), toFloat('1_0;'), toFloat('1_0//x\\ny'), toFloat('\\u00A0\\u00011_0'), toFloat('\\u0001\\u00A01_0'), toFloat('\\u000E\\u00A01_0'), toFloat('\\u00A01.5\\u000E'), toFloat('-\\u0001 1.5')]"
+        rows: [[null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null]]
+      - note: "Java takes the characters up to a space off a text's ends. The SQL stores give null for those that are not ASCII's spaces (drivine4j#696)."
+        only: [neo4j]
+        cypher: "RETURN [toFloat('\\u000B1.5\\u000C'), toFloat('\\u000D3\\u000D'), toFloat('\\u001F2\\u0001'), toFloat('\\u001C1.5'), toFloat('\\u00011.5'), toFloat('\\u000E1.5'), toFloat('1.5\\u000E'), toFloat('\\u001F1_0')]"
+        rows: [[1.5, 3.0, 2.0, 1.5, 1.5, 1.5, 1.5, 10.0]]
+      - note: "A decimal as Java writes one, with no digits before or after its point, a sign, a + in its power, and 0s first."
+        only: [neo4j, sql]
+        cypher: "RETURN [toFloat('.5'), toFloat('5.'), toFloat('+.5'), toFloat('-.5e1'), toFloat('1.5e+3'), toFloat('1E2'), toFloat('+1'), toFloat('00012'), toFloat('017'), toFloat('  1.5  '), toFloat('1E+3'), toFloat('1.5e00000000000000000003')]"
+        rows: [[0.5, 5.0, 0.5, -5.0, 1500.0, 100.0, 1.0, 12.0, 17.0, 1.5, 1000.0, 1500.0]]
+      - note: "And not one with no digits in its power or before it, two points, a comma, or digits of another script."
+        only: [neo4j, sql]
+        cypher: "RETURN [toFloat('1e'), toFloat('e1'), toFloat('1e+'), toFloat('.'), toFloat('+'), toFloat('1.2.3'), toFloat('1,5'), toFloat(''), toFloat('  '), toFloat('1.5e'), toFloat('\\uFF11'), toFloat('\\u0663'), toFloat('\\u221E')]"
+        rows: [[null, null, null, null, null, null, null, null, null, null, null, null, null]]
+      - note: "A decimal past a double's range is an infinity, or 0.0, and one past a long's a float."
+        only: [neo4j, sql]
+        cypher: "RETURN [toFloat('1e400'), toFloat('-1e400'), toFloat('1e-400'), toFloat('1.7976931348623157e308'), toFloat('1.7976931348623159e308'), toFloat('4.9e-324'), toFloat('2e-324'), toFloat('9223372036854775807'), toFloat('9223372036854775808'), toFloat('-9223372036854775809'), toFloat('9007199254740993'), toFloat('123456789012345678901234567890')]"
+        rows: [[{$float: "Infinity"}, {$float: "-Infinity"}, 0.0, 1.7976931348623157e308, {$float: "Infinity"}, 4.9e-324, 0.0, 9.223372036854776e18, 9.223372036854776e18, -9.223372036854776e18, 9.007199254740992e15, 1.2345678901234568e29]]
+      - note: "So is one with an exponent past a long's. Postgres fails (drivine4j#692)."
+        only: [neo4j, oracle, sqlite]
+        cypher: "RETURN [toFloat('1e5000000000')]"
+        rows: [[{$float: "Infinity"}]]
+      - note: "A text given as a parameter is read alike. The SQL stores give null for the Java and Cypher forms here (drivine4j#696)."
+        only: [neo4j]
+        cypher: "RETURN [toFloat($a), toFloat($b), toFloat($c), toFloat($d), toFloat($e), toFloat($f)]"
+        parameters: {a: "nan", b: "0x10", c: "1_000", d: "1d", e: "\u00A0NaN", f: "0x1p3"}
+        rows: [[null, 16.0, 1000.0, 1.0, null, 8.0]]
+      - note: "A minus zero read is a negative zero; Postgres, Oracle and SQLite keep none (drivine4j#552)."
+        only: [neo4j]
+        cypher: "RETURN [1.0 / toFloat('-0'), 1.0 / toFloat('-0.0'), 1.0 / toFloat('-0x0p0')]"
+        rows: [[{$float: "-Infinity"}, {$float: "-Infinity"}, {$float: "-Infinity"}]]
 
   - name: "Round by a mode"
     description: "round(value, precision, mode) rounds in decimal by one of Java's rounding modes, as Neo4j does, so 2.345 is halfway; a null gives null."
