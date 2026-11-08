@@ -59,7 +59,7 @@ internal object VariableKinds {
     /**
      * [clauses] in turn, over [scope]: what their `RETURN` returns, of the kinds it returns. Within a `FOREACH`, [foreach],
      * a `CREATE` or a `MERGE` may name a variable bound already, as Neo4j takes it there. [kept] stay in scope after each
-     * `WITH` that does not name them, as what a `CALL`'s brackets import does.
+     * `WITH` that does not name them, as what a `CALL`'s brackets import does, and a subquery's variables from outside it.
      */
     private fun clauses(clauses: List<Clause>, scope: Scope, foreach: Boolean = false, kept: Map<String, Kind> = emptyMap()): Map<String, Kind> {
         var current = scope
@@ -149,8 +149,9 @@ internal object VariableKinds {
     /**
      * The scope after a `WITH` or a `RETURN` of [projection] over [scope]: each item of the kind its expression is, and with
      * `*` each variable in scope. Its `WHERE`, [where], and its order read the items, and a variable before it as of any kind;
-     * but a pattern in the `WHERE` names only what the `WITH` passes on, and what a `CALL`'s brackets import, [kept], as
-     * Neo4j has it after a `WITH` that groups or is DISTINCT (drivine4j#504). Refuses two items of one name (Neo4j's 42N38).
+     * but a pattern in the `WHERE` names only what the `WITH` passes on, and what a `CALL`'s brackets import or a subquery
+     * reads from outside it, [kept], as Neo4j has it after a `WITH` that groups or is DISTINCT (drivine4j#504). Refuses two
+     * items of one name (Neo4j's 42N38).
      */
     private fun projected(projection: Projection, scope: Scope, where: Expression?, kept: Set<String> = emptySet()): Scope {
         projection.items.groupBy { it.name }.entries.firstOrNull { it.value.size > 1 }?.let { (name, _) ->

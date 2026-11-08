@@ -731,7 +731,7 @@ cases:
         error: "r is bound already, so a MERGE makes no relationship of it, as in Neo4j."
 
   - name: "Pattern in a WITH's WHERE naming a variable the WITH drops"
-    description: "A pattern in the WHERE of a WITH that neither groups nor is DISTINCT, or in an EXISTS { … }, a COUNT { … } or a pattern comprehension there, that names a variable from before the WITH that the WITH does not pass on, is refused, as a value read there from such a variable is (drivine4j#426). Neo4j takes both, reading the variable from before the WITH; read as a new node, the pattern would match every row (drivine4j#504). After a WITH that groups or is DISTINCT, Neo4j refuses it too (see \"Variable before a WITH that groups, in its WHERE\")."
+    description: "A pattern in the WHERE of a WITH that neither groups nor is DISTINCT, or in an EXISTS { … }, a COUNT { … }, a pattern comprehension or a CALL { … } there, that names a variable from before the WITH that the WITH does not pass on, is refused, as a value read there from such a variable is (drivine4j#426). Neo4j takes both, reading the variable from before the WITH; read as a new node, the pattern would match every row (drivine4j#504). After a WITH that groups or is DISTINCT, Neo4j refuses it too (see \"Variable before a WITH that groups, in its WHERE\")."
     steps:
       - cypher: "MATCH (p:Person) WITH p AS q WHERE (p)-->() RETURN q.name"
         error: "p is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used."
@@ -762,6 +762,11 @@ cases:
         cypher: "MATCH (p:Person) WITH p AS q WHERE EXISTS { CALL (*) { MATCH (p)-->() RETURN 1 AS x } RETURN x } RETURN q.name"
         error: "p is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used."
       - cypher: "MATCH (p:Person) WITH p AS q WHERE EXISTS { CALL (*) { WITH 1 AS one MATCH (p)-->() RETURN one } RETURN one } RETURN q.name"
+        error: "p is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used."
+      - note: "And one that imports it by name, in its brackets or its importing WITH."
+        cypher: "MATCH (p:Person) WITH p AS q WHERE EXISTS { CALL (p) { MATCH (p)-->() RETURN 1 AS x } RETURN x } RETURN q.name"
+        error: "p is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used."
+      - cypher: "MATCH (p:Person) WITH p AS q WHERE EXISTS { CALL { WITH p MATCH (p)-->() RETURN 1 AS x } RETURN x } RETURN q.name"
         error: "p is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used."
 
   - name: "Two items of one name"
