@@ -180,9 +180,10 @@ abstract class SqlCypherCompiler(
 
     /**
      * Whether the JSON [json] is NaN itself, not a list or a map holding it: null where it can't be, as the statement is given or
-     * works out none and the store holds none. `count(DISTINCT …)`, `collect(DISTINCT …)` and `WITH DISTINCT` or `RETURN DISTINCT`
-     * keep each such value apart, as Neo4j does, NaN being equal to nothing, while a list or a map holding NaN is compared as any
-     * other, as Neo4j compares one stored or worked out for each row (drivine4j#558, drivine4j#685).
+     * works out none and the store holds none. `count(DISTINCT …)`, `collect(DISTINCT …)`, `WITH DISTINCT` or `RETURN DISTINCT`,
+     * a projection's grouping keys and a statement's `UNION` without `ALL` keep each such value apart, as Neo4j does, NaN being
+     * equal to nothing, while a list or a map holding NaN is compared as any other, as Neo4j compares one stored or worked out for
+     * each row (drivine4j#558, drivine4j#685, drivine4j#688). A `UNION` in `CALL { … }` or a subquery still keeps them once.
      */
     protected open fun bareNaN(json: String): String? = null
 
@@ -311,7 +312,7 @@ abstract class SqlCypherCompiler(
 
     /**
      * A `UNION`: each query's rows, in the order of the queries and each query's own order, as a graph engine
-     * gives them; without `ALL`, each row once, where it is first given.
+     * gives them; without `ALL`, each row once, where it is first given, but one whose item is NaN each time ([bareNaN]).
      */
     private fun union(query: Query, parameters: Map<String, Any?>): CompiledCypher {
         val parts = listOf(query.clauses) + query.unions.map { it.clauses }
@@ -335,8 +336,11 @@ abstract class SqlCypherCompiler(
         val sql = if (query.unions.first().all) {
             "SELECT u.result FROM (\n${indent(rows)}\n) u\nORDER BY u.part, u.n"
         } else {
-            // A row is given once, where it is first given: its rows are compared as JSON compares them.
-            "SELECT d.result FROM (\n${indent("SELECT u.result, MIN(u.part * 1000000000.0 + u.n) AS k FROM (\n${indent(rows)}\n) u\nGROUP BY u.result")}\n) d\nORDER BY d.k"
+            // A row is given once, where it is first given: its rows are compared as JSON compares them. One whose item is NaN,
+            // equal to nothing, is given each time, as Neo4j gives it (drivine4j#688): by its own place beside the result.
+            val nan = (if (names.first().size == 1) listOf("u.result") else names.first().indices.map { itemAt("u.result", it) }).mapNotNull(::bareNaN)
+            val apart = if (nan.isEmpty()) "" else ", CASE WHEN ${nan.joinToString(" OR ") { "($it)" }} THEN u.part * 1000000000.0 + u.n END"
+            "SELECT d.result FROM (\n${indent("SELECT u.result, MIN(u.part * 1000000000.0 + u.n) AS k FROM (\n${indent(rows)}\n) u\nGROUP BY u.result$apart")}\n) d\nORDER BY d.k"
         }
         return CompiledCypher(planned(sql), writer.parameters.values, nonFinite)
     }
@@ -2863,6 +2867,22 @@ abstract class SqlCypherCompiler(
                 items.zip(columns).forEach { (item, pair) ->
                     if (!contains(item.expression, ::isAggregate)) keys += pair.second.groupKeys()
                     else variablesOutsideAggregates(item.expression).forEach { variable -> select.scope[variable]?.let { keys += it.groupKeys() } }
+                }
+                // A key that is NaN, equal to nothing, makes a group of each row, as Neo4j groups it (drivine4j#688): by a value made
+                // for each row beside it. Only where a key may be NaN ([bareNaN]), so a statement given and working out none compiles
+                // as it did. One value for the row, where any of its keys is NaN.
+                val nans = compiled.zip(columns).mapNotNull { (item, pair) ->
+                    val (name, value) = item
+                    if (items.first { it.name == name }.expression.let { contains(it, ::isAggregate) }) return@mapNotNull null
+                    // Written out, not bound in a subquery as Oracle's test binds a long value: Oracle groups by no subquery (ORA-22818).
+                    (pair.second as? Value.Json)?.takeIf { (value as? Value.Json)?.let(::mayBeFloat) == true }?.let { unshared { bareNaN(it.sql) } }
+                }
+                if (nans.isNotEmpty()) {
+                    val apart = "CASE WHEN ${nans.joinToString(" OR ") { "($it)" }} THEN ${uuid()} END"
+                    keys += apart
+                    // DISTINCT over the groups keeps each such group apart too, as Neo4j keeps it (drivine4j#685): by that value, the
+                    // one row's of its group, as an aggregate, which the select list may read where it may not read a key it groups by.
+                    if (projection.distinct) selectList += "MIN($apart) AS d1"
                 }
                 keys.distinct()
             }
