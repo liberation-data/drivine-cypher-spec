@@ -3095,6 +3095,15 @@ cases:
         cypher: "UNWIND [0.0, 0.0, 1.0, 1.0] AS z RETURN DISTINCT z / z AS v, count(*) AS c"
         unordered: true
         rows: [[{$float: "NaN"}, 1], [{$float: "NaN"}, 1], [1.0, 2]]
+      - note: "Neo4j groups once a NaN given once and read in each row, as its DISTINCT keeps one (\"NaN and the infinities as parameters\"); a SQL store, which can't tell one NaN from another, makes a group of each row (drivine4j#688)."
+        only: [neo4j]
+        cypher: "UNWIND [1, 2] AS x RETURN $p AS v, count(*) AS c"
+        parameters: {p: {$float: "NaN"}}
+        rows: [[{$float: "NaN"}, 2]]
+      - only: [sql]
+        cypher: "UNWIND [1, 2] AS x RETURN $p AS v, count(*) AS c"
+        parameters: {p: {$float: "NaN"}}
+        rows: [[{$float: "NaN"}, 1], [{$float: "NaN"}, 1]]
       - note: "A statement's UNION without ALL gives each row whose item is NaN, of one item or of several (drivine4j#688)."
         only: [neo4j, sql]
         cypher: "RETURN 0.0 / 0.0 AS v UNION RETURN 0.0 / 0.0 AS v UNION RETURN 1.0 AS v UNION RETURN 1.0 AS v"
@@ -3104,6 +3113,13 @@ cases:
         cypher: "UNWIND [0.0, 0.0, 1.0, 1.0] AS z RETURN z / z AS v, 'a' AS w UNION RETURN 1.0 AS v, 'a' AS w"
         unordered: true
         rows: [[{$float: "NaN"}, "a"], [{$float: "NaN"}, "a"], [1.0, "a"]]
+      - note: "A UNION without ALL in CALL { … } keeps NaN rows once on a SQL store, where Neo4j gives each (drivine4j#690)."
+        only: [neo4j]
+        cypher: "CALL { RETURN 0.0 / 0.0 AS v UNION RETURN 0.0 / 0.0 AS v } RETURN count(*)"
+        rows: [2]
+      - only: [sql]
+        cypher: "CALL { RETURN 0.0 / 0.0 AS v UNION RETURN 0.0 / 0.0 AS v } RETURN count(*)"
+        rows: [1]
       - note: "WITH DISTINCT and RETURN DISTINCT keep a row whose item is NaN apart, as count(DISTINCT …) does (drivine4j#685)."
         only: [neo4j, sql]
         cypher: "UNWIND [0.0/0.0, 0.0/0.0] AS r WITH DISTINCT r RETURN count(*)"
