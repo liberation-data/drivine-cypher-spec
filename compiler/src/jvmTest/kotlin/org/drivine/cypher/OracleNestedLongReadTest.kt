@@ -79,6 +79,15 @@ class OracleNestedLongReadTest {
     }
 
     @Test
+    fun `a property read in a UNION in a CALL, or of a node it gives, is read the CLOB way (drivine4j#516, drivine4j#506)`() {
+        // Each query's own columns: the property read in each, and read of the node the UNION gives.
+        val within = routed(oracle("CALL { MATCH (n:X) RETURN [n.t] AS v, n.i AS i UNION ALL UNWIND [{t: 'x'}] AS r RETURN r.t AS v, 1 AS i } RETURN v"))
+        assertTrue(within.contains(clob("n1.props", "\$.t")), within)
+        val given = routed(oracle("CALL { MATCH (n:X) RETURN n UNION ALL MATCH (n:Y) RETURN n } RETURN [n.t], n.m.t"))
+        assertTrue(Regex("""JSON_TRANSFORM\(\w+\.\w*props, KEEP '\$\.t'\)""").containsMatchIn(given) && Regex("""JSON_TRANSFORM\(\w+\.\w*props, KEEP '\$\.m\.t'\)""").containsMatchIn(given), given)
+    }
+
+    @Test
     fun `a key with a double quote in it is read the CLOB way`() {
         val sql = routed(oracle("MATCH (n:X) RETURN n.m.`a\"b` ORDER BY n.`c\"d`"))
         assertTrue(sql.contains(clob("n1.props", "\$.m.\"a\\\"b\"")) && sql.contains(clob("n1.props", "\$.\"c\\\"d\"")), sql)
