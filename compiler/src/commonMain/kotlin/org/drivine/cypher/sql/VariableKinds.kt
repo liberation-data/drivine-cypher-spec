@@ -155,11 +155,12 @@ internal object VariableKinds {
             throw CompilerException("Two items are named $name, as Cypher refuses: name each item of a WITH or a RETURN once, with AS.")
         }
         projection.items.forEach { expression(it.expression, scope) }
-        val next = if (projection.star) scope.copy() else Scope()
+        // What a WITH outside drops stays dropped after a subquery's own WITH, but for an item that names it again.
+        val next = if (projection.star) scope.copy() else Scope(dropped = LinkedHashSet(scope.dropped))
         projection.items.forEach { next[it.name] = kindOf(it.expression, scope) }
         val reading = Scope(scope.kinds.mapValuesTo(LinkedHashMap()) { Kind.ANY }.apply { putAll(next.kinds) })
         where?.let {
-            val dropped = scope.kinds.keys.filterTo(LinkedHashSet()) { name -> next[name] == null && name !in kept }
+            val dropped = scope.kinds.keys.filterTo(LinkedHashSet(next.dropped)) { name -> next[name] == null && name !in kept }
             expression(it, Scope(LinkedHashMap(reading.kinds), dropped))
         }
         projection.orderBy.forEach { expression(it.expression, reading) }

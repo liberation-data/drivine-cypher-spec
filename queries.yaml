@@ -164,6 +164,18 @@ cases:
       - cypher: "WITH 1 AS a WITH `a` RETURN a"
         only: [neo4j, sql]
         rows: [1]
+      - note: "So a UNION and a CALL's importing WITH read it by that name."
+        cypher: "WITH 1 AS a RETURN `a` UNION RETURN 2 AS a"
+        only: [neo4j, sql]
+        unordered: true
+        rows: [1, 2]
+      - cypher: "WITH 1 AS a CALL { WITH `a` RETURN a + 1 AS b } RETURN b"
+        only: [neo4j, sql]
+        rows: [2]
+      - cypher: "UNWIND [1, 1, 2] AS i WITH `i`, count(*) AS c RETURN i, c"
+        only: [neo4j, sql]
+        unordered: true
+        rows: [[1, 2], [2, 1]]
 
   - name: "Map key order"
     description: "A returned map keeps its keys in the order they were written."
