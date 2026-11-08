@@ -1,5 +1,6 @@
 package org.drivine.cypher
 
+import org.drivine.cypher.oracle.OracleReads
 import org.drivine.cypher.sql.OracleCypherCompiler
 import org.drivine.cypher.sql.PostgresCypherCompiler
 import org.drivine.cypher.sql.SqliteCypherCompiler
@@ -39,7 +40,7 @@ class OracleCompareTextTest {
                 "JSON_VALUE(n1.props, '\$.t.type()')", "JSON_VALUE(n1.props, '\$.t' RETURNING BINARY_DOUBLE)",
                 "JSON_VALUE(n2.props, '\$.t.type()')", "JSON_VALUE(n2.props, '\$.t' RETURNING BINARY_DOUBLE)",
             )
-            assertTrue(ordered.contains("THEN CASE WHEN JSON_VALUE(n1.props, '\$.t.type()') = 'string' THEN $text ELSE ($nan AND JSON_QUERY(n1.props, '\$.t' RETURNING JSON) $operator JSON_QUERY(n2.props, '\$.t' RETURNING JSON)) END END"), ordered)
+            assertTrue(ordered.contains("THEN CASE WHEN JSON_VALUE(n1.props, '\$.t.type()') = 'string' THEN $text ELSE ($nan AND JSON_QUERY(n1.props, '\$.t' RETURNING JSON) $operator ${OracleReads.routedRead("n2.props", "'\$.t'")}) END END"), ordered)
             assertTrue(!ordered.contains("JSON_VALUE(JSON_QUERY("), ordered)
         }
         // Equal as JSON where both are read as VARCHAR2s, as is quicker than reading their kinds; else as CLOBs where both are
@@ -73,7 +74,7 @@ class OracleCompareTextTest {
         // Items each read as a VARCHAR2, written or given, are compared as JSON with the property, a plain equality, where it is
         // read as one too or is no text: tested once, beside the items, and not in each item's comparison (#475).
         val tested = "(${property("n1")} IS NOT NULL OR NVL(JSON_VALUE(n1.props, '\$.t.type()'), 'null') <> 'string') AND EXISTS (SELECT 1 FROM "
-        val item = Regex("WHERE i\\d+\\.item = JSON_QUERY\\(n1\\.props, '\\\$\\.t' RETURNING JSON\\)\\)")
+        val item = Regex("WHERE i\\d+\\.item = " + Regex.escape(OracleReads.routedRead("n1.props", "'\$.t'")) + "\\)")
         for (cypher in listOf("MATCH (n:Doc) WHERE n.t IN \$xs RETURN n", "MATCH (n:Doc) RETURN n.t IN \$xs", "MATCH (n:Doc) RETURN n.t IN ['a', 5, null, \$x]")) {
             val listed = sql(cypher, mapOf("xs" to listOf("a", "b"), "x" to "abc"))
             assertTrue(listed.contains(tested) && item.containsMatchIn(listed) && !listed.contains("DBMS_LOB"), listed)
@@ -85,9 +86,9 @@ class OracleCompareTextTest {
             assertTrue(clobItem.containsMatchIn(listed) && !listed.contains(tested), listed)
         }
         // The issue's: beside a value too long to write twice, which is bound, the property is bound by its own path, its JSON
-        // only where it is no text past 32,767 characters, and its kind and CLOB from columns of their own.
+        // only where it is no text past 32,767 characters, read the CLOB way, and its kind and CLOB from columns of their own.
         val beside = sql("MATCH (n:Doc), (m:Doc) WHERE n.t > toLower(trim(coalesce(\$p.q, m.name))) RETURN count(*)", mapOf("p" to mapOf("q" to null)))
-        assertTrue(beside.contains("CASE WHEN JSON_VALUE(n1.props, '\$.t.length()' RETURNING NUMBER) > 32767 THEN NULL ELSE JSON_QUERY(n1.props, '\$.t' RETURNING JSON) END AS v1, JSON_VALUE(n1.props, '\$.t.type()') AS v2, JSON_VALUE(n1.props, '\$.t' RETURNING CLOB) AS v3"), beside)
+        assertTrue(beside.contains("CASE WHEN JSON_VALUE(n1.props, '\$.t.length()' RETURNING NUMBER) > 32767 THEN NULL ELSE ${OracleReads.routedRead("n1.props", "'\$.t'")} END AS v1, JSON_VALUE(n1.props, '\$.t.type()') AS v2, JSON_VALUE(n1.props, '\$.t' RETURNING CLOB) AS v3"), beside)
         val (alias) = Regex("(sh\\d+)\\.v3").find(beside)!!.destructured
         assertTrue(beside.contains("THEN CASE WHEN $alias.v2 = 'string' THEN ${texts("JSON_VALUE($alias.v1, '\$')", "JSON_VALUE($alias.v4, '\$')", "$alias.v3", "JSON_VALUE($alias.v4, '\$' RETURNING CLOB)", ">")} ELSE (${notNaN("$alias.v2", "JSON_VALUE($alias.v1, '\$' RETURNING BINARY_DOUBLE)", "JSON_VALUE($alias.v4, '\$.type()')", "JSON_VALUE($alias.v4, '\$' RETURNING BINARY_DOUBLE)")} AND $alias.v1 > $alias.v4) END"), beside)
         val inBeside = sql("MATCH (n:Doc), (m:Doc) RETURN n.t IN [toLower(trim(coalesce(\$p.q, m.name)))]", mapOf("p" to mapOf("q" to null)))
@@ -106,7 +107,7 @@ class OracleCompareTextTest {
             val listed = sql("MATCH (n:Doc) RETURN n.t IN \$l", mapOf("l" to items))
             assertTrue(listed.contains(if (null in items) " THEN TRUE ELSE NULL END" else " THEN FALSE END)"), listed)
             assertTrue(listed.contains("DBMS_LOB.COMPARE(") == items.any { it is String && it.length !in 1..4_000 }, listed)
-            assertTrue(!listed.contains("JSON_SERIALIZE") && !listed.contains("g_nulls_equal") && !listed.contains("JSON_VALUE(JSON_QUERY("), listed)
+            assertTrue(!Regex("JSON_SERIALIZE\\((?!JSON_TRANSFORM\\(n1\\.props, KEEP)").containsMatchIn(listed) && !listed.contains("g_nulls_equal") && !listed.contains("JSON_VALUE(JSON_QUERY("), listed)
         }
         // A value that may hold a null, beside items that hold none, is in none where none is equal, and not read for its nulls.
         val holding = sql("RETURN \$v IN \$l", mapOf("v" to listOf(1L, null), "l" to listOf("a", 5L)))
@@ -175,7 +176,7 @@ class OracleCompareTextTest {
         // There a CLOB read from an unwound row's JSON closed the session, where the JSON is refused (ORA-40180).
         val written = sql("UNWIND \$items AS t MERGE (n:Doc {a: t.a}) WITH n WHERE n.t > \$x AND n.t IN \$xs SET n.y = 1", mapOf("items" to listOf(mapOf("a" to "x")), "x" to "abc", "xs" to listOf("a")))
         assertTrue(!written.contains("DBMS_LOB.COMPARE"), written)
-        assertTrue(written.contains("IS NAN)) AND JSON_QUERY(w7.c1_props, '\$.t' RETURNING JSON) > CASE WHEN"), written)
+        assertTrue(written.contains("IS NAN)) AND ${OracleReads.routedRead("w7.c1_props", "'\$.t'")} > CASE WHEN"), written)
         val folded = sql("WITH ['a', 'b'] AS l RETURN reduce(acc = [], s IN l | acc + [s = \$x, s < \$x])")
         assertTrue(!folded.contains("DBMS_LOB.COMPARE"), folded)
     }
