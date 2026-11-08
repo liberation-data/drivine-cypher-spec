@@ -1,19 +1,15 @@
 #!/usr/bin/env bash
-# One archive of .github/actions/pinned-toolchain: as kept at <file>, or where none is kept (or not this one) and <fetch>
-# is true, fetched from <url>, with retries over a few minutes, as GitHub's release downloads fail on and off in an
+# One archive of .github/actions/pinned-toolchain: as kept at <file>, or where none is kept (or not this one), fetched
+# from <url>, with retries over a few minutes, as GitHub's release downloads fail on and off in an
 # outage. Either way its SHA-256 is <sha>, or it is refused. Writes fetched=true to the step's output where it fetched.
-#   archive.sh <url> <sha> <file> <fetch>
+#   archive.sh <url> <sha> <file>
 set -euo pipefail
-url="$1" want="$2" file="$3" fetch="$4"
+url="$1" want="$2" file="$3"
 name=$(basename "$file")
 sha() { shasum -a 256 "$1" | cut -d' ' -f1; }
 if [[ -f "$file" && "$(sha "$file")" == "$want" ]]; then
     echo "$name: kept, SHA-256 $want."
     exit 0
-fi
-if [[ "$fetch" != true ]]; then
-    echo "::error::The artifact holds no $name with SHA-256 $want."
-    exit 1
 fi
 rm -f "$file"
 mkdir -p "$(dirname "$file")"

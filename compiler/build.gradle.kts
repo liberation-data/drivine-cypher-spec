@@ -12,8 +12,7 @@ plugins {
     kotlin("plugin.serialization") version "2.2.20"
     id("com.strumenta.antlr-kotlin") version "1.0.8"
     `maven-publish`
-    signing
-    // Uploads the publications to the Central Portal, as one deployment. drivine4j publishes with the same version.
+    // Bundles the publications for the Central Portal, as one deployment. drivine4j publishes with the same version.
     id("com.gradleup.nmcp") version "0.0.8"
 }
 
@@ -310,8 +309,7 @@ tasks.register<Exec>("nativeCorpusCheck") {
 publishing {
     publications.withType<MavenPublication>().configureEach {
         // Maven Central takes a publication only with a javadoc jar beside its jar and sources: an empty one, as the
-        // module's API is documented in its KDoc and README. One for each publication, so that each publication's signing
-        // task, when Central's publishing signs them, depends on its own.
+        // module's API is documented in its KDoc and README. One for each publication, named for it.
         val publication = name
         artifact(tasks.register<Jar>("${publication}JavadocJar") {
             description = "The empty javadoc jar Maven Central asks of the $publication publication."
@@ -347,38 +345,17 @@ publishing {
 }
 
 /*
- * Signing, which Maven Central asks of every file, and only when SIGN=true: a local build or a publish to a local
- * repository signs nothing. The key is an ASCII-armored private key in SIGNING_KEY, with its passphrase in
- * SIGNING_PASSWORD: the release key in .github/workflows/compiler-release.yml, or a throwaway key in its dry run.
- */
-if (providers.environmentVariable("SIGN").orNull == "true") {
-    signing {
-        val key = providers.environmentVariable("SIGNING_KEY").orNull
-        require(key != null && key.contains("BEGIN PGP PRIVATE KEY BLOCK")) { "SIGN=true needs SIGNING_KEY, an ASCII-armored private key." }
-        useInMemoryPgpKeys(key, providers.environmentVariable("SIGNING_PASSWORD").orNull)
-        sign(publishing.publications)
-    }
-    // Each publication's files include the empty javadoc jar and the kotlin-tooling metadata that every target's
-    // publish task reads, so a publish task waits for every signature, not only its own publication's.
-    tasks.withType<AbstractPublishToMaven>().configureEach { dependsOn(tasks.withType<Sign>()) }
-}
-
-/*
- * Every publication in one bundle, uploaded as one deployment, so the Central Portal releases every target or none:
- * zipAggregationPublication builds it (build/nmcp/zip/publicationAggregated.zip), and
- * publishAggregatedPublicationToCentralPortal uploads it. The Portal token is CENTRAL_PORTAL_USERNAME and
- * CENTRAL_PORTAL_PASSWORD, as drivine4j's release has it.
+ * Every publication in one bundle, unsigned, for one deployment, so the Central Portal releases every target or none:
+ * zipAggregationPublication builds it (build/nmcp/zip/publicationAggregated.zip). The release signs and uploads it
+ * outside Gradle (.github/scripts/compiler-release-sign.sh and compiler-release-upload.sh), so the build never sees the
+ * release key or the Portal token.
  */
 nmcp {
     publishAllPublications {
-        username = providers.environmentVariable("CENTRAL_PORTAL_USERNAME").orNull
-        password = providers.environmentVariable("CENTRAL_PORTAL_PASSWORD").orNull
         publicationType = "AUTOMATIC"
     }
     publishAggregation {
         project(":")
-        username = providers.environmentVariable("CENTRAL_PORTAL_USERNAME").orNull
-        password = providers.environmentVariable("CENTRAL_PORTAL_PASSWORD").orNull
         publicationType = "AUTOMATIC"
     }
 }

@@ -1,15 +1,14 @@
 #!/usr/bin/env bash
 # Checks the compiler's Central Portal bundle before it is kept or uploaded: exactly the artifacts in $ARTIFACTS, each
-# with the files Maven Central asks for at the version given, and a signature beside every file. Copies the bundle to
+# with the files Maven Central asks for at the version given, and with verify a signature beside every file. Copies the bundle to
 # <out>/publicationAggregated.zip and unpacks it to <out>/maven-repo, and writes what it staged to the job's summary.
-#   compiler-release-check.sh <bundle zip> <version> verify|present|none <out>
-# verify checks each signature with the key in the runner's keyring (the build job's throwaway key); present only asks
-# that each signature is there (the publish job, whose release key's public half isn't on the runner); none asks for no
-# signature (the dry run's unsigned rebuild in publish-dry-run).
+#   compiler-release-check.sh <bundle zip> <version> verify|none <out>
+# verify checks each signature with the key in the keyring GNUPGHOME names (compiler-release-sign.sh's, of the key it
+# signed with); none asks for no signature (the build job's bundle, which the job after the gate signs).
 set -euo pipefail
 zip="$1" version="$2" signatures="$3" out="$4"
 fail() { echo "::error::$*"; exit 1; }
-[[ "$signatures" == verify || "$signatures" == present || "$signatures" == none ]] || fail "The third argument is verify, present or none, not $signatures."
+[[ "$signatures" == verify || "$signatures" == none ]] || fail "The third argument is verify or none, not $signatures."
 [[ -n "${ARTIFACTS:-}" ]] || fail "ARTIFACTS, the artifacts to publish, isn't set."
 
 rm -rf "$out"
