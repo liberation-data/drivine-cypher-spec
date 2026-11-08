@@ -16,7 +16,10 @@ fail() { echo "::error::$*"; exit 1; }
 work=$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/compiler-upload.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 headers="$work/headers"
-( umask 077; printf 'Authorization: UserToken %s\n' "$(printf '%s:%s' "$CENTRAL_PORTAL_USERNAME" "$CENTRAL_PORTAL_PASSWORD" | base64 | tr -d '\n')" > "$headers" )
+token=$(printf '%s:%s' "$CENTRAL_PORTAL_USERNAME" "$CENTRAL_PORTAL_PASSWORD" | base64 | tr -d '\n')
+# GitHub masks the secrets, not their base64: mask it too, in case the Portal's answer quotes it.
+[[ -z "${GITHUB_ACTIONS:-}" ]] || echo "::add-mask::$token"
+( umask 077; printf 'Authorization: UserToken %s\n' "$token" > "$headers" )
 
 # The deployment's id, as the Portal answers an upload. Sent once, not retried: an upload the Portal took, whose answer
 # was lost, would make a second deployment of the version, which fails as the first is published.

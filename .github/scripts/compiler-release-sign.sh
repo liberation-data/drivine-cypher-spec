@@ -32,6 +32,8 @@ repo="$work/bundle"
 mkdir "$repo"
 unzip -q "$unsigned" -d "$repo"
 cd "$repo"
+# A link would be skipped below but followed by zip, putting what it names (this keyring, the step's environment) in the bundle.
+find . ! -type f ! -type d | grep -q . && fail "$unsigned holds an entry that is neither a file nor a directory, such as a link."
 files=$(find . -type f ! -name '*.md5' ! -name '*.sha1' ! -name '*.sha256' ! -name '*.sha512' ! -name '*.asc' | sort)
 [[ -n "$files" ]] || fail "$unsigned holds no file to sign."
 find . -name '*.asc' | grep -q . && fail "$unsigned is already signed: build makes it unsigned."
