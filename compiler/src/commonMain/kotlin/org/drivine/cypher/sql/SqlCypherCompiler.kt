@@ -1609,9 +1609,9 @@ abstract class SqlCypherCompiler(
             }
             // A value one query writes as JSON that keeps its keys' order ([Value.Json.ordered]), as Postgres's `json` of a list or a map
             // it builds, and another as it compares, Postgres's `jsonb`, is written as one that keeps them in each ([orderedJson]), so
-            // the parts' columns are of one type (drivine4j#516) and a map one query builds keeps its keys' order, as it does
-            // returned on its own. Not as it compares: SQLite's canonical text of such a map, and Postgres's `jsonb`, sort its keys.
-            // A UNION that compares its rows has its parts' values compared already, none of them ordered.
+            // the parts' columns are of one type (drivine4j#516). That is a cast on Postgres alone, where writing each as it compares
+            // would be one on SQLite too, to its canonical text. Neo4j gives such a map's keys in an order of its own, which the spec
+            // leaves unchecked. A UNION that compares its rows has its parts' values compared already, none of them ordered.
             val mixed = projected.first().scope.keys.filter { variable -> projected.map { (it.scope.getValue(variable) as? Value.Json)?.ordered }.distinct().size > 1 }
             // Each query's columns, and only those: a query's rows also carry what it orders them by, as an UNWIND's places, which
             // another query's need not (drivine4j#506).

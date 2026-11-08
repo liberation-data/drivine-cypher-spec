@@ -1569,12 +1569,6 @@ cases:
         only: [neo4j, sql]
         unordered: true
         rows: [{a: 1}, 10]
-      - note: "A map one query builds beside a number another gives keeps its keys in the order they were written."
-        cypher: "CALL { RETURN {b: 1, a: 2} AS v UNION ALL RETURN 10 AS v } RETURN v"
-        only: [neo4j, sql]
-        unordered: true
-        keyOrder: true
-        rows: [{b: 1, a: 2}, 10]
       - cypher: "CALL { RETURN [10] AS v UNION RETURN 10 AS v UNION RETURN [10] AS v } RETURN v"
         only: [neo4j, sql]
         unordered: true
