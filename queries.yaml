@@ -3653,6 +3653,14 @@ cases:
         only: [neo4j, sql]
         unordered: true
         rows: [["7", [false, true, false, false]], [7, [false, true, false, false]]]
+      - note: "A float, a date, a moment and a duration are not equal to a list either, nor 1.0 to a list or a map: a list beside a list is compared item by item, where 1 is equal to 1.0."
+        cypher: "UNWIND [1.0, date('2020-01-01'), datetime('2020-01-01T00:00Z'), duration('P1D'), [1.0, null]] AS v RETURN [v = [null], v = [1, null], v = {a: null}] AS r"
+        only: [neo4j, sql]
+        rows: [[false, false, false], [false, false, false], [false, false, false], [false, false, false], [false, null, false]]
+      - note: "In the step of a reduce."
+        cypher: "UNWIND [1, [1], 'x', {a: 1}, 1.5, true] AS v RETURN reduce(acc = [], x IN [[null], {a: null}] | acc + [v = x]) AS r"
+        only: [neo4j, sql]
+        rows: [[false, false], [null, false], [false, false], [false, null], [false, false], [false, false]]
 
   - name: "Values that hold a null, compared in the step of a reduce"
     description: "The step of a reduce() compares lists and maps that hold a null item by item, as a query does."
