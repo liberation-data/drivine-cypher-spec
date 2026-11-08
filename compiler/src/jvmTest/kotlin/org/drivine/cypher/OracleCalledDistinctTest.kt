@@ -6,6 +6,7 @@ import org.drivine.cypher.sql.SqliteCypherCompiler
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 /**
  * On Oracle, a `CALL { … }` query that keeps its rows distinct is not decorrelated (`NO_DECORRELATE`): so rewritten, a value of
@@ -33,6 +34,24 @@ class OracleCalledDistinctTest {
             "UNWIND [1, 1, 2] AS i CALL (i) { WITH DISTINCT i RETURN i AS j UNION WITH DISTINCT i RETURN i * 10 AS j } RETURN i, j" to
                 listOf("NO_MERGE NO_DECORRELATE"),
         ).forEach { (cypher, hints) -> assertEquals(hints, calledHints(OracleCypherCompiler("g").compile(cypher).sql), cypher) }
+    }
+
+    @Test
+    fun `a CALL that keeps a row whose item may be NaN apart is not decorrelated either`() {
+        // drivine4j#685 numbers such a row apart beside its SELECT DISTINCT: the hint is kept.
+        val nan = mapOf("p" to Double.NaN)
+        listOf(
+            "UNWIND [\$p, \$p, 1.0] AS i CALL (i) { WITH DISTINCT i RETURN i AS j } RETURN i, j",
+            "UNWIND [0.0, 0.0, 1.0] AS z CALL (z) { RETURN DISTINCT z / z AS v } RETURN z, v",
+            "UNWIND [0.0, 1.0] AS z CALL (z) { UNWIND [z / z, z / z] AS y WITH DISTINCT y RETURN count(*) AS c } RETURN z, c",
+        ).forEach { cypher ->
+            val sql = OracleCypherCompiler("g").compile(cypher, nan).sql
+            assertTrue(" AS d1" in sql, cypher)
+            assertEquals(listOf("NO_MERGE NO_DECORRELATE"), calledHints(sql), cypher)
+            // Whether the row is NaN binds no value in a subquery: one so bound beside the DISTINCT read the outer row's
+            // values as null on Oracle, hinted or not, as `RETURN DISTINCT z / z AS v` did.
+            assertFalse(Regex("""\) sh\d+\)""").containsMatchIn(sql.lines().single { " AS d1" in it }), cypher)
+        }
     }
 
     @Test

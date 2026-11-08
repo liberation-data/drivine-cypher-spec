@@ -1156,6 +1156,20 @@ cases:
         only: [neo4j, sql]
         cypher: "CALL { UNWIND [1, 1] AS x WITH DISTINCT x RETURN x } RETURN x"
         rows: [1]
+      - note: "A row whose item is NaN, kept apart (drivine4j#685), is the imported value too."
+        only: [neo4j, sql]
+        cypher: "UNWIND [$p, $p, 1.0] AS i CALL (i) { WITH DISTINCT i RETURN i AS j } RETURN i, j"
+        parameters: {p: {$float: "NaN"}}
+        rows: [[{$float: "NaN"}, {$float: "NaN"}], [{$float: "NaN"}, {$float: "NaN"}], [1.0, 1.0]]
+      - cypher: "UNWIND [0.0, 0.0, 1.0] AS z CALL (z) { RETURN DISTINCT z / z AS v } RETURN z, v"
+        only: [neo4j, sql]
+        rows: [[0.0, {$float: "NaN"}], [0.0, {$float: "NaN"}], [1.0, 1.0]]
+      - cypher: "UNWIND [0.0, 0.0, 1.0] AS z CALL (z) { WITH DISTINCT z, z / z AS v RETURN v } RETURN z, v"
+        only: [neo4j, sql]
+        rows: [[0.0, {$float: "NaN"}], [0.0, {$float: "NaN"}], [1.0, 1.0]]
+      - cypher: "UNWIND [0.0, 1.0] AS z CALL (z) { UNWIND [z / z, z / z] AS y WITH DISTINCT y RETURN count(*) AS c } RETURN z, c"
+        only: [neo4j, sql]
+        rows: [[0.0, 2], [1.0, 1]]
 
   - name: "CALL imports only what it names"
     description: "A CALL sees only what its brackets or its leading WITH import: any other name in it is a new variable."
