@@ -46,7 +46,10 @@ internal object VariableKinds {
         }
     }
 
-    /** Refuses [query] where a variable of it is used as two kinds, or made where it is bound already. */
+    /**
+     * Refuses [query] where a variable of it is used as two kinds, or made where it is bound already; where a pattern in a
+     * `WITH`'s `WHERE` names a variable the `WITH` drops (see [Scope]); and where a `WITH` or a `RETURN` names two items alike.
+     */
     fun check(query: Query) {
         query(query, Scope())
     }
