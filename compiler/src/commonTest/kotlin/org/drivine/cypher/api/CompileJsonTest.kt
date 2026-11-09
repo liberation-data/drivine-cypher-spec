@@ -146,6 +146,26 @@ class CompileJsonTest {
     }
 
     @Test
+    fun oraclesRowsAsTextIsABooleanFalseWhereLeftOut() {
+        fun write(graph: String, store: String = "oracle") =
+            CompileJson.compile("{\"store\": \"$store\", \"graph\": $graph, \"cypher\": \"UNWIND [1, 2, 3] AS i CREATE (n:N {i: i}) RETURN n.i\"}")
+        assertEquals(
+            "{\"error\":\"A request's graph gives oracleRowsAsText as true or false.\"}",
+            write("{\"name\": \"g\", \"oracleRowsAsText\": \"true\"}"),
+        )
+        val json = write("{\"name\": \"g\"}")
+        assertEquals(json, write("{\"name\": \"g\", \"oracleRowsAsText\": false}"))
+        assertEquals(json, write("{\"name\": \"g\", \"oracleRowsAsText\": null}"))
+        assertTrue("DBMS_SQL.RETURN_RESULT(cy_cursor)" in json && "rows:json" !in json, json)
+        val text = write("{\"name\": \"g\", \"oracleRowsAsText\": true}")
+        assertTrue("RETURNING CLOB EXTENDED) AS \\\"rows:json\\\" FROM (" in text, text)
+        // Meaningful on Oracle only: the other stores compile alike either way.
+        for (store in listOf("postgres", "sqlite")) {
+            assertEquals(write("{\"name\": \"g\"}", store), write("{\"name\": \"g\", \"oracleRowsAsText\": true}", store), store)
+        }
+    }
+
+    @Test
     fun anAnswersTextEscapesNulAndALoneSurrogate() {
         assertEquals("\"a\\u0000\\u001Fb\\\"\\\\\u2028\uD83D\uDE00\"", written("a\u0000\u001Fb\"\\\u2028\uD83D\uDE00"))
         assertEquals("\"a\\uD800b\\uDFFF\"", written("a\uD800b\uDFFF"))
