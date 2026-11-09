@@ -1227,3 +1227,34 @@ cases:
         rows: [[1, 40001, 40001, 40001], [2, 40001, 40001, 40001]]
       - cypher: "MATCH (n:CyWrite) WHERE head([n]).t ENDS WITH 'x' RETURN count(*)"
         rows: [2]
+
+  - name: "A stored empty text searched for and measured"
+    description: "A stored empty text starts with, ends with and holds the empty text, and no other; its size is 0. Oracle's empty text is null as SQL text (drivine4j#416)."
+    steps:
+      - cypher: "CREATE (:CyWrite {k: 0, name: 'ab'}), (:CyWrite {k: 1, name: ''}), (:CyWrite {k: 2, name: 'xy'}), (:CyWrite {k: 3, name: 5})"
+      - only: [neo4j, sql]
+        cypher: "MATCH (a:CyWrite) WHERE a.name STARTS WITH '' RETURN a.name ORDER BY a.k"
+        rows: ["ab", "", "xy"]
+      - only: [neo4j, sql]
+        cypher: "MATCH (a:CyWrite) WHERE a.name ENDS WITH $e RETURN a.name ORDER BY a.k"
+        parameters: {e: ""}
+        rows: ["ab", "", "xy"]
+      - only: [neo4j, sql]
+        cypher: "MATCH (a:CyWrite) WHERE a.name CONTAINS '' RETURN a.name ORDER BY a.k"
+        rows: ["ab", "", "xy"]
+      - only: [neo4j, sql]
+        cypher: "MATCH (a:CyWrite) WHERE NOT a.name CONTAINS 'b' RETURN a.name ORDER BY a.k"
+        rows: ["", "xy"]
+      - only: [neo4j, sql]
+        cypher: "MATCH (a:CyWrite), (b:CyWrite {k: 1}) WHERE a.name STARTS WITH b.name RETURN a.name ORDER BY a.k"
+        rows: ["ab", "", "xy"]
+      - only: [neo4j, sql]
+        cypher: "MATCH (a:CyWrite {k: 1}), (b:CyWrite) WHERE a.name ENDS WITH b.name RETURN b.name ORDER BY b.k"
+        rows: [""]
+      - only: [neo4j, sql]
+        cypher: "MATCH (a:CyWrite) WHERE a.k < 3 RETURN a.name, size(a.name) ORDER BY a.k"
+        rows: [["ab", 2], ["", 0], ["xy", 2]]
+      - note: "Written by SET, as a statement that writes reads it."
+        only: [neo4j, sql]
+        cypher: "MATCH (a:CyWrite {k: 1}) SET a.s = size(a.name), a.c = 'ab' CONTAINS a.name RETURN [a.s, a.c]"
+        rows: [[0, true]]

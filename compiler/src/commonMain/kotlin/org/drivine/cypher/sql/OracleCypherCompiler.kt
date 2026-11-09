@@ -189,48 +189,72 @@ class OracleCypherCompiler(
      * CLOB, and searched or compared, beside such a subquery for each of two rows or more (#370), where the property was
      * left where it is read, and where it was bound as JSON and read as a CLOB from that.
      */
-    override fun texts(vararg jsons: String, body: (List<String>) -> String): String {
+    override fun texts(vararg jsons: String, body: (List<String>) -> String): String = texts(*jsons, lengths = null, body = body)
+
+    /**
+     * [texts], and where [lengths] is given, where [body] gives null over them as `VARCHAR2`s and as CLOBs, [lengths] over
+     * the texts' lengths, as [textLength] reads them: null where a value is no text. An empty text is null as a `VARCHAR2`
+     * and as a CLOB, as Oracle's empty text is, so [body] gives null where one is: [lengths] answers for it (#416). It is
+     * read only there, as `COALESCE` reads a value only where those before it are null.
+     */
+    private fun texts(vararg jsons: String, lengths: ((List<String>) -> String)?, body: (List<String>) -> String): String {
         val properties = jsons.map(::besideLong)
-        if (!binds(*jsons) || properties.none { it }) return shared(*jsons) { xs -> textsOf(xs.map(::textsOf), body) }
-        // Within a body given CLOBs, a property's CLOB alone: its VARCHAR2 is not read.
+        if (!binds(*jsons) || properties.none { it }) return shared(*jsons) { xs -> textsOf(xs.map { textsOf(it, lengths != null) }, lengths, body) }
+        // Within a body given CLOBs, a property's CLOB alone: its VARCHAR2 is not read. Its length, where it is asked for.
         val columns = jsons.withIndex().flatMap { (i, json) ->
+            fun length() = listOfNotNull(lengths?.let { textLengthOf(json) })
             when {
                 !properties[i] -> listOf(json)
-                long -> listOf(textOf(json, clob = true))
-                else -> listOf(textOf(json, clob = false), textOf(json, clob = true))
+                long -> listOf(textOf(json, clob = true)) + length()
+                else -> listOf(textOf(json, clob = false), textOf(json, clob = true)) + length()
             }
         }
         return sharedBound(*columns.toTypedArray()) { names ->
             val next = names.iterator()
             val texts = jsons.indices.map { i ->
+                fun length() = if (lengths != null) next.next() else "NULL"
                 when {
-                    !properties[i] -> textsOf(next.next())
-                    long -> next.next().let { whole -> Texts(whole, whole) }
-                    else -> Texts(next.next(), next.next())
+                    !properties[i] -> textsOf(next.next(), lengths != null)
+                    long -> next.next().let { whole -> Texts(whole, whole, length()) }
+                    else -> Texts(next.next(), next.next(), length())
                 }
             }
-            textsOf(texts, body)
+            textsOf(texts, lengths, body)
         }
     }
 
-    /** A text as a `VARCHAR2`, null past 4,000 bytes, and as a CLOB: see [texts]. */
-    private data class Texts(val short: String, val whole: String)
+    /** A text as a `VARCHAR2`, null past 4,000 bytes, and as a CLOB; and its [length]: see [texts]. */
+    private data class Texts(val short: String, val whole: String, val length: String)
 
-    /** The JSON [json]'s texts: see [textOf]. */
-    private fun textsOf(json: String) = Texts(textOf(json, clob = false), textOf(json, clob = true))
+    /** The JSON [json]'s texts, and where [length], its length: see [textOf] and [textLengthOf]. */
+    private fun textsOf(json: String, length: Boolean) = Texts(textOf(json, clob = false), textOf(json, clob = true), if (length) textLengthOf(json) else "NULL")
 
-    /** [body] over [texts] as `VARCHAR2`s, and where it gives null, as CLOBs: see [texts]. */
-    private fun textsOf(texts: List<Texts>, body: (List<String>) -> String): String {
+    /** [body] over [texts] as `VARCHAR2`s, and where it gives null, as CLOBs, and then [lengths] over their lengths: see [texts]. */
+    private fun textsOf(texts: List<Texts>, lengths: ((List<String>) -> String)?, body: (List<String>) -> String): String {
+        val empty = lengths?.invoke(texts.map { it.length })
         // Within a body given CLOBs, as CLOBs alone.
-        if (long) return body(texts.map { it.whole })
+        if (long) return body(texts.map { it.whole }).let { whole -> if (empty == null) whole else "COALESCE($whole, $empty)" }
         val read = body(texts.map { it.short })
         long = true
         val whole = try { body(texts.map { it.whole }) } finally { long = false }
-        return "COALESCE($read, $whole)"
+        return "COALESCE(${listOfNotNull(read, whole, empty).joinToString(", ")})"
     }
 
     /** The JSON [json] as text, where it is a string: a CLOB where [clob], else as [text] reads it; a property by its own path (see [direct]). */
     private fun textOf(json: String, clob: Boolean) = direct(if (clob) longText(json) else text(json), json)
+
+    /** How many characters the JSON [json] is, where it is a string, an empty one too, and of any length; a property by its own path (see [direct]). */
+    private fun textLengthOf(json: String) = direct(textLength(json), json)
+
+    private fun textLength(json: String) = shared(json) { (x) -> "CASE WHEN ${kind(x)} = 'string' THEN JSON_VALUE($x, '\$.length()' RETURNING NUMBER) END" }
+
+    /**
+     * Any text starts with, ends with and holds the empty text, and the empty text no other, as in Cypher: Oracle's empty
+     * text is null as a `VARCHAR2` and as a CLOB, so [search] gives null where either is empty, and the texts' lengths
+     * answer there (#416). A text compared with a value of another kind is still null.
+     */
+    override fun searchedTexts(a: String, b: String, search: (List<String>) -> String) =
+        texts(a, b, lengths = { (x, y) -> "CASE WHEN $y = 0 AND $x IS NOT NULL THEN TRUE WHEN $x = 0 AND $y IS NOT NULL THEN FALSE END" }, body = search)
 
     /** Whether [json] is a property as [propertyOf] reads it, short beside a long value: see [texts] and [sharedSum]. */
     private fun besideLong(json: String) = json.length <= SHARED_ABOVE && propertyRead(json) != null
@@ -1270,9 +1294,9 @@ class OracleCypherCompiler(
     override fun function(name: String, json: String): String? = functionOf(name, json)?.let { direct(it, json) }
 
     private fun functionOf(name: String, json: String): String? = when (name) {
-        // A text past 4,000 bytes, null as a VARCHAR2, is measured as a CLOB (#298).
+        // A text past 4,000 bytes, null as a VARCHAR2, is measured as a CLOB (#298); a text null as both is empty (#416).
         "size" -> "CASE ${kind(json)} WHEN 'array' THEN JSON_SCALAR(JSON_VALUE($json, '\$.size()' RETURNING NUMBER)) " +
-            "WHEN 'string' THEN JSON_SCALAR(COALESCE(LENGTH(JSON_VALUE($json, '\$')), LENGTH(JSON_VALUE($json, '\$' RETURNING CLOB)))) END"
+            "WHEN 'string' THEN JSON_SCALAR(COALESCE(LENGTH(JSON_VALUE($json, '\$')), LENGTH(JSON_VALUE($json, '\$' RETURNING CLOB)), 0)) END"
         "tolower" -> texts(json) { (t) -> scalar("LOWER($t)") }
         "toupper" -> texts(json) { (t) -> scalar("UPPER($t)") }
         "trim" -> texts(json) { (t) -> scalar("TRIM($t)") }
