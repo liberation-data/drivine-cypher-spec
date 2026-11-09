@@ -90,6 +90,11 @@ unpack)
     # on a fresh runner, before anything else is put in these directories, so it takes them away whole.
     refuse() {
         trap - ERR
+        # set -E runs the ERR trap in a $(...) too, where exit would end only that subshell and unpack would go on: there
+        # it fails instead, so the command the $(...) is in fails, and unpack refuses.
+        if (( BASH_SUBSHELL > 0 )); then
+            exit 1
+        fi
         if [[ "$placed" == true ]]; then
             chmod -R u+rwX "$gradle_files" "$toolchain_files" "$konan_files" "$binaryen_mirror" 2> /dev/null || true
             rm -rf "$gradle_files" "$toolchain_files" "$konan_files" "$binaryen_mirror"
@@ -123,10 +128,35 @@ unpack)
         refuse "$bad isn't a plain file or directory"
     fi
     mkdir "$work/out"
-    unzip -q "$zip" -d "$work/out" < /dev/null 2> "$work/error" || refuse "unzip can't unpack it ($(head -n 1 "$work/error"))"
-    # Whatever modes the entries named, the owner's to read and write, and no one else's to write, so every check below
-    # sees every file, and everything can be moved and removed.
-    chmod -R u+rwX,go-w "$work/out"
+    # Unpacked by Python, not unzip: unzip writes as much as an entry's data holds, whatever size the zip declares for
+    # it, so a zip of a few MB declaring a few bytes would fill the disk. Python's zipfile writes no more than each
+    # entry's declared size (and fails on its CRC where the data is other than that), and the sizes it reads are
+    # within the limit together. It writes only the names checked above, each once (in any case, on macOS), as plain
+    # files and directories of the owner's modes, whatever modes the entries name, so every check below sees every
+    # file, and everything can be moved and removed.
+    python3 -I - "$zip" "$work/out" "$work/names" "$max_bytes" "$max_entries" 2> "$work/error" <<'PY' || refuse "it can't be unpacked ($(tail -n 1 "$work/error"))"
+import os, shutil, sys, zipfile
+zip_path, out, names_file, max_bytes, max_entries = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4]), int(sys.argv[5])
+with open(names_file, "rb") as f:
+    listed = set(f.read().decode("latin-1").splitlines())
+with zipfile.ZipFile(zip_path) as z:
+    infos = z.infolist()
+    if len(infos) > max_entries:
+        sys.exit(f"it holds {len(infos)} entries, more than {max_entries}")
+    total = sum(info.file_size for info in infos)
+    if total > max_bytes:
+        sys.exit(f"it declares {total} bytes, more than {max_bytes}")
+    for info in infos:
+        if info.filename not in listed:
+            sys.exit(f"{info.filename!r} isn't a name unzip listed")
+        path = os.path.join(out, *info.filename.rstrip("/").split("/"))
+        if info.is_dir():
+            os.makedirs(path, exist_ok=True)
+            continue
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with z.open(info) as source, open(path, "xb") as target:
+            shutil.copyfileobj(source, target, 1 << 20)
+PY
     # As unpacked: still nothing but files and directories, so nothing below is a link.
     if bad=$(find "$work/out" ! -type f ! -type d -print -quit); [[ -n "$bad" ]]; then
         refuse "${bad#"$work/out/"} isn't a plain file or directory"
@@ -197,7 +227,9 @@ PY
     # a version_<v> without it would send Gradle to the mirror for an archive it doesn't hold.
     if [[ -n "$binaryen_platform" && -d "$gradle_files/com.github.webassembly/binaryen" ]]; then
         while IFS= read -r -d '' file; do
-            v=$(basename "$(dirname "$(dirname "$file")")") name=$(basename "$file")
+            # Apart: of two assignments in one command, a failure of the first isn't seen.
+            v=$(basename "$(dirname "$(dirname "$file")")")
+            name=$(basename "$file")
             [[ "$name" == "binaryen-$v-$binaryen_platform.tar.gz" ]] || continue
             mkdir -p "$binaryen_mirror/version_$v"
             cp "$file" "$binaryen_mirror/version_$v/binaryen-version_$v-$binaryen_platform.tar.gz"

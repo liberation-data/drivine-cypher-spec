@@ -21,7 +21,8 @@
 set -euo pipefail
 mode="${1:-}" list="${2:-}"
 if [[ "$mode" == block ]]; then
-    printf '0.0.0.0 download.jetbrains.com\n:: download.jetbrains.com\n' | sudo tee -a /etc/hosts > /dev/null
+    # On a line of its own, should /etc/hosts not end in a newline.
+    printf '\n0.0.0.0 download.jetbrains.com\n:: download.jetbrains.com\n' | sudo tee -a /etc/hosts > /dev/null
     # macOS answers from its resolver's cache until told to read /etc/hosts again.
     if [[ "$(uname -s)" == Darwin ]]; then
         sudo dscacheutil -flushcache

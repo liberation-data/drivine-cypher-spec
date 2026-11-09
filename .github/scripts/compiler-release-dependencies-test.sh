@@ -5,8 +5,8 @@
 # binaryen archive as its releases are; must drop a Gradle file that isn't the bytes the verification metadata pins at
 # their SHA-1's path, and go on; must take entries of any mode, and clean up after them; must refuse whole, putting
 # nothing anywhere, a zip with a name that climbs out, an absolute name, a name at a path stage doesn't make, a name
-# twice, a link, more entries or bytes than its limits, or that isn't a zip; must take away what it put in place where a
-# step fails; and must take the test's own metadata only in the test. check must pass the dependencies the list pins,
+# twice, a link, more entries or bytes than its limits, an entry of more bytes than it declares, or that isn't a zip;
+# must take away what it put in place where a step fails, in a $(...) too; and must take the test's own metadata only in the test. check must pass the dependencies the list pins,
 # and fail one it doesn't, or a list that pins nothing. fetch must put in Kotlin/Native's cache only an archive with
 # the pinned SHA-256, kept or fetched again, and fail where it has none. Run by compiler-release.yml's dry run, in
 # build, on macOS as build unpacks there.
@@ -186,6 +186,35 @@ HOME="$home" "$here/compiler-release-dependencies.sh" unpack "$work/good.zip" > 
 [[ "$(cat "$home.out")" == *"is refused"*"failed"* ]] || fail "unpack didn't refuse where a step failed: $(cat "$home.out")"
 [[ "$(cd "$home" && find . -type f)" == "./.cache" && ! -e "$home/.gradle/caches/modules-2/files-2.1" ]] || fail "unpack left some of the zip in place: $(cd "$home" && find . -type f)"
 echo "unpack refuses, and takes away what it put in place, where a step fails"
+# A step in a $(...) that fails once the zip is in place: the ERR trap runs in that subshell, and unpack must still
+# refuse, not go on. Here basename fails on binaryen's archive, as unpack lays it out (and only there: python3 can be a
+# script that runs basename).
+mkdir -p "$work/failing-bin"
+printf '#!/bin/sh\ncase "$*" in *binaryen-123-*) exit 1 ;; esac\nexec /usr/bin/basename "$@"\n' > "$work/failing-bin/basename"
+chmod +x "$work/failing-bin/basename"
+PATH="$work/failing-bin:$PATH" unpacked "$work/good.zip"
+[[ "$UNPACK_OUT" == *"is refused"*"failed"* && -z "$UNPACKED" ]] || fail "unpack went on where a step in a \$(...) failed: $UNPACK_OUT: $UNPACKED"
+echo "unpack refuses, and takes away what it put in place, where a step in a \$(...) fails"
+
+# An entry that declares fewer bytes than its data holds: unzip would write all its data, past the limit; unpack writes
+# no more than declared, and refuses it on its CRC.
+python3 -I - "$work/lying.zip" "$jar" <<'PY2'
+import struct, sys, zipfile
+out, name = sys.argv[1:]
+with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+    info = zipfile.ZipInfo(name)
+    info.create_system = 3
+    info.external_attr = 0o100644 << 16
+    info.compress_type = zipfile.ZIP_DEFLATED
+    z.writestr(info, b"\0" * (8 << 20))
+data = bytearray(open(out, "rb").read())
+central = data.find(b"PK\x01\x02")
+data[22:26] = data[central + 24:central + 28] = struct.pack("<I", 13)
+open(out, "wb").write(data)
+PY2
+unpacked "$work/lying.zip"
+[[ "$UNPACK_OUT" == *"is refused"*"can't be unpacked"* && -z "$UNPACKED" ]] || fail "unpack took an entry of more bytes than it declares: $UNPACK_OUT: $UNPACKED"
+echo "refused: an entry of more bytes than it declares"
 
 # stage, from a made-up home: Gradle's files, the toolchain archives, and Kotlin/Native's archives but nothing else of
 # its, into what unpack takes whole.

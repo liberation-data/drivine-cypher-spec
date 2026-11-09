@@ -442,11 +442,14 @@ into step 2 could change what it builds whatever it then checked. So:
   runner of its own, which holds no secret and builds nothing, and uploads its files as the run's artifact. Where none is
   kept, or the upload fails, it uploads nothing, and the job itself never fails the run; what its upload can do to step
   2 is below.
-- Step 2 downloads that artifact as the zip it is, unopened, and `compiler-release-dependencies.sh unpack` checks it
+- Step 2 asks GitHub the artifact's size first, and downloads it only where it is one artifact of at most 3 GB, as
+  the download is written whole before anything checks it. It downloads it as the zip it is, unopened, and `compiler-release-dependencies.sh unpack` checks it
   before it puts anything in place: every entry is a plain file or directory at a path `stage` makes (no link, no `.`
   or `..`, nothing but Gradle's files, the toolchain archives and Kotlin/Native's archives), no name is there twice in
-  any case, and there are at most 5,000 entries and 3 GB unpacked. Unpacked, every file is made the owner's to read and
-  write, whatever mode the zip gave it, and each of Gradle's files is kept only where its SHA-1 is the directory it sits
+  any case, and there are at most 5,000 entries and 3 GB unpacked. It is unpacked by Python's `zipfile`, not `unzip`,
+  which writes as much as an entry's data holds whatever size the zip declares for it: `zipfile` writes no more than the
+  declared size, refuses an entry whose CRC is then wrong, and makes every file the owner's to read and write, whatever
+  mode the zip gave it. Each of Gradle's files is kept only where its SHA-1 is the directory it sits
   in, as Gradle lays them out, and its SHA-256 is the one `gradle/verification-metadata.xml` pins for that file of that
   component. Gradle takes a file it finds at its SHA-1's path without checking it, and strict verification would then
   fail the build, so a file of other bytes left there would fail every release that read the entry; dropped, it is
@@ -518,9 +521,10 @@ for any other deployment. It also checks that the signing refuses a bundle it mu
 (`.github/scripts/compiler-release-sign-test.sh`): one with a link among thousands, a file, a version or a path that no
 publication makes, or a checksum of a file it doesn't hold. And in step 2, before it unpacks the dependencies, it checks
 that `stage` keeps only what `unpack` takes, that `unpack` refuses whole a zip with a name that climbs out, an absolute
-name, a path `stage` doesn't make, a name twice, a link, or more entries or bytes than its limits, drops a Gradle file
+name, a path `stage` doesn't make, a name twice, a link, more entries or bytes than its limits, or an entry of more
+bytes than it declares, drops a Gradle file
 of other bytes at its real path, at another SHA-1's path or that the metadata doesn't name, takes entries whose modes
-let no one read them and cleans up after them, takes away what it put in place where a step fails, takes the test's
+let no one read them and cleans up after them, takes away what it put in place where a step fails (in a `$(...)` too), takes the test's
 own metadata only in the test, and lays out only the runner's binaryen archive with the pinned SHA-256, that the check of Kotlin/Native's dependencies fails one the list doesn't pin, and that their fetch
 puts in Kotlin/Native's way only an archive with the pinned SHA-256
 (`.github/scripts/compiler-release-dependencies-test.sh`).
