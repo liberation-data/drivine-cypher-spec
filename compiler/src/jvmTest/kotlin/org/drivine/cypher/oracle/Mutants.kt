@@ -79,7 +79,7 @@ object Mutants {
     private class Token(val start: Int, val end: Int, val kind: Char)
 
     private val TOKEN = Regex(
-        """('(?:[^'\\]|\\.)*'?|"(?:[^"\\]|\\.)*"?)|(`(?:[^`]|``)*`?)|(\$\w+)|(0x[0-9a-fA-F]+|\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)|([\p{L}_][\p{L}\p{N}_]*)|(<>|<=|>=|=~|->|<-|\.\.|\+=|\S)""",
+        """('[^'\\]*(?:\\.[^'\\]*)*'?|"[^"\\]*(?:\\.[^"\\]*)*"?)|(`[^`]*(?:``[^`]*)*`?)|(\$\w+)|(0x[0-9a-fA-F]+|\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)|([\p{L}_][\p{L}\p{N}_]*)|(<>|<=|>=|=~|->|<-|\.\.|\+=|\S)""",
     )
 
     private fun tokens(cypher: String): List<Token> = TOKEN.findAll(cypher).map { m ->
