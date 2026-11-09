@@ -4,8 +4,9 @@
 # unpack would refuse. unpack must put a zip of stage's paths where the build looks for them (and lay out binaryen's
 # archives as its releases are), and must refuse whole, putting nothing anywhere, a zip with a name that climbs out, an
 # absolute name, a name at a path stage doesn't make, a name twice, a link, or that isn't a zip. check must pass the
-# dependencies the list pins, and fail one it doesn't, or a list that pins nothing. Run by compiler-release.yml's dry
-# run, in build, on macOS as build unpacks there.
+# dependencies the list pins, and fail one it doesn't, or a list that pins nothing. fetch must put in Kotlin/Native's
+# cache only an archive with the pinned SHA-256, kept or fetched again, and fail where it has none. Run by
+# compiler-release.yml's dry run, in build, on macOS as build unpacks there.
 #   compiler-release-dependencies-test.sh
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
@@ -174,3 +175,44 @@ rm -rf "$konan/dependencies/lldb-4-macos"
 printf '%s https://download.example/native/llvm-19-aarch64-macos-essentials-79.tar.gz' "$(printf 'a%.0s' {1..64})" > "$list"
 KONAN_DATA_DIR="$konan" "$here/compiler-konan-dependencies.sh" check "$list" > "$work/check.out" 2>&1 || fail "check didn't read a last line without a newline: $(cat "$work/check.out")"
 echo "check reads a last line without a newline"
+
+# fetch: a kept archive whose SHA-256 is the pinned one goes into Kotlin/Native's cache; a kept archive with another is
+# fetched again, and where it can't be, fetch fails and puts nothing of it there. curl is a stand-in that serves
+# $SERVE, or fails as an outage does, so nothing is fetched and archive.sh's retries don't wait.
+mkdir -p "$work/bin"
+cat > "$work/bin/curl" <<'SH'
+#!/usr/bin/env bash
+out=
+while (( $# )); do [[ "$1" == -o ]] && { out="$2"; shift; }; shift; done
+[[ -n "${SERVE:-}" && -n "$out" ]] || exit 22
+cp "$SERVE" "$out"
+SH
+chmod +x "$work/bin/curl"
+printf 'the llvm archive\n' > "$work/llvm.tar.gz"
+llvm_sha=$(shasum -a 256 "$work/llvm.tar.gz" | cut -d' ' -f1)
+echo "$llvm_sha https://download.example/native/llvm-19-aarch64-macos-essentials-79.tar.gz" > "$list"
+fetch_home="$work/fetch-home" fetch_konan="$work/fetch-konan"
+kept_llvm="$fetch_home/.cache/drivine-konan-dependencies/llvm-19-aarch64-macos-essentials-79.tar.gz"
+cached_llvm="$fetch_konan/dependencies/cache/llvm-19-aarch64-macos-essentials-79.tar.gz"
+fetch() { HOME="$fetch_home" KONAN_DATA_DIR="$fetch_konan" PATH="$work/bin:$PATH" "$here/compiler-konan-dependencies.sh" fetch "$list" > "$work/fetch.out" 2>&1; }
+mkdir -p "$(dirname "$kept_llvm")"
+cp "$work/llvm.tar.gz" "$kept_llvm"
+fetch || fail "fetch refused a kept archive with the pinned SHA-256: $(cat "$work/fetch.out")"
+cmp -s "$cached_llvm" "$work/llvm.tar.gz" || fail "fetch didn't put the kept archive in Kotlin/Native's cache"
+echo "fetch takes a kept archive with the pinned SHA-256"
+rm -rf "$fetch_konan"
+echo "another llvm" > "$kept_llvm"
+if fetch; then
+    fail "fetch took a kept archive with another SHA-256, which it couldn't fetch again"
+fi
+[[ ! -e "$cached_llvm" && ! -e "$kept_llvm" ]] || fail "fetch refused the kept archive, but left it, or put it in Kotlin/Native's cache"
+echo "another llvm" > "$kept_llvm"
+SERVE="$work/llvm.tar.gz" fetch || fail "fetch didn't fetch again a kept archive with another SHA-256: $(cat "$work/fetch.out")"
+cmp -s "$cached_llvm" "$work/llvm.tar.gz" || fail "fetch put another archive than the pinned one in Kotlin/Native's cache"
+echo "another" > "$work/llvm-other.tar.gz"
+rm -rf "$fetch_konan" "$kept_llvm"
+if SERVE="$work/llvm-other.tar.gz" fetch; then
+    fail "fetch took a fetched archive with another SHA-256"
+fi
+[[ ! -e "$cached_llvm" ]] || fail "fetch put a fetched archive with another SHA-256 in Kotlin/Native's cache"
+echo "fetch refuses a kept or fetched archive with another SHA-256, and fetches the pinned one again"

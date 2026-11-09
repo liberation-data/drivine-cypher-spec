@@ -490,8 +490,9 @@ for any other deployment. It also checks that the signing refuses a bundle it mu
 (`.github/scripts/compiler-release-sign-test.sh`): one with a link among thousands, a file, a version or a path that no
 publication makes, or a checksum of a file it doesn't hold. And in step 2, before it unpacks the dependencies, it checks
 that `stage` keeps only what `unpack` takes, that `unpack` refuses whole a zip with a name that climbs out, an absolute
-name, a path `stage` doesn't make, a name twice or a link, and that the check of Kotlin/Native's dependencies fails one
-the list doesn't pin (`.github/scripts/compiler-release-dependencies-test.sh`).
+name, a path `stage` doesn't make, a name twice or a link, that the check of Kotlin/Native's dependencies fails one
+the list doesn't pin, and that their fetch puts in Kotlin/Native's way only an archive with the pinned SHA-256
+(`.github/scripts/compiler-release-dependencies-test.sh`).
 
 The `release` environment is this repository's own, not drivine4j's, and is set up once in its settings before the first
 release: a required reviewer, tags `v*` allowed to deploy to it, and the secrets drivine4j's release uses,
