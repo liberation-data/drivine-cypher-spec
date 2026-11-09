@@ -16,7 +16,7 @@ rm -f "$file"
 mkdir -p "$(dirname "$file")"
 if ! curl -fsSL --retry 8 --retry-all-errors --retry-delay 20 --connect-timeout 20 --max-time 600 -o "$file" "$url"; then
     rm -f "$file"
-    echo "::error::Couldn't fetch $url, nor was $name cached. Re-run this job once it can be fetched (Adoptium's and Gradle's archives are served from GitHub's release downloads)."
+    echo "::error::Couldn't fetch $url, nor was $name cached. Re-run this job once it can be fetched (Adoptium's and Gradle's archives are served from GitHub's release downloads, Kotlin/Native's from download.jetbrains.com)."
     exit 1
 fi
 got=$(sha "$file")
