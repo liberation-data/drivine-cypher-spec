@@ -149,7 +149,7 @@ A statement that is only spaces and comments isn't run. The text after the last 
 | `:params` | Prints the parameters to stdout as a map over several lines: `{`, then each `name: value` on a line of its own, indented two spaces, with `,` after each but the last, then `}`. A text is in `'…'`, not `"…"` as `plain` prints it. |
 | `:params clear` | Clears them. |
 | `:use DATABASE` | Moves to another database, on a store that has more than one. |
-| `:source FILE` | Runs a file's statements in place. A relative path is read from the working directory. |
+| `:source FILE` | Runs a file's statements in place. A relative path is read from the working directory. A file that can't be read fails as a statement does, with exit code 1. |
 | `:exit`, `:quit` | Stops reading. |
 | `:help` | Lists the commands. |
 
@@ -165,7 +165,7 @@ FalkorDB commits each statement as it runs, so there `:begin` and `:commit` do n
 - `NAME => EXPRESSION`, as in `-P 'limit => 10'`;
 - a map, as in `-P '{limit: 10, since: date("2024-01-01")}'`.
 
-`-P NAME=EXPRESSION` is taken too.
+`-P NAME=EXPRESSION` is taken too. A `-P` of none of these forms is a bad value, and exits with 2.
 
 The expression is Cypher. It's evaluated by running `RETURN expression` on the store, so a parameter holds what the store gives for it. A parameter set later replaces an earlier one of the same name. A statement that uses a parameter that isn't set fails, on every store, as it does on Neo4j. A `-P` whose expression fails on the store fails as a statement does, with exit code 1, before any statement runs.
 

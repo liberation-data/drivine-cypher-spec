@@ -131,6 +131,12 @@ cases:
     stdout: "a\n1\nb\n2\nc\n3\n"
     exit: 0
 
+  - name: "A :source file that can't be read fails as a statement does"
+    files: {"a.cypher": "RETURN 1 AS a;\n:source missing.cypher\nRETURN 3 AS c;\n"}
+    args: ["--format", "plain", "-f", "a.cypher"]
+    stdout: "a\n1\n"
+    exit: 1
+
   - name: ":param takes a map, and :params clear clears the parameters"
     files: {"p.cypher": ":param {a: 1, b: 'x'}\nRETURN $a AS a, $b AS b;\n:params clear\nRETURN $a AS a;\n"}
     args: ["--format", "plain", "-f", "p.cypher"]
@@ -215,6 +221,12 @@ cases:
     args: ["--format", "plain", "-P", "x => 1/0", "RETURN 1 AS one"]
     stdout: ""
     exit: 1
+
+  - name: "A -P of neither form exits with 2"
+    store: false
+    args: ["-P", "y", "RETURN 1"]
+    stdout: ""
+    exit: 2
 
   - name: "-P takes NAME=EXPRESSION, and a later parameter replaces an earlier one"
     args: ["--format", "plain", "-P", "y=1", "--param", "y => 'z'", "RETURN $y AS y"]
