@@ -2534,6 +2534,11 @@ cases:
         rows: ["Keanu"]
       - cypher: "WITH [{a: 1}] AS l, 'a' AS k RETURN l[0][k]"
         rows: [1]
+      - note: "A relationship or a node a map holds, read so, is that, compared by identity: neither KNOWS relationship has a property."
+        cypher: "MATCH (:Person {name: 'Keanu'})-[r1:KNOWS]->(), (:Person {name: 'Laurence'})-[r2:KNOWS]->() WITH {x: r1} AS m, r1, r2, 'x' AS k RETURN [m[k] = r1, m[k] = r2]"
+        rows: [[true, false]]
+      - cypher: "MATCH (a:Person {name: 'Keanu'}), (b:Person {name: 'Carrie'}) WITH {x: a} AS m, a, b, 'x' AS k RETURN [m[k] = a, m[k] = b, m[k].name]"
+        rows: [[true, false, "Keanu"]]
       - note: "An entry read so, divided or taken % by an integer zero, or an integer zero read so dividing or taking % a float, fails, as a number read at run time does: Neo4j works out no entry as it plans (drivine4j#686)."
         only: [neo4j, sql]
         cypher: "WITH {x: 3.0} AS m, 'x' AS k RETURN m[k] / 0"
