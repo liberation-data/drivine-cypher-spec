@@ -416,6 +416,12 @@ abstract class SqlCypherCompiler(
      */
     protected open fun texts(vararg jsons: String, body: (List<String>) -> String): String = body(jsons.map(::text))
 
+    /**
+     * `STARTS WITH`, `ENDS WITH` or `CONTAINS` of the JSON values [a] and [b]: [search] over their texts, as [texts] reads them.
+     * A store whose empty text reads as null answers for one otherwise: see Oracle's.
+     */
+    protected open fun searchedTexts(a: String, b: String, search: (List<String>) -> String): String = texts(a, b, body = search)
+
     /** The JSON [json] as a condition, where it is `true` or `false`. */
     protected abstract fun boolOf(json: String): String
 
@@ -4632,11 +4638,11 @@ abstract class SqlCypherCompiler(
                 Operator.MODULO -> Value.Json(remainder(a, divisor(binary, b)))
                 Operator.POWER -> Value.Json(scalar(float("power(${number(a)}, ${number(b)})")))
                 Operator.IN -> Value.Bool(membership(binary, left, right, scope, filter).let { within -> keyIn?.let { keyedIn(it, right, within) } ?: within })
-                Operator.STARTS_WITH -> Value.Bool(texts(a, b) { texts -> shared(*texts.toTypedArray()) { (x, y) -> startsWith(x, y) } })
+                Operator.STARTS_WITH -> Value.Bool(searchedTexts(a, b) { texts -> shared(*texts.toTypedArray()) { (x, y) -> startsWith(x, y) } })
                 // A pattern is short: only the text is read as a long one where it is.
                 Operator.MATCHES -> Value.Bool(texts(a) { (x) -> matches(x, text(b)) })
-                Operator.ENDS_WITH -> Value.Bool(texts(a, b) { texts -> shared(*texts.toTypedArray()) { (x, y) -> endsWith(x, y) } })
-                Operator.CONTAINS -> Value.Bool(texts(a, b) { (x, y) -> containsText(x, y) })
+                Operator.ENDS_WITH -> Value.Bool(searchedTexts(a, b) { texts -> shared(*texts.toTypedArray()) { (x, y) -> endsWith(x, y) } })
+                Operator.CONTAINS -> Value.Bool(searchedTexts(a, b) { (x, y) -> containsText(x, y) })
                 else -> error("logical operators are handled above")
             }
         }
