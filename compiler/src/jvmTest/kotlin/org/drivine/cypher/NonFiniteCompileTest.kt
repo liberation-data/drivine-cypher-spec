@@ -50,6 +50,8 @@ class NonFiniteCompileTest {
         listOf(
             "RETURN 1.0 / 2", "RETURN 1.0 / -2.5", "RETURN toFloat('1.5')", "RETURN toFloat(2)",
             "RETURN toFloat(null)", "MATCH (n:A) WHERE n.x = 1 RETURN n.x * 2",
+            // A name with Unicode's spaces around it is no name, and null, as Neo4j reads it (drivine4j#692).
+            "RETURN toFloat('\u00A0NaN')", "RETURN toFloat('\u3000-Infinity')", "RETURN toFloat('Infinity\u2028')",
         ).forEach { cypher ->
             assertFalse(postgres(cypher), cypher)
             assertFalse(sqlite(cypher), cypher)

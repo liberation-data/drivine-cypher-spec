@@ -6444,11 +6444,11 @@ abstract class SqlCypherCompiler(
 
         /**
          * Whether [text] names NaN or an infinity, as Java reads a double, which Neo4j's `toFloat` takes it as, or is a number
-         * past a double's range with Cypher's spaces around it ([CYPHER_SPACES]), which it reads as an infinity too
-         * (`'\u00A01e400'`, drivine4j#692).
+         * past a double's range with Cypher's spaces around it ([CYPHER_NUMBER]), which it reads as an infinity too
+         * (`'\u00A01e400'`, drivine4j#692): a name with them around it is no name (`'\u00A0NaN'` is null).
          */
-        fun nonFiniteText(text: String) =
-            org.drivine.cypher.json.parseDoubleOrNull(text.trim { it <= ' ' || CYPHER_SPACES.any { spaces -> it.code in spaces } })?.isFinite() == false
+        fun nonFiniteText(text: String) = sequenceOf(text.trim { it <= ' ' }, text.takeIf(CYPHER_NUMBER::matches)?.trim { char -> CYPHER_SPACES.any { char.code in it } })
+            .any { it != null && org.drivine.cypher.json.parseDoubleOrNull(it)?.isFinite() == false }
 
         /** The texts `toFloat` takes as NaN, the infinity and the negative one, as Java reads them, spaces around them allowed. */
         const val NAN_NAME = """^\s*[+-]?NaN\s*$"""
@@ -6474,6 +6474,9 @@ abstract class SqlCypherCompiler(
          */
         fun cypherNumberText(end: String) = "^$CYPHER_SPACE*-?((0|[1-9][0-9]*)(\\.[0-9]+([eE][+-]?[0-9]+)?|[eE][+-]?[0-9]+)|\\.[0-9]+([eE][+-]?[0-9]+)?|" +
             "0|[1-9][0-9]{0,17}|[1-8][0-9]{18})$CYPHER_SPACE*$end"
+
+        /** [cypherNumberText] as the compiler reads a text it is given, which [nonFiniteText] reads past a double's range. */
+        private val CYPHER_NUMBER = Regex(cypherNumberText("$"))
 
         private fun escaped(code: Int) = if (code < 0x100) "\\x" + code.toString(16).padStart(2, '0') else "\\u" + code.toString(16).padStart(4, '0')
 
