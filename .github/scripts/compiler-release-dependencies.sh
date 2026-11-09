@@ -21,15 +21,23 @@
 #     the release build never restores the cache itself, and unpacks only this, its plain files, checked by name. It
 #     also lays out the binaryen archives among Gradle's files as binaryen's releases are, in ~/.cache/drivine-binaryen,
 #     for -Pcompiler.binaryenMirror (see build.gradle.kts): Gradle can't take them from its own files without asking
-#     GitHub. Only an archive whose SHA-256 is the one gradle/verification-metadata.xml pins for it is laid out, as
-#     Gradle takes the mirror's copy without asking for another, and refuses one with another SHA-256, failing the build:
-#     where none is laid out, it fetches the archive from GitHub instead.
+#     GitHub. Only this runner's archive (binaryen-<v>-arm64-macos.tar.gz on macOS arm64), with the SHA-256
+#     gradle/verification-metadata.xml pins for it, is laid out, as Gradle takes the mirror's copy without asking for
+#     another, and fails the build on one with another SHA-256, or where the mirror holds the version but not this
+#     runner's archive: where none is laid out, it fetches the archive from GitHub instead.
 set -euo pipefail
 
 gradle_files="$HOME/.gradle/caches/modules-2/files-2.1"
 toolchain_files="$HOME/.cache/drivine-pinned-toolchain"
 konan_files="$HOME/.cache/drivine-konan-dependencies"
 binaryen_mirror="$HOME/.cache/drivine-binaryen"
+# binaryen's name for this runner's platform, as its releases name their archives. The test names one.
+case "$(uname -s)-$(uname -m)" in
+Darwin-arm64) binaryen_platform=arm64-macos ;; Darwin-x86_64) binaryen_platform=x86_64-macos ;;
+Linux-x86_64) binaryen_platform=x86_64-linux ;; Linux-aarch64) binaryen_platform=aarch64-linux ;;
+*) binaryen_platform= ;;
+esac
+binaryen_platform="${COMPILER_BINARYEN_PLATFORM:-$binaryen_platform}"
 # The test names a made-up one.
 verification_metadata="${COMPILER_VERIFICATION_METADATA:-$(cd "$(dirname "$0")/../.." && pwd)/compiler/gradle/verification-metadata.xml}"
 
@@ -98,12 +106,13 @@ unpack)
     [[ -d "$work/out/toolchain" ]] && cp -R "$work/out/toolchain/." "$toolchain_files/"
     [[ -d "$work/out/konan" ]] && cp -R "$work/out/konan/." "$konan_files/"
     # gradle/com.github.webassembly/binaryen/<v>/<sha1>/binaryen-<v>-<platform>.tar.gz, as
-    # version_<v>/binaryen-version_<v>-<platform>.tar.gz, where its SHA-256 is the first the verification metadata gives
-    # under <artifact name="<name>">.
+    # version_<v>/binaryen-version_<v>-<platform>.tar.gz, where <platform> is this runner's, and its SHA-256 is the
+    # first the verification metadata gives under <artifact name="<name>">. Only this runner's: a version_<v> without it
+    # would send Gradle to the mirror for an archive it doesn't hold.
     if [[ -d "$work/out/gradle/com.github.webassembly/binaryen" ]]; then
         while IFS= read -r -d '' file; do
             v=$(basename "$(dirname "$(dirname "$file")")") name=$(basename "$file")
-            [[ "$name" == "binaryen-$v-"* ]] || continue
+            [[ -n "$binaryen_platform" && "$name" == "binaryen-$v-$binaryen_platform.tar.gz" ]] || continue
             pinned=$(awk -v want="<artifact name=\"$name\">" 'index($0, want) { found = 1; next }
                 found { if (match($0, /value="[0-9a-f]+"/)) print substr($0, RSTART + 7, RLENGTH - 8); exit }' \
                 "$verification_metadata" 2> /dev/null || true)

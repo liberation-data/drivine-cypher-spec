@@ -458,8 +458,9 @@ What is still fetched: Gradle asks Maven Central and the Gradle Plugin Portal fo
 `.sha1`, small files, which it checks too, before it takes a file it already has. binaryen's GitHub releases publish no
 `.sha1` it could ask for, so step 2 takes binaryen from a directory laid out as those releases are, which `unpack` fills
 from the entry's copy (`-Pcompiler.binaryenMirror`, in `build.gradle.kts`), and Gradle checks it the same way. Gradle
-would take a copy there with another SHA-256 and fail on it, not fetch the pinned one, so `unpack` lays out only a copy
-whose SHA-256 is the one `gradle/verification-metadata.xml` pins.
+would take a copy there with another SHA-256 and fail on it, not fetch the pinned one, and would fail where the
+directory holds the version but not this runner's archive, so `unpack` lays out only this runner's copy, and only where
+its SHA-256 is the one `gradle/verification-metadata.xml` pins.
 
 The gate's jobs read their own caches, as before (setup-gradle's, the toolchain archives', `~/.konan`), and Gradle
 checks the dependencies they use too; they build nothing that is released. Every action `compiler.yml` and this workflow
@@ -495,9 +496,9 @@ for any other deployment. It also checks that the signing refuses a bundle it mu
 (`.github/scripts/compiler-release-sign-test.sh`): one with a link among thousands, a file, a version or a path that no
 publication makes, or a checksum of a file it doesn't hold. And in step 2, before it unpacks the dependencies, it checks
 that `stage` keeps only what `unpack` takes, that `unpack` refuses whole a zip with a name that climbs out, an absolute
-name, a path `stage` doesn't make, a name twice or a link, and lays out only a binaryen archive with the pinned
-SHA-256, that the check of Kotlin/Native's dependencies fails one
-the list doesn't pin, and that their fetch puts in Kotlin/Native's way only an archive with the pinned SHA-256
+name, a path `stage` doesn't make, a name twice or a link, and lays out only the runner's binaryen archive with the
+pinned SHA-256, that the check of Kotlin/Native's dependencies fails one the list doesn't pin, and that their fetch
+puts in Kotlin/Native's way only an archive with the pinned SHA-256
 (`.github/scripts/compiler-release-dependencies-test.sh`).
 
 The `release` environment is this repository's own, not drivine4j's, and is set up once in its settings before the first
