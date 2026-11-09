@@ -105,7 +105,8 @@ top-level await, so the entry runs that loader's text as a function with its Nod
 is checked, so a Kotlin release that writes the loader otherwise fails at once. The corpus check on wasmJs goes through
 this entry. Each entry has its TypeScript types: Kotlin's `.d.mts` for `import`, and `npm/index.d.cts` for `require`.
 
-The package's name is set once, as `compiler.npmName` in `gradle.properties`. The corpus check on wasmJs fails when the
+The package holds the wasm, its loaders, the CommonJS entry, the types of each, a short README (`npm/README.md`) and
+the repository's LICENSE. The package's name is set once, as `compiler.npmName` in `gradle.properties`. The corpus check on wasmJs fails when the
 package it loads has another (`check/corpus-node-test.sh` tests that).
 
 ### C
@@ -257,7 +258,8 @@ After the merge, it lists what to look at by hand (`scripts/sync-report.py`):
 
 A spec tag is a compiler release: pushing the tag `vX.Y.Z` on `main` publishes the compiler to Maven Central as
 `org.drivine:drivine-cypher-compiler` `X.Y.Z`, with one artifact for each target (`-jvm`, `-wasm-js`, `-macosarm64`,
-`-linuxx64`, `-linuxarm64`, `-mingwx64`). The compiler and the spec it was checked against then share one number, so a
+`-linuxx64`, `-linuxarm64`, `-mingwx64`), and its wasmJs build to npm as `@liberation-data/drivine-cypher-compiler`
+`X.Y.Z` (the name is `compiler.npmName` in `gradle.properties`). The compiler and the spec it was checked against then share one number, so a
 library pins one tag for both. A tag that changes only the spec publishes the compiler again, unchanged, under the new
 number.
 
@@ -287,6 +289,23 @@ it is published. A failed upload is re-run
 alone ("Re-run failed jobs"), and waits for the reviewer again; the upload itself isn't retried, as a second would make
 a second deployment of the version, so look at https://central.sonatype.com/publishing/deployments before re-running one
 that failed without the Portal's answer.
+
+**npm.** Step 2 also builds the npm package (`./gradlew npmPackage`, at the tag's version), packs it as npm publishes it,
+and checks the tarball (`.github/scripts/compiler-npm-check.sh`, which `compiler-npm-check-test.sh` tests over made-up tarballs in the gate): the package's name and the tag's version, and its
+files and nothing else (the wasm, its loaders, the CommonJS entry, the types, `npm/README.md` and the repository's
+LICENSE). The tarball, its SHA-256 and its npm integrity are kept beside the bundle. Its publish is a job of its own,
+`publish-npm`, which also waits in the `release` environment for its reviewer, and needs only the tarball: it checks
+the tarball's SHA-256 is step 2's, then publishes it by npm's trusted publishing, with no npm token stored anywhere:
+npm's settings for the package name this repository, `compiler-release.yml` and the `release` environment as its
+publisher, and the job's OIDC token (`id-token: write`) proves it is that workflow. The same token gives npm's provenance
+(`--provenance`), which records the run and the commit that built the package. The job installs npm 11.21.1, as desk's
+and Drivine for TypeScript's releases do: trusted publishing needs 11.5.1 or later. A version with a suffix is published under the npm tag `next`, and
+any other under `latest`. The two publishes don't wait on each other, so a failure of one neither undoes nor holds up
+the other. A re-run publishes nothing where npm has the version as this tarball (by its integrity), and fails where npm
+has another tarball under the version, as npm never takes a version twice. The gate's wasmJs job packs the package
+too, installs it into an empty project with only the dependencies its `package.json` names, and compiles the corpus
+through it, byte for byte the JVM's (`.github/scripts/compiler-npm-clean-install.sh`). A dry run gives the tarball to
+`npm publish --dry-run`, which sends nothing.
 
 The jobs that build install the pinned JDK and Gradle with `.github/actions/pinned-toolchain`: from Adoptium's archive
 of `gradle/pinned-jdk.properties`'s `version` and the zip `gradle/wrapper/gradle-wrapper.properties` names, each checked
@@ -318,8 +337,30 @@ publication makes, or a checksum of a file it doesn't hold.
 
 The `release` environment is this repository's own, not drivine4j's, and is set up once in its settings before the first
 release: a required reviewer, tags `v*` allowed to deploy to it, and the secrets drivine4j's release uses,
-`CENTRAL_PORTAL_USERNAME`, `CENTRAL_PORTAL_PASSWORD`, `SIGNING_KEY` and `SIGNING_PASSWORD`. Without it, a tag's run makes
-an empty one, with no reviewer, and step 3 stops at its check of the secrets.
+`CENTRAL_PORTAL_USERNAME`, `CENTRAL_PORTAL_PASSWORD`, `SIGNING_KEY` and `SIGNING_PASSWORD`. npm needs no secret. Without
+the environment, a tag's run makes an empty one, with no reviewer, and step 3 stops at its check of the secrets. npm
+trusts the environment by its name alone, so once its trusted publisher is set, `publish-npm` would publish from such an
+empty `release` with no reviewer: keep the environment's required reviewer, and its rule that only tags `v*` deploy to
+it, for as long as the publisher names it.
+
+**npm's trusted publisher, once.** npm lets a trusted publisher be set only on a package that exists, so the package's
+first version is published by hand, and every later one by `publish-npm`:
+
+1. Take the newest tag's tarball: where that tag's run built one, its `compiler-npm-<version>` artifact
+   (`gh run download <run id> -n compiler-npm-<version>`), already checked by step 2, so a re-run of its `publish-npm`
+   finds npm has this tarball and publishes nothing. A tag from before the npm publish (v0.32.0) has no such artifact,
+   and packs the old name, `@drivine/cypher-compiler`, without the README or LICENSE: build its tarball from the tag's
+   compiler sources with `main`'s packaging (`npmPackage`, `compiler.npmName`, `npm/` and LICENSE), and check it as
+   step 2 does (`main`'s `compiler-npm-check.sh`, and the corpus check against that tag's JVM).
+2. A maintainer of the `@liberation-data` scope publishes that tarball once: `npm publish <tarball> --access public`,
+   with `--tag next` for a version with a suffix. This one version has no provenance, as it isn't published from a run.
+3. On npmjs.com, in the package's settings, add a trusted publisher: GitHub Actions, organization
+   `liberation-data`, repository `drivine-cypher-spec`, workflow `compiler-release.yml`, environment `release`.
+
+Until then a tag's run publishes to Maven Central and `publish-npm` fails at npm's refusal: publish that tag's tarball
+as above, set the publisher, and re-run `publish-npm` alone ("Re-run failed jobs"), which waits for the reviewer again
+and finds the version published. GitHub re-runs a job only within 30 days of its run; after that, push the next tag.
+The workflow's file name is part of the publisher, so renaming `compiler-release.yml` needs the setting changed with it.
 
 Push the tag with or after `main`: a tag pushed before the commit is on `main` is refused at step 1; push `main` and
 re-run the workflow.
