@@ -455,16 +455,19 @@ into step 2 could change what it builds whatever it then checked. So:
   component. Gradle takes a file it finds at its SHA-1's path without checking it, and strict verification would then
   fail the build, so a file of other bytes left there would fail every release that read the entry; dropped, it is
   fetched. (So are the POMs Gradle reads but doesn't check, of modules published with Gradle's module metadata, which
-  the file doesn't name: small files.) Where a check fails, or a step of `unpack` does, it puts nothing in place, or
+  the file doesn't name: small files.) Each toolchain or Kotlin/Native archive is kept only where its name and SHA-256
+  are ones pinned (the JDK's archive of a platform `gradle/pinned-jdk.properties` pins, the zip
+  `gradle/wrapper/gradle-wrapper.properties` names, an archive `gradle/kotlin-native-dependencies.txt` names), so
+  nothing the build won't use sits on the runner's disk through it. Where a check fails, or a step of `unpack` does, it puts nothing in place, or
   takes away what it put, with a warning, and step 2 fetches everything; and should `unpack` itself fail, step 2 takes
   away those directories. Each file is then checked again as it is used: Gradle checks every dependency against
   `gradle/verification-metadata.xml` (`--dependency-verification strict`, whatever a `gradle.properties` says);
-  `archive.sh` checks the JDK and Gradle archives against their pinned SHA-256s, and fetches one whose checksum isn't
-  the pinned one; `.github/scripts/compiler-konan-dependencies.sh` does the same for Kotlin/Native's own dependencies
+  `archive.sh` checks the JDK and Gradle archives against their pinned SHA-256s, and fetches one that isn't kept, or
+  whose checksum isn't the pinned one; `.github/scripts/compiler-konan-dependencies.sh` does the same for Kotlin/Native's own dependencies
   against `gradle/kotlin-native-dependencies.txt`.
 
 So the entry, whoever saved it, can neither change what is built nor make step 2 fail: a Gradle file whose checksum
-isn't the pinned one is dropped and fetched, an archive whose checksum isn't is fetched again, and an entry that fails a
+isn't the pinned one is dropped and fetched, as is an archive whose name or checksum isn't, and an entry that fails a
 check is refused whole. At worst it makes step 2 fetch what the entry lacks, as where none is kept: Gradle tries each
 fetch up to 8 times, over about 4 minutes (`gradle.properties`), and the archives are retried for a few minutes; where
 it still can't, step 2 fails, before the reviewer is asked, and is re-run. What it can still do is take over the
@@ -525,8 +528,8 @@ that `stage` keeps only what `unpack` takes, that `unpack` refuses whole a zip w
 name, a path `stage` doesn't make, a name twice, a link, more entries or bytes than its limits, or an entry of more
 bytes than it declares, drops a Gradle file
 of other bytes at its real path, at another SHA-1's path or that the metadata doesn't name, takes entries whose modes
-let no one read them and cleans up after them, takes away what it put in place where a step fails (in a `$(...)` too), takes the test's
-own metadata only in the test, and lays out only the runner's binaryen archive with the pinned SHA-256, that the check of Kotlin/Native's dependencies fails one the list doesn't pin, and that their fetch
+let no one read them and cleans up after them, takes away what it put in place where a step fails (in a `$(...)` too), drops a toolchain or Kotlin/Native archive whose name or SHA-256 isn't pinned, takes the test's
+own pins only in the test, and lays out only the runner's binaryen archive with the pinned SHA-256, that the check of Kotlin/Native's dependencies fails one the list doesn't pin, and that their fetch
 puts in Kotlin/Native's way only an archive with the pinned SHA-256
 (`.github/scripts/compiler-release-dependencies-test.sh`).
 

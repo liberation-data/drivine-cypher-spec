@@ -23,8 +23,9 @@
 #   that can save an entry (the gate's, with third-party actions and what they fetch) could have saved it. It takes its
 #   dependencies from the dependencies job instead: that job restores the entry compiler.yml's release-dependencies job
 #   kept, on a runner of its own, and uploads its files as an artifact, which build unpacks only once every name in it is
-#   a plain file at a path that entry holds (.github/scripts/compiler-release-dependencies.sh). Each file is then checked
-#   as it is used: Gradle's against gradle/verification-metadata.xml, the JDK's and Gradle's archives and
+#   a plain file at a path that entry holds (.github/scripts/compiler-release-dependencies.sh), and keeps only the files
+#   whose SHA-256s are the pinned ones, so a wrong one is fetched, not used. Each file is then checked again as it is
+#   used: Gradle's against gradle/verification-metadata.xml, the JDK's and Gradle's archives and
 #   Kotlin/Native's dependencies against their pinned SHA-256s. So the entry, whoever saved it, can't change what is
 #   built: at worst, the build fetches what it lacks, with retries, as it fetches everything where no entry is kept, and
 #   an outage then fails it, before the reviewer is asked, and it is re-run.

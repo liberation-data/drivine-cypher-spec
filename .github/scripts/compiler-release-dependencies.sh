@@ -22,10 +22,11 @@
 #     is kept only where its SHA-1 is the directory it sits in and its SHA-256 is the one gradle/verification-metadata.xml
 #     pins for it: Gradle takes a file at its SHA-1's path without checking it, and strict verification would then fail
 #     every release that read the entry, so a file of other bytes is dropped, and Gradle fetches it. (So are the POMs
-#     Gradle reads but doesn't check, of modules it reads Gradle's module metadata for: small files, fetched again.) The
-#     toolchain and Kotlin/Native archives are checked where they are used, and fetched again where they aren't the
-#     pinned ones. A zip that fails a check, or a step that fails, is refused whole, with a warning: nothing of it is
-#     left in place, and the build fetches everything. So an entry, whatever it holds, can't fail a release: at worst
+#     Gradle reads but doesn't check, of modules it reads Gradle's module metadata for: small files, fetched again.) A
+#     toolchain or Kotlin/Native archive is kept only where its name and SHA-256 are ones their pins name, so nothing
+#     unused sits on the disk, and is checked again where it is used, and fetched where it isn't kept. A zip that fails
+#     a check, or a step that fails, is refused whole, with a warning: nothing of it is left in place, and the build
+#     fetches everything. So an entry, whatever it holds, can't fail a release: at worst
 #     the build fetches what it lacks. It also lays out this runner's binaryen archive among Gradle's files (on macOS
 #     arm64, binaryen-<v>-arm64-macos.tar.gz) as binaryen's releases are, in ~/.cache/drivine-binaryen, for
 #     -Pcompiler.binaryenMirror (see build.gradle.kts): Gradle can't take it from its own files without asking GitHub,
@@ -42,13 +43,15 @@ Darwin-arm64) binaryen_platform=arm64-macos ;; Darwin-x86_64) binaryen_platform=
 Linux-x86_64) binaryen_platform=x86_64-linux ;; Linux-aarch64) binaryen_platform=aarch64-linux ;;
 *) binaryen_platform= ;;
 esac
-verification_metadata="$(cd "$(dirname "$0")/../.." && pwd)/compiler/gradle/verification-metadata.xml"
+# What pins the dependencies: gradle/verification-metadata.xml Gradle's files, and the rest the toolchain and
+# Kotlin/Native archives.
+pins="$(cd "$(dirname "$0")/../.." && pwd)/compiler/gradle"
 # At most this much, unpacked, and this many entries: an entry is about 1.2 GB in some 300 files.
 max_bytes=$((3 * 1024 * 1024 * 1024)) max_entries=5000
-# compiler-release-dependencies-test.sh names its own platform, metadata and limits; nothing else can.
+# compiler-release-dependencies-test.sh names its own platform, pins and limits; nothing else can.
 if [[ "${COMPILER_RELEASE_DEPENDENCIES_TEST:-}" == true ]]; then
     binaryen_platform="${COMPILER_BINARYEN_PLATFORM:-$binaryen_platform}"
-    verification_metadata="${COMPILER_VERIFICATION_METADATA:-$verification_metadata}"
+    pins="${COMPILER_PINS:-$pins}"
     max_bytes="${COMPILER_MAX_BYTES:-$max_bytes}" max_entries="${COMPILER_MAX_ENTRIES:-$max_entries}"
 fi
 
@@ -168,7 +171,7 @@ PY
     # Gradle takes a file it finds at its SHA-1's path without checking it, and strict verification then fails the
     # build, so a file of other bytes there would fail every release that read the entry; dropped, Gradle fetches it.
     if [[ -d "$work/out/gradle" ]]; then
-        python3 -I - "$work/out/gradle" "$verification_metadata" <<'PY' || refuse "its Gradle files can't be checked"
+        python3 -I - "$work/out/gradle" "$pins/verification-metadata.xml" <<'PY' || refuse "its Gradle files can't be checked"
 import hashlib, os, sys
 import xml.etree.ElementTree as ET
 root, metadata = sys.argv[1], sys.argv[2]
@@ -208,6 +211,51 @@ if dropped:
 print(f"{kept} of Gradle's files are the ones gradle/verification-metadata.xml pins.")
 PY
     fi
+    # The toolchain and Kotlin/Native archives: each kept only where its name and SHA-256 are ones pinned (the JDK's
+    # archive as .github/actions/pinned-toolchain names it, for a platform gradle/pinned-jdk.properties pins; the Gradle
+    # zip gradle/wrapper/gradle-wrapper.properties names; an archive gradle/kotlin-native-dependencies.txt names). Each
+    # is checked again where it is used, and fetched where it isn't kept: dropped here, a file of other bytes, or that
+    # nothing uses, doesn't sit on the runner's disk through the build.
+    python3 -I - "$work/out" "$pins" <<'PY' || refuse "its toolchain and Kotlin/Native archives can't be checked"
+import hashlib, os, sys
+out, pins = sys.argv[1], sys.argv[2]
+def properties(path):
+    with open(path) as f:
+        return dict(line.strip().split("=", 1) for line in f if "=" in line and not line.lstrip().startswith("#"))
+pinned = {"toolchain": {}, "konan": {}}
+jdk = properties(os.path.join(pins, "pinned-jdk.properties"))
+for key, sha256 in jdk.items():
+    if key.startswith("sha256."):
+        platform = key[len("sha256."):]
+        extension = "zip" if platform.startswith("windows") else "tar.gz"
+        pinned["toolchain"][f"temurin-{jdk['version']}-{platform}.{extension}"] = sha256
+wrapper = properties(os.path.join(pins, "wrapper", "gradle-wrapper.properties"))
+pinned["toolchain"][wrapper["distributionUrl"].replace("\\:", ":").rsplit("/", 1)[1]] = wrapper["distributionSha256Sum"]
+with open(os.path.join(pins, "kotlin-native-dependencies.txt")) as f:
+    for line in f:
+        fields = line.split()
+        if fields and not fields[0].startswith("#"):
+            pinned["konan"][fields[1].rsplit("/", 1)[1]] = fields[0]
+dropped = 0
+example = None
+for part, names in pinned.items():
+    directory = os.path.join(out, part)
+    if not os.path.isdir(directory):
+        continue
+    for name in os.listdir(directory):
+        path = os.path.join(directory, name)
+        sha256 = hashlib.sha256()
+        if name in names:
+            with open(path, "rb") as f:
+                for block in iter(lambda: f.read(1 << 20), b""):
+                    sha256.update(block)
+        if sha256.hexdigest() != names.get(name):
+            os.remove(path)
+            dropped += 1
+            example = example or f"{part}/{name}"
+if dropped:
+    print(f"::warning::{dropped} of the release dependencies' toolchain and Kotlin/Native archives aren't ones pinned, by name and SHA-256 (such as {example}), so the build fetches what it uses of them.")
+PY
     # Moved, not copied, into directories nothing else has put anything in yet.
     for target in "$gradle_files" "$toolchain_files" "$konan_files" "$binaryen_mirror"; do
         if [[ -e "$target" && -n "$(ls -A "$target")" ]]; then
@@ -237,7 +285,7 @@ PY
     fi
     trap - ERR
     count() { find "$1" -type f 2> /dev/null | wc -l | tr -d ' '; }
-    echo "Unpacked $(count "$gradle_files") of Gradle's files, checked, and $(count "$toolchain_files") toolchain archives and $(count "$konan_files") of Kotlin/Native's archives, each checked as it is used."
+    echo "Unpacked $(count "$gradle_files") of Gradle's files, checked, and $(count "$toolchain_files") toolchain archives and $(count "$konan_files") of Kotlin/Native's archives, each checked, and checked again as it is used."
     ;;
 *)
     echo "compiler-release-dependencies.sh stage <dir> | unpack <zip>" >&2

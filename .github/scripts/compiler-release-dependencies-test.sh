@@ -6,10 +6,11 @@
 # their SHA-1's path, and go on; must take entries of any mode, and clean up after them; must refuse whole, putting
 # nothing anywhere, a zip with a name that climbs out, an absolute name, a name at a path stage doesn't make, a name
 # twice, a link, more entries or bytes than its limits, an entry of more bytes than it declares, or that isn't a zip;
-# must take away what it put in place where a step fails, in a $(...) too; and must take the test's own metadata only in the test. check must pass the dependencies the list pins,
-# and fail one it doesn't, or a list that pins nothing. fetch must put in Kotlin/Native's cache only an archive with
-# the pinned SHA-256, kept or fetched again, and fail where it has none. Run by compiler-release.yml's dry run, in
-# build, on macOS as build unpacks there.
+# must drop a toolchain or Kotlin/Native archive whose name and SHA-256 aren't pinned, and go on; must take away what
+# it put in place where a step fails, in a $(...) too; and must take the test's own pins only in the test. check must
+# pass the dependencies the list pins, and fail one it doesn't, or a list that pins nothing. fetch must put in
+# Kotlin/Native's cache only an archive with the pinned SHA-256, kept or fetched again, and fail where it has none. Run
+# by compiler-release.yml's dry run, in build, on macOS as build unpacks there.
 #   compiler-release-dependencies-test.sh
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
@@ -24,12 +25,17 @@ jar=gradle/org.example/lib/1.0/$sha1/lib-1.0.jar
 binaryen=gradle/com.github.webassembly/binaryen/123/$sha1/binaryen-123-arm64-macos.tar.gz
 good=("$jar" "$binaryen" toolchain/gradle-9.6.1-bin.zip konan/llvm-19-aarch64-macos-essentials-79.tar.gz)
 # What unpack checks against, in place of the repository's: this runner's binaryen platform, which the test names, and
-# verification metadata that pins zipped's bytes for the jar and for binaryen's archive on that platform and another.
-# unpack takes them only with COMPILER_RELEASE_DEPENDENCIES_TEST set.
+# pins of zipped's bytes: verification metadata for the jar and for binaryen's archive on that platform and another,
+# and the JDK's, Gradle's and Kotlin/Native's archives. unpack takes them only with COMPILER_RELEASE_DEPENDENCIES_TEST
+# set.
 export COMPILER_RELEASE_DEPENDENCIES_TEST=true COMPILER_BINARYEN_PLATFORM=arm64-macos
 other_binaryen="${binaryen%-arm64-macos.tar.gz}-x86_64-linux.tar.gz"
-export COMPILER_VERIFICATION_METADATA="$work/verification-metadata.xml"
-cat > "$COMPILER_VERIFICATION_METADATA" <<XML
+export COMPILER_PINS="$work/pins"
+mkdir -p "$COMPILER_PINS/wrapper"
+printf '# made up\nversion=21.0.13+9\nsha256.mac-aarch64=%s\nsha256.windows-x64=%s\n' "$sha256" "$sha256" > "$COMPILER_PINS/pinned-jdk.properties"
+printf 'distributionSha256Sum=%s\ndistributionUrl=https\\://services.gradle.org/distributions/gradle-9.6.1-bin.zip\n' "$sha256" > "$COMPILER_PINS/wrapper/gradle-wrapper.properties"
+printf '# made up\n%s https://download.example/native/llvm-19-aarch64-macos-essentials-79.tar.gz\n' "$sha256" > "$COMPILER_PINS/kotlin-native-dependencies.txt"
+cat > "$COMPILER_PINS/verification-metadata.xml" <<XML
 <?xml version="1.0" encoding="UTF-8"?>
 <verification-metadata xmlns="https://schema.gradle.org/dependency-verification">
    <components>
@@ -142,12 +148,35 @@ unpacked "$work/planted.zip"
 [[ "$UNPACKED" == "$(printf '%s\n' "./.cache/drivine-binaryen/version_123/binaryen-version_123-arm64-macos.tar.gz" "./.gradle/caches/modules-2/files-2.1/${binaryen#gradle/}" | sort)" ]] || fail "unpack kept a Gradle file that isn't the pinned bytes at their SHA-1's path: $UNPACKED"
 [[ "$UNPACK_OUT" == *"::warning::3 of the release dependencies' Gradle files aren't the bytes"* ]] || fail "unpack didn't say it dropped three files: $UNPACK_OUT"
 echo "unpack drops a Gradle file of other bytes, at another SHA-1's path, or that the metadata doesn't name"
-# Without COMPILER_RELEASE_DEPENDENCIES_TEST, the repository's own metadata, which pins no org.example.
+# The toolchain and Kotlin/Native archives: kept where their names and SHA-256s are pinned (the JDK's, of any platform
+# pinned, as the toolchain action names it), dropped where their bytes, name or platform aren't, and unpack goes on.
+python3 -I - "$work/archives.zip" <<'PY2'
+import sys, zipfile
+with zipfile.ZipFile(sys.argv[1], "w") as z:
+    for name, data in (("toolchain/temurin-21.0.13+9-mac-aarch64.tar.gz", "a dependency\n"),
+                       ("toolchain/temurin-21.0.13+9-windows-x64.zip", "a dependency\n"),
+                       ("toolchain/gradle-9.6.1-bin.zip", "planted\n"),
+                       ("toolchain/temurin-21.0.13+9-linux-x64.tar.gz", "a dependency\n"),
+                       ("toolchain/temurin-21.0.13+9-windows-x64.tar.gz", "a dependency\n"),
+                       ("toolchain/filler", "a dependency\n"),
+                       ("konan/llvm-19-aarch64-macos-essentials-79.tar.gz", "a dependency\n"),
+                       ("konan/lldb-4-macos.tar.gz", "a dependency\n")):
+        info = zipfile.ZipInfo(name)
+        info.create_system = 3
+        info.external_attr = 0o100644 << 16
+        z.writestr(info, data)
+PY2
+unpacked "$work/archives.zip"
+[[ "$UNPACKED" == "$(printf '%s\n' ./.cache/drivine-konan-dependencies/llvm-19-aarch64-macos-essentials-79.tar.gz "./.cache/drivine-pinned-toolchain/temurin-21.0.13+9-mac-aarch64.tar.gz" "./.cache/drivine-pinned-toolchain/temurin-21.0.13+9-windows-x64.zip" | sort)" ]] || fail "unpack kept a toolchain or Kotlin/Native archive its pins don't name: $UNPACKED"
+[[ "$UNPACK_OUT" == *"::warning::5 of the release dependencies' toolchain and Kotlin/Native archives aren't ones pinned"* ]] || fail "unpack didn't say it dropped five archives: $UNPACK_OUT"
+echo "unpack drops a toolchain or Kotlin/Native archive whose name or SHA-256 its pins don't name"
+# Without COMPILER_RELEASE_DEPENDENCIES_TEST, the repository's own pins, which name no org.example, nor these bytes.
 home="$work/home-untested"
 mkdir "$home"
 HOME="$home" COMPILER_RELEASE_DEPENDENCIES_TEST= "$here/compiler-release-dependencies.sh" unpack "$work/good.zip" > "$home.out" 2>&1 || fail "unpack exited $?: $(cat "$home.out")"
-[[ ! -e "$home/.gradle/caches/modules-2/files-2.1/${jar#gradle/}" ]] || fail "unpack took the test's metadata outside the test"
-echo "unpack takes the test's metadata only in the test"
+[[ -z "$(cd "$home" && find . -type f)" ]] || fail "unpack took the test's pins outside the test: $(cd "$home" && find . -type f)"
+[[ "$(cat "$home.out")" != *"is refused"* ]] || fail "unpack refused the zip outside the test, rather than check it against the repository's pins: $(cat "$home.out")"
+echo "unpack takes the test's pins only in the test"
 
 # Modes that leave a file unreadable or a directory unlistable: unpack makes them the owner's, checks them as any, and
 # its own clean-up still removes them.
@@ -222,8 +251,8 @@ home="$work/stage-home"
 jardir="$home/.gradle/caches/modules-2/files-2.1/$(dirname "${jar#gradle/}")"
 mkdir -p "$jardir" "$home/.cache/drivine-pinned-toolchain" "$home/.cache/drivine-konan-dependencies"
 printf 'a dependency\n' > "$jardir/${jar##*/}"
-echo zip > "$home/.cache/drivine-pinned-toolchain/gradle-9.6.1-bin.zip"
-echo llvm > "$home/.cache/drivine-konan-dependencies/llvm-19-aarch64-macos-essentials-79.tar.gz"
+printf 'a dependency\n' > "$home/.cache/drivine-pinned-toolchain/gradle-9.6.1-bin.zip"
+printf 'a dependency\n' > "$home/.cache/drivine-konan-dependencies/llvm-19-aarch64-macos-essentials-79.tar.gz"
 echo partial > "$home/.cache/drivine-konan-dependencies/llvm.part"
 HOME="$home" "$here/compiler-release-dependencies.sh" stage "$work/staged" > "$work/stage.out" 2>&1 || fail "stage exited $?: $(cat "$work/stage.out")"
 staged=$(cd "$work/staged" && find . -type f | sort)
