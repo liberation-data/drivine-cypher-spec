@@ -80,13 +80,15 @@ class PostgresTextFloatTest {
         assertEquals(" 1E-10000 ", held(" 1E-0012345 "))
         assertEquals("1.5e+10000", held("1.5e+10000"))
         assertEquals(2, Regex("""regexp_replace\(""").findAll(sql).count(), sql)
-        // Rounded to the places a double has, so a number nearer 0 than any double is 0, in few enough digits to read.
-        assertEquals(2, Regex("""ELSE round\(.*?, 400\) END""").findAll(sql).count(), sql)
-        // Past a double's range, the infinity: numeric's where the statement may work one out, as this one may, so it is
-        // written as the number that stands for it and is equal to one given; else 1e309, not written in 10,001 digits.
-        assertEquals(2, Regex(""" >= 1e309 THEN 'Infinity'::numeric WHEN [^']*? <= -1e309 THEN '-Infinity'::numeric ELSE round\(""").findAll(sql).count(), sql)
+        // Nearer 0 than half the least double, 0; else rounded to the places a double has, in few enough digits to read.
+        assertEquals(2, Regex("""WHEN abs\([^']*?\) <= 2.4703282292062327209e-324 THEN 0 ELSE round\(.*?, 400\) END""").findAll(sql).count(), sql)
+        // From where Java rounds to an infinity, 1.7976931348623159e308 among them, the infinity: numeric's where the statement
+        // may work one out, as this one may, so it is written as the number that stands for it and is equal to one given;
+        // else 1e309, not written in 10,001 digits.
+        val overflow = "1.79769313486231580794e308"
+        assertEquals(2, Regex(""" >= $overflow THEN 'Infinity'::numeric WHEN [^']*? <= -$overflow THEN '-Infinity'::numeric WHEN abs\(""").findAll(sql).count(), sql)
         val given = sql("RETURN toFloat(\$s)", mapOf("s" to "1.5"))
-        assertEquals(2, Regex(""" >= 1e309 THEN 1e309 WHEN [^']*? <= -1e309 THEN -1e309 ELSE round\(""").findAll(given).count(), given)
+        assertEquals(2, Regex(""" >= $overflow THEN 1e309 WHEN [^']*? <= -$overflow THEN -1e309 WHEN abs\(""").findAll(given).count(), given)
         for (kept in listOf("1e9999", "1e09999", "1e400", "-1.5e-400", "10000")) assertEquals(kept, held(kept))
         assertFalse(sql("MATCH (n:A) RETURN toInteger(n.s)").contains("regexp_replace"))
     }

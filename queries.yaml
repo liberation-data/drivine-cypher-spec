@@ -3737,9 +3737,13 @@ cases:
         rows: [[{$float: "Infinity"}, {$float: "-Infinity"}, 0.0, 0.0]]
       - note: "Such an infinity is equal to one given."
         only: [neo4j, sql]
-        cypher: "RETURN [toFloat('1e400') = $inf, toFloat('-1e5000000000') = $ninf, toFloat('1e400') = $ninf]"
+        cypher: "RETURN [toFloat('1e400') = $inf, toFloat('-1e5000000000') = $ninf, toFloat('1e400') = $ninf, toFloat('1.7976931348623159e308') = $inf, toFloat('-1.7976931348623159e308') = $ninf]"
         parameters: {inf: {$float: "Infinity"}, ninf: {$float: "-Infinity"}}
-        rows: [[true, true, false]]
+        rows: [[true, true, false, true, true]]
+      - note: "And one that rounds to 0.0 is equal to it."
+        only: [neo4j, sql]
+        cypher: "RETURN [toFloat('2e-324') = 0.0, toFloat('-1e-330') = 0.0, toFloat('3e-324') > 0.0]"
+        rows: [[true, true, true]]
       - note: "A text given as a parameter is read alike. The SQL stores give null for the Java and Cypher forms here (drivine4j#696)."
         only: [neo4j]
         cypher: "RETURN [toFloat($a), toFloat($b), toFloat($c), toFloat($d), toFloat($e), toFloat($f)]"

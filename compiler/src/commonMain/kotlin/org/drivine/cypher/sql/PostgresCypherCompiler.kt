@@ -491,18 +491,20 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
     /**
      * The text [text], a number, as a `numeric` that reads as the double Neo4j's `toFloat` gives (drivine4j#692):
      * - its exponent held to [EXPONENT_BOUND] ([bounded]), past which `numeric` fails;
-     * - past any double's range, the infinity, as Java reads it: where the statement is compiled as one given NaN or an
-     *   infinity, `numeric`'s, which [scalar] writes as the number that stands for it, so it is equal to one given; else
-     *   [INFINITE], which reads as the infinity, where the number itself, `1e10000` written out, would be past the digits
-     *   Drivine reads a JSON number in, and `'Infinity'::numeric` would be written as a text;
-     * - else rounded to [MOST_PLACES], past which a double has no digit, so a number nearer 0 than any double is 0, as in
-     *   Neo4j, and is written in few enough digits to be read (`'1e-999'`).
+     * - from [DOUBLE_OVERFLOW], where Java rounds to an infinity (`'1.7976931348623159e308'`), the infinity: where the
+     *   statement is compiled as one given NaN or an infinity, `numeric`'s, which [scalar] writes as the number that stands
+     *   for it, so it is equal to one given; else [INFINITE], which reads as the infinity, where the number itself, `1e10000`
+     *   written out, would be past the digits Drivine reads a JSON number in, and `'Infinity'::numeric` would be written as
+     *   a text;
+     * - up to [DOUBLE_UNDERFLOW], where Java rounds to 0.0 (`'2e-324'`), 0, so it is equal to 0.0;
+     * - else rounded to [MOST_PLACES], past which a double has no digit, so it is written in few enough digits to be read.
      *
      * The number is bound once ([sharedBound]), however short, so its `regexp_replace` runs once a row.
      */
     private fun textAsFloat(text: String) = sharedBound("CAST(${bounded(text)} AS numeric)") { (n) ->
         val (infinity, negativeInfinity) = if (nonFinite) "'Infinity'::numeric" to "'-Infinity'::numeric" else INFINITE to "-$INFINITE"
-        "CASE WHEN $n >= $INFINITE THEN $infinity WHEN $n <= -$INFINITE THEN $negativeInfinity ELSE round($n, $MOST_PLACES) END"
+        "CASE WHEN $n >= $DOUBLE_OVERFLOW THEN $infinity WHEN $n <= -$DOUBLE_OVERFLOW THEN $negativeInfinity " +
+            "WHEN abs($n) <= $DOUBLE_UNDERFLOW THEN 0 ELSE round($n, $MOST_PLACES) END"
     }
 
     /**
@@ -843,6 +845,18 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
 
         /** The exponent [bounded] holds a larger one to: past a double's range either way, and well within `numeric`'s. */
         private const val EXPONENT_BOUND = 10000
+
+        /**
+         * Where a decimal rounds to an infinity as a double, half an ulp past the greatest, 2^1024 - 2^970
+         * (1.797693134862315807937…e308), here a little past it, so a text between the two is read as the number it is.
+         */
+        private const val DOUBLE_OVERFLOW = "1.79769313486231580794e308"
+
+        /**
+         * Up to which a decimal rounds to 0.0 as a double, half the least, 2^-1075 (2.470328229206232720882…e-324), here a
+         * little past it.
+         */
+        private const val DOUBLE_UNDERFLOW = "2.4703282292062327209e-324"
 
         /**
          * Below it, `exp` is nearer 0 than the least double, half of 2^-1074, and Java gives 0.0: ln(2^-1075) is
