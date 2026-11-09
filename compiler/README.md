@@ -409,7 +409,10 @@ first version is published by hand, and every later one by `publish-npm`:
 2. A maintainer of the `@liberation-data` scope publishes that tarball once: `npm publish <tarball> --access public`,
    with `--tag next` for a version with a suffix. This one version has no provenance, as it isn't published from a run.
 3. On npmjs.com, in the package's settings, add a trusted publisher: GitHub Actions, organization
-   `liberation-data`, repository `drivine-cypher-spec`, workflow `compiler-release.yml`, environment `release`.
+   `liberation-data`, repository `drivine-cypher-spec`, workflow `compiler-release.yml`, environment `release`. Save
+   it, and give it the permission to publish directly, not only to stage: a new trusted publisher may only stage a
+   version for a maintainer to publish (npm's staged publishing), and `npm publish` from the workflow then fails with
+   "OIDC permission denied". v0.33.0's first publish failed on both, an unsaved publisher and a stage-only one.
 
 Until then a tag's run publishes to Maven Central and `publish-npm` fails at npm's refusal: publish that tag's tarball
 as above, set the publisher, and re-run `publish-npm` alone ("Re-run failed jobs"), which waits for the reviewer again
