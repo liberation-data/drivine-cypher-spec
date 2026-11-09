@@ -1,0 +1,240 @@
+# The drivine CLI's cases: see README.md in this directory. A runner empties the graph before each case.
+cases:
+  - name: "plain prints each kind of value as cypher-shell does"
+    cypherShell: true
+    args: ["--format", "plain", "RETURN 1 AS n, 'a' AS s, null AS z, [1, 'b'] AS l, {k: 2} AS m, 1.5 AS f, true AS b"]
+    stdout: "n, s, z, l, m, f, b\n1, \"a\", NULL, [1, \"b\"], {k: 2}, 1.5, TRUE\n"
+    exit: 0
+
+  - name: "auto is plain when stdout is not a terminal"
+    cypherShell: true
+    args: ["RETURN 1 AS n, 'a' AS s"]
+    stdout: "n, s\n1, \"a\"\n"
+    exit: 0
+
+  - name: "plain prints nothing for a result with no rows"
+    cypherShell: true
+    args: ["--format", "plain", "MATCH (n:Nope) RETURN n"]
+    stdout: ""
+    exit: 0
+
+  - name: "verbose prints a table and its count of rows"
+    cypherShell: true
+    args: ["--format", "verbose", "RETURN 1 AS n, 'a' AS s, null AS z, [1, 'b'] AS l, {k: 2} AS m, 1.5 AS f, true AS b"]
+    stdout: "+-------------------------------------------------+\n| n | s   | z    | l        | m      | f   | b    |\n+-------------------------------------------------+\n| 1 | \"a\" | NULL | [1, \"b\"] | {k: 2} | 1.5 | TRUE |\n+-------------------------------------------------+\n\n1 row\n"
+    exit: 0
+
+  - name: "verbose prints the columns of a result with no rows"
+    cypherShell: true
+    args: ["--format", "verbose", "MATCH (n:Nope) RETURN n"]
+    stdout: "+---+\n| n |\n+---+\n+---+\n\n0 rows\n"
+    exit: 0
+
+  - name: "verbose prints the store's counts of what a statement wrote"
+    cypherShell: true
+    only: [neo4j]
+    args: ["--format", "verbose", "CREATE (n:T) DELETE n"]
+    stdout: "0 rows\nCreated 1 node, deleted 1 node, added 1 label\n"
+    exit: 0
+
+  - name: "plain prints a node and a relationship as cypher-shell does"
+    cypherShell: true
+    args: ["--format", "plain", "CREATE (n:P {name: 'x'})-[r:K {w: 1}]->(m:Q) RETURN n, r, m"]
+    stdout: "n, r, m\n(:P {name: \"x\"}), [:K {w: 1}], (:Q)\n"
+    exit: 0
+
+  - name: "-c runs as the positional argument does"
+    args: ["--format", "plain", "-c", "RETURN 2 AS two"]
+    stdout: "two\n2\n"
+    exit: 0
+
+  - name: "A statement that fails exits with 1, and prints nothing to stdout"
+    cypherShell: true
+    args: ["--format", "plain", "RETURN 1/0"]
+    stdout: ""
+    exit: 1
+
+  - name: "A statement that doesn't parse exits with 1"
+    cypherShell: true
+    args: ["--format", "plain", "RETURN ("]
+    stdout: ""
+    exit: 1
+
+  - name: "A file is split on ; outside strings and comments"
+    cypherShell: true
+    files: {"f.cypher": "RETURN 1 AS a;\nRETURN \"x;y\" AS b;\n// c;\nRETURN 2 AS c;\n"}
+    args: ["--format", "plain", "-f", "f.cypher"]
+    stdout: "a\n1\nb\n\"x;y\"\nc\n2\n"
+    exit: 0
+
+  - name: "A ; in a block comment or a backticked name doesn't split"
+    files: {"f.cypher": "/* a; b */ RETURN 1 AS `x;y`;\nRETURN 'it''s' AS q, \"\\\";\" AS r;\n"}
+    args: ["--format", "plain", "-f", "f.cypher"]
+    stdout: "x;y\n1\nq, r\n\"it's\", \"\\\";\"\n"
+    exit: 0
+    note: "Cypher writes a ' in a '…' text as \\' or ''."
+
+  - name: "The text after the last ; runs, and a statement of only comments doesn't"
+    stdin: "RETURN 1 AS a;\n// nothing here;\n  ;\nRETURN 2 AS b"
+    args: ["--format", "plain"]
+    stdout: "a\n1\nb\n2\n"
+    exit: 0
+
+  - name: "A file stops at its first failing statement"
+    cypherShell: true
+    files: {"g.cypher": "RETURN 1 AS a;\nRETURN 1/0;\nRETURN 2 AS c;\n"}
+    args: ["--format", "plain", "-f", "g.cypher"]
+    stdout: "a\n1\n"
+    exit: 1
+
+  - name: "--fail-at-end runs every statement, and still exits with 1"
+    cypherShell: true
+    files: {"g.cypher": "RETURN 1 AS a;\nRETURN 1/0;\nRETURN 2 AS c;\n"}
+    args: ["--format", "plain", "--fail-at-end", "-f", "g.cypher"]
+    stdout: "a\n1\nc\n2\n"
+    exit: 1
+
+  - name: "--continue is --fail-at-end"
+    files: {"g.cypher": "RETURN 1 AS a;\nRETURN 1/0;\nRETURN 2 AS c;\n"}
+    args: ["--format", "plain", "--continue", "-f", "g.cypher"]
+    stdout: "a\n1\nc\n2\n"
+    exit: 1
+
+  - name: ":param, :begin and :rollback in a file"
+    cypherShell: true
+    files: {"h.cypher": ":param x => 5\nRETURN $x AS x;\n:begin\nCREATE (n:B) RETURN 1 AS made;\n:rollback\nMATCH (n:B) RETURN count(n) AS c;\n"}
+    args: ["--format", "plain", "-f", "h.cypher"]
+    stdout: "x\n5\nmade\n1\nc\n0\n"
+    exit: 0
+
+  - name: ":commit keeps what the transaction wrote"
+    files: {"h.cypher": ":begin\nCREATE (n:B);\nCREATE (n:B);\n:commit\nMATCH (n:B) RETURN count(n) AS c;\n"}
+    args: ["--format", "plain", "-f", "h.cypher"]
+    stdout: "c\n2\n"
+    exit: 0
+
+  - name: "A file that ends inside a transaction rolls it back"
+    files: {"h.cypher": ":begin\nCREATE (n:B);\n"}
+    args: ["--format", "plain", "-f", "h.cypher"]
+    exit: 0
+
+  - name: "Statements piped to stdin run"
+    cypherShell: true
+    stdin: "RETURN 3 AS three;\n"
+    args: ["--format", "plain"]
+    stdout: "three\n3\n"
+    exit: 0
+
+  - name: "Piped stdin, with no --format, is plain"
+    cypherShell: true
+    stdin: "RETURN 3 AS three;\n"
+    args: []
+    stdout: "three\n3\n"
+    exit: 0
+
+  - name: "-P takes NAME => EXPRESSION"
+    cypherShell: true
+    args: ["--format", "plain", "-P", "y => 7", "RETURN $y AS y"]
+    stdout: "y\n7\n"
+    exit: 0
+
+  - name: "-P takes a map"
+    cypherShell: true
+    args: ["--format", "plain", "-P", "{y: 8}", "RETURN $y AS y"]
+    stdout: "y\n8\n"
+    exit: 0
+
+  - name: "-P takes NAME=EXPRESSION, and a later parameter replaces an earlier one"
+    args: ["--format", "plain", "-P", "y=1", "--param", "y => 'z'", "RETURN $y AS y"]
+    stdout: "y\n\"z\"\n"
+    exit: 0
+
+  - name: "NEO4J_USERNAME and NEO4J_PASSWORD give the user and the password"
+    cypherShell: true
+    only: [neo4j, postgres, oracle]
+    env: {DRIVINE_PASSWORD: null, NEO4J_USERNAME: "$user", NEO4J_PASSWORD: "$password"}
+    args: ["--format", "plain", "RETURN 4 AS four"]
+    stdout: "four\n4\n"
+    exit: 0
+    note: "$user and $password are the store's, as the runner has them."
+
+  - name: "-p is taken, with a warning"
+    only: [neo4j, postgres, oracle]
+    env: {DRIVINE_PASSWORD: null}
+    args: ["--format", "plain", "-u", "$user", "-p", "$password", "RETURN 5 AS five"]
+    stdout: "five\n5\n"
+    stderr: "a password given with -p shows in ps and in your shell history"
+    exit: 0
+
+  - name: "A wrong password exits with 3"
+    only: [neo4j, postgres, oracle]
+    env: {DRIVINE_PASSWORD: "not-the-password"}
+    args: ["--format", "plain", "RETURN 1"]
+    stdout: ""
+    exit: 3
+
+  - name: "A store that can't be reached exits with 3"
+    store: false
+    args: ["-a", "bolt://localhost:1", "--format", "plain", "RETURN 1"]
+    stdout: ""
+    exit: 3
+
+  - name: "An unknown flag exits with 2, naming it"
+    store: false
+    args: ["--nope", "RETURN 1"]
+    stdout: ""
+    stderr: "--nope"
+    exit: 2
+
+  - name: "--change-password is refused"
+    store: false
+    args: ["--change-password"]
+    stderr: "--change-password"
+    exit: 2
+
+  - name: "Two inputs exit with 2"
+    store: false
+    files: {"f.cypher": "RETURN 1;\n"}
+    args: ["-f", "f.cypher", "RETURN 2"]
+    exit: 2
+
+  - name: "--version prints drivine's version"
+    store: false
+    args: ["--version"]
+    stdoutLines: ["^drivine \\S+$"]
+    exit: 0
+
+  - name: "--explain prints the SQL a statement compiles to, and runs nothing"
+    only: [sql]
+    args: ["--explain", "CREATE (n:Explained) RETURN n"]
+    stdoutLines: ["\\S"]
+    exit: 0
+
+  - name: "--explain is refused on a graph engine"
+    only: [graph]
+    args: ["--explain", "RETURN 1"]
+    stdout: ""
+    exit: 2
+
+  - name: "--encryption is refused on a SQL store"
+    only: [sql]
+    args: ["--encryption", "true", "RETURN 1"]
+    stdout: ""
+    exit: 2
+
+  - name: "json prints a line per statement"
+    stdin: "RETURN 1 AS n, 'a' AS s, null AS z, [1.5, true] AS l, {k: 2} AS m;\nUNWIND [1, 2] AS x RETURN x;\n"
+    args: ["--format", "json"]
+    stdout: "{\"columns\":[\"n\",\"s\",\"z\",\"l\",\"m\"],\"rows\":[[1,\"a\",null,[1.5,true],{\"k\":2}]]}\n{\"columns\":[\"x\"],\"rows\":[[1],[2]]}\n"
+    exit: 0
+
+  - name: "json writes NaN and the infinities as the spec does"
+    only: [neo4j, sql]
+    args: ["--format", "json", "RETURN 0.0 / 0.0 AS nan, 1.0 / 0.0 AS inf"]
+    stdout: "{\"columns\":[\"nan\",\"inf\"],\"rows\":[[{\"$float\":\"NaN\"},{\"$float\":\"Infinity\"}]]}\n"
+    exit: 0
+
+  - name: "csv quotes as RFC 4180 does, and null is an empty field"
+    args: ["--format", "csv", "RETURN 1 AS n, 'a,b' AS s, 'say \"hi\"' AS q, null AS z, [1, 2] AS l"]
+    stdout: "n,s,q,z,l\n1,\"a,b\",\"say \"\"hi\"\"\",,[1,2]\n"
+    exit: 0
