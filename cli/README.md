@@ -238,7 +238,7 @@ On Windows, where a pipe can look like a terminal, `--non-interactive` makes the
 
 ## cypher-shell compatibility (later)
 
-The CLI reads cypher-shell's files and prints values as cypher-shell does, but its flags, environment variables and exit codes are Drivine's own. A mode that takes cypher-shell's, so that `alias cypher-shell=drivine` works and a script written for cypher-shell runs unchanged, is a later issue. What differs today:
+The CLI reads cypher-shell's files and prints values as cypher-shell does, but its flags, environment variables and exit codes are Drivine's own. A mode that takes cypher-shell's, so that `alias cypher-shell=drivine` works and a script written for cypher-shell runs unchanged, is a later issue, [liberation-data/drivine4j#720](https://github.com/liberation-data/drivine4j/issues/720). What differs today:
 
 - **Flag names.** `drivine` takes `--user` beside `--username`, and has `--graph`, `--type`, `--profile`, `--continue` and `--explain`, which cypher-shell doesn't. cypher-shell's `--uri`, `--debug`, `--encryption`, `--access-mode`, `--impersonate`, `--notifications`, `--enable-autocompletions`, `--error-format` and `--change-password` are unknown flags.
 - **`-p` and `--password`.** cypher-shell takes a password on the command line. `drivine` refuses it.
