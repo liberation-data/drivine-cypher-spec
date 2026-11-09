@@ -158,7 +158,7 @@ Any other command fails as a statement fails, and prints `Could not find command
 
 If the input ends inside a transaction, the transaction is rolled back, as cypher-shell does.
 
-FalkorDB has no multi-statement transactions. There `:begin` prints one line to stderr, `FalkorDB has no multi-statement transactions; each statement runs and commits on its own`, and the run goes on, each statement committing as it runs. `:commit` does nothing. `:rollback` fails as a command does, with a message on stderr and exit code 1, since nothing can be rolled back.
+FalkorDB has no multi-statement transactions. There `:begin` prints one line to stderr, `FalkorDB has no multi-statement transactions; each statement runs and commits on its own`, and the run goes on, each statement committing as it runs. `:commit` does nothing. `:rollback` fails as a command does, with a message on stderr and exit code 1, since nothing can be rolled back. An input that ends after `:begin` with no `:commit` rolls nothing back there, and doesn't fail.
 
 ## Parameters
 
