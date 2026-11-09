@@ -443,8 +443,8 @@ into step 2 could change what it builds whatever it then checked. So:
   kept, or the upload fails, it uploads nothing, and the job itself never fails the run; what its upload can do to step
   2 is below.
 - Step 2 asks GitHub the artifact's size first, and downloads it only where it is one artifact of at most 3 GB, as
-  the download is written whole before anything checks it. It downloads it as the zip it is, unopened, and `compiler-release-dependencies.sh unpack` checks it
-  before it puts anything in place: every entry is a plain file or directory at a path `stage` makes (no link, no `.`
+  the download is written whole before anything checks it. It downloads it as the zip it is, unopened, and
+  `compiler-release-dependencies.sh unpack` checks it before it puts anything in place: every entry is a plain file or directory at a path `stage` makes (no link, no `.`
   or `..`, nothing but Gradle's files, the toolchain archives and Kotlin/Native's archives), no name is there twice in
   any case, and there are at most 5,000 entries and 3 GB unpacked. It is unpacked by Python's `zipfile`, not `unzip`,
   which writes as much as an entry's data holds whatever size the zip declares for it: `zipfile` writes no more than the
