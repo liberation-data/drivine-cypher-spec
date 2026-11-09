@@ -15,7 +15,8 @@
 #     the POMs Gradle downloads but doesn't record in gradle/verification-metadata.xml, of modules published with
 #     Gradle's module metadata: so the release fetches those each time, small files from Maven Central and the Gradle
 #     Plugin Portal. It fails where a file it keeps has a name unpack would refuse, so a name outside the layout below
-#     fails the job that keeps the entry, rather than leaving every release to fetch everything with only a warning.
+#     fails the job that keeps the entry, rather than leaving every release to fetch everything with only a warning; and
+#     likewise where it holds more entries or bytes than unpack takes.
 #
 #   compiler-release-dependencies.sh unpack <zip>
 #     Puts the files of a zip of such a <dir> where the build looks for them. The zip is the dependencies job's upload
@@ -177,6 +178,14 @@ stage)
     # Tested by what it prints, not by its status: with pipefail, a head that stops reading fails the pipe.
     if bad=$(cd "$dir" && find . -type f | sed 's|^\./||' | grep -vE "$allowed" | head -n 1); [[ -n "$bad" ]]; then
         echo "::error::$bad isn't a name unpack takes, so it would refuse the entry: widen its pattern, and its test."
+        exit 1
+    fi
+    # Within unpack's limits, counted as it counts them (every entry, and the space it takes unpacked), so an entry too
+    # big fails the job that keeps it, rather than every release refusing it with only a warning.
+    entries=$(find "$dir" -mindepth 1 | wc -l | tr -d ' ')
+    used=$(du -sk "$dir" | cut -f1)
+    if (( entries > max_entries || used * 1024 > max_bytes )); then
+        echo "::error::$dir holds $entries entries in ${used} KB, more than unpack takes ($max_entries, $max_bytes bytes), so it would refuse the entry: raise its limits, and build's."
         exit 1
     fi
     echo "Staged $(find "$dir" -type f | wc -l | tr -d ' ') files, $(du -sh "$dir" | cut -f1), in $dir."

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # compiler-release-dependencies.sh's and compiler-konan-dependencies.sh's own test, over made-up zips and dependencies,
 # in a made-up home. stage must copy a home's dependencies into the layout unpack takes, keeping only what unpack
-# keeps, so unpack of its entry warns of nothing, and fail on a name or a link unpack would refuse. unpack must put a
+# keeps, so unpack of its entry warns of nothing, and fail on a name or a link unpack would refuse, or on more entries
+# or bytes than unpack takes. unpack must put a
 # zip of stage's paths where the build looks for them, laying out the runner's binaryen archive as its releases are;
 # must drop a Gradle file that isn't the bytes the verification metadata pins at
 # their SHA-1's path, and go on; must take entries of any mode, and clean up after them; must refuse whole, putting
@@ -273,6 +274,14 @@ grep -q "Left out 1 of Gradle's files.*lib-1.0.pom" "$work/stage.out" || fail "s
 grep -q "Left out 1 toolchain.*gradle-9.5-bin.zip" "$work/stage.out" || fail "stage didn't say it left out the archive: $(cat "$work/stage.out")"
 [[ "$(cat "$work/stage.out")" != *"::warning::"* ]] || fail "stage warned: $(cat "$work/stage.out")"
 echo "stage copies the dependencies, and of them only what unpack keeps, so unpack of its entry warns of nothing"
+# More entries or bytes than unpack takes: stage fails, rather than make an entry every release refuses.
+for limit in COMPILER_MAX_ENTRIES=3 COMPILER_MAX_BYTES=20; do
+    if env HOME="$home" "$limit" "$here/compiler-release-dependencies.sh" stage "$work/staged-${limit%%=*}" > "$work/stage.out" 2>&1; then
+        fail "stage made an entry beyond unpack's limits ($limit)"
+    fi
+    grep -q "::error::.*more than unpack takes" "$work/stage.out" || fail "stage didn't say the entry is beyond unpack's limits ($limit): $(cat "$work/stage.out")"
+done
+echo "stage fails where it holds more entries or bytes than unpack takes"
 # A name unpack refuses, of a file the metadata pins (one it doesn't pin, stage leaves out).
 printf 'a dependency\n' > "$jardir/lib 1.0.jar"
 if HOME="$home" "$here/compiler-release-dependencies.sh" stage "$work/staged-odd" > "$work/stage.out" 2>&1; then

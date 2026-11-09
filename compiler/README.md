@@ -434,8 +434,8 @@ into step 2 could change what it builds whatever it then checked. So:
   so an entry it made unpacks with no warning, and a warning at `unpack` means the entry isn't one `stage` made. It
   leaves out, each time, the POMs Gradle downloads but doesn't record in `gradle/verification-metadata.xml`, of modules
   published with Gradle's module metadata (some 80 of them), so step 2 fetches those each release: small files, from
-  Maven Central and the Gradle Plugin Portal. `stage` fails where a file it keeps has a name `unpack` would refuse, so
-  such a name fails this job, not every release, quietly, with only a warning. GitHub drops an entry no run has read for
+  Maven Central and the Gradle Plugin Portal. `stage` fails where a file it keeps has a name `unpack` would refuse, or
+  where it holds more entries or bytes than `unpack` takes, so such an entry fails this job, not every release, quietly, with only a warning. GitHub drops an entry no run has read for
   7 days, so the first tag after a quiet week fetches everything; to keep it warm before a tag, run workflow_dispatch of
   `Compiler release` on `main` (a dry run), whose `dependencies` job restores it (`Compiler`'s own job only looks it
   up, which may not count as a read). An entry is about 1.2 GB, of the repository's 10 GB of Actions cache: a change of
@@ -530,7 +530,7 @@ for any other deployment. It also checks that the signing refuses a bundle it mu
 (`.github/scripts/compiler-release-sign-test.sh`): one with a link among thousands, a file, a version or a path that no
 publication makes, or a checksum of a file it doesn't hold. And in step 2, before it unpacks the dependencies, it checks
 that `stage` keeps only the paths `unpack` takes, and of the files only those `unpack` keeps (leaving out a POM the
-metadata doesn't name), so `unpack` of its entry warns of nothing, that `unpack` refuses whole a zip with a name that climbs out, an absolute
+metadata doesn't name), so `unpack` of its entry warns of nothing, and fails beyond `unpack`'s limits, that `unpack` refuses whole a zip with a name that climbs out, an absolute
 name, a path `stage` doesn't make, a name twice, a link, more entries or bytes than its limits, or an entry of more
 bytes than it declares, drops a Gradle file
 of other bytes at its real path, at another SHA-1's path or that the metadata doesn't name, takes entries whose modes
