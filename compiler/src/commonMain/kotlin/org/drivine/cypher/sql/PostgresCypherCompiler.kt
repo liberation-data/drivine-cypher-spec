@@ -197,6 +197,18 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
     override fun keyJoin(table: String, row: String, key: String, id: String): String =
         lateral("SELECT * FROM $table $row WHERE $row.$key = $id OFFSET 0", row, optional = true, columns = emptyList())
 
+    /**
+     * A probe of the relationships of one end for each row, which Postgres plans as a scan of that end's index whatever the
+     * table's statistics say. Joined plainly, a `MERGE`'s read of its pattern in a loop was planned, with the relationship
+     * table analyzed while the loop's own rows were uncommitted (as an autovacuum or an autoanalyze landing mid-loop leaves
+     * it: pages, no rows), as a scan of the whole of an index by the relationship's type alone, filtered for the row's node:
+     * `MATCH (n) MERGE (n)-[:R]->(n)` took 18 s over 20,000 nodes where it takes 0.5 s (drivine4j#663, drivine#671). In the
+     * probe the end's equality is the only condition an index can answer. `OFFSET 0` keeps the subquery from being pulled
+     * up into a plain join.
+     */
+    override fun endProbe(rows: String, row: String, end: String, id: String): String =
+        lateral("SELECT * FROM $rows $row WHERE $row.$end = $id OFFSET 0", row, optional = false, columns = emptyList())
+
     /** The property's text, as a range index or a uniqueness constraint reads it with `->>`, compared with the value's. */
     override fun indexedEquality(property: String, value: String, of: IndexedProperty?): String? =
         PROPERTY_READ.matchEntire(property)?.let { "(${it.groupValues[1]} ->> ${it.groupValues[2]}) = ($value #>> '{}')" }
