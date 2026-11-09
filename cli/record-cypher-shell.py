@@ -4,6 +4,10 @@ Runs each case in cli.yaml marked `cypherShell: true` through cypher-shell, in a
 cypher-shell gives the case's stdout, stderr and exit code. That keeps the cases' claim, that drivine prints what
 cypher-shell prints, measured against cypher-shell itself.
 
+It checks the cases of both modes. A default-mode case marked `cypherShell: true` is one where drivine already gives
+what cypher-shell gives. A case marked `mode: cypher-shell` is a test of the cypher-shell compatibility mode, which
+comes later. Both are checked against cypher-shell now.
+
     cli/record-cypher-shell.py [--image neo4j:2026.10.1]
 
 It needs Docker, and PyYAML or Ruby to read the YAML. It starts its own container, and removes it when it is done. It
@@ -73,16 +77,19 @@ def main():
                 mode = format(int(str(mode), 8), "o")
                 run("docker", "exec", "-i", name, "sh", "-c", f"cat > {path} && chmod {mode} {path}", stdin=text)
 
-            # The runner gives drivine the password in DRIVINE_PASSWORD, which cypher-shell doesn't read, so it is
-            # given here as NEO4J_PASSWORD. A case's DRIVINE_PASSWORD comes before its NEO4J_PASSWORD, as in drivine.
+            # The runner gives drivine the user and the password in DRIVINE_USER and DRIVINE_PASSWORD, which
+            # cypher-shell doesn't read, so they are given here as NEO4J_USERNAME and NEO4J_PASSWORD. A case's
+            # DRIVINE_USER and DRIVINE_PASSWORD come before its NEO4J_USERNAME and NEO4J_PASSWORD,
+            # as the compatibility mode's cases say.
             env = {"NEO4J_USERNAME": "neo4j", "NEO4J_PASSWORD": password}
             given = dict(case.get("env") or {})
-            if "DRIVINE_PASSWORD" in given:
-                drivine = given.pop("DRIVINE_PASSWORD")
-                if drivine is None:
-                    env.pop("NEO4J_PASSWORD")
-                else:
-                    given["NEO4J_PASSWORD"] = drivine
+            for drivine, neo4j in (("DRIVINE_USER", "NEO4J_USERNAME"), ("DRIVINE_PASSWORD", "NEO4J_PASSWORD")):
+                if drivine in given:
+                    value = given.pop(drivine)
+                    if value is None:
+                        env.pop(neo4j)
+                    else:
+                        given[neo4j] = value
             for key, value in given.items():
                 if value is None:
                     env.pop(key, None)

@@ -20,20 +20,39 @@ cases:
 
   - name: "verbose prints a table and its count of rows"
     cypherShell: true
+    mode: cypher-shell
     args: ["--format", "verbose", "RETURN 1 AS n, 'a' AS s, null AS z, [1, 'b'] AS l, {k: 2} AS m, 1.5 AS f, true AS b"]
+    stdout: "+-------------------------------------------------+\n| n | s   | z    | l        | m      | f   | b    |\n+-------------------------------------------------+\n| 1 | \"a\" | NULL | [1, \"b\"] | {k: 2} | 1.5 | TRUE |\n+-------------------------------------------------+\n\n1 row\n"
+    exit: 0
+
+  - name: "table prints a table and its count of rows"
+    args: ["--format", "table", "RETURN 1 AS n, 'a' AS s, null AS z, [1, 'b'] AS l, {k: 2} AS m, 1.5 AS f, true AS b"]
     stdout: "+-------------------------------------------------+\n| n | s   | z    | l        | m      | f   | b    |\n+-------------------------------------------------+\n| 1 | \"a\" | NULL | [1, \"b\"] | {k: 2} | 1.5 | TRUE |\n+-------------------------------------------------+\n\n1 row\n"
     exit: 0
 
   - name: "verbose prints the columns of a result with no rows"
     cypherShell: true
+    mode: cypher-shell
     args: ["--format", "verbose", "MATCH (n:Nope) RETURN n"]
+    stdout: "+---+\n| n |\n+---+\n+---+\n\n0 rows\n"
+    exit: 0
+
+  - name: "table prints the columns of a result with no rows"
+    args: ["--format", "table", "MATCH (n:Nope) RETURN n"]
     stdout: "+---+\n| n |\n+---+\n+---+\n\n0 rows\n"
     exit: 0
 
   - name: "verbose prints the store's counts of what a statement wrote"
     cypherShell: true
+    mode: cypher-shell
     only: [neo4j]
     args: ["--format", "verbose", "CREATE (n:T) DELETE n"]
+    stdout: "0 rows\nCreated 1 node, deleted 1 node, added 1 label\n"
+    exit: 0
+
+  - name: "table prints the store's counts of what a statement wrote"
+    only: [neo4j]
+    args: ["--format", "table", "CREATE (n:T) DELETE n"]
     stdout: "0 rows\nCreated 1 node, deleted 1 node, added 1 label\n"
     exit: 0
 
@@ -127,12 +146,13 @@ cases:
 
   - name: "--fail-at-end runs every statement, and still exits with 1"
     cypherShell: true
+    mode: cypher-shell
     files: {"g.cypher": "RETURN 1 AS a;\nRETURN 1/0;\nRETURN 2 AS c;\n"}
     args: ["--format", "plain", "--fail-at-end", "-f", "g.cypher"]
     stdout: "a\n1\nc\n2\n"
     exit: 1
 
-  - name: "--continue is --fail-at-end"
+  - name: "--continue runs every statement, and still exits with 1"
     files: {"g.cypher": "RETURN 1 AS a;\nRETURN 1/0;\nRETURN 2 AS c;\n"}
     args: ["--format", "plain", "--continue", "-f", "g.cypher"]
     stdout: "a\n1\nc\n2\n"
@@ -274,11 +294,11 @@ cases:
     stdout: ""
     exit: 1
 
-  - name: "A -P of neither form exits with 1"
+  - name: "A -P of neither form exits with 2"
     store: false
     args: ["-P", "y", "RETURN 1"]
     stdout: ""
-    exit: 1
+    exit: 2
 
   - name: "-P takes NAME=EXPRESSION, and a later parameter replaces an earlier one"
     args: ["--format", "plain", "-P", "y=1", "--param", "y => 'z'", "RETURN $y AS y"]
@@ -287,133 +307,119 @@ cases:
 
   - name: "NEO4J_USERNAME and NEO4J_PASSWORD give the user and the password"
     cypherShell: true
+    mode: cypher-shell
     only: [neo4j, postgres, oracle]
-    env: {DRIVINE_PASSWORD: null, NEO4J_USERNAME: "$user", NEO4J_PASSWORD: "$password"}
+    env: {DRIVINE_USER: null, DRIVINE_PASSWORD: null, NEO4J_USERNAME: "$user", NEO4J_PASSWORD: "$password"}
     args: ["--format", "plain", "RETURN 4 AS four"]
     stdout: "four\n4\n"
     exit: 0
     note: "$user and $password are the store's, as the runner has them."
 
   - name: "-p is taken, with a warning"
-    description: "-u comes before NEO4J_USERNAME, and -p before DRIVINE_PASSWORD."
+    mode: cypher-shell
+    description: "-u comes before DRIVINE_USER and NEO4J_USERNAME, and -p before DRIVINE_PASSWORD."
     only: [neo4j, postgres, oracle]
-    env: {NEO4J_USERNAME: "nobody", DRIVINE_PASSWORD: "not-the-password"}
+    env: {DRIVINE_USER: "nobody", NEO4J_USERNAME: "nobody", DRIVINE_PASSWORD: "not-the-password"}
     args: ["--format", "plain", "-u", "$user", "-p", "$password", "RETURN 5 AS five"]
     stdout: "five\n5\n"
     stderr: "a password given with -p shows in ps and in your shell history"
     exit: 0
 
+  - name: "--user comes before DRIVINE_USER"
+    only: [neo4j, postgres, oracle]
+    env: {DRIVINE_USER: "nobody"}
+    args: ["--format", "plain", "--user", "$user", "RETURN 5 AS five"]
+    stdout: "five\n5\n"
+    exit: 0
+
+  - name: "-p is refused, pointing to DRIVINE_PASSWORD"
+    store: false
+    args: ["-u", "x", "-p", "y", "RETURN 1"]
+    stdout: ""
+    stderr: "use DRIVINE_PASSWORD, a profile or the prompt"
+    exit: 2
+
   - name: "DRIVINE_PASSWORD comes before NEO4J_PASSWORD"
+    mode: cypher-shell
     only: [neo4j, postgres, oracle]
     env: {NEO4J_PASSWORD: "not-the-password"}
     args: ["--format", "plain", "RETURN 6 AS six"]
     stdout: "six\n6\n"
     exit: 0
 
+  - name: "NEO4J_PASSWORD isn't read"
+    only: [neo4j, postgres, oracle]
+    env: {DRIVINE_PASSWORD: null, NEO4J_PASSWORD: "$password"}
+    args: ["--format", "plain", "RETURN 1"]
+    stdout: ""
+    exit: 3
+    note: "With no password, the store refuses the user."
+
   - name: "With no user and no password, and stdin not a terminal, nothing prompts and the store refuses"
     only: [neo4j, postgres, oracle]
-    env: {DRIVINE_PASSWORD: null, NEO4J_USERNAME: null, NEO4J_PASSWORD: null}
+    env: {DRIVINE_USER: null, DRIVINE_PASSWORD: null}
     args: ["--format", "plain", "RETURN 1"]
     stdout: ""
-    exit: 1
-    note: "cypher-shell 2026.10.1 does the same."
-
-  - name: "With --exit-codes=detailed, no user and no password exit with 3"
-    only: [neo4j, postgres, oracle]
-    env: {DRIVINE_PASSWORD: null, NEO4J_USERNAME: null, NEO4J_PASSWORD: null}
-    args: ["--exit-codes=detailed", "--format", "plain", "RETURN 1"]
-    stdout: ""
     exit: 3
+    note: "cypher-shell 2026.10.1 does the same, but exits with 1."
 
-  - name: "A wrong password exits with 1"
+  - name: "A wrong password exits with 3"
     only: [neo4j, postgres, oracle]
     env: {DRIVINE_PASSWORD: "not-the-password"}
     args: ["--format", "plain", "RETURN 1"]
     stdout: ""
-    exit: 1
-
-  - name: "With --exit-codes=detailed, a wrong password exits with 3"
-    only: [neo4j, postgres, oracle]
-    env: {DRIVINE_PASSWORD: "not-the-password"}
-    args: ["--exit-codes=detailed", "--format", "plain", "RETURN 1"]
-    stdout: ""
     exit: 3
 
-  - name: "A store that can't be reached exits with 1"
+  - name: "A store that can't be reached exits with 3"
     store: false
-    args: ["-a", "bolt://localhost:1", "--format", "plain", "RETURN 1"]
-    stdout: ""
-    exit: 1
-
-  - name: "With DRIVINE_EXIT_CODES=detailed, a store that can't be reached exits with 3"
-    store: false
-    env: {DRIVINE_EXIT_CODES: "detailed"}
     args: ["-a", "bolt://localhost:1", "--format", "plain", "RETURN 1"]
     stdout: ""
     exit: 3
 
-  - name: "An unknown flag exits with 1, naming it"
+  - name: "An unknown flag exits with 2, naming it"
     store: false
     args: ["--nope", "RETURN 1"]
     stdout: ""
     stderr: "--nope"
-    exit: 1
-
-  - name: "With --exit-codes=detailed, an unknown flag exits with 2"
-    store: false
-    args: ["--exit-codes=detailed", "--nope", "RETURN 1"]
-    stdout: ""
-    stderr: "--nope"
     exit: 2
 
-  - name: "--exit-codes of a value that isn't one is a bad invocation"
-    store: false
-    args: ["--exit-codes=nope", "RETURN 1"]
-    stdout: ""
-    exit: 1
-
-  - name: "--exit-codes of a value that isn't one exits with 2 under DRIVINE_EXIT_CODES=detailed"
-    store: false
-    env: {DRIVINE_EXIT_CODES: "detailed"}
-    args: ["--exit-codes=nope", "RETURN 1"]
-    stdout: ""
-    exit: 2
-
-  - name: "--change-password is refused"
+  - name: "A cypher-shell flag that isn't Drivine's, such as --change-password, is an unknown flag"
     store: false
     args: ["--change-password"]
     stderr: "--change-password"
-    exit: 1
+    exit: 2
 
-  - name: "Two inputs exit with 1"
+  - name: "Two inputs exit with 2"
     store: false
     files: {"f.cypher": "RETURN 1;\n"}
     args: ["-f", "f.cypher", "RETURN 2"]
-    exit: 1
-
-  - name: "With --exit-codes=detailed, two inputs exit with 2"
-    store: false
-    files: {"f.cypher": "RETURN 1;\n"}
-    args: ["--exit-codes=detailed", "-f", "f.cypher", "RETURN 2"]
     exit: 2
 
-  - name: "A -f file that can't be read exits with 1"
+  - name: "A -f file that can't be read exits with 2"
     store: false
     args: ["-f", "missing.cypher"]
     stdout: ""
-    exit: 1
+    exit: 2
 
   - name: "--fail-fast with --fail-at-end exits with 1"
+    mode: cypher-shell
     store: false
     args: ["--fail-fast", "--fail-at-end", "RETURN 1"]
     stdout: ""
     exit: 1
 
-  - name: "A format that isn't one exits with 1"
+  - name: "A format that isn't one exits with 2"
     store: false
     args: ["--format", "xml", "RETURN 1"]
     stdout: ""
-    exit: 1
+    exit: 2
+
+  - name: "verbose isn't a format"
+    store: false
+    args: ["--format", "verbose", "RETURN 1"]
+    stdout: ""
+    exit: 2
+    note: "table is what cypher-shell calls verbose. The compatibility mode takes verbose."
 
   - name: "--help exits with 0"
     store: false
@@ -421,6 +427,7 @@ cases:
     exit: 0
 
   - name: "NEO4J_ADDRESS gives the address, before NEO4J_URI"
+    mode: cypher-shell
     store: false
     env: {NEO4J_ADDRESS: "sqlite::memory:", NEO4J_URI: "bolt://localhost:1"}
     args: ["--format", "plain", "RETURN 1 AS one"]
@@ -428,6 +435,7 @@ cases:
     exit: 0
 
   - name: "NEO4J_URI gives the address"
+    mode: cypher-shell
     store: false
     env: {NEO4J_URI: "sqlite::memory:"}
     args: ["--format", "plain", "RETURN 1 AS one"]
@@ -435,11 +443,41 @@ cases:
     exit: 0
 
   - name: "-a comes before NEO4J_ADDRESS"
+    mode: cypher-shell
     store: false
     env: {NEO4J_ADDRESS: "bolt://localhost:1"}
     args: ["-a", "sqlite::memory:", "--format", "plain", "RETURN 1 AS one"]
     stdout: "one\n1\n"
     exit: 0
+
+  - name: "DRIVINE_ADDRESS gives the address"
+    store: false
+    env: {DRIVINE_ADDRESS: "sqlite::memory:"}
+    args: ["--format", "plain", "RETURN 1 AS one"]
+    stdout: "one\n1\n"
+    exit: 0
+
+  - name: "-a comes before DRIVINE_ADDRESS"
+    store: false
+    env: {DRIVINE_ADDRESS: "bolt://localhost:1"}
+    args: ["-a", "sqlite::memory:", "--format", "plain", "RETURN 1 AS one"]
+    stdout: "one\n1\n"
+    exit: 0
+
+  - name: "With no address, the invocation is refused"
+    store: false
+    args: ["--format", "plain", "RETURN 1"]
+    stdout: ""
+    stderr: "DRIVINE_ADDRESS"
+    exit: 2
+    note: "There is no default address. cypher-shell, and the compatibility mode, use neo4j://localhost:7687."
+
+  - name: "NEO4J_ADDRESS isn't read"
+    store: false
+    env: {NEO4J_ADDRESS: "sqlite::memory:"}
+    args: ["--format", "plain", "RETURN 1"]
+    stdout: ""
+    exit: 2
 
   - name: "The default: key picks the profile"
     store: false
@@ -458,31 +496,24 @@ cases:
   - name: "An environment variable overrides the profile"
     store: false
     files: {".drivine.yml": "default: \"far\"\nprofiles:\n  far:\n    address: \"bolt://localhost:1\"\n"}
-    env: {NEO4J_ADDRESS: "sqlite::memory:"}
+    env: {DRIVINE_ADDRESS: "sqlite::memory:"}
     args: ["--format", "plain", "RETURN 1 AS one"]
     stdout: "one\n1\n"
     exit: 0
 
-  - name: "A profile with an unknown key exits with 1"
+  - name: "A profile with an unknown key exits with 2"
     store: false
     files: {".drivine.yml": "profiles:\n  mem:\n    address: \"sqlite::memory:\"\n    host: \"x\"\n"}
     args: ["--profile", "mem", "RETURN 1"]
     stdout: ""
-    exit: 1
-
-  - name: "With --exit-codes=detailed, a profile with an unknown key exits with 2"
-    store: false
-    files: {".drivine.yml": "profiles:\n  mem:\n    address: \"sqlite::memory:\"\n    host: \"x\"\n"}
-    args: ["--exit-codes=detailed", "--profile", "mem", "RETURN 1"]
-    stdout: ""
     exit: 2
 
-  - name: "A --profile that names no profile exits with 1"
+  - name: "A --profile that names no profile exits with 2"
     store: false
     files: {".drivine.yml": "profiles:\n  mem:\n    address: \"sqlite::memory:\"\n"}
     args: ["--profile", "nope", "RETURN 1"]
     stdout: ""
-    exit: 1
+    exit: 2
 
   - name: "A profile file that holds a password and others can read is refused"
     store: false
@@ -491,28 +522,51 @@ cases:
     args: ["--profile", "mem", "RETURN 1"]
     stdout: ""
     stderr: "chmod 600"
-    exit: 1
+    exit: 2
     note: "The runner writes the file with mode 0644. On Windows, where the CLI doesn't check a file's mode, this case doesn't hold."
 
   - name: "A profile file of mode 600 gives the password"
     only: [neo4j, postgres, oracle]
     files: {".drivine.yml": {text: "default: \"p\"\nprofiles:\n  p:\n    password: \"$password\"\n", mode: "600"}}
-    env: {DRIVINE_PASSWORD: null, NEO4J_PASSWORD: null}
+    env: {DRIVINE_PASSWORD: null}
     args: ["--format", "plain", "RETURN 7 AS seven"]
     stdout: "seven\n7\n"
     exit: 0
-    note: "The user is the runner's NEO4J_USERNAME, and the address its -a."
+    note: "The user is the runner's DRIVINE_USER, and the address its -a."
+
+  - name: "DRIVINE_PASSWORD comes before the profile's password"
+    only: [neo4j, postgres, oracle]
+    files: {".drivine.yml": {text: "default: \"p\"\nprofiles:\n  p:\n    password: \"not-the-password\"\n", mode: "600"}}
+    args: ["--format", "plain", "RETURN 8 AS eight"]
+    stdout: "eight\n8\n"
+    exit: 0
+    note: "The password is the runner's DRIVINE_PASSWORD."
 
   - name: "-d is refused on SQLite"
     only: [sqlite]
     args: ["-d", "other", "RETURN 1"]
     stdout: ""
-    exit: 1
+    exit: 2
     note: "On SQLite, -a sqlite:path names the file."
 
-  - name: "With --exit-codes=detailed, -d on SQLite exits with 2"
+  - name: "--database is refused on FalkorDB"
+    only: [falkordb]
+    args: ["--database", "other", "RETURN 1"]
+    stdout: ""
+    exit: 2
+    note: "On FalkorDB, --graph names the graph."
+
+  - name: "--graph is refused on Neo4j and Memgraph"
+    only: [neo4j, memgraph]
+    args: ["-g", "other", "RETURN 1"]
+    stdout: ""
+    exit: 2
+    note: "On Neo4j and Memgraph, --database names the database."
+
+  - name: "DRIVINE_DATABASE is refused on SQLite, as -d is"
     only: [sqlite]
-    args: ["--exit-codes=detailed", "-d", "other", "RETURN 1"]
+    env: {DRIVINE_DATABASE: "other"}
+    args: ["RETURN 1"]
     stdout: ""
     exit: 2
 
@@ -532,9 +586,10 @@ cases:
     only: [graph]
     args: ["--explain", "RETURN 1"]
     stdout: ""
-    exit: 1
+    exit: 2
 
   - name: "--encryption is refused on a SQL store"
+    mode: cypher-shell
     only: [sql]
     args: ["--encryption", "true", "RETURN 1"]
     stdout: ""
