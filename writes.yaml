@@ -213,6 +213,58 @@ cases:
       - cypher: "MATCH (:CyWrite)-[r]-() RETURN r"
         rows: []
 
+  - name: "A write after a DELETE"
+    description: "What a statement makes after it deletes is made anew, with no id of what it deleted, and a read after the DELETE finds none of it."
+    steps:
+      - cypher: "CREATE (:CyWrite {num: 1}), (:CyWrite {num: 2})"
+      - note: A MERGE after a DELETE finds nothing it deleted, and makes its node with an id of its own (drivine4j#713).
+        cypher: "MATCH (a:CyWrite) WITH a, elementId(a) AS old DELETE a MERGE (a2:CyWrite) RETURN a2.num, old = elementId(a2)"
+        only: [neo4j, sql]
+        rows: [[null, false], [null, false]]
+      - cypher: "MATCH (a:CyWrite) RETURN count(a)"
+        rows: [1]
+      - note: So too in a later part of the statement.
+        cypher: "MATCH (a:CyWrite) WITH a, elementId(a) AS old DELETE a WITH collect(old) AS olds MERGE (b:CyWrite {num: 4}) RETURN b.num, elementId(b) IN olds"
+        only: [neo4j, sql]
+        rows: [[4, false]]
+      - note: And inside a FOREACH.
+        cypher: "MATCH (a:CyWrite) WITH a, elementId(a) AS old DELETE a FOREACH (x IN [1] | MERGE (:CyWrite {num: 5})) WITH old MATCH (b:CyWrite) RETURN b.num, old = elementId(b)"
+        only: [neo4j, sql]
+        rows: [[5, false]]
+      - note: A match after the DELETE finds none of what it deleted.
+        cypher: "MATCH (a:CyWrite) DELETE a WITH count(*) AS c OPTIONAL MATCH (b:CyWrite) RETURN c, count(b)"
+        rows: [[1, 0]]
+
+  - name: "A relationship written after a DELETE"
+    description: "A relationship a statement makes after it deletes one, or a node with its relationships, takes no id of what it deleted."
+    steps:
+      - cypher: "CREATE (a:CyWrite {k: 'a'}), (b:CyWrite {k: 'b'}) CREATE (a)-[:T {name: 'rel1'}]->(b), (a)-[:T {name: 'rel2'}]->(b)"
+      - note: A MERGE after a DELETE of relationships finds neither, and makes one (drivine4j#713).
+        cypher: "MATCH (a:CyWrite)-[t:T]->(b:CyWrite) WITH a, b, t, elementId(t) AS old DELETE t MERGE (a)-[t2:T {name: 'rel3'}]->(b) RETURN t2.name, old = elementId(t2)"
+        only: [neo4j, sql]
+        rows: [["rel3", false], ["rel3", false]]
+      - cypher: "MATCH (:CyWrite)-[t:T]->(:CyWrite) RETURN t.name"
+        rows: ["rel3"]
+      - note: A node and a relationship made after a DETACH DELETE take neither the node's id nor its relationship's.
+        cypher: "MATCH (a:CyWrite)-[t:T]->(b:CyWrite {k: 'b'}) WITH a, b, elementId(b) AS nb, elementId(t) AS nt DETACH DELETE b CREATE (a)-[s:T]->(c:CyWrite {k: 'c'}) RETURN nb = elementId(c), nt = elementId(s)"
+        only: [neo4j, sql]
+        rows: [[false, false]]
+      - cypher: "MATCH (:CyWrite {k: 'a'})-[:T]->(c:CyWrite) RETURN c.k"
+        rows: ["c"]
+
+  - name: "An id is not used again by a later statement"
+    description: "On the SQL stores, a node or relationship made after another was deleted, in a later statement, never takes the deleted one's id."
+    steps:
+      - note: The node that keeps the ids is made first, so the deleted node is the last one made, the one whose id a store that hands out the next id after the greatest would give again.
+        cypher: "CREATE (:CyWrite:CyKeep) CREATE (a:CyWrite {k: 'a'})-[:T]->(b:CyWrite {k: 'b'})"
+      - note: The deleted node's and relationship's ids are kept on the node that stays (drivine4j#713).
+        cypher: "MATCH (k:CyKeep), (a:CyWrite {k: 'a'})-[t:T]->(b:CyWrite {k: 'b'}) SET k.node = elementId(b), k.rel = elementId(t) DETACH DELETE b"
+      - cypher: "MATCH (a:CyWrite {k: 'a'}) CREATE (a)-[:T]->(:CyWrite {k: 'c'})"
+      - note: "Neo4j doesn't promise this across statements: its ids may be used again once a delete is committed. Drivine's SQL stores never hand an id out twice."
+        only: [sql]
+        cypher: "MATCH (k:CyKeep), (:CyWrite {k: 'a'})-[t:T]->(c:CyWrite {k: 'c'}) RETURN k.node = elementId(c), k.rel = elementId(t)"
+        rows: [[false, false]]
+
   - name: "Read after write"
     description: "A read later in the statement sees what the write made."
     steps:
