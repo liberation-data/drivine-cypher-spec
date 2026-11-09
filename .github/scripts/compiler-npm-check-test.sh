@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# compiler-npm-check.sh's own test: made-up tarballs of the package's files, with a file too many or too few, or another
-# name or version, are refused, and the package's own passes with its integrity. No build.
+# compiler-npm-check.sh's own test: made-up tarballs of the package's files, with a file too many or too few, another
+# name or version, or a package.json with `scripts` or `publishConfig`, are refused, and the package's own passes with its
+# integrity. No build.
 #
 #   .github/scripts/compiler-npm-check-test.sh
 set -euo pipefail
@@ -52,4 +53,13 @@ refused 'another version' "$root/version.tgz" "is $name@1.2.4, not $name@1.2.3"
 
 pack "$root/name.tgz" '{"name": "@drivine/cypher-compiler", "version": "1.2.3"}'
 refused 'another name' "$root/name.tgz" "is @drivine/cypher-compiler@1.2.3, not $name@1.2.3"
+
+pack "$root/scripts.tgz" "{\"name\": \"$name\", \"version\": \"1.2.3\", \"scripts\": {\"postinstall\": \"node index.cjs\"}}"
+refused 'scripts' "$root/scripts.tgz" "package.json has scripts, which"
+
+pack "$root/publish-config.tgz" "{\"name\": \"$name\", \"version\": \"1.2.3\", \"publishConfig\": {\"registry\": \"https://registry.invalid/\"}}"
+refused 'publishConfig' "$root/publish-config.tgz" "package.json has publishConfig, which"
+
+pack "$root/both.tgz" "{\"name\": \"$name\", \"version\": \"1.2.3\", \"scripts\": {}, \"publishConfig\": {}}"
+refused 'scripts and publishConfig' "$root/both.tgz" "package.json has scripts and publishConfig, which"
 echo "compiler-npm-check-test: passed"

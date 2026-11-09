@@ -74,6 +74,12 @@ env:
     drivine-cypher-compiler-linuxx64
     drivine-cypher-compiler-linuxarm64
     drivine-cypher-compiler-mingwx64
+  # The npm that publishes, as desk's and Drivine for TypeScript's releases pin it: npm's latest can be a new major, and
+  # trusted publishing needs 11.5.1 or later. Its tarball is installed only once it has the integrity pinned here, the
+  # registry's dist.integrity of this version (npm view npm@<version> dist.integrity): npm bundles its dependencies, so
+  # the tarball is all of it. A bump changes both.
+  NPM_CLI_VERSION: 11.21.1
+  NPM_CLI_INTEGRITY: sha512-YTzL6QBEJXyHcTu0JiUc7RKMp+mzlJtl7rGLmERaXUQeFHIMc9atdr6G9M9C8vDWbv40epoTQAzNL2/PtZVDhQ==
 
 jobs:
   check:
@@ -293,10 +299,24 @@ jobs:
     steps:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 24
-      # The npm that publishes, as desk's and Drivine for TypeScript's releases pin it: npm's latest can be a new major,
-      # and trusted publishing needs 11.5.1 or later.
-      - run: npm install -g npm@11.21.1
+          # An exact release of Node 24, the LTS, so a new one reaches the publish only through a reviewed bump.
+          node-version: 24.22.2
+      - name: Install the pinned npm, checked against its integrity
+        run: |
+          dir="$RUNNER_TEMP/npm-cli"
+          mkdir -p "$dir"
+          tgz="$(npm pack "npm@$NPM_CLI_VERSION" --pack-destination "$dir" --ignore-scripts --silent | tail -n 1)"
+          got="sha512-$(openssl dgst -sha512 -binary "$dir/$tgz" | base64 | tr -d '\n')"
+          if [[ "$got" != "$NPM_CLI_INTEGRITY" ]]; then
+            echo "::error::npm $NPM_CLI_VERSION's tarball has integrity $got, not $NPM_CLI_INTEGRITY as pinned."
+            exit 1
+          fi
+          npm install -g "$dir/$tgz" --ignore-scripts
+          hash -r
+          if [[ "$(npm --version)" != "$NPM_CLI_VERSION" ]]; then
+            echo "::error::npm is $(npm --version), not $NPM_CLI_VERSION."
+            exit 1
+          fi
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: compiler-npm-${{ env.VERSION }}
@@ -324,7 +344,7 @@ jobs:
           # npm publishes a version with a suffix (1.2.3-rc.1) only under a tag of its own, never as latest.
           tag=latest
           [[ "$VERSION" == *-* ]] && tag=next
-          npm publish "$RUNNER_TEMP/npm/$TARBALL" --provenance --access public --tag "$tag"
+          npm publish "$RUNNER_TEMP/npm/$TARBALL" --ignore-scripts --provenance --access public --tag "$tag"
 
   # A dry run's stand-in for publish-npm: build's tarball, checked as publish-npm checks it, given to npm publish
   # --dry-run, which packs and reports it but sends nothing and needs no token.
@@ -342,10 +362,24 @@ jobs:
     steps:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 24
-      # The npm that publishes, as desk's and Drivine for TypeScript's releases pin it: npm's latest can be a new major,
-      # and trusted publishing needs 11.5.1 or later.
-      - run: npm install -g npm@11.21.1
+          # An exact release of Node 24, the LTS, so a new one reaches the publish only through a reviewed bump.
+          node-version: 24.22.2
+      - name: Install the pinned npm, checked against its integrity
+        run: |
+          dir="$RUNNER_TEMP/npm-cli"
+          mkdir -p "$dir"
+          tgz="$(npm pack "npm@$NPM_CLI_VERSION" --pack-destination "$dir" --ignore-scripts --silent | tail -n 1)"
+          got="sha512-$(openssl dgst -sha512 -binary "$dir/$tgz" | base64 | tr -d '\n')"
+          if [[ "$got" != "$NPM_CLI_INTEGRITY" ]]; then
+            echo "::error::npm $NPM_CLI_VERSION's tarball has integrity $got, not $NPM_CLI_INTEGRITY as pinned."
+            exit 1
+          fi
+          npm install -g "$dir/$tgz" --ignore-scripts
+          hash -r
+          if [[ "$(npm --version)" != "$NPM_CLI_VERSION" ]]; then
+            echo "::error::npm is $(npm --version), not $NPM_CLI_VERSION."
+            exit 1
+          fi
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: compiler-npm-${{ env.VERSION }}
@@ -360,7 +394,7 @@ jobs:
             exit 1
           fi
       - name: Publish to npm, as a dry run
-        run: npm publish "$RUNNER_TEMP/npm/$TARBALL" --dry-run --access public --tag dry-run
+        run: npm publish "$RUNNER_TEMP/npm/$TARBALL" --dry-run --ignore-scripts --access public --tag dry-run
 
   # A dry run's stand-in for publish, which it skips: build's bundle signed as publish signs it, but with a key made here
   # and thrown away with the runner, with GitHub's release downloads blocked throughout, then checked to be build's bundle
