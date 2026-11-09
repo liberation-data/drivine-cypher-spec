@@ -25,6 +25,9 @@ class CoalesceOneArgumentTest {
         "MATCH (n:Pr) WHERE coalesce(n.i) > 0 RETURN n.i",
         "MATCH ()-[r:R]->() RETURN coalesce(r.role)",
         "MATCH (n:Pr) RETURN coalesce(max(n.i))",
+        "MATCH (n:Pr) RETURN coalesce(n.name) AS m, count(*)",
+        "MATCH (n:Pr) RETURN DISTINCT coalesce(n.name)",
+        "MATCH (n:Pr) RETURN n.i ORDER BY coalesce(n.name)",
         "RETURN [coalesce(\$x), coalesce([1, null]), coalesce({a: 1}).a, coalesce(date('2024-03-15')).year]",
         "CREATE (n:Pr {a: 1}) SET n.b = coalesce(n.a), n.c = coalesce(n.missing) RETURN coalesce(n.b)",
     )

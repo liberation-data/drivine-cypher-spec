@@ -360,6 +360,11 @@ cases:
         rows: ["Johnny"]
       - cypher: "MATCH (p:Person) RETURN coalesce(max(p.born))"
         rows: [1967]
+      - note: "As a grouping key, and kept once by DISTINCT."
+        cypher: "MATCH (p:Person) RETURN coalesce(p.missing) AS m, count(*) AS c"
+        rows: [{m: null, c: 4}]
+      - cypher: "MATCH (p:Person) RETURN DISTINCT coalesce(p.missing)"
+        rows: [null]
       - cypher: "RETURN [coalesce($x), coalesce([1, null]), coalesce({a: 1}).a, coalesce(date('2024-03-15')).year, coalesce([date('2024-03-15')])[0].month]"
         parameters: {x: "y"}
         rows: [["y", [1, null], 1, 2024, 3]]
