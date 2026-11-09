@@ -291,18 +291,28 @@ a second deployment of the version, so look at https://central.sonatype.com/publ
 that failed without the Portal's answer.
 
 **npm.** Step 2 also builds the npm package (`./gradlew npmPackage`, at the tag's version), packs it as npm publishes it,
-and checks the tarball (`.github/scripts/compiler-npm-check.sh`, which `compiler-npm-check-test.sh` tests over made-up tarballs in the gate): the package's name and the tag's version, and its
+and checks the tarball (`.github/scripts/compiler-npm-check.sh`, which `compiler-npm-check-test.sh` tests over made-up tarballs in the gate): the package's name and the tag's version, its
 files and nothing else (the wasm, its loaders, the CommonJS entry, the types, `npm/README.md` and the repository's
-LICENSE). The tarball, its SHA-256 and its npm integrity are kept beside the bundle. Its publish is a job of its own,
+LICENSE), and no `scripts` or `publishConfig` in its `package.json`, which `npmPackage` never writes: scripts would run
+on each install of the package, and npm publish takes any setting `publishConfig` holds that its command line doesn't,
+the registry it publishes to among them. The tarball, its SHA-256 and its npm integrity are kept beside the bundle. Its publish is a job of its own,
 `publish-npm`, which also waits in the `release` environment for its reviewer, and needs only the tarball: it checks
 the tarball's SHA-256 is step 2's, then publishes it by npm's trusted publishing, with no npm token stored anywhere:
 npm's settings for the package name this repository, `compiler-release.yml` and the `release` environment as its
 publisher, and the job's OIDC token (`id-token: write`) proves it is that workflow. The same token gives npm's provenance
-(`--provenance`), which records the run and the commit that built the package. The job installs npm 11.21.1, as desk's
-and Drivine for TypeScript's releases do: trusted publishing needs 11.5.1 or later. A version with a suffix is published under the npm tag `next`, and
+(`--provenance`), which records the run and the commit that built the package, and runs none of the package's scripts
+(`--ignore-scripts`). The job runs on an exact Node release (24.22.2, of the 24 LTS), and installs npm 11.21.1, as
+desk's and Drivine for TypeScript's releases do: trusted publishing needs 11.5.1 or later. It installs npm from its
+registry tarball only once the tarball has the integrity pinned beside the version (`NPM_CLI_VERSION` and
+`NPM_CLI_INTEGRITY` in `compiler-release.yml`; npm bundles its dependencies, so the tarball is the whole of it). To bump
+npm, set both, the integrity from `npm view npm@<version> dist.integrity`; to bump Node, set `node-version` in both npm
+jobs. A version with a suffix is published under the npm tag `next`, and
 any other under `latest`. The two publishes don't wait on each other, so a failure of one neither undoes nor holds up
 the other. A re-run publishes nothing where npm has the version as this tarball (by its integrity), and fails where npm
-has another tarball under the version, as npm never takes a version twice. The gate's wasmJs job packs the package
+has another tarball under the version, as npm never takes a version twice. Once Maven Central has the version, a
+failed `publish-npm` is finished with "Re-run failed jobs", which keeps step 2's tarball and its outputs, and never with
+"Re-run all jobs": a full re-run builds again, and its build stops at "Maven Central doesn't have this version yet", so
+`publish-npm` never runs. The gate's wasmJs job packs the package
 too, installs it into an empty project with only the dependencies its `package.json` names, and compiles the corpus
 through it, byte for byte the JVM's (`.github/scripts/compiler-npm-clean-install.sh`). A dry run gives the tarball to
 `npm publish --dry-run`, which sends nothing.
