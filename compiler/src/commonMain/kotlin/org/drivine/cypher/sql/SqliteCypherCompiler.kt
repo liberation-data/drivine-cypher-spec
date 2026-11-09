@@ -547,7 +547,7 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
         val c = "cy"
         fun called(steps: String) = "SELECT ${item(c)} AS result FROM json_each(${SqliteFunctions.CYPHER}($steps, \$${Parameters.OBJECT})) AS $c ORDER BY $c.key"
         val written = called(literal(steps))
-        if (JavaText.utf8(written).size <= MOST_STATEMENT_BYTES) return written
+        if (JavaText.utf8(written).size <= MOST_STATEMENT_BYTES - HOST_ADDS) return written
         boundSteps = steps
         return called("\$$PROGRAM")
     }
@@ -645,6 +645,13 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
          * (3.53.2.1): it refuses a longer one with SQLITE_TOOBIG, "statement too long". The sqlite3 shell's and Python's take 1,000,000,000.
          */
         const val MOST_STATEMENT_BYTES = 1_000_000
+
+        /**
+         * The bytes a host may add to a statement before it runs it, which [procedure] leaves room for: drivine4j writes
+         * `/* drivine:json */` and a line break before it, and `?` for each marker, 9 bytes more in all. SQLite counts the
+         * bytes it is given, with no terminator, and refuses only past its limit.
+         */
+        const val HOST_ADDS = 1_000
 
         /** The marker a procedure's steps are bound at where they would make the statement too long: see [procedure]. */
         const val PROGRAM = "_cy_program"

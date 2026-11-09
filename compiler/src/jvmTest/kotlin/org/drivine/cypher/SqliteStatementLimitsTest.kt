@@ -115,6 +115,29 @@ class SqliteStatementLimitsTest {
         assertEquals(written.replace(steps, "\$_cy_program"), bound.sql)
     }
 
+    /**
+     * drivine4j runs the statement with `/* drivine:json */` and a line break before it, and `?` for `$_cy_params`: 9 bytes
+     * longer than the compiler wrote it. A statement written within those few bytes of the limit is refused there.
+     */
+    @Test
+    fun `a write whose statement would be within a host's few bytes of the limit is given its steps bound`() {
+        fun cypher(length: Int) = "CREATE (s:School {name: 'Hilly Fields'})\n" +
+            (1..300).joinToString("\n") { "CREATE (s)-[:STUDENT]->(:Student {name: 'Student $it'})" } + "\nCREATE (:Note {t: '${"x".repeat(length)}'})"
+        fun writtenBytes(length: Int): Int {
+            val compiled = compiled(cypher(length))
+            val steps = compiled.parameters["_cy_program"] as String? ?: return compiled.sql.toByteArray().size
+            return compiled.sql.replace("\$_cy_program", "'${steps.replace("'", "''")}'").toByteArray().size
+        }
+        // The longest text whose statement, written, is within the limit.
+        var (low, high) = 0 to 1_000_000
+        while (low < high) {
+            val mid = (low + high + 1) / 2
+            if (writtenBytes(mid) <= 1_000_000) low = mid else high = mid - 1
+        }
+        assertTrue(writtenBytes(low) > 1_000_000 - 9, "${writtenBytes(low)} bytes")
+        assertTrue(compiled(cypher(low)).parameters.containsKey("_cy_program"))
+    }
+
     @Test
     fun `a write whose statement is within the limit has its steps written into it, as before`() {
         val compiled = compiled("CREATE (s:School {name: 'Hilly Fields'})\n" + (1..100).joinToString("\n") { "CREATE (s)-[:STUDENT]->(:Student {name: 'Student $it'})" })
