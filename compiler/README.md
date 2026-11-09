@@ -430,7 +430,11 @@ into step 2 could change what it builds whatever it then checked. So:
   `gradle/kotlin-native-dependencies.txt`, `gradle/pinned-jdk.properties`, `gradle/wrapper/gradle-wrapper.properties`)
   and `compiler-release-dependencies.sh`, whose layout the entry is, so a change of either makes a new entry, kept by
   the first run that finds none: the change's pull request, for its own runs, and its merge, for the tags after. A run
-  that finds the entry kept does nothing more. `stage` fails where a file it keeps has a name `unpack` would refuse, so
+  that finds the entry kept does nothing more. `stage` keeps only the files `unpack` keeps, by the same check (below),
+  so an entry it made unpacks with no warning, and a warning at `unpack` means the entry isn't one `stage` made. It
+  leaves out, each time, the POMs Gradle downloads but doesn't record in `gradle/verification-metadata.xml`, of modules
+  published with Gradle's module metadata (some 80 of them), so step 2 fetches those each release: small files, from
+  Maven Central and the Gradle Plugin Portal. `stage` fails where a file it keeps has a name `unpack` would refuse, so
   such a name fails this job, not every release, quietly, with only a warning. GitHub drops an entry no run has read for
   7 days, so the first tag after a quiet week fetches everything; to keep it warm before a tag, run workflow_dispatch of
   `Compiler release` on `main` (a dry run), whose `dependencies` job restores it (`Compiler`'s own job only looks it
@@ -454,11 +458,11 @@ into step 2 could change what it builds whatever it then checked. So:
   in, as Gradle lays them out, and its SHA-256 is the one `gradle/verification-metadata.xml` pins for that file of that
   component. Gradle takes a file it finds at its SHA-1's path without checking it, and strict verification would then
   fail the build, so a file of other bytes left there would fail every release that read the entry; dropped, it is
-  fetched. (So are the POMs Gradle reads but doesn't check, of modules published with Gradle's module metadata, which
-  the file doesn't name: small files.) Each toolchain or Kotlin/Native archive is kept only where its name and SHA-256
+  fetched. Each toolchain or Kotlin/Native archive is kept only where its name and SHA-256
   are ones pinned (the JDK's archive of a platform `gradle/pinned-jdk.properties` pins, the zip
   `gradle/wrapper/gradle-wrapper.properties` names, an archive `gradle/kotlin-native-dependencies.txt` names), so
-  nothing the build won't use sits on the runner's disk through it. Where a check fails, or a step of `unpack` does, it puts nothing in place, or
+  nothing the build won't use sits on the runner's disk through it. Where it drops a file, it warns, as `stage` keeps
+  none such. Where a check fails, or a step of `unpack` does, it puts nothing in place, or
   takes away what it put, with a warning, and step 2 fetches everything; and should `unpack` itself fail, step 2 takes
   away those directories. Each file is then checked again as it is used: Gradle checks every dependency against
   `gradle/verification-metadata.xml` (`--dependency-verification strict`, whatever a `gradle.properties` says);
@@ -474,7 +478,8 @@ it still can't, step 2 fails, before the reviewer is asked, and is re-run. What 
 `dependencies` job's own runner, which holds nothing step 2 needs but the upload: it could upload an artifact of a name
 step 2 then can't use, which fails step 2's own upload, as any of the gate's jobs could too; `publish` signs only the
 bundle whose SHA-256 is step 2's own output. What is still fetched: Gradle asks Maven Central and the Gradle Plugin
-Portal for each dependency's POM, module and `.sha1`, small files, before it takes a file it already has. binaryen's
+Portal for each dependency's POM, module and `.sha1`, small files, before it takes a file it already has, and fetches
+the POMs `stage` leaves out. binaryen's
 GitHub releases publish no `.sha1` it could ask for, so step 2 takes binaryen from a directory laid out as those
 releases are, which `unpack` fills from the entry's copy, once checked (`-Pcompiler.binaryenMirror`, in
 `build.gradle.kts`), and only this runner's: Gradle would fail where the directory holds the version but not this
@@ -524,7 +529,8 @@ stand-in for the Central Portal on the runner, which refuses an upload that isn'
 for any other deployment. It also checks that the signing refuses a bundle it must not sign
 (`.github/scripts/compiler-release-sign-test.sh`): one with a link among thousands, a file, a version or a path that no
 publication makes, or a checksum of a file it doesn't hold. And in step 2, before it unpacks the dependencies, it checks
-that `stage` keeps only what `unpack` takes, that `unpack` refuses whole a zip with a name that climbs out, an absolute
+that `stage` keeps only the paths `unpack` takes, and of the files only those `unpack` keeps (leaving out a POM the
+metadata doesn't name), so `unpack` of its entry warns of nothing, that `unpack` refuses whole a zip with a name that climbs out, an absolute
 name, a path `stage` doesn't make, a name twice, a link, more entries or bytes than its limits, or an entry of more
 bytes than it declares, drops a Gradle file
 of other bytes at its real path, at another SHA-1's path or that the metadata doesn't name, takes entries whose modes
