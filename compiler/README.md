@@ -371,7 +371,8 @@ after it, and the key's variables are unset before the signing runs anything, so
 key, its passphrase nor the Portal token is passed on a command line or written to the log: the token's base64, which
 GitHub doesn't mask as it masks the secrets, is masked too. The signed bundle is kept as the run's artifact only once
 it is published. A failed upload is re-run
-alone ("Re-run failed jobs"), and waits for the reviewer again; the upload itself isn't retried, as a second would make
+alone (its own "Re-run this job", not "Re-run failed jobs", which also re-runs a `dependencies` job that failed or was
+cancelled, and step 2 after it), and waits for the reviewer again; the upload itself isn't retried, as a second would make
 a second deployment of the version, so look at https://central.sonatype.com/publishing/deployments before re-running one
 that failed without the Portal's answer.
 
@@ -395,8 +396,9 @@ jobs. A version with a suffix is published under the npm tag `next`, and
 any other under `latest`. The two publishes don't wait on each other, so a failure of one neither undoes nor holds up
 the other. A re-run publishes nothing where npm has the version as this tarball (by its integrity), and fails where npm
 has another tarball under the version, as npm never takes a version twice. Once Maven Central has the version, a
-failed `publish-npm` is finished with "Re-run failed jobs", which keeps step 2's tarball and its outputs, and never with
-"Re-run all jobs": a full re-run builds again, and its build stops at "Maven Central doesn't have this version yet", so
+failed `publish-npm` is finished with its own "Re-run this job", which keeps step 2's tarball and its outputs, and never
+with "Re-run all jobs", nor with "Re-run failed jobs" where the `dependencies` job failed or was cancelled, as either
+re-runs step 2: a re-run of step 2 builds again, and its build stops at "Maven Central doesn't have this version yet", so
 `publish-npm` never runs. The gate's wasmJs job packs the package
 too, installs it into an empty project with only the dependencies its `package.json` names, and compiles the corpus
 through it, byte for byte the JVM's (`.github/scripts/compiler-npm-clean-install.sh`). A dry run gives the tarball to
@@ -563,7 +565,7 @@ first version is published by hand, and every later one by `publish-npm`:
    `liberation-data`, repository `drivine-cypher-spec`, workflow `compiler-release.yml`, environment `release`.
 
 Until then a tag's run publishes to Maven Central and `publish-npm` fails at npm's refusal: publish that tag's tarball
-as above, set the publisher, and re-run `publish-npm` alone ("Re-run failed jobs"), which waits for the reviewer again
+as above, set the publisher, and re-run `publish-npm` alone (its own "Re-run this job"), which waits for the reviewer again
 and finds the version published. GitHub re-runs a job only within 30 days of its run; after that, push the next tag.
 The workflow's file name is part of the publisher, so renaming `compiler-release.yml` needs the setting changed with it.
 
