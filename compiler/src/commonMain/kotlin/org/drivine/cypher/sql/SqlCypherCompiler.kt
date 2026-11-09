@@ -6442,8 +6442,13 @@ abstract class SqlCypherCompiler(
         private fun known(expression: Expression): Boolean = expression is Expression.Literal || expression is Expression.Parameter ||
             (expression is Expression.Unary && expression.operator == Expression.Unary.Operator.NEGATE && known(expression.operand))
 
-        /** Whether [text] names NaN or an infinity, as Java reads a double, which Neo4j's `toFloat` takes it as. */
-        fun nonFiniteText(text: String) = org.drivine.cypher.json.parseDoubleOrNull(text.trim { it <= ' ' })?.isFinite() == false
+        /**
+         * Whether [text] names NaN or an infinity, as Java reads a double, which Neo4j's `toFloat` takes it as, or is a number
+         * past a double's range with Cypher's spaces around it ([CYPHER_SPACES]), which it reads as an infinity too
+         * (`'\u00A01e400'`, drivine4j#692).
+         */
+        fun nonFiniteText(text: String) =
+            org.drivine.cypher.json.parseDoubleOrNull(text.trim { it <= ' ' || CYPHER_SPACES.any { spaces -> it.code in spaces } })?.isFinite() == false
 
         /** The texts `toFloat` takes as NaN, the infinity and the negative one, as Java reads them, spaces around them allowed. */
         const val NAN_NAME = """^\s*[+-]?NaN\s*$"""

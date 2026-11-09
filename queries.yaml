@@ -3672,6 +3672,10 @@ cases:
         only: [neo4j, postgres, sqlite]
         cypher: "RETURN [toFloat('\\u00A01E3'), toFloat('\\u00A01e-3'), toFloat('\\u00A01e+3'), toFloat('\\u00A01e400'), toFloat('\\u00A0-1e400'), toFloat('\\u00A01e-400'), toFloat('\\u00A0-0'), toFloat('\\u00A01e-999'), toFloat('\\u00A01e5000000000')]"
         rows: [[1000.0, 0.001, 1000.0, {$float: "Infinity"}, {$float: "-Infinity"}, 0.0, 0.0, 0.0, {$float: "Infinity"}]]
+      - note: "And such an infinity is one in the statement too: less itself it is NaN, and its text Java's name (drivine4j#692). Oracle gives null (drivine4j#696)."
+        only: [neo4j, postgres, sqlite]
+        cypher: "RETURN [toFloat('\\u00A01e400') - toFloat('\\u00A01e400'), toString(toFloat('\\u00A0-1e400'))]"
+        rows: [[{$float: "NaN"}, "-Infinity"]]
       - note: "And Cypher's whole numbers and a _ between digits. The SQL stores give null (drivine4j#696)."
         only: [neo4j]
         cypher: "RETURN [toFloat('\\u00A01_000'), toFloat('\\u00A00x10'), toFloat('\\u00A0-0o17'), toFloat('0x10\\u00A0'), toFloat('1_0e400'), toFloat('\\u00A0\\u001C1_0')]"
