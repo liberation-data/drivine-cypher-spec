@@ -73,7 +73,7 @@ A refused one is refused however it is given, as a flag, an environment variable
 
 When none of these gives a password and stdin isn't a terminal, nothing prompts, as in cypher-shell: the CLI connects with no password, and with no user if none is given, and a store that needs them refuses them, which fails as a connection does, with exit code 3. Where a store needs no password, as SQLite needs none, none is asked for.
 
-A password is never taken on the command line. `-p` and `--password` are refused as a bad invocation, with one line on stderr: `drivine: a password on the command line shows in ps and in your shell history; use DRIVINE_PASSWORD, a profile or the prompt.`
+A password is never taken on the command line. `-p` and `--password` are refused as a bad invocation, with one line on stderr: `drivine: a password on the command line shows in ps and in your shell history; use DRIVINE_PASSWORD, a profile or the prompt.` An address given with `-a` that holds a password, as `postgresql://user:secret@host/db` does, is refused so too, with the same line. A user in an address (`postgresql://user@host/db`) is taken, after `-u`. An address that holds a password may come from `DRIVINE_ADDRESS` or a profile, which are kept off the command line, and its password then comes after `DRIVINE_PASSWORD`, as a profile's does.
 
 ### Profiles
 
@@ -142,9 +142,9 @@ A line may end in `\r\n` as well as `\n`: the `\r` is not part of a command. A s
 
 | Command | What it does |
 |---|---|
-| `:begin` | Opens a transaction, which the statements after it run in. |
-| `:commit` | Commits it. |
-| `:rollback` | Rolls it back. |
+| `:begin` | Opens a transaction, which the statements after it run in. Inside one, it fails as a command does. |
+| `:commit` | Commits it. With no transaction open, it fails as a command does. |
+| `:rollback` | Rolls it back. With no transaction open, it fails as a command does. |
 | `:param NAME => EXPRESSION` | Sets a parameter, as `-P` does. |
 | `:param {NAME: EXPRESSION, …}` | Sets the parameters named. |
 | `:params` | Prints the parameters to stdout as a map over several lines: `{`, then each `name: value` on a line of its own, indented two spaces, with `,` after each but the last, then `}`. A text is in `'…'`, not `"…"` as `plain` prints it. A map's parameters print in the order the store gives its keys, as **Order** in [Output](#output) says. |
@@ -166,7 +166,7 @@ FalkorDB has no multi-statement transactions. There `:begin` prints one line to 
 - `NAME => EXPRESSION`, as in `-P 'limit => 10'`;
 - a map, as in `-P '{limit: 10, since: date("2024-01-01")}'`.
 
-`-P NAME=EXPRESSION` is taken too, where the text doesn't start with `{` and the first `=` isn't the start of a `=>`: a text that starts with `{` is a map, even one holding a `=`, as `{url: 'a?b=c'}` does. A `-P` of none of these forms is a bad value, and so a bad invocation.
+`-P NAME=EXPRESSION` is taken too, where the text doesn't start with `{` and the first `=` isn't the start of a `=>`: a text that starts with `{` is a map, even one holding a `=`, as `{url: 'a?b=c'}` does. Spaces around the `=`, as around a `=>`, are part of neither the name nor the expression, so `-P 'limit = 10'` is `limit`. A `-P` of none of these forms is a bad value, and so a bad invocation.
 
 The expression is Cypher. It's evaluated by running `RETURN expression` on the store, so a parameter holds what the store gives for it. A parameter set later replaces an earlier one of the same name. A statement that uses a parameter that isn't set fails, on every store, as it does on Neo4j. A `-P` whose expression fails on the store fails as a statement does, with exit code 1, and no statement runs, with `--continue` too: the statements would run without the parameter.
 

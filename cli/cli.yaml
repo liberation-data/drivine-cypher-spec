@@ -633,3 +633,16 @@ cases:
     args: ["--format", "csv"]
     stdout: "a\n1\n\nb\n2\n"
     exit: 0
+
+  - name: "An -a address that holds a password is refused, as -p is"
+    store: false
+    args: ["-a", "postgresql://u:secret@localhost:1/db", "RETURN 1"]
+    stdout: ""
+    stderr: "a password on the command line shows in ps"
+    exit: 2
+
+  - name: ":commit with no transaction open fails as a command does"
+    files: {"c.cypher": "RETURN 1 AS a;\n:commit\nRETURN 2 AS b;\n"}
+    args: ["--format", "plain", "-f", "c.cypher"]
+    stdout: "a\n1\n"
+    exit: 1
