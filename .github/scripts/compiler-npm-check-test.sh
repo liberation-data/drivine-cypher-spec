@@ -29,11 +29,15 @@ refused() {
     local what="$1" tgz="$2" expect="$3" out
     if out="$("$check" "$tgz" 1.2.3 "$name" 2>&1)"; then fail "$what passed"; fi
     grep -qF -- "$expect" <<<"$out" || fail "$what: not its failure: $out"
+    # The workflow writes the check's stdout to the job's outputs, so a failure says nothing there.
+    [[ -z "$("$check" "$tgz" 1.2.3 "$name" 2> /dev/null)" ]] || fail "$what: written to stdout, which is the job's outputs"
 }
 
 pack "$root/ok.tgz" "{\"name\": \"$name\", \"version\": \"1.2.3\"}"
 out="$("$check" "$root/ok.tgz" 1.2.3 "$name")" || fail "the package's own tarball was refused: $out"
 [[ "$out" == "integrity=sha512-$(openssl dgst -sha512 -binary "$root/ok.tgz" | base64 | tr -d '\n')" ]] || fail "not its integrity: $out"
+# In a locale that sorts LICENSE among the lower-case names, as macOS's en_US does, the same tarball passes.
+LC_ALL=en_US.UTF-8 "$check" "$root/ok.tgz" 1.2.3 "$name" > /dev/null || fail "the package's own tarball was refused in en_US.UTF-8"
 
 pack "$root/extra.tgz" "{\"name\": \"$name\", \"version\": \"1.2.3\"}" .npmrc
 refused 'a file too many' "$root/extra.tgz" '> package/.npmrc'
