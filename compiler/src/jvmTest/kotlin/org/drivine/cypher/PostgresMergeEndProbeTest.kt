@@ -17,8 +17,8 @@ import kotlin.test.assertTrue
  * are uncommitted: the plan made again read the whole of an index by the relationship's type alone for every row, so
  * `MATCH (n) MERGE (n)-[:R]->(n)` took 18 s over 20,000 nodes where it takes 0.5 s (drivine4j#663, drivine#671). The rows
  * it gives are the spec's MERGE cases'; the plans and times are those of Drivine for TypeScript's `CypherWriteLoopTime` and
- * of the `PostgresMergeEndProbe.spec.ts` drafted on drivine4j#663, which need a store. This pins the shape, and that the probe's one condition an
- * index answers is the bound end's key.
+ * of the `PostgresMergeEndProbe.spec.ts` drafted on drivine4j#663, which need a store. This pins the shape, and that the
+ * probe's one condition an index answers is the bound end's key.
  */
 class PostgresMergeEndProbeTest {
 
