@@ -114,7 +114,7 @@ Flags and environment variables override the profile, key by key. So `DRIVINE_PA
 | `--sample-rows N` | For `table`, the number of rows sampled to size its columns. The default is 1000. |
 | `--wrap {true,false}` | For `table`, whether a value wider than its column wraps. The default is `true`. |
 | `--continue` | Keeps going past a failed statement or command: see [Failures and exit codes](#failures-and-exit-codes). |
-| `--explain` | On a SQL store, prints for each statement the SQL it compiles to, which may run over several lines, then one line, `-- parameters: ` and its parameters as compact JSON, written as `json` writes values. It runs no statement of the input, but it still connects to evaluate each `-P` and `:param` expression, as [Parameters](#parameters) says. The SQL is the compiler's, and cases don't compare it. On a graph engine, it's refused as a bad invocation: there, the store runs the Cypher itself. |
+| `--explain` | On a SQL store, prints for each statement the SQL it compiles to, which may run over several lines, then one line, `-- parameters: ` and the Cypher parameters the statement is given, by their names, as compact JSON, written as `json` writes values. These are the statement's own parameters, not the values the SQL binds. It runs no statement of the input, but it still connects to evaluate each `-P` and `:param` expression, as [Parameters](#parameters) says. The SQL is the compiler's, and cases don't compare it. On a graph engine, it's refused as a bad invocation: there, the store runs the Cypher itself. |
 | `--non-interactive` | No REPL, even on a terminal: see [The REPL](#the-repl). |
 | `--history FILE` | The REPL's history file, or `in-memory` or `disable`. The default is `~/.drivine/history`. |
 | `--idle-timeout T` | Leaves the REPL after T without input, given as `<hours>h<minutes>m<seconds>s`, as in `1h30m`. |
@@ -124,7 +124,7 @@ Flags and environment variables override the profile, key by key. So `DRIVINE_PA
 | `--driver-version` | Prints the drivers' versions, one per line, and exits with 0. |
 | `-h`, `--help` | Prints the usage and exits with 0. |
 
-`-p` and `--password` are refused, as [The user and the password](#the-user-and-the-password) says. Any other flag is unknown, and so is a cypher-shell flag that isn't in this table, until the [compatibility mode](#cypher-shell-compatibility-later) takes it. A refused or unknown flag is a bad invocation. The message names the flag and points to `--help`.
+`-p` and `--password` are refused, as [The user and the password](#the-user-and-the-password) says. Any other flag is unknown, and so is a cypher-shell flag that isn't in this table, until the [compatibility mode](#cypher-shell-compatibility-later) takes it. A refused or unknown flag is a bad invocation. The message names the flag and points to `--help`, except for `-p` and `--password`, whose message is the one line that section gives.
 
 ## Files
 
@@ -168,7 +168,7 @@ FalkorDB has no multi-statement transactions. There `:begin` prints one line to 
 
 `-P NAME=EXPRESSION` is taken too, where the first `=` isn't the start of a `=>`. A `-P` of none of these forms is a bad value, and so a bad invocation.
 
-The expression is Cypher. It's evaluated by running `RETURN expression` on the store, so a parameter holds what the store gives for it. A parameter set later replaces an earlier one of the same name. A statement that uses a parameter that isn't set fails, on every store, as it does on Neo4j. A `-P` whose expression fails on the store fails as a statement does, with exit code 1, before any statement runs.
+The expression is Cypher. It's evaluated by running `RETURN expression` on the store, so a parameter holds what the store gives for it. A parameter set later replaces an earlier one of the same name. A statement that uses a parameter that isn't set fails, on every store, as it does on Neo4j. A `-P` whose expression fails on the store fails as a statement does, with exit code 1, and no statement runs, with `--continue` too: the statements would run without the parameter.
 
 ## Output
 
@@ -180,7 +180,7 @@ The expression is Cypher. It's evaluated by running `RETURN expression` on the s
 | `table` | Each result as a table, then its count of rows and how long it took, then the store's counts of what it wrote, as cypher-shell's `verbose` prints them. A result with no columns, such as a write with no `RETURN`, prints no table. |
 | `plain` | Each result's columns, `, ` between them, then a line per row, with the values printed as cypher-shell prints them. A result with no rows prints nothing. |
 | `json` | One line per statement, compact: `{"columns":[...],"rows":[[...],...]}`. Values are written as the spec's files write them, with NaN and the infinities as `{"$float":"NaN"}` and the others, and a float as `plain` prints it: `2.0`, not `2`, and `1.0E10`. A whole number is written exactly, past 2^53 too. A text's characters are written as they are, escaped only where JSON requires it: `\"`, `\\`, `\b`, `\f`, `\n`, `\r` and `\t` in their short forms, and any other control character as `\u00XX`. A temporal value is its ISO 8601 text, as a JSON string. |
-| `csv` | Each result as RFC 4180 CSV, with a header row, and lines that end in `\n`. A text and a temporal value are their own characters, null is an empty field, and any other value is its compact JSON. A field is in `"…"` only when it holds a `,`, a `"` or a line break. Results are separated by one empty line. |
+| `csv` | Each result as RFC 4180 CSV, with a header row, and lines that end in `\n`. A text and a temporal value are their own characters, null is an empty field, and any other value is its compact JSON. A field is in `"…"` only when it holds a `,`, a `"` or a line break. Results are separated by one empty line. A result with no columns, such as a write with no `RETURN`, prints nothing, not even its separator. |
 
 **How `plain` and `table` print a value**, as cypher-shell does:
 
