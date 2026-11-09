@@ -51,6 +51,11 @@ Among them, a compiler can be made with a `CypherEncoder`, the host's writing of
 compiler asks before its own. drivine4j gives its Jackson mapper's, so that a parameter is written as drivine4j has
 always written it. An encoder is the compiler's own, for as long as it compiles: no state is shared between hosts.
 
+`OracleCypherCompiler` also takes `rowsAsText`, false where left out, the Kotlin form of the request's `oracleRowsAsText`
+(see [Oracle's rows as text](#oracles-rows-as-text)). drivine4j reads the `JSON` rows over JDBC, which reads every row,
+so it leaves it false; it is for a host whose Oracle driver can't, node-oracledb's thin mode (#1795), until a fixed
+driver release.
+
 A host with no Kotlin types calls `CompileJson.compile(request)`, JSON text in and out. The wasm build exports it as
 `compile`, and the shared library as `drivine_compile`:
 
@@ -62,7 +67,8 @@ A host with no Kotlin types calls `CompileJson.compile(request)`, JSON text in a
 ```
 
 `store` is `postgres`, `oracle` or `sqlite`. `graph` has the graph's `name`; the rest of it is Oracle's, and may be left
-out. The answer is one of:
+out: `nullsEqualStored` and `eraStored` (true where left out), `indexedProperties`, and `oracleRowsAsText` (false where
+left out, see [Oracle's rows as text](#oracles-rows-as-text)). The answer is one of:
 
 - `{"sql": …, "parameters": {…}, "setup": […], "warnings": […], "nonFinite": false}`, and on Oracle
   `"storedFunctions": {"nullsEqual": …, "era": …}`. Run `setup` first (on Postgres, the function a statement that
@@ -92,6 +98,40 @@ a host's JSON reads as a double, losing digits. An untagged JSON number in the a
 
 A request nests its arrays and objects at most 64 deep, its own object and `parameters` two of them; a deeper one is
 an error.
+
+### Oracle's rows as text
+
+On Oracle a statement that writes is a PL/SQL block, which returns its rows as an implicit result
+(`DBMS_SQL.RETURN_RESULT`), a row of `JSON` each, as drivine4j reads them. node-oracledb's thin mode can't read that
+result: it gives only the prefetched rows of an implicit result with a `JSON` column, 2 by default and none with
+`prefetchRows: 0`, with no error (oracle/node-oracledb#1795, open, in every thin release to 26.0.0), and some values fail
+with `NJS-126: OSON version 2 is not supported`. A row of text each is no way round it: a `CLOB` column is cut short
+alike, and a `VARCHAR2` holds too little of a row.
+
+So a host whose driver can't read it sets `"oracleRowsAsText": true` in `graph` (`GraphOptions.oracleRowsAsText` in
+Kotlin). A statement that writes and returns rows then returns them all as one row, a JSON list in their order, as text in
+a column named `rows:json`:
+
+```sql
+OPEN cy_cursor FOR
+    SELECT JSON_SERIALIZE(COALESCE(JSON_ARRAYAGG(cy_r.result ORDER BY cy_r.cy_n NULL ON NULL RETURNING JSON), JSON('[]')) RETURNING CLOB EXTENDED) AS "rows:json" FROM (
+        SELECT cy_q.result, ROWNUM AS cy_n FROM (
+            <the rows' query>
+        ) cy_q
+    ) cy_r;
+DBMS_SQL.RETURN_RESULT(cy_cursor);
+```
+
+The text is Oracle's extended JSON, so a float stays a float: an object of the one key `$numberDouble` is one,
+`{"$numberDouble": 2}` or `{"$numberDouble": 2.5}`, and NaN and the infinities are `{"$numberDouble": "Nan"}`, `"Inf"`
+and `"-Inf"`. Every other value is plain JSON, as the `JSON` rows hold it: a whole number in full, a text, a temporal
+value as its ISO 8601 text, a list, a map. A map the statement returns whose one key is `$numberDouble` is written as a
+float is. The host reads the one row while its driver prefetches at least one row (node-oracledb's default is 2).
+
+Every other statement, a read or a write that returns nothing, compiles alike either way, as does every statement on the
+other stores. The option is temporary: Drivine for TypeScript and drivine-python set it until a node-oracledb release
+with #1795's fix ships, and then drop it, and it goes from the module with them. drivine4j's JDBC reads the `JSON` rows,
+and leaves it false.
 
 ### npm
 
@@ -167,7 +207,8 @@ The JVM is the oracle. `./gradlew jvmOracle` writes, into `build/oracle`:
 
 - `corpus.jsonl`: every statement in the spec's files (`queries.yaml`, `writes.yaml`, `temporal.yaml`, `refusals.yaml`,
   `schema.yaml`), compiled for Postgres, Oracle and SQLite, and some with parameters the spec has no form for (whole
-  floats, temporal values, bytes, `$` keys) and Oracle's graph options: each request and the JVM's answer. A statement
+  floats, temporal values, bytes, `$` keys) and Oracle's graph options, and on Oracle with `oracleRowsAsText` each of
+  those statements whose SQL it changes (every write that returns rows): each request and the JVM's answer. A statement
   whose SQL embeds the moment it was compiled, as SQLite's does for `datetime()` and the like, is left out, found by its
   SQL holding that moment.
 - `doubles.txt`: random doubles (subnormals included) and Java's text of each, and random decimal and hexadecimal texts,

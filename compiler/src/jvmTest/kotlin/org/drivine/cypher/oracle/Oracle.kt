@@ -13,7 +13,8 @@ import java.time.format.DateTimeFormatter
  * The JVM's answers, which the other targets are checked against, byte for byte (`./gradlew jvmOracle`):
  *
  * - `corpus.jsonl`: every statement in the spec's files, compiled for Postgres, Oracle and SQLite, and a few with typed
- *   parameters: each line `{"request": …, "answer": …}`, both JSON text, the answer as [CompileJson] gives it on the JVM.
+ *   parameters, Oracle's graph options, and on Oracle with `oracleRowsAsText` each statement whose SQL it changes: each
+ *   line `{"request": …, "answer": …}`, both JSON text, the answer as [CompileJson] gives it on the JVM.
  *   A statement whose SQL embeds the moment it was compiled at, as SQLite's does of `datetime()` and the like, is left
  *   out: no two runs give it alike. It is found by its SQL holding that moment, so no list of statements is kept.
  * - `doubles.txt`: doubles as Java writes them (`T<tab>bits<tab>text`) and texts as Java reads them
@@ -68,15 +69,24 @@ object Oracle {
         return lines to clocked
     }
 
-    /** The corpus's requests, in its order: each spec statement for each store, the typed ones, Oracle's graph options, and requests that are no request. */
+    /**
+     * The corpus's requests, in its order: each spec statement for each store, the typed ones, Oracle's graph options, Oracle's
+     * rows as text, and requests that are no request.
+     */
     internal fun corpusRequests(spec: File): List<String> = buildList {
-        for ((cypher, parameters) in statements(spec)) for (store in STORES) add(request(store, cypher, parameters))
+        val statements = statements(spec)
+        for ((cypher, parameters) in statements) for (store in STORES) add(request(store, cypher, parameters))
         for ((cypher, parameters) in TYPED) for (store in STORES) add(request(store, cypher, parameters))
         // Oracle's graph options.
         for (options in ORACLE_OPTIONS) {
             add(json.writeValueAsString(linkedMapOf("store" to "oracle", "graph" to options, "cypher" to "MATCH (p:Person {name: \$name}) WHERE p.age = \$age RETURN p.name, p.born", "parameters" to mapOf("name" to "Ada", "age" to 36))))
             add(json.writeValueAsString(linkedMapOf("store" to "oracle", "graph" to options, "cypher" to "MATCH (p:Person) WHERE p.nick = \$nick RETURN p", "parameters" to mapOf("nick" to null))))
             add(json.writeValueAsString(linkedMapOf("store" to "oracle", "graph" to options, "cypher" to "RETURN date({year: -44, month: 3, day: 15}) AS d")))
+        }
+        // Oracle's rows as text: each spec and typed statement whose SQL the option changes, a write that returns rows.
+        for ((cypher, parameters) in statements + (TYPED + ROWS_AS_TEXT_WRITES).map { (cypher, parameters) -> Mutants.Statement(cypher, parameters) }) {
+            val text = request("oracle", cypher, parameters, ROWS_AS_TEXT)
+            if (CompileJson.compile(text) != CompileJson.compile(request("oracle", cypher, parameters))) add(text)
         }
         // Requests that are no request.
         addAll(listOf("", "[]", "{\"store\": \"neo4j\", \"graph\": {\"name\": \"g\"}, \"cypher\": \"RETURN 1\"}", "{\"store\": \"postgres\", \"cypher\": \"RETURN 1\"}"))
@@ -108,8 +118,8 @@ object Oracle {
     private fun embedsClock(answer: String, before: LocalDateTime, after: LocalDateTime): Boolean =
         listOf(before, after).any { answer.contains("'" + SECONDS.format(it)) }
 
-    private fun request(store: String, cypher: String, parameters: Map<String, Any?>): String =
-        json.writeValueAsString(linkedMapOf("store" to store, "graph" to mapOf("name" to "g"), "cypher" to cypher, "parameters" to parameters))
+    private fun request(store: String, cypher: String, parameters: Map<String, Any?>, graph: Map<String, Any?> = mapOf("name" to "g")): String =
+        json.writeValueAsString(linkedMapOf("store" to store, "graph" to graph, "cypher" to cypher, "parameters" to parameters))
 
     /**
      * The spec's values (see its README) as [CompileJson]'s typed JSON: `{$repeat, times}` written out, `{$float}` as it is,
@@ -153,6 +163,15 @@ object Oracle {
         "RETURN \$m AS m, \$m.`\$a` AS a" to mapOf("m" to mapOf("\$map" to mapOf("\$a" to 1, "b" to float("2.0")))),
         "RETURN \$big AS big" to mapOf("big" to java.math.BigInteger("123456789012345678901234567890")),
         "MATCH (p:Person) RETURN p.name, p.age SKIP \$s LIMIT \$l" to mapOf("s" to 1, "l" to 2),
+    )
+
+    /** The graph of Oracle's rows as text: see [corpusRequests]. */
+    internal val ROWS_AS_TEXT: Map<String, Any?> = mapOf("name" to "g", "oracleRowsAsText" to true)
+
+    /** Writes that return rows the spec's statements have no form of, for Oracle's rows as text: a long text given, many rows. */
+    private val ROWS_AS_TEXT_WRITES: List<Pair<String, Map<String, Any?>>> = listOf(
+        "UNWIND [1, 2] AS i CREATE (n:N {i: i, long: \$long}) RETURN n.i, n.long ORDER BY n.i" to mapOf("long" to "x".repeat(40_000)),
+        "UNWIND range(1, 250) AS i CREATE (n:N {i: i}) RETURN n.i ORDER BY n.i DESC" to emptyMap(),
     )
 
     private val ORACLE_OPTIONS: List<Map<String, Any?>> = listOf(

@@ -27,12 +27,28 @@ enum class Store(val id: String) {
  * @param eraStored on Oracle, whether the store keeps the graph's functions that renumber a year BC, likewise.
  * @param indexedProperties on Oracle, the labels and properties a range index or a one-property uniqueness constraint is
  *   over, each `label to property`: a node a pattern finds by one is read through that index.
+ * @param oracleRowsAsText on Oracle, whether a statement that writes and returns rows returns them all as one row of JSON
+ *   text, a list in their order, in a column named `rows:json` ([OracleCypherCompiler.ROWS_AS_TEXT]), in place of a row
+ *   of `JSON` each. The text is Oracle's extended JSON (`JSON_SERIALIZE(… EXTENDED)`), so a float stays a float: an
+ *   object of the one key `$numberDouble` is one, `{"$numberDouble": 2}`, `{"$numberDouble": 2.5}`, and NaN and the
+ *   infinities `{"$numberDouble": "Nan"}`, `"Inf"` and `"-Inf"`. Every other value is plain JSON, as the `JSON` rows
+ *   hold it: a whole number in full, a text, a temporal value as its ISO 8601 text, a list, a map. A map the statement
+ *   returns whose one key is `$numberDouble` is written as a float is, and read as one. One row, as a host reads it while
+ *   the driver's prefetch is at least one row (node-oracledb's default is 2).
+ *
+ *   It is for a host whose Oracle driver can't read an implicit result's `JSON` column: in node-oracledb's thin mode such
+ *   a result gives only its prefetched rows, 2 by default and none with `prefetchRows: 0`, with no error
+ *   (oracle/node-oracledb#1795), and some values fail with `NJS-126: OSON version 2 is not supported`. A `CLOB` column
+ *   is cut short alike, a row each, and a `VARCHAR2` holds too little of a row. It is temporary: Drivine for TypeScript
+ *   and drivine-python drop it once a node-oracledb release with the fix ships. A statement that returns no rows, or
+ *   reads only, and every statement on the other stores, is compiled alike either way.
  */
 data class GraphOptions(
     val name: String,
     val nullsEqualStored: Boolean = true,
     val eraStored: Boolean = true,
     val indexedProperties: Set<Pair<String, String>> = emptySet(),
+    val oracleRowsAsText: Boolean = false,
 )
 
 /** What compiling a statement gives: the SQL, or the compiler's refusal of the statement. */
@@ -77,7 +93,7 @@ object CypherCompiler {
     fun compile(store: Store, graph: GraphOptions, cypher: String, parameters: Map<String, Any?> = emptyMap()): CompileResult {
         val compiler: SqlCypherCompiler = when (store) {
             Store.POSTGRES -> PostgresCypherCompiler(graph.name)
-            Store.ORACLE -> OracleCypherCompiler(graph.name, graph.nullsEqualStored, graph.eraStored, graph.indexedProperties)
+            Store.ORACLE -> OracleCypherCompiler(graph.name, graph.nullsEqualStored, graph.eraStored, graph.indexedProperties, null, graph.oracleRowsAsText)
             Store.SQLITE -> SqliteCypherCompiler(graph.name)
         }
         val compiled = try {

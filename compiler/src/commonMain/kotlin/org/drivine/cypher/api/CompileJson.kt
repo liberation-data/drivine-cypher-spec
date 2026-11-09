@@ -26,7 +26,8 @@ import kotlin.io.encoding.ExperimentalEncodingApi
  * ```
  *
  * `store` is `postgres`, `oracle` or `sqlite`. `graph` is [GraphOptions]: `name`, and on Oracle `nullsEqualStored`,
- * `eraStored` (true where left out) and `indexedProperties` (`[["Person", "name"], …]`). `parameters` may be left out.
+ * `eraStored` (true where left out), `indexedProperties` (`[["Person", "name"], …]`) and `oracleRowsAsText` (false where
+ * left out). `parameters` may be left out.
  *
  * The answer is [Compiled] (`sql`, `parameters`, `setup`, `warnings`, `nonFinite`, and on Oracle `storedFunctions`:
  * `{"nullsEqual": …, "era": …}`), `{"refusal": "<message>"}` where the compiler refuses the statement, or
@@ -97,6 +98,7 @@ object CompileJson {
             nullsEqualStored = flag(graph, "nullsEqualStored"),
             eraStored = flag(graph, "eraStored"),
             indexedProperties = indexed,
+            oracleRowsAsText = flag(graph, "oracleRowsAsText", default = false),
         )
         val cypher = tree["cypher"]?.textValue() ?: throw IllegalArgumentException("A request gives its statement as cypher.")
         val parameters = when (val given = tree["parameters"]) {
@@ -107,9 +109,9 @@ object CompileJson {
         return Call(store, options, cypher, parameters)
     }
 
-    /** The graph's option [name], true where it is left out; refused where it is no boolean, as `"false"` would be read as true. */
-    private fun flag(graph: ObjectNode, name: String): Boolean {
-        val given = graph[name]?.takeUnless { it.isNull } ?: return true
+    /** The graph's option [name], [default] where it is left out; refused where it is no boolean, as `"false"` would be read as true. */
+    private fun flag(graph: ObjectNode, name: String, default: Boolean = true): Boolean {
+        val given = graph[name]?.takeUnless { it.isNull } ?: return default
         require(given.isBoolean) { "A request's graph gives $name as true or false." }
         return given.booleanValue()
     }

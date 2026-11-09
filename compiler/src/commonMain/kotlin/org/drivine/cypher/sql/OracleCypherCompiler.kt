@@ -45,6 +45,11 @@ class OracleCypherCompiler(
     private val indexedProperties: Set<Pair<String, String>>,
     /** The host's writing of the values it gives as JSON: see [CypherEncoder]. */
     encoder: CypherEncoder?,
+    /**
+     * Whether a statement that writes returns its rows as one row of JSON text, in place of a row of `JSON` each: see
+     * [returnRows], and [org.drivine.cypher.api.GraphOptions.oracleRowsAsText].
+     */
+    private val rowsAsText: Boolean = false,
 ) : SqlCypherCompiler(graph, encoder) {
 
     // The constructor drivine4j's compiler had, its defaults among it, kept so that what was compiled against it still links.
@@ -1774,7 +1779,23 @@ class OracleCypherCompiler(
         "END;",
     )).joinToString("\n") }
 
-    override fun returnRows(query: String) = listOf("OPEN $CURSOR FOR\n${indent(query)};", "DBMS_SQL.RETURN_RESULT($CURSOR);")
+    /**
+     * The rows of [query], returned as an implicit result: a row of `JSON` each, or with [rowsAsText] all of them as one
+     * row, a JSON list in their order, as text in a column named [ROWS_AS_TEXT]. Its text is extended JSON, so a value
+     * plain JSON has no text for is read back as it is: a `BINARY_DOUBLE` is `{"$numberDouble": 2}` (`"Nan"`, `"Inf"` and
+     * `"-Inf"` for NaN and the infinities), as a whole float written `2` would be read as the whole number 2. One row, as
+     * node-oracledb's thin mode gives only the prefetched rows of an implicit result with a `JSON` or a `CLOB` column
+     * (oracle/node-oracledb#1795), and a row's text may be longer than a `VARCHAR2`.
+     */
+    override fun returnRows(query: String): List<String> {
+        if (!rowsAsText) return listOf("OPEN $CURSOR FOR\n${indent(query)};", "DBMS_SQL.RETURN_RESULT($CURSOR);")
+        val numbered = "SELECT cy_q.result, ROWNUM AS cy_n FROM (\n${indent(query)}\n) cy_q"
+        val rows = "COALESCE(JSON_ARRAYAGG(cy_r.result ORDER BY cy_r.cy_n NULL ON NULL RETURNING JSON), JSON('[]'))"
+        return listOf(
+            "OPEN $CURSOR FOR\n${indent("SELECT JSON_SERIALIZE($rows RETURNING CLOB EXTENDED) AS \"$ROWS_AS_TEXT\" FROM (\n${indent(numbered)}\n) cy_r")};",
+            "DBMS_SQL.RETURN_RESULT($CURSOR);",
+        )
+    }
 
     /**
      * Oracle's `SIGN` gives 0 for a positive number under 1.0E-128, from 1.0E-130 up, which NUMBER holds and compares
@@ -1850,6 +1871,12 @@ class OracleCypherCompiler(
     companion object {
         /** The cursor a procedure returns its rows by. */
         private const val CURSOR = "cy_cursor"
+
+        /**
+         * The column a statement that writes returns its rows in with `rowsAsText`, as one JSON list's text: see [returnRows].
+         * A host reads a column named `<name>:json` as JSON text, named `<name>`.
+         */
+        const val ROWS_AS_TEXT = "rows:json"
 
         /** A property as [propertyOf] reads it, its properties and its path, a literal whose quotes are doubled: see [propertyRead]. */
         val PROPERTY_READ = Regex("""JSON_QUERY\((.+), ('\$(?:[^']|'')*') RETURNING JSON\)""")
