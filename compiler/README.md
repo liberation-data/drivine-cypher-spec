@@ -105,6 +105,9 @@ top-level await, so the entry runs that loader's text as a function with its Nod
 is checked, so a Kotlin release that writes the loader otherwise fails at once. The corpus check on wasmJs goes through
 this entry. Each entry has its TypeScript types: Kotlin's `.d.mts` for `import`, and `npm/index.d.cts` for `require`.
 
+The package's name is set once, as `compiler.npmName` in `gradle.properties`. The corpus check on wasmJs fails when the
+package it loads has another (`check/corpus-node-test.sh` tests that).
+
 ### C
 
 ```c

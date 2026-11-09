@@ -212,13 +212,17 @@ val npmPackage = tasks.register<Sync>("npmPackage") {
     from(distribution) { include("*.wasm", "*.mjs", "*.d.mts") }
     from(layout.projectDirectory.dir("npm")) { include("index.cjs", "index.d.cts") }
     into(layout.buildDirectory.dir("npm"))
+    val packageName = npmName
     val packageVersion = project.version.toString()
+    // Written by doLast, so the Sync doesn't see them: as inputs, a change of either builds the package again.
+    inputs.property("npmName", packageName)
+    inputs.property("version", packageVersion)
     doLast {
         // Kotlin's own package.json names the loader's npm dependencies (kotlinx-datetime's @js-joda/core).
         @Suppress("UNCHECKED_CAST")
         val kotlinPackage = groovy.json.JsonSlurper().parse(distribution.get().outputs.files.singleFile.resolve("package.json")) as Map<String, Any?>
         val packageJson = linkedMapOf(
-            "name" to npmName,
+            "name" to packageName,
             "version" to packageVersion,
             "description" to "Drivine's Cypher compiler: Cypher as SQL for Postgres, Oracle and SQLite, built for Wasm.",
             "license" to "Apache-2.0",
