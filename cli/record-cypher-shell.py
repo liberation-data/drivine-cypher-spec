@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 Runs each case in cli.yaml marked `cypherShell: true` through cypher-shell, in a Neo4j container, and checks that
-cypher-shell gives the case's stdout and exit code. That keeps the cases' claim, that drivine prints what cypher-shell
-prints, measured against cypher-shell itself.
+cypher-shell gives the case's stdout, stderr and exit code. That keeps the cases' claim, that drivine prints what
+cypher-shell prints, measured against cypher-shell itself.
 
     cli/record-cypher-shell.py [--image neo4j:2026.10.1]
 
@@ -92,7 +92,8 @@ def main():
             result = run(*command, stdin=stdin if stdin is not None else "")
 
             stdout = "".join(line for line in result.stdout.splitlines(keepends=True) if not TIMING.match(line.rstrip("\n")))
-            if stdout != case.get("stdout", stdout) or result.returncode != case.get("exit", result.returncode):
+            if (stdout != case.get("stdout", stdout) or case.get("stderr", "") not in result.stderr
+                    or result.returncode != case.get("exit", result.returncode)):
                 failed += 1
                 print(f"DIFFERS: {case['name']}\n  exit {result.returncode}, stdout {stdout!r}\n  stderr {result.stderr.strip()!r}")
             else:

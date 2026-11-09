@@ -392,7 +392,7 @@ cases:
 
   - name: "csv quotes as RFC 4180 does, and null is an empty field"
     args: ["--format", "csv", "RETURN 1 AS n, 'a,b' AS s, 'say \"hi\"' AS q, null AS z, [1, 2] AS l"]
-    stdout: "n,s,q,z,l\n1,\"a,b\",\"say \"\"hi\"\"\",,[1,2]\n"
+    stdout: "n,s,q,z,l\n1,\"a,b\",\"say \"\"hi\"\"\",,\"[1,2]\"\n"
     exit: 0
 
   - name: "csv separates results with one empty line"
