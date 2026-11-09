@@ -3715,7 +3715,7 @@ cases:
         only: [neo4j, sql]
         cypher: "RETURN [toFloat('(1)'), toFloat('--1'), toFloat('- -1'), toFloat('-(1)'), toFloat('1 2'), toFloat('1/**/0'), toFloat('/*'), toFloat('1/*'), toFloat('/**/'), toFloat('0x1F/*'), toFloat('1_0;'), toFloat('1_0//x\\ny'), toFloat('\\u00A0\\u00011_0'), toFloat('\\u0001\\u00A01_0'), toFloat('\\u000E\\u00A01_0'), toFloat('\\u00A01.5\\u000E'), toFloat('-\\u0001 1.5')]"
         rows: [[null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null]]
-      - note: "Java takes the characters up to a space off a text's ends. The SQL stores give null for those that are not ASCII's spaces (drivine4j#696)."
+      - note: "Java takes the characters up to a space off a text's ends. Oracle gives null for those that are not ASCII's spaces, and Postgres and SQLite for those that are not Cypher's either (drivine4j#696)."
         only: [neo4j]
         cypher: "RETURN [toFloat('\\u000B1.5\\u000C'), toFloat('\\u000D3\\u000D'), toFloat('\\u001F2\\u0001'), toFloat('\\u001C1.5'), toFloat('\\u00011.5'), toFloat('\\u000E1.5'), toFloat('1.5\\u000E'), toFloat('\\u001F1_0')]"
         rows: [[1.5, 3.0, 2.0, 1.5, 1.5, 1.5, 1.5, 10.0]]
