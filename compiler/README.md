@@ -337,7 +337,9 @@ release: a required reviewer, tags `v*` allowed to deploy to it, and the secrets
 `CENTRAL_PORTAL_USERNAME`, `CENTRAL_PORTAL_PASSWORD`, `SIGNING_KEY` and `SIGNING_PASSWORD`, with `NPM_TOKEN`, an npm
 automation token that can publish in the `@liberation-data` scope, until npm's trusted publishing for this workflow
 replaces it (#117). Without it, a tag's run makes
-an empty one, with no reviewer, and step 3 stops at its check of the secrets.
+an empty one, with no reviewer, and step 3 stops at its check of the secrets. Without `NPM_TOKEN` alone, a tag's run
+publishes to Maven Central and `publish-npm` stops at its check of the token: add it, and re-run `publish-npm` alone
+("Re-run failed jobs").
 
 Push the tag with or after `main`: a tag pushed before the commit is on `main` is refused at step 1; push `main` and
 re-run the workflow.

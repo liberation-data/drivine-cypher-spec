@@ -12,9 +12,10 @@
 # - The npm package is built and checked in the same job, and kept beside the bundle. Its publish is a job of its own,
 #   also waiting in `release`: it publishes the tarball that was checked, with npm's provenance, and a failure of
 #   either publish neither undoes nor holds up the other.
-# - workflow_dispatch, and a pull request that changes the release machinery, are dry runs: everything but the upload
-#   to the Portal, the bundle signed with a throwaway key, with GitHub's release downloads blocked, kept as the run's
-#   artifact, and uploaded to a stand-in for the Portal on the runner.
+# - workflow_dispatch, and a pull request that changes the release machinery, are dry runs: everything but the uploads
+#   to the Portal and to npm, the bundle signed with a throwaway key, with GitHub's release downloads blocked, kept as
+#   the run's artifact, and uploaded to a stand-in for the Portal on the runner, and the npm tarball given to npm
+#   publish --dry-run.
 # - The jobs that build install the pinned JDK and Gradle with .github/actions/pinned-toolchain, from checked archives:
 #   the gate's jobs keep them in the cache, so a GitHub release-download outage, which failed v0.31.0's publish, doesn't
 #   hold up a gate whose cache is warm; the build job reads no cache and fetches them, so an outage fails it, before the
