@@ -40,8 +40,8 @@ Only one of `cypher`, `-c` and `-f` may be given. Given two, the CLI refuses the
 | Neo4j | `neo4j://host:port`, `bolt://host:port`, and their `+s` and `+ssc` forms, as cypher-shell takes them |
 | Memgraph | `memgraph://host:port`, or a `bolt://` address with `--type memgraph` |
 | FalkorDB | `falkordb://host:port` |
-| Postgres | `postgresql://host:port/database` (`postgres://` too) |
-| Oracle | `oracle://host:port/service` |
+| Postgres | `postgresql://host:port/database` (`postgres://` too), or with no `/database` |
+| Oracle | `oracle://host:port/service`, or with no `/service` |
 | SQLite | `sqlite:path`, or `sqlite::memory:` |
 
 - **`--type TYPE`** names the store where the address leaves it open. The types are `neo4j`, `memgraph`, `falkordb`, `postgres`, `oracle` and `sqlite`. A `bolt://` address with no type is Neo4j. A type the address's scheme contradicts, as `--type neo4j` with `postgresql://`, is refused as a bad invocation.
@@ -219,9 +219,9 @@ On a SQL store, the CLI reads a node's labels and a relationship's type along wi
 | 0 | Everything ran. |
 | 1 | A statement or a command failed. |
 | 2 | The invocation is wrong: an unknown or refused flag, a bad value, two inputs, no address, a `-f` file that can't be read, a bad profile. Nothing ran. The invocation is checked before the CLI connects, so it exits with 2, not 3, where the store can't be reached too. |
+| 3 | The store can't be reached, or it refused the user and password. Nothing ran. |
 
 The flags are read first, in the order given, and the first that ends the run ends it with nothing else checked: an unknown or refused flag exits with 2, and `-h`, `--help`, `-v`, `--version` or `--driver-version` exits with 0. Only then are the rest checked, such as two inputs, the address and the profile, so `drivine --nope` names `--nope`, not the missing address.
-| 3 | The store can't be reached, or it refused the user and password. Nothing ran. |
 
 A script that tests for non-zero works with these codes as with cypher-shell's, which exits with 1 for every failure.
 
@@ -255,7 +255,7 @@ The cases marked `mode: cypher-shell` are the mode's tests. Each keeps its expec
 
 ## Cases
 
-`cli.yaml` holds the cases each build runs. A runner runs each one against every store the case names, giving the CLI that store's address and credentials. The address goes in `-a`, and the credentials in `DRIVINE_USER` and `DRIVINE_PASSWORD`, each unless the case gives that variable itself, even as null. In `args`, `env` and the texts of `files`, `$user` and `$password` stand for the store's. The runner empties the graph before each case, and runs each case in an empty directory of its own, with `HOME` another empty directory, and with no `DRIVINE_` or `NEO4J_` variable set but those it gives. It skips a case marked `mode: cypher-shell` until the [compatibility mode](#cypher-shell-compatibility-later) exists.
+`cli.yaml` holds the cases each build runs. A runner runs each one against every store the case names, giving the CLI that store's address and credentials. The address goes in `-a`, in its store's own scheme, as `memgraph://` for Memgraph, since a `bolt://` one with no `--type` is Neo4j, and the credentials in `DRIVINE_USER` and `DRIVINE_PASSWORD`, each unless the case gives that variable itself, even as null. In `args`, `env` and the texts of `files`, `$user` and `$password` stand for the store's. The runner empties the graph before each case, and runs each case in an empty directory of its own, with `HOME` another empty directory, and with no `DRIVINE_` or `NEO4J_` variable set but those it gives. It skips a case marked `mode: cypher-shell` until the [compatibility mode](#cypher-shell-compatibility-later) exists.
 
 A store in `only` and `except` is `neo4j`, `memgraph`, `falkordb`, `postgres`, `oracle` or `sqlite`: the CLI doesn't reach Neptune. `graph` names the first three, and `sql` the last three.
 
