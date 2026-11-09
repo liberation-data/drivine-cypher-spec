@@ -340,6 +340,32 @@ cases:
         unorderedLists: true
         rows: [{avg: 1997.0, latest: 2003, distinct: ["Neo", "Trinity"]}]
 
+  - name: "coalesce() of one argument"
+    description: "coalesce() of one argument is that argument, null where it is null: a property missing or held, null written, a value of each kind, and within an expression. Of none it is refused."
+    steps:
+      - cypher: "MATCH (p:Person) WITH p ORDER BY p.name RETURN coalesce(p.missing) IS NULL"
+        rows: [true, true, true, true]
+      - cypher: "MATCH (p:Person) RETURN coalesce(p.name) AS n ORDER BY n"
+        rows: ["Carrie", "Hugo", "Keanu", "Laurence"]
+      - cypher: "MATCH (p:Person) WITH p ORDER BY p.name RETURN coalesce(p.born)"
+        rows: [1967, null, 1964, 1961]
+      - cypher: "RETURN coalesce(null)"
+        rows: [null]
+      - note: "Within an expression, as its operand, a function's argument and a condition."
+        cypher: "MATCH (p:Person) WITH p ORDER BY p.name RETURN [coalesce(p.born) + 1, toUpper(coalesce(p.name)), size(coalesce(p.name)), coalesce(p.missing) IS NULL]"
+        rows: [[1968, "CARRIE", 6, true], [null, "HUGO", 4, true], [1965, "KEANU", 5, true], [1962, "LAURENCE", 8, true]]
+      - cypher: "MATCH (p:Person) WHERE coalesce(p.born) > 1962 RETURN p.name ORDER BY p.name"
+        rows: ["Carrie", "Keanu"]
+      - cypher: "MATCH (:Person)-[r:ACTED_IN]->(:Movie {title: 'Johnny Mnemonic'}) RETURN coalesce(r.role)"
+        rows: ["Johnny"]
+      - cypher: "MATCH (p:Person) RETURN coalesce(max(p.born))"
+        rows: [1967]
+      - cypher: "RETURN [coalesce($x), coalesce([1, null]), coalesce({a: 1}).a, coalesce(date('2024-03-15')).year, coalesce([date('2024-03-15')])[0].month]"
+        parameters: {x: "y"}
+        rows: [["y", [1, null], 1, 2024, 3]]
+      - cypher: "RETURN coalesce()"
+        error: true
+
   - name: "Quantifiers, CASE and powers"
     description: "Quantifiers, XOR, simple CASE, powers, negation and text functions give the values Neo4j gives."
     steps:

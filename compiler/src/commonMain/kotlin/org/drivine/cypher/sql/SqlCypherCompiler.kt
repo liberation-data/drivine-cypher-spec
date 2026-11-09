@@ -5345,8 +5345,11 @@ abstract class SqlCypherCompiler(
                 "length" -> (one() as? Value.Path)?.let { Value.Json(idCount(it.eids)) } ?: throw CompilerException("length() takes a path.")
                 "nodes" -> (one() as? Value.Path)?.let { nodeList(it.nids) } ?: throw CompilerException("nodes() takes a path.")
                 "relationships" -> (one() as? Value.Path)?.let { relationshipList(it.eids) } ?: throw CompilerException("relationships() takes a path.")
+                // Of one argument, that argument alone, read as COALESCE reads it: Oracle and SQLite take no COALESCE of one (drivine4j#530).
                 "coalesce" -> Value.Json(
-                    "COALESCE(${function.arguments.zip(arguments).joinToString(", ") { (argument, value) -> coalesced(argument, value, scope) }})",
+                    function.arguments.zip(arguments).map { (argument, value) -> coalesced(argument, value, scope) }
+                        .also { if (it.isEmpty()) throw CompilerException("coalesce() takes at least one argument.") }
+                        .let { read -> read.singleOrNull() ?: "COALESCE(${read.joinToString(", ")})" },
                     temporal = kindOf(function.arguments.zip(arguments)),
                     // A list of one kind where each is, or is null or an empty list written, as `coalesce(l, [])`: so Oracle reads its items
                     // by their places, as it reads l's (#347).
