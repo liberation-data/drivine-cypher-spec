@@ -22,7 +22,7 @@ drivine [flags] [cypher]
 |---|---|
 | `cypher`, the one positional argument, or `-c CYPHER` | That text, as a file's text is run (see [Files](#files)), then exit. |
 | `-f FILE`, `--file FILE` | The file's statements, then exit. |
-| stdin, when it isn't a terminal | Its statements, then exit. |
+| stdin, when it isn't a terminal or `--non-interactive` is given | Its statements, then exit. |
 | none of these, stdin a terminal | The [REPL](#the-repl). |
 
 Each statement runs in its own transaction, unless it falls between `:begin` and `:commit`.
@@ -46,7 +46,7 @@ Only one of `cypher`, `-c` and `-f` may be given. Given two, the CLI exits with 
 
 - **`--type TYPE`** names the store where the address leaves it open. The types are `neo4j`, `memgraph`, `falkordb`, `postgres`, `oracle` and `sqlite`.
 - **With no address,** the CLI reads `NEO4J_ADDRESS`, then `NEO4J_URI`, then the profile. If none is set, it uses `neo4j://localhost:7687`, as cypher-shell does.
-- **`-d DATABASE`, `--database DATABASE`, or `NEO4J_DATABASE`** names the database, on a store that has more than one. On Postgres, a database named in the address wins.
+- **`-d DATABASE` or `--database DATABASE`, then `NEO4J_DATABASE`, then the profile** names the database, on a store that has more than one. On Postgres, a database named in the address wins.
 
 ### The user and the password
 
@@ -80,7 +80,7 @@ profiles:
 
 A profile's keys are `address`, `type`, `database`, `user` and `password`. Any other key is refused, with exit code 2.
 
-Flags and environment variables override the profile, key by key.
+Flags and environment variables override the profile, key by key. A `--profile` or a `default:` that names no profile is refused, with exit code 2.
 
 ## Flags
 
@@ -135,7 +135,7 @@ A file, stdin and the positional argument are read alike.
 
 A statement that is only spaces and comments isn't run. The text after the last `;` is run too, as long as it is more than spaces and comments.
 
-**Commands.** A line whose first character after any spaces is `:` is a command. It runs on its own, and needs no `;`:
+**Commands.** A line whose first character after any spaces is `:` is a command, where a statement would start: not inside a string, a comment, or a statement that no `;` has ended yet. It runs on its own, and needs no `;`:
 
 | Command | What it does |
 |---|---|
@@ -165,7 +165,7 @@ FalkorDB commits each statement as it runs, so there `:begin` and `:commit` do n
 
 `-P NAME=EXPRESSION` is taken too.
 
-The expression is Cypher. It's evaluated by running `RETURN expression` on the store, so a parameter holds what the store gives for it. A parameter set later replaces an earlier one of the same name.
+The expression is Cypher. It's evaluated by running `RETURN expression` on the store, so a parameter holds what the store gives for it. A parameter set later replaces an earlier one of the same name. A statement that uses a parameter that isn't set fails, on every store, as it does on Neo4j.
 
 ## Output
 
@@ -208,7 +208,7 @@ On a SQL store, the CLI reads a node's labels and a relationship's type along wi
 |---|---|
 | 0 | Everything ran. |
 | 1 | A statement or a command failed. |
-| 2 | The invocation is wrong: an unknown or refused flag, a bad value, two inputs, a bad profile. Nothing ran. |
+| 2 | The invocation is wrong: an unknown or refused flag, a bad value, two inputs, a bad profile. Nothing ran. The invocation is checked before the CLI connects, so it exits with 2, not 3, where the store can't be reached too. |
 | 3 | The store can't be reached, or it refused the user and password. Nothing ran. |
 
 cypher-shell exits with 1 in all these cases. A script that tests for non-zero works with both, and a script that tests for 1 alone sees `drivine` exit with 2 or 3 where cypher-shell exited with 1.
@@ -222,7 +222,7 @@ The REPL starts when stdin is a terminal, no input was given, and `--non-interac
 - **History** goes to `--history`'s file. `in-memory` keeps it for the session alone, and `disable` keeps none.
 - **Leaving:** `:exit`, `:quit` or Ctrl-D leaves. Ctrl-C drops the statement being typed.
 
-The REPL's output is `auto`'s: `verbose` on a terminal.
+The REPL's output is `auto`'s, which tests stdout, not stdin: `verbose` when stdout is a terminal, `plain` when it is piped.
 
 On Windows, where a pipe can look like a terminal, `--non-interactive` makes the CLI read stdin, as in cypher-shell.
 

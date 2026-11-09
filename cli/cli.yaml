@@ -211,11 +211,19 @@ cases:
     note: "$user and $password are the store's, as the runner has them."
 
   - name: "-p is taken, with a warning"
+    description: "-u comes before NEO4J_USERNAME, and -p before DRIVINE_PASSWORD."
     only: [neo4j, postgres, oracle]
-    env: {DRIVINE_PASSWORD: null}
+    env: {NEO4J_USERNAME: "nobody", DRIVINE_PASSWORD: "not-the-password"}
     args: ["--format", "plain", "-u", "$user", "-p", "$password", "RETURN 5 AS five"]
     stdout: "five\n5\n"
     stderr: "a password given with -p shows in ps and in your shell history"
+    exit: 0
+
+  - name: "DRIVINE_PASSWORD comes before NEO4J_PASSWORD"
+    only: [neo4j, postgres, oracle]
+    env: {NEO4J_PASSWORD: "not-the-password"}
+    args: ["--format", "plain", "RETURN 6 AS six"]
+    stdout: "six\n6\n"
     exit: 0
 
   - name: "A wrong password exits with 3"
@@ -314,6 +322,13 @@ cases:
     store: false
     files: {".drivine.yml": "profiles:\n  mem:\n    address: \"sqlite::memory:\"\n    host: \"x\"\n"}
     args: ["--profile", "mem", "RETURN 1"]
+    stdout: ""
+    exit: 2
+
+  - name: "A --profile that names no profile exits with 2"
+    store: false
+    files: {".drivine.yml": "profiles:\n  mem:\n    address: \"sqlite::memory:\"\n"}
+    args: ["--profile", "nope", "RETURN 1"]
     stdout: ""
     exit: 2
 
