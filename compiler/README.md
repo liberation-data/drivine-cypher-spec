@@ -474,13 +474,14 @@ into step 2 could change what it builds whatever it then checked. So:
   whose checksum isn't the pinned one; `.github/scripts/compiler-konan-dependencies.sh` does the same for Kotlin/Native's own dependencies
   against `gradle/kotlin-native-dependencies.txt`.
 
-So the entry, whoever saved it, can neither change what is built nor make step 2 fail: a Gradle file whose checksum
+So the entry, whoever saved it, can't change what is published, nor make step 2 fail by what it holds: a Gradle file whose checksum
 isn't the pinned one is dropped and fetched, as is an archive whose name or checksum isn't, and an entry that fails a
 check is refused whole. At worst it makes step 2 fetch what the entry lacks, as where none is kept: Gradle tries each
 fetch up to 8 times, over about 4 minutes (`gradle.properties`), and the archives are retried for a few minutes; where
 it still can't, step 2 fails, before the reviewer is asked, and is re-run. What it can still do is take over the
 `dependencies` job's own runner, which holds nothing step 2 needs but the upload: it could upload an artifact of a name
-step 2 then can't use, which fails step 2's own upload, as any of the gate's jobs could too; `publish` signs only the
+step 2 then can't use (`compiler-maven-central-<version>` or `compiler-npm-<version>`), which fails step 2's own upload,
+and so the run, as any of the gate's jobs could too; `publish` signs only the
 bundle whose SHA-256 is step 2's own output. What is still fetched: Gradle asks Maven Central and the Gradle Plugin
 Portal for each dependency's POM, module and `.sha1`, small files, before it takes a file it already has, and fetches
 the POMs `stage` leaves out. binaryen's
@@ -494,7 +495,9 @@ drops it, set the repository variable `COMPILER_RELEASE_SKIP_CACHE` to `true` (S
 Variables): the `dependencies` job then restores nothing, and step 2 fetches everything, as before this cache. Delete
 the entry (`gh cache list --repo liberation-data/drivine-cypher-spec --key compiler-release-dependencies`, then
 `gh cache delete <key> --repo liberation-data/drivine-cypher-spec`), and run workflow_dispatch of `Compiler` on `main`,
-which keeps a fresh one; then delete the variable.
+which keeps a fresh one; then delete the variable. Where step 2's upload failed because an artifact of its name was
+already in the run, a re-run of that run may fail again, as the artifact stays: start a new run instead, with the
+variable set, by deleting the tag and pushing it again.
 
 The gate's jobs read their own caches, as before (setup-gradle's, the toolchain archives', `~/.konan`), and Gradle
 checks the dependencies they use too; they build nothing that is released. Every action `compiler.yml` and this workflow
