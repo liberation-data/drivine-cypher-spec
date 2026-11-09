@@ -4,7 +4,8 @@ package org.drivine.cypher.sql
 /**
  * A kind of temporal value, as openCypher has them. On a SQL store a temporal value is the ISO 8601 text a
  * store keeps a moment as, and [pattern] tells the kind from the text: a regular expression both stores
- * read, written with capturing groups alone, for Oracle's take no other kind. A year is numbered as Neo4j
+ * read, written with capturing groups alone, for Oracle's take no other kind. Each store is given it as its
+ * [TemporalSql.regex] spells it: SQLite's ends at `\z`, not `$`. A year is numbered as Neo4j
  * and ISO 8601 number it, astronomically: `0000` is 1 BC and `-0044` is 45 BC.
  */
 enum class Temporal(val pattern: String, val zoned: Boolean = false) {

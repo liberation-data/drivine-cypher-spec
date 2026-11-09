@@ -22,6 +22,12 @@ abstract class TemporalSql(protected val shared: (List<String>, (List<String>) -
     /** The text the group [group] of the regular expression [pattern] matches in [text]: null where it matches none. */
     abstract fun group(text: String, pattern: String, group: Int): String
 
+    /**
+     * The regular expression [pattern], one of [Temporal]'s or of an offset's, as [matches], [group] and [replace] are given it on this store:
+     * as it is, where `^` is the text's start and `$` its end, as Postgres's and Oracle's read them.
+     */
+    open fun regex(pattern: String): String = pattern
+
     /** The text [text] as a number: null where it is null or empty. */
     abstract fun number(text: String): String
 
@@ -163,7 +169,7 @@ abstract class TemporalSql(protected val shared: (List<String>, (List<String>) -
     open fun replace(text: String, pattern: String, replacement: String) = "REGEXP_REPLACE($text, $pattern, $replacement)"
 
     /** The zoned text [text] without the offset it ends with. */
-    protected fun unzoned(text: String) = replace(text, "'${Temporal.OFFSET}'", "''")
+    protected fun unzoned(text: String) = replace(text, "'${regex(Temporal.OFFSET)}'", "''")
 
     companion object {
         /**

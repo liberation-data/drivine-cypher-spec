@@ -311,24 +311,51 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
         "tointeger" -> shared(json) { (x) ->
             (if (nonFinite) "CASE WHEN ${isNaN(x)} THEN '0' ELSE " else "") +
             "CASE json_type($x) WHEN 'integer' THEN $x WHEN 'real' THEN json_quote(CAST($x ->> '$' AS INTEGER)) " +
-                "WHEN 'text' THEN CASE WHEN trim($x ->> '$') REGEXP '^[+-]?[0-9]+$' THEN json_quote(CAST(trim($x ->> '$') AS INTEGER)) " +
-                "WHEN ($x ->> '$') REGEXP ${literal(NUMERIC_TEXT)} THEN json_quote(CAST(CAST(trim($x ->> '$') AS REAL) AS INTEGER)) END END" +
+                "WHEN 'text' THEN CASE WHEN ($x ->> '$') REGEXP ${literal(WHOLE_TEXT)} THEN json_quote(CAST(($x ->> '$') AS INTEGER)) " +
+                "WHEN ($x ->> '$') REGEXP ${literal(DECIMAL_TEXT)} THEN json_quote(CAST(CAST(trim($x ->> '$') AS REAL) AS INTEGER)) " +
+                "WHEN ($x ->> '$') REGEXP ${literal(CYPHER_NUMBER_TEXT)} THEN json_quote(${cypherInteger("($x ->> '$')")}) END END" +
                 if (nonFinite) " END" else ""
         }
-        // A text that names NaN or an infinity, as Java reads it, is that float, where the statement may work one out (#545).
+        // A text is read first as Java reads it, then as a number Cypher writes, as Neo4j reads it: see [textFloat].
         "tofloat" -> shared(json) { (x) ->
             (if (nonFinite) "CASE WHEN ${isNaN(x)} THEN $x ELSE " else "") +
             "CASE json_type($x) WHEN 'integer' THEN json_quote(CAST($x ->> '$' AS REAL)) WHEN 'real' THEN $x " +
-                "WHEN 'text' THEN CASE WHEN ($x ->> '$') REGEXP ${literal(NUMERIC_TEXT)} THEN json_quote(CAST(trim($x ->> '$') AS REAL)) " +
-                (if (nonFinite) "WHEN ($x ->> '$') REGEXP ${literal(NAN_NAME)} THEN $NAN_JSON WHEN ($x ->> '$') REGEXP ${literal(INFINITY_NAME)} THEN json_quote($INFINITY) " +
-                    "WHEN ($x ->> '$') REGEXP ${literal(NEGATIVE_INFINITY_NAME)} THEN json_quote(-$INFINITY) " else "") + "END END" +
-                if (nonFinite) " END" else ""
+                "WHEN 'text' THEN ${textFloat("($x ->> '$')")} END" + if (nonFinite) " END" else ""
         }
         "head" -> "($json -> 0)"
         "last" -> "($json -> -1)"
         "abs" -> scalar("abs(${number(json)})")
         else -> null
     }
+
+    /**
+     * `toFloat` of the text [text], as JSON, as Neo4j reads it: as Java's `Double.parseDouble` does, on the text with the
+     * characters up to a space taken off its ends, and else as a number written in Cypher, with Cypher's spaces around it.
+     *
+     * - **A decimal**, with ASCII's spaces around it, is read by SQLite's `CAST`, which skips those and no others: a text
+     *   with any other space before it `CAST` reads as 0.0 (drivine4j#693), so it is no decimal here.
+     * - **A name of NaN or an infinity**, as Java writes it, is that float, where the statement may work one out (#545),
+     *   with what Java takes off a text's ends around it ([JAVA_SPACE]), but no Unicode space, which leaves it no name.
+     * - **A number Cypher writes**, with Cypher's spaces around it ([CYPHER_SPACE]), Unicode's among them, is read by `CAST`
+     *   once those before it are taken off, which reads as far as the number goes: a float, past a double's range an
+     *   infinity, or a whole number in a long's range ([CYPHER_NUMBER_TEXT]).
+     *
+     * Any other text is null, though Neo4j reads some of them (drivine4j#696). The decimal is matched first, so a text that
+     * is one is read as cheaply as before.
+     */
+    private fun textFloat(text: String) =
+        "CASE WHEN $text REGEXP ${literal(DECIMAL_TEXT)} THEN json_quote(CAST(trim($text) AS REAL)) " +
+            (if (nonFinite) "WHEN $text REGEXP ${literal(NAN_TEXT)} THEN $NAN_JSON WHEN $text REGEXP ${literal(INFINITY_TEXT)} THEN json_quote($INFINITY) " +
+                "WHEN $text REGEXP ${literal(NEGATIVE_INFINITY_TEXT)} THEN json_quote(-$INFINITY) " else "") +
+            "WHEN $text REGEXP ${literal(CYPHER_NUMBER_TEXT)} THEN json_quote(CAST(ltrim($text, $CYPHER_SPACE_CHARS) AS REAL)) END"
+
+    /**
+     * `toInteger` of the text [text], a number Cypher writes with Cypher's spaces around it ([CYPHER_NUMBER_TEXT]), as SQL:
+     * a whole number as itself, and a float cut to a whole number, as a decimal is, once the spaces before it, which `CAST`
+     * reads as 0, are taken off, as [textFloat] takes them (drivine4j#693).
+     */
+    private fun cypherInteger(text: String) =
+        "CASE WHEN $text GLOB '*[.eE]*' THEN CAST(CAST(ltrim($text, $CYPHER_SPACE_CHARS) AS REAL) AS INTEGER) ELSE CAST(ltrim($text, $CYPHER_SPACE_CHARS) AS INTEGER) END"
 
     override fun page(skip: String?, limit: String?) =
         if (skip == null && limit == null) emptyList() else listOf("LIMIT ${limit ?: "-1"}${skip?.let { " OFFSET $it" }.orEmpty()}")
@@ -594,8 +621,52 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
         /** The records of a procedure's loops, whose `item` a step reads. */
         val RECORDS = setOf(RECORD, MATCHED)
 
-        /** A text SQLite reads as a number, spaces around it allowed. */
-        const val NUMERIC_TEXT = """^\s*[+-]?([0-9]+\.?[0-9]*|\.[0-9]+)([eE][+-]?[0-9]+)?\s*$"""
+        /**
+         * ASCII's spaces, tab to CR and the space, the only ones SQLite's `CAST` to a number skips. Written out, as `\s` is
+         * each host's: on drivine4j's, Unicode's spaces too (drivine4j#693).
+         */
+        const val ASCII_SPACE = """[\t\n\x0B\f\r ]"""
+
+        /**
+         * A decimal, with ASCII's spaces around it: a text SQLite's `CAST` reads as Java's `Double.parseDouble` does. Each of
+         * these patterns ends at `\z`, the text's end, as [matches] does: Java's `$` matches before a line break that ends the
+         * text too, and JavaScript's does not.
+         */
+        const val DECIMAL_TEXT = """^$ASCII_SPACE*[+-]?([0-9]+\.?[0-9]*|\.[0-9]+)([eE][+-]?[0-9]+)?$ASCII_SPACE*\z"""
+
+        /** A whole number, with ASCII's spaces around it, which `CAST` reads as itself, as Neo4j's `toInteger` does. */
+        const val WHOLE_TEXT = """^$ASCII_SPACE*[+-]?[0-9]+$ASCII_SPACE*\z"""
+
+        /** What Java's `String.trim` takes off a text's ends, U+0000 to the space, around a name of NaN or an infinity. */
+        const val JAVA_SPACE = """[\x00-\x20]"""
+
+        /** The names of NaN and the infinities, as [SqlCypherCompiler.NAN_NAME] and the others, with [JAVA_SPACE] around them. */
+        val NAN_TEXT = javaName(NAN_NAME)
+        val INFINITY_TEXT = javaName(INFINITY_NAME)
+        val NEGATIVE_INFINITY_TEXT = javaName(NEGATIVE_INFINITY_NAME)
+
+        private fun javaName(name: String) = name.replace("""\s""", JAVA_SPACE).removeSuffix("$") + """\z"""
+
+        /** Cypher's spaces, which may come around a number written in Cypher: tab to CR, U+001C to the space, and Unicode's. */
+        private val CYPHER_SPACES = listOf(0x09..0x0D, 0x1C..0x20, 0x85..0x85, 0xA0..0xA0, 0x1680..0x1680, 0x2000..0x200A, 0x2028..0x2029,
+            0x202F..0x202F, 0x205F..0x205F, 0x3000..0x3000)
+
+        /** [CYPHER_SPACES] as a class of a regular expression, each character escaped, as Java, JavaScript and Python read it. */
+        val CYPHER_SPACE = CYPHER_SPACES.joinToString("", "[", "]") { if (it.first == it.last) escaped(it.first) else "${escaped(it.first)}-${escaped(it.last)}" }
+
+        /** [CYPHER_SPACES] as SQL text, the characters `trim` takes off. */
+        val CYPHER_SPACE_CHARS = "char(${CYPHER_SPACES.flatten().joinToString(", ")})"
+
+        /**
+         * A number written in Cypher, with [CYPHER_SPACE] around it, and a minus: a float, with digits after its point or an
+         * exponent, or a whole number with no 0 before it, which Neo4j reads up to a long's ends, and so only one well in
+         * range, up to 8999999999999999999. Cypher's other forms, a minus with a space after it, and a whole number nearer a
+         * long's ends are left out, null (drivine4j#696).
+         */
+        val CYPHER_NUMBER_TEXT = "^$CYPHER_SPACE*-?((0|[1-9][0-9]*)(\\.[0-9]+([eE][+-]?[0-9]+)?|[eE][+-]?[0-9]+)|\\.[0-9]+([eE][+-]?[0-9]+)?|" +
+            "0|[1-9][0-9]{0,17}|[1-8][0-9]{18})$CYPHER_SPACE*\\z"
+
+        private fun escaped(code: Int) = if (code < 0x100) "\\x" + code.toString(16).padStart(2, '0') else "\\u" + code.toString(16).padStart(4, '0')
 
         /** The characters `trim` takes off a text's ends, as Cypher's does: SQLite's own takes spaces alone. */
         const val WHITESPACE = "char(32, 9, 10, 11, 12, 13)"

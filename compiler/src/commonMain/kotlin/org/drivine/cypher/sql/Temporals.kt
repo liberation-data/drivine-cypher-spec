@@ -29,7 +29,7 @@ class Temporals(
     // ----- Kinds -----
 
     /** Whether the text [text] is of [kind]. */
-    fun isKind(text: String, kind: Temporal): String = sql.matches(text, literal(kind.pattern))
+    fun isKind(text: String, kind: Temporal): String = sql.matches(text, literal(sql.regex(kind.pattern)))
 
     /**
      * [body] of the kind among [kinds] that the text [text] is, as its shape tells, and of the text, written once:
@@ -55,7 +55,7 @@ class Temporals(
         for (kind in kinds) {
             val ad = kind.adPattern?.takeIf { sql.numbersBcFromOne }
             val (plain, read) = if (ad == null) body(kind) to false else sql.knownAd(texts) { body(kind) }
-            if (read && ad != null && (binding() || plain.length <= TemporalSql.GUARDED_UP_TO)) first += whens({ sql.matches(it, literal(ad)) }, plain)
+            if (read && ad != null && (binding() || plain.length <= TemporalSql.GUARDED_UP_TO)) first += whens({ sql.matches(it, literal(sql.regex(ad))) }, plain)
             own += whens({ isKind(it, kind) }, if (read) body(kind) else plain)
         }
         return "CASE ${(first + own).joinToString(" ")} END"
@@ -92,8 +92,8 @@ class Temporals(
      * each writes it.
      */
     fun offset(text: String): String {
-        val utc = sql.replace(sql.group(text, literal(Temporal.OFFSET), 1), "'^[+-]00:?00$'", "'Z'")
-        return sql.replace(utc, "'^([+-][0-9]{2})([0-9]{2})$'", "'\\1:\\2'")
+        val utc = sql.replace(sql.group(text, literal(sql.regex(Temporal.OFFSET)), 1), literal(sql.regex("^[+-]00:?00$")), "'Z'")
+        return sql.replace(utc, literal(sql.regex("^([+-][0-9]{2})([0-9]{2})$")), "'\\1:\\2'")
     }
 
     /** The offset a value of [to] made of the text [text] of [from] has: its own, or UTC's where it has none; none where [to] is local. */
@@ -470,7 +470,7 @@ class Temporals(
      * negated whole opens with its sign.
      */
     private fun parts(text: String): Parts {
-        fun group(name: String) = Temporal.DURATION_PARTS.getValue(name).let { (pattern, group) -> sql.group(text, literal(pattern), group) }
+        fun group(name: String) = Temporal.DURATION_PARTS.getValue(name).let { (pattern, group) -> sql.group(text, literal(sql.regex(pattern)), group) }
         fun part(name: String) = "COALESCE(${sql.number(group(name))}, 0)"
         val sign = "CASE WHEN SUBSTR($text, 1, 1) = '-' THEN -1 WHEN $text IS NOT NULL THEN 1 END"
         return Parts(
