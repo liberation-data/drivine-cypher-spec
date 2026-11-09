@@ -44,7 +44,7 @@ Only one of `cypher`, `-c` and `-f` may be given. Given two, the CLI refuses the
 | Oracle | `oracle://host:port/service`, or with no `/service` |
 | SQLite | `sqlite:path`, or `sqlite::memory:` |
 
-- **`--type TYPE`** names the store where the address leaves it open. The types are `neo4j`, `memgraph`, `falkordb`, `postgres`, `oracle` and `sqlite`. A `bolt://` address with no type is Neo4j. A type the address's scheme contradicts, as `--type neo4j` with `postgresql://`, is refused as a bad invocation.
+- **`--type TYPE`** names the store where the address leaves it open. The types are `neo4j`, `memgraph`, `falkordb`, `postgres`, `oracle` and `sqlite`. Only a `bolt://` address, in any of its forms, leaves the store open: with no type it is Neo4j. Every other scheme names its store, and a type the scheme contradicts, as `--type neo4j` with `postgresql://`, is refused as a bad invocation.
 - **With no address** from any of these, there is no default: the CLI refuses the invocation, as a bad one, and says to give `-a`, `DRIVINE_ADDRESS` or a profile.
 
 ### The database and the graph
@@ -149,7 +149,7 @@ A line may end in `\r\n` as well as `\n`: the `\r` is not part of a command. A s
 | `:param {NAME: EXPRESSION, …}` | Sets the parameters named. |
 | `:params` | Prints the parameters to stdout as a map over several lines: `{`, then each `name: value` on a line of its own, indented two spaces, with `,` after each but the last, then `}`. A text is in `'…'`, not `"…"` as `plain` prints it. A map's parameters print in the order the store gives its keys, as **Order** in [Output](#output) says. |
 | `:params clear` | Clears them. |
-| `:use DATABASE` | Moves to another database, as `--database` names one in [the table](#the-database-and-the-graph). Where `--database` is refused, it fails as a command does. |
+| `:use DATABASE` | Moves to another database, as `--database` names one in [the table](#the-database-and-the-graph), but over a database or a service the address names. Where `--database` is refused, it fails as a command does. |
 | `:source FILE` | Runs a file's statements in place. A relative path is read from the working directory. A file that can't be read fails as a statement does, with exit code 1. |
 | `:exit`, `:quit` | Stops reading. |
 | `:help` | Lists the commands. |
@@ -166,7 +166,7 @@ FalkorDB has no multi-statement transactions. There `:begin` prints one line to 
 - `NAME => EXPRESSION`, as in `-P 'limit => 10'`;
 - a map, as in `-P '{limit: 10, since: date("2024-01-01")}'`.
 
-`-P NAME=EXPRESSION` is taken too. A `-P` of none of these forms is a bad value, and so a bad invocation.
+`-P NAME=EXPRESSION` is taken too, where the first `=` isn't the start of a `=>`. A `-P` of none of these forms is a bad value, and so a bad invocation.
 
 The expression is Cypher. It's evaluated by running `RETURN expression` on the store, so a parameter holds what the store gives for it. A parameter set later replaces an earlier one of the same name. A statement that uses a parameter that isn't set fails, on every store, as it does on Neo4j. A `-P` whose expression fails on the store fails as a statement does, with exit code 1, before any statement runs.
 
@@ -221,7 +221,7 @@ On a SQL store, the CLI reads a node's labels and a relationship's type along wi
 | 2 | The invocation is wrong: an unknown or refused flag, a bad value, two inputs, no address, a `-f` file that can't be read, a bad profile. Nothing ran. The invocation is checked before the CLI connects, so it exits with 2, not 3, where the store can't be reached too. |
 | 3 | The store can't be reached, or it refused the user and password. Nothing ran. |
 
-The flags are read first, in the order given, and the first that ends the run ends it with nothing else checked: an unknown or refused flag exits with 2, and `-h`, `--help`, `-v`, `--version` or `--driver-version` exits with 0. Only then are the rest checked, such as two inputs, the address and the profile, so `drivine --nope` names `--nope`, not the missing address.
+The flags are read first, in the order given, and the first that ends the run ends it with nothing else checked: an unknown or refused flag, or a flag's missing or bad value, exits with 2, and `-h`, `--help`, `-v`, `--version` or `--driver-version` exits with 0. Only then are the rest checked, such as two inputs, the address and the profile, so `drivine --nope` names `--nope`, not the missing address.
 
 A script that tests for non-zero works with these codes as with cypher-shell's, which exits with 1 for every failure.
 
@@ -251,7 +251,7 @@ The CLI reads cypher-shell's files and prints values as cypher-shell does, but i
 - **Exit codes.** cypher-shell exits with 1 for every failure. `drivine` exits with 2 for a bad invocation and 3 for a store it can't connect to.
 - **`-d` and `--graph`.** cypher-shell's `-d` names a Neo4j database. `drivine`'s names the database or the service, and is refused on FalkorDB and SQLite. A graph is named with `--graph`, which cypher-shell doesn't have.
 
-The cases marked `mode: cypher-shell` are the mode's tests. Each keeps its expected output, its exit code among it, as cypher-shell gives it. The runner gives them the store's user and password in `DRIVINE_USER` and `DRIVINE_PASSWORD`, as it gives every case, so the mode reads those before `NEO4J_USERNAME` and `NEO4J_PASSWORD`. `record-cypher-shell.py` checks every case marked `cypherShell: true` against cypher-shell, in either mode.
+The cases marked `mode: cypher-shell` are the mode's tests. Each also marked `cypherShell: true` keeps its expected output, its exit code among it, as cypher-shell gives it. The runner gives them the store's user and password in `DRIVINE_USER` and `DRIVINE_PASSWORD`, as it gives every case, so the mode reads those before `NEO4J_USERNAME` and `NEO4J_PASSWORD`. `record-cypher-shell.py` checks every case marked `cypherShell: true` against cypher-shell, in either mode.
 
 ## Cases
 
@@ -276,7 +276,7 @@ A store in `only` and `except` is `neo4j`, `memgraph`, `falkordb`, `postgres`, `
 | `files` | Files written into the run's own empty directory before the CLI runs, by name. Each is its text, or a map of its `text` and its `mode`, in octal, as in `{text: "…", mode: "600"}`. A file is written with mode 0644, which others can read, unless it gives a `mode`. |
 | `env` | Environment variables set for the run. A variable the case gives as null is unset. |
 | `stdout` | What stdout must be, exactly. |
-| `stdoutLines` | Regular expressions that stdout's lines must match in order, each a line after the one the expression before it matched. The lines between them aren't checked. |
+| `stdoutLines` | Regular expressions that stdout's lines must match in order, each found anywhere in its line unless `^` and `$` anchor it, each a line after the one the expression before it matched. The lines between them aren't checked. |
 | `stderr` | Text stderr must contain. |
 | `exit` | The exit code. |
 | `store` | `false` for a case that runs with no store, where the runner gives no address. |
