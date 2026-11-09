@@ -3735,6 +3735,11 @@ cases:
         only: [neo4j, sql]
         cypher: "RETURN [toFloat('1e5000000000'), toFloat('-1e5000000000'), toFloat('1e-5000000000'), toFloat('1e-999')]"
         rows: [[{$float: "Infinity"}, {$float: "-Infinity"}, 0.0, 0.0]]
+      - note: "Such an infinity is equal to one given."
+        only: [neo4j, sql]
+        cypher: "RETURN [toFloat('1e400') = $inf, toFloat('-1e5000000000') = $ninf, toFloat('1e400') = $ninf]"
+        parameters: {inf: {$float: "Infinity"}, ninf: {$float: "-Infinity"}}
+        rows: [[true, true, false]]
       - note: "A text given as a parameter is read alike. The SQL stores give null for the Java and Cypher forms here (drivine4j#696)."
         only: [neo4j]
         cypher: "RETURN [toFloat($a), toFloat($b), toFloat($c), toFloat($d), toFloat($e), toFloat($f)]"

@@ -82,8 +82,11 @@ class PostgresTextFloatTest {
         assertEquals(2, Regex("""regexp_replace\(""").findAll(sql).count(), sql)
         // Rounded to the places a double has, so a number nearer 0 than any double is 0, in few enough digits to read.
         assertEquals(2, Regex("""ELSE round\(.*?, 400\) END""").findAll(sql).count(), sql)
-        // Past a double's range, held to 1e309, which reads as the infinity, given NaN or not, not written in 10,001 digits.
-        assertEquals(2, Regex(""" >= 1e309 THEN 1e309 WHEN [^']*? <= -1e309 THEN -1e309 ELSE round\(""").findAll(sql).count(), sql)
+        // Past a double's range, the infinity: numeric's where the statement may work one out, as this one may, so it is
+        // written as the number that stands for it and is equal to one given; else 1e309, not written in 10,001 digits.
+        assertEquals(2, Regex(""" >= 1e309 THEN 'Infinity'::numeric WHEN [^']*? <= -1e309 THEN '-Infinity'::numeric ELSE round\(""").findAll(sql).count(), sql)
+        val given = sql("RETURN toFloat(\$s)", mapOf("s" to "1.5"))
+        assertEquals(2, Regex(""" >= 1e309 THEN 1e309 WHEN [^']*? <= -1e309 THEN -1e309 ELSE round\(""").findAll(given).count(), given)
         for (kept in listOf("1e9999", "1e09999", "1e400", "-1.5e-400", "10000")) assertEquals(kept, held(kept))
         assertFalse(sql("MATCH (n:A) RETURN toInteger(n.s)").contains("regexp_replace"))
     }

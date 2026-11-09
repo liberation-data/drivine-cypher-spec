@@ -491,16 +491,18 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
     /**
      * The text [text], a number, as a `numeric` that reads as the double Neo4j's `toFloat` gives (drivine4j#692):
      * - its exponent held to [EXPONENT_BOUND] ([bounded]), past which `numeric` fails;
-     * - past any double's range, held to [INFINITE], which reads as the infinity, as Java reads it, whether or not the
-     *   statement is compiled as one given NaN or an infinity: the number itself, `1e10000` written out, would be past the
-     *   digits Drivine reads a JSON number in, and `'Infinity'::numeric` would be written as a text where it is not;
+     * - past any double's range, the infinity, as Java reads it: where the statement is compiled as one given NaN or an
+     *   infinity, `numeric`'s, which [scalar] writes as the number that stands for it, so it is equal to one given; else
+     *   [INFINITE], which reads as the infinity, where the number itself, `1e10000` written out, would be past the digits
+     *   Drivine reads a JSON number in, and `'Infinity'::numeric` would be written as a text;
      * - else rounded to [MOST_PLACES], past which a double has no digit, so a number nearer 0 than any double is 0, as in
      *   Neo4j, and is written in few enough digits to be read (`'1e-999'`).
      *
      * The number is bound once ([sharedBound]), however short, so its `regexp_replace` runs once a row.
      */
     private fun textAsFloat(text: String) = sharedBound("CAST(${bounded(text)} AS numeric)") { (n) ->
-        "CASE WHEN $n >= $INFINITE THEN $INFINITE WHEN $n <= -$INFINITE THEN -$INFINITE ELSE round($n, $MOST_PLACES) END"
+        val (infinity, negativeInfinity) = if (nonFinite) "'Infinity'::numeric" to "'-Infinity'::numeric" else INFINITE to "-$INFINITE"
+        "CASE WHEN $n >= $INFINITE THEN $infinity WHEN $n <= -$INFINITE THEN $negativeInfinity ELSE round($n, $MOST_PLACES) END"
     }
 
     /**
