@@ -144,9 +144,10 @@ jobs:
   # and uploaded as this run's artifact, for build to check and unpack. Here, not in build: actions/cache unpacks an
   # entry with tar -P, which writes wherever the entry's names point, so an entry made to harm a runner harms only this
   # one, which holds no secret and builds nothing (its token reads the repository's contents). Where none is kept, or the
-  # upload fails, it uploads nothing and build fetches every dependency; it never fails the run. After the gate, whose
-  # release-dependencies job keeps them where none are kept yet, in every run but a tag's: so a dry run on a pull request
-  # that changes the pins builds from the entry that pull request's pins make.
+  # upload fails, it uploads nothing and build fetches every dependency; it never fails the run, nor holds up build,
+  # which runs however it ends (failed, or cancelled at its timeout, which continue-on-error doesn't cover). After the
+  # gate, whose release-dependencies job keeps them where none are kept yet, in every run but a tag's: so a dry run on a
+  # pull request that changes the pins builds from the entry that pull request's pins make.
   dependencies:
     needs: [check, gate]
     runs-on: macos-latest
@@ -186,6 +187,10 @@ jobs:
 
   build:
     needs: [check, gate, dependencies]
+    # Whatever the dependencies job's result: its runner can be an entry's, which can hang it until it is cancelled. And
+    # so the jobs after build ask for build's success alone, as a job's default success() is false where any job before
+    # it, dependencies too, wasn't a success.
+    if: ${{ !cancelled() && needs.check.result == 'success' && needs.gate.result == 'success' }}
     # macOS builds every target: macosArm64 only builds there, and Kotlin/Native cross-compiles the others.
     runs-on: macos-latest
     permissions:
@@ -334,7 +339,7 @@ jobs:
   # bundle, this commit's scripts, and gpg, curl, jq and zip, which the runner has.
   publish:
     needs: [check, build]
-    if: needs.check.outputs.publish == 'true'
+    if: ${{ !cancelled() && needs.build.result == 'success' && needs.check.outputs.publish == 'true' }}
     runs-on: ubuntu-latest
     environment: release
     # The upload's poll gives up after an hour; the signing takes a minute.
@@ -400,7 +405,7 @@ jobs:
   # fails where npm has another under the version.
   publish-npm:
     needs: [check, build]
-    if: needs.check.outputs.publish == 'true'
+    if: ${{ !cancelled() && needs.build.result == 'success' && needs.check.outputs.publish == 'true' }}
     runs-on: ubuntu-latest
     environment: release
     timeout-minutes: 15
@@ -471,7 +476,7 @@ jobs:
   # --dry-run, which packs and reports it but sends nothing and needs no token.
   publish-npm-dry-run:
     needs: [check, build]
-    if: needs.check.outputs.publish != 'true'
+    if: ${{ !cancelled() && needs.build.result == 'success' && needs.check.outputs.publish != 'true' }}
     runs-on: ubuntu-latest
     env:
       VERSION: ${{ needs.check.outputs.version }}
@@ -523,7 +528,7 @@ jobs:
   # as the run's artifact. It uploads nothing to the Portal.
   publish-dry-run:
     needs: [check, build]
-    if: needs.check.outputs.publish != 'true'
+    if: ${{ !cancelled() && needs.build.result == 'success' && needs.check.outputs.publish != 'true' }}
     runs-on: ubuntu-latest
     env:
       VERSION: ${{ needs.check.outputs.version }}

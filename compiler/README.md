@@ -444,8 +444,9 @@ into step 2 could change what it builds whatever it then checked. So:
   again. A fork's pull request keeps none, as no release reads it.
 - In the release, the `dependencies` job restores that entry (its exact key, from the tag's scope or `main`'s) on a
   runner of its own, which holds no secret and builds nothing, and uploads its files as the run's artifact. Where none is
-  kept, or the upload fails, it uploads nothing, and the job itself never fails the run; what its upload can do to step
-  2 is below.
+  kept, or the upload fails, it uploads nothing, and the job itself never fails the run; step 2, and the jobs after it,
+  run however it ends, failed or cancelled at its 20-minute timeout (as a runner an entry took over could make it), as
+  they ask only for the success of the jobs before them that they use. What its upload can do to step 2 is below.
 - Step 2 asks GitHub the artifact's size first, and downloads it only where it is one artifact of at most 3 GB, as
   the download is written whole before anything checks it, and by the ID it asked about, so an artifact put in its
   place after isn't downloaded. It downloads it as the zip it is, unopened, and
