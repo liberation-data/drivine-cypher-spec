@@ -178,8 +178,8 @@ The expression is Cypher. It's evaluated by running `RETURN expression` on the s
 | `auto` | `verbose` when stdout is a terminal, `plain` when it isn't. This is the default. |
 | `verbose` | Each result as a table, then its count of rows and how long it took, then the store's counts of what it wrote, as cypher-shell prints them. A result with no columns, such as a write with no `RETURN`, prints no table. |
 | `plain` | Each result's columns, `, ` between them, then a line per row, with the values printed as cypher-shell prints them. A result with no rows prints nothing. |
-| `json` | One line per statement, compact: `{"columns":[...],"rows":[[...],...]}`. Values are written as the spec's files write them, with NaN and the infinities as `{"$float":"NaN"}` and the others. |
-| `csv` | Each result as RFC 4180 CSV, with a header row, and lines that end in `\n`. A text is its own characters, null is an empty field, and any other value is its compact JSON. Results are separated by one empty line. |
+| `json` | One line per statement, compact: `{"columns":[...],"rows":[[...],...]}`. Values are written as the spec's files write them, with NaN and the infinities as `{"$float":"NaN"}` and the others, and a float always with a fraction: `2.0`, not `2`. |
+| `csv` | Each result as RFC 4180 CSV, with a header row, and lines that end in `\n`. A text is its own characters, null is an empty field, and any other value is its compact JSON. A field is in `"…"` only when it holds a `,`, a `"` or a line break. Results are separated by one empty line. |
 
 **How `plain` and `verbose` print a value**, as cypher-shell does:
 
@@ -187,6 +187,7 @@ The expression is Cypher. It's evaluated by running `RETURN expression` on the s
 |---|---|
 | null | `NULL` |
 | a boolean | `TRUE` or `FALSE` |
+| a float | always with a fraction: `2.0`, not `2`, which is a whole number |
 | a text | in `"…"`, with each `"` escaped as `\"`. A `\` and a line break are printed as they are: `'a"b\\c'` prints as `"a\"b\c"`. |
 | a list | `[1, "b"]` |
 | a map | `{k: 2}` |

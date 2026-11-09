@@ -2,8 +2,8 @@
 cases:
   - name: "plain prints each kind of value as cypher-shell does"
     cypherShell: true
-    args: ["--format", "plain", "RETURN 1 AS n, 'a' AS s, null AS z, [1, 'b'] AS l, {k: 2} AS m, 1.5 AS f, true AS b"]
-    stdout: "n, s, z, l, m, f, b\n1, \"a\", NULL, [1, \"b\"], {k: 2}, 1.5, TRUE\n"
+    args: ["--format", "plain", "RETURN 1 AS n, 'a' AS s, null AS z, [1, 'b'] AS l, {k: 2} AS m, 1.5 AS f, true AS b, 2.0 AS w"]
+    stdout: "n, s, z, l, m, f, b, w\n1, \"a\", NULL, [1, \"b\"], {k: 2}, 1.5, TRUE, 2.0\n"
     exit: 0
 
   - name: "auto is plain when stdout is not a terminal"
@@ -403,9 +403,9 @@ cases:
     exit: 2
 
   - name: "json prints a line per statement"
-    stdin: "RETURN 1 AS n, 'a' AS s, null AS z, [1.5, true] AS l, {k: 2} AS m;\nUNWIND [1, 2] AS x RETURN x;\n"
+    stdin: "RETURN 1 AS n, 'a' AS s, null AS z, [1.5, true] AS l, {k: 2} AS m, 2.0 AS w;\nUNWIND [1, 2] AS x RETURN x;\n"
     args: ["--format", "json"]
-    stdout: "{\"columns\":[\"n\",\"s\",\"z\",\"l\",\"m\"],\"rows\":[[1,\"a\",null,[1.5,true],{\"k\":2}]]}\n{\"columns\":[\"x\"],\"rows\":[[1],[2]]}\n"
+    stdout: "{\"columns\":[\"n\",\"s\",\"z\",\"l\",\"m\",\"w\"],\"rows\":[[1,\"a\",null,[1.5,true],{\"k\":2},2.0]]}\n{\"columns\":[\"x\"],\"rows\":[[1],[2]]}\n"
     exit: 0
 
   - name: "json writes NaN and the infinities as the spec does"
@@ -413,9 +413,9 @@ cases:
     stdout: "{\"columns\":[\"nan\",\"inf\"],\"rows\":[[{\"$float\":\"NaN\"},{\"$float\":\"Infinity\"}]]}\n"
     exit: 0
 
-  - name: "csv quotes as RFC 4180 does, and null is an empty field"
-    args: ["--format", "csv", "RETURN 1 AS n, 'a,b' AS s, 'say \"hi\"' AS q, null AS z, [1, 2] AS l"]
-    stdout: "n,s,q,z,l\n1,\"a,b\",\"say \"\"hi\"\"\",,\"[1,2]\"\n"
+  - name: "csv quotes a field only where it holds a , a \" or a line break, and null is an empty field"
+    args: ["--format", "csv", "RETURN 1 AS n, 'a' AS t, 'a,b' AS s, 'say \"hi\"' AS q, null AS z, [1, 2] AS l"]
+    stdout: "n,t,s,q,z,l\n1,a,\"a,b\",\"say \"\"hi\"\"\",,\"[1,2]\"\n"
     exit: 0
 
   - name: "csv separates results with one empty line"
