@@ -209,7 +209,9 @@ jobs:
         run: ../.github/scripts/compiler-release-dependencies-test.sh
       # Its size first, as GitHub gives it: download-artifact writes the whole artifact before anything checks it, and
       # the dependencies job's runner, which an entry can take over, chooses what it uploads. One artifact of at most
-      # 3 GB, unpack's own limit, or none is downloaded.
+      # 3 GB, unpack's own limit, or none is downloaded; and that one by its ID, so an artifact put in its place after
+      # (by a name's overwrite, with a token that runner kept) isn't. At most 10 digits, so bash's arithmetic can't
+      # overflow.
       - name: The release dependencies are of a size to download
         id: size
         if: needs.dependencies.outputs.uploaded == 'true'
@@ -217,24 +219,25 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          sizes=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?name=compiler-release-dependencies" -q '.artifacts[].size_in_bytes')
-          if [[ "$sizes" =~ ^[0-9]+$ ]] && (( sizes <= 3 * 1024 * 1024 * 1024 )); then
-            echo "The release dependencies are $sizes bytes."
-            echo "ok=true" >> "$GITHUB_OUTPUT"
+          found=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?name=compiler-release-dependencies" -q '.artifacts[] | "\(.id) \(.size_in_bytes)"')
+          if [[ "$found" =~ ^([0-9]+)\ ([0-9]{1,10})$ ]] && (( BASH_REMATCH[2] <= 3 * 1024 * 1024 * 1024 )); then
+            echo "The release dependencies are artifact ${BASH_REMATCH[1]}, of ${BASH_REMATCH[2]} bytes."
+            echo "id=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
           else
-            echo "::warning::The release dependencies aren't one artifact of at most 3 GB (${sizes//$'\n'/, } bytes), so the build fetches every dependency."
+            found="${found:-none}"
+            echo "::warning::The release dependencies aren't one artifact of at most 3 GB (found, as <ID> <bytes>: ${found//$'\n'/, }), so the build fetches every dependency."
           fi
       # The dependencies job's upload, as the zip it is: download-artifact doesn't unzip it, so nothing of it is written
       # until compiler-release-dependencies.sh has checked every name in it.
-      - if: steps.size.outputs.ok == 'true'
+      - if: steps.size.outputs.id != ''
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         continue-on-error: true
         with:
-          name: compiler-release-dependencies
+          artifact-ids: ${{ steps.size.outputs.id }}
           path: ${{ runner.temp }}/release-dependencies
           skip-decompress: true
       - name: The release dependencies, checked by name and unpacked
-        if: steps.size.outputs.ok == 'true'
+        if: steps.size.outputs.id != ''
         run: |
           shopt -s nullglob
           zips=("$RUNNER_TEMP"/release-dependencies/*)
