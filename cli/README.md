@@ -166,7 +166,7 @@ FalkorDB has no multi-statement transactions. There `:begin` prints one line to 
 - `NAME => EXPRESSION`, as in `-P 'limit => 10'`;
 - a map, as in `-P '{limit: 10, since: date("2024-01-01")}'`.
 
-`-P NAME=EXPRESSION` is taken too, where the first `=` isn't the start of a `=>`. A `-P` of none of these forms is a bad value, and so a bad invocation.
+`-P NAME=EXPRESSION` is taken too, where the text doesn't start with `{` and the first `=` isn't the start of a `=>`: a text that starts with `{` is a map, even one holding a `=`, as `{url: 'a?b=c'}` does. A `-P` of none of these forms is a bad value, and so a bad invocation.
 
 The expression is Cypher. It's evaluated by running `RETURN expression` on the store, so a parameter holds what the store gives for it. A parameter set later replaces an earlier one of the same name. A statement that uses a parameter that isn't set fails, on every store, as it does on Neo4j. A `-P` whose expression fails on the store fails as a statement does, with exit code 1, and no statement runs, with `--continue` too: the statements would run without the parameter.
 
