@@ -14,6 +14,7 @@ import json
 import os
 import re
 import secrets
+import shlex
 import subprocess
 import sys
 import time
@@ -65,13 +66,22 @@ def main():
             directory = f"/tmp/case-{index}"
             run("docker", "exec", name, "mkdir", "-p", directory)
             for file, text in (case.get("files") or {}).items():
-                run("docker", "exec", "-i", name, "sh", "-c", f"cat > {directory}/{file}", stdin=text)
+                run("docker", "exec", "-i", name, "sh", "-c", f"cat > {shlex.quote(f'{directory}/{file}')}", stdin=text)
 
+            # The runner gives drivine the password in DRIVINE_PASSWORD, which cypher-shell doesn't read, so it is
+            # given here as NEO4J_PASSWORD. A case's DRIVINE_PASSWORD comes before its NEO4J_PASSWORD, as in drivine.
             env = {"NEO4J_USERNAME": "neo4j", "NEO4J_PASSWORD": password}
-            for key, value in (case.get("env") or {}).items():
+            given = dict(case.get("env") or {})
+            if "DRIVINE_PASSWORD" in given:
+                drivine = given.pop("DRIVINE_PASSWORD")
+                if drivine is None:
+                    env.pop("NEO4J_PASSWORD")
+                else:
+                    given["NEO4J_PASSWORD"] = drivine
+            for key, value in given.items():
                 if value is None:
                     env.pop(key, None)
-                elif key != "DRIVINE_PASSWORD":
+                else:
                     env[key] = value.replace("$user", "neo4j").replace("$password", password)
             args = [arg.replace("$user", "neo4j").replace("$password", password) for arg in case.get("args", [])]
             command = ["docker", "exec", "-i", "-w", directory]

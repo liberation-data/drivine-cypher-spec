@@ -37,6 +37,12 @@ cases:
     stdout: "0 rows\nCreated 1 node, deleted 1 node, added 1 label\n"
     exit: 0
 
+  - name: "plain prints a path along and against its relationships' directions"
+    stdin: "CREATE (:A)-[:R]->(:B)<-[:S]-(:C);\nMATCH p = (:A)-[:R]->(:B)<-[:S]-(:C) RETURN p;\n"
+    args: ["--format", "plain"]
+    stdout: "p\n(:A)-[:R]->(:B)<-[:S]-(:C)\n"
+    exit: 0
+
   - name: "plain prints a node and a relationship as cypher-shell does"
     cypherShell: true
     args: ["--format", "plain", "CREATE (n:P {name: 'x'})-[r:K {w: 1}]->(m:Q) RETURN n, r, m"]
@@ -67,12 +73,11 @@ cases:
     stdout: "a\n1\nb\n\"x;y\"\nc\n2\n"
     exit: 0
 
-  - name: "A ; in a block comment or a backticked name doesn't split"
-    files: {"f.cypher": "/* a; b */ RETURN 1 AS `x;y`;\nRETURN 'it''s' AS q, \"\\\";\" AS r;\n"}
+  - name: "A ; in a block comment, a backticked name or after an escaped quote doesn't split"
+    files: {"f.cypher": "/* a; b */ RETURN 1 AS `x;y`;\nRETURN 'it\\';s' AS q, \"\\\";\" AS r;\n"}
     args: ["--format", "plain", "-f", "f.cypher"]
-    stdout: "x;y\n1\nq, r\n\"it's\", \"\\\";\"\n"
+    stdout: "x;y\n1\nq, r\n\"it';s\", \"\\\";\"\n"
     exit: 0
-    note: "Cypher writes a ' in a '…' text as \\' or ''."
 
   - name: "The text after the last ; runs, and a statement of only comments doesn't"
     stdin: "RETURN 1 AS a;\n// nothing here;\n  ;\nRETURN 2 AS b"
@@ -102,6 +107,7 @@ cases:
 
   - name: ":param, :begin and :rollback in a file"
     cypherShell: true
+    except: [falkordb]
     files: {"h.cypher": ":param x => 5\nRETURN $x AS x;\n:begin\nCREATE (n:B) RETURN 1 AS made;\n:rollback\nMATCH (n:B) RETURN count(n) AS c;\n"}
     args: ["--format", "plain", "-f", "h.cypher"]
     stdout: "x\n5\nmade\n1\nc\n0\n"
@@ -111,6 +117,12 @@ cases:
     files: {"h.cypher": ":begin\nCREATE (n:B);\nCREATE (n:B);\n:commit\nMATCH (n:B) RETURN count(n) AS c;\n"}
     args: ["--format", "plain", "-f", "h.cypher"]
     stdout: "c\n2\n"
+    exit: 0
+
+  - name: ":source runs a file's statements in place, read from the working directory"
+    files: {"a.cypher": "RETURN 1 AS a;\n:source b.cypher\nRETURN 3 AS c;\n", "b.cypher": "RETURN 2 AS b;\n"}
+    args: ["--format", "plain", "-f", "a.cypher"]
+    stdout: "a\n1\nb\n2\nc\n3\n"
     exit: 0
 
   - name: "A file that ends inside a transaction rolls it back"
@@ -198,6 +210,73 @@ cases:
     args: ["-f", "f.cypher", "RETURN 2"]
     exit: 2
 
+  - name: "--fail-fast with --fail-at-end exits with 2"
+    store: false
+    args: ["--fail-fast", "--fail-at-end", "RETURN 1"]
+    stdout: ""
+    exit: 2
+
+  - name: "A format that isn't one exits with 2"
+    store: false
+    args: ["--format", "xml", "RETURN 1"]
+    stdout: ""
+    exit: 2
+
+  - name: "--help exits with 0"
+    store: false
+    args: ["--help"]
+    exit: 0
+
+  - name: "NEO4J_ADDRESS gives the address, before NEO4J_URI"
+    store: false
+    env: {NEO4J_ADDRESS: "sqlite::memory:", NEO4J_URI: "bolt://localhost:1"}
+    args: ["--format", "plain", "RETURN 1 AS one"]
+    stdout: "one\n1\n"
+    exit: 0
+
+  - name: "NEO4J_URI gives the address"
+    store: false
+    env: {NEO4J_URI: "sqlite::memory:"}
+    args: ["--format", "plain", "RETURN 1 AS one"]
+    stdout: "one\n1\n"
+    exit: 0
+
+  - name: "-a comes before NEO4J_ADDRESS"
+    store: false
+    env: {NEO4J_ADDRESS: "bolt://localhost:1"}
+    args: ["-a", "sqlite::memory:", "--format", "plain", "RETURN 1 AS one"]
+    stdout: "one\n1\n"
+    exit: 0
+
+  - name: "The default: key picks the profile"
+    store: false
+    files: {".drivine.yml": "default: \"mem\"\nprofiles:\n  mem:\n    address: \"sqlite::memory:\"\n"}
+    args: ["--format", "plain", "RETURN 1 AS one"]
+    stdout: "one\n1\n"
+    exit: 0
+
+  - name: "--profile picks a profile over the default"
+    store: false
+    files: {".drivine.yml": "default: \"far\"\nprofiles:\n  far:\n    address: \"bolt://localhost:1\"\n  mem:\n    address: \"sqlite::memory:\"\n"}
+    args: ["--profile", "mem", "--format", "plain", "RETURN 1 AS one"]
+    stdout: "one\n1\n"
+    exit: 0
+
+  - name: "An environment variable overrides the profile"
+    store: false
+    files: {".drivine.yml": "default: \"far\"\nprofiles:\n  far:\n    address: \"bolt://localhost:1\"\n"}
+    env: {NEO4J_ADDRESS: "sqlite::memory:"}
+    args: ["--format", "plain", "RETURN 1 AS one"]
+    stdout: "one\n1\n"
+    exit: 0
+
+  - name: "A profile with an unknown key exits with 2"
+    store: false
+    files: {".drivine.yml": "profiles:\n  mem:\n    address: \"sqlite::memory:\"\n    host: \"x\"\n"}
+    args: ["--profile", "mem", "RETURN 1"]
+    stdout: ""
+    exit: 2
+
   - name: "--version prints drivine's version"
     store: false
     args: ["--version"]
@@ -207,7 +286,7 @@ cases:
   - name: "--explain prints the SQL a statement compiles to, and runs nothing"
     only: [sql]
     args: ["--explain", "CREATE (n:Explained) RETURN n"]
-    stdoutLines: ["\\S"]
+    stdoutLines: ["\\S", "^-- parameters: \\{.*\\}$"]
     exit: 0
 
   - name: "--explain is refused on a graph engine"
