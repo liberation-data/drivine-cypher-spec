@@ -642,6 +642,8 @@ cases:
     exit: 2
 
   - name: ":commit with no transaction open fails as a command does"
+    except: [falkordb]
+    note: "On FalkorDB :commit does nothing, as the README's FalkorDB rule says."
     files: {"c.cypher": "RETURN 1 AS a;\n:commit\nRETURN 2 AS b;\n"}
     args: ["--format", "plain", "-f", "c.cypher"]
     stdout: "a\n1\n"
