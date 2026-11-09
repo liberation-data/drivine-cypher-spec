@@ -3,10 +3,10 @@ name: Compiler
 
 on:
   pull_request:
-    paths: ['compiler/**', '*.yaml', '.github/workflows/compiler.yml', '.github/actions/pinned-toolchain/**', '.github/scripts/compiler-npm-*.sh', 'LICENSE']
+    paths: ['compiler/**', '*.yaml', '.github/workflows/compiler.yml', '.github/actions/pinned-toolchain/**', '.github/scripts/compiler-npm-*.sh', '.github/scripts/compiler-release-dependencies.sh', '.github/scripts/compiler-konan-dependencies.sh', 'LICENSE']
   push:
     branches: [main]
-    paths: ['compiler/**', '*.yaml', '.github/workflows/compiler.yml', '.github/actions/pinned-toolchain/**', '.github/scripts/compiler-npm-*.sh', 'LICENSE']
+    paths: ['compiler/**', '*.yaml', '.github/workflows/compiler.yml', '.github/actions/pinned-toolchain/**', '.github/scripts/compiler-npm-*.sh', '.github/scripts/compiler-release-dependencies.sh', '.github/scripts/compiler-konan-dependencies.sh', 'LICENSE']
   workflow_dispatch:
   # compiler-release.yml runs this first, on the tag it releases, so a tag doesn't run it twice.
   workflow_call:
@@ -22,6 +22,8 @@ defaults:
 
 # Each job runs on the JDK gradle/pinned-jdk.properties pins, exactly: its tzdb is the zones the compiler takes. It and the
 # Gradle distribution are installed from their checked archives, kept in the cache (.github/actions/pinned-toolchain).
+# Gradle checks every dependency it fetches or finds cached against gradle/verification-metadata.xml, and refuses one
+# whose SHA-256 isn't there (compiler/README.md, "Building").
 jobs:
   jvm:
     name: JVM tests, double fuzz and metadata compile
@@ -109,3 +111,48 @@ jobs:
       - name: Summary
         if: always()
         run: ../.github/scripts/compiler-summary.sh build/test-results/macosArm64Test corpus.log >> "$GITHUB_STEP_SUMMARY"
+
+  # The release build's dependencies, kept in the Actions cache for compiler-release.yml (compiler/README.md,
+  # "Releasing"): Gradle's downloaded files, the JDK and Gradle archives, and Kotlin/Native's own dependencies, as a build
+  # of the release fetches them. The release takes only files from them, and checks each as it uses it, so what the entry
+  # holds can't change what is released. One entry for each set of pins, which the key hashes, kept by the first run that
+  # finds none; a run that finds it kept does nothing more. Not in a tag's run (as compiler-release.yml's gate), whose
+  # caches only that tag's runs read.
+  release-dependencies:
+    name: The release build's dependencies, kept for the release
+    if: github.ref_type != 'tag'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      # As compiler-release.yml's dependencies job names it: keep the two in step.
+      - name: The cache key
+        id: key
+        env:
+          PINS: ${{ hashFiles('compiler/gradle/verification-metadata.xml', 'compiler/gradle/kotlin-native-dependencies.txt', 'compiler/gradle/pinned-jdk.properties', 'compiler/gradle/wrapper/gradle-wrapper.properties') }}
+        run: echo "key=compiler-release-dependencies-v1-$RUNNER_OS-$RUNNER_ARCH-$PINS" | tee -a "$GITHUB_OUTPUT"
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        id: kept
+        with:
+          path: ~/release-dependencies
+          key: ${{ steps.key.outputs.key }}
+          lookup-only: true
+      - if: steps.kept.outputs.cache-hit != 'true'
+        uses: ./.github/actions/pinned-toolchain
+      - name: Kotlin/Native's dependencies, checked
+        if: steps.kept.outputs.cache-hit != 'true'
+        run: ../.github/scripts/compiler-konan-dependencies.sh fetch gradle/kotlin-native-dependencies.txt
+      # What compiler-release.yml's build job builds, so Gradle and Kotlin/Native fetch what it uses.
+      - name: The release's build
+        if: steps.kept.outputs.cache-hit != 'true'
+        run: ./gradlew --no-daemon --dependency-verification strict zipAggregationPublication npmPackage -Pcompiler.version=0.0.0-dependencies
+      - name: Kotlin/Native used only its pinned dependencies
+        if: steps.kept.outputs.cache-hit != 'true'
+        run: ../.github/scripts/compiler-konan-dependencies.sh check gradle/kotlin-native-dependencies.txt
+      - name: The dependencies, as files
+        if: steps.kept.outputs.cache-hit != 'true'
+        run: ../.github/scripts/compiler-release-dependencies.sh stage "$HOME/release-dependencies"
+      - if: steps.kept.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/release-dependencies
+          key: ${{ steps.key.outputs.key }}

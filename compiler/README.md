@@ -185,6 +185,46 @@ What the build generates (`gen/Generate.java`, run on the pinned JDK): the zone 
 the other targets check a zone name against, as their own zone databases (the OS's, Node's ICU) are other tzdb releases;
 and the tables of powers of ten and five the double text and parse use.
 
+### Dependency verification
+
+Gradle checks every dependency the build uses, fetched or found in its cache, against `gradle/verification-metadata.xml`,
+and refuses one whose SHA-256 isn't there: each plugin's and library's jars, klibs, POMs and modules, Kotlin's compiler,
+Kotlin/Native's prebuilt bundle, and the Node, Yarn and binaryen archives Kotlin fetches for wasmJs. The file is what a
+release is built from, so it changes only in a reviewed pull request, as code does. Sources and javadoc jars, which an
+IDE fetches and no build runs, aren't checked. Kotlin/Native's own dependencies, which it fetches itself and Gradle never
+sees, are pinned for the release apart (see [Releasing](#releasing)).
+
+A change that adds, removes or moves a dependency or a plugin (a bump of Kotlin, antlr-kotlin, nmcp, kotlinx, Jackson,
+JUnit, the Node version) updates the file in the same pull request, or every build stops at the first dependency it
+doesn't name:
+
+1. On macOS arm64, with a Gradle home and a Kotlin/Native home of their own, so every file is fetched now, not taken
+   from an old cache, write the checksums of every file the CI jobs and the release use (`<jdk>` the pinned JDK's home):
+
+   ```sh
+   GRADLE_USER_HOME="$(mktemp -d)" KONAN_DATA_DIR="$(mktemp -d)" ./gradlew --no-daemon \
+     -Porg.gradle.java.installations.paths=<jdk> --write-verification-metadata sha256 clean jvmTest metadataCompile \
+     publishJvmPublicationToMavenLocal publishKotlinMultiplatformPublicationToMavenLocal -Dmaven.repo.local="$(mktemp -d)" \
+     wasmJsNodeTest wasmJsCorpusCheck macosArm64Test nativeCorpusCheck linkDrivinecypherReleaseSharedLinuxX64 \
+     linkDrivinecypherReleaseSharedLinuxArm64 linkDrivinecypherReleaseSharedMingwX64 zipAggregationPublication \
+     npmPackage -Pcompiler.version=0.0.0-ci
+   ```
+
+   Gradle adds to the file and never removes from it: to drop what nothing uses any more, move the file aside first, and
+   copy its `<trusted-artifacts>` and step 2's entries back after.
+2. Linux CI fetches the Linux builds of three archives macOS doesn't: `kotlin-native-prebuilt-<kotlin>-linux-x86_64.tar.gz`,
+   `node-<node>-linux-x64.tar.gz` and `binaryen-<version>-x86_64-linux.tar.gz`. Add each beside its macOS one, with the
+   SHA-256 its publisher gives (Node's `SHASUMS256.txt`, the binaryen release's `.sha256`; Maven Central gives
+   Kotlin/Native's only as a `.sha1`, so fetch the archive, check it against that, and take its SHA-256), saying where it
+   came from in `origin`. Running step 1's tasks that Linux runs on Linux x64 adds them too.
+3. In the pull request's review, read the file's diff, which names each file and its SHA-256: each new one is one the
+   change means to bring (look into a new group, or a new dependency of a dependency), and each new archive, and a sample
+   of the jars (Kotlin's compiler among them), has the checksum its publisher gives (Maven Central's `.sha1` or `.sha256`
+   beside each file, the Plugin Portal's likewise).
+
+A bump of Kotlin also moves Kotlin/Native's own dependencies, which `gradle/kotlin-native-dependencies.txt` pins (see
+[Releasing](#releasing)).
+
 ### The pinned JDK
 
 `gradle/pinned-jdk.properties` pins one JDK exactly: Temurin 21.0.13+9, which brings tzdb 2026e. It writes the zone ids
@@ -199,7 +239,8 @@ reviewed pull request. To bump it:
    archive (`https://api.adoptium.net/v3/assets/release_name/eclipse/jdk-<version>?os=<os>&architecture=<arch>&image_type=jdk`).
 2. Nothing else names it but this section's first line (with `tzdb`): CI installs the JDK from Adoptium's archive of
    `version`, checked against its `sha256` (`.github/actions/pinned-toolchain`). Merge the bump to `main` before the next
-   tag, so main's run fetches the new archive into the cache a tag's gate reads (see [Releasing](#releasing)).
+   tag, so main's run fetches the new archive into the cache a tag's gate reads, and keeps the release's dependencies
+   under the new pin (see [Releasing](#releasing)).
 3. Run `./gradlew generateTables`. Where the JDK brings another tzdb, it stops and names it: set `tzdb` to that.
 4. Open the pull request, and say in it which zones the new tzdb adds or removes (the diff of the generated
    `build/generated/tables/org/drivine/cypher/time/JvmZoneIds.kt` against the old one's).
@@ -371,14 +412,71 @@ runs its gate fastest after a run on `main` since the bump (its merge, or workfl
 GitHub drops a cache no run has read for 7 days. Where nothing is cached, a job fetches them, with retries; where it
 can't, it fails naming the URL: re-run it once GitHub's release downloads work.
 
-The release's build job (step 2) reads no cache: it fetches the archives each time, and checks them, as a cache entry
-is unpacked before its archive is checked, and an earlier job of a tag's run, the gate's, which runs third-party
-actions, could save one in the tag's scope. Every action `compiler.yml` and this workflow use is pinned to a commit.
-Maven Central also serves some dependencies through GitHub's release downloads. So an outage can fail step 2, or the
-gate; it fails before the reviewer is asked, and is re-run.
+**Step 2's dependencies.** Step 2 fetches Kotlin's compiler, Kotlin/Native's prebuilt bundle (about 250 MB), every
+other dependency, the JDK and Gradle archives, and Kotlin/Native's own dependencies: Maven Central serves some of
+Kotlin's large artifacts through GitHub's release downloads, whose outages failed v0.33.0's step 2 twice, so it takes
+them from the Actions cache where they are kept. But it restores no cache itself. actions/cache unpacks an entry with
+`tar -P`, which writes wherever the entry's names point, outside the cached paths too, and an entry can be saved by any
+job of a run on its ref, the gate's among them, which run third-party actions and what those fetch. An entry restored
+into step 2 could change what it builds whatever it then checked. So:
+
+- `compiler.yml`'s `release-dependencies` job (on macOS, in every run but a tag's) builds what step 2 builds, on a
+  runner with nothing else cached, and keeps what that fetched, as files, in the Actions cache: Gradle's downloaded files
+  (`~/.gradle/caches/modules-2/files-2.1`: the jars, klibs, POMs, modules and archives), the JDK and Gradle archives, and
+  Kotlin/Native's own dependencies (`.github/scripts/compiler-release-dependencies.sh stage`). Nothing derived from them
+  is kept (Gradle's index of them, transformed jars, compiled build scripts, unpacked distributions, the Kotlin daemon),
+  as nothing would check it. Its key hashes what pins them (`gradle/verification-metadata.xml`,
+  `gradle/kotlin-native-dependencies.txt`, `gradle/pinned-jdk.properties`, `gradle/wrapper/gradle-wrapper.properties`),
+  so a change of a pin makes a new entry, kept by the first run that finds none: the change's pull request, for its own
+  runs, and its merge, for the tags after. A run that finds the entry kept does nothing more. GitHub drops an entry no
+  run has read for 7 days, so the first tag after a quiet week fetches everything; to keep it warm before a tag, run
+  workflow_dispatch of `Compiler` on `main`.
+- In the release, the `dependencies` job restores that entry (its exact key, from the tag's scope or `main`'s) on a
+  runner of its own, which holds no secret and builds nothing, and uploads its files as the run's artifact. Where none is
+  kept, or the upload fails, it uploads nothing, and never fails the run.
+- Step 2 downloads that artifact as the zip it is, unopened, and `compiler-release-dependencies.sh unpack` puts its
+  files in place only where every entry is a plain file or directory at a path `stage` makes: no link, no `.` or `..`,
+  nothing but Gradle's files, the toolchain archives and Kotlin/Native's archives. Otherwise it puts nothing anywhere,
+  with a warning, and step 2 fetches everything. Each file is then checked as it is used: Gradle checks every dependency
+  against `gradle/verification-metadata.xml` (`--dependency-verification strict`, whatever a `gradle.properties` says),
+  fetched or unpacked; `archive.sh` checks the JDK and Gradle archives against their pinned SHA-256s, and fetches one
+  whose checksum isn't the pinned one; `.github/scripts/compiler-konan-dependencies.sh` does the same for Kotlin/Native's
+  own dependencies against `gradle/kotlin-native-dependencies.txt`, and after the bundle is built, fails step 2 where
+  Kotlin/Native unpacked one that file doesn't pin.
+
+So the entry can't change what is built, whoever saved it: a file whose checksum isn't the pinned one is refused, or
+fetched again, and an entry of another name refuses the whole zip. At worst it makes step 2 fetch what the entry lacks,
+as where none is kept: Gradle retries each fetch 8 times, over about 4 minutes (`gradle.properties`), and the archives are
+retried for a few minutes; where it still can't, step 2 fails, before the reviewer is asked, and is re-run. What is still
+fetched: Gradle asks Maven Central and the Gradle Plugin Portal for each dependency's POM, module and `.sha1`, small
+files, which it checks too, before it takes a file it already has. binaryen's GitHub releases publish no `.sha1` it
+could ask for, so step 2 takes binaryen from a directory laid out as those releases are, which `unpack` fills from the
+entry's copy (`-Pcompiler.binaryenMirror`, in `build.gradle.kts`), and Gradle checks it the same way.
+
+The gate's jobs read their own caches, as before (setup-gradle's, the toolchain archives', `~/.konan`), and Gradle
+checks the dependencies they use too; they build nothing that is released. Every action `compiler.yml` and this workflow
+use is pinned to a commit.
+
+**Kotlin/Native's own dependencies.** Kotlin/Native fetches its LLVM, libffi, and the sysroots and toolchains of the
+targets it cross-compiles from download.jetbrains.com, as archives whose checksums aren't published, and checks nothing.
+`gradle/kotlin-native-dependencies.txt` pins those step 2 uses on macOS arm64, each by its SHA-256 and URL, and
+`compiler-konan-dependencies.sh` puts each, checked, where Kotlin/Native looks for it before it would fetch one. A bump
+of Kotlin moves them: step 2 and `release-dependencies` then fail at "Kotlin/Native used only its pinned dependencies",
+naming each it unpacked that isn't pinned. To pin them, on macOS arm64, build what step 2 builds with a Kotlin/Native
+home of its own, which prints each URL it fetches:
+
+```sh
+KONAN_DATA_DIR="$(mktemp -d)" ./gradlew --no-daemon zipAggregationPublication npmPackage | grep 'Downloading dependency'
+```
+
+Fetch each URL, take its SHA-256 (`shasum -a 256`), from a second network too where you can, as there is no published
+checksum to compare with, and write the file's lines from them. The review checks each URL is download.jetbrains.com's,
+under `kotlin/native`, and each name one that Kotlin's `konan.properties` gives for `macos_arm64` or a target it builds.
 
 To bump Gradle, keep the checksum: `./gradlew wrapper --gradle-version <v> --gradle-distribution-sha256-sum <sum>`,
-with the sum of the `-bin` zip from https://gradle.org/release-checksums/. Without one, every job stops at it.
+with the sum of the `-bin` zip from https://gradle.org/release-checksums/. Without one, every job stops at it. Check too
+that Gradle still reads `gradle.properties`' retry settings, which are its internal names: with a repository that
+can't be reached, `--debug` says `Waiting 2000ms before next retry. 7 retries left`.
 
 A run from workflow_dispatch, or on a pull request that changes the release machinery, is a dry run: steps 1 and 2,
 under the version `0.0.0-dry-run`, and step 3's signing, with a key made in the job and thrown away with it, with
@@ -387,7 +485,10 @@ byte for byte, with a signature beside each file, keeps it as the run's artifact
 stand-in for the Central Portal on the runner, which refuses an upload that isn't the one nmcp made and a status call
 for any other deployment. It also checks that the signing refuses a bundle it must not sign
 (`.github/scripts/compiler-release-sign-test.sh`): one with a link among thousands, a file, a version or a path that no
-publication makes, or a checksum of a file it doesn't hold.
+publication makes, or a checksum of a file it doesn't hold. And in step 2, before it unpacks the dependencies, it checks
+that `unpack` refuses whole a zip with a name that climbs out, an absolute name, a path `stage` doesn't make or a link,
+and that the check of Kotlin/Native's dependencies fails one the list doesn't pin
+(`.github/scripts/compiler-release-dependencies-test.sh`).
 
 The `release` environment is this repository's own, not drivine4j's, and is set up once in its settings before the first
 release: a required reviewer, tags `v*` allowed to deploy to it, and the secrets drivine4j's release uses,

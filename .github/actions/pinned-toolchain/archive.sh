@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# One archive of .github/actions/pinned-toolchain: as kept at <file>, or where none is kept (or not this one), fetched
+# One archive of .github/actions/pinned-toolchain (or of Kotlin/Native's pinned dependencies,
+# .github/scripts/compiler-konan-dependencies.sh): as kept at <file>, or where none is kept (or not this one), fetched
 # from <url>, with retries over a few minutes, as GitHub's release downloads fail on and off in an
 # outage. Either way its SHA-256 is <sha>, or it is refused. Writes fetched=true to the step's output where it fetched.
 #   archive.sh <url> <sha> <file>
@@ -15,7 +16,7 @@ rm -f "$file"
 mkdir -p "$(dirname "$file")"
 if ! curl -fsSL --retry 8 --retry-all-errors --retry-delay 20 --connect-timeout 20 --max-time 600 -o "$file" "$url"; then
     rm -f "$file"
-    echo "::error::Couldn't fetch $url, nor was $name cached. It is served from GitHub's release downloads: re-run this job once those work."
+    echo "::error::Couldn't fetch $url, nor was $name cached. Re-run this job once it can be fetched (Adoptium's and Gradle's archives are served from GitHub's release downloads)."
     exit 1
 fi
 got=$(sha "$file")
