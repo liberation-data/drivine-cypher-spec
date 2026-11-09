@@ -27,9 +27,10 @@
 #     is kept only where its SHA-1 is the directory it sits in and its SHA-256 is the one gradle/verification-metadata.xml
 #     pins for it: Gradle takes a file at its SHA-1's path without checking it, and strict verification would then fail
 #     every release that read the entry, so a file of other bytes is dropped, and Gradle fetches it. A toolchain or
-#     Kotlin/Native archive is kept only where its name and SHA-256 are ones their pins name, so nothing unused sits on
-#     the disk, and is checked again where it is used, and fetched where it isn't kept. stage keeps only these, so where
-#     unpack drops a file, it warns: the entry isn't stage's. A zip that fails a check, or a step that fails, is refused
+#     Kotlin/Native archive is kept only where its name and SHA-256 are ones their pins name, so nothing but pinned
+#     archives sits on the disk (at most another pinned platform's JDK, within the cap), and is checked again where it
+#     is used, and fetched where it isn't kept. stage keeps only these, so where unpack drops a file, it warns: the
+#     entry isn't stage's. A zip that fails a check, or a step that fails, is refused
 #     whole, with a warning: nothing of it is left in place, and the build fetches everything. So an entry, whatever it
 #     holds, can't fail a release: at worst the build fetches what it lacks. It also lays out this runner's binaryen archive among Gradle's files (on macOS
 #     arm64, binaryen-<v>-arm64-macos.tar.gz) as binaryen's releases are, in ~/.cache/drivine-binaryen, for
@@ -73,7 +74,8 @@ allowed="^(gradle/|toolchain/|konan/|gradle/$part/|gradle/$part/$part/|gradle/$p
 # metadata doesn't name: so those are dropped too, and fetched each release. The toolchain and Kotlin/Native archives:
 # each only where its name and SHA-256 are ones pinned (the JDK's archive as .github/actions/pinned-toolchain names it,
 # for a platform gradle/pinned-jdk.properties pins; the Gradle zip gradle/wrapper/gradle-wrapper.properties names; an
-# archive gradle/kotlin-native-dependencies.txt names), so nothing unused sits on the runner's disk through the build;
+# archive gradle/kotlin-native-dependencies.txt names), so nothing but pinned archives sits on the runner's disk
+# through the build (at most another pinned platform's JDK, which the build doesn't use, within unpack's 3 GB);
 # each is checked again where it is used, and fetched where it isn't kept. stage and unpack share it, so an entry stage
 # made loses nothing at unpack: unpack warns where it drops a file, as only an entry that isn't stage's has one.
 keep_pinned() {

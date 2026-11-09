@@ -464,7 +464,8 @@ into step 2 could change what it builds whatever it then checked. So:
   fetched. Each toolchain or Kotlin/Native archive is kept only where its name and SHA-256
   are ones pinned (the JDK's archive of a platform `gradle/pinned-jdk.properties` pins, the zip
   `gradle/wrapper/gradle-wrapper.properties` names, an archive `gradle/kotlin-native-dependencies.txt` names), so
-  nothing the build won't use sits on the runner's disk through it. Where it drops a file, it warns, as `stage` keeps
+  nothing but pinned archives sits on the runner's disk through it (at most the JDK of another platform pinned, which
+  the build doesn't use, within the 3 GB). Where it drops a file, it warns, as `stage` keeps
   none such. Where a check fails, or a step of `unpack` does, it puts nothing in place, or
   takes away what it put, with a warning, and step 2 fetches everything; and should `unpack` itself fail, step 2 takes
   away those directories. Each file is then checked again as it is used: Gradle checks every dependency against
