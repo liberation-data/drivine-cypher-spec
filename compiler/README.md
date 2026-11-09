@@ -53,8 +53,8 @@ always written it. An encoder is the compiler's own, for as long as it compiles:
 
 `OracleCypherCompiler` also takes `rowsAsText`, false where left out, the Kotlin form of the request's `oracleRowsAsText`
 (see [Oracle's rows as text](#oracles-rows-as-text)). drivine4j reads the `JSON` rows over JDBC, which reads every row,
-so it leaves it false; it is for a host whose Oracle driver can't, node-oracledb's thin mode (#1795), until a fixed
-driver release.
+so it leaves it false; it is for a host whose Oracle driver can't, node-oracledb's thin mode
+(oracle/node-oracledb#1795), until a fixed driver release.
 
 A host with no Kotlin types calls `CompileJson.compile(request)`, JSON text in and out. The wasm build exports it as
 `compile`, and the shared library as `drivine_compile`:
@@ -132,8 +132,8 @@ rows are one JSON value, so a write whose rows together pass Oracle's limit on t
 
 Every other statement, a read or a write that returns nothing, compiles alike either way, as does every statement on the
 other stores. The option is temporary: Drivine for TypeScript and drivine-python set it until a node-oracledb release
-with #1795's fix ships, and then drop it, and it goes from the module with them. drivine4j's JDBC reads the `JSON` rows,
-and leaves it false.
+with oracle/node-oracledb#1795's fix ships, and then drop it, and it goes from the module with them. drivine4j's JDBC
+reads the `JSON` rows, and leaves it false.
 
 ### npm
 
@@ -210,9 +210,9 @@ The JVM is the oracle. `./gradlew jvmOracle` writes, into `build/oracle`:
 - `corpus.jsonl`: every statement in the spec's files (`queries.yaml`, `writes.yaml`, `temporal.yaml`, `refusals.yaml`,
   `schema.yaml`), compiled for Postgres, Oracle and SQLite, and some with parameters the spec has no form for (whole
   floats, temporal values, bytes, `$` keys) and Oracle's graph options, and on Oracle with `oracleRowsAsText` each of
-  those statements whose SQL it changes (every write that returns rows): each request and the JVM's answer. A statement
-  whose SQL embeds the moment it was compiled, as SQLite's does for `datetime()` and the like, is left out, found by its
-  SQL holding that moment.
+  those statements whose SQL it changes (every write that returns rows), and two writes of its own, of a long text and of
+  many rows: each request and the JVM's answer. A statement whose SQL embeds the moment it was compiled, as SQLite's
+  does for `datetime()` and the like, is left out, found by its SQL holding that moment.
 - `doubles.txt`: random doubles (subnormals included) and Java's text of each, and random decimal and hexadecimal texts,
   halfway points between doubles and texts a digit either side, and Java's reading of each.
 - `mutants.jsonl`: a sample of the spec's statements mutated (`Mutants`), which no corpus statement is: truncated,

@@ -93,7 +93,7 @@ object CypherCompiler {
     fun compile(store: Store, graph: GraphOptions, cypher: String, parameters: Map<String, Any?> = emptyMap()): CompileResult {
         val compiler: SqlCypherCompiler = when (store) {
             Store.POSTGRES -> PostgresCypherCompiler(graph.name)
-            Store.ORACLE -> OracleCypherCompiler(graph.name, graph.nullsEqualStored, graph.eraStored, graph.indexedProperties, null, graph.oracleRowsAsText)
+            Store.ORACLE -> OracleCypherCompiler(graph.name, graph.nullsEqualStored, graph.eraStored, graph.indexedProperties, encoder = null, rowsAsText = graph.oracleRowsAsText)
             Store.SQLITE -> SqliteCypherCompiler(graph.name)
         }
         val compiled = try {

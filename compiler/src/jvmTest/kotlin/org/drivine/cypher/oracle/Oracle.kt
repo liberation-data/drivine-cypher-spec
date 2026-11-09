@@ -13,8 +13,8 @@ import java.time.format.DateTimeFormatter
  * The JVM's answers, which the other targets are checked against, byte for byte (`./gradlew jvmOracle`):
  *
  * - `corpus.jsonl`: every statement in the spec's files, compiled for Postgres, Oracle and SQLite, and a few with typed
- *   parameters, Oracle's graph options, and on Oracle with `oracleRowsAsText` each statement whose SQL it changes: each
- *   line `{"request": …, "answer": …}`, both JSON text, the answer as [CompileJson] gives it on the JVM.
+ *   parameters, Oracle's graph options, and on Oracle with `oracleRowsAsText` each statement whose SQL it changes and
+ *   [ROWS_AS_TEXT_WRITES]: each line `{"request": …, "answer": …}`, both JSON text, the answer as [CompileJson] gives it on the JVM.
  *   A statement whose SQL embeds the moment it was compiled at, as SQLite's does of `datetime()` and the like, is left
  *   out: no two runs give it alike. It is found by its SQL holding that moment, so no list of statements is kept.
  * - `doubles.txt`: doubles as Java writes them (`T<tab>bits<tab>text`) and texts as Java reads them
