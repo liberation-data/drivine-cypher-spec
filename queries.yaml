@@ -939,6 +939,15 @@ cases:
       - only: [neo4j, sql]
         cypher: "UNWIND ['', 'a'] AS x RETURN collect(size(x))"
         rows: [[0, 1]]
+      - note: "A null, a missing property or a value of another kind beside the empty text is still null; a list's size is its own."
+        only: [neo4j, sql]
+        cypher: "MATCH (p:Person {name: 'Keanu'}) RETURN [null STARTS WITH '', '' STARTS WITH null, $p.q ENDS WITH $e, $e CONTAINS $p.q, p.nope STARTS WITH '', '' ENDS WITH p.nope, 5 STARTS WITH $e, $e CONTAINS 5, size(null), size(p.nope), isEmpty(p.nope), size(['']), size([])]"
+        parameters: {e: "", p: {q: null}}
+        rows: [[null, null, null, null, null, null, null, null, null, null, null, 1, 0]]
+      - note: "A text of spaces is no empty text on Oracle."
+        only: [neo4j, sql]
+        cypher: "RETURN ['  ' STARTS WITH '', '' CONTAINS ' ', '  ' ENDS WITH ' ', size('  '), isEmpty(' ')]"
+        rows: [[true, false, true, 2, false]]
 
   - name: "Round to a fractional or negative precision"
     description: "round() reads its precision as a whole number toward zero, as Neo4j does, and fails on a row it rounds a number on by one below 0 or past 2147483647."

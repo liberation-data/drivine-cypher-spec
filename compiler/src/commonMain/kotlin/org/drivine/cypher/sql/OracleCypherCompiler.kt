@@ -243,7 +243,11 @@ class OracleCypherCompiler(
     /** The JSON [json] as text, where it is a string: a CLOB where [clob], else as [text] reads it; a property by its own path (see [direct]). */
     private fun textOf(json: String, clob: Boolean) = direct(if (clob) longText(json) else text(json), json)
 
-    /** How many characters the JSON [json] is, where it is a string, an empty one too, and of any length; a property by its own path (see [direct]). */
+    /**
+     * The length of the JSON [json], where it is a string, an empty one too, and of any length; a property by its own path
+     * (see [direct]). Oracle counts it in UTF-8 bytes, not characters (a character past U+FFFF is 4), so only whether it
+     * is 0 is read.
+     */
     private fun textLengthOf(json: String) = direct(textLength(json), json)
 
     private fun textLength(json: String) = shared(json) { (x) -> "CASE WHEN ${kind(x)} = 'string' THEN JSON_VALUE($x, '\$.length()' RETURNING NUMBER) END" }
