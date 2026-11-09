@@ -906,6 +906,49 @@ cases:
         cypher: "RETURN [split('abc', ''), split('', ',')]"
         rows: [[["a", "b", "c"], [""]]]
 
+  - name: "The empty text searched for and measured"
+    description: "Every text starts with, ends with and holds the empty text, and the empty text holds no other; its size is 0. Oracle's empty text is null as SQL text (drivine4j#416)."
+    steps:
+      - only: [neo4j, sql]
+        cypher: "RETURN ['ab' STARTS WITH '', 'ab' ENDS WITH '', 'ab' CONTAINS '', '' STARTS WITH '', '' ENDS WITH '', '' CONTAINS '']"
+        rows: [[true, true, true, true, true, true]]
+      - only: [neo4j, sql]
+        cypher: "RETURN ['' STARTS WITH 'a', '' ENDS WITH 'b', '' CONTAINS 'b', NOT ('' CONTAINS 'b')]"
+        rows: [[false, false, false, true]]
+      - only: [neo4j, sql]
+        cypher: "RETURN [$t STARTS WITH $e, $t ENDS WITH $e, $t CONTAINS $e, $e STARTS WITH $t, $e ENDS WITH $t, $e CONTAINS $t]"
+        parameters: {t: "ab", e: ""}
+        rows: [[true, true, true, false, false, false]]
+      - only: [neo4j, sql]
+        cypher: "UNWIND ['ab', ''] AS x RETURN x, x STARTS WITH '', x CONTAINS 'b', 'ab' ENDS WITH x, size(x) ORDER BY x"
+        rows: [["", true, false, true, 0], ["ab", true, true, true, 2]]
+      - note: "A text past 32 KB is searched as a CLOB."
+        only: [neo4j, sql]
+        cypher: "RETURN [$long STARTS WITH $e, $long ENDS WITH $e, $long CONTAINS $e, $e CONTAINS $long, $e STARTS WITH $long]"
+        parameters: {e: "", long: {$repeat: "x", times: 40000}}
+        rows: [[true, true, true, false, false]]
+      - note: "Beside a value long enough to be bound, as a stored text beside one is."
+        only: [neo4j, sql]
+        cypher: "UNWIND ['', 'b'] AS x RETURN [toUpper(trim(coalesce($p.q, 'ab'))) ENDS WITH x, x CONTAINS toLower(trim(coalesce($p.q, 'b')))] ORDER BY x"
+        parameters: {p: {q: null}}
+        rows: [[true, false], [false, true]]
+      - only: [neo4j, sql]
+        cypher: "RETURN [size(''), size($e), isEmpty(''), isEmpty($e)]"
+        parameters: {e: ""}
+        rows: [[0, 0, true, true]]
+      - only: [neo4j, sql]
+        cypher: "UNWIND ['', 'a'] AS x RETURN collect(size(x))"
+        rows: [[0, 1]]
+      - note: "A null, a missing property or a value of another kind beside the empty text is still null; a list's size is its own."
+        only: [neo4j, sql]
+        cypher: "MATCH (p:Person {name: 'Keanu'}) RETURN [null STARTS WITH '', '' STARTS WITH null, $p.q ENDS WITH $e, $e CONTAINS $p.q, p.nope STARTS WITH '', '' ENDS WITH p.nope, 5 STARTS WITH $e, $e CONTAINS 5, size(null), size(p.nope), isEmpty(p.nope), size(['']), size([])]"
+        parameters: {e: "", p: {q: null}}
+        rows: [[null, null, null, null, null, null, null, null, null, null, null, 1, 0]]
+      - note: "A text of spaces is no empty text on Oracle."
+        only: [neo4j, sql]
+        cypher: "RETURN ['  ' STARTS WITH '', '' CONTAINS ' ', '  ' ENDS WITH ' ', size('  '), isEmpty(' ')]"
+        rows: [[true, false, true, 2, false]]
+
   - name: "Round to a fractional or negative precision"
     description: "round() reads its precision as a whole number toward zero, as Neo4j does, and fails on a row it rounds a number on by one below 0 or past 2147483647."
     steps:
