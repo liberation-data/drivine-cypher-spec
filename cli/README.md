@@ -146,7 +146,7 @@ A line may end in `\r\n` as well as `\n`: the `\r` is not part of a command. A s
 | `:rollback` | Rolls it back. |
 | `:param NAME => EXPRESSION` | Sets a parameter, as `-P` does. |
 | `:param {NAME: EXPRESSION, …}` | Sets the parameters named. |
-| `:params` | Prints the parameters to stdout as a map over several lines: `{`, then each `name: value` on a line of its own, indented two spaces, with `,` after each but the last, then `}`. A text is in `'…'`, not `"…"` as `plain` prints it. |
+| `:params` | Prints the parameters to stdout as a map over several lines: `{`, then each `name: value` on a line of its own, indented two spaces, with `,` after each but the last, then `}`. A text is in `'…'`, not `"…"` as `plain` prints it. A map's parameters print in the order the store gives its keys, as **Order** in [Output](#output) says. |
 | `:params clear` | Clears them. |
 | `:use DATABASE` | Moves to another database, on a store that has more than one. |
 | `:source FILE` | Runs a file's statements in place. A relative path is read from the working directory. A file that can't be read fails as a statement does, with exit code 1. |
@@ -178,7 +178,7 @@ The expression is Cypher. It's evaluated by running `RETURN expression` on the s
 | `auto` | `verbose` when stdout is a terminal, `plain` when it isn't. This is the default. |
 | `verbose` | Each result as a table, then its count of rows and how long it took, then the store's counts of what it wrote, as cypher-shell prints them. A result with no columns, such as a write with no `RETURN`, prints no table. |
 | `plain` | Each result's columns, `, ` between them, then a line per row, with the values printed as cypher-shell prints them. A result with no rows prints nothing. |
-| `json` | One line per statement, compact: `{"columns":[...],"rows":[[...],...]}`. Values are written as the spec's files write them, with NaN and the infinities as `{"$float":"NaN"}` and the others, and a float as `plain` prints it: `2.0`, not `2`, and `1.0E10`. A whole number is written exactly, past 2^53 too. A text's characters are written as they are, with a `\u` escape only where JSON requires one. A temporal value is its ISO 8601 text, as a JSON string. |
+| `json` | One line per statement, compact: `{"columns":[...],"rows":[[...],...]}`. Values are written as the spec's files write them, with NaN and the infinities as `{"$float":"NaN"}` and the others, and a float as `plain` prints it: `2.0`, not `2`, and `1.0E10`. A whole number is written exactly, past 2^53 too. A text's characters are written as they are, escaped only where JSON requires it: `\"`, `\\`, `\b`, `\f`, `\n`, `\r` and `\t` in their short forms, and any other control character as `\u00XX`. A temporal value is its ISO 8601 text, as a JSON string. |
 | `csv` | Each result as RFC 4180 CSV, with a header row, and lines that end in `\n`. A text and a temporal value are their own characters, null is an empty field, and any other value is its compact JSON. A field is in `"…"` only when it holds a `,`, a `"` or a line break. Results are separated by one empty line. |
 
 **How `plain` and `verbose` print a value**, as cypher-shell does:
@@ -187,7 +187,7 @@ The expression is Cypher. It's evaluated by running `RETURN expression` on the s
 |---|---|
 | null | `NULL` |
 | a boolean | `TRUE` or `FALSE` |
-| a float | as Java's `Double.toString` writes it: always with a fraction, `2.0`, not `2`, which is a whole number; the fewest digits that read back as the same double; an exponent below 10^-3 and from 10^7, as in `1.0E10` and `1.0E-4`; and `-0.0` with its sign |
+| a float | as Java's `Double.toString` writes it: always with a fraction, `2.0`, not `2`, which is a whole number; the fewest digits that read back as the same double; an exponent below 10^-3 and from 10^7, as in `1.0E10` and `1.0E-4`; and `-0.0` with its sign, where the store keeps it |
 | a whole number | exactly, past 2^53 too |
 | a text | in `"…"`, with each `"` escaped as `\"`. A `\` and a line break are printed as they are: `'a"b\\c'` prints as `"a\"b\c"`. |
 | a list | `[1, "b"]` |
@@ -197,7 +197,7 @@ The expression is Cypher. It's evaluated by running `RETURN expression` on the s
 | a temporal value | its ISO 8601 text, unquoted, as the driver gives it. A SQL store gives a temporal value as text, so there it prints as a text. |
 | a path | its nodes and relationships, as in `(:A)-[:R]->(:B)<-[:S]-(:C)`: `-[…]->` for a relationship walked along its direction, `<-[…]-` for one walked against it |
 
-**Order.** A map's keys, and a node's or a relationship's properties, print in the order the store gives them, in every format, as cypher-shell prints them. Neo4j gives `{b: 1, a: 2, aa: 3}` as `{aa: 3, a: 2, b: 1}`, and Postgres's `jsonb` orders keys shortest first, so no case compares two keys' order.
+**Order.** A map's keys, and a node's or a relationship's properties, print in the order the store gives them, in every format, as cypher-shell prints them. Neo4j gives `{b: 1, a: 2, aa: 3}` as `{aa: 3, a: 2, b: 1}`, and Postgres's `jsonb` orders keys shortest first, so no case compares two keys' order but `:params`' `a` before `b`, which every store gives in that order.
 
 **Text and lines.** Every format writes UTF-8 and ends each line with `\n`, on Windows too.
 

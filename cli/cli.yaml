@@ -80,7 +80,7 @@ cases:
     args: ["--format", "plain", "CREATE (n:P {t: 'é😀'}) RETURN n, 'é😀' AS t"]
     stdout: "n, t\n(:P {t: \"é😀\"}), \"é😀\"\n"
     exit: 0
-    note: "Keys come in the store's order, which differs by store, so no case compares a map or a node of two keys or more."
+    note: "Keys come in the store's order, which differs by store, so no case compares a map or a node of two keys or more but :params' a and b, which every store orders alike."
 
   - name: "-c runs as the positional argument does"
     args: ["--format", "plain", "-c", "RETURN 2 AS two"]
