@@ -23,7 +23,7 @@ abstract class TemporalSql(protected val shared: (List<String>, (List<String>) -
     abstract fun group(text: String, pattern: String, group: Int): String
 
     /**
-     * The regular expression [pattern], one of [Temporal]'s, as [matches], [group] and [replace] are given it on this store:
+     * The regular expression [pattern], one of [Temporal]'s or of an offset's, as [matches], [group] and [replace] are given it on this store:
      * as it is, where `^` is the text's start and `$` its end, as Postgres's and Oracle's read them.
      */
     open fun regex(pattern: String): String = pattern

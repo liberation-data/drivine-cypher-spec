@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import org.drivine.cypher.api.CompileJson
 import org.drivine.cypher.oracle.Mutants
 import org.drivine.cypher.oracle.Oracle
+import org.drivine.cypher.sql.PostgresTemporalSql
+import org.drivine.cypher.sql.SqliteTemporalSql
 import org.junit.jupiter.api.Test
 import java.io.File
 import kotlin.test.assertEquals
@@ -15,9 +17,9 @@ import kotlin.test.assertTrue
  * library's host, which reads it with its own language's regular expressions (see the spec's `host.yaml`). So it is written
  * with no construct the hosts read otherwise: no `\s`, `\d`, `\w`, `\b` or any other class escape (drivine4j's are Unicode's,
  * Drivine for TypeScript's `\d` and `\w` ASCII's), no `$` (Java's matches before a line break that ends the text), no `.`
- * (Java's matches no U+0085, JavaScript's does), and no flag group: only `\z` for the text's end, and classes written out,
- * with `\t`, `\n`, `\f`, `\r`, `\xNN` and `\uNNNN` escapes. A user's own pattern, given to `=~`, is the user's: only the
- * compiler's text around it is checked.
+ * (Java's matches no U+0085, JavaScript's does), no class within a class or `&&` in one (Java's union and intersection), and
+ * no flag group: only `\z` for the text's end, and classes written out, with `\t`, `\n`, `\f`, `\r`, `\xNN` and `\uNNNN`
+ * escapes. A user's own pattern, given to `=~`, is the user's: only the compiler's text around it is checked.
  */
 class SqliteRegexpPatternsTest {
 
@@ -61,9 +63,21 @@ class SqliteRegexpPatternsTest {
         assertEquals(listOf("\\d", "\\w", "\\b", "\\S", "\\p", "\\Z"), unsafe("\\d\\w\\b\\S\\p{L}\\Z"))
         assertEquals(listOf("(?i", "."), unsafe("(?i)a.b"))
         assertEquals(listOf("[:"), unsafe("[[:alnum:]]"))
+        // Java reads a class within a class as their union and && as their intersection, JavaScript and Python as characters.
+        assertEquals(listOf("["), unsafe("[a[b]]"))
+        assertEquals(listOf("&&"), unsafe("[a&&b]"))
         assertEquals(listOf("\\-"), unsafe("a\\-b"))
         assertEquals(emptyList(), unsafe("^[\\t\\n\\x0B\\f\\r \\u3000-]*[+-]?([0-9]+\\.?[0-9]*|[.$][0-9]+){0,17}\\$\\z"))
         assertEquals(emptyList(), unsafe("^(?:"))
+    }
+
+    @Test
+    fun `SQLite's regex ends a pattern at the text's end in place of its trailing anchor alone, and Postgres's leaves it`() {
+        val sqlite = SqliteTemporalSql { _, body -> body(emptyList()) }
+        assertEquals("^a\\z", sqlite.regex("^a$"))
+        assertEquals("^a\\\\\\z", sqlite.regex("^a\\\\$"), "an escaped backslash before an anchor")
+        for (kept in listOf("^a\\$", "^a\\\\\\$", "[$]", "^a\\z", "(a$|b)c", "")) assertEquals(kept, sqlite.regex(kept))
+        assertEquals("^a$", PostgresTemporalSql { _, body -> body(emptyList()) }.regex("^a$"))
     }
 
     @Test
@@ -117,7 +131,11 @@ class SqliteRegexpPatternsTest {
                     if (escaped == null || !(escaped in ESCAPES || escaped in SYNTAX || (inClass && escaped == '-'))) found += "\\${escaped ?: ""}"
                     at++
                 }
-                inClass -> if (c == ']') inClass = false else if (c == '[' && pattern.getOrNull(at + 1) == ':') found += "[:"
+                inClass -> when {
+                    c == ']' -> inClass = false
+                    c == '[' -> found += if (pattern.getOrNull(at + 1) == ':') "[:" else "["
+                    c == '&' && pattern.getOrNull(at + 1) == '&' -> found += "&&"
+                }
                 c == '[' -> {
                     inClass = true
                     if (pattern.getOrNull(at + 1) == '^') at++
