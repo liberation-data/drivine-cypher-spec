@@ -36,6 +36,7 @@ on:
       - .github/scripts/compiler-release-sign-test.sh
       - .github/scripts/compiler-release-upload.sh
       - .github/scripts/compiler-npm-check.sh
+      - .github/scripts/compiler-npm-check-test.sh
       - .github/scripts/compiler-npm-clean-install.sh
       - compiler/check/corpus-node.cjs
       - .github/actions/pinned-toolchain/**

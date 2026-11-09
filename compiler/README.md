@@ -291,7 +291,7 @@ a second deployment of the version, so look at https://central.sonatype.com/publ
 that failed without the Portal's answer.
 
 **npm.** Step 2 also builds the npm package (`./gradlew npmPackage`, at the tag's version), packs it as npm publishes it,
-and checks the tarball (`.github/scripts/compiler-npm-check.sh`): the package's name and the tag's version, and its
+and checks the tarball (`.github/scripts/compiler-npm-check.sh`, which `compiler-npm-check-test.sh` tests over made-up tarballs in the gate): the package's name and the tag's version, and its
 files and nothing else (the wasm, its loaders, the CommonJS entry, the types, `npm/README.md` and the repository's
 LICENSE). The tarball, its SHA-256 and its npm integrity are kept beside the bundle. Its publish is a job of its own,
 `publish-npm`, which also waits in the `release` environment for its reviewer, and needs only the tarball: it checks

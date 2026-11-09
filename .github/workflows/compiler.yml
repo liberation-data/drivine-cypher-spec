@@ -52,6 +52,8 @@ jobs:
       - uses: gradle/actions/setup-gradle@748248ddd2a24f49513d8f472f81c3a07d4d50e1 # v4.4.4
       - name: The npm corpus check, over made-up packages
         run: check/corpus-node-test.sh
+      - name: The npm package's check, over made-up tarballs
+        run: ../.github/scripts/compiler-npm-check-test.sh
       - run: ./gradlew --no-daemon clean wasmJsNodeTest wasmJsCorpusCheck -Pnode="$(command -v node)" | tee corpus.log
       # The package as npm gives it: packed, installed into an empty project with only the dependencies it names, then
       # every corpus request compiled through it, byte for byte the JVM's.
