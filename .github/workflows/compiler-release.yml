@@ -161,9 +161,12 @@ jobs:
       - name: The cache key
         id: key
         env:
-          PINS: ${{ hashFiles('compiler/gradle/verification-metadata.xml', 'compiler/gradle/kotlin-native-dependencies.txt', 'compiler/gradle/pinned-jdk.properties', 'compiler/gradle/wrapper/gradle-wrapper.properties') }}
+          PINS: ${{ hashFiles('compiler/gradle/verification-metadata.xml', 'compiler/gradle/kotlin-native-dependencies.txt', 'compiler/gradle/pinned-jdk.properties', 'compiler/gradle/wrapper/gradle-wrapper.properties', '.github/scripts/compiler-release-dependencies.sh') }}
         run: echo "key=compiler-release-dependencies-v1-$RUNNER_OS-$RUNNER_ARCH-$PINS" | tee -a "$GITHUB_OUTPUT"
-      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      # The repository variable COMPILER_RELEASE_SKIP_CACHE=true skips it, so build fetches everything: the way out where
+      # an entry is no use, until it is deleted (compiler/README.md, "Releasing").
+      - if: vars.COMPILER_RELEASE_SKIP_CACHE != 'true'
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         id: restore
         with:
           path: ~/release-dependencies
@@ -195,6 +198,7 @@ jobs:
       PUBLISH: ${{ needs.check.outputs.publish }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
       # On macOS, where build unpacks the dependencies: unpack refuses a zip it must not unpack, and puts nothing anywhere.
       - name: The dependencies' unpack refuses a zip it must not unpack
         if: env.PUBLISH != 'true'
@@ -215,8 +219,12 @@ jobs:
           zips=("$RUNNER_TEMP"/release-dependencies/*)
           if (( ${#zips[@]} != 1 )); then
             echo "::warning::The release dependencies weren't downloaded as one zip, so the build fetches every dependency."
-          else
-            ../.github/scripts/compiler-release-dependencies.sh unpack "${zips[0]}"
+          # unpack refuses a zip it can't take whole, and takes away what it put in place; should it stop otherwise, so
+          # is anything of the zip taken away here, and the build fetches every dependency.
+          elif ! ../.github/scripts/compiler-release-dependencies.sh unpack "${zips[0]}"; then
+            echo "::warning::Unpacking the release dependencies failed, so nothing of them is used, and the build fetches every dependency."
+            rm -rf "$HOME/.gradle/caches/modules-2/files-2.1" "$HOME/.cache/drivine-pinned-toolchain" \
+              "$HOME/.cache/drivine-konan-dependencies" "$HOME/.cache/drivine-binaryen"
           fi
       # No cache: the JDK and Gradle archives as the dependencies held them, or fetched, and either way checked against
       # their pinned SHA-256s.
@@ -224,6 +232,10 @@ jobs:
         with: { cache: 'false' }
       - name: Kotlin/Native's dependencies, checked
         run: ../.github/scripts/compiler-konan-dependencies.sh fetch gradle/kotlin-native-dependencies.txt
+      # From here Kotlin/Native can't fetch anything itself: every dependency it uses is one fetch put in its way, checked.
+      # Its prebuilt comes from Maven Central, through Gradle, which checks it.
+      - name: Kotlin/Native can fetch nothing of its own
+        run: ../.github/scripts/compiler-konan-dependencies.sh block
       - name: Maven Central doesn't have this version yet
         run: |
           # Only an answer of 200 stops a release. When Maven Central can't be asked, the step goes on: the portal

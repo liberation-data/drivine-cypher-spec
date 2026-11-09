@@ -420,47 +420,65 @@ them from the Actions cache where they are kept. But it restores no cache itself
 job of a run on its ref, the gate's among them, which run third-party actions and what those fetch. An entry restored
 into step 2 could change what it builds whatever it then checked. So:
 
-- `compiler.yml`'s `release-dependencies` job (on macOS, in every run but a tag's) builds what step 2 builds, on a
-  runner with no Gradle or Kotlin/Native cache restored (only the toolchain archives', which it checks), and keeps what
-  that fetched, as files, in the Actions cache: Gradle's downloaded files (`~/.gradle/caches/modules-2/files-2.1`: the
-  jars, klibs, POMs, modules and archives), the JDK and Gradle archives, and Kotlin/Native's own dependencies
-  (`.github/scripts/compiler-release-dependencies.sh stage`). Nothing derived from them is kept (Gradle's index of them,
-  transformed jars, compiled build scripts, unpacked distributions, the Kotlin daemon), as nothing would check it. Its
-  key hashes what pins them (`gradle/verification-metadata.xml`, `gradle/kotlin-native-dependencies.txt`,
-  `gradle/pinned-jdk.properties`, `gradle/wrapper/gradle-wrapper.properties`), so a change of a pin makes a new entry,
-  kept by the first run that finds none: the change's pull request, for its own runs, and its merge, for the tags after.
-  A run that finds the entry kept does nothing more. A change of the layout `stage` makes, or of the names `unpack`
-  takes, moves the key's `v1` in both workflows, so no release reads an entry of the old layout. `stage` fails where a
-  file it keeps has a name `unpack` would refuse, so such a name fails this job, not every release, quietly, with only a
-  warning. GitHub drops an entry no run has read for 7 days, so the first tag after a quiet week fetches everything; to
-  keep it warm before a tag, run workflow_dispatch of `Compiler release` on `main` (a dry run), whose `dependencies` job
-  restores it (`Compiler`'s own job only looks it up, which may not count as a read). An entry is about 1.2 GB, of the
-  repository's 10 GB of Actions cache: a change of a pin makes two (its pull request's and `main`'s), and GitHub drops
-  the least recently used caches beyond that, the gate's among them, which their next runs fetch again.
+- `compiler.yml`'s `release-dependencies` job (on macOS, in every run but a tag's or a fork's pull request's) builds what
+  step 2 builds, on a runner with no Gradle or Kotlin/Native cache restored (only the toolchain archives', which it
+  checks), and keeps what that fetched, as files, in the Actions cache: Gradle's downloaded files
+  (`~/.gradle/caches/modules-2/files-2.1`: the jars, klibs, POMs, modules and archives), the JDK and Gradle archives,
+  and Kotlin/Native's own dependencies (`.github/scripts/compiler-release-dependencies.sh stage`). Nothing derived from
+  them is kept (Gradle's index of them, transformed jars, compiled build scripts, unpacked distributions, the Kotlin
+  daemon), as nothing would check it. Its key hashes what pins them (`gradle/verification-metadata.xml`,
+  `gradle/kotlin-native-dependencies.txt`, `gradle/pinned-jdk.properties`, `gradle/wrapper/gradle-wrapper.properties`)
+  and `compiler-release-dependencies.sh`, whose layout the entry is, so a change of either makes a new entry, kept by
+  the first run that finds none: the change's pull request, for its own runs, and its merge, for the tags after. A run
+  that finds the entry kept does nothing more. `stage` fails where a file it keeps has a name `unpack` would refuse, so
+  such a name fails this job, not every release, quietly, with only a warning. GitHub drops an entry no run has read for
+  7 days, so the first tag after a quiet week fetches everything; to keep it warm before a tag, run workflow_dispatch of
+  `Compiler release` on `main` (a dry run), whose `dependencies` job restores it (`Compiler`'s own job only looks it
+  up, which may not count as a read). An entry is about 1.2 GB, of the repository's 10 GB of Actions cache: a change of
+  a pin makes two (its pull request's and `main`'s), and GitHub drops the least recently used caches beyond that, the
+  gate's among them, or `main`'s entry itself after several such pull requests, which the next run on `main` keeps
+  again. A fork's pull request keeps none, as no release reads it.
 - In the release, the `dependencies` job restores that entry (its exact key, from the tag's scope or `main`'s) on a
   runner of its own, which holds no secret and builds nothing, and uploads its files as the run's artifact. Where none is
-  kept, or the upload fails, it uploads nothing, and never fails the run.
-- Step 2 downloads that artifact as the zip it is, unopened, and `compiler-release-dependencies.sh unpack` puts its
-  files in place only where every entry is a plain file or directory at a path `stage` makes: no link, no `.` or `..`,
-  nothing but Gradle's files, the toolchain archives and Kotlin/Native's archives. Otherwise it puts nothing anywhere,
-  with a warning, and step 2 fetches everything. Each file is then checked as it is used: Gradle checks every dependency
-  against `gradle/verification-metadata.xml` (`--dependency-verification strict`, whatever a `gradle.properties` says),
-  fetched or unpacked; `archive.sh` checks the JDK and Gradle archives against their pinned SHA-256s, and fetches one
-  whose checksum isn't the pinned one; `.github/scripts/compiler-konan-dependencies.sh` does the same for Kotlin/Native's
-  own dependencies against `gradle/kotlin-native-dependencies.txt`, and after the bundle is built, fails step 2 where
-  Kotlin/Native unpacked one that file doesn't pin.
+  kept, or the upload fails, it uploads nothing, and the job itself never fails the run; what its upload can do to step
+  2 is below.
+- Step 2 downloads that artifact as the zip it is, unopened, and `compiler-release-dependencies.sh unpack` checks it
+  before it puts anything in place: every entry is a plain file or directory at a path `stage` makes (no link, no `.`
+  or `..`, nothing but Gradle's files, the toolchain archives and Kotlin/Native's archives), no name is there twice in
+  any case, and there are at most 5,000 entries and 3 GB unpacked. Unpacked, every file is made the owner's to read and
+  write, whatever mode the zip gave it, and each of Gradle's files is kept only where its SHA-1 is the directory it sits
+  in, as Gradle lays them out, and its SHA-256 is the one `gradle/verification-metadata.xml` pins for that file of that
+  component. Gradle takes a file it finds at its SHA-1's path without checking it, and strict verification would then
+  fail the build, so a file of other bytes left there would fail every release that read the entry; dropped, it is
+  fetched. (So are the POMs Gradle reads but doesn't check, of modules published with Gradle's module metadata, which
+  the file doesn't name: small files.) Where a check fails, or a step of `unpack` does, it puts nothing in place, or
+  takes away what it put, with a warning, and step 2 fetches everything; and should `unpack` itself fail, step 2 takes
+  away those directories. Each file is then checked again as it is used: Gradle checks every dependency against
+  `gradle/verification-metadata.xml` (`--dependency-verification strict`, whatever a `gradle.properties` says);
+  `archive.sh` checks the JDK and Gradle archives against their pinned SHA-256s, and fetches one whose checksum isn't
+  the pinned one; `.github/scripts/compiler-konan-dependencies.sh` does the same for Kotlin/Native's own dependencies
+  against `gradle/kotlin-native-dependencies.txt`.
 
-So the entry can't change what is built, whoever saved it: a file whose checksum isn't the pinned one is refused, or
-fetched again, and an entry of another name refuses the whole zip. At worst it makes step 2 fetch what the entry lacks,
-as where none is kept: Gradle tries each fetch up to 8 times, over about 4 minutes (`gradle.properties`), and the
-archives are retried for a few minutes; where it still can't, step 2 fails, before the reviewer is asked, and is re-run.
-What is still fetched: Gradle asks Maven Central and the Gradle Plugin Portal for each dependency's POM, module and
-`.sha1`, small files, which it checks too, before it takes a file it already has. binaryen's GitHub releases publish no
-`.sha1` it could ask for, so step 2 takes binaryen from a directory laid out as those releases are, which `unpack` fills
-from the entry's copy (`-Pcompiler.binaryenMirror`, in `build.gradle.kts`), and Gradle checks it the same way. Gradle
-would take a copy there with another SHA-256 and fail on it, not fetch the pinned one, and would fail where the
-directory holds the version but not this runner's archive, so `unpack` lays out only this runner's copy, and only where
-its SHA-256 is the one `gradle/verification-metadata.xml` pins.
+So the entry, whoever saved it, can neither change what is built nor make step 2 fail: a Gradle file whose checksum
+isn't the pinned one is dropped and fetched, an archive whose checksum isn't is fetched again, and an entry that fails a
+check is refused whole. At worst it makes step 2 fetch what the entry lacks, as where none is kept: Gradle tries each
+fetch up to 8 times, over about 4 minutes (`gradle.properties`), and the archives are retried for a few minutes; where
+it still can't, step 2 fails, before the reviewer is asked, and is re-run. What it can still do is take over the
+`dependencies` job's own runner, which holds nothing step 2 needs but the upload: it could upload an artifact of a name
+step 2 then can't use, which fails step 2's own upload, as any of the gate's jobs could too; `publish` signs only the
+bundle whose SHA-256 is step 2's own output. What is still fetched: Gradle asks Maven Central and the Gradle Plugin
+Portal for each dependency's POM, module and `.sha1`, small files, before it takes a file it already has. binaryen's
+GitHub releases publish no `.sha1` it could ask for, so step 2 takes binaryen from a directory laid out as those
+releases are, which `unpack` fills from the entry's copy, once checked (`-Pcompiler.binaryenMirror`, in
+`build.gradle.kts`), and only this runner's: Gradle would fail where the directory holds the version but not this
+runner's archive.
+
+**Where an entry is no use.** Should a release still fail on what the cache held, or an entry need to go before GitHub
+drops it, set the repository variable `COMPILER_RELEASE_SKIP_CACHE` to `true` (Settings, Secrets and variables, Actions,
+Variables): the `dependencies` job then restores nothing, and step 2 fetches everything, as before this cache. Delete
+the entry (`gh cache list --repo liberation-data/drivine-cypher-spec --key compiler-release-dependencies`, then
+`gh cache delete <key> --repo liberation-data/drivine-cypher-spec`), and run workflow_dispatch of `Compiler` on `main`,
+which keeps a fresh one; then delete the variable.
 
 The gate's jobs read their own caches, as before (setup-gradle's, the toolchain archives', `~/.konan`), and Gradle
 checks the dependencies they use too; they build nothing that is released. Every action `compiler.yml` and this workflow
@@ -469,9 +487,13 @@ use is pinned to a commit.
 **Kotlin/Native's own dependencies.** Kotlin/Native fetches its LLVM, libffi, and the sysroots and toolchains of the
 targets it cross-compiles from download.jetbrains.com, as archives whose checksums aren't published, and checks nothing.
 `gradle/kotlin-native-dependencies.txt` pins those step 2 uses on macOS arm64, each by its SHA-256 and URL, and
-`compiler-konan-dependencies.sh` puts each, checked, where Kotlin/Native looks for it before it would fetch one. A bump
-of Kotlin moves them: step 2 and `release-dependencies` then fail at "Kotlin/Native used only its pinned dependencies",
-naming each it unpacked that isn't pinned. To pin them, on macOS arm64, build what step 2 builds with a Kotlin/Native
+`compiler-konan-dependencies.sh fetch` puts each, checked, where Kotlin/Native looks for it before it would fetch one.
+Then `block` points download.jetbrains.com nowhere for the rest of the job (Kotlin/Native's prebuilt comes from Maven
+Central, through Gradle), so Kotlin/Native can't fetch, nor run, one the file doesn't pin: the build fails where it
+tries. After the build, `check` also fails where Kotlin/Native unpacked a dependency whose directory's name isn't one
+the file pins: a check of names, after the fact, which `block` makes a second line. A bump of Kotlin moves them:
+step 2 and `release-dependencies` then fail, at the build (Kotlin/Native can't reach download.jetbrains.com for the
+new one) or at "Kotlin/Native used only its pinned dependencies". To pin them, on macOS arm64, build what step 2 builds with a Kotlin/Native
 home of its own, which prints each URL it fetches:
 
 ```sh
@@ -496,8 +518,10 @@ for any other deployment. It also checks that the signing refuses a bundle it mu
 (`.github/scripts/compiler-release-sign-test.sh`): one with a link among thousands, a file, a version or a path that no
 publication makes, or a checksum of a file it doesn't hold. And in step 2, before it unpacks the dependencies, it checks
 that `stage` keeps only what `unpack` takes, that `unpack` refuses whole a zip with a name that climbs out, an absolute
-name, a path `stage` doesn't make, a name twice or a link, and lays out only the runner's binaryen archive with the
-pinned SHA-256, that the check of Kotlin/Native's dependencies fails one the list doesn't pin, and that their fetch
+name, a path `stage` doesn't make, a name twice, a link, or more entries or bytes than its limits, drops a Gradle file
+of other bytes at its real path, at another SHA-1's path or that the metadata doesn't name, takes entries whose modes
+let no one read them and cleans up after them, takes away what it put in place where a step fails, takes the test's
+own metadata only in the test, and lays out only the runner's binaryen archive with the pinned SHA-256, that the check of Kotlin/Native's dependencies fails one the list doesn't pin, and that their fetch
 puts in Kotlin/Native's way only an archive with the pinned SHA-256
 (`.github/scripts/compiler-release-dependencies-test.sh`).
 

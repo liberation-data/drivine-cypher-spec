@@ -10,12 +10,32 @@
 #     dependencies' cache), or where none is kept, or not this one, fetched with retries; either way checked against its
 #     SHA-256, or refused. Then copies each into Kotlin/Native's cache, for it to unpack.
 #   compiler-konan-dependencies.sh check <list>
-#     After the build: every dependency Kotlin/Native unpacked is one <list> pins, so it fetched and ran nothing else.
-#     Where it fetched another, as after a bump of Kotlin, it fails naming each: see compiler/README.md, "Releasing".
+#     After the build: every dependency Kotlin/Native unpacked is, by its directory's name, one <list> pins. This checks
+#     names, after the fact; what keeps an unpinned one from being fetched and run is block. Where Kotlin/Native wanted
+#     another, as after a bump of Kotlin, the build fails at block's doing, or this fails naming each: see
+#     compiler/README.md, "Releasing".
+#   compiler-konan-dependencies.sh block
+#     After fetch, on a CI runner: points download.jetbrains.com nowhere (in /etc/hosts, with sudo), and checks it can't
+#     be reached, so Kotlin/Native can't fetch a dependency the list doesn't pin, and the build fails before it would run
+#     one, rather than check finding it after. Kotlin/Native's prebuilt bundle comes from Maven Central, through Gradle.
 set -euo pipefail
 mode="${1:-}" list="${2:-}"
+if [[ "$mode" == block ]]; then
+    printf '0.0.0.0 download.jetbrains.com\n:: download.jetbrains.com\n' | sudo tee -a /etc/hosts > /dev/null
+    # macOS answers from its resolver's cache until told to read /etc/hosts again.
+    if [[ "$(uname -s)" == Darwin ]]; then
+        sudo dscacheutil -flushcache
+        sudo killall -HUP mDNSResponder || true
+    fi
+    if curl -s --max-time 10 -o /dev/null https://download.jetbrains.com/; then
+        echo "::error::download.jetbrains.com is still reachable, so Kotlin/Native could fetch what the list doesn't pin."
+        exit 1
+    fi
+    echo "download.jetbrains.com is blocked: Kotlin/Native can use only the dependencies fetch put in its way."
+    exit 0
+fi
 if [[ ( "$mode" != fetch && "$mode" != check ) || ! -f "$list" ]]; then
-    echo "compiler-konan-dependencies.sh fetch|check <list>" >&2
+    echo "compiler-konan-dependencies.sh fetch|check <list> | block" >&2
     exit 2
 fi
 archive="$(cd "$(dirname "$0")/../actions/pinned-toolchain" && pwd)/archive.sh"
