@@ -275,7 +275,7 @@ A store in `only` and `except` is `neo4j`, `memgraph`, `falkordb`, `postgres`, `
 | `stdin` | Text fed to stdin. With no `stdin`, stdin is empty. Either way it isn't a terminal. |
 | `files` | Files written into the run's own empty directory before the CLI runs, by name. Each is its text, or a map of its `text` and its `mode`, in octal, as in `{text: "…", mode: "600"}`. A file is written with mode 0644, which others can read, unless it gives a `mode`. |
 | `env` | Environment variables set for the run. A variable the case gives as null is unset. |
-| `stdout` | What stdout must be, exactly. |
+| `stdout` | What stdout must be, exactly. A case with neither `stdout` nor `stdoutLines` doesn't check stdout. |
 | `stdoutLines` | Regular expressions that stdout's lines must match in order, each found anywhere in its line unless `^` and `$` anchor it, each a line after the one the expression before it matched. The lines between them aren't checked. |
 | `stderr` | Text stderr must contain. |
 | `exit` | The exit code. |
