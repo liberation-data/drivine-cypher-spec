@@ -47,9 +47,10 @@ class OracleCypherCompiler(
     encoder: CypherEncoder?,
     /**
      * Whether a statement that writes returns its rows as one row of JSON text, in place of a row of `JSON` each: see
-     * [returnRows], and [org.drivine.cypher.api.GraphOptions.oracleRowsAsText].
+     * [returnRows], and [org.drivine.cypher.api.GraphOptions.oracleRowsAsText]. False where it is left out, as the other
+     * constructors leave it.
      */
-    private val rowsAsText: Boolean = false,
+    private val rowsAsText: Boolean,
 ) : SqlCypherCompiler(graph, encoder) {
 
     // The constructor drivine4j's compiler had, its defaults among it, kept so that what was compiled against it still links.
@@ -58,7 +59,16 @@ class OracleCypherCompiler(
         nullsEqualStored: Boolean = true,
         eraStored: Boolean = true,
         indexedProperties: Set<Pair<String, String>> = emptySet(),
-    ) : this(graph, nullsEqualStored, eraStored, indexedProperties, null)
+    ) : this(graph, nullsEqualStored, eraStored, indexedProperties, null, false)
+
+    // The constructor with an encoder and without rowsAsText, kept so that what was compiled against it still links.
+    constructor(
+        graph: String,
+        nullsEqualStored: Boolean,
+        eraStored: Boolean,
+        indexedProperties: Set<Pair<String, String>>,
+        encoder: CypherEncoder?,
+    ) : this(graph, nullsEqualStored, eraStored, indexedProperties, encoder, false)
 
     /** The function the store keeps that compares two values that may hold a null: see [nullsEqual]. */
     private val storedNullsEqual = nullsEqualName(graph)

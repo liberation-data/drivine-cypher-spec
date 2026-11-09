@@ -5,6 +5,7 @@ import org.drivine.cypher.api.Compiled
 import org.drivine.cypher.api.CypherCompiler
 import org.drivine.cypher.api.GraphOptions
 import org.drivine.cypher.api.Store
+import org.drivine.cypher.json.CypherEncoder
 import org.drivine.cypher.oracle.Oracle
 import org.drivine.cypher.sql.OracleCypherCompiler
 import org.junit.jupiter.api.Test
@@ -85,6 +86,20 @@ class OracleRowsAsTextTest {
         val cypher = writes.first()
         assertEquals(sql(cypher, rowsAsText = true), (compiled(cypher, GraphOptions("g", oracleRowsAsText = true)) as Compiled).sql)
         assertEquals("rows:json", OracleCypherCompiler.ROWS_AS_TEXT)
+    }
+
+    @Test
+    fun `the constructors drivine4j was compiled against still link, without the option`() {
+        val encoder = OracleCypherCompiler::class.java.getConstructor(
+            String::class.java, Boolean::class.javaPrimitiveType, Boolean::class.javaPrimitiveType, Set::class.java, CypherEncoder::class.java,
+        )
+        val plain = OracleCypherCompiler::class.java.getConstructor(
+            String::class.java, Boolean::class.javaPrimitiveType, Boolean::class.javaPrimitiveType, Set::class.java,
+        )
+        val cypher = writes.first()
+        for (compiler in listOf(encoder.newInstance("g", true, true, emptySet<Any>(), null), plain.newInstance("g", true, true, emptySet<Any>()))) {
+            assertEquals(sql(cypher, rowsAsText = false), compiler.compile(cypher, parameters).sql)
+        }
     }
 
     @Test

@@ -126,7 +126,9 @@ The text is Oracle's extended JSON, so a float stays a float: an object of the o
 `{"$numberDouble": 2}` or `{"$numberDouble": 2.5}`, and NaN and the infinities are `{"$numberDouble": "Nan"}`, `"Inf"`
 and `"-Inf"`. Every other value is plain JSON, as the `JSON` rows hold it: a whole number in full, a text, a temporal
 value as its ISO 8601 text, a list, a map. A map the statement returns whose one key is `$numberDouble` is written as a
-float is. The host reads the one row while its driver prefetches at least one row (node-oracledb's default is 2).
+float is. The host reads the one row while its driver prefetches at least one row (node-oracledb's default is 2). The
+rows are one JSON value, so a write whose rows together pass Oracle's limit on the size of one fails, where a row of
+`JSON` each would not.
 
 Every other statement, a read or a write that returns nothing, compiles alike either way, as does every statement on the
 other stores. The option is temporary: Drivine for TypeScript and drivine-python set it until a node-oracledb release

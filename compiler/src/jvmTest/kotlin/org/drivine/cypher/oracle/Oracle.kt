@@ -166,7 +166,7 @@ object Oracle {
     )
 
     /** The graph of Oracle's rows as text: see [corpusRequests]. */
-    internal val ROWS_AS_TEXT: Map<String, Any?> = mapOf("name" to "g", "oracleRowsAsText" to true)
+    private val ROWS_AS_TEXT: Map<String, Any?> = mapOf("name" to "g", "oracleRowsAsText" to true)
 
     /** Writes that return rows the spec's statements have no form of, for Oracle's rows as text: a long text given, many rows. */
     private val ROWS_AS_TEXT_WRITES: List<Pair<String, Map<String, Any?>>> = listOf(
