@@ -138,6 +138,16 @@ class SqliteStatementLimitsTest {
         assertTrue(compiled(cypher(low)).parameters.containsKey("_cy_program"))
     }
 
+    /** SQLite's limit is of bytes: a text of 'é', two bytes a character, makes a statement past it in fewer characters. */
+    @Test
+    fun `a write whose statement is within the limit in characters but past it in bytes is given its steps bound`() {
+        val compiled = compiled("CREATE (:Note {t: '${"é".repeat(600_000)}'})")
+        val steps = compiled.parameters["_cy_program"] as String?
+        assertTrue(steps != null, "steps written in: ${compiled.sql.length} characters, ${compiled.sql.toByteArray().size} bytes")
+        val written = compiled.sql.replace("\$_cy_program", "'${steps.replace("'", "''")}'")
+        assertTrue(written.length < 1_000_000 && written.toByteArray().size > 1_000_000, "${written.length} characters, ${written.toByteArray().size} bytes")
+    }
+
     @Test
     fun `a write whose statement is within the limit has its steps written into it, as before`() {
         val compiled = compiled("CREATE (s:School {name: 'Hilly Fields'})\n" + (1..100).joinToString("\n") { "CREATE (s)-[:STUDENT]->(:Student {name: 'Student $it'})" })
