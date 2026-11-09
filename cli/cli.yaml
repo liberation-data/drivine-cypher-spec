@@ -125,6 +125,24 @@ cases:
     stdout: "a\n1\nb\n2\nc\n3\n"
     exit: 0
 
+  - name: ":param takes a map, and :params clear clears the parameters"
+    files: {"p.cypher": ":param {a: 1, b: 'x'}\nRETURN $a AS a, $b AS b;\n:params clear\nRETURN $a AS a;\n"}
+    args: ["--format", "plain", "-f", "p.cypher"]
+    stdout: "a, b\n1, \"x\"\n"
+    exit: 1
+
+  - name: "An unknown command fails as a statement does"
+    files: {"u.cypher": ":nope\nRETURN 1 AS a;\n"}
+    args: ["--format", "plain", "-f", "u.cypher"]
+    stdout: ""
+    exit: 1
+
+  - name: ":exit stops reading"
+    stdin: "RETURN 1 AS a;\n:exit\nRETURN 2 AS b;\n"
+    args: ["--format", "plain"]
+    stdout: "a\n1\n"
+    exit: 0
+
   - name: "A file that ends inside a transaction rolls it back"
     files: {"h.cypher": ":begin\nCREATE (n:B);\n"}
     args: ["--format", "plain", "-f", "h.cypher"]
@@ -135,6 +153,12 @@ cases:
     stdin: "RETURN 3 AS three;\n"
     args: ["--format", "plain"]
     stdout: "three\n3\n"
+    exit: 0
+
+  - name: "Given a statement, stdin isn't read"
+    stdin: "RETURN 9 AS nine;\n"
+    args: ["--format", "plain", "RETURN 1 AS one"]
+    stdout: "one\n1\n"
     exit: 0
 
   - name: "Piped stdin, with no --format, is plain"
@@ -285,8 +309,8 @@ cases:
 
   - name: "--explain prints the SQL a statement compiles to, and runs nothing"
     only: [sql]
-    args: ["--explain", "CREATE (n:Explained) RETURN n"]
-    stdoutLines: ["\\S", "^-- parameters: \\{.*\\}$"]
+    args: ["--explain", "-P", "x => 1", "CREATE (n:Explained {x: $x}) RETURN n"]
+    stdoutLines: ["\\S", "^-- parameters: \\{.*\"x\":1.*\\}$"]
     exit: 0
 
   - name: "--explain is refused on a graph engine"
@@ -308,7 +332,6 @@ cases:
     exit: 0
 
   - name: "json writes NaN and the infinities as the spec does"
-    only: [neo4j, sql]
     args: ["--format", "json", "RETURN 0.0 / 0.0 AS nan, 1.0 / 0.0 AS inf"]
     stdout: "{\"columns\":[\"nan\",\"inf\"],\"rows\":[[{\"$float\":\"NaN\"},{\"$float\":\"Infinity\"}]]}\n"
     exit: 0
@@ -316,4 +339,10 @@ cases:
   - name: "csv quotes as RFC 4180 does, and null is an empty field"
     args: ["--format", "csv", "RETURN 1 AS n, 'a,b' AS s, 'say \"hi\"' AS q, null AS z, [1, 2] AS l"]
     stdout: "n,s,q,z,l\n1,\"a,b\",\"say \"\"hi\"\"\",,[1,2]\n"
+    exit: 0
+
+  - name: "csv separates results with one empty line"
+    stdin: "RETURN 1 AS a;\nRETURN 2 AS b;\n"
+    args: ["--format", "csv"]
+    stdout: "a\n1\n\nb\n2\n"
     exit: 0

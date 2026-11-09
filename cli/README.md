@@ -119,7 +119,7 @@ The CLI takes every cypher-shell flag. Most do what they do in cypher-shell. The
 | `--type TYPE` | The store's type, where the address leaves it open. |
 | `--profile NAME` | The profile to connect with. |
 | `--continue` | Keep going past a failed statement, as `--fail-at-end` does. |
-| `--explain` | On a SQL store, prints for each statement the SQL it compiles to, which may run over several lines, then one line, `-- parameters: ` and its parameters as compact JSON, written as `json` writes values. It runs nothing. The SQL is the compiler's, and cases don't compare it. On a graph engine, it's refused with exit code 2: there, the store runs the Cypher itself. |
+| `--explain` | On a SQL store, prints for each statement the SQL it compiles to, which may run over several lines, then one line, `-- parameters: ` and its parameters as compact JSON, written as `json` writes values. It runs no statement of the input, but it still connects to evaluate each `-P` and `:param` expression, as [Parameters](#parameters) says. The SQL is the compiler's, and cases don't compare it. On a graph engine, it's refused with exit code 2: there, the store runs the Cypher itself. |
 
 Any other flag is refused, with exit code 2. The message names the flag and points to `--help`.
 
@@ -174,7 +174,7 @@ The expression is Cypher. It's evaluated by running `RETURN expression` on the s
 | Format | What it prints |
 |---|---|
 | `auto` | `verbose` when stdout is a terminal, `plain` when it isn't. This is the default. |
-| `verbose` | Each result as a table, then its count of rows and how long it took, then the store's counts of what it wrote, as cypher-shell prints them. |
+| `verbose` | Each result as a table, then its count of rows and how long it took, then the store's counts of what it wrote, as cypher-shell prints them. A result with no columns, such as a write with no `RETURN`, prints no table. |
 | `plain` | Each result's columns, `, ` between them, then a line per row, with the values printed as cypher-shell prints them. A result with no rows prints nothing. |
 | `json` | One line per statement, compact: `{"columns":[...],"rows":[[...],...]}`. Values are written as the spec's files write them, with NaN and the infinities as `{"$float":"NaN"}` and the others. |
 | `csv` | Each result as RFC 4180 CSV, with a header row, and lines that end in `\n`. A text is its own characters, null is an empty field, and any other value is its compact JSON. Results are separated by one empty line. |
@@ -192,7 +192,7 @@ The expression is Cypher. It's evaluated by running `RETURN expression` on the s
 | a relationship | `[:TYPE {key: value}]` |
 | a path | its nodes and relationships, as in `(:A)-[:R]->(:B)<-[:S]-(:C)`: `-[…]->` for a relationship walked along its direction, `<-[…]-` for one walked against it |
 
-A SQL store gives a node or a relationship as Drivine reads it, and it is printed as it would be on Neo4j.
+On a SQL store, the CLI reads a node's labels and a relationship's type along with their properties, though `PersistenceManager.query` gives only the properties, and prints them as it would on Neo4j.
 
 **`verbose`'s timing line**, `ready to start consuming query after N ms, results consumed after another M ms`, varies from run to run. Cases don't compare it.
 
@@ -243,7 +243,7 @@ A store in `only` and `except` is `neo4j`, `memgraph`, `falkordb`, `postgres`, `
 | Key | What it is |
 |---|---|
 | `name` | Unique in the file. |
-| `description` | What the case checks. |
+| `description` | What the case checks, where its name doesn't say it. Optional. |
 | `args` | The arguments, after the address the runner gives. |
 | `stdin` | Text fed to stdin. With no `stdin`, stdin is empty. Either way it isn't a terminal. |
 | `files` | Files written into the run's own empty directory before the CLI runs, by name. |
