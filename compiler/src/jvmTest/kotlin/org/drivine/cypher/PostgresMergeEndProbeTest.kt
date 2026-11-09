@@ -12,12 +12,13 @@ import kotlin.test.assertTrue
 /**
  * On Postgres, a `MERGE`'s read of its pattern, for each row of the loop that writes, reads each relationship by a probe of
  * one end, `CROSS JOIN LATERAL (SELECT * FROM … e WHERE e.src = n.nid OFFSET 0) e`: the end toward the first node bound
- * before the pattern, or else the first given properties, or else the first node. Joined plainly, it was planned by the relationship table's statistics, which an
- * ANALYZE during the loop (an autovacuum) leaves at no rows while the loop's own are uncommitted: the plan made again
- * read the whole of an index by the relationship's type alone for every row, so `MATCH (n) MERGE (n)-[:R]->(n)` took 18 s
- * over 20,000 nodes where it takes 0.5 s (drivine4j#663, drivine#671). The rows it gives are the spec's MERGE cases'; the
- * plans and times are those of Drivine for TypeScript's `CypherWriteLoopTime` and drivine4j's `PostgresMergeEndProbe`,
- * which need a store. This pins the shape, and that the probe's one condition an index answers is the bound end's key.
+ * before the pattern, or else the first given properties, or else the first node. Joined plainly, it was planned by the
+ * relationship table's statistics, which an ANALYZE during the loop (an autovacuum) leaves at no rows while the loop's own
+ * are uncommitted: the plan made again read the whole of an index by the relationship's type alone for every row, so
+ * `MATCH (n) MERGE (n)-[:R]->(n)` took 18 s over 20,000 nodes where it takes 0.5 s (drivine4j#663, drivine#671). The rows
+ * it gives are the spec's MERGE cases'; the plans and times are those of Drivine for TypeScript's `CypherWriteLoopTime` and
+ * of the `PostgresMergeEndProbe.spec.ts` drafted on drivine4j#663, which need a store. This pins the shape, and that the probe's one condition an
+ * index answers is the bound end's key.
  */
 class PostgresMergeEndProbeTest {
 
@@ -54,6 +55,10 @@ class PostgresMergeEndProbeTest {
         Triple("MATCH (n:CyLoop) MERGE (n)-[:CY_TAGS {w: 1}]->(:CyTag {k: 1})", "src", true),
         Triple("MATCH (n:CyLoop) CALL (n) { MERGE (n)-[:CY_SELF]->(n) } RETURN count(n)", "src", true),
         Triple("MATCH (n:CyLoop) FOREACH (i IN [1] | MERGE (n)-[:CY_SELF]->(n))", "src", true),
+        Triple("MATCH (n:CyLoop) CALL (n) { FOREACH (i IN [1] | MERGE (:CyOther)-[:CY_TO]->(n)) } RETURN count(n)", "dst", true),
+        Triple("MATCH (n:CyLoop) WITH n MERGE (:CyOther)-[:CY_TO]->(n)", "dst", true),
+        Triple("MATCH (n:CyLoop) WITH n, count(*) AS c MERGE (:CyOther)-[:CY_TO]->(n)", "dst", true),
+        Triple("UNWIND range(1, 3) AS i CREATE (n:CyLoop) MERGE (:CyOther)-[:CY_TO]->(n)", "dst", true),
         Triple("UNWIND range(1, 3) AS i MERGE (a:CyA {k: i})-[:CY_AB]->(b:CyB {k: i})", "src", false),
         Triple("MERGE (a:CyA {k: 1})-[:CY_AB]->(b:CyB)", "src", false),
         Triple("MERGE (a:CyA)-[:CY_AB]->(b:CyB {k: 2})", "dst", false),
@@ -88,6 +93,9 @@ class PostgresMergeEndProbeTest {
             "MATCH (n:CyLoop) MERGE (:CyStart)-[:CY_A]->(:CyMid)-[:CY_B]->(n)" to listOf("dst", "dst"),
             "MATCH (n:CyLoop) MERGE (:CyStart)<-[:CY_A]-(:CyMid)<-[:CY_B]-(n)" to listOf("src", "src"),
             "MATCH (n:CyLoop) MERGE (:CyStart)-[:CY_A]->(n)-[:CY_B]->(:CyEnd)" to listOf("dst", "src"),
+            // A node at two positions: probed toward the one bound, its first.
+            "MATCH (n:CyLoop) MERGE (m:CyMid)-[:CY_A]->(n)-[:CY_B]->(m)" to listOf("dst", "src"),
+            "MATCH (n:CyLoop) MERGE (n)-[:CY_A]->(:CyMid)-[:CY_B]->(n)" to listOf("src", "src"),
             "MATCH (n:CyLoop) MERGE (:CyStart {k: 1})-[:CY_A]->(:CyMid)-[:CY_B]->(n)" to listOf("dst", "dst"),
             "MERGE (:CyStart)-[:CY_A]->(:CyMid)-[:CY_B]->(:CyEnd {k: 1})" to listOf("dst", "dst"),
         )) {

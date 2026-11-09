@@ -1786,9 +1786,10 @@ abstract class SqlCypherCompiler(
             val pinned = pattern.nodes.map { node -> node.properties != null || node.variable?.let { select.scope[it] } != null }
             val before = select.scope
             // A MERGE's read probes each relationship by its end toward the node the walk starts from: the first bound before
-            // the pattern, a single row the loop's row holds, or else the first given properties. Not one given properties
-            // where another is bound: the same node for every row of the loop gains a relationship at each, and probing it,
-            // or the nodes a MERGE makes anew of it, read more for each row than the last (drivine4j#663).
+            // the pattern, else the first given properties, else the first. A bound one is taken before one given properties,
+            // as the tag of `MATCH (n) MERGE (:Tag {k: 1})-[:R]->(n)`, the same for every row, gains a relationship at each:
+            // probed by it, each row would read more than the last (drivine4j#663). A bound node the same for every row, as
+            // `MATCH (c {k: 1}) UNWIND … MERGE (c)-[:R]->(:P {k: i})`'s, gains one too: the pattern does not say which varies.
             val toward = if (!probingEnds) 0 else pattern.nodes.indexOfFirst { node -> node.variable?.let { before[it] } != null }
                 .takeIf { it >= 0 } ?: pinned.indexOf(true).coerceAtLeast(0)
             val bound = pattern.nodes.map { node ->
