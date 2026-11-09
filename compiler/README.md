@@ -295,8 +295,11 @@ and checks the tarball (`.github/scripts/compiler-npm-check.sh`, which `compiler
 files and nothing else (the wasm, its loaders, the CommonJS entry, the types, `npm/README.md` and the repository's
 LICENSE). The tarball, its SHA-256 and its npm integrity are kept beside the bundle. Its publish is a job of its own,
 `publish-npm`, which also waits in the `release` environment for its reviewer, and needs only the tarball: it checks
-the tarball's SHA-256 is step 2's, then publishes it with npm's provenance, which records the run and the commit that
-built it (`--provenance`, from the job's OIDC token). A version with a suffix is published under the npm tag `next`, and
+the tarball's SHA-256 is step 2's, then publishes it by npm's trusted publishing, with no npm token stored anywhere:
+npm's settings for the package name this repository, `compiler-release.yml` and the `release` environment as its
+publisher, and the job's OIDC token (`id-token: write`) proves it is that workflow. The same token gives npm's provenance
+(`--provenance`), which records the run and the commit that built the package. The job installs npm 11.21.1, as desk's
+and Drivine for TypeScript's releases do: trusted publishing needs 11.5.1 or later. A version with a suffix is published under the npm tag `next`, and
 any other under `latest`. The two publishes don't wait on each other, so a failure of one neither undoes nor holds up
 the other. A re-run publishes nothing where npm has the version as this tarball (by its integrity), and fails where npm
 has another tarball under the version, as npm never takes a version twice. The gate's wasmJs job packs the package
@@ -334,12 +337,21 @@ publication makes, or a checksum of a file it doesn't hold.
 
 The `release` environment is this repository's own, not drivine4j's, and is set up once in its settings before the first
 release: a required reviewer, tags `v*` allowed to deploy to it, and the secrets drivine4j's release uses,
-`CENTRAL_PORTAL_USERNAME`, `CENTRAL_PORTAL_PASSWORD`, `SIGNING_KEY` and `SIGNING_PASSWORD`, with `NPM_TOKEN`, an npm
-automation token that can publish in the `@liberation-data` scope, until npm's trusted publishing for this workflow
-replaces it (#117). Without the environment, a tag's run makes an empty one, with no reviewer, and step 3 and
-`publish-npm` stop at their checks of the secrets. Without `NPM_TOKEN` alone, a tag's run publishes to Maven Central and
-`publish-npm` stops at its check of the token: add it, and re-run `publish-npm` alone ("Re-run failed jobs"), which
-waits for the reviewer again.
+`CENTRAL_PORTAL_USERNAME`, `CENTRAL_PORTAL_PASSWORD`, `SIGNING_KEY` and `SIGNING_PASSWORD`. npm needs no secret. Without
+the environment, a tag's run makes an empty one, with no reviewer, and step 3 stops at its check of the secrets.
+
+**npm's trusted publisher, once.** npm lets a trusted publisher be set only on a package that exists, so the package's
+first version is published by hand, and every later one by `publish-npm`:
+
+1. Build the version Maven Central has at the newest tag, from that tag, as a tarball, and check it as step 2 does
+   (`compiler-npm-check.sh`, and the corpus check against that tag's JVM).
+2. A maintainer of the `@liberation-data` scope publishes that tarball once: `npm publish <tarball> --access public`.
+3. On npmjs.com, in the package's settings, add a trusted publisher: GitHub Actions, repository
+   `liberation-data/drivine-cypher-spec`, workflow `compiler-release.yml`, environment `release`.
+
+Until then a tag's run publishes to Maven Central and `publish-npm` fails at npm's refusal: set the publisher, and re-run
+`publish-npm` alone ("Re-run failed jobs"), which waits for the reviewer again. The workflow's file name is part of the
+publisher, so renaming `compiler-release.yml` needs the setting changed with it.
 
 Push the tag with or after `main`: a tag pushed before the commit is on `main` is refused at step 1; push `main` and
 re-run the workflow.

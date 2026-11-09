@@ -266,9 +266,10 @@ jobs:
           path: ${{ runner.temp }}/signed.zip
           if-no-files-found: warn
 
-  # Publishes build's npm tarball, with npm's provenance (the run and commit that built it, signed by GitHub's OIDC token).
-  # It waits in `release`, which holds NPM_TOKEN, as publish does, but needs neither publish nor its secrets: a failure of
-  # one doesn't hold up the other. Re-run for the same tag, it publishes nothing where npm has this tarball already, and
+  # Publishes build's npm tarball by npm's trusted publishing: npm is told, in the package's settings, that this
+  # repository's compiler-release.yml may publish it from the `release` environment, and GitHub's OIDC token proves that
+  # on each run, so no npm token is stored. It also gives npm's provenance (the run and commit that built it). It waits in
+  # `release`, as publish does, but needs neither publish nor its secrets: a failure of one doesn't hold up the other. Re-run for the same tag, it publishes nothing where npm has this tarball already, and
   # fails where npm has another under the version.
   publish-npm:
     needs: [check, build]
@@ -278,7 +279,7 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
-      # npm's provenance: the OIDC token that signs where the package came from.
+      # npm's trusted publishing and provenance: the OIDC token that proves this workflow and signs where the package came from.
       id-token: write
     env:
       VERSION: ${{ needs.check.outputs.version }}
@@ -290,10 +291,12 @@ jobs:
       run:
         working-directory: .
     steps:
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: '22'
-          registry-url: https://registry.npmjs.org
+          node-version: 24
+      # The npm that publishes, as desk's and Drivine for TypeScript's releases pin it: npm's latest can be a new major,
+      # and trusted publishing needs 11.5.1 or later.
+      - run: npm install -g npm@11.21.1
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: compiler-npm-${{ env.VERSION }}
@@ -307,17 +310,7 @@ jobs:
             echo "::error::The npm tarball downloaded has SHA-256 $got, not ${NPM_SHA256:-none} as build made it."
             exit 1
           fi
-      - name: The release secret is set
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          if [[ -z "$NPM_TOKEN" ]]; then
-            echo "::error::The release environment is missing NPM_TOKEN."
-            exit 1
-          fi
       - name: Publish to npm
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           # A re-run: npm has the version already. It is this run's tarball, or the publish fails.
           if published=$(npm view "$NPM_NAME@$VERSION" dist.integrity 2> /dev/null) && [[ -n "$published" ]]; then
@@ -347,10 +340,12 @@ jobs:
       run:
         working-directory: .
     steps:
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: '22'
-          registry-url: https://registry.npmjs.org
+          node-version: 24
+      # The npm that publishes, as desk's and Drivine for TypeScript's releases pin it: npm's latest can be a new major,
+      # and trusted publishing needs 11.5.1 or later.
+      - run: npm install -g npm@11.21.1
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: compiler-npm-${{ env.VERSION }}
