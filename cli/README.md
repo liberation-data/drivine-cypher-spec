@@ -27,7 +27,7 @@ drivine [flags] [cypher]
 
 Each statement runs in its own transaction, unless it falls between `:begin` and `:commit`.
 
-Only one of `cypher`, `-c` and `-f` may be given. Given two, the CLI exits with 2. Given one, stdin isn't read.
+Only one of `cypher`, `-c` and `-f` may be given. Given two, the CLI refuses them as a bad invocation (see [Failures and exit codes](#failures-and-exit-codes)). Given one, stdin isn't read.
 
 ## Connecting
 
@@ -46,7 +46,15 @@ Only one of `cypher`, `-c` and `-f` may be given. Given two, the CLI exits with 
 
 - **`--type TYPE`** names the store where the address leaves it open. The types are `neo4j`, `memgraph`, `falkordb`, `postgres`, `oracle` and `sqlite`.
 - **With no address,** the CLI reads `NEO4J_ADDRESS`, then `NEO4J_URI`, then the profile. If none is set, it uses `neo4j://localhost:7687`, as cypher-shell does.
-- **`-d DATABASE` or `--database DATABASE`, then `NEO4J_DATABASE`, then the profile** names the database, on a store that has more than one. On Postgres, a database named in the address wins.
+- **`-d DATABASE` or `--database DATABASE`, then `NEO4J_DATABASE`, then the profile's `database`** names the database, store by store:
+
+| Store | What `-d` names |
+|---|---|
+| Neo4j, Memgraph | The database, by its name. |
+| Postgres | The database. A database named in the address wins. |
+| Oracle | The service, by its name. |
+| FalkorDB | The graph, by its name. |
+| SQLite | Nothing: `-a sqlite:path` names the file, so a database given any of these ways is refused as a bad invocation. |
 
 ### The user and the password
 
@@ -60,7 +68,7 @@ Only one of `cypher`, `-c` and `-f` may be given. Given two, the CLI exits with 
 4. The profile.
 5. A prompt, when stdin is a terminal. The prompt doesn't echo.
 
-When none of these gives a password and stdin isn't a terminal, nothing prompts, as in cypher-shell: the CLI connects with no password, and with no user if none is given, and a store that needs them refuses, so the CLI exits with 3.
+When none of these gives a password and stdin isn't a terminal, nothing prompts, as in cypher-shell: the CLI connects with no password, and with no user if none is given, and a store that needs them refuses them, which fails as a connection does (see [Failures and exit codes](#failures-and-exit-codes)).
 
 The recommended routes are `DRIVINE_PASSWORD`, the profile and the prompt. Where a store needs no password, as SQLite needs none, none is asked for.
 
@@ -80,9 +88,11 @@ profiles:
     password: "…"
 ```
 
-A profile's keys are `address`, `type`, `database`, `user` and `password`. Any other key is refused, with exit code 2.
+A profile's keys are `address`, `type`, `database`, `user` and `password`. Any other key is refused, as a bad invocation.
 
-Flags and environment variables override the profile, key by key. A `--profile` or a `default:` that names no profile is refused, with exit code 2.
+A profile may hold the password, as `~/.pgpass` may. The CLI refuses to read a profile file that holds a `password` and that its group or others can read: it says so on stderr, names the file, gives the fix, `chmod 600 <file>`, and exits as a bad invocation does. On Windows, where a file has no such modes, it doesn't check.
+
+Flags and environment variables override the profile, key by key. So `-p`, `DRIVINE_PASSWORD` and `NEO4J_PASSWORD` each come before the profile's `password`, as [the password's order](#the-user-and-the-password) says. A `--profile` or a `default:` that names no profile is refused, as a bad invocation.
 
 ## Flags
 
@@ -95,11 +105,11 @@ The CLI takes every cypher-shell flag. Most do what they do in cypher-shell. The
 | `-a`, `--address`, `--uri` | The store's address: see [The address](#the-address). |
 | `-u`, `--username` | As in cypher-shell. |
 | `-p`, `--password` | As in cypher-shell, with a warning: see [The user and the password](#the-user-and-the-password). |
-| `-d`, `--database` | As in cypher-shell. |
+| `-d`, `--database` | As in cypher-shell, on Neo4j. On the other stores, see [The address](#the-address). |
 | `-f`, `--file` | As in cypher-shell: see [Files](#files). |
 | `-P`, `--param` | A parameter: see [Parameters](#parameters). It may be given more than once. |
 | `--format {auto,verbose,plain}` | As in cypher-shell, plus `json` and `csv`: see [Output](#output). |
-| `--fail-fast`, `--fail-at-end` | As in cypher-shell. `--fail-at-end` is the same as `--continue`. `--fail-fast` given with either exits with 2. |
+| `--fail-fast`, `--fail-at-end` | As in cypher-shell. `--fail-at-end` is the same as `--continue`. `--fail-fast` given with either is a bad invocation. |
 | `--non-interactive` | As in cypher-shell: no REPL, even on a terminal. |
 | `--sample-rows N`, `--wrap {true,false}` | As in cypher-shell, for `verbose`. |
 | `-v`, `--version` | Prints `drivine <version>` and exits with 0. |
@@ -108,9 +118,9 @@ The CLI takes every cypher-shell flag. Most do what they do in cypher-shell. The
 | `--log [FILE]`, `--debug [FILE]` | Logs to the file, or to stderr. |
 | `--transaction-timeout T` | As in cypher-shell, where the store can time out a transaction. |
 | `--idle-timeout T` | As in cypher-shell. |
-| `--encryption`, `--access-mode`, `--impersonate` | Passed to the driver on Neo4j and Memgraph. On any other store, each is refused with exit code 2. |
+| `--encryption`, `--access-mode`, `--impersonate` | Passed to the driver on Neo4j and Memgraph. On any other store, each is refused as a bad invocation. |
 | `--notifications`, `--enable-autocompletions`, `--error-format` | Taken, and have no effect. |
-| `--change-password` | Refused, with exit code 2. |
+| `--change-password` | Refused, as a bad invocation. |
 | `-h`, `--help` | Prints the usage and exits with 0. |
 
 ### Drivine's own flags
@@ -121,9 +131,10 @@ The CLI takes every cypher-shell flag. Most do what they do in cypher-shell. The
 | `--type TYPE` | The store's type, where the address leaves it open. |
 | `--profile NAME` | The profile to connect with. |
 | `--continue` | Keep going past a failed statement, as `--fail-at-end` does. |
-| `--explain` | On a SQL store, prints for each statement the SQL it compiles to, which may run over several lines, then one line, `-- parameters: ` and its parameters as compact JSON, written as `json` writes values. It runs no statement of the input, but it still connects to evaluate each `-P` and `:param` expression, as [Parameters](#parameters) says. The SQL is the compiler's, and cases don't compare it. On a graph engine, it's refused with exit code 2: there, the store runs the Cypher itself. |
+| `--exit-codes {default,detailed}` | The exit codes: cypher-shell's by default, or Drivine's richer ones with `detailed`. It is given as `--exit-codes=detailed` or `--exit-codes detailed`. See [Failures and exit codes](#failures-and-exit-codes). |
+| `--explain` | On a SQL store, prints for each statement the SQL it compiles to, which may run over several lines, then one line, `-- parameters: ` and its parameters as compact JSON, written as `json` writes values. It runs no statement of the input, but it still connects to evaluate each `-P` and `:param` expression, as [Parameters](#parameters) says. The SQL is the compiler's, and cases don't compare it. On a graph engine, it's refused as a bad invocation: there, the store runs the Cypher itself. |
 
-Any other flag is refused, with exit code 2. The message names the flag and points to `--help`.
+Any other flag is refused, as a bad invocation. The message names the flag and points to `--help`.
 
 ## Files
 
@@ -157,7 +168,7 @@ Any other command fails as a statement fails, and prints `Could not find command
 
 If the input ends inside a transaction, the transaction is rolled back, as cypher-shell does.
 
-FalkorDB commits each statement as it runs, so there `:begin` and `:commit` do nothing, and `:rollback` prints a warning to stderr that nothing was rolled back, as Drivine's `TransactionMode.WARN` does.
+FalkorDB has no multi-statement transactions. There `:begin` prints one line to stderr, `FalkorDB has no multi-statement transactions; each statement runs and commits on its own`, and the run goes on, each statement committing as it runs. `:commit` does nothing. `:rollback` fails as a command does, with a message on stderr and exit code 1, since nothing can be rolled back.
 
 ## Parameters
 
@@ -165,7 +176,7 @@ FalkorDB commits each statement as it runs, so there `:begin` and `:commit` do n
 - `NAME => EXPRESSION`, as in `-P 'limit => 10'`;
 - a map, as in `-P '{limit: 10, since: date("2024-01-01")}'`.
 
-`-P NAME=EXPRESSION` is taken too. A `-P` of none of these forms is a bad value, and exits with 2.
+`-P NAME=EXPRESSION` is taken too. A `-P` of none of these forms is a bad value, and so a bad invocation.
 
 The expression is Cypher. It's evaluated by running `RETURN expression` on the store, so a parameter holds what the store gives for it. A parameter set later replaces an earlier one of the same name. A statement that uses a parameter that isn't set fails, on every store, as it does on Neo4j. A `-P` whose expression fails on the store fails as a statement does, with exit code 1, before any statement runs.
 
@@ -213,14 +224,18 @@ On a SQL store, the CLI reads a node's labels and a relationship's type along wi
 
 **Stopping.** By default, the CLI stops at the first statement or command that fails, as `--fail-fast` does. With `--fail-at-end` or `--continue`, it runs everything and reports each failure as it comes.
 
-| Exit code | When |
-|---|---|
-| 0 | Everything ran. |
-| 1 | A statement or a command failed. |
-| 2 | The invocation is wrong: an unknown or refused flag, a bad value, two inputs, a `-f` file that can't be read, a bad profile. Nothing ran. The invocation is checked before the CLI connects, so it exits with 2, not 3, where the store can't be reached too. |
-| 3 | The store can't be reached, or it refused the user and password. Nothing ran. |
+By default, every failure exits with 1, as in cypher-shell: a failed statement or command, a bad invocation, and a store that can't be reached or refuses the user. `--exit-codes=detailed`, or the environment variable `DRIVINE_EXIT_CODES=detailed`, gives each kind of failure a code of its own:
 
-cypher-shell exits with 1 in all these cases. A script that tests for non-zero works with both, and a script that tests for 1 alone sees `drivine` exit with 2 or 3 where cypher-shell exited with 1.
+| When | Exit code | With `detailed` |
+|---|---|---|
+| Everything ran. | 0 | 0 |
+| A statement or a command failed. | 1 | 1 |
+| A bad invocation: an unknown or refused flag, a bad value, two inputs, a `-f` file that can't be read, a bad profile. Nothing ran. | 1 | 2 |
+| The store can't be reached, or it refused the user and password. Nothing ran. | 1 | 3 |
+
+The invocation is checked before the CLI connects, so with `detailed` it exits with 2, not 3, where the store can't be reached too. The flag comes before the variable. A value of either other than `default` or `detailed` is a bad invocation, which exits with the codes the other gives, if it gives any, and else with 1.
+
+By default, the codes are cypher-shell's, so a script that tests for 1 works with both. With `detailed`, a script that tests for non-zero still works, and a script that tests for 1 alone sees `drivine` exit with 2 or 3 where cypher-shell exited with 1.
 
 ## The REPL
 
@@ -237,7 +252,7 @@ On Windows, where a pipe can look like a terminal, `--non-interactive` makes the
 
 ## Cases
 
-`cli.yaml` holds the cases each build runs. A runner runs each one against every store the case names, giving the CLI that store's address and credentials. The address goes in `-a`, and the credentials in `NEO4J_USERNAME` and `DRIVINE_PASSWORD`, unless the case gives its own. In `args` and `env`, `$user` and `$password` stand for the store's. The runner empties the graph before each case, and runs each case in an empty directory of its own, with `HOME` another empty directory, and with no `NEO4J_` variable or `DRIVINE_PASSWORD` set but those it gives.
+`cli.yaml` holds the cases each build runs. A runner runs each one against every store the case names, giving the CLI that store's address and credentials. The address goes in `-a`, and the credentials in `NEO4J_USERNAME` and `DRIVINE_PASSWORD`, unless the case gives its own. In `args`, `env` and the texts of `files`, `$user` and `$password` stand for the store's. The runner empties the graph before each case, and runs each case in an empty directory of its own, with `HOME` another empty directory, and with no `NEO4J_` variable, `DRIVINE_PASSWORD` or `DRIVINE_EXIT_CODES` set but those it gives.
 
 A store in `only` and `except` is `neo4j`, `memgraph`, `falkordb`, `postgres`, `oracle` or `sqlite`: the CLI doesn't reach Neptune. `graph` names the first three, and `sql` the last three.
 
@@ -255,7 +270,7 @@ A store in `only` and `except` is `neo4j`, `memgraph`, `falkordb`, `postgres`, `
 | `description` | What the case checks, where its name doesn't say it. Optional. |
 | `args` | The arguments, after the address the runner gives. |
 | `stdin` | Text fed to stdin. With no `stdin`, stdin is empty. Either way it isn't a terminal. |
-| `files` | Files written into the run's own empty directory before the CLI runs, by name. |
+| `files` | Files written into the run's own empty directory before the CLI runs, by name. Each is its text, or a map of its `text` and its `mode`, in octal, as in `{text: "…", mode: "600"}`. A file is written with mode 0644, which others can read, unless it gives a `mode`. |
 | `env` | Environment variables set for the run. A variable the case gives as null is unset. |
 | `stdout` | What stdout must be, exactly. |
 | `stdoutLines` | Regular expressions that stdout's lines must match in order, each a line after the one the expression before it matched. The lines between them aren't checked. |
@@ -263,6 +278,7 @@ A store in `only` and `except` is `neo4j`, `memgraph`, `falkordb`, `postgres`, `
 | `exit` | The exit code. |
 | `store` | `false` for a case that runs with no store, where the runner gives no address. |
 | `only`, `except` | The stores it runs on, or doesn't, as in the spec's other files. |
+| `os` | The operating systems it runs on, of `linux`, `macos` and `windows`. Every one where it isn't given. |
 | `cypherShell` | `true` where the expected output is cypher-shell 2026.10.1's for the same invocation on Neo4j, as `record-cypher-shell.py` checks. |
 | `note` | Why the case is there. It is not read. |
 

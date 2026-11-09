@@ -65,8 +65,13 @@ def main():
             run(*shell, "MATCH (n) DETACH DELETE n")
             directory = f"/tmp/case-{index}"
             run("docker", "exec", name, "mkdir", "-p", directory)
-            for file, text in (case.get("files") or {}).items():
-                run("docker", "exec", "-i", name, "sh", "-c", f"cat > {shlex.quote(f'{directory}/{file}')}", stdin=text)
+            # A file is its text, or a map of its text and its mode, in octal; with no mode it is written as 0644.
+            for file, given in (case.get("files") or {}).items():
+                text, mode = (given["text"], given.get("mode", "644")) if isinstance(given, dict) else (given, "644")
+                text = text.replace("$user", "neo4j").replace("$password", password)
+                path = shlex.quote(f"{directory}/{file}")
+                mode = format(int(str(mode), 8), "o")
+                run("docker", "exec", "-i", name, "sh", "-c", f"cat > {path} && chmod {mode} {path}", stdin=text)
 
             # The runner gives drivine the password in DRIVINE_PASSWORD, which cypher-shell doesn't read, so it is
             # given here as NEO4J_PASSWORD. A case's DRIVINE_PASSWORD comes before its NEO4J_PASSWORD, as in drivine.

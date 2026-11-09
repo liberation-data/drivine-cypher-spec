@@ -151,6 +151,23 @@ cases:
     args: ["--format", "plain", "-f", "h.cypher"]
     stdout: "c\n2\n"
     exit: 0
+    note: "On FalkorDB, :begin warns, each CREATE commits on its own and :commit does nothing, so the count is the same."
+
+  - name: "On FalkorDB, :begin warns that each statement commits on its own, and the run goes on"
+    only: [falkordb]
+    files: {"h.cypher": ":begin\nCREATE (n:B);\nMATCH (n:B) RETURN count(n) AS c;\n:commit\n"}
+    args: ["--format", "plain", "-f", "h.cypher"]
+    stdout: "c\n1\n"
+    stderr: "FalkorDB has no multi-statement transactions; each statement runs and commits on its own"
+    exit: 0
+
+  - name: "On FalkorDB, :rollback fails as a command does, since nothing can be rolled back"
+    only: [falkordb]
+    files: {"h.cypher": ":begin\nCREATE (n:B);\n:rollback\nMATCH (n:B) RETURN count(n) AS c;\n"}
+    args: ["--format", "plain", "-f", "h.cypher"]
+    stdout: ""
+    exit: 1
+    note: "The MATCH after :rollback doesn't run, as the run stops at the first failure by default."
 
   - name: ":source runs a file's statements in place, read from the working directory"
     files: {"a.cypher": "RETURN 1 AS a;\n:source b.cypher\nRETURN 3 AS c;\n", "b.cypher": "RETURN 2 AS b;\n"}
@@ -215,6 +232,7 @@ cases:
     exit: 0
 
   - name: "A file that ends inside a transaction rolls it back"
+    except: [falkordb]
     files: {"h.cypher": ":begin\nCREATE (n:B);\n"}
     args: ["--format", "plain", "-f", "h.cypher"]
     exit: 0
@@ -256,11 +274,11 @@ cases:
     stdout: ""
     exit: 1
 
-  - name: "A -P of neither form exits with 2"
+  - name: "A -P of neither form exits with 1"
     store: false
     args: ["-P", "y", "RETURN 1"]
     stdout: ""
-    exit: 2
+    exit: 1
 
   - name: "-P takes NAME=EXPRESSION, and a later parameter replaces an earlier one"
     args: ["--format", "plain", "-P", "y=1", "--param", "y => 'z'", "RETURN $y AS y"]
@@ -297,58 +315,105 @@ cases:
     env: {DRIVINE_PASSWORD: null, NEO4J_USERNAME: null, NEO4J_PASSWORD: null}
     args: ["--format", "plain", "RETURN 1"]
     stdout: ""
-    exit: 3
-    note: "cypher-shell 2026.10.1 does the same, but exits with 1."
+    exit: 1
+    note: "cypher-shell 2026.10.1 does the same."
 
-  - name: "A wrong password exits with 3"
+  - name: "With --exit-codes=detailed, no user and no password exit with 3"
+    only: [neo4j, postgres, oracle]
+    env: {DRIVINE_PASSWORD: null, NEO4J_USERNAME: null, NEO4J_PASSWORD: null}
+    args: ["--exit-codes=detailed", "--format", "plain", "RETURN 1"]
+    stdout: ""
+    exit: 3
+
+  - name: "A wrong password exits with 1"
     only: [neo4j, postgres, oracle]
     env: {DRIVINE_PASSWORD: "not-the-password"}
     args: ["--format", "plain", "RETURN 1"]
     stdout: ""
+    exit: 1
+
+  - name: "With --exit-codes=detailed, a wrong password exits with 3"
+    only: [neo4j, postgres, oracle]
+    env: {DRIVINE_PASSWORD: "not-the-password"}
+    args: ["--exit-codes=detailed", "--format", "plain", "RETURN 1"]
+    stdout: ""
     exit: 3
 
-  - name: "A store that can't be reached exits with 3"
+  - name: "A store that can't be reached exits with 1"
     store: false
+    args: ["-a", "bolt://localhost:1", "--format", "plain", "RETURN 1"]
+    stdout: ""
+    exit: 1
+
+  - name: "With DRIVINE_EXIT_CODES=detailed, a store that can't be reached exits with 3"
+    store: false
+    env: {DRIVINE_EXIT_CODES: "detailed"}
     args: ["-a", "bolt://localhost:1", "--format", "plain", "RETURN 1"]
     stdout: ""
     exit: 3
 
-  - name: "An unknown flag exits with 2, naming it"
+  - name: "An unknown flag exits with 1, naming it"
     store: false
     args: ["--nope", "RETURN 1"]
     stdout: ""
     stderr: "--nope"
+    exit: 1
+
+  - name: "With --exit-codes=detailed, an unknown flag exits with 2"
+    store: false
+    args: ["--exit-codes=detailed", "--nope", "RETURN 1"]
+    stdout: ""
+    stderr: "--nope"
+    exit: 2
+
+  - name: "--exit-codes of a value that isn't one is a bad invocation"
+    store: false
+    args: ["--exit-codes=nope", "RETURN 1"]
+    stdout: ""
+    exit: 1
+
+  - name: "--exit-codes of a value that isn't one exits with 2 under DRIVINE_EXIT_CODES=detailed"
+    store: false
+    env: {DRIVINE_EXIT_CODES: "detailed"}
+    args: ["--exit-codes=nope", "RETURN 1"]
+    stdout: ""
     exit: 2
 
   - name: "--change-password is refused"
     store: false
     args: ["--change-password"]
     stderr: "--change-password"
-    exit: 2
+    exit: 1
 
-  - name: "Two inputs exit with 2"
+  - name: "Two inputs exit with 1"
     store: false
     files: {"f.cypher": "RETURN 1;\n"}
     args: ["-f", "f.cypher", "RETURN 2"]
+    exit: 1
+
+  - name: "With --exit-codes=detailed, two inputs exit with 2"
+    store: false
+    files: {"f.cypher": "RETURN 1;\n"}
+    args: ["--exit-codes=detailed", "-f", "f.cypher", "RETURN 2"]
     exit: 2
 
-  - name: "A -f file that can't be read exits with 2"
+  - name: "A -f file that can't be read exits with 1"
     store: false
     args: ["-f", "missing.cypher"]
     stdout: ""
-    exit: 2
+    exit: 1
 
-  - name: "--fail-fast with --fail-at-end exits with 2"
+  - name: "--fail-fast with --fail-at-end exits with 1"
     store: false
     args: ["--fail-fast", "--fail-at-end", "RETURN 1"]
     stdout: ""
-    exit: 2
+    exit: 1
 
-  - name: "A format that isn't one exits with 2"
+  - name: "A format that isn't one exits with 1"
     store: false
     args: ["--format", "xml", "RETURN 1"]
     stdout: ""
-    exit: 2
+    exit: 1
 
   - name: "--help exits with 0"
     store: false
@@ -398,17 +463,56 @@ cases:
     stdout: "one\n1\n"
     exit: 0
 
-  - name: "A profile with an unknown key exits with 2"
+  - name: "A profile with an unknown key exits with 1"
     store: false
     files: {".drivine.yml": "profiles:\n  mem:\n    address: \"sqlite::memory:\"\n    host: \"x\"\n"}
     args: ["--profile", "mem", "RETURN 1"]
     stdout: ""
+    exit: 1
+
+  - name: "With --exit-codes=detailed, a profile with an unknown key exits with 2"
+    store: false
+    files: {".drivine.yml": "profiles:\n  mem:\n    address: \"sqlite::memory:\"\n    host: \"x\"\n"}
+    args: ["--exit-codes=detailed", "--profile", "mem", "RETURN 1"]
+    stdout: ""
     exit: 2
 
-  - name: "A --profile that names no profile exits with 2"
+  - name: "A --profile that names no profile exits with 1"
     store: false
     files: {".drivine.yml": "profiles:\n  mem:\n    address: \"sqlite::memory:\"\n"}
     args: ["--profile", "nope", "RETURN 1"]
+    stdout: ""
+    exit: 1
+
+  - name: "A profile file that holds a password and others can read is refused"
+    store: false
+    os: [linux, macos]
+    files: {".drivine.yml": "profiles:\n  mem:\n    address: \"sqlite::memory:\"\n    password: \"x\"\n"}
+    args: ["--profile", "mem", "RETURN 1"]
+    stdout: ""
+    stderr: "chmod 600"
+    exit: 1
+    note: "The runner writes the file with mode 0644. On Windows, where the CLI doesn't check a file's mode, this case doesn't hold."
+
+  - name: "A profile file of mode 600 gives the password"
+    only: [neo4j, postgres, oracle]
+    files: {".drivine.yml": {text: "default: \"p\"\nprofiles:\n  p:\n    password: \"$password\"\n", mode: "600"}}
+    env: {DRIVINE_PASSWORD: null, NEO4J_PASSWORD: null}
+    args: ["--format", "plain", "RETURN 7 AS seven"]
+    stdout: "seven\n7\n"
+    exit: 0
+    note: "The user is the runner's NEO4J_USERNAME, and the address its -a."
+
+  - name: "-d is refused on SQLite"
+    only: [sqlite]
+    args: ["-d", "other", "RETURN 1"]
+    stdout: ""
+    exit: 1
+    note: "On SQLite, -a sqlite:path names the file."
+
+  - name: "With --exit-codes=detailed, -d on SQLite exits with 2"
+    only: [sqlite]
+    args: ["--exit-codes=detailed", "-d", "other", "RETURN 1"]
     stdout: ""
     exit: 2
 
@@ -428,13 +532,13 @@ cases:
     only: [graph]
     args: ["--explain", "RETURN 1"]
     stdout: ""
-    exit: 2
+    exit: 1
 
   - name: "--encryption is refused on a SQL store"
     only: [sql]
     args: ["--encryption", "true", "RETURN 1"]
     stdout: ""
-    exit: 2
+    exit: 1
 
   - name: "json prints a line per statement"
     stdin: "RETURN 1 AS n, 'a' AS s, null AS z, [1.5, true] AS l, {k: 2} AS m, 2.0 AS w;\nUNWIND [1, 2] AS x RETURN x;\n"
