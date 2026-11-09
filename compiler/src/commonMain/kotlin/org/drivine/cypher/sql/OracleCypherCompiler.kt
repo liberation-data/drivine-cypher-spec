@@ -90,7 +90,7 @@ class OracleCypherCompiler(
 
     override fun literalJson(value: Any?) =
         if (value is Double) "JSON_SCALAR(TO_BINARY_DOUBLE(${literal(org.drivine.cypher.json.jvmDoubleText(value))}))"
-        else "JSON(${literal(CypherJson.writeValueAsString(value, encoder = encoder))})"
+        else "JSON(${textLiteral(CypherJson.writeValueAsString(value, encoder = encoder))})"
 
     /**
      * A text that holds an extended JSON double is read as extended JSON, and only one: else a map of the parameter's whose
@@ -1903,14 +1903,20 @@ class OracleCypherCompiler(
         /** NaN and the infinities by Java's names, as `Double.parseDouble` reads them: see `toFloat` in [functionOf]. */
         private const val JAVA_NAMES = "^([+-]?NaN|[+]?Infinity|-Infinity)\$"
 
-        /** A quoted SQL text, its quotes doubled: see [nanFree]. */
-        private val QUOTED = Regex("'(?:[^']|'')*'")
+        /**
+         * A quoted SQL text, its quotes doubled: see [nanFree]. A run of other characters is matched at once, not one by one in an
+         * alternation, which the JVM's regex recurses into for each character: so it overflowed the stack on a piece of 4,000.
+         */
+        private val QUOTED = Regex("'[^']*(?:''[^']*)*'")
 
         /** What separates the words of a value the statement writes: see [nanFree]. */
         private val WRITTEN_SEPARATORS = Regex("[\\s(),]+")
 
-        /** The words of a literal ([literalJson]), and of a list or a map made of them ([jsonArray], [jsonObject]): see [nanFree]. */
-        private val WRITTEN_WORDS = setOf("JSON", "JSON_SCALAR", "TO_BINARY_DOUBLE", "JSON_ARRAY", "JSON_OBJECT", "VALUE", "NULL", "ON", "RETURNING")
+        /**
+         * The words of a literal ([literalJson]), a long text's `TO_CLOB` pieces among them ([textLiteral]), and of a list or a
+         * map made of them ([jsonArray], [jsonObject]): see [nanFree].
+         */
+        private val WRITTEN_WORDS = setOf("JSON", "JSON_SCALAR", "TO_BINARY_DOUBLE", "TO_CLOB", "||", "JSON_ARRAY", "JSON_OBJECT", "VALUE", "NULL", "ON", "RETURNING")
 
         /**
          * The value at the path [path] in the JSON [json], with [passing] its `PASSING` clause where it has one: a text read with
@@ -1933,6 +1939,40 @@ class OracleCypherCompiler(
 
         /** The most bytes a `VARCHAR2` holds in SQL, as a database is made by default (`MAX_STRING_SIZE = STANDARD`). */
         const val SHORT_TEXT = 4000
+
+        /**
+         * [text] as SQL text: one string literal where it is written in at most [SHORT_TEXT] bytes, its quotes doubled, as Oracle
+         * takes no longer one (ORA-01704, drivine4j#419); else a CLOB, `TO_CLOB` of literals of at most [SHORT_TEXT] bytes each,
+         * joined with `||`. A piece ends only between two characters, never within a surrogate pair or a JSON escape (`\n`,
+         * `\u0001`), and its quotes are doubled after the text is cut, so none is cut in two.
+         */
+        private fun textLiteral(text: String): String {
+            if (literalBytes(text) <= SHORT_TEXT) return OracleSql.literal(text)
+            val pieces = mutableListOf<String>()
+            var start = 0
+            var bytes = 0
+            var i = 0
+            while (i < text.length) {
+                val end = when {
+                    text[i] == '\\' && i + 1 < text.length -> if (text[i + 1] == 'u') minOf(i + 6, text.length) else i + 2
+                    text[i].isHighSurrogate() && i + 1 < text.length && text[i + 1].isLowSurrogate() -> i + 2
+                    else -> i + 1
+                }
+                val size = literalBytes(text.substring(i, end))
+                if (bytes + size > SHORT_TEXT) {
+                    pieces += text.substring(start, i)
+                    start = i
+                    bytes = 0
+                }
+                bytes += size
+                i = end
+            }
+            pieces += text.substring(start)
+            return pieces.joinToString(" || ") { "TO_CLOB(${OracleSql.literal(it)})" }
+        }
+
+        /** The bytes [text] is written in as a SQL string literal: its UTF-8, a quote doubled, and not the quotes around it. */
+        private fun literalBytes(text: String) = org.drivine.cypher.text.JavaText.utf8(text).size + text.count { it == '\'' }
 
         /** The hint that turns Oracle's JSON table transformation off: see [planned]. */
         private const val NO_JSON_TABLE_TRANSFORM = "NO_JSON_TABLE_TRANSFORM"
