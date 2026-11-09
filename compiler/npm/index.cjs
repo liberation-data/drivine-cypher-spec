@@ -8,7 +8,7 @@
  * and its awaits taken out. Each edit is checked to apply, so a Kotlin release that writes the loader otherwise fails
  * here at once, rather than loading something else.
  *
- *   const { compile } = require('@drivine/cypher-compiler');
+ *   const { compile } = require('@liberation-data/drivine-cypher-compiler');
  *   JSON.parse(compile(JSON.stringify({ store: 'postgres', graph: { name: 'g' }, cypher: 'RETURN 1' })));
  */
 const fs = require('fs');
