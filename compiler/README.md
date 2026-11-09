@@ -16,7 +16,7 @@ the spec's files at the top of the repository and nothing here.
 | Target | What it builds | Who loads it |
 |---|---|---|
 | `jvm` | a jar | drivine4j, and Android |
-| `wasmJs` | `@drivine/cypher-compiler`, an npm package (`./gradlew npmPackage`, in `build/npm`) | Drivine for TypeScript |
+| `wasmJs` | `@liberation-data/drivine-cypher-compiler`, an npm package (`./gradlew npmPackage`, in `build/npm`) | Drivine for TypeScript |
 | `macosArm64`, `linuxX64`, `linuxArm64`, `mingwX64` | `libdrivinecypher`, a shared library with a C ABI | drivine-python, over ctypes |
 
 macosArm64 builds on macOS only. The others build anywhere Kotlin/Native runs.
@@ -96,7 +96,7 @@ an error.
 ### npm
 
 ```js
-const { compile } = require('@drivine/cypher-compiler');      // or: import { compile } from '@drivine/cypher-compiler'
+const { compile } = require('@liberation-data/drivine-cypher-compiler');      // or: import { compile } from '@liberation-data/drivine-cypher-compiler'
 const answer = JSON.parse(compile(JSON.stringify({ store: 'sqlite', graph: { name: 'g' }, cypher: 'RETURN 1' })));
 ```
 

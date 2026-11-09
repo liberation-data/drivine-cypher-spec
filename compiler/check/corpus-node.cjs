@@ -5,18 +5,25 @@
  * (build/oracle/mutants.jsonl), where given.
  *
  *   node check/corpus-node.cjs <npm package directory> <corpus.jsonl> [<differences.jsonl> [<mutants.jsonl> <their differences.jsonl>]]
+ *
+ * With DRIVINE_NPM_NAME set, as the Gradle task sets it from gradle.properties, the package must have that name.
  */
 const fs = require('fs');
 const { performance } = require('perf_hooks');
 const { report } = require('./report.cjs');
 
 const [packageDir, corpus, differencesFile, mutants, mutantDifferencesFile] = process.argv.slice(2);
+const packageJson = JSON.parse(fs.readFileSync(require('path').join(packageDir, 'package.json'), 'utf8'));
+if (process.env.DRIVINE_NPM_NAME && packageJson.name !== process.env.DRIVINE_NPM_NAME) {
+    console.error(`The npm package is named ${packageJson.name}, not ${process.env.DRIVINE_NPM_NAME} as gradle.properties names it.`);
+    process.exit(1);
+}
 // Every file the package's package.json names (its entries, and the types of each) is in the package.
 const named = [];
 (function walk(value) {
     if (typeof value === 'string') named.push(value);
     else if (value) Object.values(value).forEach(walk);
-})((({ main, types, exports }) => ({ main, types, exports }))(JSON.parse(fs.readFileSync(require('path').join(packageDir, 'package.json'), 'utf8'))));
+})((({ main, types, exports }) => ({ main, types, exports }))(packageJson));
 const absent = named.filter((file) => !fs.existsSync(require('path').join(packageDir, file)));
 if (absent.length > 0) {
     console.error(`The npm package's package.json names files it hasn't: ${absent.join(', ')}`);

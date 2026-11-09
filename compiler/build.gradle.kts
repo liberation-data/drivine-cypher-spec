@@ -202,9 +202,12 @@ tasks.withType<org.jetbrains.kotlin.gradle.targets.js.testing.KotlinJsTest>().co
     environment("DRIVINE_ORACLE", oracleDir.get().asFile.absolutePath)
 }
 
-/** The npm package, @drivine/cypher-compiler, in build/npm: the production wasm, its ES module loaders, the CJS entry, and the types of each. */
+/** The npm package's name, from gradle.properties: the one name the package, its check and the release use. */
+val npmName: String = providers.gradleProperty("compiler.npmName").get()
+
+/** The npm package, [npmName], in build/npm: the production wasm, its ES module loaders, the CJS entry, and the types of each. */
 val npmPackage = tasks.register<Sync>("npmPackage") {
-    description = "Assembles the npm package @drivine/cypher-compiler in build/npm."
+    description = "Assembles the npm package $npmName in build/npm."
     val distribution = tasks.named("wasmJsNodeProductionLibraryDistribution")
     from(distribution) { include("*.wasm", "*.mjs", "*.d.mts") }
     from(layout.projectDirectory.dir("npm")) { include("index.cjs", "index.d.cts") }
@@ -215,7 +218,7 @@ val npmPackage = tasks.register<Sync>("npmPackage") {
         @Suppress("UNCHECKED_CAST")
         val kotlinPackage = groovy.json.JsonSlurper().parse(distribution.get().outputs.files.singleFile.resolve("package.json")) as Map<String, Any?>
         val packageJson = linkedMapOf(
-            "name" to "@drivine/cypher-compiler",
+            "name" to npmName,
             "version" to packageVersion,
             "description" to "Drivine's Cypher compiler: Cypher as SQL for Postgres, Oracle and SQLite, built for Wasm.",
             "license" to "Apache-2.0",
@@ -262,6 +265,8 @@ tasks.register<Exec>("wasmJsCorpusCheck") {
     executable(providers.gradleProperty("node").getOrElse("node"))
     // The loader's npm dependencies, as Kotlin installed them for the wasm tests.
     environment("NODE_PATH", layout.buildDirectory.dir("wasm/node_modules").get().asFile.absolutePath)
+    // The name the package must have: a package built under another than the release publishes fails the check.
+    environment("DRIVINE_NPM_NAME", npmName)
     args(
         layout.projectDirectory.file("check/corpus-node.cjs").asFile.absolutePath,
         layout.buildDirectory.dir("npm").get().asFile.absolutePath,
