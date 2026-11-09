@@ -39,7 +39,7 @@ cases:
 
   - name: "plain prints a path along and against its relationships' directions"
     cypherShell: true
-    args: ["--format", "plain", "CREATE p = (:A)-[:R]->(:B)<-[:S]-(:C) RETURN p"]
+    args: ["--format", "plain", "CREATE (a:A)-[:R]->(:B)<-[:S]-(:C) WITH a MATCH p = (a)-[:R]->(:B)<-[:S]-(:C) RETURN p"]
     stdout: "p\n(:A)-[:R]->(:B)<-[:S]-(:C)\n"
     exit: 0
 
