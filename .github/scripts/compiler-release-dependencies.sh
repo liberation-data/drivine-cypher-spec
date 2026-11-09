@@ -21,13 +21,17 @@
 #     the release build never restores the cache itself, and unpacks only this, its plain files, checked by name. It
 #     also lays out the binaryen archives among Gradle's files as binaryen's releases are, in ~/.cache/drivine-binaryen,
 #     for -Pcompiler.binaryenMirror (see build.gradle.kts): Gradle can't take them from its own files without asking
-#     GitHub.
+#     GitHub. Only an archive whose SHA-256 is the one gradle/verification-metadata.xml pins for it is laid out, as
+#     Gradle takes the mirror's copy without asking for another, and refuses one with another SHA-256, failing the build:
+#     where none is laid out, it fetches the archive from GitHub instead.
 set -euo pipefail
 
 gradle_files="$HOME/.gradle/caches/modules-2/files-2.1"
 toolchain_files="$HOME/.cache/drivine-pinned-toolchain"
 konan_files="$HOME/.cache/drivine-konan-dependencies"
 binaryen_mirror="$HOME/.cache/drivine-binaryen"
+# The test names a made-up one.
+verification_metadata="${COMPILER_VERIFICATION_METADATA:-$(cd "$(dirname "$0")/../.." && pwd)/compiler/gradle/verification-metadata.xml}"
 
 # A name stage makes, as zip lists it: no empty, . or .. part, no leading /, and only the characters Maven coordinates,
 # Gradle's SHA-1 directories and the archives' names use.
@@ -94,11 +98,19 @@ unpack)
     [[ -d "$work/out/toolchain" ]] && cp -R "$work/out/toolchain/." "$toolchain_files/"
     [[ -d "$work/out/konan" ]] && cp -R "$work/out/konan/." "$konan_files/"
     # gradle/com.github.webassembly/binaryen/<v>/<sha1>/binaryen-<v>-<platform>.tar.gz, as
-    # version_<v>/binaryen-version_<v>-<platform>.tar.gz.
+    # version_<v>/binaryen-version_<v>-<platform>.tar.gz, where its SHA-256 is the first the verification metadata gives
+    # under <artifact name="<name>">.
     if [[ -d "$work/out/gradle/com.github.webassembly/binaryen" ]]; then
         while IFS= read -r -d '' file; do
             v=$(basename "$(dirname "$(dirname "$file")")") name=$(basename "$file")
             [[ "$name" == "binaryen-$v-"* ]] || continue
+            pinned=$(awk -v want="<artifact name=\"$name\">" 'index($0, want) { found = 1; next }
+                found { if (match($0, /value="[0-9a-f]+"/)) print substr($0, RSTART + 7, RLENGTH - 8); exit }' \
+                "$verification_metadata" 2> /dev/null || true)
+            if [[ -z "$pinned" || "$(shasum -a 256 "$file" | cut -d' ' -f1)" != "$pinned" ]]; then
+                echo "::warning::$name isn't the binaryen archive $verification_metadata pins, so the build fetches it."
+                continue
+            fi
             mkdir -p "$binaryen_mirror/version_$v"
             cp "$file" "$binaryen_mirror/version_$v/binaryen-version_$v-${name#"binaryen-$v-"}"
         done < <(find "$work/out/gradle/com.github.webassembly/binaryen" -mindepth 3 -maxdepth 3 -type f -name 'binaryen-*.tar.gz' -print0)
