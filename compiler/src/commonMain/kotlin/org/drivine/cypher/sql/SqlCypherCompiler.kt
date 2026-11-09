@@ -6448,13 +6448,43 @@ abstract class SqlCypherCompiler(
         private fun known(expression: Expression): Boolean = expression is Expression.Literal || expression is Expression.Parameter ||
             (expression is Expression.Unary && expression.operator == Expression.Unary.Operator.NEGATE && known(expression.operand))
 
-        /** Whether [text] names NaN or an infinity, as Java reads a double, which Neo4j's `toFloat` takes it as. */
-        fun nonFiniteText(text: String) = org.drivine.cypher.json.parseDoubleOrNull(text.trim { it <= ' ' })?.isFinite() == false
+        /**
+         * Whether [text] names NaN or an infinity, as Java reads a double, which Neo4j's `toFloat` takes it as, or is a number
+         * past a double's range with Cypher's spaces around it ([CYPHER_NUMBER]), which it reads as an infinity too
+         * (`'\u00A01e400'`, drivine4j#692): a name with them around it is no name (`'\u00A0NaN'` is null).
+         */
+        fun nonFiniteText(text: String) = sequenceOf(text.trim { it <= ' ' }, text.takeIf(CYPHER_NUMBER::matches)?.trim { char -> CYPHER_SPACES.any { char.code in it } })
+            .any { it != null && org.drivine.cypher.json.parseDoubleOrNull(it)?.isFinite() == false }
 
         /** The texts `toFloat` takes as NaN, the infinity and the negative one, as Java reads them, spaces around them allowed. */
         const val NAN_NAME = """^\s*[+-]?NaN\s*$"""
         const val INFINITY_NAME = """^\s*\+?Infinity\s*$"""
         const val NEGATIVE_INFINITY_NAME = """^\s*-Infinity\s*$"""
+
+        /** Cypher's spaces, which may come around a number written in Cypher: tab to CR, U+001C to the space, and Unicode's. */
+        val CYPHER_SPACES = listOf(0x09..0x0D, 0x1C..0x20, 0x85..0x85, 0xA0..0xA0, 0x1680..0x1680, 0x2000..0x200A, 0x2028..0x2029,
+            0x202F..0x202F, 0x205F..0x205F, 0x3000..0x3000)
+
+        /**
+         * [CYPHER_SPACES] as a class of a regular expression, each character escaped, as Java, JavaScript, Python and
+         * Postgres read it.
+         */
+        val CYPHER_SPACE = CYPHER_SPACES.joinToString("", "[", "]") { if (it.first == it.last) escaped(it.first) else "${escaped(it.first)}-${escaped(it.last)}" }
+
+        /**
+         * A number written in Cypher, with [CYPHER_SPACE] around it, and a minus, as a regular expression that ends in
+         * [end], the store's end of a text: a float, with digits after its point or an exponent, or a whole number with no 0
+         * before it, which Neo4j reads up to a long's ends, and so only one well in range, up to 8999999999999999999.
+         * Cypher's other forms, a minus with a space after it, and a whole number nearer a long's ends are left out, null
+         * (drivine4j#696).
+         */
+        fun cypherNumberText(end: String) = "^$CYPHER_SPACE*-?((0|[1-9][0-9]*)(\\.[0-9]+([eE][+-]?[0-9]+)?|[eE][+-]?[0-9]+)|\\.[0-9]+([eE][+-]?[0-9]+)?|" +
+            "0|[1-9][0-9]{0,17}|[1-8][0-9]{18})$CYPHER_SPACE*$end"
+
+        /** [cypherNumberText] as the compiler reads a text it is given, which [nonFiniteText] reads past a double's range. */
+        private val CYPHER_NUMBER = Regex(cypherNumberText("$"))
+
+        private fun escaped(code: Int) = if (code < 0x100) "\\x" + code.toString(16).padStart(2, '0') else "\\u" + code.toString(16).padStart(4, '0')
 
         /**
          * What [textsIn] adds each text to, [texts], as it reads a statement through, what it gives each name it binds, with the value

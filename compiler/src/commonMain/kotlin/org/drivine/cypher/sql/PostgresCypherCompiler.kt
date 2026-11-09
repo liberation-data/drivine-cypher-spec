@@ -455,11 +455,12 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
         "tointeger" -> if (!nonFinite) "to_jsonb(trunc(${numeric(json)}))" else shared(numeric(json)) { (n) ->
             "to_jsonb(CASE $n WHEN 'NaN' THEN 0 WHEN 'Infinity' THEN ${Long.MAX_VALUE} WHEN '-Infinity' THEN ${Long.MIN_VALUE} ELSE trunc($n) END)"
         }
-        // A text that names NaN or an infinity, as Java reads it, is that float, where the statement may work one out (#545).
-        "tofloat" -> scalar(float(if (!nonFinite) numeric(json) else shared(json) { (x) ->
-            "CASE WHEN jsonb_typeof($x) = 'string' THEN CASE WHEN ($x #>> '{}') ~ ${literal(NAN_NAME)} THEN 'NaN'::numeric " +
-                "WHEN ($x #>> '{}') ~ ${literal(INFINITY_NAME)} THEN 'Infinity'::numeric WHEN ($x #>> '{}') ~ ${literal(NEGATIVE_INFINITY_NAME)} " +
-                "THEN '-Infinity'::numeric ELSE ${numeric(x)} END ELSE ${numeric(x)} END"
+        // A text that names NaN or an infinity, as Java reads it, is that float, where the statement may work one out (#545),
+        // and one Cypher writes a number in is that number, with Cypher's spaces around it (drivine4j#692).
+        "tofloat" -> scalar(float(if (!nonFinite) numeric(json, cypher = true) else shared(json) { (x) ->
+            "CASE WHEN jsonb_typeof($x) = 'string' THEN CASE WHEN ($x #>> '{}') ~ ${literal(JAVA_NAN)} THEN 'NaN'::numeric " +
+                "WHEN ($x #>> '{}') ~ ${literal(JAVA_INFINITY)} THEN 'Infinity'::numeric WHEN ($x #>> '{}') ~ ${literal(JAVA_NEGATIVE_INFINITY)} " +
+                "THEN '-Infinity'::numeric ELSE ${numeric(x, cypher = true)} END ELSE ${numeric(x)} END"
         }))
         "head" -> "($json -> 0)"
         "last" -> "($json -> -1)"
@@ -467,10 +468,51 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
         else -> null
     }
 
-    /** The JSON [json] as a `numeric`, where it is a number (as [number] reads it) or a text that writes one: null for any other text, as Cypher converts it. */
-    private fun numeric(json: String) = shared(json) { (x) ->
-        "CASE WHEN jsonb_typeof($x) = 'number' THEN ${number(x)} WHEN ($x #>> '{}') ~ ${literal(NUMERIC_TEXT)} THEN CAST($x #>> '{}' AS numeric) END"
+    /**
+     * The JSON [json] as a `numeric`, where it is a number (as [number] reads it) or a text that writes one: null for any
+     * other text, as Cypher converts it.
+     *
+     * - **A decimal**, with ASCII's spaces around it ([NUMERIC_TEXT]), is read by `CAST`, which skips those and no others.
+     *   Postgres's `\s` takes Unicode's spaces too, which `CAST` fails on (drivine4j#692), so the pattern names ASCII's.
+     * - **A number Cypher writes**, where [cypher], as `toFloat` reads one, with Cypher's spaces around it, Unicode's among
+     *   them ([CYPHER_NUMBER_TEXT]), is read by `CAST` once `btrim` takes those off.
+     *
+     * Where [cypher], either is read as [textAsFloat] reads it. `toInteger`'s is not: Neo4j fails a text past a long's range,
+     * and `numeric`'s failure is the nearer (drivine4j#694). Any other text is null, though Neo4j reads some of them
+     * (drivine4j#696).
+     */
+    private fun numeric(json: String, cypher: Boolean = false) = shared(json) { (x) ->
+        "CASE WHEN jsonb_typeof($x) = 'number' THEN ${number(x)} WHEN ($x #>> '{}') ~ ${literal(NUMERIC_TEXT)} " +
+            "THEN ${if (cypher) textAsFloat("$x #>> '{}'") else "CAST($x #>> '{}' AS numeric)"} " +
+            (if (cypher) "WHEN ($x #>> '{}') ~ ${literal(CYPHER_NUMBER_TEXT)} THEN ${textAsFloat("btrim($x #>> '{}', $CYPHER_SPACE_CHARS)")} " else "") +
+            "END"
     }
+
+    /**
+     * The text [text], a number, as a `numeric` that reads as the double Neo4j's `toFloat` gives (drivine4j#692):
+     * - its exponent held to [EXPONENT_BOUND] ([bounded]), past which `numeric` fails;
+     * - from [DOUBLE_OVERFLOW], where Java rounds to an infinity (`'1.7976931348623159e308'`), the infinity: where the
+     *   statement is compiled as one given NaN or an infinity, `numeric`'s, which [scalar] writes as the number that stands
+     *   for it, so it is equal to one given; else [INFINITE], which reads as the infinity, where the number itself, `1e10000`
+     *   written out, would be past the digits Drivine reads a JSON number in, and `'Infinity'::numeric` would be written as
+     *   a text;
+     * - up to [DOUBLE_UNDERFLOW], where Java rounds to 0.0 (`'2e-324'`), 0, so it is equal to 0.0;
+     * - else rounded to [MOST_PLACES], past which a double has no digit, so it is written in few enough digits to be read.
+     *
+     * The number is bound once ([sharedBound]), however short, so its `regexp_replace` runs once a row.
+     */
+    private fun textAsFloat(text: String) = sharedBound("CAST(${bounded(text)} AS numeric)") { (n) ->
+        val (infinity, negativeInfinity) = if (nonFinite) "'Infinity'::numeric" to "'-Infinity'::numeric" else INFINITE to "-$INFINITE"
+        "CASE WHEN $n >= $DOUBLE_OVERFLOW THEN $infinity WHEN $n <= -$DOUBLE_OVERFLOW THEN $negativeInfinity " +
+            "WHEN abs($n) <= $DOUBLE_UNDERFLOW THEN 0 ELSE round($n, $MOST_PLACES) END"
+    }
+
+    /**
+     * The text [text], a number, with an exponent of more than [EXPONENT_BOUND] held to it: `numeric` fails past about
+     * 10^131072 and 10^-16383, where a double is long since an infinity or 0.0, and so is the number held, which is read
+     * so (`'1e5000000000'` is an infinity, as in Neo4j).
+     */
+    private fun bounded(text: String) = "regexp_replace($text, ${literal(LARGE_EXPONENT)}, ${literal("\\1$EXPONENT_BOUND")})"
 
     /** A statement that reads only: one that writes would store the number that stands for one, and fails as `numeric` does. */
     override fun nonFiniteWorkedOut(writes: Boolean) = !writes
@@ -778,8 +820,43 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
         /** The most places `round()` rounds to: past them, a double, the least of which is near 4.9E-324, has no digit. */
         private const val MOST_PLACES = 400
 
-        /** A text Postgres reads as a `numeric`, spaces around it allowed. */
-        private const val NUMERIC_TEXT = """^\s*[+-]?([0-9]+\.?[0-9]*|\.[0-9]+)([eE][+-]?[0-9]+)?\s*$"""
+        /** A text Postgres reads as a `numeric`, with the ASCII spaces around it that `CAST` skips: tab to CR, and the space. */
+        private const val NUMERIC_TEXT = """^[\x09-\x0d ]*[+-]?([0-9]+\.?[0-9]*|\.[0-9]+)([eE][+-]?[0-9]+)?[\x09-\x0d ]*$"""
+
+        /** A number Cypher writes, as [cypherNumberText] gives it, ending where Postgres's `$` ends a text: at its end alone. */
+        private val CYPHER_NUMBER_TEXT = cypherNumberText("$")
+
+        /** Cypher's spaces, as the characters `btrim` takes off. */
+        private val CYPHER_SPACE_CHARS = CYPHER_SPACES.flatten().joinToString(" || ", "(", ")") { "chr($it)" }
+
+        /**
+         * What Java's `String.trim` takes off a text's ends, U+0000 to the space, but U+0000, which Postgres's texts hold
+         * none of: Postgres's `\s` takes Unicode's spaces too, which leave a name of NaN or an infinity no name.
+         */
+        private const val JAVA_SPACE = """[\x01-\x20]"""
+
+        /** The names of NaN and the infinities, as [SqlCypherCompiler.NAN_NAME] and the others, with [JAVA_SPACE] around them. */
+        private val JAVA_NAN = NAN_NAME.replace("""\s""", JAVA_SPACE)
+        private val JAVA_INFINITY = INFINITY_NAME.replace("""\s""", JAVA_SPACE)
+        private val JAVA_NEGATIVE_INFINITY = NEGATIVE_INFINITY_NAME.replace("""\s""", JAVA_SPACE)
+
+        /** An exponent of [EXPONENT_BOUND] or more, its sign kept as its first group, 0s before it allowed. */
+        private const val LARGE_EXPONENT = """([eE][+-]?)0*[1-9][0-9]{4,}"""
+
+        /** The exponent [bounded] holds a larger one to: past a double's range either way, and well within `numeric`'s. */
+        private const val EXPONENT_BOUND = 10000
+
+        /**
+         * Where a decimal rounds to an infinity as a double, half an ulp past the greatest, 2^1024 - 2^970
+         * (1.797693134862315807937…e308), here a little past it, so a text between the two is read as the number it is.
+         */
+        private const val DOUBLE_OVERFLOW = "1.79769313486231580794e308"
+
+        /**
+         * Up to which a decimal rounds to 0.0 as a double, half the least, 2^-1075 (2.470328229206232720882…e-324), here a
+         * little past it.
+         */
+        private const val DOUBLE_UNDERFLOW = "2.4703282292062327209e-324"
 
         /**
          * Below it, `exp` is nearer 0 than the least double, half of 2^-1074, and Java gives 0.0: ln(2^-1075) is

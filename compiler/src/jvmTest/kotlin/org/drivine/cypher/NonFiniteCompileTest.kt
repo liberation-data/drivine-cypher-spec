@@ -44,9 +44,14 @@ class NonFiniteCompileTest {
         }
         assertTrue(postgres("RETURN 1.0 / \$z", mapOf("z" to 0)))
         assertTrue(postgres("RETURN toFloat(\$s)", mapOf("s" to "Infinity")))
+        // A number past a double's range with Unicode's spaces around it, which Neo4j reads as an infinity (drivine4j#692).
+        assertTrue(postgres("RETURN toFloat('\u00A01e400') - toFloat('\u00A01e400')"))
+        assertTrue(postgres("RETURN toFloat(\$s)", mapOf("s" to "\u3000-1e400")))
         listOf(
             "RETURN 1.0 / 2", "RETURN 1.0 / -2.5", "RETURN toFloat('1.5')", "RETURN toFloat(2)",
             "RETURN toFloat(null)", "MATCH (n:A) WHERE n.x = 1 RETURN n.x * 2",
+            // A name with Unicode's spaces around it is no name, and null, as Neo4j reads it (drivine4j#692).
+            "RETURN toFloat('\u00A0NaN')", "RETURN toFloat('\u3000-Infinity')", "RETURN toFloat('Infinity\u2028')",
         ).forEach { cypher ->
             assertFalse(postgres(cypher), cypher)
             assertFalse(sqlite(cypher), cypher)

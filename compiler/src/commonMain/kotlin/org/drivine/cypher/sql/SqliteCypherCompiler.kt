@@ -647,26 +647,11 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
 
         private fun javaName(name: String) = name.replace("""\s""", JAVA_SPACE).removeSuffix("$") + """\z"""
 
-        /** Cypher's spaces, which may come around a number written in Cypher: tab to CR, U+001C to the space, and Unicode's. */
-        private val CYPHER_SPACES = listOf(0x09..0x0D, 0x1C..0x20, 0x85..0x85, 0xA0..0xA0, 0x1680..0x1680, 0x2000..0x200A, 0x2028..0x2029,
-            0x202F..0x202F, 0x205F..0x205F, 0x3000..0x3000)
-
-        /** [CYPHER_SPACES] as a class of a regular expression, each character escaped, as Java, JavaScript and Python read it. */
-        val CYPHER_SPACE = CYPHER_SPACES.joinToString("", "[", "]") { if (it.first == it.last) escaped(it.first) else "${escaped(it.first)}-${escaped(it.last)}" }
-
         /** [CYPHER_SPACES] as SQL text, the characters `trim` takes off. */
         val CYPHER_SPACE_CHARS = "char(${CYPHER_SPACES.flatten().joinToString(", ")})"
 
-        /**
-         * A number written in Cypher, with [CYPHER_SPACE] around it, and a minus: a float, with digits after its point or an
-         * exponent, or a whole number with no 0 before it, which Neo4j reads up to a long's ends, and so only one well in
-         * range, up to 8999999999999999999. Cypher's other forms, a minus with a space after it, and a whole number nearer a
-         * long's ends are left out, null (drivine4j#696).
-         */
-        val CYPHER_NUMBER_TEXT = "^$CYPHER_SPACE*-?((0|[1-9][0-9]*)(\\.[0-9]+([eE][+-]?[0-9]+)?|[eE][+-]?[0-9]+)|\\.[0-9]+([eE][+-]?[0-9]+)?|" +
-            "0|[1-9][0-9]{0,17}|[1-8][0-9]{18})$CYPHER_SPACE*\\z"
-
-        private fun escaped(code: Int) = if (code < 0x100) "\\x" + code.toString(16).padStart(2, '0') else "\\u" + code.toString(16).padStart(4, '0')
+        /** [cypherNumberText] ending in `\z`, which reads alike in each library's host, where `$` does not (drivine4j#693). */
+        val CYPHER_NUMBER_TEXT = cypherNumberText("\\z")
 
         /** The characters `trim` takes off a text's ends, as Cypher's does: SQLite's own takes spaces alone. */
         const val WHITESPACE = "char(32, 9, 10, 11, 12, 13)"
