@@ -300,8 +300,8 @@ the registry it publishes to among them. The tarball, its SHA-256 and its npm in
 the tarball's SHA-256 is step 2's, then publishes it by npm's trusted publishing, with no npm token stored anywhere:
 npm's settings for the package name this repository, `compiler-release.yml` and the `release` environment as its
 publisher, and the job's OIDC token (`id-token: write`) proves it is that workflow. The same token gives npm's provenance
-(`--provenance`), which records the run and the commit that built the package, and runs none of the package's scripts
-(`--ignore-scripts`). The job runs on an exact Node release (24.22.2, of the 24 LTS), and installs npm 11.21.1, as
+(`--provenance`), which records the run and the commit that built the package. The publish runs none of the package's
+scripts (`--ignore-scripts`). The job runs on an exact Node release (24.22.2, of the 24 LTS), and installs npm 11.21.1, as
 desk's and Drivine for TypeScript's releases do: trusted publishing needs 11.5.1 or later. It installs npm from its
 registry tarball only once the tarball has the integrity pinned beside the version (`NPM_CLI_VERSION` and
 `NPM_CLI_INTEGRITY` in `compiler-release.yml`; npm bundles its dependencies, so the tarball is the whole of it). To bump
