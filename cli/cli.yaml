@@ -159,6 +159,21 @@ cases:
     stdout: "a\n1\n"
     exit: 0
 
+  - name: "A : line inside a statement no ; has ended is part of the statement"
+    cypherShell: true
+    files: {"s.cypher": "RETURN 1 AS a\n:exit\n;\nRETURN 2 AS b;\n"}
+    args: ["--format", "plain", "-f", "s.cypher"]
+    stdout: ""
+    exit: 1
+    note: "The statement is RETURN 1 AS a :exit, which doesn't parse."
+
+  - name: "A : line inside a string isn't a command, and plain prints a text's line breaks as they are"
+    cypherShell: true
+    files: {"t.cypher": "RETURN \"a\n:exit\nb\" AS s;\nRETURN 2 AS b;\n"}
+    args: ["--format", "plain", "-f", "t.cypher"]
+    stdout: "s\n\"a\n:exit\nb\"\nb\n2\n"
+    exit: 0
+
   - name: "A file that ends inside a transaction rolls it back"
     files: {"h.cypher": ":begin\nCREATE (n:B);\n"}
     args: ["--format", "plain", "-f", "h.cypher"]
@@ -225,6 +240,14 @@ cases:
     args: ["--format", "plain", "RETURN 6 AS six"]
     stdout: "six\n6\n"
     exit: 0
+
+  - name: "With no user and no password, and stdin not a terminal, nothing prompts and the store refuses"
+    only: [neo4j, postgres, oracle]
+    env: {DRIVINE_PASSWORD: null, NEO4J_USERNAME: null, NEO4J_PASSWORD: null}
+    args: ["--format", "plain", "RETURN 1"]
+    stdout: ""
+    exit: 3
+    note: "cypher-shell 2026.10.1 does the same, but exits with 1."
 
   - name: "A wrong password exits with 3"
     only: [neo4j, postgres, oracle]

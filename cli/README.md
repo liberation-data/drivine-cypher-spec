@@ -60,6 +60,8 @@ Only one of `cypher`, `-c` and `-f` may be given. Given two, the CLI exits with 
 4. The profile.
 5. A prompt, when stdin is a terminal. The prompt doesn't echo.
 
+When none of these gives a password and stdin isn't a terminal, nothing prompts, as in cypher-shell: the CLI connects with no password, and with no user if none is given, and a store that needs them refuses, so the CLI exits with 3.
+
 The recommended routes are `DRIVINE_PASSWORD`, the profile and the prompt. Where a store needs no password, as SQLite needs none, none is asked for.
 
 ### Profiles
@@ -185,7 +187,7 @@ The expression is Cypher. It's evaluated by running `RETURN expression` on the s
 |---|---|
 | null | `NULL` |
 | a boolean | `TRUE` or `FALSE` |
-| a text | in `"…"`, with each `"` escaped as `\"`. A `\` is printed as it is: `'a"b\\c'` prints as `"a\"b\c"`. |
+| a text | in `"…"`, with each `"` escaped as `\"`. A `\` and a line break are printed as they are: `'a"b\\c'` prints as `"a\"b\c"`. |
 | a list | `[1, "b"]` |
 | a map | `{k: 2}` |
 | a node | `(:Label {key: value})` |
