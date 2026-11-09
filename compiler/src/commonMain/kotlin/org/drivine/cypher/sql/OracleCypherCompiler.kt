@@ -1903,7 +1903,10 @@ class OracleCypherCompiler(
         /** NaN and the infinities by Java's names, as `Double.parseDouble` reads them: see `toFloat` in [functionOf]. */
         private const val JAVA_NAMES = "^([+-]?NaN|[+]?Infinity|-Infinity)\$"
 
-        /** A quoted SQL text, its quotes doubled: see [nanFree]. */
+        /**
+         * A quoted SQL text, its quotes doubled: see [nanFree]. A run of other characters is matched at once, not one by one in an
+         * alternation, which the JVM's regex recurses into for each character: so it overflowed the stack on a piece of 4,000.
+         */
         private val QUOTED = Regex("'[^']*(?:''[^']*)*'")
 
         /** What separates the words of a value the statement writes: see [nanFree]. */
