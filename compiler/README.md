@@ -414,7 +414,9 @@ first version is published by hand, and every later one by `publish-npm`:
    only stage a version for a maintainer to publish (npm's staged publishing), and `npm publish` from the workflow then
    fails with "OIDC permission denied"; npm doesn't let a saved publisher be changed, so a stage-only one is deleted
    and added again. v0.33.0's first publish failed on both, an unsaved publisher and a stage-only one. npm drops a new
-   publisher that hasn't published within 2 days.
+   publisher that hasn't published within 2 days, and one set up here isn't used until the next tag: the re-run below
+   finds the version published and publishes nothing. So if the next tag comes more than 2 days later, check the
+   publisher is still there before pushing it, and add it again if it's gone.
 
 Until then a tag's run publishes to Maven Central and `publish-npm` fails at npm's refusal: publish that tag's tarball
 as above, set the publisher, and re-run `publish-npm` alone ("Re-run failed jobs"), which waits for the reviewer again
