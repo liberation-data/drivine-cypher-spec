@@ -1764,11 +1764,11 @@ abstract class SqlCypherCompiler(
             }
         }
 
-        /** Binds the patterns of one `MATCH` into [select]: their relationships are distinct from one another. */
         /**
-         * [patterns] matched over the rows [select] reads; [shortestWhere] is met by the paths of the last, a shortest path, see
-         * [shortest]. With [probingEnds], as a `MERGE` reads its pattern for each row of the loop that writes, each relationship
-         * is read by a probe of an end ([endProbe]), not joined by the table's statistics.
+         * [patterns] matched over the rows [select] reads, their relationships distinct from one another; [shortestWhere] is
+         * met by the paths of the last, a shortest path, see [shortest]. With [probingEnds], as a `MERGE` reads its pattern for
+         * each row of the loop that writes, each relationship is read by a probe of an end ([endProbe]), not joined by the
+         * table's statistics.
          */
         private fun patterns(select: Select, patterns: List<Pattern>, shortestWhere: Expression? = null, probingEnds: Boolean = false) {
             val hops = mutableListOf<Hop>()
@@ -1785,6 +1785,12 @@ abstract class SqlCypherCompiler(
             // A node bound before the pattern, or given properties, is where a walk starts best.
             val pinned = pattern.nodes.map { node -> node.properties != null || node.variable?.let { select.scope[it] } != null }
             val before = select.scope
+            // A MERGE's read probes each relationship by its end toward the node the walk starts from: the first bound before
+            // the pattern, a single row the loop's row holds, or else the first given properties. Not one given properties
+            // where another is bound: the same node for every row of the loop gains a relationship at each, and probing it,
+            // or the nodes a MERGE makes anew of it, read more for each row than the last (drivine4j#663).
+            val toward = if (!probingEnds) 0 else pattern.nodes.indexOfFirst { node -> node.variable?.let { before[it] } != null }
+                .takeIf { it >= 0 } ?: pinned.indexOf(true).coerceAtLeast(0)
             val bound = pattern.nodes.map { node ->
                 val existing = node.variable?.let { select.scope[it] }
                 val value = when (existing) {
@@ -1838,15 +1844,15 @@ abstract class SqlCypherCompiler(
                 val from = bound[i].nid
                 val to = bound[i + 1].nid
                 val rows = edgesFor(relationship.direction)
-                // A MERGE's read probes the relationships of the end bound before its pattern, or of its near end where
-                // neither end or both are: the end's columns of the rows read, from the near end and to the far one.
+                // The end's columns of the rows read, of the near end and of the far one: the far one is probed where the
+                // node the walk starts from ([toward]) is past this relationship, reached through it.
                 val ends = when (relationship.direction) {
                     RelationshipPattern.Direction.OUTGOING -> "src" to "dst"
                     RelationshipPattern.Direction.INCOMING -> "dst" to "src"
                     RelationshipPattern.Direction.EITHER -> ("a" to "b").takeIf { undirectedBothWays }
                 }
                 val probe = ends?.takeIf { probingEnds }?.let { (near, far) ->
-                    if (pinned[i + 1] && !pinned[i]) endProbe(rows, name, far, to) else endProbe(rows, name, near, from)
+                    if (i < toward) endProbe(rows, name, far, to) else endProbe(rows, name, near, from)
                 }
                 if (probe != null) select.join(probe) else select.source("$rows $name")
                 val value = Value.Relationship("$name.eid", "$name.src", "$name.dst", "$name.type", "$name.props")

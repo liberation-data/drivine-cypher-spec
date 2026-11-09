@@ -11,8 +11,8 @@ import kotlin.test.assertTrue
 
 /**
  * On Postgres, a `MERGE`'s read of its pattern, for each row of the loop that writes, reads each relationship by a probe of
- * one end, `CROSS JOIN LATERAL (SELECT * FROM … e WHERE e.src = n.nid OFFSET 0) e`: the end bound before the pattern, or
- * the near end where neither or both are. Joined plainly, it was planned by the relationship table's statistics, which an
+ * one end, `CROSS JOIN LATERAL (SELECT * FROM … e WHERE e.src = n.nid OFFSET 0) e`: the end toward the first node bound
+ * before the pattern, or else the first given properties, or else the first node. Joined plainly, it was planned by the relationship table's statistics, which an
  * ANALYZE during the loop (an autovacuum) leaves at no rows while the loop's own are uncommitted: the plan made again
  * read the whole of an index by the relationship's type alone for every row, so `MATCH (n) MERGE (n)-[:R]->(n)` took 18 s
  * over 20,000 nodes where it takes 0.5 s (drivine4j#663, drivine#671). The rows it gives are the spec's MERGE cases'; the
@@ -47,6 +47,11 @@ class PostgresMergeEndProbeTest {
         Triple("MATCH (n:CyLoop) MERGE (:CyOther)-[:CY_ANY]-(n)", "b", true),
         Triple("MATCH (a:CyA), (b:CyB) MERGE (a)-[:CY_AB]->(b)", "src", true),
         Triple("MATCH (a:CyA), (b:CyB) MERGE (a)<-[:CY_BA]-(b)", "dst", true),
+        // The bound end, not the one given properties: that node, the same for every row, gains a relationship at each.
+        Triple("MATCH (n:CyLoop) MERGE (:CyTag {k: 1})-[:CY_TAGS]->(n)", "dst", true),
+        Triple("MATCH (n:CyLoop) MERGE (:CyTag {k: 1})<-[:CY_TAGS]-(n)", "src", true),
+        Triple("MATCH (n:CyLoop) MERGE (:CyTag {k: 1})-[:CY_TAGS]-(n)", "b", true),
+        Triple("MATCH (n:CyLoop) MERGE (n)-[:CY_TAGS {w: 1}]->(:CyTag {k: 1})", "src", true),
         Triple("MATCH (n:CyLoop) CALL (n) { MERGE (n)-[:CY_SELF]->(n) } RETURN count(n)", "src", true),
         Triple("MATCH (n:CyLoop) FOREACH (i IN [1] | MERGE (n)-[:CY_SELF]->(n))", "src", true),
         Triple("UNWIND range(1, 3) AS i MERGE (a:CyA {k: i})-[:CY_AB]->(b:CyB {k: i})", "src", false),
@@ -75,6 +80,22 @@ class PostgresMergeEndProbeTest {
         assertEquals(listOf("src", "src"), probes.map { it.groupValues[3] }, "$cypher:\n$sql")
         assertTrue(boundFromRow(sql, probes[0].groupValues[4]), "$cypher:\n$sql")
         assertFalse(edgesJoined.containsMatchIn(sql), "$cypher:\n$sql")
+    }
+
+    @Test
+    fun `each relationship of a MERGE's pattern of many is probed by its end toward the bound node`() {
+        for ((cypher, ends) in listOf(
+            "MATCH (n:CyLoop) MERGE (:CyStart)-[:CY_A]->(:CyMid)-[:CY_B]->(n)" to listOf("dst", "dst"),
+            "MATCH (n:CyLoop) MERGE (:CyStart)<-[:CY_A]-(:CyMid)<-[:CY_B]-(n)" to listOf("src", "src"),
+            "MATCH (n:CyLoop) MERGE (:CyStart)-[:CY_A]->(n)-[:CY_B]->(:CyEnd)" to listOf("dst", "src"),
+            "MATCH (n:CyLoop) MERGE (:CyStart {k: 1})-[:CY_A]->(:CyMid)-[:CY_B]->(n)" to listOf("dst", "dst"),
+            "MERGE (:CyStart)-[:CY_A]->(:CyMid)-[:CY_B]->(:CyEnd {k: 1})" to listOf("dst", "dst"),
+        )) {
+            val sql = sql(cypher)
+            val probes = endProbe.findAll(sql).toList()
+            assertEquals(ends, probes.map { it.groupValues[3] }, "$cypher:\n$sql")
+            assertFalse(edgesJoined.containsMatchIn(sql), "$cypher:\n$sql")
+        }
     }
 
     @Test
