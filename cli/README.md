@@ -95,7 +95,7 @@ A profile's keys are `address`, `type`, `database`, `graph`, `user` and `passwor
 
 A profile may hold the password, as `~/.pgpass` may. The CLI refuses to read a profile file that holds a `password` and that its group or others can read: it says so on stderr, names the file, gives the fix, `chmod 600 <file>`, and exits as a bad invocation does. On Windows, where a file has no such modes, it doesn't check.
 
-Flags and environment variables override the profile, key by key. So `DRIVINE_PASSWORD` comes before the profile's `password`, as [the password's order](#the-user-and-the-password) says. A `--profile` or a `default:` that names no profile is refused, as a bad invocation.
+Flags and environment variables override the profile, key by key. So `DRIVINE_PASSWORD` comes before the profile's `password`, as [the password's order](#the-user-and-the-password) says. A user or a database that the profile's `address` names is the address's, not a key's, and comes where [the user's order](#the-user-and-the-password) and [the table](#the-database-and-the-graph) put an address's: before `DRIVINE_USER` and `DRIVINE_DATABASE`. A `--profile` or a `default:` that names no profile is refused, as a bad invocation.
 
 ## Flags
 
@@ -156,7 +156,7 @@ A line may end in `\r\n` as well as `\n`: the `\r` is not part of a command. A s
 
 Any other command fails as a statement fails, and prints `Could not find command :nope, use :help to see available commands` to stderr, `:nope` being the command, as cypher-shell does.
 
-If the input ends inside a transaction, the transaction is rolled back, as cypher-shell does.
+If the input ends inside a transaction, the transaction is rolled back, as cypher-shell does. The run doesn't fail for it.
 
 FalkorDB has no multi-statement transactions, so no transaction is ever open there. There `:begin` prints one line to stderr, `FalkorDB has no multi-statement transactions; each statement runs and commits on its own`, and the run goes on, each statement committing as it runs. A `:begin` after another, as in an `apoc.export.cypher` file's batches, warns again and doesn't fail. `:commit` does nothing. `:rollback` fails as a command does, with a message on stderr and exit code 1, since nothing can be rolled back. An input that ends after `:begin` with no `:commit` rolls nothing back there, and doesn't fail.
 
