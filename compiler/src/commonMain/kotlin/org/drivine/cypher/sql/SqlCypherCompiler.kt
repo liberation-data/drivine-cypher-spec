@@ -307,9 +307,10 @@ abstract class SqlCypherCompiler(
 
     /**
      * The read of the relationship rows [rows], as [row], whose end column [end] is [id], for each row: how a `MERGE`'s
-     * pattern reads its relationships, from a table the loop that writes adds to. Null here: the rows are joined plainly.
-     * Postgres probes the end's index for each row instead, as a plain join is planned by the table's statistics
-     * (drivine4j#663).
+     * pattern reads its relationships, from a table the loop that writes adds to (drivine4j#663), and how a `MATCH` reads a
+     * pattern as a chain, its relationships by an end and its nodes, [rows] the node table, by `nid` (drivine#680). Null
+     * here: the rows are joined plainly. Postgres probes the column's index for each row instead, as a plain join is planned
+     * by the tables' statistics.
      */
     protected open fun endProbe(rows: String, row: String, end: String, id: String): String? = null
 
@@ -1471,12 +1472,12 @@ abstract class SqlCypherCompiler(
             val (row, seed) = if (seededFirst) seededRows(select) else select to null
             val metByPaths = shortestWhere?.let { if (seed == null) it else seeded(it, seed, madeAnew, inBody = true) }
             if (!match.optional) {
-                patterns(row, match.patterns, metByPaths)
+                patterns(row, match.patterns, metByPaths, chaining = true)
                 return where?.let { filtered(row, it) } ?: row
             }
             // What is found is read by a lateral query, joined to keep the row when it finds nothing.
             var inner = Select(row.scope).also { it.afterGrouping = row.afterGrouping }
-            patterns(inner, match.patterns, metByPaths)
+            patterns(inner, match.patterns, metByPaths, chaining = true)
             where?.let { inner = if (seed == null) filtered(inner, it) else filtered(inner, seeded(it, seed, madeAnew, inBody = true)) { e -> isSeeded(e, madeAnew) } }
             val found = inner.bound.filterKeys { it !in row.scope && it !in madeAnew }
             if (found.isEmpty() && inner.sources.isEmpty()) return row
@@ -1768,11 +1769,14 @@ abstract class SqlCypherCompiler(
          * [patterns] matched over the rows [select] reads, their relationships distinct from one another; [shortestWhere] is
          * met by the paths of the last, a shortest path, see [shortest]. With [probingEnds], as a `MERGE` reads its pattern for
          * each row of the loop that writes, each relationship is read by a probe of an end ([endProbe]), not joined by the
-         * table's statistics.
+         * table's statistics. With [chaining], as a `MATCH` reads its patterns, a pattern of relationships of one hop each is
+         * read as a chain of probes (see [pattern]).
          */
-        private fun patterns(select: Select, patterns: List<Pattern>, shortestWhere: Expression? = null, probingEnds: Boolean = false) {
+        private fun patterns(
+            select: Select, patterns: List<Pattern>, shortestWhere: Expression? = null, probingEnds: Boolean = false, chaining: Boolean = false,
+        ) {
             val hops = mutableListOf<Hop>()
-            patterns.forEachIndexed { i, pattern -> pattern(select, pattern, hops, shortestWhere.takeIf { i == patterns.lastIndex }, probingEnds) }
+            patterns.forEachIndexed { i, pattern -> pattern(select, pattern, hops, shortestWhere.takeIf { i == patterns.lastIndex }, probingEnds, chaining) }
             for (i in hops.indices) for (j in i + 1 until hops.size) {
                 val (a, b) = hops[i] to hops[j]
                 // Relationships of types no relationship has both of cannot be one.
@@ -1780,11 +1784,29 @@ abstract class SqlCypherCompiler(
             }
         }
 
-        private fun pattern(select: Select, pattern: Pattern, hops: MutableList<Hop>, shortestWhere: Expression? = null, probingEnds: Boolean = false) {
+        /**
+         * [pattern] matched over the rows [select] reads, its relationships added to [hops]. With [chaining], on a store that
+         * probes ([endProbe]), a pattern whose relationships are each of one hop ([chains]) is read as a chain of probes from
+         * the node it starts at, [start]: the first node bound before it, else the first given properties, else, at -1, its
+         * first relationship, read whole. Each relationship is read by a probe of its end toward the start, and each node it
+         * reaches by a probe of its key, the relationship's other end, so each row reads what it reaches by an index, in that
+         * order, whatever the tables' statistics say. Joined plainly, Postgres planned `MATCH (:A)-[r:R]->(:A) RETURN
+         * count(r)`, with the node table analyzed just after it was emptied (statistics of no rows over its pages), to read
+         * every node again for each node: 475 s over 20,000 relationships, where it takes 30 ms (drivine#680, drivine4j#673).
+         */
+        private fun pattern(
+            select: Select, pattern: Pattern, hops: MutableList<Hop>, shortestWhere: Expression? = null, probingEnds: Boolean = false,
+            chaining: Boolean = false,
+        ) {
             if (pattern.shortest != null) return shortest(select, pattern, shortestWhere)
             // A node bound before the pattern, or given properties, is where a walk starts best.
             val pinned = pattern.nodes.map { node -> node.properties != null || node.variable?.let { select.scope[it] } != null }
             val before = select.scope
+            val chained = chaining && chains(pattern)
+            val start = if (!chained) -1 else pattern.nodes.indexOfFirst { node -> node.variable?.let { before[it] } != null }
+                .takeIf { it >= 0 } ?: pinned.indexOf(true)
+            // The aliases of the nodes a chain reads by their keys, each joined after the relationship that reaches it.
+            val probed = mutableSetOf<String>()
             // A MERGE's read probes each relationship by its end toward the node the walk starts from: the first bound before
             // the pattern, else the first given properties, else the first. A bound one is taken before one given properties,
             // as the tag of `MATCH (n) MERGE (:Tag {k: 1})-[:R]->(n)`, the same for every row, gains a relationship at each:
@@ -1792,13 +1814,13 @@ abstract class SqlCypherCompiler(
             // `MATCH (c {k: 1}) UNWIND … MERGE (c)-[:R]->(:P {k: i})`'s, gains one too: the pattern does not say which varies.
             val toward = if (!probingEnds) 0 else pattern.nodes.indexOfFirst { node -> node.variable?.let { before[it] } != null }
                 .takeIf { it >= 0 } ?: pinned.indexOf(true).coerceAtLeast(0)
-            val bound = pattern.nodes.map { node ->
+            val bound = pattern.nodes.mapIndexed { n, node ->
                 val existing = node.variable?.let { select.scope[it] }
                 val value = when (existing) {
                     is Value.Node -> existing
                     null -> {
                         val name = alias("n")
-                        select.source("$nodes $name")
+                        if (chained && n != start) probed += name else select.source("$nodes $name")
                         Value.Node("$name.nid", "$name.labels", "$name.props", "$name.stamp").also { value ->
                             node.variable?.let { select.bind(it, value) }
                             if (select.afterGrouping) grouped += value.nid
@@ -1826,19 +1848,23 @@ abstract class SqlCypherCompiler(
                 if (node.labels.isNotEmpty() || node.properties != null) anchor(select, value.nid)
                 value
             }
-            pattern.relationships.forEachIndexed { i, relationship ->
+            // A chain reads the relationships from its start outward; a path holds them in the pattern's order.
+            val order = if (!chained) pattern.relationships.indices.toList() else (start - 1 downTo 0) + (start.coerceAtLeast(0)..pattern.relationships.lastIndex)
+            val found = arrayOfNulls<Hop>(pattern.relationships.size)
+            for (i in order) {
+                val relationship = pattern.relationships[i]
                 if (relationship.group != null) {
-                    hops += quantified(select, relationship, bound[i].nid, bound[i + 1].nid, seed(pattern.nodes[i], before))
-                    return@forEachIndexed
+                    found[i] = quantified(select, relationship, bound[i].nid, bound[i + 1].nid, seed(pattern.nodes[i], before))
+                    continue
                 }
                 if (relationship.range != null) {
                     // Walked from its far node when only that one is pinned: the same relationships, read backwards.
-                    hops += if (pinned[i + 1] && !pinned[i]) {
+                    found[i] = if (pinned[i + 1] && !pinned[i]) {
                         walk(select, relationship.reversed(), bound[i + 1].nid, bound[i].nid, backwards = true, seed(pattern.nodes[i + 1], before))
                     } else {
                         walk(select, relationship, bound[i].nid, bound[i + 1].nid, backwards = false, seed(pattern.nodes[i], before))
                     }
-                    return@forEachIndexed
+                    continue
                 }
                 if (relationship.variable != null && select.scope[relationship.variable] != null) unsupported("A relationship variable bound before its pattern")
                 val name = alias("e")
@@ -1855,7 +1881,8 @@ abstract class SqlCypherCompiler(
                 val probe = ends?.takeIf { probingEnds }?.let { (near, far) ->
                     if (i < toward) endProbe(rows, name, far, to) else endProbe(rows, name, near, from)
                 }
-                if (probe != null) select.join(probe) else select.source("$rows $name")
+                if (chained) chain(select, i, start, rows, name, ends!!, bound, probed)
+                else if (probe != null) select.join(probe) else select.source("$rows $name")
                 val value = Value.Relationship("$name.eid", "$name.src", "$name.dst", "$name.type", "$name.props")
                 relationship.variable?.let { select.bind(it, value) }
                 anchor(select, from)
@@ -1874,13 +1901,37 @@ abstract class SqlCypherCompiler(
                     select, from, to, both = relationship.direction == RelationshipPattern.Direction.EITHER && undirectedBothWays,
                     given = (pattern.nodes[i].properties != null) to (pattern.nodes[i + 1].properties != null),
                 )
-                hops += Hop(value.eid, false, relationship.types, ids(to))
+                found[i] = Hop(value.eid, false, relationship.types, ids(to))
             }
+            found.forEach { hops += it!! }
             pattern.variable?.let { variable ->
                 val mine = hops.takeLast(pattern.relationships.size)
                 val nids = joinIds(listOf(ids(bound.first().nid)) + mine.map { it.nodes })
                 val eids = mine.map { if (it.many) it.eids else ids(it.eids) }.let { if (it.isEmpty()) noIds else joinIds(it) }
                 select.bind(variable, Value.Path(nids, eids))
+            }
+        }
+
+        /** Whether [pattern] is read as a chain of probes by a store that probes: it has relationships, each of one hop. */
+        private fun chains(pattern: Pattern): Boolean =
+            pattern.relationships.isNotEmpty() && endProbe(nodes, "n", "nid", "n.nid") != null &&
+                pattern.relationships.all { it.group == null && it.range == null && (it.direction != RelationshipPattern.Direction.EITHER || undirectedBothWays) }
+
+        /**
+         * The [i]th relationship of a chain ([pattern]) joined to [select] as the rows [rows], named [name], whose [ends] are
+         * the columns of its near end and its far one: probed by its end toward the chain's [start], or, the first relationship
+         * of a chain that starts at none, read whole. Then each node it reaches whose alias is in [probed], probed by its key.
+         */
+        private fun chain(select: Select, i: Int, start: Int, rows: String, name: String, ends: Pair<String, String>, bound: List<Value.Node>, probed: MutableSet<String>) {
+            val (near, far) = ends
+            val reached = when {
+                i < start -> listOf(bound[i] to near).also { select.join(endProbe(rows, name, far, bound[i + 1].nid)!!) }
+                start < 0 && i == 0 -> listOf(bound[0] to near, bound[1] to far).also { select.source("$rows $name") }
+                else -> listOf(bound[i + 1] to far).also { select.join(endProbe(rows, name, near, bound[i].nid)!!) }
+            }
+            for ((node, end) in reached) {
+                val alias = node.nid.substringBefore('.')
+                if (probed.remove(alias)) select.join(endProbe(nodes, alias, "nid", "$name.$end")!!)
             }
         }
 
