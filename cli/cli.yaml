@@ -38,8 +38,8 @@ cases:
     exit: 0
 
   - name: "plain prints a path along and against its relationships' directions"
-    stdin: "CREATE (:A)-[:R]->(:B)<-[:S]-(:C);\nMATCH p = (:A)-[:R]->(:B)<-[:S]-(:C) RETURN p;\n"
-    args: ["--format", "plain"]
+    cypherShell: true
+    args: ["--format", "plain", "CREATE p = (:A)-[:R]->(:B)<-[:S]-(:C) RETURN p"]
     stdout: "p\n(:A)-[:R]->(:B)<-[:S]-(:C)\n"
     exit: 0
 
@@ -47,6 +47,12 @@ cases:
     cypherShell: true
     args: ["--format", "plain", "CREATE (n:P {name: 'x'})-[r:K {w: 1}]->(m:Q) RETURN n, r, m"]
     stdout: "n, r, m\n(:P {name: \"x\"}), [:K {w: 1}], (:Q)\n"
+    exit: 0
+
+  - name: "plain escapes a \" in a text, and not a \\"
+    cypherShell: true
+    args: ["--format", "plain", "RETURN 'a\"b\\\\c' AS s, 'it\\'s' AS q"]
+    stdout: "s, q\n\"a\\\"b\\c\", \"it's\"\n"
     exit: 0
 
   - name: "-c runs as the positional argument does"
@@ -132,14 +138,24 @@ cases:
     exit: 1
 
   - name: "An unknown command fails as a statement does"
+    cypherShell: true
     files: {"u.cypher": ":nope\nRETURN 1 AS a;\n"}
     args: ["--format", "plain", "-f", "u.cypher"]
     stdout: ""
+    stderr: "Could not find command :nope, use :help to see available commands"
     exit: 1
 
+  - name: ":params lists the parameters as a map, a line each"
+    cypherShell: true
+    files: {"p.cypher": ":param {a: 1, b: \"x\"}\n:params\n"}
+    args: ["--format", "plain", "-f", "p.cypher"]
+    stdout: "{\n  a: 1,\n  b: 'x'\n}\n"
+    exit: 0
+
   - name: ":exit stops reading"
-    stdin: "RETURN 1 AS a;\n:exit\nRETURN 2 AS b;\n"
-    args: ["--format", "plain"]
+    cypherShell: true
+    files: {"r.cypher": "RETURN 1 AS a;\n:exit\nRETURN 2 AS b;\n"}
+    args: ["--format", "plain", "-f", "r.cypher"]
     stdout: "a\n1\n"
     exit: 0
 

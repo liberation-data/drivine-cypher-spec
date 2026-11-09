@@ -144,14 +144,14 @@ A statement that is only spaces and comments isn't run. The text after the last 
 | `:rollback` | Rolls it back. |
 | `:param NAME => EXPRESSION` | Sets a parameter, as `-P` does. |
 | `:param {NAME: EXPRESSION, …}` | Sets the parameters named. |
-| `:params` | Lists the parameters, one per line. |
+| `:params` | Prints the parameters to stdout as a map over several lines: `{`, then each `name: value` on a line of its own, indented two spaces, with `,` after each but the last, then `}`. A text is in `'…'`, not `"…"` as `plain` prints it. |
 | `:params clear` | Clears them. |
 | `:use DATABASE` | Moves to another database, on a store that has more than one. |
 | `:source FILE` | Runs a file's statements in place. A relative path is read from the working directory. |
 | `:exit`, `:quit` | Stops reading. |
 | `:help` | Lists the commands. |
 
-Any other command fails as a statement fails.
+Any other command fails as a statement fails, and prints `Could not find command :nope, use :help to see available commands` to stderr, `:nope` being the command, as cypher-shell does.
 
 If the input ends inside a transaction, the transaction is rolled back, as cypher-shell does.
 
@@ -185,7 +185,7 @@ The expression is Cypher. It's evaluated by running `RETURN expression` on the s
 |---|---|
 | null | `NULL` |
 | a boolean | `TRUE` or `FALSE` |
-| a text | in `"…"`, with `"` and `\` escaped |
+| a text | in `"…"`, with each `"` escaped as `\"`. A `\` is printed as it is: `'a"b\\c'` prints as `"a\"b\c"`. |
 | a list | `[1, "b"]` |
 | a map | `{k: 2}` |
 | a node | `(:Label {key: value})` |
