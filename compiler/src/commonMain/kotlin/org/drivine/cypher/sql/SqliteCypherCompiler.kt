@@ -7,6 +7,7 @@ import org.drivine.cypher.store.SqliteSql
 import org.drivine.cypher.json.CypherEncoder
 import org.drivine.cypher.json.CypherJson
 import org.drivine.cypher.store.Stamps
+import org.drivine.cypher.text.JavaText
 
 /**
  * Compiles a Cypher statement to SQL over a graph's tables on SQLite: see [SqlCypherCompiler]. A statement it
@@ -111,9 +112,12 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
         withEntries("json_object(${entries.take(MOST_ARGUMENTS / 2).joinToString(", ") { (key, value) -> "${literal(key)}, json($value)" }})", entries.drop(MOST_ARGUMENTS / 2))
 
     /** In parts, as for [jsonArray]: a `json_set` of as many entries as it takes, each set over the last. */
-    override fun withEntries(json: String, entries: List<Pair<String, String>>) =
+    override fun withEntries(json: String, entries: List<Pair<String, String>>) = setOver(json, entries.map { (key, value) -> key to "json($value)" })
+
+    /** The map [json] with [entries] set over it, each value SQL as `json_set` takes it, in parts as [withEntries] sets them. */
+    private fun setOver(json: String, entries: List<Pair<String, String>>) =
         entries.chunked((MOST_ARGUMENTS - 1) / 2).fold(json) { map, part ->
-            "json_set($map, ${part.joinToString(", ") { (key, value) -> "${path(key)}, json($value)" }})"
+            "json_set($map, ${part.joinToString(", ") { (key, value) -> "${path(key)}, $value" }})"
         }
 
     override fun propertyOf(json: String, key: String) = "($json -> ${path(key)})"
@@ -407,10 +411,15 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
         return if (optional) "LEFT JOIN $rows ON TRUE" else crossJoin(rows)
     }
 
-    /** The rows of [query], of the columns [columns], as `json_each` gives the JSON list of maps they are gathered in, named [name]: see [lateral]. */
+    /**
+     * The rows of [query], of the columns [columns], as `json_each` gives the JSON list of maps they are gathered in, named [name]:
+     * see [lateral]. Past 50 columns, as for [jsonObject], the rest are set over the map of the first 50 (drivine4j#375).
+     */
     private fun gathered(query: String, name: String, columns: List<Pair<String, Boolean>>): String {
-        val entries = columns.joinToString(", ") { (column, json) -> "${literal(column)}, ${if (json) "json(q.$column)" else "q.$column"}" }
-        return "json_each((SELECT json_group_array(json_object($entries)) FROM (\n${indent(query)}\n) q)) AS $name"
+        val entries = columns.map { (column, json) -> column to if (json) "json(q.$column)" else "q.$column" }
+        val first = entries.take(MOST_ARGUMENTS / 2).joinToString(", ") { (column, value) -> "${literal(column)}, $value" }
+        val map = setOver("json_object($first)", entries.drop(MOST_ARGUMENTS / 2))
+        return "json_each((SELECT json_group_array($map) FROM (\n${indent(query)}\n) q)) AS $name"
     }
 
     /** JSON's null, which a column of SQL's null is in the map, as SQL's null again: a list of nodes that is null is not the list `[null]`. */
@@ -529,11 +538,27 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
      * of its own, so the statement is applied whole or not at all (see `SqliteCypherFunction`): SQLite has no procedural
      * language. The steps are given as JSON, each with its SQL, in which each variable of the procedure it reads is a
      * numbered parameter, `?1`, and the variables bound to them in turn. The rows it returns are JSON's, in a list.
+     *
+     * The steps are written into the statement, as a literal, unless that makes it longer than SQLite takes: then they are
+     * bound, at [PROGRAM] (drivine4j#427). The function reads the same text either way.
      */
     override fun procedure(program: List<ProcedureStep>): String {
         val steps = CypherJson.writeValueAsString(mapOf("steps" to program.map(::step)), encoder = encoder)
         val c = "cy"
-        return "SELECT ${item(c)} AS result FROM json_each(${SqliteFunctions.CYPHER}(${literal(steps)}, \$${Parameters.OBJECT})) AS $c ORDER BY $c.key"
+        fun called(steps: String) = "SELECT ${item(c)} AS result FROM json_each(${SqliteFunctions.CYPHER}($steps, \$${Parameters.OBJECT})) AS $c ORDER BY $c.key"
+        val written = called(literal(steps))
+        if (JavaText.utf8(written).size <= MOST_STATEMENT_BYTES) return written
+        boundSteps = steps
+        return called("\$$PROGRAM")
+    }
+
+    /** The steps [procedure] binds, where it binds them, which [finished] binds at [PROGRAM]. */
+    private var boundSteps: String? = null
+
+    override fun finished(compiled: CompiledCypher): CompiledCypher {
+        val steps = boundSteps ?: return compiled
+        boundSteps = null
+        return compiled.copy(parameters = compiled.parameters + (PROGRAM to steps))
     }
 
     /** [step] as the function that carries it out reads it. */
@@ -615,6 +640,15 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
     private fun path(key: String) = literal("$.${SqliteSql.quoted(key)}")
 
     private companion object {
+        /**
+         * The most bytes of a statement SQLite takes, `SQLITE_LIMIT_SQL_LENGTH`, on a connection xerial's sqlite-jdbc opens
+         * (3.53.2.1): it refuses a longer one with SQLITE_TOOBIG, "statement too long". The sqlite3 shell's and Python's take 1,000,000,000.
+         */
+        const val MOST_STATEMENT_BYTES = 1_000_000
+
+        /** The marker a procedure's steps are bound at where they would make the statement too long: see [procedure]. */
+        const val PROGRAM = "_cy_program"
+
         /** The variables of a procedure: see [SqlCypherCompiler.ROWS] and the rest. */
         val VARIABLES = setOf(PARAMS, ROWS, OUT, ROW, VALUE, ID, COUNT, FOUND) + (1..NESTING).flatMap { listOf("$SAVED$it", "$GATHERED$it", "$CALLER$it", "$RETURNED$it") }
 
