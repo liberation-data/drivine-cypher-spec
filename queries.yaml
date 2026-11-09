@@ -3691,8 +3691,8 @@ cases:
         cypher: "UNWIND [$a, $b, $c] AS s RETURN toInteger(s)"
         parameters: {a: "\u00A0+1.5", b: "\u00A05.", c: "\u00A09223372036854775808"}
         rows: [null, null, null]
-      - note: "Nor from what Cypher does not write before a line break that ends a text (drivine4j#693). Oracle gives null for the last (drivine4j#696)."
-        only: [neo4j, postgres, sqlite]
+      - note: "Nor from what Cypher does not write before a line break that ends a text (drivine4j#693). Oracle and Postgres give null for the last (drivine4j#696)."
+        only: [neo4j, sqlite]
         cypher: "RETURN [toFloat('5.\\u0085'), toFloat('+1.5\\u2028'), toInteger('+5\\u2028'), toInteger('5.\\u0085'), toInteger('5\\u2028')]"
         rows: [[null, null, null, null, 5]]
       - note: "toInteger reads a whole number with ASCII's spaces around it as itself, past a double's precision (drivine4j#693). Oracle gives null for the last (drivine4j#696)."
