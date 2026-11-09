@@ -41,6 +41,7 @@ on:
       - compiler/check/corpus-node.cjs
       - .github/actions/pinned-toolchain/**
       - compiler/npm/**
+      - LICENSE
       - compiler/build.gradle.kts
       - compiler/settings.gradle.kts
       - compiler/gradle.properties

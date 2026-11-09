@@ -3,10 +3,10 @@ name: Compiler
 
 on:
   pull_request:
-    paths: ['compiler/**', '*.yaml', '.github/workflows/compiler.yml', '.github/actions/pinned-toolchain/**', '.github/scripts/compiler-npm-*.sh']
+    paths: ['compiler/**', '*.yaml', '.github/workflows/compiler.yml', '.github/actions/pinned-toolchain/**', '.github/scripts/compiler-npm-*.sh', 'LICENSE']
   push:
     branches: [main]
-    paths: ['compiler/**', '*.yaml', '.github/workflows/compiler.yml', '.github/actions/pinned-toolchain/**', '.github/scripts/compiler-npm-*.sh']
+    paths: ['compiler/**', '*.yaml', '.github/workflows/compiler.yml', '.github/actions/pinned-toolchain/**', '.github/scripts/compiler-npm-*.sh', 'LICENSE']
   workflow_dispatch:
   # compiler-release.yml runs this first, on the tag it releases, so a tag doesn't run it twice.
   workflow_call:

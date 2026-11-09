@@ -17,4 +17,6 @@ echo '{"private": true}' > "$project/package.json"
 (cd "$project" && npm install --no-audit --no-fund --ignore-scripts --save --save-prod "$tgz" > /dev/null)
 
 name="$(tar -xOzf "$tgz" package/package.json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s).name))')"
-env -u NODE_PATH DRIVINE_NPM_NAME="$name" node "$check" "$project/node_modules/$name" "$corpus" "$differences"
+# Its line in the job's summary is told apart from the Gradle corpus check's, which is also on wasmJs.
+env -u NODE_PATH DRIVINE_NPM_NAME="$name" node "$check" "$project/node_modules/$name" "$corpus" "$differences" |
+    sed 's/^Corpus on wasmJs (/Corpus on wasmJs, the packed npm package installed (/'
