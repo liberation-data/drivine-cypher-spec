@@ -1,5 +1,5 @@
-# Releases the Cypher compiler (compiler/) to Maven Central, as org.drivine:drivine-cypher-compiler. compiler/README.md
-# ("Releasing") describes the process.
+# Releases the Cypher compiler (compiler/) to Maven Central, as org.drivine:drivine-cypher-compiler, and its wasmJs build
+# to npm, as gradle.properties' compiler.npmName. compiler/README.md ("Releasing") describes the process.
 #
 # - A push of a tag vX.Y.Z on main publishes the compiler as version X.Y.Z: a spec tag is a compiler release, so the
 #   compiler and the spec it was checked against share one number. A tag that changes only the spec publishes the
@@ -9,6 +9,9 @@
 #   reviewer's approval, then signs that bundle with the release key and uploads it to the Central Portal as one
 #   deployment, which releases every target or none. What is published is the bundle that was checked, byte for byte,
 #   with a signature beside each file; nothing is built, and no JDK, Gradle or dependency fetched, after the gate.
+# - The npm package is built and checked in the same job, and kept beside the bundle. Its publish is a job of its own,
+#   also waiting in `release`: it publishes the tarball that was checked, with npm's provenance, and a failure of
+#   either publish neither undoes nor holds up the other.
 # - workflow_dispatch, and a pull request that changes the release machinery, are dry runs: everything but the upload
 #   to the Portal, the bundle signed with a throwaway key, with GitHub's release downloads blocked, kept as the run's
 #   artifact, and uploaded to a stand-in for the Portal on the runner.
@@ -32,7 +35,11 @@ on:
       - .github/scripts/compiler-release-sign.sh
       - .github/scripts/compiler-release-sign-test.sh
       - .github/scripts/compiler-release-upload.sh
+      - .github/scripts/compiler-npm-check.sh
+      - .github/scripts/compiler-npm-clean-install.sh
+      - compiler/check/corpus-node.cjs
       - .github/actions/pinned-toolchain/**
+      - compiler/npm/**
       - compiler/build.gradle.kts
       - compiler/settings.gradle.kts
       - compiler/gradle.properties
@@ -116,6 +123,10 @@ jobs:
     runs-on: macos-latest
     outputs:
       bundle-sha256: ${{ steps.bundle.outputs.sha256 }}
+      npm-name: ${{ steps.npm-name.outputs.name }}
+      npm-tarball: ${{ steps.npm.outputs.tarball }}
+      npm-sha256: ${{ steps.npm.outputs.sha256 }}
+      npm-integrity: ${{ steps.npm.outputs.integrity }}
     env:
       VERSION: ${{ needs.check.outputs.version }}
       PUBLISH: ${{ needs.check.outputs.publish }}
@@ -154,6 +165,38 @@ jobs:
         with:
           name: compiler-maven-central-${{ env.VERSION }}
           path: compiler/release/publicationAggregated.zip
+          if-no-files-found: error
+      - name: The npm package's name
+        id: npm-name
+        run: echo "name=$(grep '^compiler.npmName=' gradle.properties | cut -d= -f2-)" | tee -a "$GITHUB_OUTPUT"
+      - name: npm doesn't have this version yet
+        env:
+          NPM_NAME: ${{ steps.npm-name.outputs.name }}
+        run: |
+          # npm view prints the version where the registry has it, nothing (and fails) where it hasn't. Where the
+          # registry can't be asked, the step goes on: npm publish refuses a version it already has.
+          if got=$(npm view "$NPM_NAME@$VERSION" version 2> /dev/null) && [[ "$got" == "$VERSION" ]]; then
+            if [[ "$PUBLISH" == true ]]; then
+              echo "::warning::npm already has $NPM_NAME@$VERSION; the npm publish job checks it is this run's tarball, and publishes nothing."
+            else
+              echo "::warning::npm already has $NPM_NAME@$VERSION."
+            fi
+          fi
+      # The wasmJs build, as the gate's corpus check checked it, packed as npm publishes it.
+      - name: Build and check the npm package
+        id: npm
+        env:
+          NPM_NAME: ${{ steps.npm-name.outputs.name }}
+        run: |
+          ./gradlew --no-daemon npmPackage -Pcompiler.version="$VERSION"
+          tarball="$(npm pack ./build/npm --pack-destination release --silent | tail -n 1)"
+          ../.github/scripts/compiler-npm-check.sh "release/$tarball" "$VERSION" "$NPM_NAME" | tee -a "$GITHUB_OUTPUT"
+          echo "tarball=$tarball" | tee -a "$GITHUB_OUTPUT"
+          echo "sha256=$(shasum -a 256 "release/$tarball" | cut -d' ' -f1)" | tee -a "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: compiler-npm-${{ env.VERSION }}
+          path: compiler/release/${{ steps.npm.outputs.tarball }}
           if-no-files-found: error
 
   # Signs build's bundle with the release key and uploads it, as one deployment, followed until the Portal publishes it.
@@ -219,6 +262,107 @@ jobs:
           name: compiler-maven-central-uploaded-${{ env.VERSION }}
           path: ${{ runner.temp }}/signed.zip
           if-no-files-found: warn
+
+  # Publishes build's npm tarball, with npm's provenance (the run and commit that built it, signed by GitHub's OIDC token).
+  # It waits in `release`, which holds NPM_TOKEN, as publish does, but needs neither publish nor its secrets: a failure of
+  # one doesn't hold up the other. Re-run for the same tag, it publishes nothing where npm has this tarball already, and
+  # fails where npm has another under the version.
+  publish-npm:
+    needs: [check, build]
+    if: needs.check.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    environment: release
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      # npm's provenance: the OIDC token that signs where the package came from.
+      id-token: write
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+      NPM_NAME: ${{ needs.build.outputs.npm-name }}
+      TARBALL: ${{ needs.build.outputs.npm-tarball }}
+      INTEGRITY: ${{ needs.build.outputs.npm-integrity }}
+    # No checkout: the tarball is all it needs.
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+          registry-url: https://registry.npmjs.org
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: compiler-npm-${{ env.VERSION }}
+          path: ${{ runner.temp }}/npm
+      - name: The tarball is build's
+        env:
+          NPM_SHA256: ${{ needs.build.outputs.npm-sha256 }}
+        run: |
+          got=$(shasum -a 256 "$RUNNER_TEMP/npm/$TARBALL" | cut -d' ' -f1)
+          if [[ -z "$NPM_SHA256" || "$got" != "$NPM_SHA256" ]]; then
+            echo "::error::The npm tarball downloaded has SHA-256 $got, not ${NPM_SHA256:-none} as build made it."
+            exit 1
+          fi
+      - name: The release secret is set
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [[ -z "$NPM_TOKEN" ]]; then
+            echo "::error::The release environment is missing NPM_TOKEN."
+            exit 1
+          fi
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          # A re-run: npm has the version already. It is this run's tarball, or the publish fails.
+          if published=$(npm view "$NPM_NAME@$VERSION" dist.integrity 2> /dev/null) && [[ -n "$published" ]]; then
+            if [[ "$published" == "$INTEGRITY" ]]; then
+              echo "npm already has $NPM_NAME@$VERSION, this tarball: nothing to publish."
+              exit 0
+            fi
+            echo "::error::npm already has $NPM_NAME@$VERSION, with integrity $published, not this tarball's $INTEGRITY."
+            exit 1
+          fi
+          # npm publishes a version with a suffix (1.2.3-rc.1) only under a tag of its own, never as latest.
+          tag=latest
+          [[ "$VERSION" == *-* ]] && tag=next
+          npm publish "$RUNNER_TEMP/npm/$TARBALL" --provenance --access public --tag "$tag"
+
+  # A dry run's stand-in for publish-npm: build's tarball, checked as publish-npm checks it, given to npm publish
+  # --dry-run, which packs and reports it but sends nothing and needs no token.
+  publish-npm-dry-run:
+    needs: [check, build]
+    if: needs.check.outputs.publish != 'true'
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+      TARBALL: ${{ needs.build.outputs.npm-tarball }}
+    # No checkout: the tarball is all it needs.
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+          registry-url: https://registry.npmjs.org
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: compiler-npm-${{ env.VERSION }}
+          path: ${{ runner.temp }}/npm
+      - name: The tarball is build's
+        env:
+          NPM_SHA256: ${{ needs.build.outputs.npm-sha256 }}
+        run: |
+          got=$(shasum -a 256 "$RUNNER_TEMP/npm/$TARBALL" | cut -d' ' -f1)
+          if [[ -z "$NPM_SHA256" || "$got" != "$NPM_SHA256" ]]; then
+            echo "::error::The npm tarball downloaded has SHA-256 $got, not ${NPM_SHA256:-none} as build made it."
+            exit 1
+          fi
+      - name: Publish to npm, as a dry run
+        run: npm publish "$RUNNER_TEMP/npm/$TARBALL" --dry-run --access public --tag dry-run
 
   # A dry run's stand-in for publish, which it skips: build's bundle signed as publish signs it, but with a key made here
   # and thrown away with the runner, with GitHub's release downloads blocked throughout, then checked to be build's bundle

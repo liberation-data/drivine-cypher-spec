@@ -105,7 +105,8 @@ top-level await, so the entry runs that loader's text as a function with its Nod
 is checked, so a Kotlin release that writes the loader otherwise fails at once. The corpus check on wasmJs goes through
 this entry. Each entry has its TypeScript types: Kotlin's `.d.mts` for `import`, and `npm/index.d.cts` for `require`.
 
-The package's name is set once, as `compiler.npmName` in `gradle.properties`. The corpus check on wasmJs fails when the
+The package holds the wasm, its loaders, the CommonJS entry, the types of each, a short README (`npm/README.md`) and
+the repository's LICENSE. The package's name is set once, as `compiler.npmName` in `gradle.properties`. The corpus check on wasmJs fails when the
 package it loads has another (`check/corpus-node-test.sh` tests that).
 
 ### C
@@ -257,7 +258,8 @@ After the merge, it lists what to look at by hand (`scripts/sync-report.py`):
 
 A spec tag is a compiler release: pushing the tag `vX.Y.Z` on `main` publishes the compiler to Maven Central as
 `org.drivine:drivine-cypher-compiler` `X.Y.Z`, with one artifact for each target (`-jvm`, `-wasm-js`, `-macosarm64`,
-`-linuxx64`, `-linuxarm64`, `-mingwx64`). The compiler and the spec it was checked against then share one number, so a
+`-linuxx64`, `-linuxarm64`, `-mingwx64`), and its wasmJs build to npm as `@liberation-data/drivine-cypher-compiler`
+`X.Y.Z` (the name is `compiler.npmName` in `gradle.properties`). The compiler and the spec it was checked against then share one number, so a
 library pins one tag for both. A tag that changes only the spec publishes the compiler again, unchanged, under the new
 number.
 
@@ -287,6 +289,20 @@ it is published. A failed upload is re-run
 alone ("Re-run failed jobs"), and waits for the reviewer again; the upload itself isn't retried, as a second would make
 a second deployment of the version, so look at https://central.sonatype.com/publishing/deployments before re-running one
 that failed without the Portal's answer.
+
+**npm.** Step 2 also builds the npm package (`./gradlew npmPackage`, at the tag's version), packs it as npm publishes it,
+and checks the tarball (`.github/scripts/compiler-npm-check.sh`): the package's name and the tag's version, and its
+files and nothing else (the wasm, its loaders, the CommonJS entry, the types, `npm/README.md` and the repository's
+LICENSE). The tarball, its SHA-256 and its npm integrity are kept beside the bundle. Its publish is a job of its own,
+`publish-npm`, which also waits in the `release` environment for its reviewer, and needs only the tarball: it checks
+the tarball's SHA-256 is step 2's, then publishes it with npm's provenance, which records the run and the commit that
+built it (`--provenance`, from the job's OIDC token). A version with a suffix is published under the npm tag `next`, and
+any other under `latest`. The two publishes don't wait on each other, so a failure of one neither undoes nor holds up
+the other. A re-run publishes nothing where npm has the version as this tarball (by its integrity), and fails where npm
+has another tarball under the version, as npm never takes a version twice. The gate's wasmJs job packs the package
+too, installs it into an empty project with only the dependencies its `package.json` names, and compiles the corpus
+through it, byte for byte the JVM's (`.github/scripts/compiler-npm-clean-install.sh`). A dry run gives the tarball to
+`npm publish --dry-run`, which sends nothing.
 
 The jobs that build install the pinned JDK and Gradle with `.github/actions/pinned-toolchain`: from Adoptium's archive
 of `gradle/pinned-jdk.properties`'s `version` and the zip `gradle/wrapper/gradle-wrapper.properties` names, each checked
@@ -318,7 +334,9 @@ publication makes, or a checksum of a file it doesn't hold.
 
 The `release` environment is this repository's own, not drivine4j's, and is set up once in its settings before the first
 release: a required reviewer, tags `v*` allowed to deploy to it, and the secrets drivine4j's release uses,
-`CENTRAL_PORTAL_USERNAME`, `CENTRAL_PORTAL_PASSWORD`, `SIGNING_KEY` and `SIGNING_PASSWORD`. Without it, a tag's run makes
+`CENTRAL_PORTAL_USERNAME`, `CENTRAL_PORTAL_PASSWORD`, `SIGNING_KEY` and `SIGNING_PASSWORD`, with `NPM_TOKEN`, an npm
+automation token that can publish in the `@liberation-data` scope, until npm's trusted publishing for this workflow
+replaces it (#117). Without it, a tag's run makes
 an empty one, with no reviewer, and step 3 stops at its check of the secrets.
 
 Push the tag with or after `main`: a tag pushed before the commit is on `main` is refused at step 1; push `main` and

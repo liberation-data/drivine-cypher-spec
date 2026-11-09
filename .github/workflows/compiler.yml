@@ -53,6 +53,13 @@ jobs:
       - name: The npm corpus check, over made-up packages
         run: check/corpus-node-test.sh
       - run: ./gradlew --no-daemon clean wasmJsNodeTest wasmJsCorpusCheck -Pnode="$(command -v node)" | tee corpus.log
+      # The package as npm gives it: packed, installed into an empty project with only the dependencies it names, then
+      # every corpus request compiled through it, byte for byte the JVM's.
+      - name: The packed npm package, installed in an empty project, compiles the corpus as the JVM does
+        run: |
+          tgz="$(npm pack ./build/npm --pack-destination build --silent | tail -n 1)"
+          ../.github/scripts/compiler-npm-check.sh "build/$tgz" "$(node -p 'require("./build/npm/package.json").version')" "$(grep '^compiler.npmName=' gradle.properties | cut -d= -f2-)"
+          ../.github/scripts/compiler-npm-clean-install.sh "build/$tgz" build/oracle/corpus.jsonl build/oracle/differences-npm.jsonl | tee -a corpus.log
       - name: Summary
         if: always()
         run: ../.github/scripts/compiler-summary.sh build/test-results/wasmJsNodeTest corpus.log >> "$GITHUB_STEP_SUMMARY"

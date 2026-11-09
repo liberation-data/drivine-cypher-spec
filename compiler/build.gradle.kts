@@ -205,12 +205,13 @@ tasks.withType<org.jetbrains.kotlin.gradle.targets.js.testing.KotlinJsTest>().co
 /** The npm package's name, from gradle.properties: the one name the package, its check and the release use. */
 val npmName: String = providers.gradleProperty("compiler.npmName").get()
 
-/** The npm package, [npmName], in build/npm: the production wasm, its ES module loaders, the CJS entry, and the types of each. */
+/** The npm package, [npmName], in build/npm: the production wasm, its ES module loaders, the CJS entry, the types of each, its README and the repository's LICENSE. */
 val npmPackage = tasks.register<Sync>("npmPackage") {
     description = "Assembles the npm package $npmName in build/npm."
     val distribution = tasks.named("wasmJsNodeProductionLibraryDistribution")
     from(distribution) { include("*.wasm", "*.mjs", "*.d.mts") }
-    from(layout.projectDirectory.dir("npm")) { include("index.cjs", "index.d.cts") }
+    from(layout.projectDirectory.dir("npm")) { include("index.cjs", "index.d.cts", "README.md") }
+    from(layout.projectDirectory.file("../LICENSE"))
     into(layout.buildDirectory.dir("npm"))
     val packageName = npmName
     val packageVersion = project.version.toString()
