@@ -3733,8 +3733,8 @@ cases:
         rows: [[{$float: "Infinity"}, {$float: "-Infinity"}, 0.0, 1.7976931348623157e308, {$float: "Infinity"}, 4.9e-324, 0.0, 9.223372036854776e18, 9.223372036854776e18, -9.223372036854776e18, 9.007199254740992e15, 1.2345678901234568e29]]
       - note: "So is one with an exponent past a long's."
         only: [neo4j, sql]
-        cypher: "RETURN [toFloat('1e5000000000')]"
-        rows: [[{$float: "Infinity"}]]
+        cypher: "RETURN [toFloat('1e5000000000'), toFloat('-1e5000000000'), toFloat('1e-5000000000')]"
+        rows: [[{$float: "Infinity"}, {$float: "-Infinity"}, 0.0]]
       - note: "A text given as a parameter is read alike. The SQL stores give null for the Java and Cypher forms here (drivine4j#696)."
         only: [neo4j]
         cypher: "RETURN [toFloat($a), toFloat($b), toFloat($c), toFloat($d), toFloat($e), toFloat($f)]"

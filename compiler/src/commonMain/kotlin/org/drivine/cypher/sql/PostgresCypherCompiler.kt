@@ -477,11 +477,13 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
      * - **A number Cypher writes**, where [cypher], as `toFloat` reads one, with Cypher's spaces around it, Unicode's among
      *   them ([CYPHER_NUMBER_TEXT]), is read by `CAST` once `btrim` takes those off.
      *
-     * Either is read with its exponent held to [EXPONENT_BOUND] ([bounded]), past which `numeric` overflows and fails. Any
-     * other text is null, though Neo4j reads some of them (drivine4j#696).
+     * Where [cypher], either is read with its exponent held to [EXPONENT_BOUND] ([bounded]), past which `numeric` overflows
+     * and fails. `toInteger`'s is not: Neo4j fails a text past a long's range, and `numeric`'s failure is the nearer
+     * (drivine4j#694). Any other text is null, though Neo4j reads some of them (drivine4j#696).
      */
     private fun numeric(json: String, cypher: Boolean = false) = shared(json) { (x) ->
-        "CASE WHEN jsonb_typeof($x) = 'number' THEN ${number(x)} WHEN ($x #>> '{}') ~ ${literal(NUMERIC_TEXT)} THEN CAST(${bounded("$x #>> '{}'")} AS numeric) " +
+        "CASE WHEN jsonb_typeof($x) = 'number' THEN ${number(x)} WHEN ($x #>> '{}') ~ ${literal(NUMERIC_TEXT)} " +
+            "THEN CAST(${if (cypher) bounded("$x #>> '{}'") else "$x #>> '{}'"} AS numeric) " +
             (if (cypher) "WHEN ($x #>> '{}') ~ ${literal(CYPHER_NUMBER_TEXT)} THEN CAST(${bounded("btrim($x #>> '{}', $CYPHER_SPACE_CHARS)")} AS numeric) " else "") +
             "END"
     }
