@@ -3670,8 +3670,8 @@ cases:
         rows: [[1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 1.5, 0.5, 1.2345678901234568e17]]
       - note: "So written, a float past a double's range is an infinity or 0.0, and Cypher's exponents are read too (drivine4j#693). Oracle gives null (drivine4j#696)."
         only: [neo4j, postgres, sqlite]
-        cypher: "RETURN [toFloat('\\u00A01E3'), toFloat('\\u00A01e-3'), toFloat('\\u00A01e+3'), toFloat('\\u00A01e400'), toFloat('\\u00A0-1e400'), toFloat('\\u00A01e-400'), toFloat('\\u00A0-0')]"
-        rows: [[1000.0, 0.001, 1000.0, {$float: "Infinity"}, {$float: "-Infinity"}, 0.0, 0.0]]
+        cypher: "RETURN [toFloat('\\u00A01E3'), toFloat('\\u00A01e-3'), toFloat('\\u00A01e+3'), toFloat('\\u00A01e400'), toFloat('\\u00A0-1e400'), toFloat('\\u00A01e-400'), toFloat('\\u00A0-0'), toFloat('\\u00A01e-999'), toFloat('\\u00A01e5000000000')]"
+        rows: [[1000.0, 0.001, 1000.0, {$float: "Infinity"}, {$float: "-Infinity"}, 0.0, 0.0, 0.0, {$float: "Infinity"}]]
       - note: "And Cypher's whole numbers and a _ between digits. The SQL stores give null (drivine4j#696)."
         only: [neo4j]
         cypher: "RETURN [toFloat('\\u00A01_000'), toFloat('\\u00A00x10'), toFloat('\\u00A0-0o17'), toFloat('0x10\\u00A0'), toFloat('1_0e400'), toFloat('\\u00A0\\u001C1_0')]"
@@ -3733,8 +3733,8 @@ cases:
         rows: [[{$float: "Infinity"}, {$float: "-Infinity"}, 0.0, 1.7976931348623157e308, {$float: "Infinity"}, 4.9e-324, 0.0, 9.223372036854776e18, 9.223372036854776e18, -9.223372036854776e18, 9.007199254740992e15, 1.2345678901234568e29]]
       - note: "So is one with an exponent past a long's."
         only: [neo4j, sql]
-        cypher: "RETURN [toFloat('1e5000000000'), toFloat('-1e5000000000'), toFloat('1e-5000000000')]"
-        rows: [[{$float: "Infinity"}, {$float: "-Infinity"}, 0.0]]
+        cypher: "RETURN [toFloat('1e5000000000'), toFloat('-1e5000000000'), toFloat('1e-5000000000'), toFloat('1e-999')]"
+        rows: [[{$float: "Infinity"}, {$float: "-Infinity"}, 0.0, 0.0]]
       - note: "A text given as a parameter is read alike. The SQL stores give null for the Java and Cypher forms here (drivine4j#696)."
         only: [neo4j]
         cypher: "RETURN [toFloat($a), toFloat($b), toFloat($c), toFloat($d), toFloat($e), toFloat($f)]"

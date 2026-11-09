@@ -477,16 +477,24 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
      * - **A number Cypher writes**, where [cypher], as `toFloat` reads one, with Cypher's spaces around it, Unicode's among
      *   them ([CYPHER_NUMBER_TEXT]), is read by `CAST` once `btrim` takes those off.
      *
-     * Where [cypher], either is read with its exponent held to [EXPONENT_BOUND] ([bounded]), past which `numeric` overflows
-     * and fails. `toInteger`'s is not: Neo4j fails a text past a long's range, and `numeric`'s failure is the nearer
-     * (drivine4j#694). Any other text is null, though Neo4j reads some of them (drivine4j#696).
+     * Where [cypher], either is read as [textAsFloat] reads it. `toInteger`'s is not: Neo4j fails a text past a long's range,
+     * and `numeric`'s failure is the nearer (drivine4j#694). Any other text is null, though Neo4j reads some of them
+     * (drivine4j#696).
      */
     private fun numeric(json: String, cypher: Boolean = false) = shared(json) { (x) ->
         "CASE WHEN jsonb_typeof($x) = 'number' THEN ${number(x)} WHEN ($x #>> '{}') ~ ${literal(NUMERIC_TEXT)} " +
-            "THEN CAST(${if (cypher) bounded("$x #>> '{}'") else "$x #>> '{}'"} AS numeric) " +
-            (if (cypher) "WHEN ($x #>> '{}') ~ ${literal(CYPHER_NUMBER_TEXT)} THEN CAST(${bounded("btrim($x #>> '{}', $CYPHER_SPACE_CHARS)")} AS numeric) " else "") +
+            "THEN ${if (cypher) textAsFloat("$x #>> '{}'") else "CAST($x #>> '{}' AS numeric)"} " +
+            (if (cypher) "WHEN ($x #>> '{}') ~ ${literal(CYPHER_NUMBER_TEXT)} THEN ${textAsFloat("btrim($x #>> '{}', $CYPHER_SPACE_CHARS)")} " else "") +
             "END"
     }
+
+    /**
+     * The text [text], a number, as a `numeric` that reads as the double Neo4j's `toFloat` gives: its exponent held to
+     * [EXPONENT_BOUND] ([bounded]), and rounded to [MOST_PLACES], past which a double has no digit. A number nearer 0 than
+     * any double is 0 then, as in Neo4j, and is written in few enough digits to be read: `'1e-999'` would otherwise be
+     * written in 1,001, past what Drivine reads a JSON number in (drivine4j#692).
+     */
+    private fun textAsFloat(text: String) = "round(CAST(${bounded(text)} AS numeric), $MOST_PLACES)"
 
     /**
      * The text [text], a number, with an exponent of more than [EXPONENT_BOUND] held to it: `numeric` fails past about
