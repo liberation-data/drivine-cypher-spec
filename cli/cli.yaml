@@ -211,6 +211,11 @@ cases:
     stdout: "y\n8\n"
     exit: 0
 
+  - name: "A -P whose expression fails exits with 1, and runs nothing"
+    args: ["--format", "plain", "-P", "x => 1/0", "RETURN 1 AS one"]
+    stdout: ""
+    exit: 1
+
   - name: "-P takes NAME=EXPRESSION, and a later parameter replaces an earlier one"
     args: ["--format", "plain", "-P", "y=1", "--param", "y => 'z'", "RETURN $y AS y"]
     stdout: "y\n\"z\"\n"
@@ -279,6 +284,12 @@ cases:
     store: false
     files: {"f.cypher": "RETURN 1;\n"}
     args: ["-f", "f.cypher", "RETURN 2"]
+    exit: 2
+
+  - name: "A -f file that can't be read exits with 2"
+    store: false
+    args: ["-f", "missing.cypher"]
+    stdout: ""
     exit: 2
 
   - name: "--fail-fast with --fail-at-end exits with 2"

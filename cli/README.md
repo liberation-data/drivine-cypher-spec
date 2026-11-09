@@ -167,7 +167,7 @@ FalkorDB commits each statement as it runs, so there `:begin` and `:commit` do n
 
 `-P NAME=EXPRESSION` is taken too.
 
-The expression is Cypher. It's evaluated by running `RETURN expression` on the store, so a parameter holds what the store gives for it. A parameter set later replaces an earlier one of the same name. A statement that uses a parameter that isn't set fails, on every store, as it does on Neo4j.
+The expression is Cypher. It's evaluated by running `RETURN expression` on the store, so a parameter holds what the store gives for it. A parameter set later replaces an earlier one of the same name. A statement that uses a parameter that isn't set fails, on every store, as it does on Neo4j. A `-P` whose expression fails on the store fails as a statement does, with exit code 1, before any statement runs.
 
 ## Output
 
@@ -210,7 +210,7 @@ On a SQL store, the CLI reads a node's labels and a relationship's type along wi
 |---|---|
 | 0 | Everything ran. |
 | 1 | A statement or a command failed. |
-| 2 | The invocation is wrong: an unknown or refused flag, a bad value, two inputs, a bad profile. Nothing ran. The invocation is checked before the CLI connects, so it exits with 2, not 3, where the store can't be reached too. |
+| 2 | The invocation is wrong: an unknown or refused flag, a bad value, two inputs, a `-f` file that can't be read, a bad profile. Nothing ran. The invocation is checked before the CLI connects, so it exits with 2, not 3, where the store can't be reached too. |
 | 3 | The store can't be reached, or it refused the user and password. Nothing ran. |
 
 cypher-shell exits with 1 in all these cases. A script that tests for non-zero works with both, and a script that tests for 1 alone sees `drivine` exit with 2 or 3 where cypher-shell exited with 1.
