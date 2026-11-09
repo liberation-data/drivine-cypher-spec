@@ -55,6 +55,33 @@ cases:
     stdout: "s, q\n\"a\\\"b\\c\", \"it's\"\n"
     exit: 0
 
+  - name: "plain prints a float as Java's Double.toString does, and a whole number past 2^53 exactly"
+    cypherShell: true
+    args: ["--format", "plain", "RETURN 1.0E10 AS a, 0.0001 AS b, 12345.678 AS c, 0.1 AS d, 9007199254740993 AS i"]
+    stdout: "a, b, c, d, i\n1.0E10, 1.0E-4, 12345.678, 0.1, 9007199254740993\n"
+    exit: 0
+
+  - name: "plain prints a date as its ISO text, unquoted"
+    cypherShell: true
+    only: [neo4j]
+    args: ["--format", "plain", "RETURN date('2024-01-01') AS d"]
+    stdout: "d\n2024-01-01\n"
+    exit: 0
+
+  - name: "plain prints -0.0 with its sign"
+    cypherShell: true
+    only: [neo4j]
+    args: ["--format", "plain", "RETURN -0.0 AS z"]
+    stdout: "z\n-0.0\n"
+    exit: 0
+
+  - name: "plain prints a text's characters as they are"
+    cypherShell: true
+    args: ["--format", "plain", "CREATE (n:P {t: 'é😀'}) RETURN n, 'é😀' AS t"]
+    stdout: "n, t\n(:P {t: \"é😀\"}), \"é😀\"\n"
+    exit: 0
+    note: "Keys come in the store's order, which differs by store, so no case compares a map or a node of two keys or more."
+
   - name: "-c runs as the positional argument does"
     args: ["--format", "plain", "-c", "RETURN 2 AS two"]
     stdout: "two\n2\n"
@@ -162,6 +189,13 @@ cases:
     cypherShell: true
     files: {"r.cypher": "RETURN 1 AS a;\n:exit\nRETURN 2 AS b;\n"}
     args: ["--format", "plain", "-f", "r.cypher"]
+    stdout: "a\n1\n"
+    exit: 0
+
+  - name: "A file whose lines end in \\r\\n reads as one whose lines end in \\n"
+    cypherShell: true
+    files: {"w.cypher": "RETURN 1 AS a;\r\n:exit\r\nRETURN 2 AS b;\r\n"}
+    args: ["--format", "plain", "-f", "w.cypher"]
     stdout: "a\n1\n"
     exit: 0
 
@@ -411,6 +445,23 @@ cases:
   - name: "json writes NaN and the infinities as the spec does"
     args: ["--format", "json", "RETURN 0.0 / 0.0 AS nan, 1.0 / 0.0 AS inf"]
     stdout: "{\"columns\":[\"nan\",\"inf\"],\"rows\":[[{\"$float\":\"NaN\"},{\"$float\":\"Infinity\"}]]}\n"
+    exit: 0
+
+  - name: "json writes a float as plain prints it, and a whole number past 2^53 exactly"
+    args: ["--format", "json", "RETURN 1.0E10 AS a, 0.0001 AS b, 12345.678 AS c, 9007199254740993 AS i"]
+    stdout: "{\"columns\":[\"a\",\"b\",\"c\",\"i\"],\"rows\":[[1.0E10,1.0E-4,12345.678,9007199254740993]]}\n"
+    exit: 0
+
+  - name: "json writes a text's characters as they are"
+    args: ["--format", "json", "RETURN {k: 'é😀'} AS m, 'é😀\\n' AS t"]
+    stdout: "{\"columns\":[\"m\",\"t\"],\"rows\":[[{\"k\":\"é😀\"},\"é😀\\n\"]]}\n"
+    exit: 0
+
+  - name: "json writes a temporal value as its ISO 8601 text, a string"
+    only: [neo4j, sql]
+    stdin: "RETURN date('2024-01-01') AS d;\n"
+    args: ["--format", "json"]
+    stdout: "{\"columns\":[\"d\"],\"rows\":[[\"2024-01-01\"]]}\n"
     exit: 0
 
   - name: "csv quotes a field only where it holds a , a \" or a line break, and null is an empty field"

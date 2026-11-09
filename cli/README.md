@@ -135,7 +135,7 @@ A file, stdin and the positional argument are read alike.
 - a `//` comment, to the end of its line;
 - a `/* … */` comment.
 
-A statement that is only spaces and comments isn't run. The text after the last `;` is run too, as long as it is more than spaces and comments.
+A line may end in `\r\n` as well as `\n`: the `\r` is not part of a command. A statement that is only spaces and comments isn't run. The text after the last `;` is run too, as long as it is more than spaces and comments.
 
 **Commands.** A line whose first character after any spaces is `:` is a command, where a statement would start: not inside a string, a comment, or a statement that no `;` has ended yet. It runs on its own, and needs no `;`:
 
@@ -178,8 +178,8 @@ The expression is Cypher. It's evaluated by running `RETURN expression` on the s
 | `auto` | `verbose` when stdout is a terminal, `plain` when it isn't. This is the default. |
 | `verbose` | Each result as a table, then its count of rows and how long it took, then the store's counts of what it wrote, as cypher-shell prints them. A result with no columns, such as a write with no `RETURN`, prints no table. |
 | `plain` | Each result's columns, `, ` between them, then a line per row, with the values printed as cypher-shell prints them. A result with no rows prints nothing. |
-| `json` | One line per statement, compact: `{"columns":[...],"rows":[[...],...]}`. Values are written as the spec's files write them, with NaN and the infinities as `{"$float":"NaN"}` and the others, and a float always with a fraction: `2.0`, not `2`. |
-| `csv` | Each result as RFC 4180 CSV, with a header row, and lines that end in `\n`. A text is its own characters, null is an empty field, and any other value is its compact JSON. A field is in `"…"` only when it holds a `,`, a `"` or a line break. Results are separated by one empty line. |
+| `json` | One line per statement, compact: `{"columns":[...],"rows":[[...],...]}`. Values are written as the spec's files write them, with NaN and the infinities as `{"$float":"NaN"}` and the others, and a float as `plain` prints it: `2.0`, not `2`, and `1.0E10`. A whole number is written exactly, past 2^53 too. A text's characters are written as they are, with a `\u` escape only where JSON requires one. A temporal value is its ISO 8601 text, as a JSON string. |
+| `csv` | Each result as RFC 4180 CSV, with a header row, and lines that end in `\n`. A text and a temporal value are their own characters, null is an empty field, and any other value is its compact JSON. A field is in `"…"` only when it holds a `,`, a `"` or a line break. Results are separated by one empty line. |
 
 **How `plain` and `verbose` print a value**, as cypher-shell does:
 
@@ -187,13 +187,19 @@ The expression is Cypher. It's evaluated by running `RETURN expression` on the s
 |---|---|
 | null | `NULL` |
 | a boolean | `TRUE` or `FALSE` |
-| a float | always with a fraction: `2.0`, not `2`, which is a whole number |
+| a float | as Java's `Double.toString` writes it: always with a fraction, `2.0`, not `2`, which is a whole number; the fewest digits that read back as the same double; an exponent below 10^-3 and from 10^7, as in `1.0E10` and `1.0E-4`; and `-0.0` with its sign |
+| a whole number | exactly, past 2^53 too |
 | a text | in `"…"`, with each `"` escaped as `\"`. A `\` and a line break are printed as they are: `'a"b\\c'` prints as `"a\"b\c"`. |
 | a list | `[1, "b"]` |
 | a map | `{k: 2}` |
 | a node | `(:Label {key: value})` |
 | a relationship | `[:TYPE {key: value}]` |
+| a temporal value | its ISO 8601 text, unquoted, as the driver gives it. A SQL store gives a temporal value as text, so there it prints as a text. |
 | a path | its nodes and relationships, as in `(:A)-[:R]->(:B)<-[:S]-(:C)`: `-[…]->` for a relationship walked along its direction, `<-[…]-` for one walked against it |
+
+**Order.** A map's keys, and a node's or a relationship's properties, print in the order the store gives them, in every format, as cypher-shell prints them. Neo4j gives `{b: 1, a: 2, aa: 3}` as `{aa: 3, a: 2, b: 1}`, and Postgres's `jsonb` orders keys shortest first, so no case compares two keys' order.
+
+**Text and lines.** Every format writes UTF-8 and ends each line with `\n`, on Windows too.
 
 On a SQL store, the CLI reads a node's labels and a relationship's type along with their properties, though `PersistenceManager.query` gives only the properties, and prints them as it would on Neo4j.
 
