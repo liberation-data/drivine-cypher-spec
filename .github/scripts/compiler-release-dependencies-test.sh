@@ -4,10 +4,10 @@
 # unpack would refuse. unpack must put a zip of stage's paths where the build looks for them (and lay out the runner's
 # binaryen archive as its releases are, only where the verification metadata pins it), and must refuse whole, putting
 # nothing anywhere, a zip with a name that climbs out, an absolute name, a name at a path stage doesn't make, a name
-# twice, a link, or that isn't a zip. check must pass the
-# dependencies the list pins, and fail one it doesn't, or a list that pins nothing. fetch must put in Kotlin/Native's
-# cache only an archive with the pinned SHA-256, kept or fetched again, and fail where it has none. Run by
-# compiler-release.yml's dry run, in build, on macOS as build unpacks there.
+# twice, a link, or that isn't a zip. check must pass the dependencies the list pins, and fail one it doesn't, or a
+# list that pins nothing. fetch must put in Kotlin/Native's cache only an archive with the pinned SHA-256, kept or
+# fetched again, and fail where it has none. Run by compiler-release.yml's dry run, in build, on macOS as build unpacks
+# there.
 #   compiler-release-dependencies-test.sh
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
