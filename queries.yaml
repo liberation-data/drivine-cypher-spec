@@ -352,8 +352,7 @@ cases:
           }
         rows:
           - {all: true, none: false, single: true, xor: true, case: "two", power: 8.0, negated: -3, abs: 2.5, trimmed: "a", lower: "ab", unordered: null}
-      - note: "A key or an index an expression gives: Oracle reads no key so (see the Oracle case below)."
-        except: [oracle]
+      - note: "A key or an index an expression gives."
         cypher: "WITH {a: 2} AS m, [1, 3] AS xs, 'a' AS k, 1 AS i RETURN [m[k], xs[i]]"
         rows: [[2, 3]]
 
@@ -2444,12 +2443,122 @@ cases:
         cypher: "MATCH p = (a:Person)-[:KNOWS*1..2]->(b) RETURN p"
         error: "A path is not a value drivine gives the same on each store: use nodes(p), relationships(p) and length(p)."
 
-  - name: "Computed index on Oracle"
-    description: "On Oracle, a computed list index works but a computed map key gives null."
+  - name: "A key worked out at run time"
+    description: "A map, a node or a relationship read by a key an expression gives reads the entry at that key, whatever the key holds; a key it doesn't hold, a null key, a null map and an empty one read null (drivine4j#417)."
     steps:
-      - only: [oracle]
-        cypher: "WITH {a: 1} AS m, 'a' AS k, [5, 6] AS xs, 1 AS i RETURN [m[k], xs[i]]"
-        rows: [[null, 6]]
+      - cypher: "WITH {a: 1} AS m, 'a' AS k, [5, 6] AS xs, 1 AS i RETURN [m[k], xs[i]]"
+        rows: [[1, 6]]
+      - cypher: "MATCH (p:Person {name: 'Keanu'}) RETURN p['na' + 'me']"
+        rows: ["Keanu"]
+      - cypher: "MATCH (p:Person {name: 'Keanu'}) WITH p, 'born' AS k RETURN p[k]"
+        rows: [1964]
+      - cypher: "MATCH (p:Person {name: 'Keanu'}) RETURN p[$k]"
+        parameters: {k: "born"}
+        rows: [1964]
+      - cypher: "WITH {name: 'Apa'} AS m, 'name' AS k RETURN m[k]"
+        rows: ["Apa"]
+      - cypher: "WITH $expr AS expr, $idx AS idx RETURN expr[idx]"
+        parameters: {expr: {name: "Apa"}, idx: "name"}
+        rows: ["Apa"]
+      - cypher: "WITH $expr AS expr, $idx AS idx RETURN expr[toString(idx)]"
+        parameters: {expr: {name: "Apa"}, idx: "name"}
+        rows: ["Apa"]
+      - cypher: "MATCH (p:Person {name: 'Keanu'}) RETURN [k IN keys(p) | p[k]]"
+        unorderedLists: true
+        rows: [["Keanu", 1964]]
+      - cypher: "MATCH (:Person {name: 'Carrie'})-[r:ACTED_IN]->(:Movie {title: 'The Matrix'}) RETURN [key IN keys(r) | key + '->' + r[key]]"
+        rows: [["role->Trinity"]]
+      - cypher: "MATCH (:Person {name: 'Carrie'})-[r:ACTED_IN]->(:Movie {title: 'The Matrix'}) UNWIND keys(r) AS k RETURN [k, r[k]]"
+        rows: [["role", "Trinity"]]
+      - note: "Keys that a JSON path would read otherwise, as written: a quote, a dot, a $, a space, brackets, a backslash, a number's digits and unicode."
+        cypher: "WITH {`it's`: 1, `a.b`: 2, `$x`: 3, `a b`: 4, `[0]`: 5, `ключ`: 6, `\"q\"`: 7, `a\\b`: 8, `0`: 9} AS m UNWIND keys(m) AS k RETURN [k, m[k]] ORDER BY k"
+        rows: [["\"q\"", 7], ["$x", 3], ["0", 9], ["[0]", 5], ["a b", 4], ["a.b", 2], ["a\\b", 8], ["it's", 1], ["ключ", 6]]
+      - cypher: "WITH $m AS m UNWIND keys(m) AS k RETURN [k, m[k]] ORDER BY k"
+        parameters: {m: {"it's": 1, "a.b": 2, "$x": 3, "a b": 4, "[0]": 5, "ключ": 6, "\"q\"": 7, "a\\b": 8}}
+        rows: [["\"q\"", 7], ["$x", 3], ["[0]", 5], ["a b", 4], ["a.b", 2], ["a\\b", 8], ["it's", 1], ["ключ", 6]]
+      - note: "An empty key."
+        cypher: "WITH $m AS m, $k AS k, $j AS j RETURN [m[k], m[j]]"
+        parameters: {m: {"": 9, "a": 1}, k: "", j: "a"}
+        rows: [[9, 1]]
+      - note: "An empty key the statement is compiled for, a parameter's: Oracle reads no empty key by its path."
+        except: [oracle]
+        cypher: "WITH $m AS m RETURN m[$k]"
+        parameters: {m: {"": 9}, k: ""}
+        rows: [9]
+      - note: "Map2 [5]: a key is matched case and all."
+        cypher: "WITH {name: 'Mats', Name: 'Pontus'} AS m RETURN [m['na' + 'me'], m['Na' + 'me'], m['nA' + 'Me']]"
+        rows: [["Mats", "Pontus", null]]
+      - cypher: "WITH {null: 'Mats', NULL: 'Pontus'} AS m, 'null' AS a, 'NULL' AS b RETURN [m[a], m[b]]"
+        rows: [["Mats", "Pontus"]]
+      - cypher: "WITH {a: {b: 1}, l: [1, 2], f: 1.5, t: true, z: null, s: 'x'} AS m UNWIND ['a', 'l', 'f', 't', 'z', 's'] AS k RETURN [k, m[k], m[k] IS NULL] ORDER BY k"
+        rows: [["a", {b: 1}, false], ["f", 1.5, false], ["l", [1, 2], false], ["s", "x", false], ["t", true, false], ["z", null, true]]
+      - cypher: "WITH {a: {b: 1}} AS m, 'a' AS k, 'b' AS j RETURN [m[k][j], m[k].b]"
+        rows: [[1, 1]]
+      - cypher: "WITH {d: date('2020-01-02'), f: 2.0} AS m, 'd' AS k, 'f' AS j RETURN [toString(m[k]), m[j]]"
+        rows: [["2020-01-02", 2.0]]
+      - cypher: "MATCH (p:Person {name: 'Keanu'}) RETURN [p['bo' + 'rn'] + 1, size(p['na' + 'me'])]"
+        rows: [[1965, 5]]
+      - cypher: "WITH {a: 1} AS m RETURN [m['no' + 'pe'], m[null], m[$k]]"
+        parameters: {k: null}
+        rows: [[null, null, null]]
+      - cypher: "MATCH (p:Person {name: 'Keanu'}) WITH p, 'nope' AS k, null AS j RETURN [p[k], p[j]]"
+        rows: [[null, null]]
+      - cypher: "WITH null AS m, 'x' AS k RETURN m[k]"
+        rows: [null]
+      - note: "An empty map."
+        cypher: "WITH $m AS m, 'a' AS k RETURN m[k]"
+        parameters: {m: {}}
+        rows: [null]
+      - note: "Only a map's entries are read: a list read by a text is null on a SQL store, and not its items' entries. Neo4j fails."
+        only: [sql]
+        cypher: "UNWIND [[{a: 1}], {a: 2}] AS x WITH x, 'a' AS k RETURN x[k]"
+        unordered: true
+        rows: [null, 2]
+      - cypher: "OPTIONAL MATCH (x:Nobody) WITH x, 'name' AS k RETURN x[k]"
+        rows: [null]
+      - cypher: "MATCH (p:Person) WITH p, 'name' AS k WHERE p[k] = 'Keanu' RETURN p.born"
+        rows: [1964]
+      - note: "The label test is kept beside the read, in a WHERE too: a Code has no name either, and would be counted."
+        cypher: "MATCH (m:Movie) WITH m, 'name' AS k WHERE m[k] IS NULL RETURN count(*)"
+        rows: [3]
+      - cypher: "MATCH (p:Person) WHERE p.born IS NOT NULL WITH p, 'born' AS k RETURN p.name ORDER BY p[k] DESC"
+        rows: ["Carrie", "Keanu", "Laurence"]
+      - cypher: "MATCH (m:Movie) WITH m, 'released' AS k RETURN m[k] > 2000 AS late, count(*) ORDER BY late"
+        rows: [[false, 2], [true, 1]]
+      - cypher: "MATCH (p:Person) WITH collect(p) AS ps, 'name' AS k RETURN [x IN ps | x[k]]"
+        unorderedLists: true
+        rows: [["Keanu", "Carrie", "Laurence", "Hugo"]]
+      - cypher: "UNWIND ['title', 'released'] AS k MATCH (m:Movie {title: 'The Matrix'}) RETURN [k, m[k]] ORDER BY k"
+        rows: [["released", 1999], ["title", "The Matrix"]]
+      - cypher: "MATCH (p:Person {name: 'Keanu'}) CALL (p) { WITH 'name' AS k RETURN p[k] AS v } RETURN v"
+        rows: ["Keanu"]
+      - cypher: "WITH [{a: 1}] AS l, 'a' AS k RETURN l[0][k]"
+        rows: [1]
+      - note: "A relationship or a node a map holds, read so, is that, compared by identity: neither KNOWS relationship has a property."
+        cypher: "MATCH (:Person {name: 'Keanu'})-[r1:KNOWS]->(), (:Person {name: 'Laurence'})-[r2:KNOWS]->() WITH {x: r1} AS m, r1, r2, 'x' AS k RETURN [m[k] = r1, m[k] = r2]"
+        rows: [[true, false]]
+      - cypher: "MATCH (a:Person {name: 'Keanu'}), (b:Person {name: 'Carrie'}) WITH {x: a} AS m, a, b, 'x' AS k RETURN [m[k] = a, m[k] = b, m[k].name]"
+        rows: [[true, false, "Keanu"]]
+      - note: "An entry read so, divided or taken % by an integer zero, or an integer zero read so dividing or taking % a float, fails, as a number read at run time does: Neo4j works out no entry as it plans (drivine4j#686)."
+        only: [neo4j, sql]
+        cypher: "WITH {x: 3.0} AS m, 'x' AS k RETURN m[k] / 0"
+        error: true
+      - only: [neo4j, sql]
+        cypher: "WITH {x: 5.0} AS m, 'x' AS k RETURN m[k] % 0"
+        error: true
+      - only: [neo4j, sql]
+        cypher: "WITH {z: 0} AS m, 'z' AS k RETURN 1.0 / m[k]"
+        error: true
+      - only: [neo4j, sql]
+        cypher: "WITH {z: 0} AS m, 'z' AS k RETURN 5.0 % m[k]"
+        error: true
+      - only: [neo4j, sql]
+        cypher: "MATCH (p:Person {name: 'Keanu'}) WITH p, 'born' AS k RETURN p[k] % 0"
+        error: true
+      - note: "An entry that is a float zero is a float still: taken % by it is NaN."
+        only: [neo4j, oracle]
+        cypher: "WITH {f: 0.0} AS m, 'f' AS k RETURN [5 % m[k], 5.0 % m[k]]"
+        rows: [[{$float: "NaN"}, {$float: "NaN"}]]
 
   - name: "reduce reads the row"
     description: "reduce() reads the row's variables and the parameters."
