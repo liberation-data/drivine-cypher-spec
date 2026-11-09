@@ -44,7 +44,7 @@ Only one of `cypher`, `-c` and `-f` may be given. Given two, the CLI refuses the
 | Oracle | `oracle://host:port/service` |
 | SQLite | `sqlite:path`, or `sqlite::memory:` |
 
-- **`--type TYPE`** names the store where the address leaves it open. The types are `neo4j`, `memgraph`, `falkordb`, `postgres`, `oracle` and `sqlite`.
+- **`--type TYPE`** names the store where the address leaves it open. The types are `neo4j`, `memgraph`, `falkordb`, `postgres`, `oracle` and `sqlite`. A `bolt://` address with no type is Neo4j. A type the address's scheme contradicts, as `--type neo4j` with `postgresql://`, is refused as a bad invocation.
 - **With no address** from any of these, there is no default: the CLI refuses the invocation, as a bad one, and says to give `-a`, `DRIVINE_ADDRESS` or a profile.
 
 ### The database and the graph
@@ -119,7 +119,7 @@ Flags and environment variables override the profile, key by key. So `DRIVINE_PA
 | `--history FILE` | The REPL's history file, or `in-memory` or `disable`. The default is `~/.drivine/history`. |
 | `--idle-timeout T` | Leaves the REPL after T without input, given as `<hours>h<minutes>m<seconds>s`, as in `1h30m`. |
 | `--transaction-timeout T` | Times out a transaction after T, given as `--idle-timeout` gives it, where the store can time out a transaction. |
-| `--log [FILE]` | Logs to the file, or to stderr. |
+| `--log`, `--log=FILE` | Logs to stderr, or with `=FILE` to the file. The argument after `--log` is never its file. |
 | `-v`, `--version` | Prints `drivine <version>` and exits with 0. |
 | `--driver-version` | Prints the drivers' versions, one per line, and exits with 0. |
 | `-h`, `--help` | Prints the usage and exits with 0. |
@@ -149,7 +149,7 @@ A line may end in `\r\n` as well as `\n`: the `\r` is not part of a command. A s
 | `:param {NAME: EXPRESSION, …}` | Sets the parameters named. |
 | `:params` | Prints the parameters to stdout as a map over several lines: `{`, then each `name: value` on a line of its own, indented two spaces, with `,` after each but the last, then `}`. A text is in `'…'`, not `"…"` as `plain` prints it. A map's parameters print in the order the store gives its keys, as **Order** in [Output](#output) says. |
 | `:params clear` | Clears them. |
-| `:use DATABASE` | Moves to another database, on a store that has more than one. |
+| `:use DATABASE` | Moves to another database, as `--database` names one in [the table](#the-database-and-the-graph). Where `--database` is refused, it fails as a command does. |
 | `:source FILE` | Runs a file's statements in place. A relative path is read from the working directory. A file that can't be read fails as a statement does, with exit code 1. |
 | `:exit`, `:quit` | Stops reading. |
 | `:help` | Lists the commands. |
@@ -219,6 +219,8 @@ On a SQL store, the CLI reads a node's labels and a relationship's type along wi
 | 0 | Everything ran. |
 | 1 | A statement or a command failed. |
 | 2 | The invocation is wrong: an unknown or refused flag, a bad value, two inputs, no address, a `-f` file that can't be read, a bad profile. Nothing ran. The invocation is checked before the CLI connects, so it exits with 2, not 3, where the store can't be reached too. |
+
+The flags are read first, in the order given, and the first that ends the run ends it with nothing else checked: an unknown or refused flag exits with 2, and `-h`, `--help`, `-v`, `--version` or `--driver-version` exits with 0. Only then are the rest checked, such as two inputs, the address and the profile, so `drivine --nope` names `--nope`, not the missing address.
 | 3 | The store can't be reached, or it refused the user and password. Nothing ran. |
 
 A script that tests for non-zero works with these codes as with cypher-shell's, which exits with 1 for every failure.
@@ -232,7 +234,7 @@ The REPL starts when stdin is a terminal, no input was given, and `--non-interac
 - **History** goes to `--history`'s file. `in-memory` keeps it for the session alone, and `disable` keeps none.
 - **Leaving:** `:exit`, `:quit` or Ctrl-D leaves. Ctrl-C drops the statement being typed.
 
-The REPL's output is `auto`'s, which tests stdout, not stdin: `table` when stdout is a terminal, `plain` when it is piped.
+With no `--format`, the REPL's output is `auto`'s, which tests stdout, not stdin: `table` when stdout is a terminal, `plain` when it is piped.
 
 On Windows, where a pipe can look like a terminal, `--non-interactive` makes the CLI read stdin, as in cypher-shell.
 
@@ -253,7 +255,7 @@ The cases marked `mode: cypher-shell` are the mode's tests. Each keeps its expec
 
 ## Cases
 
-`cli.yaml` holds the cases each build runs. A runner runs each one against every store the case names, giving the CLI that store's address and credentials. The address goes in `-a`, and the credentials in `DRIVINE_USER` and `DRIVINE_PASSWORD`, unless the case gives its own. In `args`, `env` and the texts of `files`, `$user` and `$password` stand for the store's. The runner empties the graph before each case, and runs each case in an empty directory of its own, with `HOME` another empty directory, and with no `DRIVINE_` or `NEO4J_` variable set but those it gives. It skips a case marked `mode: cypher-shell` until the [compatibility mode](#cypher-shell-compatibility-later) exists.
+`cli.yaml` holds the cases each build runs. A runner runs each one against every store the case names, giving the CLI that store's address and credentials. The address goes in `-a`, and the credentials in `DRIVINE_USER` and `DRIVINE_PASSWORD`, each unless the case gives that variable itself, even as null. In `args`, `env` and the texts of `files`, `$user` and `$password` stand for the store's. The runner empties the graph before each case, and runs each case in an empty directory of its own, with `HOME` another empty directory, and with no `DRIVINE_` or `NEO4J_` variable set but those it gives. It skips a case marked `mode: cypher-shell` until the [compatibility mode](#cypher-shell-compatibility-later) exists.
 
 A store in `only` and `except` is `neo4j`, `memgraph`, `falkordb`, `postgres`, `oracle` or `sqlite`: the CLI doesn't reach Neptune. `graph` names the first three, and `sql` the last three.
 
