@@ -1,0 +1,12 @@
+# Kotlin/Native's own dependencies, as the release build (compiler-release.yml's build job, on macOS arm64) uses them: the
+# LLVM it compiles with, libffi, and the sysroots and toolchains of the targets it cross-compiles. Kotlin/Native fetches
+# them from download.jetbrains.com and checks nothing, so the build puts each in its way first, checked against the
+# SHA-256 here, and fails where Kotlin/Native used one this doesn't pin (.github/scripts/compiler-konan-dependencies.sh).
+# They follow Kotlin's version: see compiler/README.md, "Releasing", for how to pin them after a bump.
+# One archive a line: its SHA-256, and the URL Kotlin/Native fetches it from.
+333efdd5f3cd94deb5b115c0135679e9ef876406b09d36531d1fe90d1118affb https://download.jetbrains.com/kotlin/native/resources/llvm/19-aarch64-macos/llvm-19-aarch64-macos-essentials-79.tar.gz
+8ca0102ad5b626e8b1699f311ab098354a90154ea3e44951f28ebdd256862ba9 https://download.jetbrains.com/kotlin/native/libffi-3.3-1-macos-arm64.tar.gz
+a026ede10b5dc2f2dcba91115338040ba62558ca14cf1a18cfba50768b245385 https://download.jetbrains.com/kotlin/native/aarch64-unknown-linux-gnu-gcc-8.3.0-glibc-2.25-kernel-4.9-2.tar.gz
+a048397d50fb5a2bd6cc0f89d5a30e0b8ff0373ebff9c1d78ce1f1fb7f185a50 https://download.jetbrains.com/kotlin/native/x86_64-unknown-linux-gnu-gcc-8.3.0-glibc-2.19-kernel-4.9-2.tar.gz
+50b7c3b4c91661753e2c23de00d4d7d113264c947f7ec6836eac085e16f602e8 https://download.jetbrains.com/kotlin/native/msys2-mingw-w64-x86_64-2.tar.gz
+069193359103d4e4a4653f236e7a963e266a4a366905e858d4a68e701f43866e https://download.jetbrains.com/kotlin/native/lldb-4-macos.tar.gz

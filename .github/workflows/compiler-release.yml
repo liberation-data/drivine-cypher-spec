@@ -18,8 +18,17 @@
 #   publish --dry-run.
 # - The jobs that build install the pinned JDK and Gradle with .github/actions/pinned-toolchain, from checked archives:
 #   the gate's jobs keep them in the cache, so a GitHub release-download outage, which failed v0.31.0's publish, doesn't
-#   hold up a gate whose cache is warm; the build job reads no cache and fetches them, so an outage fails it, before the
-#   reviewer is asked, and it is re-run.
+#   hold up a gate whose cache is warm.
+# - The build job restores no cache: an entry is unpacked by tar -P, which writes wherever its names point, and any job
+#   that can save an entry (the gate's, with third-party actions and what they fetch) could have saved it. It takes its
+#   dependencies from the dependencies job instead: that job restores the entry compiler.yml's release-dependencies job
+#   kept, on a runner of its own, and uploads its files as an artifact, which build unpacks only once every name in it is
+#   a plain file at a path that entry holds (.github/scripts/compiler-release-dependencies.sh), and keeps only the files
+#   whose SHA-256s are the pinned ones, so a wrong one is fetched, not used. Each file is then checked again as it is
+#   used: Gradle's against gradle/verification-metadata.xml, the JDK's and Gradle's archives and
+#   Kotlin/Native's dependencies against their pinned SHA-256s. So the entry, whoever saved it, can't change what is
+#   built: at worst, the build fetches what it lacks, with retries, as it fetches everything where no entry is kept, and
+#   an outage then fails it, before the reviewer is asked, and it is re-run.
 name: Compiler release
 
 on:
@@ -39,6 +48,9 @@ on:
       - .github/scripts/compiler-npm-check.sh
       - .github/scripts/compiler-npm-check-test.sh
       - .github/scripts/compiler-npm-clean-install.sh
+      - .github/scripts/compiler-release-dependencies.sh
+      - .github/scripts/compiler-release-dependencies-test.sh
+      - .github/scripts/compiler-konan-dependencies.sh
       - compiler/check/corpus-node.cjs
       - .github/actions/pinned-toolchain/**
       - compiler/npm/**
@@ -47,6 +59,8 @@ on:
       - compiler/settings.gradle.kts
       - compiler/gradle.properties
       - compiler/gradle/pinned-jdk.properties
+      - compiler/gradle/verification-metadata.xml
+      - compiler/gradle/kotlin-native-dependencies.txt
       - compiler/gradle/wrapper/gradle-wrapper.properties
       - compiler/gradle/wrapper/gradle-wrapper.jar
 
@@ -126,10 +140,63 @@ jobs:
     needs: check
     uses: ./.github/workflows/compiler.yml
 
-  build:
+  # The release build's dependencies, as compiler.yml's release-dependencies job keeps them in the cache, restored here
+  # and uploaded as this run's artifact, for build to check and unpack. Here, not in build: actions/cache unpacks an
+  # entry with tar -P, which writes wherever the entry's names point, so an entry made to harm a runner harms only this
+  # one, which holds no secret and builds nothing (its token reads the repository's contents). Where none is kept, or the
+  # upload fails, it uploads nothing and build fetches every dependency; it never fails the run, nor holds up build,
+  # which runs however it ends (failed, or cancelled at its timeout, which continue-on-error doesn't cover). After the
+  # gate, whose release-dependencies job keeps them where none are kept yet, in every run but a tag's: so a dry run on a
+  # pull request that changes the pins builds from the entry that pull request's pins make.
+  dependencies:
     needs: [check, gate]
+    runs-on: macos-latest
+    continue-on-error: true
+    timeout-minutes: 20
+    outputs:
+      uploaded: ${{ steps.upload.outcome == 'success' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      # As compiler.yml's release-dependencies job names it: keep the two in step. The exact key alone: an entry for
+      # other pins is no use to this build.
+      - name: The cache key
+        id: key
+        env:
+          PINS: ${{ hashFiles('compiler/gradle/verification-metadata.xml', 'compiler/gradle/kotlin-native-dependencies.txt', 'compiler/gradle/pinned-jdk.properties', 'compiler/gradle/wrapper/gradle-wrapper.properties', '.github/scripts/compiler-release-dependencies.sh') }}
+        run: echo "key=compiler-release-dependencies-v1-$RUNNER_OS-$RUNNER_ARCH-$PINS" | tee -a "$GITHUB_OUTPUT"
+      # The repository variable COMPILER_RELEASE_SKIP_CACHE=true skips it, so build fetches everything: the way out where
+      # an entry is no use, until it is deleted (compiler/README.md, "Releasing").
+      - if: vars.COMPILER_RELEASE_SKIP_CACHE != 'true'
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        id: restore
+        with:
+          path: ~/release-dependencies
+          key: ${{ steps.key.outputs.key }}
+      # Stored, not compressed: they are archives and jars already.
+      - if: steps.restore.outputs.cache-hit == 'true'
+        id: upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        continue-on-error: true
+        with:
+          name: compiler-release-dependencies
+          path: ~/release-dependencies
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+
+  build:
+    needs: [check, gate, dependencies]
+    # Whatever the dependencies job's result: its runner can be an entry's, which can hang it until it is cancelled. And
+    # so the jobs after build ask for build's success alone, as a job's default success() is false where any job before
+    # it, dependencies too, wasn't a success.
+    if: ${{ !cancelled() && needs.check.result == 'success' && needs.gate.result == 'success' }}
     # macOS builds every target: macosArm64 only builds there, and Kotlin/Native cross-compiles the others.
     runs-on: macos-latest
+    permissions:
+      contents: read
+      # The size of the dependencies job's artifact, before it is downloaded.
+      actions: read
     outputs:
       bundle-sha256: ${{ steps.bundle.outputs.sha256 }}
       npm-name: ${{ steps.npm-name.outputs.name }}
@@ -141,11 +208,66 @@ jobs:
       PUBLISH: ${{ needs.check.outputs.publish }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # No cache: the release is built from nothing but the checked-out ref, and the JDK and Gradle archives it pins,
-      # fetched and checked against their SHA-256s. A cache entry is unpacked before its archive is checked, and an
-      # earlier job of a tag's run (the gate's, with third-party actions) can save one in the tag's scope.
+        with: { persist-credentials: false }
+      # On macOS, where build unpacks the dependencies: unpack refuses a zip it must not unpack, and puts nothing anywhere.
+      - name: The dependencies' unpack refuses a zip it must not unpack
+        if: env.PUBLISH != 'true'
+        run: ../.github/scripts/compiler-release-dependencies-test.sh
+      # Its size first, as GitHub gives it: download-artifact writes the whole artifact before anything checks it, and
+      # the dependencies job's runner, which an entry can take over, chooses what it uploads. One artifact of at most
+      # 3 GB, unpack's own limit, or none is downloaded; and that one by its ID, so an artifact put in its place after
+      # (by a name's overwrite, with a token that runner kept) isn't. At most 10 digits, so bash's arithmetic can't
+      # overflow.
+      - name: The release dependencies are of a size to download
+        id: size
+        if: needs.dependencies.outputs.uploaded == 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          found=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?name=compiler-release-dependencies" -q '.artifacts[] | "\(.id) \(.size_in_bytes)"')
+          if [[ "$found" =~ ^([0-9]+)\ ([0-9]{1,10})$ ]] && (( BASH_REMATCH[2] <= 3 * 1024 * 1024 * 1024 )); then
+            echo "The release dependencies are artifact ${BASH_REMATCH[1]}, of ${BASH_REMATCH[2]} bytes."
+            echo "id=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+          else
+            found="${found:-none}"
+            echo "::warning::The release dependencies aren't one artifact of at most 3 GB (found, as <ID> <bytes>: ${found//$'\n'/, }), so the build fetches every dependency."
+          fi
+      # The dependencies job's upload, as the zip it is: download-artifact doesn't unzip it, so nothing of it is written
+      # until compiler-release-dependencies.sh has checked every name in it.
+      - if: steps.size.outputs.id != ''
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        continue-on-error: true
+        with:
+          artifact-ids: ${{ steps.size.outputs.id }}
+          path: ${{ runner.temp }}/release-dependencies
+          skip-decompress: true
+      - name: The release dependencies, checked by name and unpacked
+        if: steps.size.outputs.id != ''
+        run: |
+          shopt -s nullglob
+          zips=("$RUNNER_TEMP"/release-dependencies/*)
+          if (( ${#zips[@]} != 1 )); then
+            echo "::warning::The release dependencies weren't downloaded as one zip, so the build fetches every dependency."
+          # unpack refuses a zip it can't take whole, and takes away what it put in place; should it stop otherwise, so
+          # is anything of the zip taken away here, and the build fetches every dependency.
+          elif ! ../.github/scripts/compiler-release-dependencies.sh unpack "${zips[0]}"; then
+            echo "::warning::Unpacking the release dependencies failed, so nothing of them is used, and the build fetches every dependency."
+            rm -rf "$HOME/.gradle/caches/modules-2/files-2.1" "$HOME/.cache/drivine-pinned-toolchain" \
+              "$HOME/.cache/drivine-konan-dependencies" "$HOME/.cache/drivine-binaryen"
+          fi
+          # The zip, unpacked or refused, is of no more use, and as big as what it holds: the build needs the disk.
+          rm -rf "$RUNNER_TEMP/release-dependencies"
+      # No cache: the JDK and Gradle archives as the dependencies held them, or fetched, and either way checked against
+      # their pinned SHA-256s.
       - uses: ./.github/actions/pinned-toolchain
         with: { cache: 'false' }
+      - name: Kotlin/Native's dependencies, checked
+        run: ../.github/scripts/compiler-konan-dependencies.sh fetch gradle/kotlin-native-dependencies.txt
+      # From here Kotlin/Native can't fetch anything itself: every dependency it uses is one fetch put in its way, checked.
+      # Its prebuilt comes from Maven Central, through Gradle, which checks it.
+      - name: Kotlin/Native can fetch nothing of its own
+        run: ../.github/scripts/compiler-konan-dependencies.sh block
       - name: Maven Central doesn't have this version yet
         run: |
           # Only an answer of 200 stops a release. When Maven Central can't be asked, the step goes on: the portal
@@ -161,8 +283,12 @@ jobs:
             echo "::warning::Couldn't ask Maven Central whether it has org.drivine:drivine-cypher-compiler:$VERSION (HTTP $status). Going on: the Central Portal rejects a version it already has."
           fi
       # Unsigned: the job after the gate signs it, so this one never holds a key, and every file it checks is published.
+      # Strict: every dependency, fetched or unpacked, has its SHA-256 in gradle/verification-metadata.xml, whatever a
+      # gradle.properties says.
       - name: Build the bundle
-        run: ./gradlew --no-daemon zipAggregationPublication -Pcompiler.version="$VERSION"
+        run: ./gradlew --no-daemon --dependency-verification strict zipAggregationPublication -Pcompiler.version="$VERSION" -Pcompiler.binaryenMirror="$HOME/.cache/drivine-binaryen"
+      - name: Kotlin/Native used only its pinned dependencies
+        run: ../.github/scripts/compiler-konan-dependencies.sh check gradle/kotlin-native-dependencies.txt
       - name: Check the bundle
         run: ../.github/scripts/compiler-release-check.sh build/nmcp/zip/publicationAggregated.zip "$VERSION" none release
       # A job output, which no other job of the run can set: publish signs only this bundle, not an artifact of the same
@@ -197,7 +323,7 @@ jobs:
         env:
           NPM_NAME: ${{ steps.npm-name.outputs.name }}
         run: |
-          ./gradlew --no-daemon npmPackage -Pcompiler.version="$VERSION"
+          ./gradlew --no-daemon --dependency-verification strict npmPackage -Pcompiler.version="$VERSION" -Pcompiler.binaryenMirror="$HOME/.cache/drivine-binaryen"
           tarball="$(npm pack ./build/npm --pack-destination release --silent | tail -n 1)"
           ../.github/scripts/compiler-npm-check.sh "release/$tarball" "$VERSION" "$NPM_NAME" | tee -a "$GITHUB_OUTPUT"
           echo "tarball=$tarball" | tee -a "$GITHUB_OUTPUT"
@@ -213,7 +339,7 @@ jobs:
   # bundle, this commit's scripts, and gpg, curl, jq and zip, which the runner has.
   publish:
     needs: [check, build]
-    if: needs.check.outputs.publish == 'true'
+    if: ${{ !cancelled() && needs.build.result == 'success' && needs.check.outputs.publish == 'true' }}
     runs-on: ubuntu-latest
     environment: release
     # The upload's poll gives up after an hour; the signing takes a minute.
@@ -279,7 +405,7 @@ jobs:
   # fails where npm has another under the version.
   publish-npm:
     needs: [check, build]
-    if: needs.check.outputs.publish == 'true'
+    if: ${{ !cancelled() && needs.build.result == 'success' && needs.check.outputs.publish == 'true' }}
     runs-on: ubuntu-latest
     environment: release
     timeout-minutes: 15
@@ -350,7 +476,7 @@ jobs:
   # --dry-run, which packs and reports it but sends nothing and needs no token.
   publish-npm-dry-run:
     needs: [check, build]
-    if: needs.check.outputs.publish != 'true'
+    if: ${{ !cancelled() && needs.build.result == 'success' && needs.check.outputs.publish != 'true' }}
     runs-on: ubuntu-latest
     env:
       VERSION: ${{ needs.check.outputs.version }}
@@ -402,7 +528,7 @@ jobs:
   # as the run's artifact. It uploads nothing to the Portal.
   publish-dry-run:
     needs: [check, build]
-    if: needs.check.outputs.publish != 'true'
+    if: ${{ !cancelled() && needs.build.result == 'success' && needs.check.outputs.publish != 'true' }}
     runs-on: ubuntu-latest
     env:
       VERSION: ${{ needs.check.outputs.version }}

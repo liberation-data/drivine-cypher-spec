@@ -7,7 +7,9 @@ import java.util.Properties
 plugins {
     // Kotlin and antlr-kotlin are pinned together: antlr-kotlin's runtime is built with one Kotlin version, and 1.0.8 is
     // the last release built with Kotlin 2.2.20 (its later releases need a later Kotlin). Move them together, and run the
-    // corpus check on every target after, as a new Kotlin can change what Kotlin/Wasm or Kotlin/Native writes.
+    // corpus check on every target after, as a new Kotlin can change what Kotlin/Wasm or Kotlin/Native writes. A bump of
+    // any plugin or dependency updates gradle/verification-metadata.xml, and of Kotlin, gradle/kotlin-native-dependencies.txt
+    // too (README.md, "Dependency verification" and "Releasing").
     kotlin("multiplatform") version "2.2.20"
     kotlin("plugin.serialization") version "2.2.20"
     id("com.strumenta.antlr-kotlin") version "1.0.8"
@@ -145,6 +147,19 @@ kotlin {
 
 // Node 22 or later, as the npm package asks: the tests read the JVM's answers with process.getBuiltinModule (Node 22.3).
 extensions.configure<org.jetbrains.kotlin.gradle.targets.wasm.nodejs.WasmNodeJsEnvSpec> { version.set("22.12.0") }
+
+/*
+ * binaryen, the wasm optimizer npmPackage runs, is fetched by Kotlin from binaryen's GitHub releases, which publish no
+ * .sha1 by which Gradle could take a copy it already has. So the release's build, which mustn't need GitHub's release
+ * downloads, takes it from -Pcompiler.binaryenMirror=<dir>, a directory laid out as those releases are, where that holds
+ * this binaryen version (.github/scripts/compiler-release-dependencies.sh lays it out from the release's dependencies).
+ * Gradle checks the archive against gradle/verification-metadata.xml wherever it comes from.
+ */
+providers.gradleProperty("compiler.binaryenMirror").orNull?.let { mirror ->
+    extensions.configure<org.jetbrains.kotlin.gradle.targets.wasm.binaryen.BinaryenEnvSpec> {
+        if (file(mirror).resolve("version_${version.get()}").isDirectory) downloadBaseUrl.set(file(mirror).toURI().toString())
+    }
+}
 
 /** The spec's files, at the top of this repository, as `cypher/<file>` on the JVM tests' classpath. */
 val specResources = tasks.register<Copy>("specResources") {
