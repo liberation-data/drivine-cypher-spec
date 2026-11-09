@@ -306,6 +306,14 @@ abstract class SqlCypherCompiler(
     protected open fun keyJoin(table: String, row: String, key: String, id: String): String = "LEFT JOIN $table $row ON $row.$key = $id"
 
     /**
+     * The read of the relationship rows [rows], as [row], whose end column [end] is [id], for each row: how a `MERGE`'s
+     * pattern reads its relationships, from a table the loop that writes adds to. Null here: the rows are joined plainly.
+     * Postgres probes the end's index for each row instead, as a plain join is planned by the table's statistics
+     * (drivine4j#663).
+     */
+    protected open fun endProbe(rows: String, row: String, end: String, id: String): String? = null
+
+    /**
      * The query of a `CALL { … }`, [query], as the row that reads what it returns joins it: kept apart from that
      * row's query, where a store would merge the two and read a value bound in the row wrongly.
      */
@@ -1757,10 +1765,14 @@ abstract class SqlCypherCompiler(
         }
 
         /** Binds the patterns of one `MATCH` into [select]: their relationships are distinct from one another. */
-        /** [patterns] matched over the rows [select] reads; [shortestWhere] is met by the paths of the last, a shortest path, see [shortest]. */
-        private fun patterns(select: Select, patterns: List<Pattern>, shortestWhere: Expression? = null) {
+        /**
+         * [patterns] matched over the rows [select] reads; [shortestWhere] is met by the paths of the last, a shortest path, see
+         * [shortest]. With [probingEnds], as a `MERGE` reads its pattern for each row of the loop that writes, each relationship
+         * is read by a probe of an end ([endProbe]), not joined by the table's statistics.
+         */
+        private fun patterns(select: Select, patterns: List<Pattern>, shortestWhere: Expression? = null, probingEnds: Boolean = false) {
             val hops = mutableListOf<Hop>()
-            patterns.forEachIndexed { i, pattern -> pattern(select, pattern, hops, shortestWhere.takeIf { i == patterns.lastIndex }) }
+            patterns.forEachIndexed { i, pattern -> pattern(select, pattern, hops, shortestWhere.takeIf { i == patterns.lastIndex }, probingEnds) }
             for (i in hops.indices) for (j in i + 1 until hops.size) {
                 val (a, b) = hops[i] to hops[j]
                 // Relationships of types no relationship has both of cannot be one.
@@ -1768,7 +1780,7 @@ abstract class SqlCypherCompiler(
             }
         }
 
-        private fun pattern(select: Select, pattern: Pattern, hops: MutableList<Hop>, shortestWhere: Expression? = null) {
+        private fun pattern(select: Select, pattern: Pattern, hops: MutableList<Hop>, shortestWhere: Expression? = null, probingEnds: Boolean = false) {
             if (pattern.shortest != null) return shortest(select, pattern, shortestWhere)
             // A node bound before the pattern, or given properties, is where a walk starts best.
             val pinned = pattern.nodes.map { node -> node.properties != null || node.variable?.let { select.scope[it] } != null }
@@ -1823,11 +1835,22 @@ abstract class SqlCypherCompiler(
                 }
                 if (relationship.variable != null && select.scope[relationship.variable] != null) unsupported("A relationship variable bound before its pattern")
                 val name = alias("e")
-                select.source("${edgesFor(relationship.direction)} $name")
-                val value = Value.Relationship("$name.eid", "$name.src", "$name.dst", "$name.type", "$name.props")
-                relationship.variable?.let { select.bind(it, value) }
                 val from = bound[i].nid
                 val to = bound[i + 1].nid
+                val rows = edgesFor(relationship.direction)
+                // A MERGE's read probes the relationships of the end bound before its pattern, or of its near end where
+                // neither end or both are: the end's columns of the rows read, from the near end and to the far one.
+                val ends = when (relationship.direction) {
+                    RelationshipPattern.Direction.OUTGOING -> "src" to "dst"
+                    RelationshipPattern.Direction.INCOMING -> "dst" to "src"
+                    RelationshipPattern.Direction.EITHER -> ("a" to "b").takeIf { undirectedBothWays }
+                }
+                val probe = ends?.takeIf { probingEnds }?.let { (near, far) ->
+                    if (pinned[i + 1] && !pinned[i]) endProbe(rows, name, far, to) else endProbe(rows, name, near, from)
+                }
+                if (probe != null) select.join(probe) else select.source("$rows $name")
+                val value = Value.Relationship("$name.eid", "$name.src", "$name.dst", "$name.type", "$name.props")
+                relationship.variable?.let { select.bind(it, value) }
                 anchor(select, from)
                 anchor(select, to)
                 select.where += when (relationship.direction) {
@@ -2601,7 +2624,7 @@ abstract class SqlCypherCompiler(
         private fun merge(merge: Clause.Merge) {
             if (merge.pattern.variable != null) unsupported("A path variable in CREATE or MERGE")
             val select = row(variablesIn(merge.pattern))
-            patterns(select, listOf(merge.pattern))
+            patterns(select, listOf(merge.pattern), probingEnds = true)
             val found = select.bound.filterKeys { it !in kinds }
             val before = LinkedHashMap(kinds)
             val match = listOf("SELECT ${withEntries(ROW, found.map { (variable, value) -> key(variable) to held(value) })} AS item") +
