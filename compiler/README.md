@@ -340,23 +340,27 @@ release: a required reviewer, tags `v*` allowed to deploy to it, and the secrets
 `CENTRAL_PORTAL_USERNAME`, `CENTRAL_PORTAL_PASSWORD`, `SIGNING_KEY` and `SIGNING_PASSWORD`. npm needs no secret. Without
 the environment, a tag's run makes an empty one, with no reviewer, and step 3 stops at its check of the secrets. npm
 trusts the environment by its name alone, so once its trusted publisher is set, `publish-npm` would publish from such an
-empty `release` with no reviewer: keep the environment's required reviewer for as long as the publisher names it.
+empty `release` with no reviewer: keep the environment's required reviewer, and its rule that only tags `v*` deploy to it, for as long as the publisher
+names it.
 
 **npm's trusted publisher, once.** npm lets a trusted publisher be set only on a package that exists, so the package's
 first version is published by hand, and every later one by `publish-npm`:
 
 1. Take the newest tag's tarball: where that tag's run built one, its `compiler-npm-<version>` artifact
    (`gh run download <run id> -n compiler-npm-<version>`), already checked by step 2, so a re-run of its `publish-npm`
-   finds npm has this tarball and publishes nothing; otherwise build it from the tag as step 2 does, and check it as
-   step 2 does (`compiler-npm-check.sh`, and the corpus check against that tag's JVM).
+   finds npm has this tarball and publishes nothing. A tag from before npm was published (v0.32.0) packs the old name
+   without the README or LICENSE, so build its tarball from the tag's compiler sources with `main`'s packaging
+   (`npmPackage`, `compiler.npmName`, `npm/` and LICENSE), and check it as step 2 does (`main`'s
+   `compiler-npm-check.sh`, and the corpus check against that tag's JVM).
 2. A maintainer of the `@liberation-data` scope publishes that tarball once: `npm publish <tarball> --access public`,
    with `--tag next` for a version with a suffix. This one version has no provenance, as it isn't published from a run.
-3. On npmjs.com, in the package's settings, add a trusted publisher: GitHub Actions, repository
-   `liberation-data/drivine-cypher-spec`, workflow `compiler-release.yml`, environment `release`.
+3. On npmjs.com, in the package's settings, add a trusted publisher: GitHub Actions, organization
+   `liberation-data`, repository `drivine-cypher-spec`, workflow `compiler-release.yml`, environment `release`.
 
 Until then a tag's run publishes to Maven Central and `publish-npm` fails at npm's refusal: publish that tag's tarball
 as above, set the publisher, and re-run `publish-npm` alone ("Re-run failed jobs"), which waits for the reviewer again
-and finds the version published. The workflow's file name is part of the
+and finds the version published. GitHub re-runs a job only within 30 days of its run; after that, push the next tag.
+The workflow's file name is part of the
 publisher, so renaming `compiler-release.yml` needs the setting changed with it.
 
 Push the tag with or after `main`: a tag pushed before the commit is on `main` is refused at step 1; push `main` and
