@@ -27,7 +27,7 @@ drivine [flags] [cypher]
 
 Each statement runs in its own transaction, unless it falls between `:begin` and `:commit`.
 
-Only one of `cypher`, `-c` and `-f` may be given. Given two, the CLI refuses them as a bad invocation (see [Failures and exit codes](#failures-and-exit-codes)). Given one, stdin isn't read.
+Only one of `cypher`, `-c` and `-f` may be given, and only one positional argument. Given two, the CLI refuses them as a bad invocation (see [Failures and exit codes](#failures-and-exit-codes)). Given one, stdin isn't read.
 
 ## Connecting
 
@@ -44,7 +44,7 @@ Only one of `cypher`, `-c` and `-f` may be given. Given two, the CLI refuses the
 | Oracle | `oracle://host:port/service`, or with no `/service` |
 | SQLite | `sqlite:path`, or `sqlite::memory:` |
 
-- **`--type TYPE`** names the store where the address leaves it open. The types are `neo4j`, `memgraph`, `falkordb`, `postgres`, `oracle` and `sqlite`. Only a `bolt://` address, in any of its forms, leaves the store open: with no type it is Neo4j. Every other scheme names its store, and a type the scheme contradicts, as `--type neo4j` with `postgresql://`, is refused as a bad invocation.
+- **`--type TYPE`** names the store where the address leaves it open. The types are `neo4j`, `memgraph`, `falkordb`, `postgres`, `oracle` and `sqlite`. Only a `bolt://` address, in any of its forms, leaves the store open: with no type it is Neo4j. Every other scheme names its store, and a type the scheme contradicts, as `--type neo4j` with `postgresql://`, is refused as a bad invocation. So is an address whose scheme isn't in the table.
 - **With no address** from any of these, there is no default: the CLI refuses the invocation, as a bad one, and says to give `-a`, `DRIVINE_ADDRESS` or a profile.
 
 ### The database and the graph
