@@ -783,7 +783,7 @@ cases:
         rows: [true]
       - cypher: "MATCH (n:Long) RETURN n.u"
         rows: [{$repeat: "😀'éx", times: 1000}]
-      - note: "Oracle measures a text past 4000 bytes as a CLOB, by its UTF-16 units, so a character past U+FFFF counts twice there: 5000."
+      - note: "Oracle measures a text past 4000 bytes as a CLOB, by its UTF-16 units, so a character past U+FFFF counts twice there: 5000 (drivine4j#729)."
         except: [oracle]
         cypher: "MATCH (n:Long) RETURN size(n.u)"
         rows: [4000]

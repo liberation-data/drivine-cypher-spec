@@ -1909,8 +1909,11 @@ class OracleCypherCompiler(
         /** What separates the words of a value the statement writes: see [nanFree]. */
         private val WRITTEN_SEPARATORS = Regex("[\\s(),]+")
 
-        /** The words of a literal ([literalJson]), and of a list or a map made of them ([jsonArray], [jsonObject]): see [nanFree]. */
-        private val WRITTEN_WORDS = setOf("JSON", "JSON_SCALAR", "TO_BINARY_DOUBLE", "JSON_ARRAY", "JSON_OBJECT", "VALUE", "NULL", "ON", "RETURNING")
+        /**
+         * The words of a literal ([literalJson]), a long text's `TO_CLOB` pieces among them ([textLiteral]), and of a list or a
+         * map made of them ([jsonArray], [jsonObject]): see [nanFree].
+         */
+        private val WRITTEN_WORDS = setOf("JSON", "JSON_SCALAR", "TO_BINARY_DOUBLE", "TO_CLOB", "||", "JSON_ARRAY", "JSON_OBJECT", "VALUE", "NULL", "ON", "RETURNING")
 
         /**
          * The value at the path [path] in the JSON [json], with [passing] its `PASSING` clause where it has one: a text read with

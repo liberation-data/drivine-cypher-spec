@@ -61,8 +61,9 @@ class OracleLongTextLiteralTest {
 
     @Test
     fun `no piece ends within a doubled quote, a surrogate pair, a character of several bytes or a JSON escape`() {
-        val unit = "😀'é\n\u0001\\x"
-        for (shift in 0 until 16) {
+        val unit = "😀'é\n\u0001\\x\""
+        // Every place the first cut can fall within the unit's 21 bytes as written.
+        for (shift in 0 until 21) {
             val text = "x".repeat(shift) + unit.repeat(800)
             val cypher = "RETURN '${text.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n").replace("\u0001", "\\u0001")}'"
             val written = pieces(sql(cypher))
@@ -87,5 +88,34 @@ class OracleLongTextLiteralTest {
         assertTrue(sql("RETURN {k: '$text'}").contains("JSON_OBJECT('k' VALUE $pieced NULL ON NULL RETURNING JSON)"), "map")
         val write = sql("CREATE (n:N {t: '$text'}) RETURN size(n.t)")
         assertTrue(write.contains("'t' VALUE $pieced"), write)
+    }
+
+    /** The lengths in bytes, as written between their quotes, of [sql]'s string literals past 4,000 bytes. */
+    private fun overLong(sql: String) = Regex("'[^']*(?:''[^']*)*'").findAll(sql).map { bytes(it.value) - 2 }.filter { it > 4000 }.toList()
+
+    @Test
+    fun `a long text in a WHERE, a search, a CASE, a list comprehension and an UNWIND is written in pieces too`() {
+        val text = "z".repeat(5000)
+        listOf(
+            "MATCH (n:N) WHERE n.t = '$text' RETURN n",
+            "MATCH (n:N) WHERE n.t CONTAINS '$text' RETURN n",
+            "MATCH (n:N) WHERE n.t STARTS WITH '$text' RETURN n",
+            "MATCH (n:N) WHERE n.t ENDS WITH '$text' RETURN n",
+            "RETURN CASE WHEN 1 = 1 THEN '$text' ELSE 'b' END",
+            "RETURN [x IN [1, 2] | '$text' + x]",
+            "UNWIND ['$text', 'b'] AS x RETURN size(x)",
+        ).forEach { cypher ->
+            val sql = sql(cypher)
+            assertTrue(sql.contains("TO_CLOB('\"${"z".repeat(3999)}')"), cypher)
+            assertEquals(emptyList(), overLong(sql), cypher)
+        }
+    }
+
+    @Test
+    fun `a list of long texts the statement writes is not tested for NaN, as one of short texts isn't`() {
+        val t = "x".repeat(5000)
+        val sql = OracleCypherCompiler("g").compile("RETURN ['$t', 1] = \$t", mapOf("t" to listOf(t, 1L))).sql
+        assertTrue(sql.contains("TO_CLOB("), sql)
+        assertTrue(!sql.contains("IS NAN") && !sql.contains("numberDouble"), sql)
     }
 }
