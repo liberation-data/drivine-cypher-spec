@@ -40,7 +40,8 @@ enum class Store(val id: String) {
  *   a result gives only its prefetched rows, 2 by default and none with `prefetchRows: 0`, with no error
  *   (oracle/node-oracledb#1795), and some values fail with `NJS-126: OSON version 2 is not supported`. A `CLOB` column
  *   is cut short alike, a row each, and a `VARCHAR2` holds too little of a row. It is temporary: Drivine for TypeScript
- *   and drivine-python drop it once a node-oracledb release with the fix ships. A statement that returns no rows, or
+ *   drops it once a node-oracledb release with the fix ships, and drivine-python once python-oracledb's thin mode, another
+ *   driver, is known to read every row (liberation-data/drivine-python#468). A statement that returns no rows, or
  *   reads only, and every statement on the other stores, is compiled alike either way.
  */
 data class GraphOptions(

@@ -131,9 +131,10 @@ rows are one JSON value, so a write whose rows together pass Oracle's limit on t
 `JSON` each would not.
 
 Every other statement, a read or a write that returns nothing, compiles alike either way, as does every statement on the
-other stores. The option is temporary: Drivine for TypeScript and drivine-python set it until a node-oracledb release
-with oracle/node-oracledb#1795's fix ships, and then drop it, and it goes from the module with them. drivine4j's JDBC
-reads the `JSON` rows, and leaves it false.
+other stores. The option is temporary: Drivine for TypeScript sets it until a node-oracledb release with
+oracle/node-oracledb#1795's fix ships, and drivine-python until python-oracledb's thin mode, another driver, is known to
+read every row (liberation-data/drivine-python#468); then they drop it, and it goes from the module with them.
+drivine4j's JDBC reads the `JSON` rows, and leaves it false.
 
 ### npm
 
