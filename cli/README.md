@@ -197,7 +197,7 @@ The expression is Cypher. It's evaluated by running `RETURN expression` on the s
 | a temporal value | its ISO 8601 text, unquoted, as the driver gives it. A SQL store gives a temporal value as text, so there it prints as a text. |
 | a path | its nodes and relationships, as in `(:A)-[:R]->(:B)<-[:S]-(:C)`: `-[…]->` for a relationship walked along its direction, `<-[…]-` for one walked against it |
 
-**Order.** A map's keys, and a node's or a relationship's properties, print in the order the store gives them, in every format, as cypher-shell prints them. Neo4j gives `{b: 1, a: 2, aa: 3}` as `{aa: 3, a: 2, b: 1}`, and Postgres's `jsonb` orders keys shortest first, so no case compares two keys' order but `:params`' `a` before `b`, which every store gives in that order.
+**Order.** A map's keys, and a node's or a relationship's properties, print in the order the store gives them, in every format, as cypher-shell prints them. Neo4j gives `{b: 1, a: 2, aa: 3}` as `{aa: 3, a: 2, b: 1}`, where the SQL stores keep a map's keys in the order they were written (the spec's "Map key order"), so no case compares two keys' order but `:params`' `a` before `b`, which every store gives in that order.
 
 **Text and lines.** Every format writes UTF-8 and ends each line with `\n`, on Windows too.
 
