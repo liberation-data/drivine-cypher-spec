@@ -24,7 +24,8 @@ deps="${KONAN_DATA_DIR:-$HOME/.konan}/dependencies"
 
 # <sha256> <url> of each pin, checked for form.
 pins=()
-while read -r want url rest; do
+# The last line is read too where the file doesn't end in a newline.
+while read -r want url rest || [[ -n "$want" ]]; do
     [[ -z "$want" || "$want" == \#* ]] && continue
     if [[ ! "$want" =~ ^[0-9a-f]{64}$ || ! "$url" =~ ^https://[^/]+/.+\.tar\.gz$ || -n "$rest" ]]; then
         echo "::error::$list: a line isn't <sha256> <https URL of a .tar.gz>: $want $url $rest"
@@ -32,6 +33,11 @@ while read -r want url rest; do
     fi
     pins+=("$want $url")
 done < "$list"
+# A list that pins nothing is a mistake, and check would then pass only where Kotlin/Native unpacked nothing.
+if (( ${#pins[@]} == 0 )); then
+    echo "::error::$list pins nothing."
+    exit 1
+fi
 
 if [[ "$mode" == fetch ]]; then
     mkdir -p "$kept" "$deps/cache"

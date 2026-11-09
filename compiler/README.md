@@ -421,16 +421,19 @@ job of a run on its ref, the gate's among them, which run third-party actions an
 into step 2 could change what it builds whatever it then checked. So:
 
 - `compiler.yml`'s `release-dependencies` job (on macOS, in every run but a tag's) builds what step 2 builds, on a
-  runner with nothing else cached, and keeps what that fetched, as files, in the Actions cache: Gradle's downloaded files
-  (`~/.gradle/caches/modules-2/files-2.1`: the jars, klibs, POMs, modules and archives), the JDK and Gradle archives, and
-  Kotlin/Native's own dependencies (`.github/scripts/compiler-release-dependencies.sh stage`). Nothing derived from them
-  is kept (Gradle's index of them, transformed jars, compiled build scripts, unpacked distributions, the Kotlin daemon),
-  as nothing would check it. Its key hashes what pins them (`gradle/verification-metadata.xml`,
-  `gradle/kotlin-native-dependencies.txt`, `gradle/pinned-jdk.properties`, `gradle/wrapper/gradle-wrapper.properties`),
-  so a change of a pin makes a new entry, kept by the first run that finds none: the change's pull request, for its own
-  runs, and its merge, for the tags after. A run that finds the entry kept does nothing more. GitHub drops an entry no
-  run has read for 7 days, so the first tag after a quiet week fetches everything; to keep it warm before a tag, run
-  workflow_dispatch of `Compiler` on `main`.
+  runner with no Gradle or Kotlin/Native cache restored (only the toolchain archives', which it checks), and keeps what
+  that fetched, as files, in the Actions cache: Gradle's downloaded files (`~/.gradle/caches/modules-2/files-2.1`: the
+  jars, klibs, POMs, modules and archives), the JDK and Gradle archives, and Kotlin/Native's own dependencies
+  (`.github/scripts/compiler-release-dependencies.sh stage`). Nothing derived from them is kept (Gradle's index of them,
+  transformed jars, compiled build scripts, unpacked distributions, the Kotlin daemon), as nothing would check it. Its
+  key hashes what pins them (`gradle/verification-metadata.xml`, `gradle/kotlin-native-dependencies.txt`,
+  `gradle/pinned-jdk.properties`, `gradle/wrapper/gradle-wrapper.properties`), so a change of a pin makes a new entry,
+  kept by the first run that finds none: the change's pull request, for its own runs, and its merge, for the tags after.
+  A run that finds the entry kept does nothing more. A change of the layout `stage` makes, or of the names `unpack`
+  takes, moves the key's `v1` in both workflows, so no release reads an entry of the old layout. `stage` fails where a
+  file it keeps has a name `unpack` would refuse, so such a name fails this job, not every release, quietly, with only a
+  warning. GitHub drops an entry no run has read for 7 days, so the first tag after a quiet week fetches everything; to
+  keep it warm before a tag, run workflow_dispatch of `Compiler` on `main`.
 - In the release, the `dependencies` job restores that entry (its exact key, from the tag's scope or `main`'s) on a
   runner of its own, which holds no secret and builds nothing, and uploads its files as the run's artifact. Where none is
   kept, or the upload fails, it uploads nothing, and never fails the run.
@@ -446,12 +449,12 @@ into step 2 could change what it builds whatever it then checked. So:
 
 So the entry can't change what is built, whoever saved it: a file whose checksum isn't the pinned one is refused, or
 fetched again, and an entry of another name refuses the whole zip. At worst it makes step 2 fetch what the entry lacks,
-as where none is kept: Gradle retries each fetch 8 times, over about 4 minutes (`gradle.properties`), and the archives are
-retried for a few minutes; where it still can't, step 2 fails, before the reviewer is asked, and is re-run. What is still
-fetched: Gradle asks Maven Central and the Gradle Plugin Portal for each dependency's POM, module and `.sha1`, small
-files, which it checks too, before it takes a file it already has. binaryen's GitHub releases publish no `.sha1` it
-could ask for, so step 2 takes binaryen from a directory laid out as those releases are, which `unpack` fills from the
-entry's copy (`-Pcompiler.binaryenMirror`, in `build.gradle.kts`), and Gradle checks it the same way.
+as where none is kept: Gradle tries each fetch up to 8 times, over about 4 minutes (`gradle.properties`), and the
+archives are retried for a few minutes; where it still can't, step 2 fails, before the reviewer is asked, and is re-run.
+What is still fetched: Gradle asks Maven Central and the Gradle Plugin Portal for each dependency's POM, module and
+`.sha1`, small files, which it checks too, before it takes a file it already has. binaryen's GitHub releases publish no
+`.sha1` it could ask for, so step 2 takes binaryen from a directory laid out as those releases are, which `unpack` fills
+from the entry's copy (`-Pcompiler.binaryenMirror`, in `build.gradle.kts`), and Gradle checks it the same way.
 
 The gate's jobs read their own caches, as before (setup-gradle's, the toolchain archives', `~/.konan`), and Gradle
 checks the dependencies they use too; they build nothing that is released. Every action `compiler.yml` and this workflow
@@ -486,9 +489,9 @@ stand-in for the Central Portal on the runner, which refuses an upload that isn'
 for any other deployment. It also checks that the signing refuses a bundle it must not sign
 (`.github/scripts/compiler-release-sign-test.sh`): one with a link among thousands, a file, a version or a path that no
 publication makes, or a checksum of a file it doesn't hold. And in step 2, before it unpacks the dependencies, it checks
-that `unpack` refuses whole a zip with a name that climbs out, an absolute name, a path `stage` doesn't make or a link,
-and that the check of Kotlin/Native's dependencies fails one the list doesn't pin
-(`.github/scripts/compiler-release-dependencies-test.sh`).
+that `stage` keeps only what `unpack` takes, that `unpack` refuses whole a zip with a name that climbs out, an absolute
+name, a path `stage` doesn't make, a name twice or a link, and that the check of Kotlin/Native's dependencies fails one
+the list doesn't pin (`.github/scripts/compiler-release-dependencies-test.sh`).
 
 The `release` environment is this repository's own, not drivine4j's, and is set up once in its settings before the first
 release: a required reviewer, tags `v*` allowed to deploy to it, and the secrets drivine4j's release uses,
