@@ -19,8 +19,9 @@ import org.drivine.cypher.store.marker.SchemaMarker.SCOPE_PROPERTY
  * scope as `$scope`. Running them, reading their rows and the transactions they run in stay each library's.
  *
  * Of several markers of a scope, which a race before [SchemaMarker.CONSTRAINT] was made can leave, the one read, the one
- * written and the one [deleteAllButNewest] keeps are the same: the one applied last, and of two applied in one moment, the
- * one made last.
+ * written and the one [deleteAllButNewest] keeps are the same on a SQL store: the one applied last, and of two applied in
+ * one moment, the one made last. The graph engines' Cypher, as drivine4j writes it, has no such tie-break, and its `MERGE`
+ * writes every marker of the scope.
  */
 @DrivineInternalApi
 interface MarkerStatements {
@@ -41,7 +42,9 @@ interface MarkerStatements {
      * What [merge] binds, for the owner [scope], its [version] (null for none, which takes away the one the marker had) and
      * its inventory's [items] ([MarkerInventory.items]), kept as the store keeps them ([storedItems]). [appliedAt] is the
      * moment, in milliseconds since the epoch, by the caller's clock: a SQL store binds it as `$now`. The graph engines
-     * take the moment of their own clock, `timestamp()`, as drivine4j's Cypher always has, and bind no `$now`.
+     * take the moment of their own clock, `timestamp()`, as drivine4j's Cypher always has, and bind no `$now`. The split
+     * is kept on purpose, so a store keeps reading the markers it already has as it did: one clock for every store would
+     * be a change of its own, made in every library at once, and not a fix here.
      */
     fun mergeParameters(scope: String, version: String?, items: String, appliedAt: Long): Map<String, Any?> =
         mapOf("scope" to scope, "version" to version, "items" to storedItems(items))
@@ -88,8 +91,11 @@ interface MarkerStatements {
 }
 
 /**
- * The marker's statements in Cypher, which Neo4j, Memgraph and FalkorDB share. The moment is the engine's `timestamp()`,
- * in milliseconds, as drivine4j writes it, so a caller's moment is not bound.
+ * The marker's statements in Cypher, which Neo4j, Memgraph and FalkorDB share, and which a store with no DDL here, as
+ * Neptune, is given, as drivine4j's grammar gives it by default. The moment is the engine's `timestamp()`, in
+ * milliseconds, as drivine4j writes it, so a caller's moment is not bound. That is on purpose, not an oversight: the SQL
+ * stores bind the caller's clock because they have no `timestamp()`, and one clock for every store would be a change of
+ * its own, made in every library at once (see [MarkerStatements.mergeParameters]).
  */
 @DrivineInternalApi
 object CypherMarkerStatements : MarkerStatements {

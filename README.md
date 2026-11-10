@@ -150,6 +150,8 @@ inventory:
     record: {keys: [...], runtime: [...], stale: [...]}
     items: "RANGE_INDEX:Person:name:Person_name_range\nruntime-stale:UNIQUENESS_CONSTRAINT:Person:id:Person_id_unique"
     read: {keys: [...], runtime: [...], stale: [...]}
+scopeFor:
+  - {owner: null, scope: "schema"}
 reads:
   - {stored: "items:", read: {keys: ["items:"], runtime: [], stale: []}, oracle: {keys: [], runtime: [], stale: []}}
 versions:
@@ -161,7 +163,8 @@ nodeStamps: {property: "__drivine.stamp", token: 16, separator: ":", neverStampe
 | Key | What it is |
 |---|---|
 | `marker` | The marker's label, the property that keys it to its owner, the scope of the owner with no name, and the constraint that keeps one marker for each scope. Each store's statements: `read` gives the `version` or `items` of the scope's newest marker; `merge` writes it, and makes it where there is none; `deleteAllButNewest` removes every other marker of the scope; `delete` removes it; and `scopes` reads the scope of every marker in SQL, on SQLite, where `scopesCypher` is read on the others. `prepare` names the statement of `store.yaml`'s `tables` a library runs first: Postgres's and Oracle's `ensuring`, SQLite's first `ddl`, and none on a graph engine. Every statement binds the scope as `$scope`; `mergeParameters` are what `merge` binds. `itemsMark` is what the inventory is kept behind on the store. `constraint` is what makes the marker's constraint, without the statements that make the store first, as `store.yaml` writes a case's `create`. |
-| `keys` | Each spec's inventory key: `<kind>:<label>:<properties joined by ",">:<name>`, the name the spec's own, or the one derived from its label and properties where it has none or an empty one. |
+| `keys` | Each spec's inventory key: `<kind>:<label>:<properties joined by ",">:<name>`, the name the spec's own, or the one derived from its label and properties where it has none or an empty one. A spec that ignores case is keyed as it is made, over the lowercased copies. |
+| `scopeFor` | An owner's name, null for the owner with none, and the scope its marker is kept under. |
 | `inventory` | A `record` of keys, the runtime ones and the stale ones; its `items`, as every store but Oracle keeps them; and what is `read` back from them. |
 | `reads` | A stored text as a store gives it back, or null where no marker or no `items` came back, and what is `read` from it: null for no inventory known, which is not an empty one. `oracle` is what Oracle reads, where it differs, its mark taken off first. |
 | `versions` | The version tokens of an owner's catalogs, null for one that sets none, and the token the owner records: null where none sets one. |
@@ -172,7 +175,7 @@ nodeStamps: {property: "__drivine.stamp", token: 16, separator: ":", neverStampe
 
 **The version token** is each catalog's token once, sorted by its UTF-16 code units, as Java sorts strings, and joined by `|`.
 
-**The moment.** On Postgres, Oracle and SQLite, `merge` binds `appliedAt` as `$now`, milliseconds since the epoch by the caller's clock. The graph engines write their own clock's, with `timestamp()`, as drivine4j always has, and bind none. The newest marker of a scope is the one with the largest `appliedAt`, a marker with none or with one that isn't a number coming last, and of two with the same, the one made last (`nid`) on a SQL store.
+**The moment.** On Postgres, Oracle and SQLite, `merge` binds `appliedAt` as `$now`, milliseconds since the epoch by the caller's clock. The graph engines write their own clock's, with `timestamp()`, as drivine4j always has, and bind none. That split is kept on purpose: one clock for every store would be a change of its own, made in every library at once. On a SQL store the newest marker of a scope is the one with the largest `appliedAt`, a marker with none or with one that isn't a number coming last (Oracle reads a text of a number as the number), and of two with the same, the one made last (`nid`). A graph engine orders by `appliedAt` as it orders any value, which every marker it writes has.
 
 ## Host functions and readers
 

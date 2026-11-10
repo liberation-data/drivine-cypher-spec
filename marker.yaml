@@ -19,6 +19,8 @@ marker:
         version: "MATCH (m:`_DrivineSchema` {scope: $scope}) RETURN m.version ORDER BY m.appliedAt DESC LIMIT 1"
         items: "MATCH (m:`_DrivineSchema` {scope: $scope}) RETURN m.items ORDER BY m.appliedAt DESC LIMIT 1"
       readParameters: ["scope"]
+      # The server's clock, timestamp(), binding no $now, as drivine4j writes it; the SQL stores bind the caller's. Kept on
+      # purpose: one clock for every store would be a change of its own, made in every library at once.
       merge: "MERGE (m:`_DrivineSchema` {scope: $scope}) SET m.version = $version, m.items = $items, m.appliedAt = timestamp()"
       mergeParameters: ["scope", "version", "items"]
       deleteAllButNewest: "MATCH (m:`_DrivineSchema` {scope: $scope}) WITH m ORDER BY m.appliedAt DESC SKIP 1 DELETE m"
@@ -33,6 +35,8 @@ marker:
         version: "MATCH (m:`_DrivineSchema` {scope: $scope}) RETURN m.version ORDER BY m.appliedAt DESC LIMIT 1"
         items: "MATCH (m:`_DrivineSchema` {scope: $scope}) RETURN m.items ORDER BY m.appliedAt DESC LIMIT 1"
       readParameters: ["scope"]
+      # The server's clock, timestamp(), binding no $now, as drivine4j writes it; the SQL stores bind the caller's. Kept on
+      # purpose: one clock for every store would be a change of its own, made in every library at once.
       merge: "MERGE (m:`_DrivineSchema` {scope: $scope}) SET m.version = $version, m.items = $items, m.appliedAt = timestamp()"
       mergeParameters: ["scope", "version", "items"]
       deleteAllButNewest: "MATCH (m:`_DrivineSchema` {scope: $scope}) WITH m ORDER BY m.appliedAt DESC SKIP 1 DELETE m"
@@ -47,6 +51,8 @@ marker:
         version: "MATCH (m:`_DrivineSchema` {scope: $scope}) RETURN m.version ORDER BY m.appliedAt DESC LIMIT 1"
         items: "MATCH (m:`_DrivineSchema` {scope: $scope}) RETURN m.items ORDER BY m.appliedAt DESC LIMIT 1"
       readParameters: ["scope"]
+      # The server's clock, timestamp(), binding no $now, as drivine4j writes it; the SQL stores bind the caller's. Kept on
+      # purpose: one clock for every store would be a change of its own, made in every library at once.
       merge: "MERGE (m:`_DrivineSchema` {scope: $scope}) SET m.version = $version, m.items = $items, m.appliedAt = timestamp()"
       mergeParameters: ["scope", "version", "items"]
       deleteAllButNewest: "MATCH (m:`_DrivineSchema` {scope: $scope}) WITH m ORDER BY m.appliedAt DESC SKIP 1 DELETE m"
@@ -181,6 +187,17 @@ keys:
   - {spec: {kind: "TEXT_INDEX", label: "Doc", properties: ["title"]}, key: "TEXT_INDEX:Doc:title:Doc_title_text"}
   - {spec: {kind: "RANGE_INDEX", label: "Ns:Thing", properties: ["a:b"]}, key: "RANGE_INDEX:Ns:Thing:a:b:Ns:Thing_a:b_range"}
   - {spec: {kind: "RANGE_INDEX", label: "Line\nBreak", properties: ["x"]}, key: "RANGE_INDEX:Line\nBreak:x:Line\nBreak_x_range"}
+  - {spec: {kind: "VECTOR_INDEX", label: "Doc", properties: ["embedding"], name: "doc_vectors"}, key: "VECTOR_INDEX:Doc:embedding:doc_vectors"}
+  - {spec: {kind: "FULLTEXT_INDEX", label: "Doc", properties: ["title", "body"]}, key: "FULLTEXT_INDEX:Doc:title,body:Doc_title_body_fulltext"}
+  - {spec: {kind: "TEXT_INDEX", label: "Doc", properties: ["title"], name: "doc_title"}, key: "TEXT_INDEX:Doc:title:doc_title"}
+  - {spec: {kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["id"], name: ""}, key: "UNIQUENESS_CONSTRAINT:Person:id:Person_id_unique"}
+  - {spec: {kind: "RANGE_INDEX", label: "Person", properties: ["name"], ignoreCase: true}, key: "RANGE_INDEX:Person:__drivine.lower.name:Person_name_ci_range"}
+  - {spec: {kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], ignoreCase: true}, key: "UNIQUENESS_CONSTRAINT:Person:__drivine.lower.email:Person_email_ci_unique"}
+  - {spec: {kind: "TEXT_INDEX", label: "Doc", properties: ["title"], ignoreCase: true}, key: "TEXT_INDEX:Doc:__drivine.lower.title:Doc_title_ci_text"}
+scopeFor:
+  - {owner: null, scope: "schema"}
+  - {owner: "billing", scope: "billing"}
+  - {owner: "", scope: ""}
 inventory:
   - name: "Declared items only"
     record: {keys: ["RANGE_INDEX:Person:name:Person_name_range", "RANGE_INDEX:Person:name,born:person_name_born", "RANGE_INDEX:Person:name:Person_name_range", "UNIQUENESS_CONSTRAINT:Person:id:Person_id_unique"], runtime: [], stale: []}

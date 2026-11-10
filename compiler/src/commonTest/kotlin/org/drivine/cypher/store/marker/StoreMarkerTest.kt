@@ -25,6 +25,7 @@ import org.drivine.schema.made
 import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.test.fail
@@ -95,8 +96,10 @@ class StoreMarkerTest {
         assertEquals(marker["label"]!!.textValue(), SchemaMarker.LABEL)
         assertEquals(marker["scopeProperty"]!!.textValue(), SchemaMarker.SCOPE_PROPERTY)
         assertEquals(marker["defaultScope"]!!.textValue(), SchemaMarker.DEFAULT_SCOPE)
-        assertEquals(SchemaMarker.DEFAULT_SCOPE, SchemaMarker.scopeFor(null))
-        assertEquals("billing", SchemaMarker.scopeFor("billing"))
+        for (case in pinned["scopeFor"]!!) {
+            val owner = case["owner"]!!.textValue()
+            assertEquals(case["scope"]!!.textValue(), SchemaMarker.scopeFor(owner), "the scope of the owner $owner")
+        }
         assertEquals(marker["separator"]!!.textValue(), SchemaMarker.SEPARATOR)
         assertEquals(marker["runtimePrefix"]!!.textValue(), SchemaMarker.RUNTIME_PREFIX)
         assertEquals(marker["staleRuntimePrefix"]!!.textValue(), SchemaMarker.STALE_RUNTIME_PREFIX)
@@ -124,6 +127,15 @@ class StoreMarkerTest {
             if ("now" in bound) assertEquals(1_762_000_000_123L, bound["now"], "$id: the caller's moment bound as now")
             assertNull(statements.mergeParameters("owner", null, "", 0L)["version"], "$id: no version bound as null")
         }
+        // Memgraph of another vector capacity keeps the marker as any Memgraph does; a store with no DDL here, as Neptune,
+        // is given the graph engines' Cypher, as drivine4j's grammar gives it by default.
+        assertEquals(CypherMarkerStatements, MarkerStatements.of(MemgraphDdl(1024)))
+        assertEquals(CypherMarkerStatements, MarkerStatements.of(neptune))
+    }
+
+    /** A store this module has no DDL of, as Neptune: Neo4j's, under another name. */
+    private val neptune: StoreDdl = object : StoreDdl by Neo4jDdl {
+        override val engine = "Neptune"
     }
 
     @Test
@@ -193,6 +205,11 @@ class StoreMarkerTest {
             assertEquals(expected["readStamps"]!!.textValue(), statements.readStamps, "$id: readStamps")
             assertEquals(constraint(id, ddl, StoreStamp.CONSTRAINT), statements(expected["constraint"]!!), "$id: the stamp's constraint")
         }
+        assertEquals(stamp["stores"]!!["memgraph"]!!["engine"]!!.textValue(), StoreStamp.engine(MemgraphDdl(1024)))
+        assertEquals(CypherStoreStampStatements, StoreStampStatements.of(MemgraphDdl(1024)))
+        // A store with no DDL here gets the graph engines' Cypher, but no engine name: its library names it.
+        assertEquals(CypherStoreStampStatements, StoreStampStatements.of(neptune))
+        assertFailsWith<IllegalArgumentException> { StoreStamp.engine(neptune) }
     }
 
     @Test
@@ -237,11 +254,12 @@ class StoreMarkerTest {
         val label = node["label"]!!.textValue()!!
         val properties = texts(node["properties"]!!)
         val name = node["name"]?.textValue()
+        val ignoreCase = node["ignoreCase"]?.booleanValue() ?: false
         return when (SchemaItemKind.valueOf(node["kind"]!!.textValue()!!)) {
-            SchemaItemKind.RANGE_INDEX -> RangeIndexSpec(label, properties, name)
-            SchemaItemKind.UNIQUENESS_CONSTRAINT -> UniquenessConstraintSpec(label, properties, name)
+            SchemaItemKind.RANGE_INDEX -> RangeIndexSpec(label, properties, name, ignoreCase)
+            SchemaItemKind.UNIQUENESS_CONSTRAINT -> UniquenessConstraintSpec(label, properties, name, ignoreCase = ignoreCase)
             SchemaItemKind.FULLTEXT_INDEX -> FullTextIndexSpec(label, properties, name)
-            SchemaItemKind.TEXT_INDEX -> TextIndexSpec(label, properties.single(), name)
+            SchemaItemKind.TEXT_INDEX -> TextIndexSpec(label, properties.single(), name, ignoreCase)
             SchemaItemKind.VECTOR_INDEX -> VectorIndexSpec(label, properties.single(), 384, SimilarityFunction.COSINE, name)
         }
     }
