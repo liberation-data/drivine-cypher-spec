@@ -61,7 +61,8 @@ object StoreStamp {
 
 /**
  * The statements that keep the store's stamp ([StoreStamp]), in a store's own language, as drivine4j's
- * `StoreStampStatements` of each store writes them. Running them and choosing among the stamps read stay each library's.
+ * `StoreStampStatements` of each store writes them. Running them stays each library's; of the stamps read, each takes the
+ * first, as drivine4j's `StoreIdentityResolver` does.
  */
 @DrivineInternalApi
 interface StoreStampStatements {
@@ -74,7 +75,8 @@ interface StoreStampStatements {
 
     /**
      * Reads every stamp as a map `{id, assignedAt}`, the oldest first, tie-broken by id, so every reader picks the same
-     * one. A map and not two columns, as a row of several columns comes back as a list, which can't be read by name.
+     * one, the first. A map and not two columns, as a row of several columns comes back as a list, which can't be read by
+     * name.
      */
     val readStamps: String
 
