@@ -196,6 +196,9 @@ class StoreMarkerTest {
         val bound = StoreStamp.assignParameters("2b9f0c1e-0000-4000-8000-000000000000", "2026-11-10T05:00:00.123Z", "NEO4J")
         assertEquals(texts(stamp["parameters"]!!), bound.keys.toList())
         assertEquals(StoreStamp.KEY, bound["key"])
+        assertEquals("2b9f0c1e-0000-4000-8000-000000000000", bound["storeId"])
+        assertEquals("2026-11-10T05:00:00.123Z", bound["assignedAt"], "the moment bound as its text, not a number")
+        assertEquals("NEO4J", bound["engine"])
         for ((id, ddl) in stores) {
             val expected = stamp["stores"]!![id] ?: fail("marker.yaml has no stamp statements for $id")
             val statements = StoreStampStatements.of(ddl)
