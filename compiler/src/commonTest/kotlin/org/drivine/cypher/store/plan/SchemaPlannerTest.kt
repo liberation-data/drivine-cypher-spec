@@ -285,6 +285,38 @@ class SchemaPlannerTest {
     }
 
     @Test
+    fun aRemovesItemsAreMergedFirstAsDrivine4jsCatalogMergesThemTheIndexesFirst() {
+        val unique = UniquenessConstraintSpec("Person", listOf("email"))
+        val indexes = ListingRows.rows("sqlite", listOf(SchemaItemInfo(SchemaItemKind.RANGE_INDEX, "Person", listOf("name"), name.effectiveName)), constraints = false)
+        val constraints = ListingRows.rows("sqlite", listOf(SchemaItemInfo(SchemaItemKind.UNIQUENESS_CONSTRAINT, "Person", listOf("email"), unique.effectiveName)), constraints = true)
+        // Given the constraint first, and the index twice: drivine4j drops the index first, and counts it once.
+        var step = planner.start(request(Operation.Remove(null, listOf(unique, name, name))), 0)
+        while (step is PlanStep.Run) {
+            step = planner.resume(step.state, step.actions.map {
+                when {
+                    it is PlanAction.Query && it.purpose == Purpose.LISTING -> PlanOutcome.Rows(if (it.statement == sqlite.listConstraintsQuery()) constraints else indexes)
+                    it is PlanAction.Query -> PlanOutcome.Rows(emptyList())
+                    else -> PlanOutcome.Ran
+                }
+            }, 0)
+        }
+        val report = assertIs<PlanStep.Done>(step).report
+        assertEquals(
+            listOf(
+                LogLine(LogLevel.INFO, "IndexManager", "Dropped SQLite RANGE_INDEX on Person[name]"),
+                LogLine(LogLevel.INFO, "ConstraintManager", "Dropped SQLite UNIQUENESS_CONSTRAINT on Person[email]"),
+                LogLine(LogLevel.INFO, "SchemaManager", "Schema for owner 'schema' on 'default': 2 removed, 2 dropped, 0 left in place"),
+            ),
+            report.log,
+        )
+        // Two items that conflict are refused before anything is run, as drivine4j's catalog refuses them.
+        val conflicting = request(Operation.Remove(null, listOf(VectorIndexSpec("Chunk", "embedding", 384), VectorIndexSpec("Chunk", "embedding", 768))))
+        val refusal = planner.validate(conflicting)
+        assertTrue(refusal!!.startsWith("Conflicting schema declarations for VECTOR_INDEX on Chunk[embedding]"), refusal)
+        assertEquals(DatabaseReport("default", failure = refusal), assertIs<PlanStep.Done>(planner.start(conflicting, 0)).report)
+    }
+
+    @Test
     fun nothingDeclaredOnTheDatabaseIsNothingRun() {
         val done = assertIs<PlanStep.Done>(planner.start(request(Operation.Enforce(), DeclaredCatalog(null, items = emptyList())), 0)).report
         assertEquals(DatabaseReport("default"), done)

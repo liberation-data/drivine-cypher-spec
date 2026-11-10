@@ -100,7 +100,8 @@ sealed interface Operation {
 
     /**
      * `SchemaManager.remove(catalog)`: the [items] taken from what [owner] declares, dropped where no one else declares
-     * them. A remove of no items plans nothing, as drivine4j's returns at once.
+     * them, merged first as drivine4j's catalog merges them (the indexes before the constraints, each once). A remove of
+     * no items plans nothing, as drivine4j's returns at once.
      */
     data class Remove(val owner: String?, val items: List<SchemaItemSpec>) : Operation
 

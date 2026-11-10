@@ -346,9 +346,15 @@ internal class SchemaProgram(
     /** `SchemaManager.remove`, on this database: drops what no one else declares here, and takes the items out of the owner's marker. */
     private fun remove(operation: Operation.Remove): DatabaseReport {
         val owner = operation.owner
+        // drivine4j removes its catalog's items, merged as `SchemaCatalog.of` merges them: the indexes first.
+        val items = try {
+            Declarations.merged(operation.items)
+        } catch (refusal: PlanRefusal) {
+            return report(failure = refusal.message)
+        }
         val run = OwnerRun(owner)
         return try {
-            run.removal = removeItems(run, operation)
+            run.removal = removeItems(run, operation.copy(items = items))
             report(listOf(run.report()))
         } catch (failure: OwnerFailure) {
             // A remove isn't isolated by owner: what fails is thrown as it is.
