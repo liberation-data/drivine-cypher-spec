@@ -284,7 +284,8 @@ cases:
     steps:
       - search: {label: "Doc", properties: ["body"], query: "-kiwi", topK: 50}
         error: "A full-text query needs a word to look for: '-kiwi' has none."
-        today: [{stores: ["graph"], issue: "liberation-data/drivine-cypher-spec#100: the graph engines are given the query as it is"}]
+        today: [{stores: ["graph"], issue: "liberation-data/drivine-cypher-spec#100"}]
+        note: "The graph engines are given the query as it is, so they don't refuse it until the module plans their searches too."
       - search: {label: "Doc", properties: ["body"], query: "NOT kiwi", topK: 50}
         error: "A full-text query needs a word to look for: 'NOT kiwi' has none."
         today: [{stores: ["graph"], issue: "liberation-data/drivine-cypher-spec#100"}]
@@ -349,9 +350,15 @@ ranking:
       overlap: 4.3
       target: {sameTop: 21, overlap: 4.5}
       measured: {postgres: {sameTop: 17, overlap: 4.33}, oracle: {sameTop: 17, overlap: 4.33}, sqlite: {sameTop: 17, overlap: 4.33}}
+    - stores: ["neo4j"]
+      sameTop: 21
+      overlap: 4.95
+      note: "Neo4j's own ranking against its recording: full agreement (pgvector has 4 hits, so 104/21 = 4.952). It fails where Neo4j's image no longer gives what was recorded: then record the lists again, as the README says."
+      measured: {neo4j: {sameTop: 21, overlap: 4.952}}
     - stores: ["memgraph"]
       sameTop: 16
       overlap: 4.09
+      note: "Memgraph's order varies between runs among hits that score alike: its overlap was 4.095 to 4.143 over recorded runs, so its bar is the worst of them, 4.095, rounded down."
       measured: {memgraph: {sameTop: 16, overlap: 4.095}}
     - stores: ["oracle-text"]
       sameTop: 5
