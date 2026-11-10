@@ -157,7 +157,7 @@ declarations:
   - {name: "...", specs: [...], conflict: "Conflicting schema declarations for ..."}
 ```
 
-A spec is written as `cases` write one, with a constraint's `nodeIdProperty`, the property a violation's sample names each node by, beside. An item, what a store has, is its `kind`, `label` and `properties`, and what the store gives of its `name`, `dimensions`, `similarity`, `analyzer`, `status`, `quantizationEnabled`, `hnswM` and `hnswEfConstruction`; a key left out is null, a value the store doesn't give.
+A spec is written as `cases` write one, with a constraint's `nodeIdProperty`, the property a violation's sample names each node by, beside. A schema manager hands every rule a spec as it is made, as drivine4j's do: one that ignores case over the lowercased copies of its properties, so that its item is found, matched and sampled over them, not over the properties declared. An item, what a store has, is its `kind`, `label` and `properties`, and what the store gives of its `name`, `dimensions`, `similarity`, `analyzer`, `status`, `quantizationEnabled`, `hnswM` and `hnswEfConstruction`; a key left out is null, a value the store doesn't give.
 
 | Key | What it is |
 |---|---|

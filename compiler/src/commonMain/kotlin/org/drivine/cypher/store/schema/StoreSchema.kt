@@ -28,6 +28,9 @@ import org.drivine.schema.VectorIndexSpec
  * pure function of its arguments; running the statements, and deciding when to, stay the schema manager's. Pinned by the
  * spec's `store.yaml` (`schema`, `listings`, `matching` and `errors`).
  *
+ * A spec is handed to each rule as it is made ([org.drivine.schema.made]), as drivine4j's schema managers hand it: one that
+ * ignores case over the lowercased copies of its properties, which its item is made over, not the properties declared.
+ *
  * A listing's rows are plain values, as a driver gives them: maps, lists, text, numbers, booleans and null. A row a store
  * gives as one map column is a map, a SQL store's JSON decoded; one it gives as several columns (Memgraph's `SHOW INDEX INFO`)
  * is a list of them. A number is read as its whole part, whatever its type: a library hands over a driver's own integer
