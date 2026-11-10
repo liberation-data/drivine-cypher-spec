@@ -33,6 +33,18 @@ object CypherNames {
      * spelling.
      */
     fun quoted(name: String): String = "`${name.replace(ESCAPED_BACKTICK, "`").replace("`", "``")}`"
+
+    /** The Unicode escape of a single quote, with as many `u` as an escape may have. */
+    private val ESCAPED_QUOTE = Regex("\\\\u+0027")
+
+    /**
+     * [text] as a Cypher string literal, between single quotes, whatever it holds: a backslash and a quote in it escaped with
+     * a backslash, as Cypher reads them, so it is one string on Neo4j, Memgraph and FalkorDB (liberation-data/drivine4j#767).
+     * The `\uXXXX` escape of a quote is taken for the quote, as [quoted] takes that of a backtick: Neo4j decodes it inside the
+     * backticks of the DDL that names the index, so the name searched is the name Neo4j made. A doubled backslash already
+     * keeps an escape in [text] from closing the quotes.
+     */
+    fun string(text: String): String = "'${text.replace(ESCAPED_QUOTE, "'").replace("\\", "\\\\").replace("'", "\\'")}'"
 }
 
 /** The name the graph engines give [similarity]. */
@@ -66,8 +78,7 @@ object Neo4jDdl : StoreDdl {
                 "FOR (n:${id(spec.label)}) ON EACH ${eachPropertyList(spec.properties)} " +
                 "OPTIONS {indexConfig: {${analyzerConfig(spec.analyzer)}}}"
         )
-        // Written with plain backticks, as drivine4j wrote it: not escaped as the other kinds' names are.
-        is TextIndexSpec -> text("CREATE TEXT INDEX `${spec.effectiveName}` IF NOT EXISTS FOR (n:`${spec.label}`) ON (n.`${spec.property}`)")
+        is TextIndexSpec -> text("CREATE TEXT INDEX ${id(spec.effectiveName)} IF NOT EXISTS FOR (n:${id(spec.label)}) ON (n.${id(spec.property)})")
     }
 
     override fun dropIndex(item: CatalogItem): List<DdlStatement> {
@@ -109,7 +120,7 @@ object Neo4jDdl : StoreDdl {
     private fun eachPropertyList(properties: List<String>): String = properties.joinToString(", ", "[", "]") { "n.${id(it)}" }
 
     /** Empty when no analyzer is declared, so Neo4j applies its own default rather than one that could drift from it. */
-    private fun analyzerConfig(analyzer: String?): String = analyzer?.let { "`fulltext.analyzer`: '$it'" } ?: ""
+    private fun analyzerConfig(analyzer: String?): String = analyzer?.let { "`fulltext.analyzer`: ${CypherNames.string(it)}" } ?: ""
 
     /**
      * The `indexConfig` body for a vector index, on one line. Dimensions and similarity are always written; the physical
@@ -149,20 +160,20 @@ class MemgraphDdl(private val vectorIndexCapacity: Int = DEFAULT_VECTOR_CAPACITY
     override fun createIndex(spec: IndexSpec, existing: CatalogItem?): List<DdlStatement> = when (spec) {
         is VectorIndexSpec -> text(
             """
-            CREATE VECTOR INDEX ${spec.effectiveName} ON :${id(spec.label)}(${id(spec.property)})
+            CREATE VECTOR INDEX ${id(spec.effectiveName)} ON :${id(spec.label)}(${id(spec.property)})
             WITH CONFIG {"dimension": ${spec.dimensions}, "metric": "${metricName(spec.similarity)}", "capacity": $vectorIndexCapacity}
             """.trimIndent()
         )
         is RangeIndexSpec -> text("CREATE INDEX ON :${id(spec.label)}(${ids(spec.properties)})")
         // Memgraph calls it a TEXT index, and it is named and over several properties as Neo4j's full-text index is.
-        is FullTextIndexSpec -> text("CREATE TEXT INDEX ${spec.effectiveName} ON :${id(spec.label)}(${ids(spec.properties)})")
+        is FullTextIndexSpec -> text("CREATE TEXT INDEX ${id(spec.effectiveName)} ON :${id(spec.label)}(${ids(spec.properties)})")
         // Memgraph's TEXT INDEX is full-text, made above from a FullTextIndexSpec; Neo4j's has no equivalent here.
         is TextIndexSpec -> throw unsupportedTextIndex(spec, engine)
     }
 
     override fun dropIndex(item: CatalogItem): List<DdlStatement> = when (item.kind) {
-        SchemaItemKind.VECTOR_INDEX -> text("DROP VECTOR INDEX ${item.name ?: "${item.label}_${item.properties.first()}_vector"}")
-        SchemaItemKind.FULLTEXT_INDEX -> text("DROP TEXT INDEX ${item.name ?: "${item.label}_${item.properties.joinToString("_")}_fulltext"}")
+        SchemaItemKind.VECTOR_INDEX -> text("DROP VECTOR INDEX ${id(item.name ?: "${item.label}_${item.properties.first()}_vector")}")
+        SchemaItemKind.FULLTEXT_INDEX -> text("DROP TEXT INDEX ${id(item.name ?: "${item.label}_${item.properties.joinToString("_")}_fulltext")}")
         else -> text("DROP INDEX ON :${id(item.label)}(${ids(item.properties)})")
     }
 

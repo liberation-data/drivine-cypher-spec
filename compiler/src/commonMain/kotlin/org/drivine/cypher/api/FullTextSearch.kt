@@ -302,7 +302,8 @@ object FullTextSearch {
     /**
      * The search's head on a graph engine: the query as it is, to the engine's full-text index. Neo4j's
      * `db.index.fulltext.queryNodes` and Memgraph's `text_search.search_all` name the index; FalkorDB's
-     * `db.idx.fulltext.queryNodes` names its label, as FalkorDB has no index names.
+     * `db.idx.fulltext.queryNodes` names its label, as FalkorDB has no index names. Each name is a Cypher string, escaped
+     * whatever it holds ([CypherNames.string]), and each label of the check an identifier ([CypherNames.quoted]).
      */
     private fun head(store: SearchStore, request: SearchRequest): SearchResult {
         val topK = requireNotNull(request.topK) { "A full-text search on ${store.id} gives its topK." }
@@ -314,10 +315,10 @@ object FullTextSearch {
         // A root label beyond the first prunes the hits as a filter does, as drivine4j's `prunedAfterIndex` counts it.
         val limit = scope.bound(indexLimit(topK, request.filtered || request.labels.size > 1))
         val call = when (store) {
-            SearchStore.NEO4J -> "CALL db.index.fulltext.queryNodes('$indexName', $query, {limit: $limit})"
+            SearchStore.NEO4J -> "CALL db.index.fulltext.queryNodes(${CypherNames.string(indexName)}, $query, {limit: $limit})"
             // Without a limit, text_search yields its best 1,000 hits and no more; one near Int.MAX_VALUE takes the server down.
-            SearchStore.MEMGRAPH -> "CALL text_search.search_all('$indexName', $query, {limit: CASE WHEN $limit < $TEXT_SEARCH_LIMIT_CAP THEN $limit ELSE $TEXT_SEARCH_LIMIT_CAP END})"
-            else -> "CALL db.idx.fulltext.queryNodes('$label', $query)"
+            SearchStore.MEMGRAPH -> "CALL text_search.search_all(${CypherNames.string(indexName)}, $query, {limit: CASE WHEN $limit < $TEXT_SEARCH_LIMIT_CAP THEN $limit ELSE $TEXT_SEARCH_LIMIT_CAP END})"
+            else -> "CALL db.idx.fulltext.queryNodes(${CypherNames.string(label)}, $query)"
         }
         return SearchPlan(sql = null, cypher = normalizedHead(call, request.alias, request.scoreAlias, limit, request.labels, label), parameters = scope.bindings())
     }

@@ -14,7 +14,7 @@ import java.time.format.DateTimeFormatter
  *
  * - `corpus.jsonl`: every statement in the spec's files, compiled for Postgres, Oracle and SQLite, and a few with typed
  *   parameters, Oracle's graph options, and on Oracle with `oracleRowsAsText` each statement whose SQL it changes and
- *   [ROWS_AS_TEXT_WRITES]: each line `{"request": …, "answer": …}`, both JSON text, the answer as [CompileJson] gives it on the JVM.
+ *   [ROWS_AS_TEXT_WRITES], and with `oracleReencodeJson` each statement whose SQL it changes: each line `{"request": …, "answer": …}`, both JSON text, the answer as [CompileJson] gives it on the JVM.
  *   A statement whose SQL embeds the moment it was compiled at, as SQLite's does of `datetime()` and the like, is left
  *   out: no two runs give it alike. It is found by its SQL holding that moment, so no list of statements is kept.
  * - `doubles.txt`: doubles as Java writes them (`T<tab>bits<tab>text`) and texts as Java reads them
@@ -109,11 +109,49 @@ object Oracle {
             val text = request("oracle", cypher, parameters, ROWS_AS_TEXT)
             if (CompileJson.compile(text) != CompileJson.compile(request("oracle", cypher, parameters))) add(text)
         }
+        // Oracle's values encoded again (#165): each spec and typed statement whose SQL the option changes, every one that returns.
+        for ((cypher, parameters) in statements + TYPED.map { (cypher, parameters) -> Mutants.Statement(cypher, parameters) }) {
+            val again = request("oracle", cypher, parameters, REENCODED)
+            if (CompileJson.compile(again) != CompileJson.compile(request("oracle", cypher, parameters))) add(again)
+        }
         // Full-text searches: each of the golden's requests, and searches that are no request.
         addAll(searchRequests())
         // Requests that are no request.
         addAll(listOf("", "[]", "{\"store\": \"neo4j\", \"graph\": {\"name\": \"g\"}, \"cypher\": \"RETURN 1\"}", "{\"store\": \"postgres\", \"cypher\": \"RETURN 1\"}"))
+        // Compiled typed, last, so every request before is where it was: results.yaml's statements, and each other spec
+        // statement whose answer typed differs from untyped by more than its columns, one that returns a node or a relationship.
+        val results = statements(spec, listOf("results.yaml"))
+        for ((cypher, parameters) in results) for (store in STORES) add(typedRequest(request(store, cypher, parameters)))
+        for ((cypher, parameters) in statements - results.toSet()) for (store in STORES) {
+            val untyped = request(store, cypher, parameters)
+            val typed = typedRequest(untyped)
+            val plain = CompileJson.compile(untyped)
+            val answer = CompileJson.compile(typed)
+            if (answer != plain && answer.substringBefore(",\"columns\":") != plain.removeSuffix("}")) add(typed)
+        }
+        // And on Oracle with its rows as text, each statement whose typed SQL the option changes: a write that returns a node or a relationship.
+        for ((cypher, parameters) in results + statements) {
+            val untyped = request("oracle", cypher, parameters, ROWS_AS_TEXT)
+            val typed = typedRequest(untyped)
+            val plain = CompileJson.compile(untyped)
+            val answer = CompileJson.compile(typed)
+            val changed = answer != CompileJson.compile(typedRequest(request("oracle", cypher, parameters)))
+            if (changed && answer.substringBefore(",\"columns\":") != plain.removeSuffix("}")) add(typed)
+        }
+        // And on Oracle with its values encoded again (#165): results.yaml's statements, and each other one whose typed SQL
+        // tags a node or a relationship, where the option changes it.
+        for ((cypher, parameters) in results + (statements - results.toSet())) {
+            val plain = CompileJson.compile(request("oracle", cypher, parameters))
+            val plainTyped = CompileJson.compile(typedRequest(request("oracle", cypher, parameters)))
+            val tags = plainTyped.substringBefore(",\"columns\":") != plain.removeSuffix("}")
+            val again = typedRequest(request("oracle", cypher, parameters, REENCODED))
+            if ((tags || results.any { it.cypher == cypher }) && CompileJson.compile(again) != plainTyped) add(again)
+        }
+        add("{\"store\": \"sqlite\", \"graph\": {\"name\": \"g\"}, \"typed\": \"yes\", \"cypher\": \"RETURN 1\"}")
     }
+
+    /** [request], a request's JSON text, asking for its statement compiled typed. */
+    private fun typedRequest(request: String): String = request.replaceFirst("{", "{\"typed\":true,")
 
     /** The module's golden of drivine4j's full-text search statements, `src/commonTest/resources/search-golden.json`. */
     private fun searchGolden(): ByteArray = requireNotNull(Oracle::class.java.getResource("/search-golden.json")) { "No search-golden.json on the classpath." }.readBytes()
@@ -136,8 +174,8 @@ object Oracle {
         )
 
     /** Every statement in the spec's files, with its parameters, in the files' order. */
-    internal fun statements(spec: File): List<Mutants.Statement> = buildList {
-        for (file in FILES) {
+    internal fun statements(spec: File, files: List<String> = FILES): List<Mutants.Statement> = buildList {
+        for (file in files) {
             val tree = yaml.readTree(File(spec, file))
             val cases = if (tree.isArray) tree else tree["cases"]
             for (case in cases) for (step in case["steps"] ?: continue) {
@@ -210,6 +248,9 @@ object Oracle {
 
     /** The graph of Oracle's rows as text: see [corpusRequests]. */
     private val ROWS_AS_TEXT: Map<String, Any?> = mapOf("name" to "g", "oracleRowsAsText" to true)
+
+    /** The graph of Oracle's values encoded again: see [corpusRequests]. */
+    private val REENCODED: Map<String, Any?> = mapOf("name" to "g", "oracleReencodeJson" to true)
 
     /** Writes that return rows the spec's statements have no form of, for Oracle's rows as text: a long text given, many rows. */
     private val ROWS_AS_TEXT_WRITES: List<Pair<String, Map<String, Any?>>> = listOf(

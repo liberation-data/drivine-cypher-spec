@@ -99,6 +99,12 @@ abstract class SqlCypherCompiler(
     protected open fun planned(query: String): String = query
 
     /**
+     * The value a statement returns, a row's `result`, as the host's driver reads it back: as it is, but where a store's says.
+     * Only the statement's own, each of its `UNION`'s queries' among them, not a subquery's, which the statement reads on.
+     */
+    protected open fun returned(json: String): String = json
+
+    /**
      * The query a `DELETE` reads the ids it deletes from, [query], a subquery of the match itself in the `DELETE`'s `IN`, as
      * [planned] gives it: a store whose planner fails on such a subquery is told more: see Oracle's.
      */
@@ -144,6 +150,30 @@ abstract class SqlCypherCompiler(
         }
         return compile(CypherReader.read(cypher), parameters)
     }
+
+    /**
+     * The statement [cypher] as [compile] gives it, and with [typed] its rows' nodes and relationships tagged with their labels
+     * and type, in the columns [ColumnKind.tagged] names: see [ColumnKind]. Untyped, it is compiled byte for byte as [compile]
+     * compiles it. For a host that gives a result's values as the graph engines' drivers do, as the drivine CLI prints them.
+     */
+    fun compile(cypher: String, parameters: Map<String, Any?>, typed: Boolean): CompiledCypher {
+        this.typed = typed
+        try {
+            return compile(cypher, parameters)
+        } finally {
+            this.typed = false
+        }
+    }
+
+    /** Whether the statement is compiled typed: see the [compile] that takes it. */
+    protected var typed = false
+        private set
+
+    /** The columns of the statement's rows, as its last `RETURN`, or its `UNION`'s first query's, gives them: see [CompiledCypher.columns]. */
+    private var returned: List<ResultColumn>? = null
+
+    /** The places among [returned] that a query of the statement gives a node, a relationship or a list of them in: see `union`. */
+    private val taggedReturned = mutableSetOf<Int>()
 
     /**
      * Whether the statement's parameters hold NaN or an infinity, at any depth: set as [compile] starts. A store whose JSON holds
@@ -204,7 +234,11 @@ abstract class SqlCypherCompiler(
     protected open val infinitiesStored = false
 
     /** The statement [query], read already, with its parameters' values [parameters], as SQL: a query, or a procedure where it writes. */
-    fun compile(query: Query, parameters: Map<String, Any?>): CompiledCypher = finished(compiled(query, parameters))
+    fun compile(query: Query, parameters: Map<String, Any?>): CompiledCypher {
+        returned = null
+        taggedReturned.clear()
+        return finished(compiled(query, parameters)).copy(columns = returned.orEmpty())
+    }
 
     /** The statement [compiled] as the store runs it, after the last pass the store makes over it: none here. */
     protected open fun finished(compiled: CompiledCypher): CompiledCypher = compiled
@@ -339,16 +373,32 @@ abstract class SqlCypherCompiler(
         if (names.distinct().size > 1) {
             throw CompilerException("Each query of a UNION returns the same names, as in Cypher: ${names.joinToString(" and ") { it.joinToString(prefix = "(", postfix = ")") }}.")
         }
-        val writer = Writer(Parameters(parameters, ::parameterJson, ::parameterCount, text = ::parameterText, asPath = parameterPath))
-        // Every query's names, before any is compiled: a name made in one is no variable of a later one's.
-        writer.give(query)
-        // Its rows are compared, as a UNION without ALL compares them: see [Writer.distinctParts].
-        writer.distinctParts = !query.unions.first().all
-        writer.identifiedParts = writer.distinctParts
+        fun written(untagged: Set<Int>): Pair<Writer, List<Writer.Projected>> {
+            val writer = Writer(Parameters(parameters, ::parameterJson, ::parameterCount, text = ::parameterText, asPath = parameterPath))
+            writer.untagged = untagged
+            // Every query's names, before any is compiled: a name made in one is no variable of a later one's.
+            writer.give(query)
+            // Its rows are compared, as a UNION without ALL compares them: see [Writer.distinctParts].
+            writer.distinctParts = !query.unions.first().all
+            writer.identifiedParts = writer.distinctParts
+            return writer to parts.map { clauses -> writer.projected(Query(clauses)) }
+        }
         // Each query's result is of one type, as one may build a list or a map, Postgres's `json`, and another give a `jsonb`
         // (drivine4j#679, as drivine4j#516 for a UNION in CALL { … }). Without ALL, it is as JSON compares it.
         val result = if (query.unions.first().all) orderedJson("q.result") else comparable(Value.Json("q.result", ordered = true))
-        val projected = parts.map { clauses -> writer.projected(Query(clauses)) }
+        val warnedBefore = warned.size
+        val declaredBefore = functions.size
+        val first = written(emptySet())
+        // Compiled typed, a column a query gives a node in and another a value of another kind is a value's, which a host reads
+        // no tag in: so the queries are written again with that column untagged in each, as compiling untyped gives it.
+        val untagged = if (!typed) emptySet() else returned.orEmpty().withIndex().filter { (i, column) -> i in taggedReturned && !column.kind.tagged }.map { it.index }.toSet()
+        val (writer, projected) = if (untagged.isEmpty()) first else {
+            warned.subList(warnedBefore, warned.size).clear()
+            functions.subList(declaredBefore, functions.size).clear()
+            returned = null
+            taggedReturned.clear()
+            written(untagged)
+        }
         // Where a query's rows hold a node or a relationship, each query gives its row's identity beside it, and a query whose rows
         // hold none its value, which is its identity (drivine4j#213): see [Writer.rowIdentity]. Where none does, there is none, nor
         // where one may hold a node without its identity, as `head(collect(n))` does: then each compares by its value.
@@ -1287,6 +1337,9 @@ abstract class SqlCypherCompiler(
          */
         var identifiedParts = false
 
+        /** The places of the statement's columns it gives as compiling untyped gives them though compiled [typed]: see `union`. */
+        var untagged: Set<Int> = emptySet()
+
         /** The queries given to compile, [query] and [procedure], whose names [hidden] keeps clear of, not yet in [queryTexts]. */
         private val queries = mutableListOf<Query>()
 
@@ -1326,7 +1379,7 @@ abstract class SqlCypherCompiler(
             give(query)
             var select = Select(emptyMap())
             for (clause in query.clauses) {
-                if (clause is Clause.Return) return project(select, clause.projection, final = true)
+                if (clause is Clause.Return) return project(select, clause.projection, final = true, statement = true)
                 select = read(select, clause)
             }
             throw CompilerException("A Cypher statement ends with RETURN.")
@@ -1809,6 +1862,7 @@ abstract class SqlCypherCompiler(
                     temporal = all.map { it?.temporal }.distinct().singleOrNull(), items = all.map { it?.items }.distinct().singleOrNull(),
                     rowKeys = all.map { it?.rowKeys }.distinct().singleOrNull(), fromList = all.all { it?.fromList == true },
                     itemItems = all.map { it?.itemItems }.distinct().singleOrNull(), temporals = all.any { it?.temporals == true },
+                    entries = all.map { it?.entries }.distinct().singleOrNull(), itemEntries = all.map { it?.itemEntries }.distinct().singleOrNull(),
                     text = all.all { it?.text == true }, texts = all.all { it?.texts == true },
                     known = all.map { it?.known }.distinct().singleOrNull(), jsonNull = all.any { it?.jsonNull == true },
                     list = all.all { it?.list == true }, itemLists = all.all { it?.itemLists == true }, flat = all.all { it?.flat == true },
@@ -1858,7 +1912,8 @@ abstract class SqlCypherCompiler(
             select.bind(
                 unwind.variable,
                 Value.Json(
-                    item(name), temporal = itemsOf(list), items = itemItemsOf(list), temporals = itemTemporalsOf(list), list = holdsLists(list), flat = isFlat(list),
+                    item(name), temporal = itemsOf(list), items = itemItemsOf(list), entries = itemEntriesOf(list), temporals = itemTemporalsOf(list),
+                    list = holdsLists(list), flat = isFlat(list),
                     text = holdsTexts(list) || isText(list), fromList = true, jsonNull = !isFlat(list),
                     known = (unwind.list as? Expression.ListLiteral)?.items?.map { knownKind(it, select.scope) }?.distinct()?.singleOrNull(),
                 ),
@@ -2178,14 +2233,19 @@ abstract class SqlCypherCompiler(
             return "CASE WHEN $list IS NOT NULL THEN (SELECT ${comparable(Value.Json(aggregateList(scalar(rowId(u)), rowOrd(u)), ordered = true))} FROM ${idRows(list, u)}) END"
         }
 
-        /** The nodes or relationships [entities] lists, as a JSON list of their properties in its order: null where the list is. */
-        private fun entitiesJson(entities: Value.Entities): String = entities.gathered ?: shared(entities.ids) { (ids) ->
+        /**
+         * The nodes or relationships [entities] lists, as a JSON list of their properties in its order, or with [tagged] of each
+         * tagged as [output] gives it: null where the list is.
+         */
+        private fun entitiesJson(entities: Value.Entities, tagged: Boolean = false): String = entities.gathered?.takeUnless { tagged } ?: shared(entities.ids) { (ids) ->
             val u = alias("u")
             val row = alias(if (entities.relationships) "e" else "n")
             val (table, value) = if (entities.relationships) {
-                edges to json(Value.Relationship("$row.eid", "$row.src", "$row.dst", "$row.type", "$row.props")).sql
+                val relationship = Value.Relationship("$row.eid", "$row.src", "$row.dst", "$row.type", "$row.props")
+                edges to if (tagged) taggedRelationship(relationship) else json(relationship).sql
             } else {
-                nodes to json(Value.Node("$row.nid", "$row.labels", "$row.props", "$row.stamp")).sql
+                val node = Value.Node("$row.nid", "$row.labels", "$row.props", "$row.stamp")
+                nodes to if (tagged) taggedNode(node) else json(node).sql
             }
             val id = if (entities.relationships) "eid" else "nid"
             "CASE WHEN $ids IS NOT NULL THEN (SELECT ${aggregateList(value, itemNo(u))} FROM ${elements(ids, u)} ${keyJoin(table, row, id, idOf(item(u), null))}) END"
@@ -2321,7 +2381,7 @@ abstract class SqlCypherCompiler(
             val clauses = creates(query.clauses)
             clauses.forEachIndexed { i, clause ->
                 when {
-                    clause is Clause.Return -> step(ProcedureStep.Return(project(select, clause.projection, final = true).sql))
+                    clause is Clause.Return -> step(ProcedureStep.Return(project(select, clause.projection, final = true, statement = true).sql))
                     clause is Clause.Delete && i == clauses.lastIndex && deleteMatched(select, clause) -> Unit
                     else -> select = next(select, clause)
                 }
@@ -2454,6 +2514,7 @@ abstract class SqlCypherCompiler(
                         Value.Json(
                             if (written) rowValue(listOf(key)) else propertyOf(row, key), temporal = values[variable]?.temporal, items = values[variable]?.items,
                             itemItems = values[variable]?.itemItems, temporals = values[variable]?.temporals == true,
+                            entries = values[variable]?.entries, itemEntries = values[variable]?.itemEntries,
                             list = values[variable]?.list == true, itemLists = values[variable]?.itemLists == true,
                             text = values[variable]?.text == true, texts = values[variable]?.texts == true,
                             rowKeys = if (written) listOf(key) else null, fromList = !written, known = values[variable]?.known,
@@ -2922,9 +2983,12 @@ abstract class SqlCypherCompiler(
         /**
          * The query a `WITH` or a `RETURN` makes of [select]: its items as columns, grouped where it
          * aggregates, then ordered, skipped and limited. Rows it does not order, group or keep distinct
-         * stay in the order [select] reads them, as a graph engine keeps them.
+         * stay in the order [select] reads them, as a graph engine keeps them. With [statement], it is the statement's own last
+         * `RETURN`, or one of its `UNION`'s, not a subquery's: it names the statement's columns ([returned]), and where the
+         * statement is compiled [typed], gives its nodes and relationships tagged ([output]), and its `result` as the host's
+         * driver reads it back (`returned(json)`, which Oracle encodes again with `oracleReencodeJson`).
          */
-        fun project(select: Select, written: Projection, final: Boolean): Projected {
+        fun project(select: Select, written: Projection, final: Boolean, statement: Boolean = false): Projected {
             // As in Neo4j, a star gives the variables in the order of their names, before the items named after it.
             // Not a randomUUID() made first for a CALL or a condition (see `anewCall`), which the statement never named.
             val starred = select.bound.keys.filterNot { it in madeAnew }.sorted()
@@ -2939,13 +3003,13 @@ abstract class SqlCypherCompiler(
             )
             // Before aggregatesFirst, which names each variable it groups by as an item of its own.
             requireExplicitGrouping(items, projection.orderBy, select.scope.keys)
-            anewFirst(select, projection, items)?.let { (made, kept) -> return project(made, kept, final) }
-            casesFirst(select, projection, items)?.let { (cased, kept) -> return project(cased, kept, final) }
+            anewFirst(select, projection, items)?.let { (made, kept) -> return project(made, kept, final, statement) }
+            casesFirst(select, projection, items)?.let { (cased, kept) -> return project(cased, kept, final, statement) }
             // After casesFirst, which refuses what it must of an aggregate's CASE before working it out first.
-            sharedFirst(select, projection, items)?.let { (shared, kept) -> return project(shared, kept, final) }
-            sortsFirst(select, projection, items)?.let { (sorted, kept) -> return project(sorted, kept, final) }
-            aggregatesFirst(select, projection, items)?.let { (grouped, kept) -> return project(grouped, kept, final) }
-            heldFirst(select, projection, items)?.let { (held, keyed) -> return project(held, keyed, final) }
+            sharedFirst(select, projection, items)?.let { (shared, kept) -> return project(shared, kept, final, statement) }
+            sortsFirst(select, projection, items)?.let { (sorted, kept) -> return project(sorted, kept, final, statement) }
+            aggregatesFirst(select, projection, items)?.let { (grouped, kept) -> return project(grouped, kept, final, statement) }
+            heldFirst(select, projection, items)?.let { (held, keyed) -> return project(held, keyed, final, statement) }
             if (final && items.size > 1) {
                 warn(
                     "The statement returns ${items.size} items (${items.joinToString { it.name }}). Prefer returning a single map or value, such as RETURN { key1: val1, key2: val2 }: " +
@@ -3074,14 +3138,15 @@ abstract class SqlCypherCompiler(
             var identity: String? = null
             val outerColumns = if (final) {
                 val read = columns.map { (column, value) -> value.columnsOf(name, column) }
-                val values = read.map(::json)
+                if (statement) returned = columnsReturned(items.map { it.name }, read)
+                val values = if (statement && typed) read.mapIndexed { i, value -> if (i in untagged) json(value) else output(value) } else read.map(::json)
                 // A value that may be JSON's null is given as SQL's where a UNION compares rows by it; in a row of several, a list's item,
                 // SQL's null is JSON's (#500).
                 val result = if (values.size == 1) values.single().let { if (distinctParts && it.jsonNull) comparedNull(it.sql) else it.sql }
                 else jsonArray(values.map { it.sql })
                 // Where a UNION compares rows by it, a row that holds a node or a relationship is compared by its identity too (drivine4j#213).
                 identity = if (distinctParts && identifiedParts) rowIdentity(read) else null
-                "$result AS result${identity?.let { ", $it AS identity" }.orEmpty()}"
+                "${if (statement) returned(result) else result} AS result${identity?.let { ", $it AS identity" }.orEmpty()}"
             } else {
                 (columns.flatMap { (column, value) -> value.columns(column).map { "$name.${it.substringAfterLast(" AS ")}" } } +
                     sorts.flatMap { (column, _) -> sortedBy(column).map { (named, term) -> "$term AS $named" } }).joinToString(", ")
@@ -3823,6 +3888,7 @@ abstract class SqlCypherCompiler(
                         items = kindOf(expression.items.zip(items)),
                         identity = identityHolding(items) { jsonArray(it) },
                         itemItems = itemKindOf(expression.items.zip(items)),
+                        itemEntries = itemEntriesOf(expression.items.zip(items)),
                         temporals = items.any(::hasTemporals),
                         list = true,
                         itemLists = entities.isNotEmpty() && entities.all(::isList),
@@ -3837,6 +3903,7 @@ abstract class SqlCypherCompiler(
                     jsonObject(entries.map { (key, value) -> key to json(value).sql }),
                     ordered = true,
                     identity = identityHolding(entries.map { it.second }) { ids -> jsonObject(entries.map { it.first }.zip(ids)) },
+                    entries = entries.mapNotNull { (key, value) -> (value as? Value.Json)?.temporal?.let { key to it } }.toMap().takeIf { it.isNotEmpty() },
                     temporals = entries.any { hasTemporals(it.second) },
                 )
             }
@@ -3860,7 +3927,8 @@ abstract class SqlCypherCompiler(
                     // An item of a list that holds a node or a relationship holds it by identity too: see [Value.Json.identity].
                     known is Number -> element(subject(), at).let { item ->
                         Value.Json(
-                            item, temporal = itemsOf(listed), items = itemItemsOf(listed), identity = identityOf(listed, item, true) { element(it, at) },
+                            item, temporal = itemsOf(listed), items = itemItemsOf(listed), entries = itemEntriesOf(listed),
+                            identity = identityOf(listed, item, true) { element(it, at) },
                             list = holdsLists(listed), text = holdsTexts(listed), temporals = itemTemporalsOf(listed), jsonNull = !isFlat(listed),
                         )
                     }
@@ -3870,7 +3938,8 @@ abstract class SqlCypherCompiler(
                         }
                         item(subject()).let { taken ->
                             Value.Json(
-                                taken, temporal = itemsOf(listed), items = itemItemsOf(listed), identity = identityOf(listed, taken, true, ::item),
+                                taken, temporal = itemsOf(listed), items = itemItemsOf(listed), entries = itemEntriesOf(listed),
+                                identity = identityOf(listed, taken, true, ::item),
                                 list = holdsLists(listed), text = holdsTexts(listed), temporals = itemTemporalsOf(listed), jsonNull = !isFlat(listed),
                             )
                         }
@@ -4246,6 +4315,12 @@ abstract class SqlCypherCompiler(
             is Value.Relationship -> Value.Json(propertyOfRow(subject.props, key))
             // A value the statement writes as one of a kind other than a map has none, as Neo4j says when it plans the statement.
             is Value.Json -> subject.known?.takeIf { it != Value.Known.MAP }?.let { throw CompilerException("${it.noun.replaceFirstChar(Char::uppercase)} has no properties.") }
+                // An entry of a map the statement makes of a temporal kind is of it, though it is named like a temporal field: read
+                // from the row a write is making where the map is in it, as any entry of it is.
+                ?: subject.entries?.get(key)?.let { kind ->
+                    subject.rowKeys?.let { keys -> Value.Json(rowValue(keys + key), temporal = kind, rowKeys = keys + key, jsonNull = !subject.flat) }
+                        ?: Value.Json(mapProperty(subject, comparable(subject), key), temporal = kind, jsonNull = !subject.flat)
+                }
                 ?: temporalField(subject, key) ?: subject.rowKeys?.let { keys -> Value.Json(rowValue(keys + key), rowKeys = keys + key, jsonNull = !subject.flat) }
                 ?: mapProperty(subject, comparable(subject), key).let { taken ->
                     Value.Json(taken, identity = identityOf(subject, taken, true) { propertyOf(it, key) }, temporals = subject.temporals, jsonNull = !subject.flat)
@@ -4283,6 +4358,34 @@ abstract class SqlCypherCompiler(
         /** Whether the statement makes [value] a text, or null: see [Value.Json.text]. */
         private fun isText(value: Value): Boolean = (value as? Value.Json)?.text == true
 
+        /**
+         * Whether [value], written as [written], is known to be no temporal value, though it may be null: a node, a relationship, a
+         * truth value, a value the statement makes a text, a list or of a known kind, or a literal or a parameter given as a value of
+         * no temporal kind (a text bound as a parameter among them). A value read from the store, or worked out of one, may be one.
+         */
+        private fun untemporal(value: Value, written: Expression?): Boolean = when (value) {
+            is Value.Json -> value.temporal == null && (value.text || value.list || value.known != null || written?.let(::given).let(::untemporalGiven))
+            is Value.Bool, is Value.Node, is Value.Relationship, is Value.Entities -> true
+            is Value.Path -> false
+        }
+
+        /** Whether [given], a value written or given as a parameter, is not null and is no temporal value. */
+        private fun untemporalGiven(given: Any?): Boolean = given is String || given is Number || given is Boolean || given is List<*> || given is Map<*, *>
+
+        /**
+         * Whether each item of the list [value], written as [written], is known to be no temporal value and no map, or null: a list the
+         * statement makes of texts, one it writes of literals, or a list given as a parameter whose items are such. Not a map, which a
+         * temporal value as a map of its kind ([kinded]) might be equal to. At [depth] 2, so are the items of each item that is a list.
+         */
+        private fun untemporalItems(value: Value, written: Expression?, depth: Int = 1): Boolean {
+            fun writtenOf(item: Expression, depth: Int): Boolean =
+                item is Expression.Literal || depth > 1 && item is Expression.ListLiteral && item.items.all { writtenOf(it, depth - 1) }
+            fun givenOf(item: Any?, depth: Int): Boolean =
+                item == null || untemporalGiven(item) && item !is Map<*, *> && (depth == 1 || item !is List<*> || item.all { givenOf(it, depth - 1) })
+            return depth == 1 && holdsTexts(value) || (written as? Expression.ListLiteral)?.items?.all { writtenOf(it, depth) } == true ||
+                (written?.let(::given) as? List<*>)?.all { givenOf(it, depth) } == true
+        }
+
         /** Whether the statement makes [value] a list whose every item is a text, or null: see [Value.Json.texts]. */
         private fun holdsTexts(value: Value): Boolean = (value as? Value.Json)?.texts == true
 
@@ -4306,6 +4409,26 @@ abstract class SqlCypherCompiler(
 
         /** The temporal kind the statement makes each item of each item of the list [list]: see [Value.Json.itemItems]. */
         private fun itemItemsOf(list: Value): Temporal? = (list as? Value.Json)?.itemItems
+
+        /** The temporal kinds, by their keys, of the entries of each item of the list [list], maps all: see [Value.Json.itemEntries]. */
+        private fun itemEntriesOf(list: Value): Map<String, Temporal>? = (list as? Value.Json)?.itemEntries
+
+        /**
+         * The temporal kinds, by their keys, of the entries of each of [values], maps all, where each is of the same kind or a null
+         * written: a null written among them aside, as [kindOf] tells it of values. Null where no key's entries are of one kind.
+         */
+        private fun itemEntriesOf(values: List<Pair<Expression, Value>>): Map<String, Temporal>? {
+            val maps = values.filter { (written, _) -> written != Expression.Literal(null) }
+            if (maps.isEmpty()) return null
+            val keys = maps.flatMap { (_, value) -> (value as? Value.Json)?.entries?.keys.orEmpty() }.toSet()
+            return keys.mapNotNull { key ->
+                val kinds = maps.mapNotNull { (written, value) ->
+                    val entry = (written as? Expression.MapLiteral)?.entries?.firstOrNull { it.first == key }?.second
+                    if (entry == Expression.Literal(null)) null else listOf((value as? Value.Json)?.entries?.get(key))
+                }.flatten().distinct()
+                kinds.singleOrNull()?.let { key to it }
+            }.toMap().takeIf { it.isNotEmpty() }
+        }
 
         /** The temporal kind the statement makes each item of each of [values], lists all, as [kindOf] tells it of values. */
         private fun itemKindOf(values: List<Pair<Expression, Value>>): Temporal? = listKindOf(values, ::itemsOf)
@@ -4341,12 +4464,26 @@ abstract class SqlCypherCompiler(
          * Temporal arithmetic and comparison, where the statement makes either side of a temporal kind: a moment
          * and a duration added or taken away, two durations added, a duration scaled, two moments compared as the
          * moments they are. Null where neither side is of a temporal kind, or the operator is no such one.
+         *
+         * A side of one kind beside a side of another, or of none ([untemporal]), written as [leftWritten] and [rightWritten], is
+         * equal to it nowhere, and ordered beside it nowhere, though their ISO texts might be: a store has the temporal value as its
+         * ISO text, which a text that spells it is too (drivine4j#379). Null where either is null, as in Cypher. A value read from
+         * the store is its text alone, so it is compared by its text, as before.
          */
-        private fun temporalBinary(operator: Operator, left: Value, right: Value): Value? {
+        private fun temporalBinary(operator: Operator, left: Value, right: Value, leftWritten: Expression? = null, rightWritten: Expression? = null): Value? {
             val l = (left as? Value.Json)?.temporal
             val r = (right as? Value.Json)?.temporal
             if (l == null && r == null) return null
             val (jsonA, jsonB) = comparable(json(left)) to comparable(json(right))
+            val apart = if (l != null && r != null) l != r else if (l != null) untemporal(right, rightWritten) else untemporal(left, leftWritten)
+            if (apart && operator in COMPARISONS) {
+                val answer = when (operator) {
+                    Operator.EQUALS -> "FALSE"
+                    Operator.NOT_EQUALS -> "TRUE"
+                    else -> return Value.Bool(NO_TRUTH)
+                }
+                return Value.Bool(shared(jsonA, jsonB) { (x, y) -> "CASE WHEN NOT ${isJsonNull(x)} AND NOT ${isJsonNull(y)} THEN $answer END" })
+            }
             val known = listOf(left, right).map { (it as? Value.Json)?.takeIf { value -> value.temporal != null } }
             // A side the statement makes of a kind: its tag's text, read as it was made where it was made here.
             val a = known[0]?.let(::tagTextOf) ?: text(jsonA)
@@ -4835,14 +4972,14 @@ abstract class SqlCypherCompiler(
                 }
             }
             val (left, right) = compared(expression(binary.left, scope), expression(binary.right, scope), binary)
-            temporalBinary(binary.operator, left, right)?.let { return it }
+            temporalBinary(binary.operator, left, right, binary.left, binary.right)?.let { return it }
             val a = comparable(json(left))
             val b = comparable(json(right))
             return when (binary.operator) {
                 Operator.EQUALS, Operator.NOT_EQUALS -> {
                     val plain = plain(binary.left, binary.right, left, right, scope)
                     val equal = (if (plain) null else givenItemwise(binary.left, left, binary.right, right))
-                        ?: equality(left, right, binary.right, plain, stored(binary.left, scope), scalarRows = givenRowsScalar(binary.right, scope))
+                        ?: equality(left, right, binary.right, plain, stored(binary.left, scope), scalarRows = givenRowsScalar(binary.right, scope), leftWritten = binary.left)
                     val keyed = if (conjunct && binary.operator == Operator.EQUALS) idEquality(binary, left, right, scope) else null
                     // A node equal to a node, where the row must pass that, may be read by its key: see [readByKey].
                     if (conjunct && binary.operator == Operator.EQUALS && left is Value.Node && right is Value.Node) comparedKeys.pairs += left.nid to right.nid
@@ -4889,7 +5026,10 @@ abstract class SqlCypherCompiler(
                 )
                 Operator.MODULO -> Value.Json(remainder(a, divisor(binary, b)))
                 Operator.POWER -> Value.Json(scalar(float("power(${number(a)}, ${number(b)})")))
-                Operator.IN -> Value.Bool(membership(binary, left, right, scope, filter).let { within -> keyIn?.let { keyedIn(it, right, within) } ?: within })
+                Operator.IN -> {
+                    val (value, list) = kindedIn(left, right, binary)
+                    Value.Bool(membership(binary, value, list, scope, filter).let { within -> keyIn?.let { keyedIn(it, right, within) } ?: within })
+                }
                 Operator.STARTS_WITH -> Value.Bool(searchedTexts(a, b) { texts -> shared(*texts.toTypedArray()) { (x, y) -> startsWith(x, y) } })
                 // A pattern is short: only the text is read as a long one where it is.
                 Operator.MATCHES -> Value.Bool(texts(a) { (x) -> matches(x, text(b)) })
@@ -4927,7 +5067,7 @@ abstract class SqlCypherCompiler(
          */
         private fun comparedItems(left: Value, a: String, right: Value, b: String): Pair<String, String> {
             fun kind(list: Value) = itemsOf(list)?.let { it to 1 } ?: itemItemsOf(list)?.takeIf { holdsLists(list) }?.let { it to 2 }
-            fun wrapped(of: Temporal): (String) -> String = { item -> comparable(Value.Json(jsonObject(listOf(of.name.lowercase() to item)), ordered = true)) }
+            fun wrapped(of: Temporal): (String) -> String = { item -> ofKind(item, of) }
             val (l, r) = kind(left) to kind(right)
             // A temporal value beside a text: its ISO text would order where Cypher does not.
             if (l?.second == 1 && r == null && holdsTexts(right)) return mappedItems(a, 1, wrapped(l.first)) to b
@@ -4953,6 +5093,58 @@ abstract class SqlCypherCompiler(
                 else -> sorted to sorted
             }
             return mappedItems(a, depth, eachOfA) to mappedItems(b, depth, eachOfB)
+        }
+
+        /**
+         * [left] and [right], the sides of [binary], an `IN`, as it compares them where one is a temporal value, or a list of them, and
+         * the other's items, or their items, are known to be of no temporal kind, or the other way round ([kindedItems]): each temporal
+         * value as a map of its kind ([kinded]), so it is in no list for a text that spells it, as in Cypher (drivine4j#379). Not beside
+         * a value that may be a map, which such a map might be equal to. Else as they are.
+         */
+        private fun kindedIn(left: Value, right: Value, binary: Expression.Binary): Pair<Value, Value> {
+            val l = (left as? Value.Json)?.temporal
+            val items = itemKind(left)
+            val r = itemKind(right)
+            return when {
+                l != null && untemporalItems(right, binary.right) -> (left as Value.Json).copy(sql = kinded(comparable(left), l), ordered = false, temporal = null) to right
+                // A list of temporal values in a list of lists of none.
+                items?.second == 1 && untemporalItems(right, binary.right, 2) -> kindedList(left as Value.Json, items) to right
+                l == null && r?.second == 1 && left is Value.Json && left.known != Value.Known.MAP && given(binary.left) !is Map<*, *> && untemporal(left, binary.left) ->
+                    left to kindedList(right as Value.Json, r)
+                items == null && r?.second == 2 && untemporalItems(left, binary.left) -> left to kindedList(right as Value.Json, r)
+                else -> left to right
+            }
+        }
+
+        /** The temporal kind the statement makes each item of the list [list], with 1, or each item of each of its items, lists all, with 2. */
+        private fun itemKind(list: Value): Pair<Temporal, Int>? = list.takeIf(::isList)?.let {
+            itemsOf(it)?.let { kind -> kind to 1 } ?: itemItemsOf(it)?.takeIf { _ -> holdsLists(it) }?.let { kind -> kind to 2 }
+        }
+
+        /** [list], whose items, or their items, are of [kind] ([itemKind]), with each such item as a map of its kind ([ofKind]). */
+        private fun kindedList(list: Value.Json, kind: Pair<Temporal, Int>): Value.Json = list.copy(
+            sql = mappedItems(comparable(list), kind.second) { ofKind(it, kind.first) }, ordered = false, items = null, itemItems = null, temporals = false,
+        )
+
+        /** The JSON [json], a value of [kind], as a map of its kind, `{"date": …}`: as [comparedItems] has an item beside one of another kind. */
+        private fun ofKind(json: String, kind: Temporal): String = comparable(Value.Json(jsonObject(listOf(kind.name.lowercase() to json)), ordered = true))
+
+        /** [json], a value of [kind], as a map of its kind ([ofKind]): null where it is null. */
+        private fun kinded(json: String, kind: Temporal): String = shared(json) { (x) -> "CASE WHEN NOT ${isJsonNull(x)} THEN ${ofKind(x, kind)} END" }
+
+        /**
+         * [left] and [right], written as [leftWritten] and [rightWritten], as an equality or an `IN` compares them where one is a list
+         * the statement makes of temporal values of one kind, or of lists of them ([itemKind]), and the other a list whose items, to the
+         * same depth, are known to be of none ([untemporalItems]): the first with each such value as a map of its kind ([kinded]), so
+         * none is equal to a text that spells it, as in Cypher (drivine4j#379). Null where they are no such lists.
+         */
+        private fun kindedItems(left: Value, leftWritten: Expression?, right: Value, rightWritten: Expression?): Pair<Value, Value>? {
+            val (l, r) = itemKind(left) to itemKind(right)
+            return when {
+                l != null && r == null && untemporalItems(right, rightWritten, l.second) -> kindedList(left as Value.Json, l) to right
+                r != null && l == null && untemporalItems(left, leftWritten, r.second) -> left to kindedList(right as Value.Json, r)
+                else -> null
+            }
         }
 
         /** The JSON list [json] with each item at [depth], 1 its own items and 2 theirs, that is not null as [each] gives it. */
@@ -5034,8 +5226,12 @@ abstract class SqlCypherCompiler(
             stored: Boolean = true,
             of: IndexedProperty? = null,
             scalarRows: Boolean = false,
+            leftWritten: Expression? = null,
+            rightWritten: Expression? = written,
         ): String {
-            (temporalBinary(Operator.EQUALS, left, right) as? Value.Bool)?.let { return it.sql }
+            (temporalBinary(Operator.EQUALS, left, right, leftWritten, rightWritten) as? Value.Bool)?.let { return it.sql }
+            // A list of temporal values beside a list of values of no temporal kind: each of its items as a map of its kind.
+            kindedItems(left, leftWritten, right, rightWritten)?.let { (l, r) -> return equality(l, r, plain = plain, stored = stored) }
             // Through the store's key comparison: on Oracle, a plain `nid = nid` lets it drop the later node's join (#576).
             if (left is Value.Node && right is Value.Node) return sameKey(left.nid, right.nid)
             if (left is Value.Relationship && right is Value.Relationship) return "${left.eid} = ${right.eid}"
@@ -5227,13 +5423,13 @@ abstract class SqlCypherCompiler(
                     val compared = others.map { listed ->
                         val equals = Expression.Binary(Operator.EQUALS, left, listed)
                         val (l, r) = compared(item, expression(listed, scope), equals)
-                        equality(l, r, listed, plain(left, listed, l, r, scope), stored(left, scope))
+                        equality(l, r, listed, plain(left, listed, l, r, scope), stored(left, scope), leftWritten = left)
                     }
                     val terms = within + compared
                     // A null beside other terms takes its kind from them; alone, it is given one, as Postgres can't make a bare NULL JSON.
                     when {
                         nulls.isEmpty() -> grouped(terms, "OR")
-                        terms.isEmpty() -> "(CASE WHEN 1 = 0 THEN FALSE END)"
+                        terms.isEmpty() -> NO_TRUTH
                         else -> grouped(terms + "NULL", "OR")
                     }
                 }
@@ -5288,8 +5484,10 @@ abstract class SqlCypherCompiler(
             fun given(expression: Expression) = (expression as? Expression.Parameter)?.let { parameterTree(it.name) }
                 ?.takeIf { it.isArray && !holdsNoNull(it) && arrays(it) && short(it) }
             fun other(value: Value) = (value as? Value.Json)?.takeIf { it.identity == null && it.temporal == null }
-            given(rightWritten)?.let { list -> other(left)?.let { return itemsEqual(comparable(it), list) } }
-            given(leftWritten)?.let { list -> other(right)?.let { return itemsEqual(comparable(it), list) } }
+            // A list of temporal values beside given texts: each of its items as a map of its kind, as [kindedItems] has it.
+            val kinded = kindedItems(left, leftWritten, right, rightWritten)
+            given(rightWritten)?.let { list -> other(left)?.let { return itemsEqual(comparable(kinded?.first as? Value.Json ?: it), list) } }
+            given(leftWritten)?.let { list -> other(right)?.let { return itemsEqual(comparable(kinded?.second as? Value.Json ?: it), list) } }
             return null
         }
 
@@ -5514,7 +5712,9 @@ abstract class SqlCypherCompiler(
             val subject = case.subject?.let { expression(it, scope) }
             val results = (case.alternatives.map { it.second } + listOfNotNull(case.otherwise)).map { it to expression(it, scope) }
             val conditions = case.alternatives.map { (key, _) ->
-                if (subject != null) expression(key, scope).let { value -> equality(subject, value, plain = plain(case.subject!!, key, subject, value, scope)) }
+                if (subject != null) expression(key, scope).let { value ->
+                    equality(subject, value, plain = plain(case.subject!!, key, subject, value, scope), leftWritten = case.subject, rightWritten = key)
+                }
                 else bool(expression(key, scope))
             }
             fun written(value: (Value) -> String): String {
@@ -5599,7 +5799,8 @@ abstract class SqlCypherCompiler(
                     is Value.Relationship -> Value.Entities(gatheredIds("CASE WHEN ${gathered.eid} IS NOT NULL THEN ${scalar(gathered.eid)} END"), true, collected(gathered))
                     // What holds a node or a relationship, a map or a list of them, is gathered beside its identity too.
                     else -> Value.Json(
-                        collected(gathered), ordered = true, items = (gathered as? Value.Json)?.temporal, itemItems = itemsOf(gathered), list = true,
+                        collected(gathered), ordered = true, items = (gathered as? Value.Json)?.temporal, itemItems = itemsOf(gathered),
+                        itemEntries = (gathered as? Value.Json)?.entries, list = true,
                         itemLists = isList(gathered), texts = isText(gathered), temporals = hasTemporals(gathered),
                         identity = identityOf(gathered)?.let { comparable(Value.Json(collect(it, rowOrder), ordered = true)) },
                     )
@@ -5774,7 +5975,7 @@ abstract class SqlCypherCompiler(
                     Value.Json(
                         result,
                         temporal = if (taken) itemsOf(one()) else null,
-                        items = if (taken) itemItemsOf(one()) else null,
+                        items = if (taken) itemItemsOf(one()) else null, entries = if (taken) itemEntriesOf(one()) else null,
                         identity = if (taken) identityOf(one(), result, true) { list -> shared(list) { (x) -> function(name, x)!! } } else null,
                         list = taken && holdsLists(one()), temporals = taken && itemTemporalsOf(one()),
                         text = if (taken) holdsTexts(one()) else name in TEXT_FUNCTIONS, jsonNull = taken && !isFlat(one()),
@@ -5965,6 +6166,41 @@ abstract class SqlCypherCompiler(
             is Value.Entities -> Value.Json(entitiesJson(value), ordered = true, list = true)
             // Each graph engine's driver gives a path as a value of its own, so a path is given by its parts.
             is Value.Path -> throw CompilerException("A path is not a value drivine gives the same on each store: use nodes(p), relationships(p) and length(p).")
+        }
+
+        /**
+         * A value as the statement's last `RETURN` gives it compiled [typed]: a node, a relationship, or a list of them, tagged
+         * with its labels or type beside its properties, as [ColumnKind] has it; any other value as [json] gives it. Only
+         * there: anywhere before it, a node is still read, compared and indexed as [json] gives it.
+         */
+        private fun output(value: Value): Value.Json = when (value) {
+            is Value.Node -> Value.Json(taggedNode(value))
+            is Value.Relationship -> Value.Json(taggedRelationship(value))
+            is Value.Entities -> Value.Json(entitiesJson(value, tagged = true), ordered = true, list = true)
+            else -> json(value)
+        }
+
+        private fun taggedNode(node: Value.Node): String =
+            "CASE WHEN ${node.nid} IS NOT NULL THEN ${jsonObject(listOf(TAG to literalJson("node"), "labels" to node.labels, "properties" to nodeJson(node)))} END"
+
+        private fun taggedRelationship(relationship: Value.Relationship): String =
+            "CASE WHEN ${relationship.eid} IS NOT NULL THEN ${jsonObject(listOf(TAG to literalJson("relationship"), "type" to scalar(relationship.type), "properties" to relationship.props))} END"
+
+        /** The columns [names] of a statement's last `RETURN`, their values [read] as its outer query reads them: see [CompiledCypher.columns]. */
+        private fun columnsReturned(names: List<String>, read: List<Value>): List<ResultColumn> {
+            val columns = names.zip(read).map { (name, value) -> ResultColumn(name, columnKind(value)) }
+            columns.forEachIndexed { i, column -> if (column.kind.tagged) taggedReturned += i }
+            // A UNION's columns are its first query's, of the kind every query's is, or a value.
+            val first = returned ?: return columns
+            return first.zip(columns).map { (named, other) -> if (named.kind == other.kind) named else named.copy(kind = ColumnKind.VALUE) }
+        }
+
+        private fun columnKind(value: Value): ColumnKind = when (value) {
+            is Value.Node -> ColumnKind.NODE
+            is Value.Relationship -> ColumnKind.RELATIONSHIP
+            is Value.Entities -> if (value.relationships) ColumnKind.RELATIONSHIPS else ColumnKind.NODES
+            is Value.Json -> value.temporal?.let(ColumnKind::of) ?: ColumnKind.VALUE
+            is Value.Bool, is Value.Path -> ColumnKind.VALUE
         }
 
         /**
@@ -6171,6 +6407,9 @@ abstract class SqlCypherCompiler(
         /** The parameters, a JSON map. */
         const val PARAMS = "cy_params"
 
+        /** The key a typed node or relationship is tagged by: see [ColumnKind]. */
+        const val TAG = "\$t"
+
         /** The rows, a JSON list of maps, each variable a row holds at its key. */
         const val ROWS = "cy_rows"
 
@@ -6308,6 +6547,14 @@ abstract class SqlCypherCompiler(
 
         /** The operators of arithmetic, whose value is a number where both operands are: see [Value.Json.known]. */
         val ARITHMETIC = setOf(Operator.ADD, Operator.SUBTRACT, Operator.MULTIPLY, Operator.DIVIDE, Operator.MODULO, Operator.POWER)
+
+        /** The operators that compare two values: equal or not, and in order. */
+        val COMPARISONS = setOf(
+            Operator.EQUALS, Operator.NOT_EQUALS, Operator.LESS_THAN, Operator.GREATER_THAN, Operator.LESS_THAN_OR_EQUAL, Operator.GREATER_THAN_OR_EQUAL,
+        )
+
+        /** A truth value that is null, of the type a condition is: Postgres can't make a bare NULL one. */
+        const val NO_TRUTH = "(CASE WHEN 1 = 0 THEN FALSE END)"
 
         /** The functions whose value, null aside, is a number, a text, a truth value or a temporal value: no list or map. */
         val SCALAR_FUNCTIONS = setOf(
