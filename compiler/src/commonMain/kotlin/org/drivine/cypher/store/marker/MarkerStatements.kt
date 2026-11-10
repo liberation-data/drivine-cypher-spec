@@ -49,7 +49,11 @@ interface MarkerStatements {
     fun mergeParameters(scope: String, version: String?, items: String, appliedAt: Long): Map<String, Any?> =
         mapOf("scope" to scope, "version" to version, "items" to storedItems(items))
 
-    /** Removes every marker of the scope but its newest: what a library runs, with the constraint, before it reads one. */
+    /**
+     * Removes every marker of the scope but its newest: what a library runs, and then makes [SchemaMarker.CONSTRAINT],
+     * before it reads or writes the marker of an owner that sets a version token. An owner that sets none runs neither, as
+     * drivine4j's `SchemaManager` does, so no constraint is made for it.
+     */
     val deleteAllButNewest: String
 
     /** Removes the scope's marker, so that the next enforce takes its schema as never versioned. */
