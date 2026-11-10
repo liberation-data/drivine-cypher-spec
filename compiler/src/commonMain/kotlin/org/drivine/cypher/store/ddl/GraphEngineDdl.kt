@@ -39,9 +39,10 @@ object CypherNames {
 
     /**
      * [text] as a Cypher string literal, between single quotes, whatever it holds: a backslash and a quote in it escaped with
-     * a backslash, as Cypher reads them, so it is one string on Neo4j, Memgraph and FalkorDB. As [quoted] does of a backtick,
-     * the `\uXXXX` escape of a quote, which Neo4j decodes before it reads the statement, is taken for the quote it is, so a
-     * name can end its own quotes in neither spelling (liberation-data/drivine4j#767).
+     * a backslash, as Cypher reads them, so it is one string on Neo4j, Memgraph and FalkorDB (liberation-data/drivine4j#767).
+     * The `\uXXXX` escape of a quote is taken for the quote, as [quoted] takes that of a backtick: Neo4j decodes it inside the
+     * backticks of the DDL that names the index, so the name searched is the name Neo4j made. A doubled backslash already
+     * keeps an escape in [text] from closing the quotes.
      */
     fun string(text: String): String = "'${text.replace(ESCAPED_QUOTE, "'").replace("\\", "\\\\").replace("'", "\\'")}'"
 }
@@ -77,7 +78,6 @@ object Neo4jDdl : StoreDdl {
                 "FOR (n:${id(spec.label)}) ON EACH ${eachPropertyList(spec.properties)} " +
                 "OPTIONS {indexConfig: {${analyzerConfig(spec.analyzer)}}}"
         )
-        // Written with plain backticks, as drivine4j wrote it: not escaped as the other kinds' names are.
         is TextIndexSpec -> text("CREATE TEXT INDEX ${id(spec.effectiveName)} IF NOT EXISTS FOR (n:${id(spec.label)}) ON (n.${id(spec.property)})")
     }
 
@@ -120,7 +120,7 @@ object Neo4jDdl : StoreDdl {
     private fun eachPropertyList(properties: List<String>): String = properties.joinToString(", ", "[", "]") { "n.${id(it)}" }
 
     /** Empty when no analyzer is declared, so Neo4j applies its own default rather than one that could drift from it. */
-    private fun analyzerConfig(analyzer: String?): String = analyzer?.let { "`fulltext.analyzer`: '$it'" } ?: ""
+    private fun analyzerConfig(analyzer: String?): String = analyzer?.let { "`fulltext.analyzer`: ${CypherNames.string(it)}" } ?: ""
 
     /**
      * The `indexConfig` body for a vector index, on one line. Dimensions and similarity are always written; the physical

@@ -1,5 +1,5 @@
 {
-  "source" : "drivine4j dd4a66f0, written by its own code (SearchGoldenWriter, not committed): only parameter names are normalized, $_pN to $_cy_ft<N+1>, and the graph engines' $_fullTextQuery and $_fullTextIndexLimit to $_cy_ft1 and $_cy_ft2.",
+  "source" : "drivine4j dd4a66f0, written by its own code (SearchGoldenWriter, not committed): only parameter names are normalized, $_pN to $_cy_ft<N+1>, and the graph engines' $_fullTextQuery and $_fullTextIndexLimit to $_cy_ft1 and $_cy_ft2. The graph engines' 14 answers whose index name or label holds a quote or a backslash were then edited by hand to write it as an escaped Cypher string (liberation-data/drivine4j#767).",
   "entries" : [ {
     "request" : {
       "store" : "postgres",
