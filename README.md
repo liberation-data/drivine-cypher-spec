@@ -91,7 +91,7 @@ tables:
   sqlite: {ddl: [...], made: "SELECT CASE WHEN ...", file: "SELECT file FROM pragma_database_list ..."}
 catalog: {item: {...}, aliases: [...], stores: {postgres: {indexes: {RANGE_INDEX: "...", ...}, constraints: "...", aliased: "...", unaliased: "..."}, ...}}
 names:
-  - {store: "postgres", graph: "drivine", kind: "ix", parts: ["Person", "name"], name: "drivine_ix_Personname_44ce5436"}
+  - {store: "postgres", graph: "drivine", kind: "ix", parts: ["Person", "name"], name: "drivine_ix2_Personname_44ce5436"}
 refusals:
   - {store: "postgres", graph: "1graph", refusal: "'1graph' cannot name a graph on Postgres: ..."}
 cases:
@@ -100,7 +100,7 @@ cases:
     spec: {kind: "RANGE_INDEX", label: "Person", properties: ["name"]}
     stores:
       postgres:
-        create: ["CREATE INDEX IF NOT EXISTS drivine_ix_Personname_44ce5436 ON drivine_node (((props ->> 'name'))) WHERE labels @> '[\"Person\"]'", "INSERT INTO drivine_schema ..."]
+        create: ["CREATE INDEX IF NOT EXISTS drivine_ix2_Personname_44ce5436 ON drivine_node (((props -> 'name'))) WHERE labels @> '[\"Person\"]'", "INSERT INTO drivine_schema ..."]
         drop: ["DO $forget$ ..."]
       neo4j:
         create: ["CREATE INDEX `Person_name_range` IF NOT EXISTS FOR (n:`Person`) ON (n.`name`)"]
@@ -111,20 +111,82 @@ cases:
       parameters: {x: "Ada"}
       indexedProperties: [["Person", "name"]]
       holds:
-        postgres: ["(props ->> 'name')", "labels @> '[\"Person\"]'"]
+        postgres: ["(props -> 'name')", "labels @> '[\"Person\"]'"]
 ```
 
 | Key | What it is |
 |---|---|
-| `tables` | What makes each SQL store's tables, base indexes and functions (`ddl`, and Oracle's `functions`), each statement safe to run again, and how a library finds them made. On Postgres, `ensuring` is one block: the probe of the node table's comment, which holds the version token (`drivine:7`), the graph's advisory lock, and the `ddl`. On Oracle, `ensuring` probes the property graph's `doc` property and each function, and makes what is missing. On SQLite, `made` counts what of the `ddl` is there, or is -1 for tables made without `AUTOINCREMENT`, and `file` names the database's file. |
+| `tables` | What makes each SQL store's tables, base indexes and functions (`ddl`, and Oracle's `functions`), each statement safe to run again, and how a library finds them made. On Postgres, `ensuring` is one block: the probe of the node table's comment, which holds the version token (`drivine:8`), the graph's advisory lock, and the `ddl`. On Oracle, `ensuring` probes the property graph's `doc` property and each function, and makes what is missing. On SQLite, `made` counts what of the `ddl` is there, or is -1 for tables made without `AUTOINCREMENT`, and `file` names the database's file. |
 | `catalog` | Each store's queries that list its indexes of each kind and its constraints; on a SQL store, the statements that set and take away the `aliases` of the record of `item`; and Oracle's `labelled`, the labelled indexes a library tells the compiler of as `indexedProperties`. |
-| `names` | The name a SQL store gives an object of `kind` made for `parts`, a label and properties, for a `graph`: `<graph>_<kind>_<readable>_<hash>`. `readable` is the parts' ASCII letters and digits run together, cut to at most 40 and to what leaves room, within the store's longest name (63 on Postgres and SQLite, 128 on Oracle), for the rest and a `_t`. `hash` is Java's `String.hashCode` of the parts joined by U+0000, over their UTF-16 code units, as `Integer.toHexString` writes it: unsigned, in lower case, with no leading zeros (`drivine_ix_name_337a8b`). |
+| `names` | The name a SQL store gives an object of `kind` made for `parts`, a label and properties, for a `graph`: `<graph>_<kind><layout>_<readable>_<hash>`, where `layout` is the store layout the object holds values in, `2` (see [Values in the store](#values-in-the-store)). `readable` is the parts' ASCII letters and digits run together, cut to at most 40 and to what leaves room, within the store's longest name (63 on Postgres and SQLite, 128 on Oracle), for the rest and a `_t`. `hash` is Java's `String.hashCode` of the parts joined by U+0000, over their UTF-16 code units, as `Integer.toHexString` writes it: unsigned, in lower case, with no leading zeros (`drivine_ix2_name_337a8b`). |
 | `refusals` | Why a store refuses a graph's name, or null where it takes it. |
 | `cases` | An index or a constraint: its `spec`, as `schema.yaml` writes one, with `ignoreCase` and the engines' vector options (`quantizationEnabled`, Neo4j's; `efRuntime`, FalkorDB's) among its `options`. A spec that ignores case is made over the lowercased copies of its properties, under a name of its own, as the schema API makes it. `existing` is what the store has of the same kind on the label already, which only FalkorDB reads. |
 
 Each case's `stores` hold, for `postgres`, `oracle`, `sqlite`, `neo4j`, `memgraph` and `falkordb`, what makes the item (`create`), what drops it by its name (`drop`), and, where it differs, what drops it with no name known (`dropUnnamed`). Each is a list of statements, or `{error}`, the message the store refuses it with. A statement is its text, or on FalkorDB `{native: [...]}`, a command of its driver (`GRAPH.CONSTRAINT`), where `{graphName}` stands for the graph. A constraint's `falkordb` has `constrainable`, `{error}`, where FalkorDB refuses it before its `create`: `GRAPH.CONSTRAINT` takes only a plain name for a property. On a SQL store, a `create` follows the statements that make the store, which the case leaves out: Postgres's and Oracle's `ensuring`, and SQLite's `ddl`. On Oracle, each index a `create` builds over the node table, the range index over every node's property, the labelled index and the unique index, is run within a PL/SQL block that runs it again a tenth of a second after another session's lock turns it away (`ORA-00054`), for up to 300 tries, and then raises, as `ensuring` runs its statements: Oracle's DDL does not wait for a lock, and libraries starting together each make the store stamp's key constraint (liberation-data/drivine4j#517). An index another session made after the block's `IF NOT EXISTS` found none (`ORA-00955`) is taken as made, as `ensuring` takes it.
 
 **Reads.** A range index and a uniqueness constraint are only worth their DDL if a statement is read through them, so each such case has a `read`: a statement, its `parameters`, and the `indexedProperties` a library gives the compiler on Oracle. Compiled on each SQL store, its SQL holds each of `holds`, the expressions the index is made over as its `create` writes them, with each column a statement reads of the node, `props`, `labels` or `stamp`, as its alias's (Oracle's index names them as `n`'s). A runner checks each expression is in the case's `create`, as it is or within a PL/SQL literal, quotes doubled, and that the compiled SQL tests it where a planner reads an index by it: as a conjunct of its `WHERE`, a label's test, or as the left side of a conjunct's `=`, and not only within a `CASE` or beside an `OR`. A vector and a full-text index have none: their searches are each library's, not compiled Cypher.
+
+### Values in the store
+
+How a value is held in a SQL store's `props`, and in the JSON compiled SQL passes around, is a contract of its own: every library writes it, and anything else that writes a store directly must write it so too, or the libraries read its values wrongly or refuse them. This is store layout 2, the one the store stamp names (see [The schema marker and the stamps](#the-schema-marker-and-the-stamps)). The graph engines hold their own values and are layout 1.
+
+**Plain values.** A text, a truth value, an integer and a list are JSON's own. A property's value is never a map, and never JSON's `null`: a property set to null is not there.
+
+**Floats.** On Postgres and SQLite a float is a JSON number written with a point, `2.0` or `1.5`: `jsonb` keeps the scale of `2.0`, and SQLite's `json_type` calls it `real`. On Oracle every float is an OSON binary double, `type()` `double`: written as `JSON_SCALAR(TO_BINARY_DOUBLE(…))`, `JSON_TRANSFORM(… SET … = TO_BINARY_DOUBLE(…))`, or extended JSON's `{"$numberDouble": "1.5"}` read with `JSON(… EXTENDED)`. JSON's `1.5`, even read as extended JSON, is a `NUMBER`, and so is held as an integer or a decimal, not a float. NaN and the infinities are not stored on any SQL store. Oracle writes the text of the binary double 2^53 as `9007199254740993`, in `JSON_SERIALIZE`, with `EXTENDED` too, and in `RETURNING NUMBER`, though the value held is 2^53: no key or reader uses that text, which is why the index key below reads a double by halves.
+
+**Temporal values.** A date, a time or a moment, a local one or one with an offset, and a duration are each a tag, a JSON object of exactly these keys:
+
+| Key | What it holds |
+|---|---|
+| `$t` | The kind: `date`, `localtime`, `time`, `localdatetime`, `datetime` or `duration`. |
+| `v` | The value's canonical ISO 8601 text, below. Two values of a kind are equal, as Neo4j has them, exactly where their `v` are. |
+| `s` | Its sort key, below: digits only. A duration has none. |
+
+A reader takes no order of the keys: Postgres's `jsonb` writes them `s`, `v`, `$t`.
+
+The canonical text `v`:
+
+- **A year** is numbered astronomically, as ISO 8601 and Neo4j number it (`0000` is 1 BC, `-0044` is 45 BC), with at least four digits, a `-` before one below 0, and a `+` before one above 9999 (`+10000`). Years run from -999,999,999 to +999,999,999.
+- **A date** is `YYYY-MM-DD`.
+- **A local time** is `hh:mm:ss`, the seconds always written, then where the second has a fraction a point and the fewest of three, six or nine digits that hold it, as Java's `Instant.toString` writes one: `10:30:00`, `10:30:00.500`, `10:30:00.000001`, `10:30:00.123456789`.
+- **A time** is a local time and its offset: `Z` for an offset of zero, however it was written (`+00:00`, `-0000`), else `±hh:mm`. Offsets run from -18:00 to +18:00. A named zone (`[Europe/Paris]`) is not held: a library writes the offset it has at that moment.
+- **A local moment** is a date, `T`, and a local time; **a moment** a date, `T`, and a time.
+- **A duration** is its months, days and seconds, kept apart as Cypher keeps them (`P1D` is not `PT24H`), written as Neo4j writes one: `P`, then the whole years and the months left of the months, then the days, then `T` and the whole hours, the whole minutes and the seconds left, with their fraction and no trailing zeros, of the seconds; each part left out where it is 0, each signed on its own (`PT-1H-30M`), and `PT0S` where all are 0. A week is 7 days; a fraction of a month is 30.436875 days, and a fraction of a day 86,400 seconds, carried to the part below.
+
+The sort key `s` is worked out of `v` alone, never of a store's timestamp, which holds neither every year nor nanoseconds; so every writer's `s` of a value is the same. Within one `$t`, two values order as their `s` do as text, under any collation, as Neo4j orders them. Values of two kinds have no order, and neither have durations.
+
+| `$t` | `s` | Digits |
+|---|---|---|
+| `date` | the year plus 1,000,000,000, in 10 digits, then `MMDD` | 14 |
+| `localdatetime` | the same, then `hhmmss` and the nanoseconds in 9 digits | 29 |
+| `datetime` | the same of the moment in UTC, its date carried a day back or on where the offset takes it there, then the offset in seconds plus 64,800, in 6 digits | 35 |
+| `localtime` | the nanoseconds of the day, in 14 digits | 14 |
+| `time` | the nanoseconds of the day in UTC plus 64,800 × 10^9 (18 hours), in 15 digits, then the offset as a moment's | 21 |
+
+The UTC year of a moment runs from -1,000,000,000 to +1,000,000,000 at the offsets' limits, so the year plus 10^9 is never negative. A time is compared by its UTC nanoseconds of the day without wrapping at midnight, as Neo4j compares it: `time('01:00+02:00')` is -1 hour, before `time('22:00Z')`, and the 18 hours keep every one at least 0. `datetime('2024-03-15T10:30:00.5+02:00')` is held as `{"$t": "datetime", "v": "2024-03-15T10:30:00.500+02:00", "s": "10000020240315083000500000000072000"}`.
+
+**Keys of maps.** A map in flight, a map literal, a parameter's, `properties(n)`, and a property's name in `props`, may have a key that begins with `$`, which a user's map may. Such a key is held with one more `$` before it, `$t` as `$$t` and `$$x` as `$$$x`, and read back with one fewer, so an object whose `$t` is written with one `$` is only ever a tag. A key that does not begin with `$` is held as it is.
+
+**Derived fields.** Beside `props`, a node's row has `words`, Drivine's own per-node fields worked out of its properties: `jsonb` on Postgres, `JSON` on Oracle and JSON text on SQLite, null where there are none. Its shape is `{"<property>": <word count>, …}`, for each property under a full-text index: the count of its words by TextQuery's rule, a run of Unicode letters, digits and `_`, which BM25 ranks by (drivine4j#665). The rule's version is recorded in the schema marker's inventory, so a change of the rule fills it again. A full-text index's ensure fills it, and writes keep it in step, in a later change under layout 2; nothing in this layout's first release writes or reads it. It is never a property: `properties(n)`, `keys(n)` and the libraries' loads never see it. A writer of its own leaves it null. Derived fields have no place in `props`: a key there that begins with a single `$` is only ever a tag's.
+
+**The count store.** Two tables beside the graph's, made empty with the store: the counts of its labels, its relationship types and its full-text words, kept so a count is read, not counted. Their names carry the layout. The writers, the fold and the readers come in the next change under layout 2; nothing in this layout's first release writes or reads them.
+
+| Table | Columns | |
+|---|---|---|
+| `<graph>_count2` | `kind`, `name`, `n`; primary key `(kind, name)` | the folded base |
+| `<graph>_count2_delta` | `id`, an identity; `kind`, `name`, `d`; index `<graph>_count2_dk` over `(kind, name)` | one row for each change to a count |
+
+`kind` is `label`, with `name` the label; `type`, with `name` the relationship type; or `words`, with `name` `<label>.<property>`, the total of `words`' counts behind BM25's average length. `kind` and `name` are text (`varchar(16)` and `varchar(1000)` on Postgres, `VARCHAR2` on Oracle, `TEXT` on SQLite), and `n` and `d` exact integers (`bigint`, `NUMBER(19)`, `INTEGER`). A count is `n + SUM(d)` over its `(kind, name)`, either missing being 0. A writer never updates a row another may: it appends one delta row for each label or type it changes, in the statement that changes it, with no trigger, `d` the change (a node of two labels made appends `+1` for each, one deleted `-1`). The fold, in one transaction, locks the deltas it reads, adds them to the base and deletes them, which is safe beside writers, as they only append. A label counts each node once for each label it carries, as `MATCH (n:L)` does; the store's stamp and marker are counted under their own labels, which `count` leaves out as it does today. A writer of its own appends its deltas so too, or the counts are wrong.
+
+**The store's stamp.** A SQL store is in layout 2 where its stamp, `(:DrivineStore {key: 'singleton'})`, has `layout: 2`, and every value in it is held as above. A library refuses a graph whose stamp names any other layout, or none, unless the graph holds no node but the stamp and the schema marker: then it drops the earlier layout's indexes and stamps it 2 (see [The schema marker and the stamps](#the-schema-marker-and-the-stamps)).
+
+**Indexes.** Each index and constraint Drivine makes over a property is keyed so two values are one key where Neo4j's `=` says they're equal: a text equal only to a text, a number to a number of the same value (`1` to `1.0`, and integers past 2^53 exactly), a temporal value only to the same value, offset and all, and a date never to the text that spells it. Its name carries the layout, `<graph>_ix2_…`, `_uq2_`, `_lx2_`, `_t2_` and `_v2_` (see `names`), so an earlier layout's index is never taken for this one's. Over the property `k`:
+
+- **Postgres**: `(props -> 'k')`, the property's `jsonb`, whose equality is Neo4j's. A statement compares the property as `(props -> 'k') = $p::jsonb`.
+- **SQLite**: two expressions, the class and the key. The class is `COALESCE(props ->> '$."k"."$t"', CASE json_type(props, '$."k"') WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'null' THEN NULL ELSE json_type(props, '$."k"') END)`; the key is `COALESCE(props ->> '$."k".s', props ->> '$."k".v', props ->> '$."k"')`, which SQLite compares as Neo4j does within a class, the integer 1 equal to the real 1.0.
+- **Oracle**: two expressions, the class and the key, of Oracle's built-ins alone, for an index over a function the store makes again with `CREATE OR REPLACE` would be disabled (ORA-30554). With `t` for `JSON_VALUE(props, '$.k.type()' RETURNING VARCHAR2(16))` and `d` for `JSON_VALUE(props, '$.k' RETURNING BINARY_DOUBLE)`, the key is `COALESCE(JSON_VALUE(props, '$.k.s'), JSON_VALUE(props, '$.k.v'), CASE t WHEN 'number' THEN TO_CHAR(JSON_VALUE(props, '$.k' RETURNING NUMBER), 'TM9') WHEN 'double' THEN CASE WHEN d = FLOOR(d) AND d >= -9223372036854775808 AND d < 9223372036854775808 THEN TO_CHAR(CAST(FLOOR(d / 4294967296) AS NUMBER) * 4294967296 + CAST(d - FLOOR(d / 4294967296) * 4294967296 AS NUMBER), 'TM9') ELSE 'd' || TO_CHAR(d) END ELSE JSON_VALUE(props, '$.k') END)`: a number's exact digits, so a `NUMBER` and a binary double of the same whole value are one key, and any other double `d` and its 17 significant digits, which tell any two doubles apart. The class, a `VARCHAR2(16)`, is `CASE WHEN <key> IS NOT NULL THEN COALESCE(JSON_VALUE(props, '$.k."$t"' RETURNING VARCHAR2(16)), CASE t WHEN 'double' THEN 'number' ELSE t END) END`, null where the key is, so a value the index holds no key of (a list, an empty text, a text past 4,000 bytes) is constrained by none. A labelled index and a uniqueness constraint's are each of these within the `CASE WHEN` of its label, as before.
+
+The module's `ValueLayout`, `Temporals.key` and `CypherJson` write this, and `ValueLayout.read` reads it back. `host.yaml`'s `key` and `read` steps and `store.yaml`'s cases are the conformance checks for a writer of its own: a value whose `s`, whose tag or whose index expression differs from theirs is a value the libraries read as another.
 
 ## The store's schema
 
@@ -187,7 +249,7 @@ A spec is written as `cases` write one, with a constraint's `nodeIdProperty`, th
 
 ## The schema marker and the stamps
 
-Each library keeps three things of its own in a store, and reads what another library kept: the schema marker, a node `(:_DrivineSchema {scope, version, items, appliedAt})` for each owner of a schema catalog, holding the version token it last applied and the inventory of the items it applied; the store's stamp, one node `(:DrivineStore {key: "singleton", storeId, assignedAt, engine})`; and the stamp on each node a save writes. `marker.yaml` pins them: drivine4j's, the reference, as it gave them when they were captured, for the graph `drivine`. The compiler's module (`org.drivine.cypher.store.marker`, and `org.drivine.cypher.store.Stamps`) writes them, and its tests check it gives these, byte for byte, on every target. Running the statements and reading their rows stay each library's.
+Each library keeps three things of its own in a store, and reads what another library kept: the schema marker, a node `(:_DrivineSchema {scope, version, items, appliedAt})` for each owner of a schema catalog, holding the version token it last applied and the inventory of the items it applied; the store's stamp, one node `(:DrivineStore {key: "singleton", storeId, assignedAt, engine, layout})`; and the stamp on each node a save writes. `marker.yaml` pins them: drivine4j's, the reference, as it gave them when they were captured, for the graph `drivine`. The compiler's module (`org.drivine.cypher.store.marker`, and `org.drivine.cypher.store.Stamps`) writes them, and its tests check it gives these, byte for byte, on every target. Running the statements and reading their rows stay each library's.
 
 They are a file of their own, not a part of `store.yaml`, because they are a contract of their own: `store.yaml` is the DDL a store is made with, and this is what the libraries keep in it once it is made, which changes apart from the DDL and is read on every enforce. The constraint each node is kept single by is made as `store.yaml` makes any, so its statements are pinned here too, as the module's DDL gives them.
 
@@ -217,7 +279,8 @@ reads:
   - {stored: "items:", read: {keys: ["items:"], runtime: [], stale: []}, oracle: {keys: [], runtime: [], stale: []}}
 versions:
   - {versions: ["v2", null, "v1"], token: "v1|v2"}
-storeStamp: {label: "DrivineStore", keyProperty: "key", key: "singleton", constraint: {...}, parameters: [...], stores: {...}}
+storeStamp: {label: "DrivineStore", keyProperty: "key", key: "singleton", constraint: {...}, parameters: [...], restampParameters: ["key", "layout"], stores: {...}}
+storeLayout: {cases: [{name: "...", store: "postgres", stamps: [{layout: null}], foreignNodes: false, objects: [...], verdict: {stamp: {drops: [...]}}}]}
 nodeStamps: {property: "__drivine.stamp", token: 16, separator: ":", neverStamped: "-", tokens: [...], stamps: [...]}
 ```
 
@@ -229,7 +292,8 @@ nodeStamps: {property: "__drivine.stamp", token: 16, separator: ":", neverStampe
 | `inventory` | A `record` of keys, the runtime ones and the stale ones; its `items`, as every store but Oracle keeps them; and what is `read` back from them. |
 | `reads` | A stored text as a store gives it back, or null where no marker or no `items` came back, and what is `read` from it: null for no inventory known, which is not an empty one. `oracle` is what Oracle reads, where it differs, its mark taken off first. |
 | `versions` | The version tokens of an owner's catalogs, null for one that sets none, and the token the owner records: null where none sets one. |
-| `storeStamp` | The stamp's label, the property it is merged on and that property's value, its constraint, and what `assignIfAbsent` binds: `storeId`, a new UUID's text, `assignedAt`, the moment as ISO-8601 text in UTC, as Java's `Instant.toString` writes it (`2026-11-10T05:00:00.123456Z`: the fraction of a second in three, six or nine digits, the fewest that hold it, and none for a whole second), and not a number, as `readStamps` orders by it, and `engine`, the store's name as the stamp records it. Each store's `engine`, as the stamp records it, its `prepare`, run first as the marker's is, and statements: `assignIfAbsent` makes the stamp where there is none, and `readStamps` reads every stamp as a map `{id, assignedAt}`, the oldest first, tie-broken by id, and a library takes the first, so every reader takes the same one. |
+| `storeStamp` | The stamp's label, the property it is merged on and that property's value, its constraint, and what `assignIfAbsent` binds: `storeId`, a new UUID's text, `assignedAt`, the moment as ISO-8601 text in UTC, as Java's `Instant.toString` writes it (`2026-11-10T05:00:00.123456Z`: the fraction of a second in three, six or nine digits, the fewest that hold it, and none for a whole second), and not a number, as `readStamps` orders by it, `engine`, the store's name as the stamp records it, and `layout`, the store layout the library holds values in: 2 on a SQL store, 1 on a graph engine, whose stamp's statements don't write it. Each store's `engine`, as the stamp records it, its `layout`, its `prepare`, run first as the marker's is, and statements: `assignIfAbsent` makes the stamp where there is none; `readStamps` reads every stamp as a map `{id, assignedAt, layout}`, the oldest first, tie-broken by id, and a library takes the first, so every reader takes the same one; `foreignNodes` gives a row where the graph holds a node other than the stamp and the schema marker; `restampLayout` sets the stamp's `layout`, binding `restampParameters`, only while it holds none, in one statement; and `layoutObjects` lists the indexes, tables and triggers Drivine may have made for the graph, each `{name, type}`. The last two are null on a graph engine. See `storeLayout`. |
+| `storeLayout` | The verdict on a graph by its store layout (#161), which `StoreLayout.verdict` gives and each library acts on at its first connection, before any statement runs. Each case gives the `store`, the `stamps` `readStamps` read (their `layout`, null where a stamp has none), whether `foreignNodes` gave a row, and the `objects` `layoutObjects` listed, each `{name, type}`. Its `verdict` is `"current"`, the graph to be used; `{stamp: {drops}}`, the graph, which holds no node but Drivine's own, re-stamped: each of `drops` run, the earlier layout's indexes, tables and triggers and their catalog records, then `restampLayout` with what `restampParameters` names, then the stamps read back and judged again, anything but `"current"` refused, so a store raced by an earlier library is never used on a guess; or `{refuse}`, the message the library refuses the graph with. A SQL store's layout is 2, a graph engine's 1, and a stamp with no `layout` is 1: a graph engine's is current, a SQL store's is older. A layout above the library's own is refused whatever the graph holds, and so are stamps of two layouts. A drop that fails leaves the graph refused. A library from before layouts reads no `layout`, and can't refuse a graph this one wrote: the upgrade notes say not to point one at it. |
 | `nodeStamps` | The node stamp's property and form, two tokens of `token` hexadecimal digits joined by `separator`. `tokens` are the text of a token of 64 `bits`, as Java's `String.format("%016x")` writes it. Each of `stamps` is a stored stamp, its `nodeToken` (what comes before its first colon, or all of it), its `linksToken` (what comes after, or null for nothing), whether it is `twoTokens` (33 long, with its colon at 16), whether it `hasNodeToken` (longer than 16, with its colon at 16), and the stamp it is `withoutLinks`. `neverStamped` is what a save reports as the stamp of a node it found with none. |
 
 **The inventory.** The `items` are the inventory keys, in the order they were recorded, joined by a newline. A key to be recreated when next ensured is written behind `runtime-stale:`, whether or not it is marked runtime too; any other key ensured at runtime behind `runtime:`; and any other as it is. A stale key is read back as a runtime one too, and a key marked runtime or stale that isn't among the keys is not written. An empty inventory is an empty text, so an inventory of one empty key is read back as an empty one. A key holding a newline, which a label can hold, is read back as two keys: the separator is not escaped, as drivine4j writes it. Oracle keeps an empty text as null, so it keeps the items behind `items:`, and takes that off as it reads them; a text with no mark is read as it is.
@@ -339,7 +403,8 @@ A case has a `name`, unique in the file, a `description`, `pairs`, and its steps
 |---|---|
 | `function`, `args`, `result` | The SQLite function, called with `args`, gives `result`. Each argument and the result is a SQL value: a text (the JSON text a function of JSON values takes, a rounding mode, or a regular expression), a whole number, a float, or null. A text result is compared exactly. `regexp` is called as SQLite calls it for `text REGEXP pattern`: `regexp(pattern, text)`, the pattern first. |
 | `function`, `ascending` | The function of one argument, called on each of `ascending` in turn, gives values that ascend as SQLite orders them, each before the next. For `drivine_sort_key` of a list, whose text is each library's own: only its order is pinned. |
-| `read`, `value` | A column of a compiled statement's rows reads as `value`, as `PersistenceManager.query` gives it. `read` has the `store` (`postgres` or `sqlite`), `nonFinite` (whether the statement was given NaN or an infinity, which the compiled statement says), and the `column`'s raw JSON text: a text, or a list of texts and `$repeat`s written one after the other. |
+| `key`, `result` | The sort key `s` of the temporal value whose kind's word and canonical text `key` gives, `{kind, v}`, is `result`, a text of digits, or null for a duration (see [Values in the store](#values-in-the-store)): as `Temporals.key` gives it, as each store's SQL works it out, and as any writer of the store layout must. |
+| `read`, `value` | A column of a compiled statement's rows reads as `value`, as `PersistenceManager.query` gives it: a temporal value's tag as its text, and a map's key held with one more `$` as the key written (see [Values in the store](#values-in-the-store)). `read` has the `store` (`postgres` or `sqlite`), `nonFinite` (whether the statement was given NaN or an infinity, which the compiled statement says), and the `column`'s raw JSON text: a text, or a list of texts and `$repeat`s written one after the other. |
 
 Values are written as in the other files: `{$float: "NaN"}` is NaN, `{$repeat: …}` a text repeated, and any other map, `{$numberDouble: "2.0"}` among them, is the map it is.
 
@@ -347,7 +412,8 @@ Values are written as in the other files: `{$float: "NaN"}` is NaN, `{$repeat: �
 
 - that each case named is in its file;
 - for each function its steps call, that a step of a paired case, run on SQLite, compiles to SQL that calls it: for `regexp`, SQL that holds the operator `REGEXP`;
-- for each `store` and `nonFinite` its steps read, that a step of a paired case, run on that store, compiles with that `nonFinite`.
+- for each `store` and `nonFinite` its steps read, that a step of a paired case, run on that store, compiles with that `nonFinite`;
+- for its `key` steps, that a step of a paired case makes a temporal value as the statement runs.
 
 A change to a host vector names the store cases it moves, and a change to a paired store case shows which host vectors it leans on. A host case with no pairs, or whose pairs no longer rely on it, fails.
 
