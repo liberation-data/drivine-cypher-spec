@@ -58,8 +58,8 @@ data class SearchIndex(val trigram: Boolean = false, val oracleText: String? = n
  * @param index what the library found of the index.
  * @param topK on a graph engine, how many rows the search wants: the index is asked for that many hits, or with [filtered]
  *   ten times as many ([indexLimit]).
- * @param filtered on a graph engine, whether the hits are pruned after the index: by a caller's filter, by a required
- *   relationship, or by a root label beyond the first.
+ * @param filtered on a graph engine, whether the hits are pruned after the index: by a caller's filter or by a required
+ *   relationship. A root label beyond the first prunes them too, and is counted without it.
  * @param alias on a graph engine, what the head names a hit's node: drivine4j's fragment search's `n`, or a view's root.
  * @param scoreAlias on a graph engine, what the head names a hit's score.
  */
@@ -305,7 +305,8 @@ object FullTextSearch {
         val indexName = request.index.name?.takeUnless { it.isBlank() } ?: "${label}_${request.properties.joinToString("_")}_fulltext"
         val scope = SearchParameters()
         val query = scope.bound(request.query)
-        val limit = scope.bound(indexLimit(topK, request.filtered))
+        // A root label beyond the first prunes the hits as a filter does, as drivine4j's `prunedAfterIndex` counts it.
+        val limit = scope.bound(indexLimit(topK, request.filtered || request.labels.size > 1))
         val call = when (store) {
             SearchStore.NEO4J -> "CALL db.index.fulltext.queryNodes('$indexName', $query, {limit: $limit})"
             // Without a limit, text_search yields its best 1,000 hits and no more; one near Int.MAX_VALUE takes the server down.

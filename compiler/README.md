@@ -136,8 +136,8 @@ FullTextSearch.plan(store, graph, SearchRequest(labels, properties, query, index
      alone.
    - On a graph engine, `cypher` is the search's head: the index's `CALL` given the query as it is, the hits that have every
      root label, the best of them, and each node and its score against the best, as `alias` and `scoreAlias` (`n` and
-     `_score` where left out). The index is asked for `topK` hits, or with `filtered` (a caller's filter, a required
-     relationship or a root label beyond the first prunes them after the index) ten times as many (`indexLimit`),
+     `_score` where left out). The index is asked for `topK` hits, or with `filtered` (a caller's filter or a required
+     relationship prunes them after the index) or a root label beyond the first ten times as many (`indexLimit`),
      and Memgraph's no more than 1,000,000.
    - `parameters` are named with the compiler's reserved prefix, `_cy_ft1`, `_cy_ft2`, …, which no library binds, so they
      never clash with the library's own; each is written `$_cy_ft<n>` in the statement, as the compiler writes its own.

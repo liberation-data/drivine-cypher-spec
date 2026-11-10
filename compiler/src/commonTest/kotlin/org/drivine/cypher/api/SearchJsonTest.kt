@@ -8,7 +8,7 @@ import kotlin.test.assertTrue
 
 /**
  * A full-text search asked of [CompileJson.compile] ([SearchJson]) where the golden doesn't reach: a request that is no
- * request, the routing beside a `cypher` request, a label given alone, a blank index name, and [FullTextSearch.indexLimit].
+ * request, the routing beside a `cypher` request, a label given alone, a blank index name, and [FullTextSearch.indexLimit], with a root label beyond the first.
  */
 @OptIn(org.drivine.DrivineInternalApi::class)
 class SearchJsonTest {
@@ -113,5 +113,13 @@ class SearchJsonTest {
         assertEquals(250, FullTextSearch.indexLimit(25, filtered = true))
         assertEquals(Int.MAX_VALUE, FullTextSearch.indexLimit(Int.MAX_VALUE, filtered = true))
         assertEquals(Int.MAX_VALUE, FullTextSearch.indexLimit(Int.MAX_VALUE, filtered = false))
+    }
+
+    @Test
+    fun aRootLabelBeyondTheFirstAsksTheIndexForTenTimesAsManyHitsUnfiltered() {
+        for (store in listOf(SearchStore.NEO4J, SearchStore.MEMGRAPH, SearchStore.FALKORDB)) {
+            val plan = FullTextSearch.plan(store, GraphOptions("g"), SearchRequest(listOf("Chunk", "Doc"), listOf("text"), "x", topK = 25)) as SearchPlan
+            assertEquals(mapOf("_cy_ft1" to "x", "_cy_ft2" to 250), plan.parameters, store.id)
+        }
     }
 }
