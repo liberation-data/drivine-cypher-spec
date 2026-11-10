@@ -224,6 +224,8 @@ cases:
   - name: "Several properties"
     description: "An index over several properties finds a word in any of them; a node that lacks one is searched by the rest."
     steps:
+      # Memgraph's three below were recorded on its arm64 build: its amd64 build of the same version (3.14.0) searches every
+      # property of the index, as Neo4j does, and passes them (liberation-data/drivine4j#762). A runner holds them on arm64 only.
       - search: {label: "Paper", properties: ["title", "body"], query: "kiwi", topK: 50}
         ids: ["p1", "p2", "p4"]
         today: [{stores: ["memgraph"], ids: ["p1", "p4"], issue: "liberation-data/drivine4j#762"}]
