@@ -6,6 +6,9 @@ import org.drivine.cypher.api.SearchIndex
 import org.drivine.cypher.api.SearchPlan
 import org.drivine.cypher.api.SearchRequest
 import org.drivine.cypher.api.SearchStore
+import org.drivine.schema.FullTextIndexSpec
+import org.drivine.schema.SchemaItemKind
+import org.drivine.schema.TextIndexSpec
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -41,5 +44,20 @@ class CypherNamesTest {
         }
         val falkor = cypher(SearchStore.FALKORDB, SearchRequest(listOf(odd), listOf("p"), "q", topK = 5))
         assertTrue("queryNodes('it\\'s\\\\', \$" in falkor, falkor)
+    }
+
+    @Test
+    fun theGraphEnginesDdlQuotesAnIndexNameThatIsNoPlainIdentifier() {
+        fun text(statements: List<DdlStatement>) = statements.joinToString("\n") { (it as DdlStatement.Text).statement }
+        val memgraph = MemgraphDdl()
+        assertEquals("CREATE TEXT INDEX `it's \\x_body_fulltext` ON :`it's \\x`(body)", text(memgraph.createIndex(FullTextIndexSpec("it's \\x", listOf("body")), null)))
+        assertEquals("DROP TEXT INDEX `it's \\x_body_fulltext`", text(memgraph.dropIndex(CatalogItem(SchemaItemKind.FULLTEXT_INDEX, "it's \\x", listOf("body")))))
+        assertEquals("DROP TEXT INDEX `a``b`", text(memgraph.dropIndex(CatalogItem(SchemaItemKind.FULLTEXT_INDEX, "L", listOf("p"), "a`b"))))
+        // A plain name is written bare, as it always was.
+        assertEquals("CREATE TEXT INDEX Doc_body_fulltext ON :Doc(body)", text(memgraph.createIndex(FullTextIndexSpec("Doc", listOf("body")), null)))
+        assertEquals(
+            "CREATE TEXT INDEX `a``b` IF NOT EXISTS FOR (n:`L``x`) ON (n.`p``y`)",
+            text(Neo4jDdl.createIndex(TextIndexSpec("L`x", "p`y", name = "a`b"), null)),
+        )
     }
 }
