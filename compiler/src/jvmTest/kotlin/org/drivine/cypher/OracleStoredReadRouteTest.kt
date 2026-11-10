@@ -26,7 +26,8 @@ class OracleStoredReadRouteTest {
     /** The Oracle statements' SQL, each with its Cypher, of the requests [requests]. */
     private fun oracleSql(requests: Sequence<String>) = requests.mapNotNull { request ->
         val read = runCatching { json.readTree(request) }.getOrNull()?.takeIf { it.isObject } ?: return@mapNotNull null
-        if (read["store"]?.textValue() != "oracle") return@mapNotNull null
+        // The compiler's statements: a full-text search's, which holds no Cypher, is FullTextSearchGoldenTest's.
+        if (read["store"]?.textValue() != "oracle" || !read.has("cypher")) return@mapNotNull null
         val sql = json.readTree(CompileJson.compile(request))["sql"]?.textValue() ?: return@mapNotNull null
         read["cypher"].textValue() to sql
     }
