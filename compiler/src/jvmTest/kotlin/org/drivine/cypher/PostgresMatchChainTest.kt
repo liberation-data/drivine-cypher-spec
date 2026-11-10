@@ -123,6 +123,9 @@ class PostgresMatchChainTest {
             // Within a subquery, by a later clause of its own.
             "MATCH (p:P) WHERE EXISTS { MATCH (a:L)-[:R]->(b) MATCH (b {k: 1}) } RETURN p",
             "MATCH (p:P) RETURN COUNT { MATCH (a:L)-[:R]->(b) MATCH (b) WHERE b.k = 1 RETURN a }",
+            // By a clause of a CALL's query: one after the match, or one after it within the same CALL.
+            "MATCH (a:L)-[:R]->(b) CALL { WITH b MATCH (b) WHERE b.k = 1 RETURN b.k AS k } RETURN a, k",
+            "MATCH (p:P) CALL { WITH p MATCH (a:L)-[:R]->(b) MATCH (b {k: 1}) RETURN a } RETURN a",
         )) {
             val sql = sql(cypher)
             assertFalse(Regex("""SELECT \* FROM ${GRAPH}_node n\d+ WHERE n\d+\.nid = e\d+\.""").containsMatchIn(sql), "$cypher:\n$sql")
