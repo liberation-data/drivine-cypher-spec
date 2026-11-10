@@ -2486,6 +2486,9 @@ cases:
         rows: [[["Laurence", "Keanu", "The Matrix"], ["KNOWS", "Neo"]]]
       - cypher: "MATCH p = (a)-[:KNOWS]-(:Person {name: 'Carrie'}) RETURN [x IN nodes(p) | x.name]"
         rows: [["Keanu", "Carrie"]]
+      - note: "A path whose only label is on its last node, which a store may read it from, backwards: in the pattern's order (drivine#680)."
+        cypher: "MATCH p = (a)-[:KNOWS]->(b)-[:ACTED_IN]->(m:Movie) RETURN [[n IN nodes(p) | coalesce(n.name, n.title)], [r IN relationships(p) | coalesce(r.role, type(r))]] ORDER BY a.name, m.title"
+        rows: [[["Keanu", "Carrie", "The Matrix"], ["KNOWS", "Trinity"]], [["Keanu", "Carrie", "The Matrix Reloaded"], ["KNOWS", "Trinity"]], [["Laurence", "Keanu", "Johnny Mnemonic"], ["KNOWS", "Johnny"]], [["Laurence", "Keanu", "The Matrix"], ["KNOWS", "Neo"]], [["Laurence", "Keanu", "The Matrix Reloaded"], ["KNOWS", "Neo"]]]
       - cypher: "MATCH p = (:Person {name: 'Hugo'}) RETURN length(p)"
         rows: [0]
       - note: A path is kept by a WITH, and is null where an optional match finds none.

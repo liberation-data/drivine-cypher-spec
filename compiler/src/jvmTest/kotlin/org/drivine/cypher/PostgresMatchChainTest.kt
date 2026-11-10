@@ -120,6 +120,9 @@ class PostgresMatchChainTest {
             "MATCH (a:L)-[:R]->(b) MATCH (b) WHERE b.k = 1 RETURN a",
             "MATCH (a:L)-[:R]->(b) WITH a, b WHERE b.k = 1 RETURN a",
             "MATCH (a:L)-[:R]->(b) UNWIND [1, 2] AS i MATCH (c)-[:S]->(b) WHERE id(b) = i RETURN c",
+            // Within a subquery, by a later clause of its own.
+            "MATCH (p:P) WHERE EXISTS { MATCH (a:L)-[:R]->(b) MATCH (b {k: 1}) } RETURN p",
+            "MATCH (p:P) RETURN COUNT { MATCH (a:L)-[:R]->(b) MATCH (b) WHERE b.k = 1 RETURN a }",
         )) {
             val sql = sql(cypher)
             assertFalse(Regex("""SELECT \* FROM ${GRAPH}_node n\d+ WHERE n\d+\.nid = e\d+\.""").containsMatchIn(sql), "$cypher:\n$sql")
@@ -127,6 +130,13 @@ class PostgresMatchChainTest {
         // One that reads the match's own node pins nothing, there or later.
         assertEquals(listOf("e3 src n1 nid", "n2 nid e3 dst"), chain(sql("MATCH (a:L)-[r:R {k: a.k}]->(b) RETURN b")))
         assertEquals(listOf("e3 src n1 nid", "n2 nid e3 dst"), chain(sql("MATCH (a:L)-[:R]->(b) MATCH (b {k: a.k}) RETURN b")))
+    }
+
+    @Test
+    fun `a path read as a chain from its last node holds its nodes and relationships in the pattern's order`() {
+        val sql = sql("MATCH p = (a)-[:KNOWS]->(b)-[:ACTED_IN]->(m:Movie) RETURN [nodes(p), relationships(p)]")
+        assertEquals(listOf("e4 dst n3 nid", "n2 nid e4 src", "e5 dst n2 nid", "n1 nid e5 src"), chain(sql))
+        assertTrue("ARRAY[n1.nid] || ARRAY[n2.nid] || ARRAY[n3.nid]" in sql && "ARRAY[e5.eid] || ARRAY[e4.eid]" in sql, sql)
     }
 
     @Test

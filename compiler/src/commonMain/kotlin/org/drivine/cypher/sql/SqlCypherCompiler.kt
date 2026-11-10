@@ -1204,7 +1204,10 @@ abstract class SqlCypherCompiler(
         /** The queries given to compile, [query] and [procedure], whose names [hidden] keeps clear of, not yet in [queryTexts]. */
         private val queries = mutableListOf<Query>()
 
-        /** Every query given to compile ([give]), kept whole for [pinnedElsewhere], as [queries] is emptied once read. */
+        /**
+         * Every query given to compile ([give]), and each `EXISTS { … }`'s or `COUNT { … }`'s ([correlated]), kept whole for
+         * [pinnedElsewhere], as [queries] is emptied once read: a subquery's clauses pin its own matches as a statement's do.
+         */
         private val given = mutableListOf<Query>()
 
         /** Each text of the queries given to compile, as far as its first space ([textsIn]), gathered when [hidden] needs it. */
@@ -1512,6 +1515,7 @@ abstract class SqlCypherCompiler(
          */
         private fun correlated(query: Query, scope: Map<String, Value>, what: String): String {
             if ((query.clauses + query.unions.flatMap { it.clauses }).any(::writes)) unsupported("A write in $what")
+            given += query
             if (query.unions.isNotEmpty()) {
                 // Each query's rows as one value each, as a statement's are; without ALL, each once.
                 val distinct = !query.unions.first().all
