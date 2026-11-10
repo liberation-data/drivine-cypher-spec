@@ -98,6 +98,12 @@ abstract class SqlCypherCompiler(
     protected open fun planned(query: String): String = query
 
     /**
+     * The value a statement returns, a row's `result`, as the host's driver reads it back: as it is, but where a store's says.
+     * Only the statement's own, each of its `UNION`'s queries' among them, not a subquery's, which the statement reads on.
+     */
+    protected open fun returned(json: String): String = json
+
+    /**
      * The query a `DELETE` reads the ids it deletes from, [query], a subquery of the match itself in the `DELETE`'s `IN`, as
      * [planned] gives it: a store whose planner fails on such a subquery is told more: see Oracle's.
      */
@@ -2910,7 +2916,8 @@ abstract class SqlCypherCompiler(
          * aggregates, then ordered, skipped and limited. Rows it does not order, group or keep distinct
          * stay in the order [select] reads them, as a graph engine keeps them. With [statement], it is the statement's own last
          * `RETURN`, or one of its `UNION`'s, not a subquery's: it names the statement's columns ([returned]), and where the
-         * statement is compiled [typed], gives its nodes and relationships tagged ([output]).
+         * statement is compiled [typed], gives its nodes and relationships tagged ([output]), and its `result` as the host's
+         * driver reads it back (`returned(json)`, which Oracle encodes again with `oracleReencodeJson`).
          */
         fun project(select: Select, written: Projection, final: Boolean, statement: Boolean = false): Projected {
             // As in Neo4j, a star gives the variables in the order of their names, before the items named after it.
@@ -3070,7 +3077,7 @@ abstract class SqlCypherCompiler(
                 else jsonArray(values.map { it.sql })
                 // Where a UNION compares rows by it, a row that holds a node or a relationship is compared by its identity too (drivine4j#213).
                 identity = if (distinctParts && identifiedParts) rowIdentity(read) else null
-                "$result AS result${identity?.let { ", $it AS identity" }.orEmpty()}"
+                "${if (statement) returned(result) else result} AS result${identity?.let { ", $it AS identity" }.orEmpty()}"
             } else {
                 (columns.flatMap { (column, value) -> value.columns(column).map { "$name.${it.substringAfterLast(" AS ")}" } } +
                     sorts.flatMap { (column, _) -> sortedBy(column).map { (named, term) -> "$term AS $named" } }).joinToString(", ")

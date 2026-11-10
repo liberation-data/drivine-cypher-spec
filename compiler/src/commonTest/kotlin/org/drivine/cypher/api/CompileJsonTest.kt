@@ -166,6 +166,30 @@ class CompileJsonTest {
     }
 
     @Test
+    fun oraclesReencodeJsonIsABooleanFalseWhereLeftOutAndWrapsEachReturnedValue() {
+        fun compile(graph: String, cypher: String, store: String = "oracle") =
+            CompileJson.compile("{\"store\": \"$store\", \"graph\": $graph, \"cypher\": \"$cypher\"}")
+        val read = "MATCH (n:N) RETURN n"
+        val write = "MERGE (t:N {id: 1}) SET t.x = 2 RETURN properties(t)"
+        assertEquals(
+            "{\"error\":\"A request's graph gives oracleReencodeJson as true or false.\"}",
+            compile("{\"name\": \"g\", \"oracleReencodeJson\": 1}", read),
+        )
+        for (cypher in listOf(read, write)) {
+            val plain = compile("{\"name\": \"g\"}", cypher)
+            assertEquals(plain, compile("{\"name\": \"g\", \"oracleReencodeJson\": false}", cypher))
+            assertEquals(plain, compile("{\"name\": \"g\", \"oracleReencodeJson\": null}", cypher))
+            assertTrue("KEEP '$')" !in plain, plain)
+            val again = compile("{\"name\": \"g\", \"oracleReencodeJson\": true}", cypher)
+            assertTrue("SELECT JSON_TRANSFORM(" in again && ", KEEP '$') AS result" in again, again)
+            // Meaningful on Oracle only: the other stores compile alike either way.
+            for (store in listOf("postgres", "sqlite")) {
+                assertEquals(compile("{\"name\": \"g\"}", cypher, store), compile("{\"name\": \"g\", \"oracleReencodeJson\": true}", cypher, store), store)
+            }
+        }
+    }
+
+    @Test
     fun anAnswersTextEscapesNulAndALoneSurrogate() {
         assertEquals("\"a\\u0000\\u001Fb\\\"\\\\\u2028\uD83D\uDE00\"", written("a\u0000\u001Fb\"\\\u2028\uD83D\uDE00"))
         assertEquals("\"a\\uD800b\\uDFFF\"", written("a\uD800b\uDFFF"))

@@ -26,9 +26,9 @@ import kotlin.io.encoding.ExperimentalEncodingApi
  * ```
  *
  * `store` is `postgres`, `oracle` or `sqlite`. `graph` is [GraphOptions]: `name`, and on Oracle `nullsEqualStored`,
- * `eraStored` (true where left out), `indexedProperties` (`[["Person", "name"], …]`) and `oracleRowsAsText` (false where
- * left out). `parameters` may be left out. With `"typed": true` (false where left out), the rows' nodes and relationships
- * are tagged with their labels and type: see [org.drivine.cypher.sql.ColumnKind].
+ * `eraStored` (true where left out), `indexedProperties` (`[["Person", "name"], …]`), `oracleRowsAsText` and
+ * `oracleReencodeJson` (false where left out). `parameters` may be left out. With `"typed": true` (false where left out),
+ * the rows' nodes and relationships are tagged with their labels and type: see [org.drivine.cypher.sql.ColumnKind].
  *
  * The answer is [Compiled] (`sql`, `parameters`, `setup`, `warnings`, `nonFinite`, and on Oracle `storedFunctions`:
  * `{"nullsEqual": …, "era": …}`, and with `typed` `columns`: `[{"name": "p", "kind": "node"}, …]`), `{"refusal": "<message>"}` where the compiler refuses the statement, or
@@ -122,6 +122,7 @@ object CompileJson {
             eraStored = flag(graph, "eraStored"),
             indexedProperties = indexed,
             oracleRowsAsText = flag(graph, "oracleRowsAsText", default = false),
+            oracleReencodeJson = flag(graph, "oracleReencodeJson", default = false),
         )
         val cypher = tree["cypher"]?.textValue() ?: throw IllegalArgumentException("A request gives its statement as cypher.")
         val parameters = when (val given = tree["parameters"]) {
