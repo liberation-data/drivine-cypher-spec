@@ -223,6 +223,7 @@ abstract class SqlCypherCompiler(
         val writes = query.unions.isEmpty() && query.clauses.any(::writes)
         nonFinite = given || (nonFiniteWorkedOut(writes) && (worksOutNonFinite(query, parameters) || (infinitiesStored && worksOutNaN(query, parameters))))
         nanWorkedOut = given || worksOutNonFinite(query, parameters) || worksOutNaN(query, parameters)
+        idsAtMost(mostIds(query))
         if (query.unions.isNotEmpty()) return withFunctions(union(query, parameters))
         if (!writes) {
             val writer = Writer(Parameters(parameters, ::parameterJson, ::parameterCount, text = ::parameterText, asPath = parameterPath))
@@ -885,6 +886,12 @@ abstract class SqlCypherCompiler(
 
     /** The `OFFSET` and `LIMIT` of a query, each a SQL whole number or null. */
     protected abstract fun page(skip: String?, limit: String?): List<String>
+
+    /**
+     * Told, as a statement starts to compile, the most ids one of its lists of ids may hold ([mostIds]), null where a walk of
+     * it has no bound: a store whose list has a limit holds them so that it fits (see Oracle's). By default, a list has none.
+     */
+    protected open fun idsAtMost(most: Long?) {}
 
     /** The list of ids holding only [id]. */
     protected abstract fun ids(id: String): String
@@ -6520,10 +6527,36 @@ abstract class SqlCypherCompiler(
         private fun escaped(code: Int) = if (code < 0x100) "\\x" + code.toString(16).padStart(2, '0') else "\\u" + code.toString(16).padStart(4, '0')
 
         /**
-         * What [textsIn] adds each text to, [texts], as it reads a statement through, what it gives each name it binds, with the value
-         * bound and whether to each item of it, a list, [bind], and what it gives each expression it reads, [read].
+         * The most ids one list of ids of [query] may hold, its nodes' or its relationships': null where a walk of it has no
+         * bound. A list is a path's or a walk's, and holds the ids of one pattern only: the node it starts from, and for each
+         * relationship of the pattern its id, or a walk's, each step's (a quantified path pattern's step takes each of its
+         * relationships) to its bound. So it is the most any one pattern of the statement holds, anywhere in it.
          */
-        private class Texts(val texts: MutableSet<String>, val bind: (String, Expression, Boolean) -> Unit = { _, _, _ -> }, val read: (Expression) -> Unit = {}) {
+        fun mostIds(query: Query): Long? {
+            var most: Long? = 1
+            fun ids(relationship: RelationshipPattern): Long? {
+                val range = relationship.range ?: return 1
+                val step = relationship.group?.pattern?.relationships?.let { inner -> if (inner.any { it.range != null }) return null else inner.size } ?: 1
+                return range.max?.let { it.toLong() * step }
+            }
+            Texts(mutableSetOf(), patterned = { pattern ->
+                val ids = pattern.relationships.fold(1L as Long?) { sum, relationship -> sum?.let { s -> ids(relationship)?.let { s + it } } }
+                most = most?.let { m -> ids?.let { maxOf(m, it) } }
+            }).query(query)
+            return most
+        }
+
+        /**
+         * What [textsIn] adds each text to, [texts], as it reads a statement through, what it gives each name it binds, with the value
+         * bound and whether to each item of it, a list, [bind], each pattern it reads, [patterned], and each expression, [read].
+         */
+        private class Texts(
+            val texts: MutableSet<String>,
+            val bind: (String, Expression, Boolean) -> Unit = { _, _, _ -> },
+            val patterned: (Pattern) -> Unit = {},
+            // Last, as a statement's reads are given as a trailing lambda.
+            val read: (Expression) -> Unit = {},
+        ) {
             fun text(text: String?) {
                 if (text != null) texts += text.substringBefore(' ')
             }
@@ -6580,6 +6613,7 @@ abstract class SqlCypherCompiler(
             }
 
             fun pattern(pattern: Pattern) {
+                patterned(pattern)
                 text(pattern.variable)
                 pattern.nodes.forEach { node -> text(node.variable); node.labels.forEach(::text); expression(node.properties) }
                 pattern.relationships.forEach { relationship ->
