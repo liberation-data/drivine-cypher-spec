@@ -1,6 +1,8 @@
 package org.drivine.cypher
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.node.ObjectNode
+import org.drivine.cypher.api.CompileJson
 import org.drivine.cypher.api.Compiled
 import org.drivine.cypher.api.CypherCompiler
 import org.drivine.cypher.api.GraphOptions
@@ -146,6 +148,24 @@ class OracleReencodeJsonTest {
         assertTrue(again.all { it["store"].textValue() == "oracle" } && statements.size > 1000, "${statements.size} requests with oracleReencodeJson")
         for (kind in listOf("MATCH", "UNION", "UNION ALL", "CALL {", "CREATE", "MERGE", "SET")) {
             assertTrue(statements.any { kind in it && "RETURN" in it }, "no statement with $kind that returns rows")
+        }
+    }
+
+    @Test
+    fun `over the corpus, only each statement's result is encoded again, and the rest of the answer is as before`() {
+        val spec = File(requireNotNull(javaClass.getResource("/cypher/queries.yaml")) { "No spec file cypher/queries.yaml" }.toURI()).parentFile
+        val json = ObjectMapper()
+        for (request in Oracle.corpusRequests(spec).map { json.readTree(it) }.filterIsInstance<ObjectNode>()) {
+            if ((request["graph"] as? ObjectNode)?.get("oracleReencodeJson")?.booleanValue() != true) continue
+            val cypher = request["cypher"].textValue()
+            val again = json.readTree(CompileJson.compile(request.toString())) as ObjectNode
+            (request["graph"] as ObjectNode).remove("oracleReencodeJson")
+            val plain = json.readTree(CompileJson.compile(request.toString())) as ObjectNode
+            val sql = again.remove("sql").textValue()
+            assertEquals(plain.remove("sql").textValue(), unwrapped(sql), cypher)
+            assertEquals(plain, again, cypher)
+            val wrapped = Regex("KEEP '\\\$'\\) AS result").findAll(sql).count()
+            assertTrue(wrapped >= 1 && wrapped == Regex("KEEP '\\\$'\\)").findAll(sql).count(), "$cypher\n$sql")
         }
     }
 
