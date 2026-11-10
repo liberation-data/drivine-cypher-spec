@@ -108,6 +108,54 @@ class StoreDdlTest {
         assertTrue(checked > 0, "store.yaml has no cases")
     }
 
+    /**
+     * liberation-data/drivine4j#517: Oracle's DDL doesn't wait for a lock, so a manager making the store's key constraint
+     * while another builds it, or writes its stamp, was turned away at once (`ORA-00054`), and could go on without the
+     * constraint. Each index over the node table, the shared, the labelled and the unique, is run again a tenth of a second
+     * later, up to [OracleDdl.BUSY_ATTEMPTS] tries, and nothing else waits. One that another session made after this one's
+     * `IF NOT EXISTS` found none (`ORA-00955`) is taken as made, as `ensuring` takes it.
+     */
+    @Test
+    fun oracleRunsEachIndexOverTheNodeTableAgainWhileAnotherSessionsLockTurnsItAwayUpToABound() {
+        // Each statement after the one that makes the store.
+        fun made(statements: List<DdlStatement>) = statements.drop(1).map { (it as DdlStatement.Text).statement }
+        val key = made(oracle.createConstraint(UniquenessConstraintSpec("DrivineStore", listOf("key"))))
+        val pair = made(oracle.createConstraint(UniquenessConstraintSpec("Person", listOf("first", "last"))))
+        val range = made(oracle.createIndex(RangeIndexSpec("Person", listOf("name")), null))
+        val labelled = "CREATE INDEX IF NOT EXISTS ${oracle.objectName("lx", listOf("Person", "name"))} "
+        val blocks = listOf(
+            "the key's unique index" to key.single { "CREATE UNIQUE INDEX" in it },
+            "the key's shared index" to key.single { "CREATE INDEX" in it },
+            "a composite constraint's unique index" to pair.single { "CREATE UNIQUE INDEX" in it },
+            "a composite constraint's labelled index" to pair.single { "CREATE INDEX IF NOT EXISTS ${oracle.objectName("lx", listOf("Person", "first", "last"))} " in it },
+            "a range index's shared index" to range.single { "CREATE INDEX IF NOT EXISTS ${oracle.objectName("ix", listOf("name"))} " in it },
+            "a range index's labelled index" to range.single { labelled in it },
+        )
+        val attempts = OracleDdl.BUSY_ATTEMPTS
+        for ((what, block) in blocks) {
+            assertTrue(block.startsWith("DECLARE\n") && block.endsWith("\nEND;"), "$what is a block of its own:\n$block")
+            assertTrue("e_busy EXCEPTION; PRAGMA EXCEPTION_INIT(e_busy, -54);" in block, "$what catches ORA-00054:\n$block")
+            assertTrue("e_exists EXCEPTION; PRAGMA EXCEPTION_INIT(e_exists, -955);" in block, "$what catches ORA-00955:\n$block")
+            assertTrue(
+                Regex("""EXCEPTION\s+WHEN e_exists THEN EXIT;\s+WHEN e_busy THEN""").containsMatchIn(block),
+                "$what takes an index another session made in the meantime as made, before waiting out a lock:\n$block",
+            )
+            assertTrue("FOR attempt IN 1 .. $attempts LOOP" in block, "$what is tried a bounded number of times:\n$block")
+            assertTrue(
+                Regex("""WHEN e_busy THEN\s+IF attempt = $attempts THEN RAISE; END IF;\s+DBMS_SESSION\.SLEEP\(0\.1\);""").containsMatchIn(block),
+                "$what is run again a tenth of a second later, and raised on its last try:\n$block",
+            )
+            assertTrue(Regex("""EXECUTE IMMEDIATE 'CREATE[^;]*;\s+EXIT;""").containsMatchIn(block), "$what stops trying once it runs:\n$block")
+            assertEquals(1, Regex("EXECUTE IMMEDIATE").findAll(block).count(), "$what runs only the index:\n$block")
+            assertTrue(block.lines().none { it.isNotEmpty() && it.isBlank() }, "$what has no line of spaces alone:\n$block")
+        }
+        // The labelled index is still made only where no uniqueness constraint's index stands for it.
+        val ranged = range.single { labelled in it }
+        assertTrue(ranged.indexOf("IF v_unique = 0 THEN") < ranged.indexOf("FOR attempt") && ranged.indexOf("END LOOP;") < ranged.lastIndexOf("END IF;"), ranged)
+        // Nothing else waits: a record of what was made, or the drop of a labelled index the unique one serves.
+        (key + pair + range).filter { "CREATE" !in it }.forEach { assertTrue("e_busy" !in it && "e_exists" !in it, it) }
+    }
+
     @Test
     fun catalogIsListedAndAliasedAsDrivine4jDid() {
         val catalog = store["catalog"]!!
