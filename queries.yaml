@@ -110,6 +110,9 @@ cases:
       - note: "Properties given on the relationship alone, and no label on either node (drivine#680)."
         cypher: "MATCH (a)-[:ACTED_IN {role: 'Trinity'}]->(m) RETURN a.name, m.title ORDER BY m.title"
         rows: [["Carrie", "The Matrix"], ["Carrie", "The Matrix Reloaded"]]
+      - note: "A node in a pattern's middle pinned by the WHERE alone, where a store may read it from (drivine#680)."
+        cypher: "MATCH (a)-[:KNOWS]->(b)-[:ACTED_IN]->(m) WHERE b.name = 'Keanu' RETURN a.name, m.title ORDER BY m.title"
+        rows: [["Laurence", "Johnny Mnemonic"], ["Laurence", "The Matrix"], ["Laurence", "The Matrix Reloaded"]]
 
   - name: "Distinct relationships in one match"
     description: "Two relationships in one pattern never match the same relationship."
@@ -142,6 +145,9 @@ cases:
       - note: "A pattern of two relationships finds the row's node, or nothing, not a part of it (drivine#680)."
         cypher: "MATCH (p:Person) OPTIONAL MATCH (p)<-[:KNOWS]-(f)<-[:KNOWS]-(g) RETURN p.name, f.name, g.name ORDER BY p.name"
         rows: [["Carrie", "Keanu", "Laurence"], ["Hugo", null, null], ["Keanu", null, null], ["Laurence", null, null]]
+      - note: "One whose WHERE pins a node it finds by the row's, not the row's node: still kept where it finds nothing (drivine#680)."
+        cypher: "MATCH (p:Person) OPTIONAL MATCH (a)-[:KNOWS]->(b) WHERE b.name = p.name RETURN p.name, a.name ORDER BY p.name"
+        rows: [["Carrie", "Keanu"], ["Hugo", null], ["Keanu", "Laurence"], ["Laurence", null]]
 
   - name: "WITH aggregates and pages"
     description: "WITH aggregates, filters, orders and pages rows."

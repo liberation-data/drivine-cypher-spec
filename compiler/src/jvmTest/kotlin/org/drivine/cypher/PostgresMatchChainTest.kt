@@ -82,6 +82,14 @@ class PostgresMatchChainTest {
             "MATCH (a)-[:R]-(b {id: 1}) RETURN a" to listOf("e3 b n2 nid", "n1 nid e3 a"),
             "MATCH (a)-[:R]->(b {id: 1})-[:S]->(c) RETURN a, c" to listOf("e4 dst n2 nid", "n1 nid e4 src", "e5 src n2 nid", "n3 nid e5 dst"),
             "MATCH (a {id: 1})-[:R]->(b {id: 2}) RETURN b" to listOf("e3 src n1 nid", "n2 nid e3 dst"),
+            // Pinned by the WHERE, a property or the key equal to a value: started there, where an index finds it, not
+            // read by its key from every relationship. One equal to another of the pattern's nodes, or in an OR, pins none.
+            "MATCH (a)-[:R]->(b) WHERE b.id = 1 RETURN a" to listOf("e3 dst n2 nid", "n1 nid e3 src"),
+            "MATCH (a)-[:R]->(b)-[:S]->(c) WHERE c.k > 1 AND id(b) = 7 RETURN a" to
+                listOf("e4 dst n2 nid", "n1 nid e4 src", "e5 src n2 nid", "n3 nid e5 dst"),
+            "MATCH (a)-[:R]->(b) WHERE id(b) IN [1, 2] RETURN a" to listOf("e3 dst n2 nid", "n1 nid e3 src"),
+            "MATCH (a)-[:R]->(b) WHERE b.k = a.k OR b.id = 1 RETURN a" to listOf("n1 nid e3 src", "n2 nid e3 dst"),
+            "MATCH (a)-[:R]->(b) WHERE b.k = a.k RETURN a" to listOf("n1 nid e3 src", "n2 nid e3 dst"),
             // A variable given properties where it appears again: the chain starts where it first appears.
             "MATCH (a)-[:R]->(a {id: 1}) RETURN a" to listOf("e2 src n1 nid"),
             "MATCH (a)-[:R]->(b)<-[:S]-(c)-[:T]->(b {id: 1}) RETURN a" to
@@ -101,6 +109,10 @@ class PostgresMatchChainTest {
         val optional = sql("MATCH (a:A) OPTIONAL MATCH (a)-[:R]->(b) RETURN b")
         assertTrue("LEFT JOIN LATERAL" in optional, optional)
         assertEquals(listOf("e3 src n1 nid", "n2 nid e3 dst"), chain(optional).map { it.joinToString(" ") }, optional)
+        // One whose WHERE pins a node by the row's: started there, within the lateral query the row is kept beside.
+        val pinned = sql("MATCH (p:A) OPTIONAL MATCH (a)-[:R]->(b) WHERE b.k = p.k RETURN a")
+        assertTrue("LEFT JOIN LATERAL" in pinned && "FROM ${GRAPH}_node n3\n" in pinned, pinned)
+        assertEquals(listOf("e4 dst n3 nid", "n2 nid e4 src"), chain(pinned, whole = 2).map { it.joinToString(" ") }, pinned)
         val with = sql("MATCH (a:A) WITH a, count(*) AS c MATCH (a)-[:R]->(b) RETURN b, c")
         assertEquals(listOf("n", "nid", "e", "dst"), chain(with).last().map { it.trimEnd { ch -> ch.isDigit() } }, with)
     }
