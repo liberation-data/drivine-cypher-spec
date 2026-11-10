@@ -143,7 +143,9 @@ cases:
         today: [{stores: ["falkordb"], ids: ["kiwi", "kiwis"], issue: "liberation-data/drivine4j#666"}]
       - search: {label: "Doc", properties: ["body"], query: "snake", topK: 50}
         ids: []
-        today: [{stores: ["memgraph", "oracle-text"], ids: ["snake"], issue: "liberation-data/drivine4j#762, liberation-data/drivine4j#763"}]
+        today:
+          - {stores: ["memgraph"], ids: ["snake"], issue: "liberation-data/drivine4j#762"}
+          - {stores: ["oracle-text"], ids: ["snake"], issue: "liberation-data/drivine4j#763"}
       - search: {label: "Doc", properties: ["body"], query: "snake_case", topK: 50}
         ids: ["snake"]
 
