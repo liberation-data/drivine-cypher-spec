@@ -402,6 +402,19 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
     override val undirectedBothWays = false
 
     /**
+     * A walk's step tests a relationship's one type as a range, `type BETWEEN 'T' AND 'T'`, which holds where `=` does.
+     * SQLite plans a subquery in `json_each`'s argument, where a walk's rows are gathered ([lateral]), as one run many
+     * times, and so built an automatic index for the step. It builds one only on columns tested with `=` or `IS`, and none
+     * on an index's leftmost column, which `src` and `dst` are, so it keyed it on the type alone: each step read every
+     * relationship of the type, and tested each against the ids the walk had taken, which grew cubically with a walk's
+     * length (drivine4j#766). With no `=` to key one on, the step is read by the index on the end it is at and the type: a
+     * walk of 2,000 hops along a chain took 69 ms, against 18.9 s, and a branching `*..6` 11 ms, against 1,780. That SQLite
+     * keys no automatic index on a range is how its planner works (`termCanDriveIndex` in `where.c`), not a rule it
+     * documents, so a library's test of the walk's plan is what notices it change.
+     */
+    override fun stepType(type: String, name: String) = "$type BETWEEN ${literal(name)} AND ${literal(name)}"
+
+    /**
      * A JSON list of maps, a map for each row of [query], gathered in a subquery that may read the row it is in, and
      * joined as `json_each` gives its items: SQLite joins no lateral query. SQLite reads a `json_each` after the sources its
      * argument reads, so the plain join [crossJoin] gives keeps that order.
