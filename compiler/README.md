@@ -444,8 +444,8 @@ Linux it checks the wheel holds to its manylinux tag with auditwheel, installed 
 `publish-pypi`, which needs every `wheels-smoke` and waits in the `release` environment for its reviewer, and needs only
 the wheels: it checks they are exactly step 2's, by SHA-256, then publishes them with `pypa/gh-action-pypi-publish` by
 PyPI's trusted publishing, with no PyPI token stored anywhere: PyPI's settings for `drivine-cypher-compiler` name this
-repository, `compiler-release.yml` and the `release` environment as its publisher (the first tag's publish makes the
-project), and the job's OIDC token proves it. The same token signs a PEP 740 attestation of each wheel. A re-run leaves
+repository, `compiler-release.yml` and the `release` environment as its publisher (the project was claimed with a
+placeholder 0.0.0, by hand, before the first tag), and the job's OIDC token proves it. The same token signs a PEP 740 attestation of each wheel. A re-run leaves
 out a wheel PyPI has already as this file (by its SHA-256), and fails where PyPI has another under its name, as PyPI
 never replaces a file. A dry run checks the wheels as `publish-pypi` does and uploads nothing.
 

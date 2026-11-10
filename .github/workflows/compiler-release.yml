@@ -302,19 +302,20 @@ jobs:
       # and its mutants, which wheels-smoke checks each installed wheel against.
       - name: Build and check the Python wheels
         id: wheels
+        # In python-release/, not release/: the bundle's check after this starts by emptying release/.
         run: |
           ./gradlew --no-daemon --dependency-verification strict pythonWheels jvmOracle -Pcompiler.version="$VERSION" -Pcompiler.binaryenMirror="$HOME/.cache/drivine-binaryen"
-          mkdir -p release/wheels release/oracle
-          cp build/wheels/*.whl release/wheels/
-          cp build/oracle/corpus.jsonl build/oracle/mutants.jsonl release/oracle/
-          (cd python && python3 check_wheel.py "$VERSION" ../release/wheels/*.whl) | tee release/wheels.txt
-          if (( $(grep -c . release/wheels.txt) != 4 )) || grep -q '::error::' release/wheels.txt; then
+          mkdir -p python-release/wheels python-release/oracle
+          cp build/wheels/*.whl python-release/wheels/
+          cp build/oracle/corpus.jsonl build/oracle/mutants.jsonl python-release/oracle/
+          (cd python && python3 check_wheel.py "$VERSION" ../python-release/wheels/*.whl) | tee python-release/wheels.txt
+          if (( $(grep -c . python-release/wheels.txt) != 4 )) || grep -q '::error::' python-release/wheels.txt; then
             echo "::error::The release needs four checked wheels, one for each of macosArm64, linuxX64, linuxArm64 and mingwX64."
             exit 1
           fi
-          { echo 'list<<WHEELS'; cat release/wheels.txt; echo 'WHEELS'; } >> "$GITHUB_OUTPUT"
-          echo "corpus-sha256=$(shasum -a 256 release/oracle/corpus.jsonl | cut -d' ' -f1)" | tee -a "$GITHUB_OUTPUT"
-          echo "mutants-sha256=$(shasum -a 256 release/oracle/mutants.jsonl | cut -d' ' -f1)" | tee -a "$GITHUB_OUTPUT"
+          { echo 'list<<WHEELS'; cat python-release/wheels.txt; echo 'WHEELS'; } >> "$GITHUB_OUTPUT"
+          echo "corpus-sha256=$(shasum -a 256 python-release/oracle/corpus.jsonl | cut -d' ' -f1)" | tee -a "$GITHUB_OUTPUT"
+          echo "mutants-sha256=$(shasum -a 256 python-release/oracle/mutants.jsonl | cut -d' ' -f1)" | tee -a "$GITHUB_OUTPUT"
       - name: Kotlin/Native used only its pinned dependencies
         run: ../.github/scripts/compiler-konan-dependencies.sh check gradle/kotlin-native-dependencies.txt
       - name: Check the bundle
@@ -364,12 +365,12 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: compiler-wheels-${{ env.VERSION }}
-          path: compiler/release/wheels/*.whl
+          path: compiler/python-release/wheels/*.whl
           if-no-files-found: error
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: compiler-oracle-${{ env.VERSION }}
-          path: compiler/release/oracle/*.jsonl
+          path: compiler/python-release/oracle/*.jsonl
           if-no-files-found: error
 
   # Signs build's bundle with the release key and uploads it, as one deployment, followed until the Portal publishes it.
