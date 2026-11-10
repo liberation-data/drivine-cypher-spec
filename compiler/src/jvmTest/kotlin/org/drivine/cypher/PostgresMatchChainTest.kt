@@ -109,6 +109,27 @@ class PostgresMatchChainTest {
     }
 
     @Test
+    fun `a match pinned on a relationship, or by a later clause, is joined plainly`() {
+        // A relationship's key or properties, which an index may find, or a node pinned by a later MATCH or a WITH's WHERE,
+        // whose condition is met in the same query: chained from `a`, every node of the label was read for the one row.
+        for (cypher in listOf(
+            "MATCH (a:L)-[r]->(b) WHERE id(r) = 1 RETURN b",
+            "MATCH (a:L)-[r]->(b) WHERE r.k IN [1, 2] RETURN b",
+            "MATCH (a:L)-[r:R {k: 1}]->(b) RETURN b",
+            "MATCH (a:L)-[:R]->(b) MATCH (b {k: 1}) RETURN a",
+            "MATCH (a:L)-[:R]->(b) MATCH (b) WHERE b.k = 1 RETURN a",
+            "MATCH (a:L)-[:R]->(b) WITH a, b WHERE b.k = 1 RETURN a",
+            "MATCH (a:L)-[:R]->(b) UNWIND [1, 2] AS i MATCH (c)-[:S]->(b) WHERE id(b) = i RETURN c",
+        )) {
+            val sql = sql(cypher)
+            assertFalse(Regex("""SELECT \* FROM ${GRAPH}_node n\d+ WHERE n\d+\.nid = e\d+\.""").containsMatchIn(sql), "$cypher:\n$sql")
+        }
+        // One that reads the match's own node pins nothing, there or later.
+        assertEquals(listOf("e3 src n1 nid", "n2 nid e3 dst"), chain(sql("MATCH (a:L)-[r:R {k: a.k}]->(b) RETURN b")))
+        assertEquals(listOf("e3 src n1 nid", "n2 nid e3 dst"), chain(sql("MATCH (a:L)-[:R]->(b) MATCH (b {k: a.k}) RETURN b")))
+    }
+
+    @Test
     fun `an unpinned OPTIONAL MATCH reads its chain within the lateral query the row is kept beside`() {
         val optional = sql("MATCH (p:A) OPTIONAL MATCH (a:B)-[:R]->(b) RETURN a")
         assertTrue("LEFT JOIN LATERAL" in optional && "FROM ${GRAPH}_node n2\n" in optional, optional)

@@ -1204,6 +1204,9 @@ abstract class SqlCypherCompiler(
         /** The queries given to compile, [query] and [procedure], whose names [hidden] keeps clear of, not yet in [queryTexts]. */
         private val queries = mutableListOf<Query>()
 
+        /** Every query given to compile ([give]), kept whole for [pinnedElsewhere], as [queries] is emptied once read. */
+        private val given = mutableListOf<Query>()
+
         /** Each text of the queries given to compile, as far as its first space ([textsIn]), gathered when [hidden] needs it. */
         private val queryTexts = mutableSetOf<String>()
 
@@ -1213,6 +1216,7 @@ abstract class SqlCypherCompiler(
          */
         fun give(query: Query) {
             queries += query
+            given += query
         }
 
         /**
@@ -1471,12 +1475,15 @@ abstract class SqlCypherCompiler(
             val seededFirst = match.where?.let(::holdsAnew) == true && (match.optional || shortestWhere != null)
             val (row, seed) = if (seededFirst) seededRows(select) else select to null
             val metByPaths = shortestWhere?.let { if (seed == null) it else seeded(it, seed, madeAnew, inBody = true) }
-            // Only a match nothing pins is read as a chain (see [pattern]): none of its nodes bound before it, given properties
-            // that read only the row ([givenBy]), or pinned by its WHERE ([pinnedBy]). A pinned one is selective, so Postgres
-            // plans its plain join well even on stale statistics, and it is joined as it always was.
-            val pins = where?.let { pinnedBy(it, row.scope) }.orEmpty()
+            // Only a match nothing pins is read as a chain (see [pattern]): none of its nodes bound before it, none of its nodes
+            // or relationships given properties that read only the row ([givenBy]), or pinned by its WHERE ([pinnedBy]) or by
+            // another clause ([pinnedElsewhere]). A pinned one is selective, so Postgres plans its plain join well even on stale
+            // statistics, and it is joined as it always was.
+            val reads = { variable: String -> variable in row.scope }
+            val pins = where?.let { pinnedBy(it, reads) }.orEmpty() + pinnedElsewhere(match)
             val chaining = match.patterns.none { pattern ->
-                pattern.nodes.any { node -> node.variable?.let { row.scope[it] != null || it in pins } == true || givenBy(node, row.scope) }
+                pattern.nodes.any { node -> node.variable?.let { row.scope[it] != null || it in pins } == true || givenBy(node.properties, reads) } ||
+                    pattern.relationships.any { relationship -> relationship.variable in pins || givenBy(relationship.properties, reads) }
             }
             if (!match.optional) {
                 patterns(row, match.patterns, metByPaths, chaining = chaining)
@@ -1933,20 +1940,20 @@ abstract class SqlCypherCompiler(
 
         /**
          * The variables [where], a `MATCH`'s, pins as a node's properties do: each one a term it is the `AND` of sets a property
-         * of, or the key of (`id()`, `elementId()`), equal to, or the key in, a value that reads only [scope], the variables
-         * bound before the `MATCH`. A match that pins a node of its patterns so is joined plainly, not read as a chain
-         * ([match]): an index finds the node, and Postgres plans the join from it well.
+         * of, or the key of (`id()`, `elementId()`), equal to, or the key in, a value that reads only variables [reads] takes,
+         * those bound before the `MATCH`. A match that pins a node or relationship of its patterns so is joined plainly, not read
+         * as a chain ([match]): an index finds it, and Postgres plans the join from it well.
          */
-        private fun pinnedBy(where: Expression, scope: Map<String, Value>): Set<String> {
+        private fun pinnedBy(where: Expression, reads: (String) -> Boolean): Set<String> {
             if (where !is Expression.Binary) return emptySet()
-            if (where.operator == Operator.AND) return pinnedBy(where.left, scope) + pinnedBy(where.right, scope)
+            if (where.operator == Operator.AND) return pinnedBy(where.left, reads) + pinnedBy(where.right, reads)
             fun subject(side: Expression): String? = when {
                 side is Expression.Property -> (side.subject as? Expression.Variable)?.name
                 side is Expression.Function && !side.distinct && side.name.lowercase() in setOf("id", "elementid") ->
                     (side.arguments.singleOrNull() as? Expression.Variable)?.name
                 else -> null
             }
-            fun given(side: Expression) = variablesIn(side).all { it in scope }
+            fun given(side: Expression) = variablesIn(side).all(reads)
             return when (where.operator) {
                 Operator.EQUALS -> setOfNotNull(subject(where.left)?.takeIf { given(where.right) }, subject(where.right)?.takeIf { given(where.left) })
                 Operator.IN -> setOfNotNull(subject(where.left)?.takeIf { given(where.right) })
@@ -1955,12 +1962,41 @@ abstract class SqlCypherCompiler(
         }
 
         /**
-         * Whether [node] is given properties that read only [scope], the variables bound before its `MATCH`, as [pinnedBy]'s
-         * values do: its match is joined plainly, not read as a chain ([match]). Properties that read another node of the
-         * match, as `(a:L)-[:R]->(b {k: a.k})`'s, pin none: no index finds `b` before `a` is read.
+         * Whether a node's or relationship's [properties] are given and read only variables [reads] takes, those bound before its
+         * `MATCH`, as [pinnedBy]'s values do: its match is joined plainly, not read as a chain ([match]). Properties that read
+         * another node of the match, as `(a:L)-[:R]->(b {k: a.k})`'s, pin none: no index finds `b` before `a` is read.
          */
-        private fun givenBy(node: NodePattern, scope: Map<String, Value>): Boolean =
-            node.properties?.let { properties -> variablesIn(properties).all { it in scope } } == true
+        private fun givenBy(properties: Expression?, reads: (String) -> Boolean): Boolean =
+            properties?.let { variablesIn(it).all(reads) } == true
+
+        /**
+         * The variables of [match]'s patterns another clause of the statement pins, as [pinnedBy] and [givenBy] tell, by a value
+         * that reads none of them: a `MATCH` that gives one properties, as `MATCH (a:L)-[:R]->(b) MATCH (b {k: 1})`'s, or whose
+         * `WHERE`, or a `WITH`'s, pins one. Joined plainly, Postgres meets that condition first, by an index, where a chain
+         * reads the node only by a probe once it has read every node it starts at. A clause before [match] pins a variable
+         * bound before it, pinned anyway, or a name used again, which is joined plainly as it always was.
+         */
+        private fun pinnedElsewhere(match: Clause.Match): Set<String> {
+            val mine = match.patterns.flatMap { pattern -> pattern.nodes.mapNotNull { it.variable } + pattern.relationships.mapNotNull { it.variable } }.toSet()
+            val reads = { variable: String -> variable !in mine }
+            val pins = mutableSetOf<String>()
+            fun clauses(clauses: List<Clause>): Unit = clauses.forEach { clause ->
+                when (clause) {
+                    is Clause.Match -> if (clause !== match && !clause.optional) {
+                        clause.where?.let { pins += pinnedBy(it, reads) }
+                        for (pattern in clause.patterns) {
+                            pattern.nodes.filter { givenBy(it.properties, reads) }.mapNotNullTo(pins) { it.variable }
+                            pattern.relationships.filter { givenBy(it.properties, reads) }.mapNotNullTo(pins) { it.variable }
+                        }
+                    }
+                    is Clause.With -> clause.where?.let { pins += pinnedBy(it, reads) }
+                    is Clause.Call -> { clauses(clause.query.clauses); clause.query.unions.forEach { clauses(it.clauses) } }
+                    else -> Unit
+                }
+            }
+            given.forEach { query -> clauses(query.clauses); query.unions.forEach { clauses(it.clauses) } }
+            return pins intersect mine
+        }
 
         /** Whether [pattern] is read as a chain of probes by a store that probes: it has relationships, each of one hop. */
         private fun chains(pattern: Pattern): Boolean =
