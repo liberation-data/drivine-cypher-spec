@@ -30,6 +30,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        # No token left on disk while the build runs Gradle and its plugins: no step here needs git credentials.
+        with: { persist-credentials: false }
       - uses: ./.github/actions/pinned-toolchain
       # Stay on setup-gradle 5.x: v6's caching is a proprietary component under Gradle's terms, which we don't take.
       - uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5.0.2
@@ -49,6 +51,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        # No token left on disk while the build runs Gradle and its plugins: no step here needs git credentials.
+        with: { persist-credentials: false }
       - uses: ./.github/actions/pinned-toolchain
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with: { node-version: '22' }
@@ -78,6 +82,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        # No token left on disk while the build runs Gradle and its plugins: no step here needs git credentials.
+        with: { persist-credentials: false }
       - uses: ./.github/actions/pinned-toolchain
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with: { python-version: '3.12' }
@@ -109,6 +115,8 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        # No token left on disk while the build runs Gradle and its plugins: no step here needs git credentials.
+        with: { persist-credentials: false }
       - uses: ./.github/actions/pinned-toolchain
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with: { python-version: '3.12' }
@@ -140,6 +148,8 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        # No token left on disk while the build runs Gradle and its plugins: no step here needs git credentials.
+        with: { persist-credentials: false }
       # As compiler-release.yml's dependencies job names it: keep the two in step.
       - name: The cache key
         id: key
