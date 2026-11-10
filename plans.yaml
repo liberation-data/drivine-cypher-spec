@@ -3027,6 +3027,55 @@ cases:
                 - ["WARN", "ConstraintManager", "Could not create constraint on Person[email]: existing data violates it"]
                 - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 0 already matching, 0 recreated, 1 needing attention"]
                 - ["ERROR", "SchemaManager", "Schema application for owner 'schema' on 'default' failed: Schema application for owner 'schema' on database 'default' found problems:\n  - VIOLATION: UNIQUENESS_CONSTRAINT on Person[email] cannot be created — existing data violates it. Conflicting sample: [{properties={email=dup@example.com}, count=2, nodes=[{elementId=4:a:1}, {elementId=4:a:2}]}]\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."]
+  - case: "19d"
+    name: "A violation in one owner, then the co-owned constraint in the next"
+    description: "Owner 'a's create is refused, and the sample bears out a violation, which fails it; owner 'b' reads the constraints again, and makes the constraint."
+    stores: ["postgres"]
+    catalogs:
+      - {owner: "a", version: null, items: ["Uniqueness constraint"]}
+      - {owner: "b", version: null, items: ["Uniqueness constraint"]}
+    steps:
+      - operation: {enforce: "all"}
+        runs:
+          - stores: ["postgres"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "a"}, rows: []}
+                  - {query: {marker: "read.items", scope: "b"}, rows: []}
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Uniqueness constraint"}, failed: {at: 1, causes: [{sqlState: "23505", vendorCode: 0, message: "ERROR: could not create unique index"}]}}
+                  - {query: {listing: "constraints"}}
+              - now: 1000000
+                actions:
+                  - {query: {sample: {spec: "Uniqueness constraint", limit: 10}}, rows: [{properties: {email: "dup@example.com"}, count: 2, nodes: [{elementId: "4:a:1"}, {elementId: "4:a:2"}]}]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Uniqueness constraint"}}
+                  - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], name: "Person_email_unique"}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "b", version: null, items: "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+            done: 1000000
+            report:
+              owners:
+                - {owner: "a", results: [{spec: "Uniqueness constraint", violation: {requested: "Uniqueness constraint", sample: [{properties: {email: "dup@example.com"}, count: 2, nodes: [{elementId: "4:a:1"}, {elementId: "4:a:2"}]}]}}], marker: null, failure: "Schema application for owner 'a' on database 'default' found problems:\n  - VIOLATION: UNIQUENESS_CONSTRAINT on Person[email] cannot be created — existing data violates it. Conflicting sample: [{properties={email=dup@example.com}, count=2, nodes=[{elementId=4:a:1}, {elementId=4:a:2}]}]\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."}
+                - {owner: "b", results: [{spec: "Uniqueness constraint", created: {kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], name: "Person_email_unique"}}], marker: {version: null, items: "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+              failure: "Schema application on database 'default' failed for 1 owner(s):\nSchema application for owner 'a' on database 'default' found problems:\n  - VIOLATION: UNIQUENESS_CONSTRAINT on Person[email] cannot be created — existing data violates it. Conflicting sample: [{properties={email=dup@example.com}, count=2, nodes=[{elementId=4:a:1}, {elementId=4:a:2}]}]\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'a' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["WARN", "ConstraintManager", "Could not create constraint on Person[email]: existing data violates it"]
+                - ["INFO", "SchemaManager", "Schema for owner 'a' on 'default': 0 created, 0 already matching, 0 recreated, 1 needing attention"]
+                - ["ERROR", "SchemaManager", "Schema application for owner 'a' on 'default' failed: Schema application for owner 'a' on database 'default' found problems:\n  - VIOLATION: UNIQUENESS_CONSTRAINT on Person[email] cannot be created — existing data violates it. Conflicting sample: [{properties={email=dup@example.com}, count=2, nodes=[{elementId=4:a:1}, {elementId=4:a:2}]}]\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."]
+                - ["INFO", "SchemaManager", "Applying schema for owner 'b' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["INFO", "ConstraintManager", "Created {engine} UNIQUENESS_CONSTRAINT on Person[email]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'b' on 'default': 1 created, 0 already matching, 0 recreated, 0 needing attention"]
   - case: "20a"
     name: "Blocked by an index"
     description: "A plain index in the way of the constraint: blocked, which fails the owner under FAIL_FAST."
@@ -3860,6 +3909,55 @@ cases:
               log:
                 - ["INFO", "IndexManager", "Dropped {engine} RANGE_INDEX on Person[name, born]"]
                 - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 2 removed, 1 dropped, 0 left in place"]
+  - case: "25d"
+    name: "remove, where the owner's marker can't be read"
+    description: "The item is dropped, and then the owner's marker can't be read, which throws: the marker isn't written."
+    stores: ["postgres", "oracle", "sqlite", "neo4j"]
+    catalogs: []
+    steps:
+      - operation: {remove: {owner: null, items: ["Range index"]}}
+        runs:
+          - stores: ["postgres", "oracle", "sqlite"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "scopes"}, rows: ["schema"]}
+                  - {query: {marker: "read.items", scope: "schema"}, failed: [{}]}
+                  - {query: {listing: "indexes.RANGE_INDEX"}}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
+              - now: 1000000
+                actions:
+                  - {execute: {drop: "Range index"}}
+            done: 1000000
+            report:
+              owners:
+                - {owner: null, marker: null, failure: "An unknown error occurred"}
+              failure: "An unknown error occurred"
+              log:
+                - ["INFO", "IndexManager", "Dropped {engine} RANGE_INDEX on Person[name]"]
+          - stores: ["neo4j"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {query: {marker: "scopes"}, rows: ["schema"]}
+                  - {query: {marker: "read.items", scope: "schema"}, failed: [{}]}
+                  - {query: {listing: "indexes.RANGE_INDEX"}}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
+              - now: 1000000
+                actions:
+                  - {execute: {drop: "Range index"}}
+            done: 1000000
+            report:
+              owners:
+                - {owner: null, marker: null, failure: "An unknown error occurred"}
+              failure: "An unknown error occurred"
+              log:
+                - ["INFO", "IndexManager", "Dropped {engine} RANGE_INDEX on Person[name]"]
   - case: "26"
     name: "A failure mid-plan under FAIL_FAST"
     description: "Owner 'a' fails at its second item: its third isn't tried, and its marker isn't written; owner 'b' is applied."
