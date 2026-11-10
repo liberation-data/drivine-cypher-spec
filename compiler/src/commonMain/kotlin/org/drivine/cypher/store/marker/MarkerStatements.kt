@@ -50,9 +50,9 @@ interface MarkerStatements {
         mapOf("scope" to scope, "version" to version, "items" to storedItems(items))
 
     /**
-     * Removes every marker of the scope but its newest: what a library runs, and then makes [SchemaMarker.CONSTRAINT],
-     * before it reads or writes the marker of an owner that sets a version token. An owner that sets none runs neither, as
-     * drivine4j's `SchemaManager` does, so no constraint is made for it.
+     * Removes every marker of the scope but its newest, before [SchemaMarker.CONSTRAINT] keeps one for each scope. When a
+     * library runs the two is its schema manager's to decide: drivine4j's `SchemaManager` today, and the module's own
+     * plan once #135 moves the manager here. This gives the statement, not the rule.
      */
     val deleteAllButNewest: String
 
