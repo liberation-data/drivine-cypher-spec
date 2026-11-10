@@ -121,7 +121,7 @@ Values are plain JSON, tagged only where JSON, or a host's reading of it, loses 
 | a whole number (Long, or past a Long a big integer) | a JSON integer: `2` |
 | a float | `{"$float": "2.0"}` (or `{"$float": 2}`), or in a request a JSON number with a fraction or an exponent (`2.5`, `1e-7`). A host whose JSON writer drops a whole float's fraction (JavaScript writes `2.0` as `2`) tags its floats |
 | NaN, the infinities | `{"$float": "NaN"}`, `{"$float": "Infinity"}`, `{"$float": "-Infinity"}` |
-| a temporal value | `{"$temporal": "DATE", "text": "2026-11-07"}`: `DATE`, `LOCAL_TIME`, `TIME`, `LOCAL_DATE_TIME`, `DATE_TIME` or `DURATION`, and its ISO 8601 text |
+| a temporal value | `{"$temporal": "DATE", "text": "2026-11-07"}`: `DATE`, `LOCAL_TIME`, `TIME`, `LOCAL_DATE_TIME`, `DATE_TIME` or `DURATION`, and its ISO 8601 text. Untagged, its ISO text is a text: as in Neo4j, it is equal to no temporal value the statement makes and is not ordered beside one (`date('2026-11-07') = $d` is false for `"2026-11-07"`) |
 | bytes | `{"$bytes": "<base64>"}` |
 | a map with a key that starts with `$` | `{"$map": {"$key": …}}` |
 
