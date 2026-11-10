@@ -25,6 +25,7 @@ import java.time.format.DateTimeFormatter
  * - `store.json`: the spec's `store.yaml`, the store layout's DDL, as JSON, which every target's JSON reader reads: the
  *   other targets have no YAML reader. See `StoreDdlTest`.
  * - `marker.json`: the spec's `marker.yaml`, the schema marker and the stamps, as JSON likewise. See `StoreMarkerTest`.
+ * - `plans.json`: the spec's `plans.yaml`, the schema plan's cases, as JSON likewise. See `StorePlanTest`.
  *
  *   Oracle <spec directory> <output directory> <fuzz count> <seed> <mutant count>
  */
@@ -51,6 +52,8 @@ object Oracle {
         File(out, "store.json").writeText(json.writeValueAsString(yaml.readTree(File(spec, "store.yaml"))))
         // The schema marker and the stamps, for each target's StoreMarkerTest.
         File(out, "marker.json").writeText(json.writeValueAsString(yaml.readTree(File(spec, "marker.yaml"))))
+        // The schema plan's cases, for each target's StorePlanTest.
+        File(out, "plans.json").writeText(json.writeValueAsString(yaml.readTree(File(spec, "plans.yaml"))))
         println("jvmOracle: ${corpus.first} statements in the corpus (${corpus.second} left out, as they embed the clock); $doubles double cases.")
         println("jvmOracle: ${mutants.made} mutant requests, ${mutants.kept} of interest, ${mutants.written} of them in mutants.jsonl.")
         println("jvmOracle: stand-in cases ${standIns.entries.joinToString { (name, n) -> "$name $n" }}.")

@@ -9,6 +9,7 @@ These files say what a statement in Drivine's flavour of Cypher gives on each st
 - `schema.yaml`: Neo4j's schema commands (`CREATE INDEX`, `CREATE CONSTRAINT`, `DROP …`, `CALL db.awaitIndexes`), and the schema spec a SQL store applies each as, or its refusal. They are read with no store. See [Schema commands](#schema-commands).
 - `store.yaml`: the store layout's DDL: the tables, the probe that finds them made, and each index and constraint as each store makes, drops and lists it, for the graph `drivine` and a set of schema specs, with a read for each index that the compiler must answer from it. Read with no store. See [The store layout](#the-store-layout). It also holds the store's schema: how each store's listings are read back, whether an item is a spec's and in its shape, what each store can do, and what its errors say. See [The store's schema](#the-stores-schema).
 - `marker.yaml`: the schema marker (`_DrivineSchema`) and the stamps: the statements each store reads and writes the marker and the store's stamp (`DrivineStore`) with, the marker's inventory as it is written and read back, the version token, and the form of the stamp each node carries. Read with no store. See [The schema marker and the stamps](#the-schema-marker-and-the-stamps).
+- `plans.yaml`: the schema plan: what a schema manager runs on each store, round by round, for an enforce, a recreate, an ensure or a remove, what the store answers, and what the manager reports, its log lines among it. Read with no store. See [The schema plan](#the-schema-plan).
 - `host.yaml`: what each library's own code does with the values compiled SQL hands it: the functions it registers on SQLite, and how it reads a column of a statement's rows. Read with no store. See [Host functions and readers](#host-functions-and-readers).
 - `cli/`: the `drivine` CLI's contract, which runs Cypher on every store and prints its results as cypher-shell does, and `cli.yaml`, the cases each build of it runs. See `cli/README.md`.
 - `model/`: the model file each library writes of an application's fragments, views and how they are stored, which Drivine Studio reads. See `model/README.md`.
@@ -235,6 +236,72 @@ nodeStamps: {property: "__drivine.stamp", token: 16, separator: ":", neverStampe
 **The version token** is each catalog's token once, sorted by its UTF-16 code units, as Java sorts strings, and joined by `|`.
 
 **The moment.** On Postgres, Oracle and SQLite, `merge` binds `appliedAt` as `$now`, milliseconds since the epoch by the caller's clock. The graph engines write their own clock's, with `timestamp()`, as drivine4j always has, and bind none. That split is kept on purpose: one clock for every store would be a change of its own, made in every library at once. On a SQL store the newest marker of a scope is the one with the largest `appliedAt`, a marker with none or with one that isn't a number coming last (Oracle reads a text of a number as the number), and of two with the same, the one made last (`nid`). A graph engine orders by `appliedAt` as it orders any value, which every marker it writes has.
+
+## The schema plan
+
+A schema manager decides, from what a store says, what to make, drop, recreate and record, and what to report: drivine4j's `SchemaManager`, `IndexManager` and `ConstraintManager`. The compiler's module (`org.drivine.cypher.store.plan`) decides it once for every library, as a planner with no store: `SchemaPlanner(store, markers)`, whose `start(request, now)` and `resume(state, outcomes, now)` each give a round of actions for the library to run, or the plan done and its report. `plans.yaml` pins its decisions: drivine4j's, the reference, captured from its managers over a scripted store, with no store, for the design's cases 1 to 29 (drivine-cypher-spec#135). The module's tests check the planner gives them, round by round, on every target.
+
+It is a file of its own because it is a contract of its own: decisions, not text. Every statement it names is pinned once, by `store.yaml` or `marker.yaml`, and what it pins is when each runs, what it is answered, and what comes of it.
+
+```yaml
+graph: "drivine"
+database: "default"
+cases:
+  - case: "2"
+    name: "An unchanged version"
+    description: "Everything there already: nothing is made, and the marker is written again as it was."
+    stores: ["postgres", "oracle", "sqlite", "neo4j", "memgraph"]
+    catalogs:
+      - {owner: null, version: "v1", items: ["Range index", "Uniqueness constraint"]}
+    steps:
+      - operation: {enforce: "all"}
+        runs:
+          - stores: ["postgres", "sqlite"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.version", scope: "schema"}, rows: ["v1"]}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: ["RANGE_INDEX:Person:name:Person_name_range\n..."]}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
+                  - {query: {listing: "constraints"}, items: [...]}
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "deleteAllButNewest", scope: "schema"}}
+                  - {writeMarker: {scope: "schema", version: "v1", items: "RANGE_INDEX:Person:name:Person_name_range\n..."}}
+            done: 1000000
+            report:
+              owners:
+                - {owner: null, results: [{spec: "Range index", alreadyMatching: {...}}, ...], marker: {version: "v1", items: "..."}}
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 2 items (forceRecreate=false, versionChanged=false, version=v1)"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 2 already matching, 0 recreated, 0 needing attention"]
+```
+
+| Key | What it is |
+|---|---|
+| `stores` | The stores the case runs on. |
+| `catalogs` | The startup catalogs, each its `owner` (null for the unnamed one, whose marker's scope is `schema`), its `version`, and its `items`. |
+| `policy`, `buildTimeoutMillis` | The policy, where it isn't the default (`FAIL_FAST`, nothing recreated, a sample of 10, no index replaced), and the wait for an index built in the background, where it isn't 60 seconds. |
+| `steps` | The operations run in turn, on one store and one manager: each its `operation` (`enforce` or `recreateAll`, of `all` or `{owner}`; `ensure` or `remove`, of an `owner`'s `items`), the `runtime` items the manager holds then, by owner, and its `runs`; or, for an ensure refused before anything is applied, `refused`, the message. |
+| `runs` | The stores that run the step alike, each round's actions with the `now` it is planned at, the `done` moment the plan ends at, and the `report`. |
+| `report` | Each owner applied, in order: what each of its items gave, its `unbuilt` indexes, its `orphans`, the `marker` it wrote (null for none), its `failure`, and for a remove what it `removed`; the database's `failure`, or the store's error it `rethrown`, from the action of that round; and every `log` line at INFO and above, its level, logger and text. |
+
+A spec is a `store.yaml` case's, by its name, or written as its cases write one. An item, what a store has, is written as `store.yaml`'s listings write one. In a log line, `{engine}` is the store's name.
+
+**Actions.** Each round's actions are what the planner gives, in order, and each is answered as the store answers it:
+
+- `{execute: {create: <case>}}`, `{drop: <case>}` and `{dropUnnamed: <case>}` are a `store.yaml` case's statements on the store, a create after the statements that make the store, as its cases leave them out (Postgres's and Oracle's `ensuring`, SQLite's `ddl`); `{marker: "constraint"}` is `marker.yaml`'s constraint, after them too; `{marker: "prepare"}` and `{marker: "deleteAllButNewest", scope}` are the marker's. One no case pins (a FalkorDB constraint's backing index, an index dropped by the name the store gave it) is given whole, `{statement}` or `{native}`. Each runs as one action a statement, and `failed: {at, causes}` fails the one `at` counts to.
+- `{query: {listing: "indexes.<KIND>"}}` and `{listing: "constraints"}` are `store.yaml`'s `catalog` queries, answered as `items`: each store's rows of them, which read back to them (the module's tests write them, and check every store's rows read back so over `store.yaml`'s listings). `{marker: "read.version"|"read.items", scope}` and `{marker: "scopes"}` are the marker's, `{sample: {spec, limit}}` is `store.yaml`'s sample, and `{indexState: <name>}` Neo4j's; each is answered as `rows`. `delay` is the wait before a poll.
+- `{awaitIndex: {name, timeout}}`, Neo4j's wait, `{fillLowerCopies: {label, properties, again}}`, the lowercased copies a library fills in, and `{writeMarker: {scope, version, items}}`, the marker's merge with what it binds (the items behind the store's mark, and on a SQL store the round's `now`).
+
+An action answered `failed` gives its `causes`, as `store.yaml`'s errors write them; the library stops there, and the actions after it in the round are planned and not run. An action given no answer otherwise ran.
+
+**Rounds.** The library runs a round's actions in order, stopping at the first that fails, and hands back what came of each. The first round reads what the plan decides from: the marker's `prepare`, each owner's marker (its version where it is versioned or ensuring, and its items), and each listing the items are found in, each statement once; for a remove, the scope of every marker. The rounds after it walk the owners sorted by name, the unnamed one first, each apart from the others, and within an owner the indexes before the constraints, each in the order declared, each finished before the next. A listing read is used again until the plan's own DDL runs; everything else drivine4j reads after its DDL (an item found after it is made, a constraint's sample, an index's state, a poll of a store that builds in the background) is read then. A state between rounds is JSON, which a library may hold anywhere.
+
+**What drivine4j decides, which the plan keeps.** A version that changed recreates the owner's items, but not one another owner declares; a first version is adopted. An ensure records the version the marker has, and `recreateOnStartup` doesn't apply to it. A runtime item a later manager hasn't been given is kept in the inventory; a recreate marks it stale, and the next ensure of it recreates it. A key recorded and no longer declared is an orphan, reported and left; a marker with no inventory has none. Only a versioned owner keeps its marker single. Under `FAIL_FAST`, a drift, a violation, an index in the way or an index not built fails the owner once every item has been tried, and its marker isn't written; under `WARN`, each is logged and the marker written. A failure drivine4j's manager catches (the marker's, the lowercased copies', a TEXT index off Neo4j, a wait that ran out) ends the owner there, its marker unwritten, and the other owners go on; one it doesn't (DDL the store refused for a reason the planner doesn't read) ends the plan, and the library throws the store's error. A remove keeps an item another owner declares or records, its properties in any order.
+
+**Where reads differ.** A plan reads less than drivine4j: drivine4j reads a listing again for each item, and runs the marker's `prepare` before each owner's first marker statement, where the plan reads a listing once until its own DDL runs, and prepares once. It also reads a listing in the first round that an item made before its use then makes it read again. What is written, and in which order, is drivine4j's, and so is every log line.
 
 ## Host functions and readers
 
