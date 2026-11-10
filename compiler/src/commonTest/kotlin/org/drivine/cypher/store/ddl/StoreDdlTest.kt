@@ -35,8 +35,8 @@ import kotlin.test.fail
  * - each generator gives the statements `store.yaml` holds, as drivine4j gave them: the tables and the probe, each case's
  *   index or constraint made and dropped, the catalog's statements, and the graph-name refusals;
  * - [SqlStoreDdl.objectName] gives each name `store.yaml` holds: Java's `String.hashCode`, written out, on every target;
- * - each case's read, compiled on each SQL store, holds the expressions the case's index is made over, so the store's
- *   planner can read the index.
+ * - each case's read, compiled on each SQL store, tests the expressions the case's index is made over where a planner
+ *   reads an index by them: a conjunct of its `WHERE`, or the left side of a conjunct's `=`.
  */
 class StoreDdlTest {
 
@@ -178,12 +178,28 @@ class StoreDdlTest {
                 for (expression in texts(read["holds"]!![id]!!)) {
                     assertTrue(expression in made || expression.replace("'", "''") in made, "$name: the index on $id is not made over\n$expression")
                     val qualified = qualified(expression, alias)
-                    assertTrue(qualified in sql, "$name: $cypher on $id does not hold its index's\n$qualified\nin\n$sql")
+                    assertTrue(sargable(sql, qualified), "$name: $cypher on $id does not test its index's\n$qualified\nin\n$sql")
                     checked++
                 }
             }
         }
         assertTrue(checked > 0, "store.yaml has no reads")
+    }
+
+    /**
+     * Whether [sql] tests [expression] where a planner reads an index by it: as a conjunct of a `WHERE`, the test of a
+     * label, or as the left side of a conjunct's `=`; and not only within a `CASE`, beside an `OR` or among the columns.
+     */
+    private fun sargable(sql: String, expression: String): Boolean {
+        var at = sql.indexOf(expression)
+        while (at >= 0) {
+            val before = sql.substring(0, at).trimEnd(' ', '(')
+            val after = sql.substring(at + expression.length)
+            val conjunct = before.endsWith("WHERE") || before.endsWith(" AND")
+            if (conjunct && listOf(" = ", "\n", " AND ", ")").any { after.startsWith(it) }) return true
+            at = sql.indexOf(expression, at + 1)
+        }
+        return false
     }
 
     /**
