@@ -1,0 +1,158 @@
+=== MATCH (a:A) MATCH (b)-[:R]->(a)-[:S]->(c) RETURN b, c
+SELECT json_build_array(CASE WHEN p6.c1_nid IS NOT NULL THEN p6.c1_props || jsonb_strip_nulls(jsonb_build_object('__drivine.stamp', p6.c1_stamp)) END, CASE WHEN p6.c2_nid IS NOT NULL THEN p6.c2_props || jsonb_strip_nulls(jsonb_build_object('__drivine.stamp', p6.c2_stamp)) END) AS result
+FROM (
+    SELECT n2.nid AS c1_nid,
+           n2.labels AS c1_labels,
+           n2.props AS c1_props,
+           n2.stamp AS c1_stamp,
+           n3.nid AS c2_nid,
+           n3.labels AS c2_labels,
+           n3.props AS c2_props,
+           n3.stamp AS c2_stamp
+    FROM g_node n1
+    CROSS JOIN g_node n2
+    CROSS JOIN g_node n3
+    CROSS JOIN g_edge e4
+    CROSS JOIN g_edge e5
+    WHERE n1.labels @> '["A"]'
+      AND e4.src = n2.nid AND e4.dst = n1.nid
+      AND e4.type = 'R'
+      AND e5.src = n1.nid AND e5.dst = n3.nid
+      AND e5.type = 'S'
+) p6
+=== MATCH (a:A) OPTIONAL MATCH (a)-[:R]->(b) RETURN b
+SELECT CASE WHEN p6.c1_nid IS NOT NULL THEN p6.c1_props || jsonb_strip_nulls(jsonb_build_object('__drivine.stamp', p6.c1_stamp)) END AS result
+FROM (
+    SELECT o4.v5_nid AS c1_nid,
+           o4.v5_labels AS c1_labels,
+           o4.v5_props AS c1_props,
+           o4.v5_stamp AS c1_stamp
+    FROM g_node n1
+    LEFT JOIN LATERAL (
+        SELECT n2.nid AS v5_nid, n2.labels AS v5_labels, n2.props AS v5_props, n2.stamp AS v5_stamp
+        FROM g_node n2
+        CROSS JOIN g_edge e3
+        WHERE e3.src = n1.nid AND e3.dst = n2.nid
+          AND e3.type = 'R'
+    ) o4 ON TRUE
+    WHERE n1.labels @> '["A"]'
+) p6
+=== MATCH (a:A) WITH a, count(*) AS c MATCH (a)-[:R]->(b) RETURN b, c
+SELECT json_build_array(CASE WHEN p6.c1_nid IS NOT NULL THEN p6.c1_props || jsonb_strip_nulls(jsonb_build_object('__drivine.stamp', p6.c1_stamp)) END, p6.c2) AS result
+FROM (
+    SELECT n4.nid AS c1_nid,
+           n4.labels AS c1_labels,
+           n4.props AS c1_props,
+           n4.stamp AS c1_stamp,
+           w3.c2 AS c2
+    FROM (
+        SELECT p2.c1_nid, p2.c1_labels, p2.c1_props, p2.c1_stamp, p2.c2
+        FROM (
+            SELECT n1.nid AS c1_nid,
+                   n1.labels AS c1_labels,
+                   n1.props AS c1_props,
+                   n1.stamp AS c1_stamp,
+                   to_jsonb(count(*)) AS c2
+            FROM g_node n1
+            WHERE n1.labels @> '["A"]'
+            GROUP BY n1.nid, n1.labels, n1.props, n1.stamp
+        ) p2
+    ) w3
+    CROSS JOIN g_node n4
+    CROSS JOIN g_edge e5
+    WHERE e5.src = w3.c1_nid AND e5.dst = n4.nid
+      AND e5.type = 'R'
+) p6
+=== MATCH (a:L)-[:R]->(b {id: 1}) RETURN a
+SELECT CASE WHEN p4.c1_nid IS NOT NULL THEN p4.c1_props || jsonb_strip_nulls(jsonb_build_object('__drivine.stamp', p4.c1_stamp)) END AS result
+FROM (
+    SELECT n1.nid AS c1_nid,
+           n1.labels AS c1_labels,
+           n1.props AS c1_props,
+           n1.stamp AS c1_stamp
+    FROM g_node n1
+    CROSS JOIN g_node n2
+    CROSS JOIN g_edge e3
+    WHERE n1.labels @> '["L"]'
+      AND (n2.props -> 'id') = CAST('1' AS jsonb)
+      AND e3.src = n1.nid AND e3.dst = n2.nid
+      AND e3.type = 'R'
+) p4
+=== MATCH (p:A) MATCH (a:L)-[:R]->(b {k: p.k}) RETURN a
+SELECT CASE WHEN p5.c1_nid IS NOT NULL THEN p5.c1_props || jsonb_strip_nulls(jsonb_build_object('__drivine.stamp', p5.c1_stamp)) END AS result
+FROM (
+    SELECT n2.nid AS c1_nid,
+           n2.labels AS c1_labels,
+           n2.props AS c1_props,
+           n2.stamp AS c1_stamp
+    FROM g_node n1
+    CROSS JOIN g_node n2
+    CROSS JOIN g_node n3
+    CROSS JOIN g_edge e4
+    WHERE n1.labels @> '["A"]'
+      AND n2.labels @> '["L"]'
+      AND CASE WHEN NOT COALESCE(jsonb_typeof((n3.props -> 'k')), 'null') = 'null' AND NOT COALESCE(jsonb_typeof((n1.props -> 'k')), 'null') = 'null' THEN (n3.props -> 'k') = (n1.props -> 'k') END
+      AND e4.src = n2.nid AND e4.dst = n3.nid
+      AND e4.type = 'R'
+) p5
+=== MATCH (a)-[:R]->(b) WHERE b.id = 1 RETURN a
+SELECT CASE WHEN p4.c1_nid IS NOT NULL THEN p4.c1_props || jsonb_strip_nulls(jsonb_build_object('__drivine.stamp', p4.c1_stamp)) END AS result
+FROM (
+    SELECT n1.nid AS c1_nid,
+           n1.labels AS c1_labels,
+           n1.props AS c1_props,
+           n1.stamp AS c1_stamp
+    FROM g_node n1
+    CROSS JOIN g_node n2
+    CROSS JOIN g_edge e3
+    WHERE e3.src = n1.nid AND e3.dst = n2.nid
+      AND e3.type = 'R'
+      AND (n2.props -> 'id') = CAST('1' AS jsonb)
+) p4
+=== MATCH (a)-[:R]->(b) WHERE id(b) IN [1, 2] RETURN a
+SELECT CASE WHEN p6.c1_nid IS NOT NULL THEN p6.c1_props || jsonb_strip_nulls(jsonb_build_object('__drivine.stamp', p6.c1_stamp)) END AS result
+FROM (
+    SELECT n1.nid AS c1_nid,
+           n1.labels AS c1_labels,
+           n1.props AS c1_props,
+           n1.stamp AS c1_stamp
+    FROM g_node n1
+    CROSS JOIN g_node n2
+    CROSS JOIN g_edge e3
+    WHERE e3.src = n1.nid AND e3.dst = n2.nid
+      AND e3.type = 'R'
+      AND (n2.nid IN (SELECT (CASE WHEN jsonb_typeof(k5.item) = 'number' THEN CASE WHEN (k5.item)::numeric = trunc((k5.item)::numeric) AND abs((k5.item)::numeric) <= 9223372036854775807 THEN (k5.item)::numeric::bigint END END) FROM jsonb_array_elements(CAST(json_build_array(CAST('1' AS jsonb), CAST('2' AS jsonb)) AS jsonb)) WITH ORDINALITY k5 (item, item_no)) AND EXISTS (SELECT 1 FROM jsonb_array_elements(CAST(json_build_array(CAST('1' AS jsonb), CAST('2' AS jsonb)) AS jsonb)) WITH ORDINALITY i4 (item, item_no) WHERE i4.item = to_jsonb(n2.nid)))
+) p6
+=== MATCH (p:A) OPTIONAL MATCH (a)-[:R]->(b) WHERE b.k = p.k RETURN a
+SELECT CASE WHEN p8.c1_nid IS NOT NULL THEN p8.c1_props || jsonb_strip_nulls(jsonb_build_object('__drivine.stamp', p8.c1_stamp)) END AS result
+FROM (
+    SELECT o5.v6_nid AS c1_nid,
+           o5.v6_labels AS c1_labels,
+           o5.v6_props AS c1_props,
+           o5.v6_stamp AS c1_stamp
+    FROM g_node n1
+    LEFT JOIN LATERAL (
+        SELECT n2.nid AS v6_nid, n2.labels AS v6_labels, n2.props AS v6_props, n2.stamp AS v6_stamp, n3.nid AS v7_nid, n3.labels AS v7_labels, n3.props AS v7_props, n3.stamp AS v7_stamp
+        FROM g_node n2
+        CROSS JOIN g_node n3
+        CROSS JOIN g_edge e4
+        WHERE e4.src = n2.nid AND e4.dst = n3.nid
+          AND e4.type = 'R'
+          AND CASE WHEN NOT COALESCE(jsonb_typeof((n3.props -> 'k')), 'null') = 'null' AND NOT COALESCE(jsonb_typeof((n1.props -> 'k')), 'null') = 'null' THEN (n3.props -> 'k') = (n1.props -> 'k') END
+    ) o5 ON TRUE
+    WHERE n1.labels @> '["A"]'
+) p8
+=== MATCH (a)-[:R]->(b), (b {id: 1}) RETURN a
+SELECT CASE WHEN p4.c1_nid IS NOT NULL THEN p4.c1_props || jsonb_strip_nulls(jsonb_build_object('__drivine.stamp', p4.c1_stamp)) END AS result
+FROM (
+    SELECT n1.nid AS c1_nid,
+           n1.labels AS c1_labels,
+           n1.props AS c1_props,
+           n1.stamp AS c1_stamp
+    FROM g_node n1
+    CROSS JOIN g_node n2
+    CROSS JOIN g_edge e3
+    WHERE e3.src = n1.nid AND e3.dst = n2.nid
+      AND e3.type = 'R'
+      AND (n2.props -> 'id') = CAST('1' AS jsonb)
+) p4

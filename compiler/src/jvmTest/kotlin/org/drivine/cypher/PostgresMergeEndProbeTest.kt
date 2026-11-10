@@ -107,14 +107,17 @@ class PostgresMergeEndProbeTest {
     }
 
     @Test
-    fun `a relationship a MATCH reads is read as a chain, and a MERGE after it probes its own`() {
-        // The MATCH reads its node by its label, and the relationship by its end from it: see PostgresMatchChainTest.
+    fun `a relationship a MATCH reads is joined as before where the MATCH is pinned, and read as a chain where not`() {
+        // Bound before by the first MATCH: joined plainly, and only the MERGE's relationship probed.
+        val both = sql("MATCH (n:CyLoop) MATCH (n)-[:CY_OUT]->(m) MERGE (m)-[:CY_SELF]->(m)")
+        assertTrue(edgesJoined.containsMatchIn(both), both)
+        assertEquals(1, endProbe.findAll(both).count(), both)
+        assertTrue(boundFromRow(both, endProbe.find(both)!!.groupValues[4]), both)
+        // Nothing pins it: its node read by its label, and the relationship by its end from it (see PostgresMatchChainTest).
         val read = sql("MATCH (n:CyLoop)-[r:CY_SELF]->(n) RETURN count(r)")
+        assertFalse(edgesJoined.containsMatchIn(read), read)
         assertTrue("FROM ${GRAPH}_node n1\n" in read, read)
         assertEquals(listOf("src"), endProbe.findAll(read).map { it.groupValues[3] }.toList(), read)
-        // The MATCH's probe reads from the node the MATCH found; the MERGE's alone from the node the loop's row holds.
-        val both = sql("MATCH (n:CyLoop) MATCH (n)-[:CY_OUT]->(m) MERGE (m)-[:CY_SELF]->(m)")
-        assertEquals(1, endProbe.findAll(both).count { boundFromRow(both, it.groupValues[4]) }, both)
     }
 
     @Test

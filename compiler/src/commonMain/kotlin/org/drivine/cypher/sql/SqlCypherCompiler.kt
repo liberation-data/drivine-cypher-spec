@@ -1471,17 +1471,20 @@ abstract class SqlCypherCompiler(
             val seededFirst = match.where?.let(::holdsAnew) == true && (match.optional || shortestWhere != null)
             val (row, seed) = if (seededFirst) seededRows(select) else select to null
             val metByPaths = shortestWhere?.let { if (seed == null) it else seeded(it, seed, madeAnew, inBody = true) }
-            // A node given properties in another of its patterns pins it as well: started at its first relationship,
-            // `MATCH (a)-[:R]->(b), (b {id: 1})` read every relationship, and b by its key from each.
-            val pinning = where?.let { pinnedBy(it, row.scope) }.orEmpty() +
-                match.patterns.flatMap { pattern -> pattern.nodes.filter { givenBy(it, row.scope) }.mapNotNull { it.variable } }
+            // Only a match nothing pins is read as a chain (see [pattern]): none of its nodes bound before it, given properties
+            // that read only the row ([givenBy]), or pinned by its WHERE ([pinnedBy]). A pinned one is selective, so Postgres
+            // plans its plain join well even on stale statistics, and it is joined as it always was.
+            val pins = where?.let { pinnedBy(it, row.scope) }.orEmpty()
+            val chaining = match.patterns.none { pattern ->
+                pattern.nodes.any { node -> node.variable?.let { row.scope[it] != null || it in pins } == true || givenBy(node, row.scope) }
+            }
             if (!match.optional) {
-                patterns(row, match.patterns, metByPaths, chaining = true, pinnedBy = pinning)
+                patterns(row, match.patterns, metByPaths, chaining = chaining)
                 return where?.let { filtered(row, it) } ?: row
             }
             // What is found is read by a lateral query, joined to keep the row when it finds nothing.
             var inner = Select(row.scope).also { it.afterGrouping = row.afterGrouping }
-            patterns(inner, match.patterns, metByPaths, chaining = true, pinnedBy = pinning)
+            patterns(inner, match.patterns, metByPaths, chaining = chaining)
             where?.let { inner = if (seed == null) filtered(inner, it) else filtered(inner, seeded(it, seed, madeAnew, inBody = true)) { e -> isSeeded(e, madeAnew) } }
             val found = inner.bound.filterKeys { it !in row.scope && it !in madeAnew }
             if (found.isEmpty() && inner.sources.isEmpty()) return row
@@ -1774,14 +1777,13 @@ abstract class SqlCypherCompiler(
          * met by the paths of the last, a shortest path, see [shortest]. With [probingEnds], as a `MERGE` reads its pattern for
          * each row of the loop that writes, each relationship is read by a probe of an end ([endProbe]), not joined by the
          * table's statistics. With [chaining], as a `MATCH` reads its patterns, a pattern of relationships of one hop each is
-         * read as a chain of probes (see [pattern]), which may start at a node of [pinnedBy], those its `WHERE` pins or another of its patterns gives properties.
+         * read as a chain of probes (see [pattern]).
          */
         private fun patterns(
             select: Select, patterns: List<Pattern>, shortestWhere: Expression? = null, probingEnds: Boolean = false, chaining: Boolean = false,
-            pinnedBy: Set<String> = emptySet(),
         ) {
             val hops = mutableListOf<Hop>()
-            patterns.forEachIndexed { i, pattern -> pattern(select, pattern, hops, shortestWhere.takeIf { i == patterns.lastIndex }, probingEnds, chaining, pinnedBy) }
+            patterns.forEachIndexed { i, pattern -> pattern(select, pattern, hops, shortestWhere.takeIf { i == patterns.lastIndex }, probingEnds, chaining) }
             for (i in hops.indices) for (j in i + 1 until hops.size) {
                 val (a, b) = hops[i] to hops[j]
                 // Relationships of types no relationship has both of cannot be one.
@@ -1792,17 +1794,20 @@ abstract class SqlCypherCompiler(
         /**
          * [pattern] matched over the rows [select] reads, its relationships added to [hops]. With [chaining], on a store that
          * probes ([endProbe]), a pattern whose relationships are each of one hop ([chains]) is read as a chain of probes from
-         * the node it starts at, [start]: the first node bound before it, else the first given properties or pinned by the
-         * `WHERE` ([pinnedBy]), else the first with a label, read by the labels' index, else, at -1, its first relationship,
-         * read whole: no index of the relationships leads with the type, so that reads every relationship. Each relationship is read by a probe of its end toward the start, and each node it
-         * reaches by a probe of its key, the relationship's other end, so each row reads what it reaches by an index, in that
-         * order, whatever the tables' statistics say. Joined plainly, Postgres planned `MATCH (:A)-[r:R]->(:A) RETURN
-         * count(r)`, with the node table analyzed just after it was emptied (statistics of no rows over its pages), to read
-         * every node again for each node: 475 s over 20,000 relationships, where it takes 30 ms (drivine#680, drivine4j#673).
+         * the node it starts at, [start]: the first node an earlier pattern of its match bound, else the first with a label,
+         * read by the labels' index, else, at -1, its first relationship, read whole: no index of the relationships leads with
+         * the type, so that reads every relationship. Each relationship is read by a probe of its end toward the start, and
+         * each node it reaches by a probe of its key, the relationship's other end, so each row reads what it reaches by an
+         * index, in that order, whatever the tables' statistics say. Joined plainly, Postgres planned `MATCH (:A)-[r:R]->(:A)
+         * RETURN count(r)`, with the node table analyzed just after it was emptied (statistics of no rows over its pages), to
+         * read every node again for each node: 475 s over 20,000 relationships, where it takes 30 ms (drivine#680,
+         * drivine4j#673). A `MATCH` chains only where nothing pins it ([match]): a node bound before it, given properties or
+         * pinned by its `WHERE` makes the read selective, which Postgres plans well joined plainly, and a chain started there
+         * kept meeting plans slower than the join's. Chaining every match from its most selective node is drivine4j#742.
          */
         private fun pattern(
             select: Select, pattern: Pattern, hops: MutableList<Hop>, shortestWhere: Expression? = null, probingEnds: Boolean = false,
-            chaining: Boolean = false, pinnedBy: Set<String> = emptySet(),
+            chaining: Boolean = false,
         ) {
             if (pattern.shortest != null) return shortest(select, pattern, shortestWhere)
             // A node bound before the pattern, or given properties, is where a walk starts best.
@@ -1810,13 +1815,13 @@ abstract class SqlCypherCompiler(
             val before = select.scope
             val chained = chaining && chains(pattern)
             val start = if (!chained) -1 else pattern.nodes.indexOfFirst { node -> node.variable?.let { before[it] } != null }
-                .takeIf { it >= 0 } ?: (pattern.nodes.indexOfFirst { givenBy(it, before) || it.variable in pinnedBy }.takeIf { it >= 0 }
-                    // Else the first with a label, read by the labels' index: the relationships' has none that leads with the
-                    // type, so read whole, the first would be every relationship of every type, where `(:Rare)-[:COMMON]->(b)`
-                    // read its few nodes. Each node of the label is one probe of the ends' index, so it stays linear.
-                    ?: pattern.nodes.indexOfFirst { it.labels.isNotEmpty() }).let { at ->
-                    // A variable given properties where it appears again, as `(a)-[:R]->(a {k: 1})`'s, is read where it first
-                    // appears: its alias is made there, and each later place is that alias, which a chain may not probe before.
+                .takeIf { it >= 0 }
+                // Else the first with a label, read by the labels' index: the relationships' has none that leads with the
+                // type, so read whole, the first would be every relationship of every type, where `(:Rare)-[:COMMON]->(b)`
+                // read its few nodes. Each node of the label is one probe of the ends' index, so it stays linear.
+                ?: pattern.nodes.indexOfFirst { it.labels.isNotEmpty() }.let { at ->
+                    // A variable given a label where it appears again, as `(a)-[:R]->(a:L)`'s, is read where it first appears:
+                    // its alias is made there, and each later place is that alias, which a chain may not probe before.
                     pattern.nodes.getOrNull(at)?.variable?.let { v -> pattern.nodes.indexOfFirst { it.variable == v } } ?: at
                 }
             // The aliases of the nodes a chain reads by their keys, each joined after the relationship that reaches it.
@@ -1929,8 +1934,8 @@ abstract class SqlCypherCompiler(
         /**
          * The variables [where], a `MATCH`'s, pins as a node's properties do: each one a term it is the `AND` of sets a property
          * of, or the key of (`id()`, `elementId()`), equal to, or the key in, a value that reads only [scope], the variables
-         * bound before the `MATCH`. A chain starts at one ([pattern]), where an index finds it: started at its first
-         * relationship, `MATCH (a)-[:R]->(b) WHERE id(a) = ${'$'}id` read every relationship, and each end by its key from it.
+         * bound before the `MATCH`. A match that pins a node of its patterns so is joined plainly, not read as a chain
+         * ([match]): an index finds the node, and Postgres plans the join from it well.
          */
         private fun pinnedBy(where: Expression, scope: Map<String, Value>): Set<String> {
             if (where !is Expression.Binary) return emptySet()
@@ -1951,8 +1956,8 @@ abstract class SqlCypherCompiler(
 
         /**
          * Whether [node] is given properties that read only [scope], the variables bound before its `MATCH`, as [pinnedBy]'s
-         * values do: a chain starts at it ([pattern]). Properties that read another node of the match, as `(a:L)-[:R]->(b {k:
-         * a.k})`'s, pin none: started at `b`, the chain read every node, where the plain join read the few of `L`.
+         * values do: its match is joined plainly, not read as a chain ([match]). Properties that read another node of the
+         * match, as `(a:L)-[:R]->(b {k: a.k})`'s, pin none: no index finds `b` before `a` is read.
          */
         private fun givenBy(node: NodePattern, scope: Map<String, Value>): Boolean =
             node.properties?.let { properties -> variablesIn(properties).all { it in scope } } == true
