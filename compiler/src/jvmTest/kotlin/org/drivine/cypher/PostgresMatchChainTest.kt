@@ -130,6 +130,14 @@ class PostgresMatchChainTest {
             val sql = sql(cypher)
             assertFalse(Regex("""SELECT \* FROM ${GRAPH}_node n\d+ WHERE n\d+\.nid = e\d+\.""").containsMatchIn(sql), "$cypher:\n$sql")
         }
+        // A WHERE that pins a node by its elementId(), or with the value on the left, joins plainly too.
+        for (cypher in listOf("MATCH (a:L)-[:R]->(b) WHERE elementId(b) = '1' RETURN a", "MATCH (a:L)-[:R]->(b) WHERE 1 = b.k RETURN a")) {
+            val sql = sql(cypher)
+            assertFalse(Regex("""SELECT \* FROM ${GRAPH}_node n\d+ WHERE n\d+\.nid = e\d+\.""").containsMatchIn(sql), "$cypher:\n$sql")
+        }
+        // A later OPTIONAL MATCH's WHERE keeps every row, so pins nothing: the match is still a chain.
+        val optional = sql("MATCH (a:L)-[:R]->(b) OPTIONAL MATCH (b)-[:S]->(c) WHERE b.k = 1 RETURN c")
+        assertEquals(listOf("e3 src n1 nid", "n2 nid e3 dst"), chain(optional, whole = 3))
         // One that reads the match's own node pins nothing, there or later.
         assertEquals(listOf("e3 src n1 nid", "n2 nid e3 dst"), chain(sql("MATCH (a:L)-[r:R {k: a.k}]->(b) RETURN b")))
         assertEquals(listOf("e3 src n1 nid", "n2 nid e3 dst"), chain(sql("MATCH (a:L)-[:R]->(b) MATCH (b {k: a.k}) RETURN b")))
