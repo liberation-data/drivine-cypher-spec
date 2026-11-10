@@ -8,7 +8,7 @@ import kotlin.test.assertTrue
 
 /**
  * A full-text search asked of [CompileJson.compile] ([SearchJson]) where the golden doesn't reach: a request that is no
- * request, the routing beside a `cypher` request, a label given alone, and [FullTextSearch.indexLimit].
+ * request, the routing beside a `cypher` request, a label given alone, a blank index name, and [FullTextSearch.indexLimit].
  */
 @OptIn(org.drivine.DrivineInternalApi::class)
 class SearchJsonTest {
@@ -81,6 +81,16 @@ class SearchJsonTest {
         assertEquals(mapOf("_cy_ft1" to "x", "_cy_ft2" to 3L), TypedJson.value(head["parameters"]!!))
         // A query with no word to score is the SQL stores' refusal; a graph engine is given it as it is.
         assertTrue(search("neo4j", "{\"labels\": [\"A\"], \"properties\": [\"t\"], \"query\": \"-only\", \"topK\": 3}", graph = null).startsWith("{\"cypher\":"))
+    }
+
+    @Test
+    fun aBlankIndexNameIsNoneAsDrivine4jReadsIt() {
+        for (store in listOf("neo4j", "memgraph")) {
+            val named = { name: String -> search(store, "{\"labels\": [\"A\"], \"properties\": [\"t\", \"u\"], \"query\": \"x\", \"topK\": 3, \"index\": {\"name\": $name}}", graph = null) }
+            assertEquals(named("null"), named("\"\""), store)
+            assertEquals(named("\"A_t_u_fulltext\""), named("\" \""), store)
+            assertTrue(named("\"\"").contains("'A_t_u_fulltext'"), store)
+        }
     }
 
     @Test

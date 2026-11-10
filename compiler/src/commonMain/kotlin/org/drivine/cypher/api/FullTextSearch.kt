@@ -43,7 +43,8 @@ enum class SearchStore(val id: String) {
  *   the candidates are then narrowed to the nodes that hold every word of some scoring term, which it answers.
  * @param oracleText on Oracle, the side table an Oracle Text index is over (the `object_name` the lookup answered), or null
  *   where none is made: the search then scores by BM25 over every node of the label, as the other SQL stores do.
- * @param name on Neo4j and Memgraph, the index's name, where it isn't `<label>_<properties joined by _>_fulltext`.
+ * @param name on Neo4j and Memgraph, the index's name, where it isn't `<label>_<properties joined by _>_fulltext`; a blank
+ *   one is none.
  */
 @DrivineInternalApi
 data class SearchIndex(val trigram: Boolean = false, val oracleText: String? = null, val name: String? = null)
@@ -300,7 +301,8 @@ object FullTextSearch {
     private fun head(store: SearchStore, request: SearchRequest): SearchResult {
         val topK = requireNotNull(request.topK) { "A full-text search on ${store.id} gives its topK." }
         val label = request.labels.first()
-        val indexName = request.index.name ?: "${label}_${request.properties.joinToString("_")}_fulltext"
+        // A blank name is none, as drivine4j reads an index annotation that names none (`FullTextIndexResolver`).
+        val indexName = request.index.name?.takeUnless { it.isBlank() } ?: "${label}_${request.properties.joinToString("_")}_fulltext"
         val scope = SearchParameters()
         val query = scope.bound(request.query)
         val limit = scope.bound(indexLimit(topK, request.filtered))

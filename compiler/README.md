@@ -122,7 +122,7 @@ FullTextSearch.plan(store, graph, SearchRequest(labels, properties, query, index
    properties: on Postgres a row where its trigram index is made, on Oracle the side table of its Oracle Text index (the
    row's `object_name`), and no row where none is made. It is null on the other stores.
 2. The library gives what it found as the request's `SearchIndex`: `trigram` on Postgres, `oracleText` (the side table, or
-   null) on Oracle, and on Neo4j and Memgraph the index's `name` where it isn't `<label>_<properties joined by _>_fulltext`.
+   null) on Oracle, and on Neo4j and Memgraph the index's `name` where it isn't `<label>_<properties joined by _>_fulltext` (a blank one is none).
 3. `plan` gives a `SearchPlan`, or a `Refusal` of a query with no word to score (`A full-text query needs a word to look
    for: '-only' has none.`), or of a graph name the store can't take.
    - On a SQL store, `sql` is one `SELECT` of the ranked candidates, `nid` and `score`: the nodes whose text meets the query,
