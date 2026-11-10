@@ -63,6 +63,10 @@ always written it. An encoder is the compiler's own, for as long as it compiles:
 so it leaves it false; it is for a host whose Oracle driver can't, node-oracledb's thin mode
 (oracle/node-oracledb#1795), until a fixed driver release.
 
+It takes `reencodeJson` too, false where left out, the Kotlin form of the request's `oracleReencodeJson` (see
+[Oracle's documents encoded again](#oracles-documents-encoded-again)). JDBC reads every OSON version, so drivine4j leaves it
+false; the hosts on thin drivers, python-oracledb's and node-oracledb's, set it.
+
 A host with no Kotlin types calls `CompileJson.compile(request)`, JSON text in and out. The wasm build exports it as
 `compile`, and the shared library as `drivine_compile`:
 
@@ -74,8 +78,9 @@ A host with no Kotlin types calls `CompileJson.compile(request)`, JSON text in a
 ```
 
 `store` is `postgres`, `oracle` or `sqlite`. `graph` has the graph's `name`; the rest of it is Oracle's, and may be left
-out: `nullsEqualStored` and `eraStored` (true where left out), `indexedProperties`, and `oracleRowsAsText` (false where
-left out, see [Oracle's rows as text](#oracles-rows-as-text)). The answer is one of:
+out: `nullsEqualStored` and `eraStored` (true where left out), `indexedProperties`, `oracleRowsAsText` and `oracleReencodeJson` (false
+where left out, see [Oracle's rows as text](#oracles-rows-as-text) and
+[Oracle's documents encoded again](#oracles-documents-encoded-again)). The answer is one of:
 
 - `{"sql": …, "parameters": {…}, "setup": […], "warnings": […], "nonFinite": false}`, and on Oracle
   `"storedFunctions": {"nullsEqual": …, "era": …}`. Run `setup` first (on Postgres, the function a statement that
@@ -216,6 +221,25 @@ other stores. The option is temporary: Drivine for TypeScript sets it until a no
 oracle/node-oracledb#1795's fix ships, and drivine-python until python-oracledb's thin mode, another driver, is known to
 read every row (liberation-data/drivine-python#468); then they drop it, and it goes from the module with them.
 drivine4j's JDBC reads the `JSON` rows, and leaves it false.
+
+### Oracle's documents encoded again
+
+Oracle keeps a `JSON` column updated in place, as a write updates a node's properties, as OSON version 2, and gives it back
+so where the statement doesn't make the document anew: as a node with no stamp, which every node Cypher writes is, is
+returned. The thin drivers read only versions 1 and 3: python-oracledb's thin mode fails with `DPY-3021: OSON version 2
+is not supported` (oracle/python-oracledb#622), node-oracledb's with `NJS-126` (oracle/node-oracledb#1796). JDBC reads it.
+Oracle's x86-64 build sends it; the arm64 build of the same image (`gvenzl/oracle-free:23-faststart`, 23.26) has not been
+seen to.
+
+So a host on a thin driver sets `"oracleReencodeJson": true` in `graph` (`GraphOptions.oracleReencodeJson` in Kotlin),
+reading or writing. Each value a statement returns, its rows' `result`, is then encoded again, as a new document:
+
+```sql
+SELECT JSON_TRANSFORM(<the value>, KEEP '$') AS result
+```
+
+With `oracleRowsAsText` too, a write's rows are serialized to text already; its reads still return `JSON`, so the host
+sets both. Every statement on the other stores is compiled alike either way.
 
 ### npm
 

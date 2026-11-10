@@ -52,7 +52,22 @@ class OracleCypherCompiler(
      * constructors leave it.
      */
     private val rowsAsText: Boolean,
+    /**
+     * Whether each value a statement returns is encoded again, `JSON_TRANSFORM(value, KEEP '$')`: see [returned], and
+     * [org.drivine.cypher.api.GraphOptions.oracleReencodeJson]. False where it is left out, as the other constructors leave it.
+     */
+    private val reencodeJson: Boolean,
 ) : SqlCypherCompiler(graph, encoder) {
+
+    // The constructor with rowsAsText and without reencodeJson, kept so that what was compiled against it still links.
+    constructor(
+        graph: String,
+        nullsEqualStored: Boolean,
+        eraStored: Boolean,
+        indexedProperties: Set<Pair<String, String>>,
+        encoder: CypherEncoder?,
+        rowsAsText: Boolean,
+    ) : this(graph, nullsEqualStored, eraStored, indexedProperties, encoder, rowsAsText, false)
 
     // The constructor drivine4j's compiler had, its defaults among it, kept so that what was compiled against it still links.
     constructor(
@@ -60,7 +75,7 @@ class OracleCypherCompiler(
         nullsEqualStored: Boolean = true,
         eraStored: Boolean = true,
         indexedProperties: Set<Pair<String, String>> = emptySet(),
-    ) : this(graph, nullsEqualStored, eraStored, indexedProperties, null, false)
+    ) : this(graph, nullsEqualStored, eraStored, indexedProperties, null, false, false)
 
     // The constructor with an encoder and without rowsAsText, kept so that what was compiled against it still links.
     constructor(
@@ -69,7 +84,7 @@ class OracleCypherCompiler(
         eraStored: Boolean,
         indexedProperties: Set<Pair<String, String>>,
         encoder: CypherEncoder?,
-    ) : this(graph, nullsEqualStored, eraStored, indexedProperties, encoder, false)
+    ) : this(graph, nullsEqualStored, eraStored, indexedProperties, encoder, false, false)
 
     /** The function the store keeps that compares two values that may hold a null: see [nullsEqual]. */
     private val storedNullsEqual = nullsEqualName(graph)
@@ -1830,6 +1845,15 @@ class OracleCypherCompiler(
         indent(statements(program).joinToString("\n")),
         "END;",
     )).joinToString("\n") }
+
+    /**
+     * With [reencodeJson], [json] encoded again. A document updated in place, as a write updates a node's properties, is
+     * kept as OSON version 2, and is read back so, where nothing the statement does to it makes it anew: as a node that has no
+     * stamp is returned (see [nodeJson]). The thin drivers read only versions 1 and 3: python-oracledb gives `DPY-3021: OSON
+     * version 2 is not supported` (oracle/python-oracledb#622), node-oracledb `NJS-126` (oracle/node-oracledb#1796). JDBC
+     * reads it, so drivine4j leaves it false. `KEEP '$'` keeps all of the value, and writes it as a new document.
+     */
+    override fun returned(json: String) = if (reencodeJson) "JSON_TRANSFORM($json, KEEP '$')" else json
 
     /**
      * The rows of [query], returned as an implicit result: a row of `JSON` each, or with [rowsAsText] all of them as one

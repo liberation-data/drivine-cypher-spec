@@ -97,6 +97,9 @@ abstract class SqlCypherCompiler(
     /** The query [query], a statement of its own that opens with `SELECT`, with what the store's planner is told of it: nothing here. */
     protected open fun planned(query: String): String = query
 
+    /** The value a statement returns, a row's `result`, as the host's driver reads it back: as it is, but where a store's says. */
+    protected open fun returned(json: String): String = json
+
     /**
      * The query a `DELETE` reads the ids it deletes from, [query], a subquery of the match itself in the `DELETE`'s `IN`, as
      * [planned] gives it: a store whose planner fails on such a subquery is told more: see Oracle's.
@@ -3015,7 +3018,7 @@ abstract class SqlCypherCompiler(
                 else jsonArray(values.map { it.sql })
                 // Where a UNION compares rows by it, a row that holds a node or a relationship is compared by its identity too (drivine4j#213).
                 identity = if (distinctParts && identifiedParts) rowIdentity(read) else null
-                "$result AS result${identity?.let { ", $it AS identity" }.orEmpty()}"
+                "${returned(result)} AS result${identity?.let { ", $it AS identity" }.orEmpty()}"
             } else {
                 (columns.flatMap { (column, value) -> value.columns(column).map { "$name.${it.substringAfterLast(" AS ")}" } } +
                     sorts.flatMap { (column, _) -> sortedBy(column).map { (named, term) -> "$term AS $named" } }).joinToString(", ")
