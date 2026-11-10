@@ -39,8 +39,29 @@ import org.drivine.schema.VectorIndexSpec
 @DrivineInternalApi
 class OracleDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
 
+    /** The count store's tables and index (see [counts]), made empty with the rest, and on a store an earlier version made. */
+    private val countStore: List<String> = listOf(
+        """
+        CREATE TABLE IF NOT EXISTS $counts (
+            kind VARCHAR2(16) NOT NULL,
+            name VARCHAR2(1000) NOT NULL,
+            n    NUMBER(19) NOT NULL,
+            PRIMARY KEY (kind, name)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS $countDeltas (
+            id   NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+            kind VARCHAR2(16) NOT NULL,
+            name VARCHAR2(1000) NOT NULL,
+            d    NUMBER(19) NOT NULL
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS $countDeltasIndex ON $countDeltas (kind, name)",
+    ).map { it.trimIndent() }
+
     /** What makes the store, when it is not there. Each statement is safe to run again. */
-    val ddl: List<String> = listOf(
+    val ddl: List<String> = (listOf(
         """
         CREATE TABLE IF NOT EXISTS $nodes (
             nid    NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -73,6 +94,7 @@ class OracleDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
         "CREATE INDEX IF NOT EXISTS ${name}_edge_src ON $edges (src, type)",
         "CREATE INDEX IF NOT EXISTS ${name}_edge_dst ON $edges (dst, type)",
         "CREATE MULTIVALUE INDEX IF NOT EXISTS ${name}_node_labels ON $nodes n (n.labels.string())",
+    ).map { it.trimIndent() } + countStore + listOf(
         """
         CREATE OR REPLACE PROPERTY GRAPH $name
             VERTEX TABLES ($nodes KEY (nid) LABEL node PROPERTIES (nid, labels, props, stamp, ${OracleSql.transform("")} AS doc))
@@ -81,7 +103,7 @@ class OracleDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
                 DESTINATION KEY (dst) REFERENCES $nodes (nid)
                 LABEL edge PROPERTIES (eid, src, dst, type, props))
         """,
-    ).map { it.trimIndent() }
+    )).map { it.trimIndent() }
 
     /**
      * The function a compiled Cypher statement compares two values that may hold a null by, list item by list item and
@@ -161,6 +183,15 @@ class OracleDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
             SELECT COUNT(*) INTO v_made FROM user_pg_prop_definitions WHERE graph_name = '${name.uppercase()}' AND property_name = 'DOC';
             IF v_made = 0 THEN
         ${ddl.joinToString("\n") { "        make(${OracleSql.literal(it)});" }}
+            END IF;
+            -- The store layout 2's count store and the node's derived fields, where an earlier version made the store.
+            SELECT COUNT(*) INTO v_made FROM user_tables WHERE table_name = '${counts.uppercase()}';
+            IF v_made = 0 THEN
+        ${countStore.joinToString("\n") { "        make(${OracleSql.literal(it)});" }}
+            END IF;
+            SELECT COUNT(*) INTO v_made FROM user_tab_columns WHERE table_name = '${nodes.uppercase()}' AND column_name = 'WORDS';
+            IF v_made = 0 THEN
+                make('ALTER TABLE $nodes ADD (words JSON)');
             END IF;
 ${made.entries.joinToString("\n") { (function, making) ->
             listOf(

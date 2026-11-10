@@ -78,6 +78,23 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
         "CREATE INDEX IF NOT EXISTS ${name}_edge_src ON $edges (src, type)",
         "CREATE INDEX IF NOT EXISTS ${name}_edge_dst ON $edges (dst, type)",
         "CREATE INDEX IF NOT EXISTS ${name}_node_labels ON $nodes USING GIN (labels jsonb_path_ops)",
+        """
+        CREATE TABLE IF NOT EXISTS $counts (
+            kind varchar(16) NOT NULL,
+            name varchar(1000) NOT NULL,
+            n    bigint NOT NULL,
+            PRIMARY KEY (kind, name)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS $countDeltas (
+            id   bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+            kind varchar(16) NOT NULL,
+            name varchar(1000) NOT NULL,
+            d    bigint NOT NULL
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS $countDeltasIndex ON $countDeltas (kind, name)",
     ).map { it.trimIndent() } + writes.ddl + temporalKeyFunction() + "COMMENT ON TABLE $nodes IS '$VERSION'"
 
     /** The function compiled Cypher works out a temporal value's sort key by: see [temporalKeyFunction]. */

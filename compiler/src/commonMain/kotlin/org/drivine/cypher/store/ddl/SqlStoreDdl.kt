@@ -130,6 +130,19 @@ abstract class SqlStoreDdl(val name: String, final override val engine: String, 
     /** What Drivine made of indexes and constraints. */
     val catalog = "${name}_schema"
 
+    /**
+     * The count store's folded base: a row each `(kind, name)`, its count `n`, `kind` `label`, `type` or `words` (see the
+     * README's Values in the store). Its name carries the store layout ([ValueLayout.LAYOUT]). Made empty: nothing writes or
+     * reads it in this layout's first change.
+     */
+    val counts = "${name}_count${ValueLayout.LAYOUT}"
+
+    /** The count store's deltas, appended a row each change to a count, by its `(kind, name)`, `d`: see [counts]. */
+    val countDeltas = "${name}_count${ValueLayout.LAYOUT}_delta"
+
+    /** The index over [countDeltas]' `(kind, name)`, by which a count reads its deltas. */
+    val countDeltasIndex = "${name}_count${ValueLayout.LAYOUT}_dk"
+
     /** The table that holds the text a full-text index on [label]'s [properties] is over. */
     fun texts(label: String, properties: List<String>): String = objectName("t", listOf(label) + properties)
 

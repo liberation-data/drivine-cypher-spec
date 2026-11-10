@@ -69,6 +69,23 @@ class SqliteDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
         """,
         "CREATE INDEX IF NOT EXISTS ${name}_edge_src ON $edges (src, type)",
         "CREATE INDEX IF NOT EXISTS ${name}_edge_dst ON $edges (dst, type)",
+        """
+        CREATE TABLE IF NOT EXISTS $counts (
+            kind TEXT NOT NULL,
+            name TEXT NOT NULL,
+            n    INTEGER NOT NULL,
+            PRIMARY KEY (kind, name)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS $countDeltas (
+            id   INTEGER PRIMARY KEY AUTOINCREMENT,
+            kind TEXT NOT NULL,
+            name TEXT NOT NULL,
+            d    INTEGER NOT NULL
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS $countDeltasIndex ON $countDeltas (kind, name)",
     ).map { it.trimIndent() }
 
     /**
