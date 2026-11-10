@@ -129,11 +129,16 @@ FullTextSearch.plan(store, graph, SearchRequest(labels, properties, query, index
      each scored by BM25 as Lucene scores it (or on Oracle with an Oracle Text index, by Oracle Text), against the best of
      them, so the best scores 1, and only those above 0. The library joins them back to its node table by `nid` for its
      projection, and adds its threshold, its predicates, the view's required relationships, `ORDER BY score DESC, nid` and
-     its `LIMIT`.
+     its `LIMIT`. On SQLite it calls the functions the library registers, `drivine_lower`, `drivine_regexp_count` and
+     `drivine_math`, and its expressions hold what the compiler's own don't (see the spec's README, *Regular
+     expressions*): POSIX's `[[:alnum:]]`, read as Java's `\p{Alnum}` with Unicode's classes, `$` and a lookahead `(?=…)`,
+     as drivine4j's `SqlitePatterns` reads them. `TextQueryCountTest` counts its terms so, by Java's expressions, on the JVM
+     alone.
    - On a graph engine, `cypher` is the search's head: the index's `CALL` given the query as it is, the hits that have every
      root label, the best of them, and each node and its score against the best, as `alias` and `scoreAlias` (`n` and
      `_score` where left out). The index is asked for `topK` hits, or with `filtered` (a caller's filter, a required
-     relationship or a root label beyond the first prunes them after the index) ten times as many (`indexLimit`).
+     relationship or a root label beyond the first prunes them after the index) ten times as many (`indexLimit`),
+     and Memgraph's no more than 1,000,000.
    - `parameters` are named with the compiler's reserved prefix, `_cy_ft1`, `_cy_ft2`, …, which no library binds, so they
      never clash with the library's own; each is written `$_cy_ft<n>` in the statement, as the compiler writes its own.
 

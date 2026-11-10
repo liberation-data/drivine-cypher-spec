@@ -37,6 +37,24 @@ class FullTextSearchGoldenTest {
         assertEquals(SearchStore.entries.map { it.id }.toSet(), stores)
         assertTrue(entries.size > 900, "${entries.size} entries")
         assertTrue(entries.any { it["answer"]!!.has("refusal") }, "a refused query")
+        // Each state of the index the library may find: the lookup, none made, made, and on Neo4j and Memgraph named.
+        val states = entries.map { entry ->
+            val request = entry["request"] as ObjectNode
+            request["store"]!!.textValue() to (request["searchIndex"]?.let { "lookup" } ?: request["search"]!!["index"]?.takeUnless { it.isNull }?.let { index ->
+                when {
+                    index.has("trigram") -> "trigram ${index["trigram"]!!.booleanValue()}"
+                    index.has("oracleText") -> "oracleText ${if (index["oracleText"]!!.isNull) "none" else "made"}"
+                    else -> "named"
+                }
+            } ?: "none given")
+        }.toSet()
+        val wanted = setOf(
+            "postgres" to "lookup", "postgres" to "trigram false", "postgres" to "trigram true",
+            "oracle" to "lookup", "oracle" to "oracleText none", "oracle" to "oracleText made",
+            "sqlite" to "none given", "neo4j" to "named", "neo4j" to "none given", "memgraph" to "named", "memgraph" to "none given",
+            "falkordb" to "none given",
+        )
+        assertTrue(states.containsAll(wanted), "the golden lacks ${wanted - states}")
         println("Full-text search golden on $target: ${entries.size} entries")
     }
 
