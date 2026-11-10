@@ -738,11 +738,12 @@ jobs:
           wheel=("$TEMP_DIR"/wheels/*-py3-none-"$TAG".whl)
           "$bin/python" -m pip install --no-index --no-deps "${wheel[0]}"
       # From the runner's temp directory, in isolated mode, so the package imported is the installed one, not a file of
-      # this checkout.
+      # this checkout. In UTF-8 mode, as -I ignores PYTHONUTF8: Windows' Python otherwise prints to a pipe in cp1252,
+      # which can't print every request of the corpus.
       - name: The installed package's answers are the JVM's
         working-directory: ${{ runner.temp }}
         run: |
-          "$VENV_PYTHON" -I "$GITHUB_WORKSPACE/compiler/check/corpus-native.py" --installed \
+          "$VENV_PYTHON" -I -X utf8 "$GITHUB_WORKSPACE/compiler/check/corpus-native.py" --installed \
             oracle/corpus.jsonl differences.jsonl oracle/mutants.jsonl differences-mutants.jsonl
       - name: The wheel holds to its manylinux tag
         if: runner.os == 'Linux'

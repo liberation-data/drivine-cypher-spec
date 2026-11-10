@@ -74,7 +74,7 @@ def report(target, results, load_ms, differences, what="Corpus"):
         f"{what} on {target}: {len(results) - len(differ)} of {len(results)} answers byte-identical to the JVM's, "
         f"{len(differ)} differ. Load and first compile {load_ms:.1f} ms; compile mean {sum(ms) / len(ms):.3f} ms, "
         f"median {at(0.5):.3f} ms, p99 {at(0.99):.3f} ms, max {ms[-1]:.1f} ms "
-        f"({json.loads(slowest['request'])['cypher'][:80]})."
+        f"({json.loads(slowest['request']).get('cypher', slowest['request'])[:80]})."
     )
     for d in differ[:5]:
         print(f"  differs: {d['request'][:300]}\n    JVM:  {d['answer'][:300]}\n    here: {d['got'][:300]}")

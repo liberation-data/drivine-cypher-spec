@@ -479,7 +479,8 @@ into step 2 could change what it builds whatever it then checked. So:
   them is kept (Gradle's index of them, transformed jars, compiled build scripts, unpacked distributions, the Kotlin
   daemon), as nothing would check it. Its key hashes what pins them (`gradle/verification-metadata.xml`,
   `gradle/kotlin-native-dependencies.txt`, `gradle/pinned-jdk.properties`, `gradle/wrapper/gradle-wrapper.properties`)
-  and `compiler-release-dependencies.sh`, whose layout the entry is, so a change of either makes a new entry, kept by
+  and `compiler-release-dependencies.sh`, whose layout the entry is, after a version (`v2`), bumped in both workflows
+  where step 2 comes to build more than the entry was made for, so a change of either makes a new entry, kept by
   the first run that finds none: the change's pull request, for its own runs, and its merge, for the tags after. A run
   that finds the entry kept does nothing more. `stage` keeps only the files `unpack` keeps, by the same check (below),
   so an entry it made unpacks with no warning, and a warning at `unpack` means the entry isn't one `stage` made. It
