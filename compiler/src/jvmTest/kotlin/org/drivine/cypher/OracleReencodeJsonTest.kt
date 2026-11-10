@@ -174,14 +174,21 @@ class OracleReencodeJsonTest {
         fun typed(cypher: String, reencodeJson: Boolean, rowsAsText: Boolean = false) = (CypherCompiler.compile(
             Store.ORACLE, GraphOptions("g", oracleRowsAsText = rowsAsText, oracleReencodeJson = reencodeJson), cypher, parameters, typed = true,
         ) as Compiled)
-        for (cypher in listOf(
-            "MATCH (n:N) RETURN n", "MATCH (n:N)-[r]->(m) RETURN n, r, m", "MATCH (n:N) RETURN n.x AS x, n",
-            "MATCH (n:N) RETURN n UNION MATCH (n:M) RETURN n", "MERGE (t:N {id: 1}) SET t.x = 2 RETURN t",
+        for ((cypher, results) in listOf(
+            "MATCH (n:N) RETURN n" to 1, "MATCH (n:N)-[r]->(m) RETURN n, r, m" to 1, "MATCH (n:N) RETURN n.x AS x, n" to 1,
+            "MATCH (n:N) RETURN n UNION MATCH (n:M) RETURN n" to 2, "MERGE (t:N {id: 1}) SET t.x = 2 RETURN t" to 1,
+            // A UNION whose column is a node in one query and a value in the other, so written twice: wrapped as the second writes it.
+            "MATCH (c:C) RETURN c AS n, c AS m UNION ALL MATCH (d:D) RETURN {x: 1} AS n, d AS m" to 2,
+            "MATCH (c:C) RETURN c AS n UNION RETURN {x: 1} AS n" to 2,
+            // A subquery's UNION and RETURN, which the statement reads on, are not.
+            "MATCH (n:N) CALL (n) { MATCH (n)-->(m) RETURN m UNION MATCH (n)<--(m) RETURN m } RETURN n, m" to 1,
+            "UNWIND [1, 2] AS i CALL (i) { CREATE (n:N {i: i}) RETURN n } RETURN n" to 1,
         )) for (rowsAsText in listOf(false, true)) {
             val plain = typed(cypher, reencodeJson = false, rowsAsText)
             val again = typed(cypher, reencodeJson = true, rowsAsText)
             val wraps = Regex(Regex.escape(", KEEP '\$') AS result")).findAll(again.sql).count()
-            assertEquals(if ("UNION" in cypher) 2 else 1, wraps, "$cypher, rowsAsText $rowsAsText: ${again.sql}")
+            assertEquals(results, wraps, "$cypher, rowsAsText $rowsAsText: ${again.sql}")
+            assertEquals(results, Regex(Regex.escape("KEEP '\$')")).findAll(again.sql).count(), "$cypher, rowsAsText $rowsAsText: ${again.sql}")
             assertEquals(plain.sql, unwrapped(again.sql), cypher)
             assertEquals(plain.copy(sql = again.sql), again, cypher)
         }
