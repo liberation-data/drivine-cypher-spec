@@ -151,7 +151,7 @@ class OracleStoreStampStatements(private val ddl: OracleDdl) : StoreStampStateme
     """.trimIndent()
 }
 
-/** The stamp on SQLite: a node of the graph, as on the graph engines. Its stamps are read as JSON ([SqliteSql.JSON_ROWS]). */
+/** The stamp on SQLite: a node of the graph, as on the graph engines. Its stamps are read as JSON ([SqliteDdl.JSON_ROWS]). */
 @DrivineInternalApi
 class SqliteStoreStampStatements(private val ddl: SqliteDdl) : StoreStampStatements {
     private val stored = SqliteSql.hasLabel("n", LABEL)
@@ -167,7 +167,7 @@ class SqliteStoreStampStatements(private val ddl: SqliteDdl) : StoreStampStateme
     """.trimIndent()
 
     override val readStamps: String = """
-        ${SqliteSql.JSON_ROWS}
+        ${SqliteDdl.JSON_ROWS}
         SELECT json_object('id', ${SqliteSql.property("n", "storeId")}, 'assignedAt', ${SqliteSql.property("n", "assignedAt")})
         FROM ${ddl.nodes} n WHERE $stored
         ORDER BY ${SqliteSql.property("n", "assignedAt")}, ${SqliteSql.property("n", "storeId")}

@@ -60,10 +60,4 @@ object SqliteSql {
 
     /** The labels of a node that carries [label] alone, as a literal of the JSON array they are stored as. */
     fun labelArray(label: String): String = literal("[${quoted(label)}]")
-
-    /**
-     * What a statement whose text values are JSON opens with: SQLite has no JSON type for a column to say so, so a
-     * library reads a row of such a statement as the JSON it holds, as drivine4j's row mapper does.
-     */
-    const val JSON_ROWS = "/* drivine:json */"
 }
