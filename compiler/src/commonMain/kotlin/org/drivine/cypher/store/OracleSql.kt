@@ -37,6 +37,16 @@ object OracleSql {
         ".${step(key)}"
     } + suffix)
 
+    /** The property [key] of the node or relationship [alias], read as text. The stamp ([Stamps.PROPERTY]) is a column of its own. */
+    fun property(alias: String, key: String): String =
+        if (key == Stamps.PROPERTY) "$alias.stamp" else "JSON_VALUE($alias.props, ${path(key)})"
+
+    /**
+     * The property [key] of [alias] read as a number, and null where it is none: what the schema marker is ordered by
+     * (`store.marker`).
+     */
+    fun number(alias: String, key: String): String = "JSON_VALUE($alias.props, ${path(key)} RETURNING NUMBER)"
+
     /**
      * Whether the node [alias] carries [label], written so the index over labels can answer it: the
      * form for a statement that reads every node of a label. A label is data, so it is written into

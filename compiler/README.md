@@ -43,7 +43,10 @@ calls into the compiler.
 drivine4j calls more of the module than the API above: the compiler classes themselves, the parts of its own SQL
 helpers that the compiler calls too (`org.drivine.cypher.store`), the store layout's DDL (`org.drivine.cypher.store.ddl`:
 each store's tables, the probe that finds them made, and its indexes, constraints and catalog statements, as the spec's
-`store.yaml` pins them), and a few of the schema specs' and compilers' functions. The compiler classes are public and unmarked; the rest are public only so that drivine4j, built apart from
+`store.yaml` pins them), the schema marker and the stamps (`org.drivine.cypher.store.marker`, and
+`org.drivine.cypher.store.Stamps`: each store's statements for the marker and the store's stamp, the marker's inventory
+and version token, and the node stamp's form, as the spec's `marker.yaml` pins them), and a few of the schema specs' and
+compilers' functions. The compiler classes are public and unmarked; the rest are public only so that drivine4j, built apart from
 the module, can call them, and are marked `@org.drivine.DrivineInternalApi`, an opt-in at the level of an error:
 drivine4j opts in module-wide, and any other caller that doesn't is refused at compile time. They may change or go in
 any release.
@@ -294,6 +297,9 @@ The JVM is the oracle. `./gradlew jvmOracle` writes, into `build/oracle`:
 - `store.json`: the spec's `store.yaml` as JSON, which `StoreDdlTest` reads on every target: the store layout's DDL
   each generator in `org.drivine.cypher.store.ddl` must give, the object names Java's `String.hashCode` gives, and the
   reads the compiler must answer from each index.
+- `marker.json`: the spec's `marker.yaml` as JSON, which `StoreMarkerTest` reads on every target: each store's
+  statements for the schema marker and the store's stamp that `org.drivine.cypher.store.marker` must give, the
+  inventories it must write and read back, the version tokens, and the node stamps `Stamps` must read and write.
 - `standins-<name>.txt`: what Java gives where the module stands in for it, worked out by Java's own API on the pinned
   JDK (`StandIns`): `ZoneId.of`'s reading of a zone; java.time's calendar dates, and its parse and text of a temporal
   value, with java.math's of a duration; `substring`, `Integer.parseInt(s, 16)` and `appendCodePoint` of a string
