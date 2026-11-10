@@ -3811,6 +3811,55 @@ cases:
               log:
                 - ["INFO", "ConstraintManager", "Dropped {engine} UNIQUENESS_CONSTRAINT on Person[email]"]
                 - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 1 removed, 1 dropped, 0 left in place"]
+  - case: "25c"
+    name: "remove, after a listing that fails once"
+    description: "The first read of the listing fails, which drops nothing for the first item; the second item reads the listing again, and is dropped."
+    stores: ["postgres", "oracle", "sqlite", "neo4j"]
+    catalogs: []
+    steps:
+      - operation: {remove: {owner: null, items: ["Range index", "Range index over two properties"]}}
+        runs:
+          - stores: ["postgres", "oracle", "sqlite"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "scopes"}, rows: []}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, failed: [{message: "connection reset"}]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}, {kind: "RANGE_INDEX", label: "Person", properties: ["name", "born"], name: "Person_name_born_range"}]}
+              - now: 1000000
+                actions:
+                  - {execute: {drop: "Range index over two properties"}}
+            done: 1000000
+            report:
+              owners:
+                - {owner: null, marker: null, removed: {dropped: 1, kept: []}}
+              log:
+                - ["INFO", "IndexManager", "Dropped {engine} RANGE_INDEX on Person[name, born]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 2 removed, 1 dropped, 0 left in place"]
+          - stores: ["neo4j"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {query: {marker: "scopes"}, rows: []}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, failed: [{message: "connection reset"}]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}, {kind: "RANGE_INDEX", label: "Person", properties: ["name", "born"], name: "Person_name_born_range"}]}
+              - now: 1000000
+                actions:
+                  - {execute: {drop: "Range index over two properties"}}
+            done: 1000000
+            report:
+              owners:
+                - {owner: null, marker: null, removed: {dropped: 1, kept: []}}
+              log:
+                - ["INFO", "IndexManager", "Dropped {engine} RANGE_INDEX on Person[name, born]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 2 removed, 1 dropped, 0 left in place"]
   - case: "26"
     name: "A failure mid-plan under FAIL_FAST"
     description: "Owner 'a' fails at its second item: its third isn't tried, and its marker isn't written; owner 'b' is applied."
@@ -4133,6 +4182,36 @@ cases:
                 - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 2 items (forceRecreate=false, versionChanged=false, version=null)"]
                 - ["INFO", "ConstraintManager", "Created {engine} UNIQUENESS_CONSTRAINT on Person[__drivine.lower.email]"]
                 - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 1 created, 1 already matching, 0 recreated, 0 needing attention"]
+  - case: "29b"
+    name: "Ignore-case lower copies, after a listing that fails once"
+    description: "The first read of the listing fails, so the copies are filled in again; the index is read again, there, and matches."
+    stores: ["postgres", "oracle", "sqlite"]
+    catalogs:
+      - {owner: null, version: null, items: ["Range index that ignores case"]}
+    steps:
+      - operation: {enforce: "all"}
+        runs:
+          - stores: ["postgres", "oracle", "sqlite"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, failed: [{message: "connection reset"}]}
+              - now: 1000000
+                actions:
+                  - {fillLowerCopies: {label: "Person", properties: ["email"], again: true}}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["__drivine.lower.email"], name: "Person_email_ci_range"}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: "RANGE_INDEX:Person:__drivine.lower.email:Person_email_ci_range"}}
+            done: 1000000
+            report:
+              owners:
+                - {owner: null, results: [{spec: "Range index that ignores case", alreadyMatching: {kind: "RANGE_INDEX", label: "Person", properties: ["__drivine.lower.email"], name: "Person_email_ci_range"}}], marker: {version: null, items: "RANGE_INDEX:Person:__drivine.lower.email:Person_email_ci_range"}}
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 1 already matching, 0 recreated, 0 needing attention"]
   - case: "item"
     name: "The public IndexManager and ConstraintManager calls"
     description: "Each on one item, with no marker: a constraint ensured and recreated, an index recreated where there is none, and dropped, where it is there and where it is not."

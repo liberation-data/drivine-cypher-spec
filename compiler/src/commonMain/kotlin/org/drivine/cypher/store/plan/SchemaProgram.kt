@@ -57,7 +57,7 @@ internal class SchemaProgram(
     private val engine = store.engine
     private val log = mutableListOf<LogLine>()
 
-    /** The listings read since the plan's own DDL last ran, by statement: their rows, or null where the read failed. */
+    /** The listings read since the plan's own DDL last ran, by statement: their rows, or null where the first round's read failed, until it is used. */
     private val listings = mutableMapOf<String, List<Any?>?>()
 
     /** The markers' properties read, by scope and property: the outcome of each read. */
@@ -941,12 +941,13 @@ internal class SchemaProgram(
     /**
      * The rows of the listing [statement]: as read since the plan's own DDL last ran, or read now; read now, after
      * waiting [poll], where it is given (a poll). Null where the read fails, which drivine4j takes as nothing listed:
-     * some stores refuse to list a kind before there is one.
+     * some stores refuse to list a kind before there is one. A read that failed is used once, as the read it is, and not
+     * kept: drivine4j reads the listing again next time.
      */
     private fun listingRows(statement: String, poll: Long? = null): List<Any?>? {
-        if (poll == null && statement in listings) return listings.getValue(statement)
+        if (poll == null && statement in listings) return listings.getValue(statement) ?: listings.remove(statement)
         val outcome = io.ask(PlanAction.Query(statement, purpose = Purpose.LISTING, delayMillis = poll ?: 0))
-        return ((outcome as? PlanOutcome.Rows)?.rows).also { listings[statement] = it }
+        return ((outcome as? PlanOutcome.Rows)?.rows).also { if (it != null) listings[statement] = it else listings.remove(statement) }
     }
 
     private fun indexes(kind: SchemaItemKind, poll: Long? = null): List<SchemaItemInfo> =
