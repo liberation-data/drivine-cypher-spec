@@ -3,6 +3,8 @@ package org.drivine.cypher.store.plan
 import org.drivine.cypher.store.ddl.DdlStatement
 import org.drivine.cypher.store.ddl.Neo4jDdl
 import org.drivine.cypher.store.ddl.SqliteDdl
+import org.drivine.cypher.store.marker.MarkerStatements
+import org.drivine.cypher.store.marker.SchemaMarker
 import org.drivine.cypher.store.schema.Cause
 import org.drivine.cypher.store.schema.FalkorDbSchema
 import org.drivine.cypher.store.schema.Neo4jSchema
@@ -127,6 +129,40 @@ class SchemaPlannerTest {
         assertEquals(listOf(UnbuiltIndex(name, stillBuilding = true, message)), owner.unbuilt)
         assertNull(owner.marker)
         assertTrue(report.failure!!.contains("  - STILL BUILDING: $message. It is left to be built"), report.failure)
+    }
+
+    @Test
+    fun anOwnerNamedSchemaReadsTheMarkerTheUnnamedOwnerWroteBeforeIt() {
+        // Both have the scope `schema`. drivine4j applies the unnamed owner first, and the owner named `schema` reads the
+        // marker it wrote: its item is the named owner's orphan.
+        val born = RangeIndexSpec("Person", "born")
+        val listed = ListingRows.rows(
+            "sqlite",
+            listOf(SchemaItemInfo(SchemaItemKind.RANGE_INDEX, "Person", listOf("name"), "Person_name_range"), SchemaItemInfo(SchemaItemKind.RANGE_INDEX, "Person", listOf("born"), "Person_born_range")),
+            constraints = false,
+        )
+        val readItems = PlanAction.Query(MarkerStatements.of(sqlite).read(SchemaMarker.ITEMS), mapOf("scope" to "schema"), Purpose.MARKER)
+        var stored: Any? = null
+        var step = planner.start(request(Operation.Enforce(), DeclaredCatalog(null, items = listOf(name)), DeclaredCatalog("schema", items = listOf(born))), 0)
+        val reads = mutableListOf<Int>()
+        while (step is PlanStep.Run) {
+            reads += step.actions.count { it == readItems }
+            val outcomes = step.actions.map { action ->
+                when {
+                    action is PlanAction.WriteMarker -> PlanOutcome.Ran.also { stored = action.parameters["items"] }
+                    action == readItems -> PlanOutcome.Rows(listOfNotNull(stored))
+                    action is PlanAction.Query && action.purpose == Purpose.LISTING -> PlanOutcome.Rows(listed)
+                    action is PlanAction.Query -> PlanOutcome.Rows(emptyList())
+                    else -> PlanOutcome.Ran
+                }
+            }
+            step = planner.resume(step.state, outcomes, 0)
+        }
+        val owners = (step as PlanStep.Done).report.owners
+        assertEquals(listOf(null, "schema"), owners.map { it.owner })
+        assertEquals(emptyList(), owners[0].orphans)
+        assertEquals(listOf("RANGE_INDEX:Person:name:Person_name_range"), owners[1].orphans)
+        assertEquals(2, reads.sum(), "read once in the first round, and again after the unnamed owner's marker is written: $reads")
     }
 
     @Test

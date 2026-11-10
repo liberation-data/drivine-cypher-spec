@@ -63,6 +63,9 @@ internal class SchemaProgram(
     /** The markers' properties read, by scope and property: the outcome of each read. */
     private val markerReads = mutableMapOf<Pair<String, String>, PlanOutcome>()
 
+    /** The markers' properties read in the first round, by scope and property. */
+    private val prefetched = mutableSetOf<Pair<String, String>>()
+
     fun run(): DatabaseReport = when (val operation = request.operation) {
         is Operation.Enforce -> apply(forceRecreate = false, operation.owners, only = null)
         is Operation.RecreateAll -> apply(forceRecreate = true, operation.owners, only = null)
@@ -161,7 +164,9 @@ internal class SchemaProgram(
         if (outcome is PlanOutcome.Failed) throw RawFailure(outcome.error, action, io.lastRound)
     }
 
+    /** Reads [property] of the scope's marker in the first round, once: an owner named `schema` shares the unnamed one's. */
     private fun prefetchMarker(scope: String, property: String) {
+        if (!prefetched.add(scope to property)) return
         val outcome = io.prefetch(markerRead(scope, property)) ?: return
         markerReads[scope to property] = outcome
     }
@@ -499,9 +504,14 @@ internal class SchemaProgram(
         ensureConstraint(SchemaMarker.CONSTRAINT, DEFAULT_VIOLATION_SAMPLE_SIZE, replaceBlockingIndex = true)
     }
 
-    /** Writes the scope's marker, once again where the first merge fails: it lost a race to make the marker, which a second merge finds. */
+    /**
+     * Writes the scope's marker, once again where the first merge fails: it lost a race to make the marker, which a second
+     * merge finds. What was read of the scope is read again after: an owner named `schema`, applied after the unnamed one,
+     * reads the marker the unnamed one wrote, as drivine4j reads it.
+     */
     private fun record(scope: String, version: String?, inventory: MarkerInventory): WrittenMarker {
         val items = inventory.items
+        markerReads.keys.removeAll { it.first == scope }
         fun merge() = io.run(PlanAction.WriteMarker(scope, markers.merge, markers.mergeParameters(scope, version, items, io.clock())))
         if (merge() is PlanOutcome.Failed) {
             val again = merge()
