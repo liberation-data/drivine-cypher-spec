@@ -10,7 +10,8 @@ import kotlin.test.assertTrue
 
 /**
  * On Postgres, a `MATCH` reads a pattern of relationships of one hop each as a chain of probes, from the node it starts at:
- * the first bound before it, else the first given properties, else its first relationship, read whole. Each relationship is
+ * the first bound before it, else the first given properties, else the first with a label, else its first relationship,
+ * read whole. Each relationship is
  * read by a probe of its end toward the start, `CROSS JOIN LATERAL (SELECT * FROM … e WHERE e.src = n.nid OFFSET 0) e`, and
  * each node it reaches by a probe of its key, `CROSS JOIN LATERAL (SELECT * FROM g_node n WHERE n.nid = e.dst OFFSET 0) n`.
  * Joined plainly, Postgres planned `MATCH (:CyLoop)-[r:CY_SELF]->(:CyLoop) RETURN count(r)`, with the node table analyzed
@@ -57,21 +58,28 @@ class PostgresMatchChainTest {
     }
 
     @Test
-    fun `the count of drivine#680 reads every relationship of its type once, and each end by its key`() {
+    fun `the count of drivine#680 reads each node of the label once, its relationships by their end, and each far end by its key`() {
         val sql = sql("MATCH (:CyLoop)-[r:CY_SELF]->(:CyLoop) RETURN count(r)")
-        assertTrue("FROM ${GRAPH}_edge e3\n" in sql, sql)
-        assertEquals(listOf(listOf("n1", "nid", "e3", "src"), listOf("n2", "nid", "e3", "dst")), chain(sql))
+        assertTrue("FROM ${GRAPH}_node n1\n" in sql, sql)
+        assertEquals(listOf(listOf("e3", "src", "n1", "nid"), listOf("n2", "nid", "e3", "dst")), chain(sql))
         // Every condition it had is kept, the probes' among them, so the rows can't change.
         assertTrue("AND e3.src = n1.nid AND e3.dst = n2.nid\n" in sql, sql)
         assertTrue("AND e3.type = 'CY_SELF'" in sql, sql)
     }
 
     @Test
-    fun `a chain starts at the node bound before the pattern, else the first given properties, else its first relationship`() {
+    fun `a chain starts at the node bound before the pattern, else the first given properties, else the first with a label, else its first relationship`() {
         val chains = listOf(
-            // No node pinned: the first relationship read whole.
+            // No node pinned and none with a label: the first relationship read whole.
             "MATCH (a)-[:R]->(b) RETURN a, b" to listOf("n1 nid e3 src", "n2 nid e3 dst"),
-            "MATCH (n:CyLoop)-[r:CY_SELF]->(n) RETURN count(r)" to listOf("n1 nid e2 src"),
+            // None pinned: the first with a label, read by the labels' index, and the relationships before it backwards.
+            "MATCH (a:Rare)-[:COMMON]->(b) RETURN b" to listOf("e3 src n1 nid", "n2 nid e3 dst"),
+            "MATCH (a)-[:R]->(b:L) RETURN a" to listOf("e3 dst n2 nid", "n1 nid e3 src"),
+            "MATCH (a)-[:R]->(b:L)-[:S]->(c:M) RETURN a, c" to listOf("e4 dst n2 nid", "n1 nid e4 src", "e5 src n2 nid", "n3 nid e5 dst"),
+            "MATCH (n:CyLoop)-[r:CY_SELF]->(n) RETURN count(r)" to listOf("e2 src n1 nid"),
+            "MATCH (a)-[:R]->(b)<-[:S]-(a:L) RETURN b" to listOf("e3 src n1 nid", "n2 nid e3 dst", "e4 dst n2 nid"),
+            // One pinned wins over one with a label.
+            "MATCH (a:L)-[:R]->(b {id: 1}) RETURN a" to listOf("e3 dst n2 nid", "n1 nid e3 src"),
             "MATCH (a)<-[:R]-(b) RETURN a, b" to listOf("n1 nid e3 dst", "n2 nid e3 src"),
             "MATCH (a)-[:R]-(b) RETURN a, b" to listOf("n1 nid e3 a", "n2 nid e3 b"),
             "MATCH (a)-[:R]->(b)-[:S]->(c) RETURN c" to listOf("n1 nid e4 src", "n2 nid e4 dst", "e5 src n2 nid", "n3 nid e5 dst"),

@@ -1793,7 +1793,8 @@ abstract class SqlCypherCompiler(
          * [pattern] matched over the rows [select] reads, its relationships added to [hops]. With [chaining], on a store that
          * probes ([endProbe]), a pattern whose relationships are each of one hop ([chains]) is read as a chain of probes from
          * the node it starts at, [start]: the first node bound before it, else the first given properties or pinned by the
-         * `WHERE` ([pinnedBy]), else, at -1, its first relationship, read whole. Each relationship is read by a probe of its end toward the start, and each node it
+         * `WHERE` ([pinnedBy]), else the first with a label, read by the labels' index, else, at -1, its first relationship,
+         * read whole: no index of the relationships leads with the type, so that reads every relationship. Each relationship is read by a probe of its end toward the start, and each node it
          * reaches by a probe of its key, the relationship's other end, so each row reads what it reaches by an index, in that
          * order, whatever the tables' statistics say. Joined plainly, Postgres planned `MATCH (:A)-[r:R]->(:A) RETURN
          * count(r)`, with the node table analyzed just after it was emptied (statistics of no rows over its pages), to read
@@ -1809,7 +1810,11 @@ abstract class SqlCypherCompiler(
             val before = select.scope
             val chained = chaining && chains(pattern)
             val start = if (!chained) -1 else pattern.nodes.indexOfFirst { node -> node.variable?.let { before[it] } != null }
-                .takeIf { it >= 0 } ?: pattern.nodes.indices.indexOfFirst { pinned[it] || pattern.nodes[it].variable in pinnedBy }.let { at ->
+                .takeIf { it >= 0 } ?: (pattern.nodes.indices.indexOfFirst { pinned[it] || pattern.nodes[it].variable in pinnedBy }.takeIf { it >= 0 }
+                    // Else the first with a label, read by the labels' index: the relationships' has none that leads with the
+                    // type, so read whole, the first would be every relationship of every type, where `(:Rare)-[:COMMON]->(b)`
+                    // read its few nodes. Each node of the label is one probe of the ends' index, so it stays linear.
+                    ?: pattern.nodes.indexOfFirst { it.labels.isNotEmpty() }).let { at ->
                     // A variable given properties where it appears again, as `(a)-[:R]->(a {k: 1})`'s, is read where it first
                     // appears: its alias is made there, and each later place is that alias, which a chain may not probe before.
                     pattern.nodes.getOrNull(at)?.variable?.let { v -> pattern.nodes.indexOfFirst { it.variable == v } } ?: at

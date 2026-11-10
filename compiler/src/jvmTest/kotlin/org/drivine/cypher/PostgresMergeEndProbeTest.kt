@@ -108,10 +108,10 @@ class PostgresMergeEndProbeTest {
 
     @Test
     fun `a relationship a MATCH reads is read as a chain, and a MERGE after it probes its own`() {
-        // The MATCH's first relationship is read whole, and its node by its key from it: see PostgresMatchChainTest.
+        // The MATCH reads its node by its label, and the relationship by its end from it: see PostgresMatchChainTest.
         val read = sql("MATCH (n:CyLoop)-[r:CY_SELF]->(n) RETURN count(r)")
-        assertTrue("FROM ${GRAPH}_edge e2\n" in read, read)
-        assertFalse(endProbe.containsMatchIn(read), read)
+        assertTrue("FROM ${GRAPH}_node n1\n" in read, read)
+        assertEquals(listOf("src"), endProbe.findAll(read).map { it.groupValues[3] }.toList(), read)
         // The MATCH's probe reads from the node the MATCH found; the MERGE's alone from the node the loop's row holds.
         val both = sql("MATCH (n:CyLoop) MATCH (n)-[:CY_OUT]->(m) MERGE (m)-[:CY_SELF]->(m)")
         assertEquals(1, endProbe.findAll(both).count { boundFromRow(both, it.groupValues[4]) }, both)
