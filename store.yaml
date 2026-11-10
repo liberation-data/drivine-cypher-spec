@@ -4391,6 +4391,32 @@ listings:
             quantizationEnabled: true
           - {kind: "VECTOR_INDEX", label: "Chunk", properties: ["c"], name: "c", dimensions: 4}
         aliases: [[], [], []]
+  - name: "Numbers a driver gives with a fraction, read as whole numbers"
+    listing: "indexes"
+    rows:
+      - name: "f"
+        type: "VECTOR"
+        entityType: "NODE"
+        labelsOrTypes: ["Chunk"]
+        properties: ["vec"]
+        options:
+          indexConfig:
+            "vector.dimensions": 8.0
+            "vector.similarity_function": "COSINE"
+            "vector.hnsw.m": 16.0
+            "vector.hnsw.ef_construction": 100.0
+    stores:
+      neo4j:
+        items:
+          - kind: "VECTOR_INDEX"
+            label: "Chunk"
+            properties: ["vec"]
+            name: "f"
+            dimensions: 8
+            similarity: "COSINE"
+            hnswM: 16
+            hnswEfConstruction: 100
+        aliases: [[]]
   - name: "Every kind Drivine manages, and those it does not"
     listing: "indexes"
     rows:
@@ -5539,6 +5565,42 @@ declarations:
       - {kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"]}
       - {kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], nodeIdProperty: "uuid"}
     items: [{kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], nodeIdProperty: "uuid"}]
+  - name: "Of constraints that know their node id property, the first wins"
+    specs:
+      - {kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"]}
+      - {kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], nodeIdProperty: "uuid"}
+      - {kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], nodeIdProperty: "id"}
+    items: [{kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], nodeIdProperty: "uuid"}]
+  - name: "Two that pin the same engine options are one"
+    specs:
+      - kind: "VECTOR_INDEX"
+        label: "Chunk"
+        properties: ["embedding"]
+        options: {dimensions: 8, similarity: "COSINE", quantizationEnabled: false}
+      - kind: "VECTOR_INDEX"
+        label: "Chunk"
+        properties: ["embedding"]
+        options: {dimensions: 8, similarity: "COSINE", quantizationEnabled: false}
+    items:
+      - kind: "VECTOR_INDEX"
+        label: "Chunk"
+        properties: ["embedding"]
+        options: {dimensions: 8, similarity: "COSINE", quantizationEnabled: false}
+  - name: "A conflict names each distinct declaration once, without its engine options"
+    specs:
+      - kind: "VECTOR_INDEX"
+        label: "Chunk"
+        properties: ["embedding"]
+        options: {dimensions: 8, similarity: "COSINE", quantizationEnabled: false}
+      - kind: "VECTOR_INDEX"
+        label: "Chunk"
+        properties: ["embedding"]
+        options: {dimensions: 16, similarity: "COSINE"}
+      - kind: "VECTOR_INDEX"
+        label: "Chunk"
+        properties: ["embedding"]
+        options: {dimensions: 16, similarity: "COSINE"}
+    conflict: "Conflicting schema declarations for VECTOR_INDEX on Chunk[embedding] (they disagree on portable parameters): VectorIndexSpec(label=Chunk, property=embedding, dimensions=8, similarity=COSINE, name=null, hnswM=null, hnswEfConstruction=null, engineOptions=[]); VectorIndexSpec(label=Chunk, property=embedding, dimensions=16, similarity=COSINE, name=null, hnswM=null, hnswEfConstruction=null, engineOptions=[])"
   - name: "Keys are kept in the order first declared, of every kind"
     specs:
       - {kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"]}

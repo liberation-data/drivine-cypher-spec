@@ -29,7 +29,9 @@ import org.drivine.schema.VectorIndexSpec
  * spec's `store.yaml` (`schema`, `listings`, `matching` and `errors`).
  *
  * A listing's rows are plain values, as a driver gives them: maps, lists, text, numbers, booleans and null. A row a store
- * gives as one map column is a map; one it gives as several columns (Memgraph's `SHOW INDEX INFO`) is a list of them.
+ * gives as one map column is a map, a SQL store's JSON decoded; one it gives as several columns (Memgraph's `SHOW INDEX INFO`)
+ * is a list of them. A number is read as its whole part, whatever its type: a library hands over a driver's own integer
+ * (a JavaScript Neo4j driver's `Integer`) as a number.
  */
 @DrivineInternalApi
 interface StoreSchema {
