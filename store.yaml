@@ -4627,6 +4627,19 @@ listings:
             similarity: "EUCLIDEAN"
             status: "[Indexing] 0/20000: UNDER CONSTRUCTION"
         aliases: [[], []]
+  - name: "A vector property's options without the dimension, beside flat options that hold it"
+    listing: "indexes"
+    rows:
+      - label: "Doc"
+        properties: ["embedding"]
+        types: {embedding: ["VECTOR"]}
+        options: {embedding: {similarityFunction: "cosine", M: 8}, dimension: 768, similarityFunction: "euclidean"}
+        entitytype: "NODE"
+    stores:
+      falkordb:
+        items:
+          - {kind: "VECTOR_INDEX", label: "Doc", properties: ["embedding"], dimensions: 768, similarity: "EUCLIDEAN"}
+        aliases: [[]]
   - name: "Relationship rows and rows that aren't an index"
     listing: "indexes"
     rows:
