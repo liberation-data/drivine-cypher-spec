@@ -1466,14 +1466,42 @@ cases:
             $forget$
       oracle:
         create:
-          - "CREATE INDEX IF NOT EXISTS drivine_ix_name_337a8b ON drivine_node (JSON_VALUE(props, '$.name'))"
+          - |-
+            DECLARE
+                e_exists EXCEPTION; PRAGMA EXCEPTION_INIT(e_exists, -955);
+                e_busy EXCEPTION; PRAGMA EXCEPTION_INIT(e_busy, -54);
+            BEGIN
+                FOR attempt IN 1 .. 300 LOOP
+                    BEGIN
+                        EXECUTE IMMEDIATE 'CREATE INDEX IF NOT EXISTS drivine_ix_name_337a8b ON drivine_node (JSON_VALUE(props, ''$.name''))';
+                        EXIT;
+                    EXCEPTION
+                        WHEN e_exists THEN EXIT;
+                        WHEN e_busy THEN
+                            IF attempt = 300 THEN RAISE; END IF;
+                            DBMS_SESSION.SLEEP(0.1);
+                    END;
+                END LOOP;
+            END;
           - |-
             DECLARE
                 v_unique NUMBER;
+                e_exists EXCEPTION; PRAGMA EXCEPTION_INIT(e_exists, -955);
+                e_busy EXCEPTION; PRAGMA EXCEPTION_INIT(e_busy, -54);
             BEGIN
                 SELECT COUNT(*) INTO v_unique FROM drivine_schema u WHERE u.label = 'Person' AND u.properties = '["name"]' AND u.kind = 'UNIQUENESS_CONSTRAINT' AND JSON_VALUE(u.properties, '$.size()' RETURNING NUMBER) = 1 AND EXISTS (SELECT 1 FROM user_indexes q WHERE q.index_name = UPPER(u.object_name));
                 IF v_unique = 0 THEN
-                    EXECUTE IMMEDIATE 'CREATE INDEX IF NOT EXISTS drivine_lx_Personname_44ce5436 ON drivine_node n (CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') THEN JSON_VALUE(n.props, ''$.name'') END)';
+                    FOR attempt IN 1 .. 300 LOOP
+                        BEGIN
+                            EXECUTE IMMEDIATE 'CREATE INDEX IF NOT EXISTS drivine_lx_Personname_44ce5436 ON drivine_node n (CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') THEN JSON_VALUE(n.props, ''$.name'') END)';
+                            EXIT;
+                        EXCEPTION
+                            WHEN e_exists THEN EXIT;
+                            WHEN e_busy THEN
+                                IF attempt = 300 THEN RAISE; END IF;
+                                DBMS_SESSION.SLEEP(0.1);
+                        END;
+                    END LOOP;
                 END IF;
             END;
           - |-
@@ -1565,14 +1593,42 @@ cases:
             $forget$
       oracle:
         create:
-          - "CREATE INDEX IF NOT EXISTS drivine_ix_nameborn_44489f9e ON drivine_node (JSON_VALUE(props, '$.name'), JSON_VALUE(props, '$.born'))"
+          - |-
+            DECLARE
+                e_exists EXCEPTION; PRAGMA EXCEPTION_INIT(e_exists, -955);
+                e_busy EXCEPTION; PRAGMA EXCEPTION_INIT(e_busy, -54);
+            BEGIN
+                FOR attempt IN 1 .. 300 LOOP
+                    BEGIN
+                        EXECUTE IMMEDIATE 'CREATE INDEX IF NOT EXISTS drivine_ix_nameborn_44489f9e ON drivine_node (JSON_VALUE(props, ''$.name''), JSON_VALUE(props, ''$.born''))';
+                        EXIT;
+                    EXCEPTION
+                        WHEN e_exists THEN EXIT;
+                        WHEN e_busy THEN
+                            IF attempt = 300 THEN RAISE; END IF;
+                            DBMS_SESSION.SLEEP(0.1);
+                    END;
+                END LOOP;
+            END;
           - |-
             DECLARE
                 v_unique NUMBER;
+                e_exists EXCEPTION; PRAGMA EXCEPTION_INIT(e_exists, -955);
+                e_busy EXCEPTION; PRAGMA EXCEPTION_INIT(e_busy, -54);
             BEGIN
                 SELECT COUNT(*) INTO v_unique FROM drivine_schema u WHERE u.label = 'Person' AND u.properties = '["name","born"]' AND u.kind = 'UNIQUENESS_CONSTRAINT' AND JSON_VALUE(u.properties, '$.size()' RETURNING NUMBER) = 1 AND EXISTS (SELECT 1 FROM user_indexes q WHERE q.index_name = UPPER(u.object_name));
                 IF v_unique = 0 THEN
-                    EXECUTE IMMEDIATE 'CREATE INDEX IF NOT EXISTS drivine_lx_Personnameborn_3f5a18d3 ON drivine_node n (CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') THEN JSON_VALUE(n.props, ''$.name'') END, CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') THEN JSON_VALUE(n.props, ''$.born'') END)';
+                    FOR attempt IN 1 .. 300 LOOP
+                        BEGIN
+                            EXECUTE IMMEDIATE 'CREATE INDEX IF NOT EXISTS drivine_lx_Personnameborn_3f5a18d3 ON drivine_node n (CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') THEN JSON_VALUE(n.props, ''$.name'') END, CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') THEN JSON_VALUE(n.props, ''$.born'') END)';
+                            EXIT;
+                        EXCEPTION
+                            WHEN e_exists THEN EXIT;
+                            WHEN e_busy THEN
+                                IF attempt = 300 THEN RAISE; END IF;
+                                DBMS_SESSION.SLEEP(0.1);
+                        END;
+                    END LOOP;
                 END IF;
             END;
           - |-
@@ -1670,14 +1726,42 @@ cases:
             $forget$
       oracle:
         create:
-          - "CREATE INDEX IF NOT EXISTS drivine_ix_nameborn_44489f9e ON drivine_node (JSON_VALUE(props, '$.name'), JSON_VALUE(props, '$.born'))"
+          - |-
+            DECLARE
+                e_exists EXCEPTION; PRAGMA EXCEPTION_INIT(e_exists, -955);
+                e_busy EXCEPTION; PRAGMA EXCEPTION_INIT(e_busy, -54);
+            BEGIN
+                FOR attempt IN 1 .. 300 LOOP
+                    BEGIN
+                        EXECUTE IMMEDIATE 'CREATE INDEX IF NOT EXISTS drivine_ix_nameborn_44489f9e ON drivine_node (JSON_VALUE(props, ''$.name''), JSON_VALUE(props, ''$.born''))';
+                        EXIT;
+                    EXCEPTION
+                        WHEN e_exists THEN EXIT;
+                        WHEN e_busy THEN
+                            IF attempt = 300 THEN RAISE; END IF;
+                            DBMS_SESSION.SLEEP(0.1);
+                    END;
+                END LOOP;
+            END;
           - |-
             DECLARE
                 v_unique NUMBER;
+                e_exists EXCEPTION; PRAGMA EXCEPTION_INIT(e_exists, -955);
+                e_busy EXCEPTION; PRAGMA EXCEPTION_INIT(e_busy, -54);
             BEGIN
                 SELECT COUNT(*) INTO v_unique FROM drivine_schema u WHERE u.label = 'Person' AND u.properties = '["name","born"]' AND u.kind = 'UNIQUENESS_CONSTRAINT' AND JSON_VALUE(u.properties, '$.size()' RETURNING NUMBER) = 1 AND EXISTS (SELECT 1 FROM user_indexes q WHERE q.index_name = UPPER(u.object_name));
                 IF v_unique = 0 THEN
-                    EXECUTE IMMEDIATE 'CREATE INDEX IF NOT EXISTS drivine_lx_Personnameborn_3f5a18d3 ON drivine_node n (CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') THEN JSON_VALUE(n.props, ''$.name'') END, CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') THEN JSON_VALUE(n.props, ''$.born'') END)';
+                    FOR attempt IN 1 .. 300 LOOP
+                        BEGIN
+                            EXECUTE IMMEDIATE 'CREATE INDEX IF NOT EXISTS drivine_lx_Personnameborn_3f5a18d3 ON drivine_node n (CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') THEN JSON_VALUE(n.props, ''$.name'') END, CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') THEN JSON_VALUE(n.props, ''$.born'') END)';
+                            EXIT;
+                        EXCEPTION
+                            WHEN e_exists THEN EXIT;
+                            WHEN e_busy THEN
+                                IF attempt = 300 THEN RAISE; END IF;
+                                DBMS_SESSION.SLEEP(0.1);
+                        END;
+                    END LOOP;
                 END IF;
             END;
           - |-
@@ -1760,14 +1844,42 @@ cases:
             $forget$
       oracle:
         create:
-          - "CREATE INDEX IF NOT EXISTS drivine_ix_nameborn_44489f9e ON drivine_node (JSON_VALUE(props, '$.name'), JSON_VALUE(props, '$.born'))"
+          - |-
+            DECLARE
+                e_exists EXCEPTION; PRAGMA EXCEPTION_INIT(e_exists, -955);
+                e_busy EXCEPTION; PRAGMA EXCEPTION_INIT(e_busy, -54);
+            BEGIN
+                FOR attempt IN 1 .. 300 LOOP
+                    BEGIN
+                        EXECUTE IMMEDIATE 'CREATE INDEX IF NOT EXISTS drivine_ix_nameborn_44489f9e ON drivine_node (JSON_VALUE(props, ''$.name''), JSON_VALUE(props, ''$.born''))';
+                        EXIT;
+                    EXCEPTION
+                        WHEN e_exists THEN EXIT;
+                        WHEN e_busy THEN
+                            IF attempt = 300 THEN RAISE; END IF;
+                            DBMS_SESSION.SLEEP(0.1);
+                    END;
+                END LOOP;
+            END;
           - |-
             DECLARE
                 v_unique NUMBER;
+                e_exists EXCEPTION; PRAGMA EXCEPTION_INIT(e_exists, -955);
+                e_busy EXCEPTION; PRAGMA EXCEPTION_INIT(e_busy, -54);
             BEGIN
                 SELECT COUNT(*) INTO v_unique FROM drivine_schema u WHERE u.label = 'Person' AND u.properties = '["name","born"]' AND u.kind = 'UNIQUENESS_CONSTRAINT' AND JSON_VALUE(u.properties, '$.size()' RETURNING NUMBER) = 1 AND EXISTS (SELECT 1 FROM user_indexes q WHERE q.index_name = UPPER(u.object_name));
                 IF v_unique = 0 THEN
-                    EXECUTE IMMEDIATE 'CREATE INDEX IF NOT EXISTS drivine_lx_Personnameborn_3f5a18d3 ON drivine_node n (CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') THEN JSON_VALUE(n.props, ''$.name'') END, CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') THEN JSON_VALUE(n.props, ''$.born'') END)';
+                    FOR attempt IN 1 .. 300 LOOP
+                        BEGIN
+                            EXECUTE IMMEDIATE 'CREATE INDEX IF NOT EXISTS drivine_lx_Personnameborn_3f5a18d3 ON drivine_node n (CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') THEN JSON_VALUE(n.props, ''$.name'') END, CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') THEN JSON_VALUE(n.props, ''$.born'') END)';
+                            EXIT;
+                        EXCEPTION
+                            WHEN e_exists THEN EXIT;
+                            WHEN e_busy THEN
+                                IF attempt = 300 THEN RAISE; END IF;
+                                DBMS_SESSION.SLEEP(0.1);
+                        END;
+                    END LOOP;
                 END IF;
             END;
           - |-
@@ -1857,14 +1969,42 @@ cases:
             $forget$
       oracle:
         create:
-          - "CREATE INDEX IF NOT EXISTS drivine_ix_name_337a8b ON drivine_node (JSON_VALUE(props, '$.name'))"
+          - |-
+            DECLARE
+                e_exists EXCEPTION; PRAGMA EXCEPTION_INIT(e_exists, -955);
+                e_busy EXCEPTION; PRAGMA EXCEPTION_INIT(e_busy, -54);
+            BEGIN
+                FOR attempt IN 1 .. 300 LOOP
+                    BEGIN
+                        EXECUTE IMMEDIATE 'CREATE INDEX IF NOT EXISTS drivine_ix_name_337a8b ON drivine_node (JSON_VALUE(props, ''$.name''))';
+                        EXIT;
+                    EXCEPTION
+                        WHEN e_exists THEN EXIT;
+                        WHEN e_busy THEN
+                            IF attempt = 300 THEN RAISE; END IF;
+                            DBMS_SESSION.SLEEP(0.1);
+                    END;
+                END LOOP;
+            END;
           - |-
             DECLARE
                 v_unique NUMBER;
+                e_exists EXCEPTION; PRAGMA EXCEPTION_INIT(e_exists, -955);
+                e_busy EXCEPTION; PRAGMA EXCEPTION_INIT(e_busy, -54);
             BEGIN
                 SELECT COUNT(*) INTO v_unique FROM drivine_schema u WHERE u.label = 'Person' AND u.properties = '["name"]' AND u.kind = 'UNIQUENESS_CONSTRAINT' AND JSON_VALUE(u.properties, '$.size()' RETURNING NUMBER) = 1 AND EXISTS (SELECT 1 FROM user_indexes q WHERE q.index_name = UPPER(u.object_name));
                 IF v_unique = 0 THEN
-                    EXECUTE IMMEDIATE 'CREATE INDEX IF NOT EXISTS drivine_lx_Personname_44ce5436 ON drivine_node n (CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') THEN JSON_VALUE(n.props, ''$.name'') END)';
+                    FOR attempt IN 1 .. 300 LOOP
+                        BEGIN
+                            EXECUTE IMMEDIATE 'CREATE INDEX IF NOT EXISTS drivine_lx_Personname_44ce5436 ON drivine_node n (CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') THEN JSON_VALUE(n.props, ''$.name'') END)';
+                            EXIT;
+                        EXCEPTION
+                            WHEN e_exists THEN EXIT;
+                            WHEN e_busy THEN
+                                IF attempt = 300 THEN RAISE; END IF;
+                                DBMS_SESSION.SLEEP(0.1);
+                        END;
+                    END LOOP;
                 END IF;
             END;
           - |-
@@ -1944,14 +2084,42 @@ cases:
             $forget$
       oracle:
         create:
-          - "CREATE INDEX IF NOT EXISTS drivine_ix_drivineloweremail_7ae8b9e6 ON drivine_node (JSON_VALUE(props, '$.\"__drivine.lower.email\"'))"
+          - |-
+            DECLARE
+                e_exists EXCEPTION; PRAGMA EXCEPTION_INIT(e_exists, -955);
+                e_busy EXCEPTION; PRAGMA EXCEPTION_INIT(e_busy, -54);
+            BEGIN
+                FOR attempt IN 1 .. 300 LOOP
+                    BEGIN
+                        EXECUTE IMMEDIATE 'CREATE INDEX IF NOT EXISTS drivine_ix_drivineloweremail_7ae8b9e6 ON drivine_node (JSON_VALUE(props, ''$."__drivine.lower.email"''))';
+                        EXIT;
+                    EXCEPTION
+                        WHEN e_exists THEN EXIT;
+                        WHEN e_busy THEN
+                            IF attempt = 300 THEN RAISE; END IF;
+                            DBMS_SESSION.SLEEP(0.1);
+                    END;
+                END LOOP;
+            END;
           - |-
             DECLARE
                 v_unique NUMBER;
+                e_exists EXCEPTION; PRAGMA EXCEPTION_INIT(e_exists, -955);
+                e_busy EXCEPTION; PRAGMA EXCEPTION_INIT(e_busy, -54);
             BEGIN
                 SELECT COUNT(*) INTO v_unique FROM drivine_schema u WHERE u.label = 'Person' AND u.properties = '["__drivine.lower.email"]' AND u.kind = 'UNIQUENESS_CONSTRAINT' AND JSON_VALUE(u.properties, '$.size()' RETURNING NUMBER) = 1 AND EXISTS (SELECT 1 FROM user_indexes q WHERE q.index_name = UPPER(u.object_name));
                 IF v_unique = 0 THEN
-                    EXECUTE IMMEDIATE 'CREATE INDEX IF NOT EXISTS drivine_lx_Persondrivineloweremail_b3ad0b9b ON drivine_node n (CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') THEN JSON_VALUE(n.props, ''$."__drivine.lower.email"'') END)';
+                    FOR attempt IN 1 .. 300 LOOP
+                        BEGIN
+                            EXECUTE IMMEDIATE 'CREATE INDEX IF NOT EXISTS drivine_lx_Persondrivineloweremail_b3ad0b9b ON drivine_node n (CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') THEN JSON_VALUE(n.props, ''$."__drivine.lower.email"'') END)';
+                            EXIT;
+                        EXCEPTION
+                            WHEN e_exists THEN EXIT;
+                            WHEN e_busy THEN
+                                IF attempt = 300 THEN RAISE; END IF;
+                                DBMS_SESSION.SLEEP(0.1);
+                        END;
+                    END LOOP;
                 END IF;
             END;
           - |-
@@ -2048,7 +2216,23 @@ cases:
             $forget$
       oracle:
         create:
-          - "CREATE INDEX IF NOT EXISTS drivine_ix_email_5c24b9c ON drivine_node (JSON_VALUE(props, '$.email'))"
+          - |-
+            DECLARE
+                e_exists EXCEPTION; PRAGMA EXCEPTION_INIT(e_exists, -955);
+                e_busy EXCEPTION; PRAGMA EXCEPTION_INIT(e_busy, -54);
+            BEGIN
+                FOR attempt IN 1 .. 300 LOOP
+                    BEGIN
+                        EXECUTE IMMEDIATE 'CREATE INDEX IF NOT EXISTS drivine_ix_email_5c24b9c ON drivine_node (JSON_VALUE(props, ''$.email''))';
+                        EXIT;
+                    EXCEPTION
+                        WHEN e_exists THEN EXIT;
+                        WHEN e_busy THEN
+                            IF attempt = 300 THEN RAISE; END IF;
+                            DBMS_SESSION.SLEEP(0.1);
+                    END;
+                END LOOP;
+            END;
           - |-
             BEGIN
                 MERGE INTO drivine_schema c
@@ -2060,7 +2244,23 @@ cases:
                 -- Another process recorded it between the MERGE's read and its insert: it is recorded.
                 NULL;
             END;
-          - "CREATE UNIQUE INDEX IF NOT EXISTS drivine_uq_Personemail_5482a751 ON drivine_node n (CASE WHEN JSON_EXISTS(n.labels, '$[*]?(@ == \"Person\")') AND JSON_EXISTS(n.props, '$.email') THEN JSON_VALUE(n.props, '$.email') END)"
+          - |-
+            DECLARE
+                e_exists EXCEPTION; PRAGMA EXCEPTION_INIT(e_exists, -955);
+                e_busy EXCEPTION; PRAGMA EXCEPTION_INIT(e_busy, -54);
+            BEGIN
+                FOR attempt IN 1 .. 300 LOOP
+                    BEGIN
+                        EXECUTE IMMEDIATE 'CREATE UNIQUE INDEX IF NOT EXISTS drivine_uq_Personemail_5482a751 ON drivine_node n (CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') AND JSON_EXISTS(n.props, ''$.email'') THEN JSON_VALUE(n.props, ''$.email'') END)';
+                        EXIT;
+                    EXCEPTION
+                        WHEN e_exists THEN EXIT;
+                        WHEN e_busy THEN
+                            IF attempt = 300 THEN RAISE; END IF;
+                            DBMS_SESSION.SLEEP(0.1);
+                    END;
+                END LOOP;
+            END;
           - |-
             DECLARE
                 v_labelled VARCHAR2(128);
@@ -2173,14 +2373,42 @@ cases:
             $forget$
       oracle:
         create:
-          - "CREATE INDEX IF NOT EXISTS drivine_ix_firstlast_f12bede6 ON drivine_node (JSON_VALUE(props, '$.first'), JSON_VALUE(props, '$.last'))"
+          - |-
+            DECLARE
+                e_exists EXCEPTION; PRAGMA EXCEPTION_INIT(e_exists, -955);
+                e_busy EXCEPTION; PRAGMA EXCEPTION_INIT(e_busy, -54);
+            BEGIN
+                FOR attempt IN 1 .. 300 LOOP
+                    BEGIN
+                        EXECUTE IMMEDIATE 'CREATE INDEX IF NOT EXISTS drivine_ix_firstlast_f12bede6 ON drivine_node (JSON_VALUE(props, ''$.first''), JSON_VALUE(props, ''$.last''))';
+                        EXIT;
+                    EXCEPTION
+                        WHEN e_exists THEN EXIT;
+                        WHEN e_busy THEN
+                            IF attempt = 300 THEN RAISE; END IF;
+                            DBMS_SESSION.SLEEP(0.1);
+                    END;
+                END LOOP;
+            END;
           - |-
             DECLARE
                 v_unique NUMBER;
+                e_exists EXCEPTION; PRAGMA EXCEPTION_INIT(e_exists, -955);
+                e_busy EXCEPTION; PRAGMA EXCEPTION_INIT(e_busy, -54);
             BEGIN
                 SELECT COUNT(*) INTO v_unique FROM drivine_schema u WHERE u.label = 'Person' AND u.properties = '["first","last"]' AND u.kind = 'UNIQUENESS_CONSTRAINT' AND JSON_VALUE(u.properties, '$.size()' RETURNING NUMBER) = 1 AND EXISTS (SELECT 1 FROM user_indexes q WHERE q.index_name = UPPER(u.object_name));
                 IF v_unique = 0 THEN
-                    EXECUTE IMMEDIATE 'CREATE INDEX IF NOT EXISTS drivine_lx_Personfirstlast_58499b51 ON drivine_node n (CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') THEN JSON_VALUE(n.props, ''$.first'') END, CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') THEN JSON_VALUE(n.props, ''$.last'') END)';
+                    FOR attempt IN 1 .. 300 LOOP
+                        BEGIN
+                            EXECUTE IMMEDIATE 'CREATE INDEX IF NOT EXISTS drivine_lx_Personfirstlast_58499b51 ON drivine_node n (CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') THEN JSON_VALUE(n.props, ''$.first'') END, CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') THEN JSON_VALUE(n.props, ''$.last'') END)';
+                            EXIT;
+                        EXCEPTION
+                            WHEN e_exists THEN EXIT;
+                            WHEN e_busy THEN
+                                IF attempt = 300 THEN RAISE; END IF;
+                                DBMS_SESSION.SLEEP(0.1);
+                        END;
+                    END LOOP;
                 END IF;
             END;
           - |-
@@ -2195,7 +2423,23 @@ cases:
                 -- Another process recorded it between the MERGE's read and its insert: it is recorded.
                 NULL;
             END;
-          - "CREATE UNIQUE INDEX IF NOT EXISTS drivine_uq_Personfirstlast_58499b51 ON drivine_node n (CASE WHEN JSON_EXISTS(n.labels, '$[*]?(@ == \"Person\")') AND JSON_EXISTS(n.props, '$.first') AND JSON_EXISTS(n.props, '$.last') THEN JSON_VALUE(n.props, '$.first') END, CASE WHEN JSON_EXISTS(n.labels, '$[*]?(@ == \"Person\")') AND JSON_EXISTS(n.props, '$.first') AND JSON_EXISTS(n.props, '$.last') THEN JSON_VALUE(n.props, '$.last') END)"
+          - |-
+            DECLARE
+                e_exists EXCEPTION; PRAGMA EXCEPTION_INIT(e_exists, -955);
+                e_busy EXCEPTION; PRAGMA EXCEPTION_INIT(e_busy, -54);
+            BEGIN
+                FOR attempt IN 1 .. 300 LOOP
+                    BEGIN
+                        EXECUTE IMMEDIATE 'CREATE UNIQUE INDEX IF NOT EXISTS drivine_uq_Personfirstlast_58499b51 ON drivine_node n (CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') AND JSON_EXISTS(n.props, ''$.first'') AND JSON_EXISTS(n.props, ''$.last'') THEN JSON_VALUE(n.props, ''$.first'') END, CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') AND JSON_EXISTS(n.props, ''$.first'') AND JSON_EXISTS(n.props, ''$.last'') THEN JSON_VALUE(n.props, ''$.last'') END)';
+                        EXIT;
+                    EXCEPTION
+                        WHEN e_exists THEN EXIT;
+                        WHEN e_busy THEN
+                            IF attempt = 300 THEN RAISE; END IF;
+                            DBMS_SESSION.SLEEP(0.1);
+                    END;
+                END LOOP;
+            END;
           - |-
             BEGIN
                 MERGE INTO drivine_schema c
@@ -2311,7 +2555,23 @@ cases:
             $forget$
       oracle:
         create:
-          - "CREATE INDEX IF NOT EXISTS drivine_ix_drivineloweremail_7ae8b9e6 ON drivine_node (JSON_VALUE(props, '$.\"__drivine.lower.email\"'))"
+          - |-
+            DECLARE
+                e_exists EXCEPTION; PRAGMA EXCEPTION_INIT(e_exists, -955);
+                e_busy EXCEPTION; PRAGMA EXCEPTION_INIT(e_busy, -54);
+            BEGIN
+                FOR attempt IN 1 .. 300 LOOP
+                    BEGIN
+                        EXECUTE IMMEDIATE 'CREATE INDEX IF NOT EXISTS drivine_ix_drivineloweremail_7ae8b9e6 ON drivine_node (JSON_VALUE(props, ''$."__drivine.lower.email"''))';
+                        EXIT;
+                    EXCEPTION
+                        WHEN e_exists THEN EXIT;
+                        WHEN e_busy THEN
+                            IF attempt = 300 THEN RAISE; END IF;
+                            DBMS_SESSION.SLEEP(0.1);
+                    END;
+                END LOOP;
+            END;
           - |-
             BEGIN
                 MERGE INTO drivine_schema c
@@ -2323,7 +2583,23 @@ cases:
                 -- Another process recorded it between the MERGE's read and its insert: it is recorded.
                 NULL;
             END;
-          - "CREATE UNIQUE INDEX IF NOT EXISTS drivine_uq_Persondrivineloweremail_b3ad0b9b ON drivine_node n (CASE WHEN JSON_EXISTS(n.labels, '$[*]?(@ == \"Person\")') AND JSON_EXISTS(n.props, '$.\"__drivine.lower.email\"') THEN JSON_VALUE(n.props, '$.\"__drivine.lower.email\"') END)"
+          - |-
+            DECLARE
+                e_exists EXCEPTION; PRAGMA EXCEPTION_INIT(e_exists, -955);
+                e_busy EXCEPTION; PRAGMA EXCEPTION_INIT(e_busy, -54);
+            BEGIN
+                FOR attempt IN 1 .. 300 LOOP
+                    BEGIN
+                        EXECUTE IMMEDIATE 'CREATE UNIQUE INDEX IF NOT EXISTS drivine_uq_Persondrivineloweremail_b3ad0b9b ON drivine_node n (CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') AND JSON_EXISTS(n.props, ''$."__drivine.lower.email"'') THEN JSON_VALUE(n.props, ''$."__drivine.lower.email"'') END)';
+                        EXIT;
+                    EXCEPTION
+                        WHEN e_exists THEN EXIT;
+                        WHEN e_busy THEN
+                            IF attempt = 300 THEN RAISE; END IF;
+                            DBMS_SESSION.SLEEP(0.1);
+                    END;
+                END LOOP;
+            END;
           - |-
             DECLARE
                 v_labelled VARCHAR2(128);
@@ -3216,14 +3492,42 @@ cases:
             $forget$
       oracle:
         create:
-          - "CREATE INDEX IF NOT EXISTS drivine_ix_name_337a8b ON drivine_node (JSON_VALUE(props, '$.name'))"
+          - |-
+            DECLARE
+                e_exists EXCEPTION; PRAGMA EXCEPTION_INIT(e_exists, -955);
+                e_busy EXCEPTION; PRAGMA EXCEPTION_INIT(e_busy, -54);
+            BEGIN
+                FOR attempt IN 1 .. 300 LOOP
+                    BEGIN
+                        EXECUTE IMMEDIATE 'CREATE INDEX IF NOT EXISTS drivine_ix_name_337a8b ON drivine_node (JSON_VALUE(props, ''$.name''))';
+                        EXIT;
+                    EXCEPTION
+                        WHEN e_exists THEN EXIT;
+                        WHEN e_busy THEN
+                            IF attempt = 300 THEN RAISE; END IF;
+                            DBMS_SESSION.SLEEP(0.1);
+                    END;
+                END LOOP;
+            END;
           - |-
             DECLARE
                 v_unique NUMBER;
+                e_exists EXCEPTION; PRAGMA EXCEPTION_INIT(e_exists, -955);
+                e_busy EXCEPTION; PRAGMA EXCEPTION_INIT(e_busy, -54);
             BEGIN
                 SELECT COUNT(*) INTO v_unique FROM drivine_schema u WHERE u.label = 'Per"son' AND u.properties = '["name"]' AND u.kind = 'UNIQUENESS_CONSTRAINT' AND JSON_VALUE(u.properties, '$.size()' RETURNING NUMBER) = 1 AND EXISTS (SELECT 1 FROM user_indexes q WHERE q.index_name = UPPER(u.object_name));
                 IF v_unique = 0 THEN
-                    EXECUTE IMMEDIATE 'CREATE INDEX IF NOT EXISTS drivine_lx_Personname_f56cb9fe ON drivine_node n (CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Per\"son")'') THEN JSON_VALUE(n.props, ''$.name'') END)';
+                    FOR attempt IN 1 .. 300 LOOP
+                        BEGIN
+                            EXECUTE IMMEDIATE 'CREATE INDEX IF NOT EXISTS drivine_lx_Personname_f56cb9fe ON drivine_node n (CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Per\"son")'') THEN JSON_VALUE(n.props, ''$.name'') END)';
+                            EXIT;
+                        EXCEPTION
+                            WHEN e_exists THEN EXIT;
+                            WHEN e_busy THEN
+                                IF attempt = 300 THEN RAISE; END IF;
+                                DBMS_SESSION.SLEEP(0.1);
+                        END;
+                    END LOOP;
                 END IF;
             END;
           - |-
@@ -3317,14 +3621,42 @@ cases:
             $forget$
       oracle:
         create:
-          - "CREATE INDEX IF NOT EXISTS drivine_ix_name_337a8b ON drivine_node (JSON_VALUE(props, '$.name'))"
+          - |-
+            DECLARE
+                e_exists EXCEPTION; PRAGMA EXCEPTION_INIT(e_exists, -955);
+                e_busy EXCEPTION; PRAGMA EXCEPTION_INIT(e_busy, -54);
+            BEGIN
+                FOR attempt IN 1 .. 300 LOOP
+                    BEGIN
+                        EXECUTE IMMEDIATE 'CREATE INDEX IF NOT EXISTS drivine_ix_name_337a8b ON drivine_node (JSON_VALUE(props, ''$.name''))';
+                        EXIT;
+                    EXCEPTION
+                        WHEN e_exists THEN EXIT;
+                        WHEN e_busy THEN
+                            IF attempt = 300 THEN RAISE; END IF;
+                            DBMS_SESSION.SLEEP(0.1);
+                    END;
+                END LOOP;
+            END;
           - |-
             DECLARE
                 v_unique NUMBER;
+                e_exists EXCEPTION; PRAGMA EXCEPTION_INIT(e_exists, -955);
+                e_busy EXCEPTION; PRAGMA EXCEPTION_INIT(e_busy, -54);
             BEGIN
                 SELECT COUNT(*) INTO v_unique FROM drivine_schema u WHERE u.label = 'a b' AND u.properties = '["name"]' AND u.kind = 'UNIQUENESS_CONSTRAINT' AND JSON_VALUE(u.properties, '$.size()' RETURNING NUMBER) = 1 AND EXISTS (SELECT 1 FROM user_indexes q WHERE q.index_name = UPPER(u.object_name));
                 IF v_unique = 0 THEN
-                    EXECUTE IMMEDIATE 'CREATE INDEX IF NOT EXISTS drivine_lx_abname_a087d008 ON drivine_node n (CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "a b")'') THEN JSON_VALUE(n.props, ''$.name'') END)';
+                    FOR attempt IN 1 .. 300 LOOP
+                        BEGIN
+                            EXECUTE IMMEDIATE 'CREATE INDEX IF NOT EXISTS drivine_lx_abname_a087d008 ON drivine_node n (CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "a b")'') THEN JSON_VALUE(n.props, ''$.name'') END)';
+                            EXIT;
+                        EXCEPTION
+                            WHEN e_exists THEN EXIT;
+                            WHEN e_busy THEN
+                                IF attempt = 300 THEN RAISE; END IF;
+                                DBMS_SESSION.SLEEP(0.1);
+                        END;
+                    END LOOP;
                 END IF;
             END;
           - |-
@@ -3414,7 +3746,23 @@ cases:
             $forget$
       oracle:
         create:
-          - "CREATE INDEX IF NOT EXISTS drivine_ix_name_337a8b ON drivine_node (JSON_VALUE(props, '$.name'))"
+          - |-
+            DECLARE
+                e_exists EXCEPTION; PRAGMA EXCEPTION_INIT(e_exists, -955);
+                e_busy EXCEPTION; PRAGMA EXCEPTION_INIT(e_busy, -54);
+            BEGIN
+                FOR attempt IN 1 .. 300 LOOP
+                    BEGIN
+                        EXECUTE IMMEDIATE 'CREATE INDEX IF NOT EXISTS drivine_ix_name_337a8b ON drivine_node (JSON_VALUE(props, ''$.name''))';
+                        EXIT;
+                    EXCEPTION
+                        WHEN e_exists THEN EXIT;
+                        WHEN e_busy THEN
+                            IF attempt = 300 THEN RAISE; END IF;
+                            DBMS_SESSION.SLEEP(0.1);
+                    END;
+                END LOOP;
+            END;
           - |-
             BEGIN
                 MERGE INTO drivine_schema c
@@ -3426,7 +3774,23 @@ cases:
                 -- Another process recorded it between the MERGE's read and its insert: it is recorded.
                 NULL;
             END;
-          - "CREATE UNIQUE INDEX IF NOT EXISTS drivine_uq_Personname_f56cb9fe ON drivine_node n (CASE WHEN JSON_EXISTS(n.labels, '$[*]?(@ == \"Per\\\"son\")') AND JSON_EXISTS(n.props, '$.name') THEN JSON_VALUE(n.props, '$.name') END)"
+          - |-
+            DECLARE
+                e_exists EXCEPTION; PRAGMA EXCEPTION_INIT(e_exists, -955);
+                e_busy EXCEPTION; PRAGMA EXCEPTION_INIT(e_busy, -54);
+            BEGIN
+                FOR attempt IN 1 .. 300 LOOP
+                    BEGIN
+                        EXECUTE IMMEDIATE 'CREATE UNIQUE INDEX IF NOT EXISTS drivine_uq_Personname_f56cb9fe ON drivine_node n (CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Per\"son")'') AND JSON_EXISTS(n.props, ''$.name'') THEN JSON_VALUE(n.props, ''$.name'') END)';
+                        EXIT;
+                    EXCEPTION
+                        WHEN e_exists THEN EXIT;
+                        WHEN e_busy THEN
+                            IF attempt = 300 THEN RAISE; END IF;
+                            DBMS_SESSION.SLEEP(0.1);
+                    END;
+                END LOOP;
+            END;
           - |-
             DECLARE
                 v_labelled VARCHAR2(128);
@@ -3548,14 +3912,42 @@ cases:
             $forget$
       oracle:
         create:
-          - "CREATE INDEX IF NOT EXISTS drivine_ix_addresscity_d068f25 ON drivine_node (JSON_VALUE(props, '$.\"address.city\"'))"
+          - |-
+            DECLARE
+                e_exists EXCEPTION; PRAGMA EXCEPTION_INIT(e_exists, -955);
+                e_busy EXCEPTION; PRAGMA EXCEPTION_INIT(e_busy, -54);
+            BEGIN
+                FOR attempt IN 1 .. 300 LOOP
+                    BEGIN
+                        EXECUTE IMMEDIATE 'CREATE INDEX IF NOT EXISTS drivine_ix_addresscity_d068f25 ON drivine_node (JSON_VALUE(props, ''$."address.city"''))';
+                        EXIT;
+                    EXCEPTION
+                        WHEN e_exists THEN EXIT;
+                        WHEN e_busy THEN
+                            IF attempt = 300 THEN RAISE; END IF;
+                            DBMS_SESSION.SLEEP(0.1);
+                    END;
+                END LOOP;
+            END;
           - |-
             DECLARE
                 v_unique NUMBER;
+                e_exists EXCEPTION; PRAGMA EXCEPTION_INIT(e_exists, -955);
+                e_busy EXCEPTION; PRAGMA EXCEPTION_INIT(e_busy, -54);
             BEGIN
                 SELECT COUNT(*) INTO v_unique FROM drivine_schema u WHERE u.label = 'Person' AND u.properties = '["address.city"]' AND u.kind = 'UNIQUENESS_CONSTRAINT' AND JSON_VALUE(u.properties, '$.size()' RETURNING NUMBER) = 1 AND EXISTS (SELECT 1 FROM user_indexes q WHERE q.index_name = UPPER(u.object_name));
                 IF v_unique = 0 THEN
-                    EXECUTE IMMEDIATE 'CREATE INDEX IF NOT EXISTS drivine_lx_Personaddresscity_236e8dd0 ON drivine_node n (CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') THEN JSON_VALUE(n.props, ''$."address.city"'') END)';
+                    FOR attempt IN 1 .. 300 LOOP
+                        BEGIN
+                            EXECUTE IMMEDIATE 'CREATE INDEX IF NOT EXISTS drivine_lx_Personaddresscity_236e8dd0 ON drivine_node n (CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') THEN JSON_VALUE(n.props, ''$."address.city"'') END)';
+                            EXIT;
+                        EXCEPTION
+                            WHEN e_exists THEN EXIT;
+                            WHEN e_busy THEN
+                                IF attempt = 300 THEN RAISE; END IF;
+                                DBMS_SESSION.SLEEP(0.1);
+                        END;
+                    END LOOP;
                 END IF;
             END;
           - |-
@@ -3649,14 +4041,42 @@ cases:
             $forget$
       oracle:
         create:
-          - "CREATE INDEX IF NOT EXISTS drivine_ix_oname_bfc2fc23 ON drivine_node (JSON_VALUE(props, '$.\"o''name\"'))"
+          - |-
+            DECLARE
+                e_exists EXCEPTION; PRAGMA EXCEPTION_INIT(e_exists, -955);
+                e_busy EXCEPTION; PRAGMA EXCEPTION_INIT(e_busy, -54);
+            BEGIN
+                FOR attempt IN 1 .. 300 LOOP
+                    BEGIN
+                        EXECUTE IMMEDIATE 'CREATE INDEX IF NOT EXISTS drivine_ix_oname_bfc2fc23 ON drivine_node (JSON_VALUE(props, ''$."o''''name"''))';
+                        EXIT;
+                    EXCEPTION
+                        WHEN e_exists THEN EXIT;
+                        WHEN e_busy THEN
+                            IF attempt = 300 THEN RAISE; END IF;
+                            DBMS_SESSION.SLEEP(0.1);
+                    END;
+                END LOOP;
+            END;
           - |-
             DECLARE
                 v_unique NUMBER;
+                e_exists EXCEPTION; PRAGMA EXCEPTION_INIT(e_exists, -955);
+                e_busy EXCEPTION; PRAGMA EXCEPTION_INIT(e_busy, -54);
             BEGIN
                 SELECT COUNT(*) INTO v_unique FROM drivine_schema u WHERE u.label = 'Person' AND u.properties = '["o''name"]' AND u.kind = 'UNIQUENESS_CONSTRAINT' AND JSON_VALUE(u.properties, '$.size()' RETURNING NUMBER) = 1 AND EXISTS (SELECT 1 FROM user_indexes q WHERE q.index_name = UPPER(u.object_name));
                 IF v_unique = 0 THEN
-                    EXECUTE IMMEDIATE 'CREATE INDEX IF NOT EXISTS drivine_lx_Persononame_490e170e ON drivine_node n (CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') THEN JSON_VALUE(n.props, ''$."o''''name"'') END)';
+                    FOR attempt IN 1 .. 300 LOOP
+                        BEGIN
+                            EXECUTE IMMEDIATE 'CREATE INDEX IF NOT EXISTS drivine_lx_Persononame_490e170e ON drivine_node n (CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') THEN JSON_VALUE(n.props, ''$."o''''name"'') END)';
+                            EXIT;
+                        EXCEPTION
+                            WHEN e_exists THEN EXIT;
+                            WHEN e_busy THEN
+                                IF attempt = 300 THEN RAISE; END IF;
+                                DBMS_SESSION.SLEEP(0.1);
+                        END;
+                    END LOOP;
                 END IF;
             END;
           - |-
@@ -3750,7 +4170,23 @@ cases:
             $forget$
       oracle:
         create:
-          - "CREATE INDEX IF NOT EXISTS drivine_ix_sayhi_c9cbc4d8 ON drivine_node (JSON_VALUE(props, '$.\"say\\\"hi\"'))"
+          - |-
+            DECLARE
+                e_exists EXCEPTION; PRAGMA EXCEPTION_INIT(e_exists, -955);
+                e_busy EXCEPTION; PRAGMA EXCEPTION_INIT(e_busy, -54);
+            BEGIN
+                FOR attempt IN 1 .. 300 LOOP
+                    BEGIN
+                        EXECUTE IMMEDIATE 'CREATE INDEX IF NOT EXISTS drivine_ix_sayhi_c9cbc4d8 ON drivine_node (JSON_VALUE(props, ''$."say\"hi"''))';
+                        EXIT;
+                    EXCEPTION
+                        WHEN e_exists THEN EXIT;
+                        WHEN e_busy THEN
+                            IF attempt = 300 THEN RAISE; END IF;
+                            DBMS_SESSION.SLEEP(0.1);
+                    END;
+                END LOOP;
+            END;
           - |-
             BEGIN
                 MERGE INTO drivine_schema c
@@ -3762,7 +4198,23 @@ cases:
                 -- Another process recorded it between the MERGE's read and its insert: it is recorded.
                 NULL;
             END;
-          - "CREATE UNIQUE INDEX IF NOT EXISTS drivine_uq_Personsayhi_5316dfc3 ON drivine_node n (CASE WHEN JSON_EXISTS(n.labels, '$[*]?(@ == \"Person\")') AND JSON_EXISTS(n.props, '$.\"say\\\"hi\"') THEN JSON_VALUE(n.props, '$.\"say\\\"hi\"') END)"
+          - |-
+            DECLARE
+                e_exists EXCEPTION; PRAGMA EXCEPTION_INIT(e_exists, -955);
+                e_busy EXCEPTION; PRAGMA EXCEPTION_INIT(e_busy, -54);
+            BEGIN
+                FOR attempt IN 1 .. 300 LOOP
+                    BEGIN
+                        EXECUTE IMMEDIATE 'CREATE UNIQUE INDEX IF NOT EXISTS drivine_uq_Personsayhi_5316dfc3 ON drivine_node n (CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') AND JSON_EXISTS(n.props, ''$."say\"hi"'') THEN JSON_VALUE(n.props, ''$."say\"hi"'') END)';
+                        EXIT;
+                    EXCEPTION
+                        WHEN e_exists THEN EXIT;
+                        WHEN e_busy THEN
+                            IF attempt = 300 THEN RAISE; END IF;
+                            DBMS_SESSION.SLEEP(0.1);
+                    END;
+                END LOOP;
+            END;
           - |-
             DECLARE
                 v_labelled VARCHAR2(128);

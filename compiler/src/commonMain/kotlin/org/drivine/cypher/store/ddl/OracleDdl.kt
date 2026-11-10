@@ -168,6 +168,41 @@ ${made.entries.joinToString("\n") { (function, making) ->
     /** [text] as a schema statement. */
     private fun statement(text: String): String = text.trimIndent()
 
+    /**
+     * The PL/SQL that runs [ddl], an index over the node table, again a tenth of a second after another session's lock
+     * turns it away (`ORA-00054`), for up to [BUSY_ATTEMPTS] tries, as [ensuring] runs its statements
+     * (liberation-data/drivine4j#517). Oracle's DDL does not wait for a lock: managers starting together each make the
+     * store's key constraint, and one whose statement met another's build over the node table, or a write of its stamp,
+     * was turned away at once, and went on without the constraint where it then looked before the other's build was done.
+     * Waited out, it finds the index the other made. One that another session made in the meantime, after this one's
+     * `IF NOT EXISTS` found none (`ORA-00955`), is taken as made, as [ensuring] takes it. It goes inside a block that
+     * declares [EXISTS] and [BUSY], at the column of the template it is written into, [indent]: each line after the first
+     * is indented to it, so the statement keeps its shape once trimmed, with no line of spaces alone.
+     */
+    private fun waitingOutBusy(ddl: String, indent: Int): String = listOf(
+        "FOR attempt IN 1 .. $BUSY_ATTEMPTS LOOP",
+        "    BEGIN",
+        "        EXECUTE IMMEDIATE ${literal(ddl)};",
+        "        EXIT;",
+        "    EXCEPTION",
+        "        WHEN e_exists THEN EXIT;",
+        "        WHEN e_busy THEN",
+        "            IF attempt = $BUSY_ATTEMPTS THEN RAISE; END IF;",
+        "            DBMS_SESSION.SLEEP(0.1);",
+        "    END;",
+        "END LOOP;",
+    ).joinToString("\n" + " ".repeat(indent))
+
+    /** [ddl], an index over the node table, as a block of its own that waits out another session's lock: see [waitingOutBusy]. */
+    private fun busyWaiting(ddl: String): String = """
+        DECLARE
+            $EXISTS
+            $BUSY
+        BEGIN
+            ${waitingOutBusy(ddl, 12)}
+        END;
+    """
+
     /** [text] as schema statements, after the one that makes the store when it is not there. */
     private fun statements(vararg text: String): List<DdlStatement> = (listOf(ensuring) + text).map { DdlStatement.Text(statement(it)) }
 
@@ -261,7 +296,7 @@ ${made.entries.joinToString("\n") { (function, making) ->
     private fun sharedIndex(spec: RangeIndexSpec): Pair<String, String> {
         val name = objectName("ix", spec.properties)
         val expressions = spec.properties.joinToString(", ") { "JSON_VALUE(props, ${path(it)})" }
-        return name to "CREATE INDEX IF NOT EXISTS $name ON $nodes ($expressions)"
+        return name to busyWaiting("CREATE INDEX IF NOT EXISTS $name ON $nodes ($expressions)")
     }
 
     /**
@@ -283,10 +318,12 @@ ${made.entries.joinToString("\n") { (function, making) ->
             """
             DECLARE
                 v_unique NUMBER;
+                $EXISTS
+                $BUSY
             BEGIN
                 $standing;
                 IF v_unique = 0 THEN
-                    EXECUTE IMMEDIATE ${literal("CREATE INDEX IF NOT EXISTS $labelled ON $nodes n ($scoped)")};
+                    ${waitingOutBusy("CREATE INDEX IF NOT EXISTS $labelled ON $nodes n ($scoped)", 20)}
                 END IF;
             END;
             """,
@@ -394,7 +431,7 @@ ${made.entries.joinToString("\n") { (function, making) ->
             val name = objectName("uq", listOf(spec.label) + spec.properties)
             // A node that lacks any of the properties is not constrained, as on the graph engines.
             val expressions = spec.properties.joinToString(", ") { OracleSql.unique("n", spec.label, spec.properties, it) }
-            val unique = "CREATE UNIQUE INDEX IF NOT EXISTS $name ON $nodes n ($expressions)"
+            val unique = busyWaiting("CREATE UNIQUE INDEX IF NOT EXISTS $name ON $nodes n ($expressions)")
             val range = RangeIndexSpec(spec.label, spec.properties)
             if (spec.properties.size > 1) {
                 statements(*rangeIndex(range).toTypedArray(), unique, recorded(spec, name))
@@ -479,8 +516,17 @@ ${made.entries.joinToString("\n") { (function, making) ->
         /** Oracle names are at most 128 characters. */
         const val MAX_OBJECT_NAME = 128
 
-        /** How many times [ensuring] tries a statement that another session's lock turns away: thirty seconds' worth. */
+        /**
+         * How many times [ensuring], and an index over the node table ([waitingOutBusy]), tries a statement that another
+         * session's lock turns away: thirty seconds' worth.
+         */
         const val BUSY_ATTEMPTS = 300
+
+        /** An exception [waitingOutBusy] catches: another session made the index in the meantime (`ORA-00955`). */
+        private const val EXISTS = "e_exists EXCEPTION; PRAGMA EXCEPTION_INIT(e_exists, -955);"
+
+        /** An exception [waitingOutBusy] catches: another session's lock turned the DDL away (`ORA-00054`). */
+        private const val BUSY = "e_busy EXCEPTION; PRAGMA EXCEPTION_INIT(e_busy, -54);"
 
         /** The keys of a range index's details: the name of its labelled index, or of the uniqueness constraint's index that stands for it. */
         private val RANGE_DETAILS = listOf("labelled", "unique")
