@@ -113,6 +113,9 @@ cases:
       - note: "A node in a pattern's middle pinned by the WHERE alone, where a store may read it from (drivine#680)."
         cypher: "MATCH (a)-[:KNOWS]->(b)-[:ACTED_IN]->(m) WHERE b.name = 'Keanu' RETURN a.name, m.title ORDER BY m.title"
         rows: [["Laurence", "Johnny Mnemonic"], ["Laurence", "The Matrix"], ["Laurence", "The Matrix Reloaded"]]
+      - note: "A node given properties in another of the match's patterns, where a store may read it from (drivine#680)."
+        cypher: "MATCH (a)-[:KNOWS]->(b), (b {name: 'Keanu'}) RETURN a.name"
+        rows: ["Laurence"]
 
   - name: "Distinct relationships in one match"
     description: "Two relationships in one pattern never match the same relationship."

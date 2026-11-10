@@ -90,6 +90,12 @@ class PostgresMatchChainTest {
             "MATCH (a)-[:R]->(b) WHERE id(b) IN [1, 2] RETURN a" to listOf("e3 dst n2 nid", "n1 nid e3 src"),
             "MATCH (a)-[:R]->(b) WHERE b.k = a.k OR b.id = 1 RETURN a" to listOf("n1 nid e3 src", "n2 nid e3 dst"),
             "MATCH (a)-[:R]->(b) WHERE b.k = a.k RETURN a" to listOf("n1 nid e3 src", "n2 nid e3 dst"),
+            // The value on the left, the key by elementId(); and a value in the node's list, which no index finds, pins none.
+            "MATCH (a)-[:R]->(b) WHERE 1 = b.id RETURN a" to listOf("e3 dst n2 nid", "n1 nid e3 src"),
+            "MATCH (a)-[:R]->(b) WHERE elementId(b) = '7' RETURN a" to listOf("e3 dst n2 nid", "n1 nid e3 src"),
+            "MATCH (a)-[:R]->(b) WHERE 1 IN b.ks RETURN a" to listOf("n1 nid e3 src", "n2 nid e3 dst"),
+            // Given properties in another of the match's patterns.
+            "MATCH (a)-[:R]->(b), (b {id: 1}) RETURN a" to listOf("e3 dst n2 nid", "n1 nid e3 src"),
             // A variable given properties where it appears again: the chain starts where it first appears.
             "MATCH (a)-[:R]->(a {id: 1}) RETURN a" to listOf("e2 src n1 nid"),
             "MATCH (a)-[:R]->(b)<-[:S]-(c)-[:T]->(b {id: 1}) RETURN a" to

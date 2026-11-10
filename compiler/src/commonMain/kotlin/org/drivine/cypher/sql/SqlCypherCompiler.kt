@@ -1471,7 +1471,10 @@ abstract class SqlCypherCompiler(
             val seededFirst = match.where?.let(::holdsAnew) == true && (match.optional || shortestWhere != null)
             val (row, seed) = if (seededFirst) seededRows(select) else select to null
             val metByPaths = shortestWhere?.let { if (seed == null) it else seeded(it, seed, madeAnew, inBody = true) }
-            val pinning = where?.let { pinnedBy(it, row.scope) }.orEmpty()
+            // A node given properties in another of its patterns pins it as well: started at its first relationship,
+            // `MATCH (a)-[:R]->(b), (b {id: 1})` read every relationship, and b by its key from each.
+            val pinning = where?.let { pinnedBy(it, row.scope) }.orEmpty() +
+                match.patterns.flatMap { pattern -> pattern.nodes.filter { it.properties != null }.mapNotNull { it.variable } }
             if (!match.optional) {
                 patterns(row, match.patterns, metByPaths, chaining = true, pinnedBy = pinning)
                 return where?.let { filtered(row, it) } ?: row
@@ -1771,7 +1774,7 @@ abstract class SqlCypherCompiler(
          * met by the paths of the last, a shortest path, see [shortest]. With [probingEnds], as a `MERGE` reads its pattern for
          * each row of the loop that writes, each relationship is read by a probe of an end ([endProbe]), not joined by the
          * table's statistics. With [chaining], as a `MATCH` reads its patterns, a pattern of relationships of one hop each is
-         * read as a chain of probes (see [pattern]), which may start at a node of [pinnedBy], those its `WHERE` pins.
+         * read as a chain of probes (see [pattern]), which may start at a node of [pinnedBy], those its `WHERE` pins or another of its patterns gives properties.
          */
         private fun patterns(
             select: Select, patterns: List<Pattern>, shortestWhere: Expression? = null, probingEnds: Boolean = false, chaining: Boolean = false,
