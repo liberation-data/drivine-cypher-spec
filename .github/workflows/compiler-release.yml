@@ -11,11 +11,13 @@
 #   deployment, which releases every target or none. What is published is the bundle that was checked, byte for byte,
 #   with a signature beside each file; nothing is built, and no JDK, Gradle or dependency fetched, after the gate.
 # - The npm package is built and checked in the same job, and kept beside the bundle. Its publish is a job of its own,
-#   also waiting in `release`: it publishes the tarball that was checked, with npm's provenance, and a failure of
-#   either publish neither undoes nor holds up the other.
+#   also waiting in `release`: it publishes the tarball that was checked, with npm's provenance.
 # - The wheels are built and checked in the same job too, then each installed on its own platform and checked against
-#   the JVM's answers (wheels-smoke). Their publish, publish-pypi, waits in `release` as well, for every wheels-smoke,
-#   and publishes the wheels that were checked, each with a PEP 740 attestation, holding up neither other publish.
+#   the JVM's answers (wheels-smoke). Their publish, publish-pypi, waits in `release` as well, and publishes the wheels
+#   that were checked, each with a PEP 740 attestation.
+# - All three publishes wait for every wheels-smoke as well as build, so they wait in `release` at once and one approval
+#   releases them; a wheel that fails its check holds the release back. Once approved, a failure of one publish neither
+#   undoes nor holds up the others.
 # - workflow_dispatch, and a pull request that changes the release machinery, are dry runs: everything but the uploads
 #   to the Portal and to npm, the bundle signed with a throwaway key, with GitHub's release downloads blocked, kept as
 #   the run's artifact, and uploaded to a stand-in for the Portal on the runner, the npm tarball given to npm
@@ -381,8 +383,11 @@ jobs:
   # It waits in the `release` environment, which holds the secrets, for its reviewer's approval. It needs nothing but the
   # bundle, this commit's scripts, and gpg, curl, jq and zip, which the runner has.
   publish:
-    needs: [check, build]
-    if: ${{ !cancelled() && needs.build.result == 'success' && needs.check.outputs.publish == 'true' }}
+    # After wheels-smoke too, as publish-pypi is: the three then wait in `release` at once, and one approval releases
+    # them, where a reviewer was asked twice before (v0.38.0). A wheel that fails its platform's check holds the whole
+    # release back, so none of a release whose Python wheels are broken is published.
+    needs: [check, build, wheels-smoke]
+    if: ${{ !cancelled() && needs.build.result == 'success' && needs.wheels-smoke.result == 'success' && needs.check.outputs.publish == 'true' }}
     runs-on: ubuntu-latest
     environment: release
     # The upload's poll gives up after an hour; the signing takes a minute.
@@ -447,8 +452,11 @@ jobs:
   # `release`, as publish does, but needs neither publish nor its secrets: a failure of one doesn't hold up the other. Re-run for the same tag, it publishes nothing where npm has this tarball already, and
   # fails where npm has another under the version.
   publish-npm:
-    needs: [check, build]
-    if: ${{ !cancelled() && needs.build.result == 'success' && needs.check.outputs.publish == 'true' }}
+    # After wheels-smoke too, as publish-pypi is: the three then wait in `release` at once, and one approval releases
+    # them, where a reviewer was asked twice before (v0.38.0). A wheel that fails its platform's check holds the whole
+    # release back, so none of a release whose Python wheels are broken is published.
+    needs: [check, build, wheels-smoke]
+    if: ${{ !cancelled() && needs.build.result == 'success' && needs.wheels-smoke.result == 'success' && needs.check.outputs.publish == 'true' }}
     runs-on: ubuntu-latest
     environment: release
     timeout-minutes: 15
