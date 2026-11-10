@@ -434,7 +434,8 @@ jobs. A version with a suffix (`-alpha.N`, `-beta.N` or `-rc.N`, the ones PyPI's
 any other tag) is published under the npm tag `next`, and
 any other under `latest`. The three publishes (`publish`, `publish-npm`, `publish-pypi`) each wait for every
 `wheels-smoke` as well as step 2, so they wait in `release` at once and one approval releases them; a wheel that fails
-its check holds the release back. Once approved they don't wait on each other, so a failure of one neither undoes nor
+its check holds the release back. A `wheels-smoke` that failed on its runner rather than its wheel is re-run with its own
+"Re-run this job", which keeps step 2's outputs and runs the three publishes after it. Once approved they don't wait on each other, so a failure of one neither undoes nor
 holds up the others. A re-run publishes nothing where npm has the version as this tarball (by its integrity), and fails where npm
 has another tarball under the version, as npm never takes a version twice. Once Maven Central has the version, a
 failed `publish-npm` is finished with its own "Re-run this job", which keeps step 2's tarball and its outputs, and never
