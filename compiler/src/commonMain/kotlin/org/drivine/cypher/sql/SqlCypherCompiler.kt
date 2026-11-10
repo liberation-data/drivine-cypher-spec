@@ -452,8 +452,8 @@ abstract class SqlCypherCompiler(
     /** A tag of the JSON values [entries], in their order: the store's object of them, as [jsonObject] writes one by default. */
     protected open fun tagObject(entries: List<Pair<String, String>>): String = jsonObject(entries)
 
-    /** A SQL text as a literal. */
-    protected fun textLiteralOf(text: String) = "'${text.replace("'", "''")}'"
+    /** A SQL text as a literal, of the store's type of text. */
+    protected open fun textLiteralOf(text: String) = "'${text.replace("'", "''")}'"
 
     /**
      * The tag of the temporal value of [kind] whose canonical text the SQL [text] gives, worked out as the statement runs: its
@@ -1639,7 +1639,7 @@ abstract class SqlCypherCompiler(
             projected.scope.forEach { (variable, value) ->
                 val returned = value.laterally(name, projected.columns)
                 // A value taken from a write's row is null where an OPTIONAL CALL finds nothing: it is read as the call returns it (#336).
-                select.bind(variable, if (call.optional && returned is Value.Json) returned.copy(rowKeys = null) else returned)
+                select.bind(variable, if (call.optional && returned is Value.Json) returned.copy(rowKeys = null, tagText = null, tagKey = null) else returned)
             }
             projected.order.forEach { (column, descending) -> select.order += lateralColumn(name, column, json = false) to descending }
         }
@@ -4361,7 +4361,7 @@ abstract class SqlCypherCompiler(
                     // open (#370).
                     fun read(kind: Temporal?, temporal: (String, String) -> String) = Value.Json(sharedSum(jsonA, jsonB) { (x, y) ->
                         val value = temporal(x, y)
-                        if (sign > 0) "COALESCE($value, ${add(x, y)})" else value
+                        if (sign > 0) "COALESCE($value, ${addTagged(x, left, y, right, false, false) { p, q -> add(p, q) }})" else value
                     }, temporal = kind)
                     fun v(json: String, side: Int) = known[side]?.let(::tagTextOf) ?: tagText(json)
                     fun isDuration(json: String) = "${tagKind(json)} = '${duration.function}'"
@@ -4428,6 +4428,21 @@ abstract class SqlCypherCompiler(
                 val nulls = open.joinToString(" OR ") { (_, json) -> isJsonNull(json) }
                 "CASE WHEN $nulls THEN NULL WHEN $ofKind THEN $compared${if (equality) " ELSE ${if (operator == "=") "FALSE" else "TRUE"}" else ""} END"
             }
+        }
+
+        /**
+         * [add] of the JSON [x] and [y], the values [left] and [right]: where the statement makes one a temporal value, it is put
+         * together with a text as its text, as Cypher writes it, and added to any other value, a list, as the value it is. [textLeft]
+         * and [textRight] say the statement makes that side a text.
+         */
+        private fun addTagged(x: String, left: Value, y: String, right: Value, textLeft: Boolean, textRight: Boolean, add: (String, String) -> String): String {
+            val (l, r) = listOf(left, right).map { (it as? Value.Json)?.takeIf { value -> value.temporal != null } }
+            if ((l == null) == (r == null)) return add(x, y)
+            val other = if (l != null) y else x
+            val text = scalar(tagTextOf(l ?: r!!))
+            // The temporal side as its text beside a text, else as its tag: one sum of either.
+            val side = if (if (l != null) textRight else textLeft) text else "CASE WHEN ${typeOf(other)} = 'string' THEN $text ELSE ${if (l != null) x else y} END"
+            return if (l != null) add(side, y) else add(x, side)
         }
 
         /** A temporal value of [kind] made by its function of [function]'s [arguments]: the moment, a text, or a map of its fields. */
@@ -4856,7 +4871,8 @@ abstract class SqlCypherCompiler(
                     val (textLeft, textRight) = (isText(left) || givenLeft is String) to (isText(right) || givenRight is String)
                     Value.Json(
                         sharedSum(a, b) { (x, y) ->
-                            add(x, y, (givenLeft ?: MadeText.takeIf { textLeft }) to (givenRight ?: MadeText.takeIf { textRight }))
+                            val given = (givenLeft ?: MadeText.takeIf { textLeft }) to (givenRight ?: MadeText.takeIf { textRight })
+                            addTagged(x, left, y, right, textLeft, textRight) { p, q -> add(p, q, given) }
                         },
                         items = itemsOf(left)?.takeIf { it == itemsOf(right) }, itemItems = itemItemsOf(left)?.takeIf { it == itemItemsOf(right) },
                         temporals = hasTemporals(left) || hasTemporals(right),
@@ -4916,6 +4932,17 @@ abstract class SqlCypherCompiler(
             // A temporal value beside a text: its ISO text would order where Cypher does not.
             if (l?.second == 1 && r == null && holdsTexts(right)) return mappedItems(a, 1, wrapped(l.first)) to b
             if (r?.second == 1 && l == null && holdsTexts(left)) return a to mappedItems(b, 1, wrapped(r.first))
+            // A list whose items the statement doesn't know, read from the store or out of a map, beside one of a kind it does:
+            // each of its items that is a tag of that kind by its sort key, and any other as a map of it alone, not ordered.
+            val known = l ?: r
+            if (known != null && known.second == 1 && known.first != Temporal.DURATION && (l == null) != (r == null)) {
+                val kind = known.first
+                val sorted: (String) -> String = { item -> scalar(tagKey(item)) }
+                val open: (String) -> String = { item ->
+                    shared(item) { (i) -> "CASE WHEN ${tagKind(i)} = '${kind.function}' THEN ${scalar(tagKey(i))} ELSE ${wrapped(kind)(i)} END" }
+                }
+                return if (l == null) mappedItems(a, 1, open) to mappedItems(b, 1, sorted) else mappedItems(a, 1, sorted) to mappedItems(b, 1, open)
+            }
             if (l == null || r == null || l.second != r.second) return a to b
             val (kind, depth) = l
             // A value of a kind with an order as its tag's sort key, which orders two of it as Cypher does.
@@ -6905,7 +6932,8 @@ abstract class SqlCypherCompiler(
         val prefix = "$alias."
         val base = name
         return when (this) {
-            is Value.Json -> copy(sql = "$prefix$base", identity = identity?.let { "$prefix${base}_identity" })
+            // Read from its column: the SQL a tag was made by is the query's before it, not this one's.
+            is Value.Json -> copy(sql = "$prefix$base", identity = identity?.let { "$prefix${base}_identity" }, tagText = null, tagKey = null)
             is Value.Entities -> Value.Entities("$prefix$base", relationships, flat = flat)
             is Value.Bool -> Value.Bool("$prefix$base")
             is Value.Node -> Value.Node("$prefix${base}_nid", "$prefix${base}_labels", "$prefix${base}_props", "$prefix${base}_stamp")
@@ -6928,7 +6956,7 @@ abstract class SqlCypherCompiler(
 
     /** This value with each piece of its SQL [transform]ed. */
     private fun Value.mapSql(transform: (String) -> String): Value = when (this) {
-        is Value.Json -> copy(sql = transform(sql), identity = identity?.let(transform))
+        is Value.Json -> copy(sql = transform(sql), identity = identity?.let(transform), tagText = tagText?.let(transform), tagKey = tagKey?.let(transform))
         is Value.Entities -> copy(ids = transform(ids), gathered = gathered?.let(transform))
         is Value.Bool -> copy(sql = transform(sql))
         is Value.Node -> Value.Node(transform(nid), transform(labels), transform(props), transform(stamp))

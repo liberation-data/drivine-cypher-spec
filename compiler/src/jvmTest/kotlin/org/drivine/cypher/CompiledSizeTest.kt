@@ -454,7 +454,9 @@ class CompiledSizeTest {
         compilers.forEach { compiler ->
             statements.forEach { (over, first) ->
                 val (size, reference) = listOf(over, first).map { compiler.compile(it, emptyMap()).sql.length }
-                assertTrue(size < 120_000 && size < reference * 1.2, "${compiler::class.simpleName}: $over: $size characters, $reference with a WITH first")
+                // Four sums of a stored value and a duration on Oracle are the most, some 132,000 characters: each a tag of the kind
+                // the stored one names, its sort key by the store's function (#161).
+                assertTrue(size < 140_000 && size < reference * 1.2, "${compiler::class.simpleName}: $over: $size characters, $reference with a WITH first")
             }
         }
     }

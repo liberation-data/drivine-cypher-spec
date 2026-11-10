@@ -107,7 +107,7 @@ class Temporals(
                 val day = sub(t, "1", "$p - 1")
                 val time = sub(t, "$p + 1")
                 val local = "CASE WHEN $zulu THEN $len - $p - 1 ELSE $len - $p - 6 END"
-                shared(listOf(int(sub(day, "1", "$p - 7")), int(sub(day, "$p - 5", "2")), int(sub(day, "$p - 2", "2")), "${seconds(time)} - $o")) { (y, m, d, u) ->
+                shared(listOf(int(sub(day, "1", "$p - 7")), int(sub(day, "$p - 5", "2")), int(sub(day, "$p - 2", "2")), "(${seconds(time)} - $o)")) { (y, m, d, u) ->
                     val carry = "CASE WHEN $u < 0 THEN -1 WHEN $u >= 86400 THEN 1 ELSE 0 END"
                     shared(listOf(carry)) { (c) ->
                         fun daysIn(year: String, month: String) = "CASE WHEN $month IN (4, 6, 9, 11) THEN 30 WHEN $month = 2 THEN CASE WHEN ${sql.mod(year, "4")} = 0 AND " +
@@ -117,7 +117,7 @@ class Temporals(
                             "WHEN $c > 0 AND $d = ${daysIn(y, m)} THEN CASE WHEN $m = 12 THEN 1 ELSE $m + 1 END ELSE $m END"
                         val dayOf = "CASE WHEN $c < 0 AND $d = 1 THEN CASE WHEN $m = 1 THEN 31 ELSE ${daysIn(y, "$m - 1")} END " +
                             "WHEN $c > 0 AND $d = ${daysIn(y, m)} THEN 1 ELSE $d + $c END"
-                        val clock = "$u - $c * 86400"
+                        val clock = "($u - $c * 86400)"
                         "${sql.digits("$year + $YEAR_BIAS", 10)} || ${sql.digits(month, 2)} || ${sql.digits(dayOf, 2)} || " +
                             "${sql.digits(sql.div(clock, "3600"), 2)} || ${sql.digits(sql.mod(sql.div(clock, "60"), "60"), 2)} || ${sql.digits(sql.mod(clock, "60"), 2)} || " +
                             "${fraction(time, local)} || ${sql.digits("$o + $OFFSET_BIAS", 6)}"
@@ -387,10 +387,51 @@ class Temporals(
             "epochMillis" -> return Field("${sql.trunc}(${sql.secondsBetween(epoch, sql.utc(text, kind))} * 1000)", text = false)
         }
         if (name !in INSTANT_FIELDS) return null
+        textField(text, kind, name)?.let { return Field(it, text = false) }
         if (name == "year") sql.textYear(text, kind)?.let { return Field(it, text = false) }
         // A field read from the timestamp once is read where it is: bound, a stored date's year was a subquery for each row.
         val local = sql.local(text, kind)
         return Field(if (name in READ_ONCE) clockField(local, name) else shared(listOf(local)) { (t) -> clockField(t, name) }, text = false)
+    }
+
+    /**
+     * The field [name] of the canonical text [text] of [kind] read off the text, where it is one of its date's or its time's
+     * own (the year, the month and the day, the hour, the minute, the second and its fraction): exactly, whatever the year
+     * and to the nanosecond, as no store's timestamp holds either. Null for any other field, which is worked out of the clock.
+     */
+    private fun textField(text: String, kind: Temporal, name: String): String? {
+        val dated = kind == Temporal.DATE || kind == Temporal.LOCAL_DATE_TIME || kind == Temporal.DATE_TIME
+        val timed = kind != Temporal.DATE && kind != Temporal.DURATION
+        fun sub(of: String, from: String, length: String? = null) = "SUBSTR($of, $from${length?.let { ", $it" }.orEmpty()})"
+        fun int(of: String) = sql.integer(of)
+        return when (name) {
+            "year", "month", "day" -> if (!dated) null else shared(listOf(text)) { (t) ->
+                val day = if (kind == Temporal.DATE) t else sub(t, "1", "${sql.position(t, "'T'")} - 1")
+                shared(listOf(day)) { (d) ->
+                    when (name) {
+                        "year" -> int(sub(d, "1", "LENGTH($d) - 6"))
+                        "month" -> int(sub(d, "LENGTH($d) - 4", "2"))
+                        else -> int(sub(d, "LENGTH($d) - 1", "2"))
+                    }
+                }
+            }
+            "hour", "minute", "second", "millisecond", "microsecond", "nanosecond" -> if (!timed) null else shared(listOf(text)) { (t) ->
+                val time = if (dated) sub(t, "${sql.position(t, "'T'")} + 1") else t
+                shared(listOf(time)) { (c) ->
+                    val local = if (kind.zoned) sub(c, "1", "LENGTH($c) - CASE WHEN ${sub(c, "LENGTH($c)", "1")} = 'Z' THEN 1 ELSE 6 END") else c
+                    val nanos = int(sub("${sub(local, "10")} || '000000000'", "1", "9"))
+                    when (name) {
+                        "hour" -> int(sub(c, "1", "2"))
+                        "minute" -> int(sub(c, "4", "2"))
+                        "second" -> int(sub(c, "7", "2"))
+                        "millisecond" -> sql.div(nanos, "1000000")
+                        "microsecond" -> sql.div(nanos, "1000")
+                        else -> nanos
+                    }
+                }
+            }
+            else -> null
+        }
     }
 
     /** The field [name], one of [INSTANT_FIELDS], of the wall clock [t], a number. */

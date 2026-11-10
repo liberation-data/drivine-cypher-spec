@@ -107,13 +107,13 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
             "json_insert($list, ${part.joinToString(", ") { "'$[#]', json($it)" }})"
         }
 
-    /** Past 50 entries, as for [jsonArray], the rest are set over the first 50 by [withEntries]. */
     override fun tagKind(json: String) = "($json ->> '\$.\"\$t\"')"
 
     override fun tagText(json: String) = "($json ->> '\$.v')"
 
     override fun tagKey(json: String) = "($json ->> '\$.s')"
 
+    /** Past 50 entries, as for [jsonArray], the rest are set over the first 50 by [withEntries]. */
     override fun jsonObject(entries: List<Pair<String, String>>) =
         withEntries("json_object(${entries.take(MOST_ARGUMENTS / 2).joinToString(", ") { (key, value) -> "${literal(key)}, json($value)" }})", entries.drop(MOST_ARGUMENTS / 2))
 

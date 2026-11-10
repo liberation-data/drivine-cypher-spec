@@ -114,6 +114,9 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
 
     override fun text(json: String) = shared(json) { (x) -> "CASE WHEN jsonb_typeof($x) = 'string' THEN $x #>> '{}' END" }
 
+    /** Of the type `text`, which a function of any type, `to_jsonb` among them, takes as it takes a text read. */
+    override fun textLiteralOf(text: String) = "CAST(${literal(text)} AS text)"
+
     override fun tagKind(json: String) = "($json ->> '\$t')"
 
     override fun tagText(json: String) = "($json ->> 'v')"

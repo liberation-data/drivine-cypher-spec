@@ -128,8 +128,16 @@ object OracleSql {
      * it does not: the two expressions of the index a range index makes over the nodes of its label (see `OracleDdl`). A
      * comparison with them is met only by a node of the label, so the one index answers both the label and the property.
      */
-    fun labelled(alias: String, label: String, key: String): List<String> =
+    fun labelledIndex(alias: String, label: String, key: String): List<String> =
         listOf(indexClass(props(alias), key), indexKey(props(alias), key)).map { "CASE WHEN ${hasLabel(alias, label)} THEN $it END" }
+
+    /**
+     * The property [key] of the node [alias] read as text where it carries [label], and null where it does not: what a labelled
+     * index held in the store layout 1, which no index of layout 2 holds ([labelledIndex]). drivine4j's own reads of a node by a
+     * property call it until they compare the property's class and key, as the compiler does.
+     */
+    fun labelled(alias: String, label: String, key: String): String =
+        "CASE WHEN ${hasLabel(alias, label)} THEN JSON_VALUE($alias.props, ${path(key)}) END"
 
     /**
      * [indexClass] and [indexKey] of the property [key] of the node [alias], where the node carries [label] and has each of
@@ -137,9 +145,15 @@ object OracleSql {
      * unique index skips a row only where every column is null, so a node without the label or one of the properties is not
      * constrained. Of a constraint over the one property [key], the same values as [labelled] on every node.
      */
-    fun unique(alias: String, label: String, keys: List<String>, key: String): List<String> {
+    fun uniqueIndex(alias: String, label: String, keys: List<String>, key: String): List<String> {
         val constrained = (listOf(hasLabel(alias, label)) + keys.map { "JSON_EXISTS(${props(alias)}, ${path(it)})" }).joinToString(" AND ")
         return listOf(indexClass(props(alias), key), indexKey(props(alias), key)).map { "CASE WHEN $constrained THEN $it END" }
+    }
+
+    /** As [labelled], what a uniqueness constraint's index held in the store layout 1, which no index of layout 2 holds ([uniqueIndex]). */
+    fun unique(alias: String, label: String, keys: List<String>, key: String): String {
+        val constrained = (listOf(hasLabel(alias, label)) + keys.map { "JSON_EXISTS($alias.props, ${path(it)})" }).joinToString(" AND ")
+        return "CASE WHEN $constrained THEN JSON_VALUE($alias.props, ${path(key)}) END"
     }
 
     /**

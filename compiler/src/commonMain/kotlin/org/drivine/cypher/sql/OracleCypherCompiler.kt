@@ -592,7 +592,7 @@ class OracleCypherCompiler(
         return shared(value) { (x) ->
             val held = listOf(OracleSql.valueClass(x), OracleSql.valueKey(x))
             indexed.joinToString(" AND ") { label ->
-                (OracleSql.labelled(alias, label, of.key) + OracleSql.unique(alias, label, listOf(of.key), of.key)).zip(held + held).joinToString(" AND ") { (column, it) -> "$column = $it" }
+                (OracleSql.labelledIndex(alias, label, of.key) + OracleSql.uniqueIndex(alias, label, listOf(of.key), of.key)).zip(held + held).joinToString(" AND ") { (column, it) -> "$column = $it" }
             }
         }
     }
