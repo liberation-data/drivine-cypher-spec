@@ -52,6 +52,16 @@ object SqliteSql {
         if (key == Stamps.PROPERTY) column(alias, "stamp") else propertyText(column(alias, "props"), path(key))
 
     /**
+     * The text a full-text search reads of [alias]: its properties [keys], each as text, a space between them, in lower case
+     * by the library's [SqliteFunctions.LOWER]. A property it does not have is no text.
+     */
+    fun searchedText(alias: String, keys: List<String>): String = "${SqliteFunctions.LOWER}(${joinedText(alias, keys)})"
+
+    /** [searchedText] before it is lowered: what a full-text search measures a text's length by (drivine4j#604). */
+    fun joinedText(alias: String, keys: List<String>): String =
+        keys.joinToString(" || ' ' || ") { "COALESCE(${property(alias, it)}, '')" }
+
+    /**
      * The property [key] of [alias] as a number where one is stored, and null for anything else: what the schema marker is
      * ordered by (`store.marker`), so a marker whose moment is not a number is read as never applied.
      */

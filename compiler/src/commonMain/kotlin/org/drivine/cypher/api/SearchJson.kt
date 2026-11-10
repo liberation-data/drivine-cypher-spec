@@ -15,7 +15,7 @@ import org.drivine.cypher.json.ObjectNode
  * ```
  *
  * `store` is `postgres`, `oracle`, `sqlite`, `neo4j`, `memgraph` or `falkordb`; `graph`, with its `name`, is the SQL stores'.
- * `search` is [SearchRequest]: `labels` (or one `label`), `properties`, `query`, `index` (`{"trigram": …}` on Postgres,
+ * `search` is [SearchRequest]: `labels` (or one `label`, not both), `properties`, `query`, `index` (`{"trigram": …}` on Postgres,
  * `{"oracleText": "<side table>" | null}` on Oracle, `{"name": …}` on Neo4j and Memgraph), and on a graph engine `topK`, and
  * `filtered`, `alias` and `scoreAlias` where they aren't false, `n` and `_score`. The answer is
  * `{"sql": …, "parameters": {…}, "warnings": […]}`, on a graph engine `cypher` in place of `sql`, or `{"refusal": …}`, or
@@ -75,6 +75,7 @@ internal object SearchJson {
     }
 
     private fun request(search: ObjectNode, store: SearchStore): SearchRequest {
+        require(!(search.has("labels") && search.has("label"))) { "A request's search names its labels or its label, not both." }
         val labels = when {
             search.has("labels") -> texts(search, "labels", "search")
             else -> listOf(text(search, "label") ?: throw IllegalArgumentException("A request's search names its labels: \"labels\": […]."))

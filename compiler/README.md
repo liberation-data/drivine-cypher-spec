@@ -138,14 +138,14 @@ FullTextSearch.plan(store, graph, SearchRequest(labels, properties, query, index
      never clash with the library's own; each is written `$_cy_ft<n>` in the statement, as the compiler writes its own.
 
 Over JSON it is the same entry, `CompileJson.compile` (`compile`, `drivine_compile`): a request with `search` in place of
-`cypher` is a search.
+`cypher` is a search, and one that gives more than one of `cypher`, `search` and `searchIndex` is an error.
 
 ```json
 {"store": "postgres", "graph": {"name": "g"},
  "search": {"labels": ["Chunk"], "properties": ["text"], "query": "how do I define an action", "index": {"trigram": true}}}
 ```
 
-`search` holds `labels` (or one `label`), `properties`, `query`, `index` (`{"trigram": …}`, `{"oracleText": "<side table>" |
+`search` holds `labels` (or one `label`, not both), `properties`, `query`, `index` (`{"trigram": …}`, `{"oracleText": "<side table>" |
 null}` or `{"name": …}`, left out where there's none), and on a graph engine `topK`, and `filtered`, `alias` and
 `scoreAlias` where they aren't false, `n` and `_score`. `graph` is the SQL stores' alone. The answer is
 `{"sql": …, "parameters": {…}, "warnings": […]}`, with `cypher` in place of `sql` on a graph engine, or `{"refusal": …}`, or

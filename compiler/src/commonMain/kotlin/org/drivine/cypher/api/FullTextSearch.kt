@@ -271,9 +271,8 @@ object FullTextSearch {
     /** Each term is counted by the function [SqliteFunctions.REGEXP_COUNT] the library registers, as Postgres counts it. */
     private fun sqlite(ddl: SqliteDdl, request: SearchRequest, query: TextQuery, scope: SearchParameters): String {
         val keys = request.properties
-        val joined = keys.joinToString(" || ' ' || ") { "COALESCE(${SqliteSql.property("c", it)}, '')" }
-        val text = "${SqliteFunctions.LOWER}($joined)"
-        val len = "length($joined)"
+        val text = SqliteSql.searchedText("c", keys)
+        val len = "length(${SqliteSql.joinedText("c", keys)})"
         val labelled = listOf(request.labels.joinToString(" AND ") { SqliteSql.hasLabel("c", it) })
         return Bm25.ranked(
             Query("c.nid, $text AS text, $len AS len", Table(ddl.nodes, "c"), labelled).text(),
