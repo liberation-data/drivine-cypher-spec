@@ -4167,7 +4167,7 @@ cases:
     steps:
       - operation: {enforce: "all"}
         runs:
-          - stores: ["postgres", "sqlite"]
+          - stores: ["postgres", "oracle", "sqlite"]
             rounds:
               - now: 1000000
                 actions:
@@ -4188,39 +4188,6 @@ cases:
                   - {fillLowerCopies: {label: "Person", properties: ["email"]}}
                   - {execute: {create: "Uniqueness constraint that ignores case"}}
                   - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["__drivine.lower.email"], name: "Person_email_ci_unique"}]}
-              - now: 1000000
-                actions:
-                  - {writeMarker: {scope: "schema", version: null, items: "RANGE_INDEX:Person:__drivine.lower.email:Person_email_ci_range\nUNIQUENESS_CONSTRAINT:Person:__drivine.lower.email:Person_email_ci_unique"}}
-            done: 1000000
-            report:
-              owners:
-                - {owner: null, results: [{spec: "Range index that ignores case", created: {kind: "RANGE_INDEX", label: "Person", properties: ["__drivine.lower.email"], name: "Person_email_ci_range"}}, {spec: "Uniqueness constraint that ignores case", created: {kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["__drivine.lower.email"], name: "Person_email_ci_unique"}}], marker: {version: null, items: "RANGE_INDEX:Person:__drivine.lower.email:Person_email_ci_range\nUNIQUENESS_CONSTRAINT:Person:__drivine.lower.email:Person_email_ci_unique"}}
-              log:
-                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 2 items (forceRecreate=false, versionChanged=false, version=null)"]
-                - ["INFO", "IndexManager", "Created {engine} RANGE_INDEX on Person[__drivine.lower.email]"]
-                - ["INFO", "ConstraintManager", "Created {engine} UNIQUENESS_CONSTRAINT on Person[__drivine.lower.email]"]
-                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 2 created, 0 already matching, 0 recreated, 0 needing attention"]
-          - stores: ["oracle"]
-            rounds:
-              - now: 1000000
-                actions:
-                  - {execute: {marker: "prepare"}}
-                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
-                  - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
-                  - {query: {listing: "constraints"}, items: []}
-              - now: 1000000
-                actions:
-                  - {fillLowerCopies: {label: "Person", properties: ["email"]}}
-                  - {execute: {create: "Range index that ignores case"}}
-                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["__drivine.lower.email"], name: "Person_email_ci_range"}]}
-              - now: 1000000
-                actions:
-                  - {query: {listing: "constraints"}, items: []}
-              - now: 1000000
-                actions:
-                  - {fillLowerCopies: {label: "Person", properties: ["email"]}}
-                  - {execute: {create: "Uniqueness constraint that ignores case"}}
-                  - {query: {listing: "constraints"}, items: []}
               - now: 1000000
                 actions:
                   - {writeMarker: {scope: "schema", version: null, items: "RANGE_INDEX:Person:__drivine.lower.email:Person_email_ci_range\nUNIQUENESS_CONSTRAINT:Person:__drivine.lower.email:Person_email_ci_unique"}}
@@ -4266,26 +4233,23 @@ cases:
                   - {execute: {marker: "prepare"}}
                   - {query: {marker: "read.items", scope: "schema"}, rows: ["items:RANGE_INDEX:Person:__drivine.lower.email:Person_email_ci_range\nUNIQUENESS_CONSTRAINT:Person:__drivine.lower.email:Person_email_ci_unique"]}
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["__drivine.lower.email"], name: "Person_email_ci_range"}]}
-                  - {query: {listing: "constraints"}, items: []}
+                  - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["__drivine.lower.email"], name: "Person_email_ci_unique"}]}
               - now: 1000000
                 actions:
                   - {readLowerCopies: {label: "Person", properties: ["email"]}, rows: [["Person", "email"]]}
               - now: 1000000
                 actions:
-                  - {fillLowerCopies: {label: "Person", properties: ["email"]}}
-                  - {execute: {create: "Uniqueness constraint that ignores case"}}
-                  - {query: {listing: "constraints"}, items: []}
+                  - {readLowerCopies: {label: "Person", properties: ["email"]}, rows: [["Person", "email"]]}
               - now: 1000000
                 actions:
                   - {writeMarker: {scope: "schema", version: null, items: "RANGE_INDEX:Person:__drivine.lower.email:Person_email_ci_range\nUNIQUENESS_CONSTRAINT:Person:__drivine.lower.email:Person_email_ci_unique"}}
             done: 1000000
             report:
               owners:
-                - {owner: null, results: [{spec: "Range index that ignores case", alreadyMatching: {kind: "RANGE_INDEX", label: "Person", properties: ["__drivine.lower.email"], name: "Person_email_ci_range"}}, {spec: "Uniqueness constraint that ignores case", created: {kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["__drivine.lower.email"], name: "Person_email_ci_unique"}}], marker: {version: null, items: "RANGE_INDEX:Person:__drivine.lower.email:Person_email_ci_range\nUNIQUENESS_CONSTRAINT:Person:__drivine.lower.email:Person_email_ci_unique"}}
+                - {owner: null, results: [{spec: "Range index that ignores case", alreadyMatching: {kind: "RANGE_INDEX", label: "Person", properties: ["__drivine.lower.email"], name: "Person_email_ci_range"}}, {spec: "Uniqueness constraint that ignores case", alreadyMatching: {kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["__drivine.lower.email"], name: "Person_email_ci_unique"}}], marker: {version: null, items: "RANGE_INDEX:Person:__drivine.lower.email:Person_email_ci_range\nUNIQUENESS_CONSTRAINT:Person:__drivine.lower.email:Person_email_ci_unique"}}
               log:
                 - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 2 items (forceRecreate=false, versionChanged=false, version=null)"]
-                - ["INFO", "ConstraintManager", "Created {engine} UNIQUENESS_CONSTRAINT on Person[__drivine.lower.email]"]
-                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 1 created, 1 already matching, 0 recreated, 0 needing attention"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 2 already matching, 0 recreated, 0 needing attention"]
   - case: "29b"
     name: "Ignore-case lower copies, after a listing that fails once"
     description: "The first read of the listing fails, so the copies are filled in again; the index is read again, there, and matches."
