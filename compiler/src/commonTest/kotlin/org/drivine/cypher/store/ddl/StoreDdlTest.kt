@@ -11,6 +11,7 @@ import org.drivine.cypher.json.JsonNode
 import org.drivine.cypher.json.ObjectNode
 import org.drivine.cypher.number.oracleFile
 import org.drivine.cypher.number.target
+import org.drivine.schema.ConstraintSpec
 import org.drivine.schema.FalkorDbVectorOptions
 import org.drivine.schema.FullTextIndexSpec
 import org.drivine.schema.Neo4jVectorOptions
@@ -97,6 +98,11 @@ class StoreDdlTest {
                 assertEquals(expectedOf(expected["drop"]!!), attempt { ddl.drop(named) }, "$name: drop on $id")
                 assertEquals(expectedOf(expected["dropUnnamed"] ?: expected["drop"]!!), attempt { ddl.drop(unnamed) }, "$name: drop unnamed on $id")
                 checked++
+            }
+            // FalkorDB's refusal of a constraint GRAPH.CONSTRAINT can't make, which a library asks before its create.
+            if (made is ConstraintSpec) {
+                val refused = case["stores"]!!["falkordb"]!!["constrainable"]?.let(::refusal) ?: emptyList<Any>()
+                assertEquals(refused, attempt { FalkorDbDdl.requireConstrainable(made); emptyList() }, "$name: constrainable on falkordb")
             }
         }
         assertTrue(checked > 0, "store.yaml has no cases")

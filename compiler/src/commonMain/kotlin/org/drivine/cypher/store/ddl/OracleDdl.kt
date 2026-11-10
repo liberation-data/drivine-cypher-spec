@@ -320,7 +320,7 @@ ${made.entries.joinToString("\n") { (function, making) ->
             side.triggerStatement,
             side.backfill,
             "CREATE VECTOR INDEX IF NOT EXISTS ${side.index} ON ${side.name} (embedding) ORGANIZATION NEIGHBOR PARTITIONS DISTANCE ${OracleSql.metric(spec.similarity)}",
-            recorded(spec, side.name, """{"dimensions": ${spec.dimensions}, "similarity": "${spec.similarity.name}"}"""),
+            recorded(spec, side.name, vectorDetails(spec)),
         )
     }
 
@@ -352,7 +352,7 @@ ${made.entries.joinToString("\n") { (function, making) ->
             },
             indexed = { row -> OracleSql.carriesLabel(row, spec.label) },
         )
-        val details = spec.analyzer?.let { "{\"analyzer\": ${json(listOf(it)).removeSurrounding("[", "]")}}" } ?: "{}"
+        val details = analyzerDetails(spec.analyzer)
         return """
             DECLARE
                 v_indexed NUMBER;
@@ -413,7 +413,7 @@ ${made.entries.joinToString("\n") { (function, making) ->
      * constraint made to find and drop.
      */
     private fun servedBy(spec: RangeIndexSpec, details: String): String {
-        val record = "kind = ${literal(spec.kind.name)} AND label = ${literal(spec.label)} AND properties = ${literal(json(spec.properties))}"
+        val record = recordOf(CatalogItem(spec.kind, spec.label, spec.properties))
         return """
             DECLARE
                 v_labelled VARCHAR2(128);

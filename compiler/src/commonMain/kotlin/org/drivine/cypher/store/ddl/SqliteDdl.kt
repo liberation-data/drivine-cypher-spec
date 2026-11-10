@@ -137,7 +137,7 @@ class SqliteDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
             statements("CREATE INDEX IF NOT EXISTS $name ON ${over(spec.label, spec.properties)}", recorded(spec, name))
         }
         // Recorded and not made: SQLite has no vector index of its own.
-        is VectorIndexSpec -> statements(recorded(spec, null, """{"dimensions": ${spec.dimensions}, "similarity": "${spec.similarity.name}"}"""))
+        is VectorIndexSpec -> statements(recorded(spec, null, vectorDetails(spec)))
         // Recorded and not made yet: a search reads every node of the label.
         is FullTextIndexSpec -> statements(recorded(spec, null, analyzerDetails(spec.analyzer)))
         is TextIndexSpec -> throw unsupportedTextIndex(spec, engine)

@@ -7,6 +7,7 @@ import org.drivine.schema.IndexSpec
 import org.drivine.schema.SchemaItemKind
 import org.drivine.schema.SchemaItemSpec
 import org.drivine.schema.TextIndexSpec
+import org.drivine.schema.VectorIndexSpec
 
 /**
  * A statement that makes, drops or lists part of a store's schema: text the store runs as it runs any statement, or, on
@@ -157,6 +158,9 @@ abstract class SqlStoreDdl(val name: String, final override val engine: String, 
 
     /** A full-text index's details, as its record holds them: its analyzer, where it names one. */
     protected fun analyzerDetails(analyzer: String?): String = analyzer?.let { "{\"analyzer\": ${json(listOf(it)).removeSurrounding("[", "]")}}" } ?: "{}"
+
+    /** A vector index's details, as its record holds them: its size and its similarity. */
+    protected fun vectorDetails(spec: VectorIndexSpec): String = """{"dimensions": ${spec.dimensions}, "similarity": "${spec.similarity.name}"}"""
 
     /** [aliases] as the JSON array a record's details keep them in, written byte for byte the same each time. */
     protected fun aliasesJson(aliases: List<String>): String =

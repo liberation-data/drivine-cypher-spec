@@ -177,7 +177,7 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
                 "CREATE EXTENSION IF NOT EXISTS vector",
                 "CREATE INDEX IF NOT EXISTS $name ON $nodes USING hnsw ((${PostgresSql.embedding("", property, spec.dimensions)}) ${PostgresSql.operators(spec.similarity)}) " +
                     "WHERE ${hasLabel("", spec.label)} AND ${PostgresSql.holdsEmbedding("", property, spec.dimensions)}",
-                recorded(spec, name, """{"dimensions": ${spec.dimensions}, "similarity": "${spec.similarity.name}"}"""),
+                recorded(spec, name, vectorDetails(spec)),
             )
         }
         is FullTextIndexSpec -> {

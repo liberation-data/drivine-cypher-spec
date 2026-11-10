@@ -1361,6 +1361,31 @@ names:
     kind: "uq"
     parts: ["Per\"son", "o'name", "address.city"]
     name: "gxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx_uq__b817300f"
+  - store: "postgres"
+    graph: "gxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    kind: "ix"
+    parts: ["AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "b"]
+    name: "gxxxxxxxxxxxxxxxxxxxxxxxxxxxxx_ix_AAAAAAAAAAAAAAAAAA_3cb33ea2"
+  - store: "oracle"
+    graph: "gxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    kind: "ix"
+    parts: ["Person", "name"]
+    name: "gxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx_ix_Personname_44ce5436"
+  - store: "oracle"
+    graph: "gxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    kind: "ix"
+    parts: ["AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "b"]
+    name: "gxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx_ix_AAAAAAAAAAAAA_3cb33ea2"
+  - store: "oracle"
+    graph: "gxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    kind: "ix"
+    parts: ["Person", "name"]
+    name: "gxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx_ix__44ce5436"
+  - store: "oracle"
+    graph: "gxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    kind: "ix"
+    parts: ["AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "b"]
+    name: "gxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx_ix__3cb33ea2"
 refusals:
   - {store: "postgres", graph: "drivine", refusal: null}
   - {store: "oracle", graph: "drivine", refusal: null}
@@ -1705,6 +1730,104 @@ cases:
       falkordb:
         create: ["CREATE INDEX FOR (n:Person) ON (n.born)"]
         drop: ["DROP INDEX FOR (n:Person) ON (n.name)", "DROP INDEX FOR (n:Person) ON (n.born)"]
+  - name: "Range index over a label FalkorDB indexes whole already"
+    description: "FalkorDB makes nothing where the label's index holds every property; the other stores make the index whole."
+    spec: {kind: "RANGE_INDEX", label: "Person", properties: ["name", "born"]}
+    existing: ["name", "born"]
+    stores:
+      postgres:
+        create:
+          - "CREATE INDEX IF NOT EXISTS drivine_ix_Personnameborn_3f5a18d3 ON drivine_node (((props ->> 'name')), ((props ->> 'born'))) WHERE labels @> '[\"Person\"]'"
+          - |-
+            INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
+            VALUES ('RANGE_INDEX', 'Person', '["name","born"]', 'Person_name_born_range', 'drivine_ix_Personnameborn_3f5a18d3', '{}')
+            ON CONFLICT (kind, label, properties) DO NOTHING
+        drop:
+          - |-
+            DO $forget$
+            DECLARE
+                v_object text;
+                v_others int;
+            BEGIN
+                SELECT max(object_name) INTO v_object FROM drivine_schema WHERE kind = 'RANGE_INDEX' AND label = 'Person' AND properties = '["name","born"]';
+                SELECT count(*) INTO v_others FROM drivine_schema WHERE object_name = v_object AND NOT (kind = 'RANGE_INDEX' AND label = 'Person' AND properties = '["name","born"]');
+                IF v_object IS NOT NULL AND v_others = 0 THEN
+                    -- Written bare, as it was made: Postgres folds the name to lower case either way.
+                    EXECUTE 'DROP INDEX IF EXISTS ' || v_object;
+                END IF;
+                DELETE FROM drivine_schema WHERE kind = 'RANGE_INDEX' AND label = 'Person' AND properties = '["name","born"]';
+            END
+            $forget$
+      oracle:
+        create:
+          - "CREATE INDEX IF NOT EXISTS drivine_ix_nameborn_44489f9e ON drivine_node (JSON_VALUE(props, '$.name'), JSON_VALUE(props, '$.born'))"
+          - |-
+            DECLARE
+                v_unique NUMBER;
+            BEGIN
+                SELECT COUNT(*) INTO v_unique FROM drivine_schema u WHERE u.label = 'Person' AND u.properties = '["name","born"]' AND u.kind = 'UNIQUENESS_CONSTRAINT' AND JSON_VALUE(u.properties, '$.size()' RETURNING NUMBER) = 1 AND EXISTS (SELECT 1 FROM user_indexes q WHERE q.index_name = UPPER(u.object_name));
+                IF v_unique = 0 THEN
+                    EXECUTE IMMEDIATE 'CREATE INDEX IF NOT EXISTS drivine_lx_Personnameborn_3f5a18d3 ON drivine_node n (CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') THEN JSON_VALUE(n.props, ''$.name'') END, CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') THEN JSON_VALUE(n.props, ''$.born'') END)';
+                END IF;
+            END;
+          - |-
+            BEGIN
+                MERGE INTO drivine_schema c
+                USING (SELECT 'RANGE_INDEX' AS kind, 'Person' AS label, '["name","born"]' AS properties FROM dual) k
+                ON (c.kind = k.kind AND c.label = k.label AND c.properties = k.properties)
+                WHEN MATCHED THEN UPDATE SET c.details = JSON_MERGEPATCH(c.details, '{"labelled": "drivine_lx_Personnameborn_3f5a18d3", "unique": null}')
+                WHEN NOT MATCHED THEN INSERT (kind, label, properties, name, object_name, details)
+                    VALUES (k.kind, k.label, k.properties, 'Person_name_born_range', 'drivine_ix_nameborn_44489f9e', '{"labelled": "drivine_lx_Personnameborn_3f5a18d3"}');
+            EXCEPTION WHEN DUP_VAL_ON_INDEX THEN
+                -- Another process recorded it between the MERGE's read and its insert: it is recorded.
+                NULL;
+            END;
+        drop:
+          - |-
+            DECLARE
+                v_object VARCHAR2(128);
+                v_labelled VARCHAR2(128);
+                v_others NUMBER;
+            BEGIN
+                SELECT MAX(object_name), MAX(JSON_VALUE(details, '$.labelled')) INTO v_object, v_labelled
+                FROM drivine_schema WHERE kind = 'RANGE_INDEX' AND label = 'Person' AND properties = '["name","born"]';
+                SELECT COUNT(*) INTO v_others FROM drivine_schema WHERE object_name = v_object AND NOT (kind = 'RANGE_INDEX' AND label = 'Person' AND properties = '["name","born"]');
+                IF v_labelled IS NOT NULL THEN
+                    EXECUTE IMMEDIATE 'DROP INDEX IF EXISTS ' || v_labelled;
+                END IF;
+                IF v_object IS NOT NULL AND v_others = 0 THEN
+                    EXECUTE IMMEDIATE 'DROP INDEX IF EXISTS ' || v_object;
+                END IF;
+                DELETE FROM drivine_schema WHERE kind = 'RANGE_INDEX' AND label = 'Person' AND properties = '["name","born"]';
+                COMMIT;
+            END;
+      sqlite:
+        create:
+          - "CREATE INDEX IF NOT EXISTS drivine_ix_Personnameborn_3f5a18d3 ON drivine_node ((CASE json_type(props, '$.\"name\"') WHEN 'text' THEN props ->> '$.\"name\"' WHEN 'null' THEN NULL ELSE props -> '$.\"name\"' END), (CASE json_type(props, '$.\"born\"') WHEN 'text' THEN props ->> '$.\"born\"' WHEN 'null' THEN NULL ELSE props -> '$.\"born\"' END)) WHERE instr(labels, '\"Person\"') > 0"
+          - |-
+            INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
+            VALUES ('RANGE_INDEX', 'Person', '["name","born"]', 'Person_name_born_range', 'drivine_ix_Personnameborn_3f5a18d3', '{}')
+            ON CONFLICT (kind, label, properties) DO NOTHING
+        drop:
+          - "DROP INDEX IF EXISTS drivine_ix_Personnameborn_3f5a18d3"
+          - "DELETE FROM drivine_schema WHERE kind = 'RANGE_INDEX' AND label = 'Person' AND properties = '[\"name\",\"born\"]'"
+      neo4j:
+        create:
+          - "CREATE INDEX `Person_name_born_range` IF NOT EXISTS FOR (n:`Person`) ON (n.`name`, n.`born`)"
+        drop:
+          - "DROP INDEX `Person_name_born_range` IF EXISTS"
+        dropUnnamed:
+          error: "Cannot drop index on Person[name, born]: Neo4j drops indexes by name, but no name is known for this index"
+      memgraph:
+        create:
+          - "CREATE INDEX ON :Person(name, born)"
+        drop:
+          - "DROP INDEX ON :Person(name, born)"
+      falkordb:
+        create: []
+        drop:
+          - "DROP INDEX FOR (n:Person) ON (n.name)"
+          - "DROP INDEX FOR (n:Person) ON (n.born)"
   - name: "Named range index"
     description: "A name given is the name the item is recorded and made under on the engines that name items."
     spec: {kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "person_by_name"}
@@ -2158,6 +2281,127 @@ cases:
         sqlite:
           - "(CASE json_type(props, '$.\"first\"') WHEN 'text' THEN props ->> '$.\"first\"' WHEN 'null' THEN NULL ELSE props -> '$.\"first\"' END)"
           - "(CASE json_type(props, '$.\"last\"') WHEN 'text' THEN props ->> '$.\"last\"' WHEN 'null' THEN NULL ELSE props -> '$.\"last\"' END)"
+          - "instr(labels, '\"Person\"') > 0"
+  - name: "Uniqueness constraint that ignores case"
+    description: "Made over the lowercased copy of the property, under a name of its own. FalkorDB refuses it: GRAPH.CONSTRAINT takes no name with a dot."
+    spec: {kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], ignoreCase: true}
+    stores:
+      postgres:
+        create:
+          - "CREATE UNIQUE INDEX IF NOT EXISTS drivine_uq_Persondrivineloweremail_b3ad0b9b ON drivine_node (((props ->> '__drivine.lower.email'))) WHERE labels @> '[\"Person\"]'"
+          - |-
+            INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
+            VALUES ('UNIQUENESS_CONSTRAINT', 'Person', '["__drivine.lower.email"]', 'Person_email_ci_unique', 'drivine_uq_Persondrivineloweremail_b3ad0b9b', '{}')
+            ON CONFLICT (kind, label, properties) DO NOTHING
+        drop:
+          - |-
+            DO $forget$
+            DECLARE
+                v_object text;
+                v_others int;
+            BEGIN
+                SELECT max(object_name) INTO v_object FROM drivine_schema WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '["__drivine.lower.email"]';
+                SELECT count(*) INTO v_others FROM drivine_schema WHERE object_name = v_object AND NOT (kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '["__drivine.lower.email"]');
+                IF v_object IS NOT NULL AND v_others = 0 THEN
+                    -- Written bare, as it was made: Postgres folds the name to lower case either way.
+                    EXECUTE 'DROP INDEX IF EXISTS ' || v_object;
+                END IF;
+                DELETE FROM drivine_schema WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '["__drivine.lower.email"]';
+            END
+            $forget$
+      oracle:
+        create:
+          - "CREATE INDEX IF NOT EXISTS drivine_ix_drivineloweremail_7ae8b9e6 ON drivine_node (JSON_VALUE(props, '$.\"__drivine.lower.email\"'))"
+          - |-
+            BEGIN
+                MERGE INTO drivine_schema c
+                USING (SELECT 'RANGE_INDEX' AS kind, 'Person' AS label, '["__drivine.lower.email"]' AS properties FROM dual) k
+                ON (c.kind = k.kind AND c.label = k.label AND c.properties = k.properties)
+                WHEN NOT MATCHED THEN INSERT (kind, label, properties, name, object_name, details)
+                    VALUES (k.kind, k.label, k.properties, 'Person___drivine.lower.email_range', 'drivine_ix_drivineloweremail_7ae8b9e6', '{"unique": "drivine_uq_Persondrivineloweremail_b3ad0b9b"}');
+            EXCEPTION WHEN DUP_VAL_ON_INDEX THEN
+                -- Another process recorded it between the MERGE's read and its insert: it is recorded.
+                NULL;
+            END;
+          - "CREATE UNIQUE INDEX IF NOT EXISTS drivine_uq_Persondrivineloweremail_b3ad0b9b ON drivine_node n (CASE WHEN JSON_EXISTS(n.labels, '$[*]?(@ == \"Person\")') AND JSON_EXISTS(n.props, '$.\"__drivine.lower.email\"') THEN JSON_VALUE(n.props, '$.\"__drivine.lower.email\"') END)"
+          - |-
+            DECLARE
+                v_labelled VARCHAR2(128);
+            BEGIN
+                SELECT MAX(JSON_VALUE(details, '$.labelled')) INTO v_labelled FROM drivine_schema WHERE kind = 'RANGE_INDEX' AND label = 'Person' AND properties = '["__drivine.lower.email"]';
+                IF v_labelled IS NOT NULL THEN
+                    EXECUTE IMMEDIATE 'DROP INDEX IF EXISTS ' || v_labelled;
+                END IF;
+                UPDATE drivine_schema SET details = JSON_MERGEPATCH(details, '{"unique": "drivine_uq_Persondrivineloweremail_b3ad0b9b", "labelled": null}') WHERE kind = 'RANGE_INDEX' AND label = 'Person' AND properties = '["__drivine.lower.email"]';
+                COMMIT;
+            END;
+          - |-
+            BEGIN
+                MERGE INTO drivine_schema c
+                USING (SELECT 'UNIQUENESS_CONSTRAINT' AS kind, 'Person' AS label, '["__drivine.lower.email"]' AS properties FROM dual) k
+                ON (c.kind = k.kind AND c.label = k.label AND c.properties = k.properties)
+                WHEN NOT MATCHED THEN INSERT (kind, label, properties, name, object_name, details)
+                    VALUES (k.kind, k.label, k.properties, 'Person_email_ci_unique', 'drivine_uq_Persondrivineloweremail_b3ad0b9b', '{}');
+            EXCEPTION WHEN DUP_VAL_ON_INDEX THEN
+                -- Another process recorded it between the MERGE's read and its insert: it is recorded.
+                NULL;
+            END;
+        drop:
+          - |-
+            DECLARE
+                v_object VARCHAR2(128);
+                v_labelled VARCHAR2(128);
+                v_others NUMBER;
+            BEGIN
+                SELECT MAX(object_name), MAX(JSON_VALUE(details, '$.labelled')) INTO v_object, v_labelled
+                FROM drivine_schema WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '["__drivine.lower.email"]';
+                SELECT COUNT(*) INTO v_others FROM drivine_schema WHERE object_name = v_object AND NOT (kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '["__drivine.lower.email"]');
+                IF v_object IS NOT NULL AND v_others = 0 THEN
+                    EXECUTE IMMEDIATE 'DROP INDEX IF EXISTS ' || v_object;
+                END IF;
+                DELETE FROM drivine_schema WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '["__drivine.lower.email"]';
+                COMMIT;
+            END;
+      sqlite:
+        create:
+          - "CREATE UNIQUE INDEX IF NOT EXISTS drivine_uq_Persondrivineloweremail_b3ad0b9b ON drivine_node ((CASE json_type(props, '$.\"__drivine.lower.email\"') WHEN 'text' THEN props ->> '$.\"__drivine.lower.email\"' WHEN 'null' THEN NULL ELSE props -> '$.\"__drivine.lower.email\"' END)) WHERE instr(labels, '\"Person\"') > 0"
+          - |-
+            INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
+            VALUES ('UNIQUENESS_CONSTRAINT', 'Person', '["__drivine.lower.email"]', 'Person_email_ci_unique', 'drivine_uq_Persondrivineloweremail_b3ad0b9b', '{}')
+            ON CONFLICT (kind, label, properties) DO NOTHING
+        drop:
+          - "DROP INDEX IF EXISTS drivine_uq_Persondrivineloweremail_b3ad0b9b"
+          - "DELETE FROM drivine_schema WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"__drivine.lower.email\"]'"
+      neo4j:
+        create:
+          - "CREATE CONSTRAINT `Person_email_ci_unique` IF NOT EXISTS FOR (n:`Person`) REQUIRE (n.`__drivine.lower.email`) IS UNIQUE"
+        drop:
+          - "DROP CONSTRAINT `Person_email_ci_unique` IF EXISTS"
+        dropUnnamed:
+          error: "Cannot drop constraint on Person[__drivine.lower.email]: Neo4j drops constraints by name, but no name is known for this constraint"
+      memgraph:
+        create:
+          - "CREATE CONSTRAINT ON (n:Person) ASSERT n.`__drivine.lower.email` IS UNIQUE"
+        drop:
+          - "DROP CONSTRAINT ON (n:Person) ASSERT n.`__drivine.lower.email` IS UNIQUE"
+      falkordb:
+        create:
+          - native: ["GRAPH.CONSTRAINT", "CREATE", "{graphName}", "UNIQUE", "NODE", "Person", "PROPERTIES", "1", "__drivine.lower.email"]
+        drop:
+          - native: ["GRAPH.CONSTRAINT", "DROP", "{graphName}", "UNIQUE", "NODE", "Person", "PROPERTIES", "1", "__drivine.lower.email"]
+        constrainable:
+          error: "FalkorDB cannot make the UNIQUENESS_CONSTRAINT Person_email_ci_unique on Person[__drivine.lower.email]: GRAPH.CONSTRAINT takes only a plain name for a property, and '__drivine.lower.email' is not one. A uniqueness constraint that ignores case is over the lowercased copy, named so. See https://github.com/FalkorDB/FalkorDB/issues/551"
+    read:
+      cypher: "MATCH (n:Person {`__drivine.lower.email`: $x}) RETURN n"
+      parameters: {x: "ada@example.com"}
+      indexedProperties:
+        - ["Person", "__drivine.lower.email"]
+      holds:
+        postgres: ["(props ->> '__drivine.lower.email')", "labels @> '[\"Person\"]'"]
+        oracle:
+          - "CASE WHEN JSON_EXISTS(n.labels, '$[*]?(@ == \"Person\")') AND JSON_EXISTS(n.props, '$.\"__drivine.lower.email\"') THEN JSON_VALUE(n.props, '$.\"__drivine.lower.email\"') END"
+        sqlite:
+          - "(CASE json_type(props, '$.\"__drivine.lower.email\"') WHEN 'text' THEN props ->> '$.\"__drivine.lower.email\"' WHEN 'null' THEN NULL ELSE props -> '$.\"__drivine.lower.email\"' END)"
           - "instr(labels, '\"Person\"') > 0"
   - name: "Vector index by cosine"
     description: "Postgres's hnsw index with its opclass; Oracle's side table, trigger, backfill and vector index; SQLite's record alone."
@@ -3599,6 +3843,8 @@ cases:
               - "PROPERTIES"
               - "1"
               - "say\"hi"
+        constrainable:
+          error: "FalkorDB cannot make the UNIQUENESS_CONSTRAINT Person_say\"hi_unique on Person[say\"hi]: GRAPH.CONSTRAINT takes only a plain name for a property, and 'say\"hi' is not one. A uniqueness constraint that ignores case is over the lowercased copy, named so. See https://github.com/FalkorDB/FalkorDB/issues/551"
     read:
       cypher: "MATCH (n:Person {`say\"hi`: $x}) RETURN n"
       parameters: {x: "Ada"}
