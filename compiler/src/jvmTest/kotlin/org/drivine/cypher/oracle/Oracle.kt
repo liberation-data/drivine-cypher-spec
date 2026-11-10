@@ -106,7 +106,22 @@ object Oracle {
         addAll(searchRequests())
         // Requests that are no request.
         addAll(listOf("", "[]", "{\"store\": \"neo4j\", \"graph\": {\"name\": \"g\"}, \"cypher\": \"RETURN 1\"}", "{\"store\": \"postgres\", \"cypher\": \"RETURN 1\"}"))
+        // Compiled typed, last, so every request before is where it was: results.yaml's statements, and each other spec
+        // statement whose answer typed differs from untyped by more than its columns, one that returns a node or a relationship.
+        val results = statements(spec, listOf("results.yaml"))
+        for ((cypher, parameters) in results) for (store in STORES) add(typedRequest(request(store, cypher, parameters)))
+        for ((cypher, parameters) in statements - results.toSet()) for (store in STORES) {
+            val untyped = request(store, cypher, parameters)
+            val typed = typedRequest(untyped)
+            val plain = CompileJson.compile(untyped)
+            val answer = CompileJson.compile(typed)
+            if (answer != plain && answer.substringBefore(",\"columns\":") != plain.removeSuffix("}")) add(typed)
+        }
+        add("{\"store\": \"sqlite\", \"graph\": {\"name\": \"g\"}, \"typed\": \"yes\", \"cypher\": \"RETURN 1\"}")
     }
+
+    /** [request], a request's JSON text, asking for its statement compiled typed. */
+    private fun typedRequest(request: String): String = request.replaceFirst("{", "{\"typed\":true,")
 
     /** The module's golden of drivine4j's full-text search statements, `src/commonTest/resources/search-golden.json`. */
     private fun searchGolden(): ByteArray = requireNotNull(Oracle::class.java.getResource("/search-golden.json")) { "No search-golden.json on the classpath." }.readBytes()
@@ -129,8 +144,8 @@ object Oracle {
         )
 
     /** Every statement in the spec's files, with its parameters, in the files' order. */
-    internal fun statements(spec: File): List<Mutants.Statement> = buildList {
-        for (file in FILES) {
+    internal fun statements(spec: File, files: List<String> = FILES): List<Mutants.Statement> = buildList {
+        for (file in files) {
             val tree = yaml.readTree(File(spec, file))
             val cases = if (tree.isArray) tree else tree["cases"]
             for (case in cases) for (step in case["steps"] ?: continue) {
