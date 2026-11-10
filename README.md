@@ -318,7 +318,7 @@ ranking:
 | `today` | Not read. What a store gives today where it differs, and the issue that makes it pass: `stores` (stores or groups), and `ids`, `ranked` or `error`, or none of them where it gives anything but the step's. A library holds such a step in its own HELD list, so the step says what every store is to give. `unfiled` marks a difference with no issue yet. |
 | `note` | Why the step is there. It is not read. |
 
-No step rests on how a store breaks a tie. On Neo4j no two hits that a `ranked` step orders, or that `topK` keeps or leaves out, score alike; where another store scores them alike, the step leaves that store out (`except`), and a step of `ids` pins its hits there.
+No step rests on how a store breaks a tie. On Neo4j no two hits that a `ranked` step orders, or that `topK` keeps or leaves out, score alike; where another store scores them alike, the step leaves that store out (`except`), and where the tie is only of order and not of which hits `topK` keeps, a step of `ids` pins its hits there.
 
 A case says what Neo4j's index gives, with Neo4j's default analyzer, `standard-no-stop-words`: words ORed, a phrase, `+` and `-`, `AND`, `OR` and `NOT` (and `&&`, `||`), `word*`, `field:word`, escapes, case and Unicode. A refusal is Drivine's own, not Neo4j's: a query with no word to look for (operators, punctuation or excluded words alone) and an empty one are refused with `A full-text query needs a word to look for: '<query>' has none.`, on every store, where Neo4j gives no hits, every node, or a parse error.
 
