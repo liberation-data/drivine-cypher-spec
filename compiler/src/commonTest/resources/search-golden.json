@@ -1,5 +1,5 @@
 {
-  "source" : "drivine4j dd4a66f0, written by its own code (SearchGoldenWriter, not committed): only parameter names are normalized, $_pN to $_cy_ft<N+1>, and the graph engines' $_fullTextQuery and $_fullTextIndexLimit to $_cy_ft1 and $_cy_ft2.",
+  "source" : "drivine4j dd4a66f0, written by its own code (SearchGoldenWriter, not committed): only parameter names are normalized, $_pN to $_cy_ft<N+1>, and the graph engines' $_fullTextQuery and $_fullTextIndexLimit to $_cy_ft1 and $_cy_ft2. The graph engines' 14 answers whose index name or label holds a quote or a backslash were then edited by hand to write it as an escaped Cypher string (liberation-data/drivine4j#767).",
   "entries" : [ {
     "request" : {
       "store" : "postgres",
@@ -21218,7 +21218,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL db.index.fulltext.queryNodes('Odd Label_the text_a.b_it's_fulltext', $_cy_ft1, {limit: $_cy_ft2})\nYIELD node, score\nWITH node, score WHERE node:`Odd Label`:`Q'uote\"d```\nWITH node, score\nORDER BY score DESC\nLIMIT $_cy_ft2\nWITH collect({node: node, score: score}) AS _ftResults, max(score) AS _ftMax\nUNWIND _ftResults AS _ftRow\nWITH _ftRow.node AS n, (CASE WHEN _ftMax > 0 THEN _ftRow.score / _ftMax ELSE 1.0 END) AS _score",
+      "cypher" : "CALL db.index.fulltext.queryNodes('Odd Label_the text_a.b_it\\'s_fulltext', $_cy_ft1, {limit: $_cy_ft2})\nYIELD node, score\nWITH node, score WHERE node:`Odd Label`:`Q'uote\"d```\nWITH node, score\nORDER BY score DESC\nLIMIT $_cy_ft2\nWITH collect({node: node, score: score}) AS _ftResults, max(score) AS _ftMax\nUNWIND _ftResults AS _ftRow\nWITH _ftRow.node AS n, (CASE WHEN _ftMax > 0 THEN _ftRow.score / _ftMax ELSE 1.0 END) AS _score",
       "parameters" : {
         "_cy_ft1" : "Graph databases",
         "_cy_ft2" : 250
@@ -21239,7 +21239,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL text_search.search_all('Odd Label_the text_a.b_it's_fulltext', $_cy_ft1, {limit: CASE WHEN $_cy_ft2 < 1000000 THEN $_cy_ft2 ELSE 1000000 END})\nYIELD node, score\nWITH node, score WHERE node:`Odd Label`:`Q'uote\"d```\nWITH node, score\nORDER BY score DESC\nLIMIT $_cy_ft2\nWITH collect({node: node, score: score}) AS _ftResults, max(score) AS _ftMax\nUNWIND _ftResults AS _ftRow\nWITH _ftRow.node AS n, (CASE WHEN _ftMax > 0 THEN _ftRow.score / _ftMax ELSE 1.0 END) AS _score",
+      "cypher" : "CALL text_search.search_all('Odd Label_the text_a.b_it\\'s_fulltext', $_cy_ft1, {limit: CASE WHEN $_cy_ft2 < 1000000 THEN $_cy_ft2 ELSE 1000000 END})\nYIELD node, score\nWITH node, score WHERE node:`Odd Label`:`Q'uote\"d```\nWITH node, score\nORDER BY score DESC\nLIMIT $_cy_ft2\nWITH collect({node: node, score: score}) AS _ftResults, max(score) AS _ftMax\nUNWIND _ftResults AS _ftRow\nWITH _ftRow.node AS n, (CASE WHEN _ftMax > 0 THEN _ftRow.score / _ftMax ELSE 1.0 END) AS _score",
       "parameters" : {
         "_cy_ft1" : "Graph databases",
         "_cy_ft2" : 250
@@ -21487,7 +21487,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL db.index.fulltext.queryNodes('Odd Label_the text_a.b_it's_fulltext', $_cy_ft1, {limit: $_cy_ft2})\nYIELD node, score\nWITH node, score WHERE node:`Odd Label`:`Q'uote\"d```\nWITH node, score\nORDER BY score DESC\nLIMIT $_cy_ft2\nWITH collect({node: node, score: score}) AS _ftResults, max(score) AS _ftMax\nUNWIND _ftResults AS _ftRow\nWITH _ftRow.node AS n, (CASE WHEN _ftMax > 0 THEN _ftRow.score / _ftMax ELSE 1.0 END) AS _score",
+      "cypher" : "CALL db.index.fulltext.queryNodes('Odd Label_the text_a.b_it\\'s_fulltext', $_cy_ft1, {limit: $_cy_ft2})\nYIELD node, score\nWITH node, score WHERE node:`Odd Label`:`Q'uote\"d```\nWITH node, score\nORDER BY score DESC\nLIMIT $_cy_ft2\nWITH collect({node: node, score: score}) AS _ftResults, max(score) AS _ftMax\nUNWIND _ftResults AS _ftRow\nWITH _ftRow.node AS n, (CASE WHEN _ftMax > 0 THEN _ftRow.score / _ftMax ELSE 1.0 END) AS _score",
       "parameters" : {
         "_cy_ft1" : "graph +data -noise",
         "_cy_ft2" : 250
@@ -21508,7 +21508,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL text_search.search_all('Odd Label_the text_a.b_it's_fulltext', $_cy_ft1, {limit: CASE WHEN $_cy_ft2 < 1000000 THEN $_cy_ft2 ELSE 1000000 END})\nYIELD node, score\nWITH node, score WHERE node:`Odd Label`:`Q'uote\"d```\nWITH node, score\nORDER BY score DESC\nLIMIT $_cy_ft2\nWITH collect({node: node, score: score}) AS _ftResults, max(score) AS _ftMax\nUNWIND _ftResults AS _ftRow\nWITH _ftRow.node AS n, (CASE WHEN _ftMax > 0 THEN _ftRow.score / _ftMax ELSE 1.0 END) AS _score",
+      "cypher" : "CALL text_search.search_all('Odd Label_the text_a.b_it\\'s_fulltext', $_cy_ft1, {limit: CASE WHEN $_cy_ft2 < 1000000 THEN $_cy_ft2 ELSE 1000000 END})\nYIELD node, score\nWITH node, score WHERE node:`Odd Label`:`Q'uote\"d```\nWITH node, score\nORDER BY score DESC\nLIMIT $_cy_ft2\nWITH collect({node: node, score: score}) AS _ftResults, max(score) AS _ftMax\nUNWIND _ftResults AS _ftRow\nWITH _ftRow.node AS n, (CASE WHEN _ftMax > 0 THEN _ftRow.score / _ftMax ELSE 1.0 END) AS _score",
       "parameters" : {
         "_cy_ft1" : "graph +data -noise",
         "_cy_ft2" : 250
@@ -21678,7 +21678,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL db.index.fulltext.queryNodes('Odd Label_the text_a.b_it's_fulltext', $_cy_ft1, {limit: $_cy_ft2})\nYIELD node, score\nWITH node, score WHERE node:`Odd Label`:`Q'uote\"d```\nWITH node, score\nORDER BY score DESC\nLIMIT $_cy_ft2\nWITH collect({node: node, score: score}) AS _ftResults, max(score) AS _ftMax\nUNWIND _ftResults AS _ftRow\nWITH _ftRow.node AS n, (CASE WHEN _ftMax > 0 THEN _ftRow.score / _ftMax ELSE 1.0 END) AS _score",
+      "cypher" : "CALL db.index.fulltext.queryNodes('Odd Label_the text_a.b_it\\'s_fulltext', $_cy_ft1, {limit: $_cy_ft2})\nYIELD node, score\nWITH node, score WHERE node:`Odd Label`:`Q'uote\"d```\nWITH node, score\nORDER BY score DESC\nLIMIT $_cy_ft2\nWITH collect({node: node, score: score}) AS _ftResults, max(score) AS _ftMax\nUNWIND _ftResults AS _ftRow\nWITH _ftRow.node AS n, (CASE WHEN _ftMax > 0 THEN _ftRow.score / _ftMax ELSE 1.0 END) AS _score",
       "parameters" : {
         "_cy_ft1" : "\"graph data\" data* name:Ada",
         "_cy_ft2" : 250
@@ -21699,7 +21699,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL text_search.search_all('Odd Label_the text_a.b_it's_fulltext', $_cy_ft1, {limit: CASE WHEN $_cy_ft2 < 1000000 THEN $_cy_ft2 ELSE 1000000 END})\nYIELD node, score\nWITH node, score WHERE node:`Odd Label`:`Q'uote\"d```\nWITH node, score\nORDER BY score DESC\nLIMIT $_cy_ft2\nWITH collect({node: node, score: score}) AS _ftResults, max(score) AS _ftMax\nUNWIND _ftResults AS _ftRow\nWITH _ftRow.node AS n, (CASE WHEN _ftMax > 0 THEN _ftRow.score / _ftMax ELSE 1.0 END) AS _score",
+      "cypher" : "CALL text_search.search_all('Odd Label_the text_a.b_it\\'s_fulltext', $_cy_ft1, {limit: CASE WHEN $_cy_ft2 < 1000000 THEN $_cy_ft2 ELSE 1000000 END})\nYIELD node, score\nWITH node, score WHERE node:`Odd Label`:`Q'uote\"d```\nWITH node, score\nORDER BY score DESC\nLIMIT $_cy_ft2\nWITH collect({node: node, score: score}) AS _ftResults, max(score) AS _ftMax\nUNWIND _ftResults AS _ftRow\nWITH _ftRow.node AS n, (CASE WHEN _ftMax > 0 THEN _ftRow.score / _ftMax ELSE 1.0 END) AS _score",
       "parameters" : {
         "_cy_ft1" : "\"graph data\" data* name:Ada",
         "_cy_ft2" : 250
@@ -21858,7 +21858,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL db.index.fulltext.queryNodes('Odd Label_the text_a.b_it's_fulltext', $_cy_ft1, {limit: $_cy_ft2})\nYIELD node, score\nWITH node, score WHERE node:`Odd Label`:`Q'uote\"d```\nWITH node, score\nORDER BY score DESC\nLIMIT $_cy_ft2\nWITH collect({node: node, score: score}) AS _ftResults, max(score) AS _ftMax\nUNWIND _ftResults AS _ftRow\nWITH _ftRow.node AS n, (CASE WHEN _ftMax > 0 THEN _ftRow.score / _ftMax ELSE 1.0 END) AS _score",
+      "cypher" : "CALL db.index.fulltext.queryNodes('Odd Label_the text_a.b_it\\'s_fulltext', $_cy_ft1, {limit: $_cy_ft2})\nYIELD node, score\nWITH node, score WHERE node:`Odd Label`:`Q'uote\"d```\nWITH node, score\nORDER BY score DESC\nLIMIT $_cy_ft2\nWITH collect({node: node, score: score}) AS _ftResults, max(score) AS _ftMax\nUNWIND _ftResults AS _ftRow\nWITH _ftRow.node AS n, (CASE WHEN _ftMax > 0 THEN _ftRow.score / _ftMax ELSE 1.0 END) AS _score",
       "parameters" : {
         "_cy_ft1" : "kiw* melon",
         "_cy_ft2" : 250
@@ -21879,7 +21879,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL text_search.search_all('Odd Label_the text_a.b_it's_fulltext', $_cy_ft1, {limit: CASE WHEN $_cy_ft2 < 1000000 THEN $_cy_ft2 ELSE 1000000 END})\nYIELD node, score\nWITH node, score WHERE node:`Odd Label`:`Q'uote\"d```\nWITH node, score\nORDER BY score DESC\nLIMIT $_cy_ft2\nWITH collect({node: node, score: score}) AS _ftResults, max(score) AS _ftMax\nUNWIND _ftResults AS _ftRow\nWITH _ftRow.node AS n, (CASE WHEN _ftMax > 0 THEN _ftRow.score / _ftMax ELSE 1.0 END) AS _score",
+      "cypher" : "CALL text_search.search_all('Odd Label_the text_a.b_it\\'s_fulltext', $_cy_ft1, {limit: CASE WHEN $_cy_ft2 < 1000000 THEN $_cy_ft2 ELSE 1000000 END})\nYIELD node, score\nWITH node, score WHERE node:`Odd Label`:`Q'uote\"d```\nWITH node, score\nORDER BY score DESC\nLIMIT $_cy_ft2\nWITH collect({node: node, score: score}) AS _ftResults, max(score) AS _ftMax\nUNWIND _ftResults AS _ftRow\nWITH _ftRow.node AS n, (CASE WHEN _ftMax > 0 THEN _ftRow.score / _ftMax ELSE 1.0 END) AS _score",
       "parameters" : {
         "_cy_ft1" : "kiw* melon",
         "_cy_ft2" : 250
@@ -22008,7 +22008,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL db.index.fulltext.queryNodes('Odd Label_the text_a.b_it's_fulltext', $_cy_ft1, {limit: $_cy_ft2})\nYIELD node, score\nWITH node, score WHERE node:`Odd Label`:`Q'uote\"d```\nWITH node, score\nORDER BY score DESC\nLIMIT $_cy_ft2\nWITH collect({node: node, score: score}) AS _ftResults, max(score) AS _ftMax\nUNWIND _ftResults AS _ftRow\nWITH _ftRow.node AS n, (CASE WHEN _ftMax > 0 THEN _ftRow.score / _ftMax ELSE 1.0 END) AS _score",
+      "cypher" : "CALL db.index.fulltext.queryNodes('Odd Label_the text_a.b_it\\'s_fulltext', $_cy_ft1, {limit: $_cy_ft2})\nYIELD node, score\nWITH node, score WHERE node:`Odd Label`:`Q'uote\"d```\nWITH node, score\nORDER BY score DESC\nLIMIT $_cy_ft2\nWITH collect({node: node, score: score}) AS _ftResults, max(score) AS _ftMax\nUNWIND _ftResults AS _ftRow\nWITH _ftRow.node AS n, (CASE WHEN _ftMax > 0 THEN _ftRow.score / _ftMax ELSE 1.0 END) AS _score",
       "parameters" : {
         "_cy_ft1" : "-only",
         "_cy_ft2" : 250
@@ -22029,7 +22029,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL text_search.search_all('Odd Label_the text_a.b_it's_fulltext', $_cy_ft1, {limit: CASE WHEN $_cy_ft2 < 1000000 THEN $_cy_ft2 ELSE 1000000 END})\nYIELD node, score\nWITH node, score WHERE node:`Odd Label`:`Q'uote\"d```\nWITH node, score\nORDER BY score DESC\nLIMIT $_cy_ft2\nWITH collect({node: node, score: score}) AS _ftResults, max(score) AS _ftMax\nUNWIND _ftResults AS _ftRow\nWITH _ftRow.node AS n, (CASE WHEN _ftMax > 0 THEN _ftRow.score / _ftMax ELSE 1.0 END) AS _score",
+      "cypher" : "CALL text_search.search_all('Odd Label_the text_a.b_it\\'s_fulltext', $_cy_ft1, {limit: CASE WHEN $_cy_ft2 < 1000000 THEN $_cy_ft2 ELSE 1000000 END})\nYIELD node, score\nWITH node, score WHERE node:`Odd Label`:`Q'uote\"d```\nWITH node, score\nORDER BY score DESC\nLIMIT $_cy_ft2\nWITH collect({node: node, score: score}) AS _ftResults, max(score) AS _ftMax\nUNWIND _ftResults AS _ftRow\nWITH _ftRow.node AS n, (CASE WHEN _ftMax > 0 THEN _ftRow.score / _ftMax ELSE 1.0 END) AS _score",
       "parameters" : {
         "_cy_ft1" : "-only",
         "_cy_ft2" : 250
@@ -22179,7 +22179,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL db.index.fulltext.queryNodes('Odd Label_the text_a.b_it's_fulltext', $_cy_ft1, {limit: $_cy_ft2})\nYIELD node, score\nWITH node, score WHERE node:`Odd Label`:`Q'uote\"d```\nWITH node, score\nORDER BY score DESC\nLIMIT $_cy_ft2\nWITH collect({node: node, score: score}) AS _ftResults, max(score) AS _ftMax\nUNWIND _ftResults AS _ftRow\nWITH _ftRow.node AS n, (CASE WHEN _ftMax > 0 THEN _ftRow.score / _ftMax ELSE 1.0 END) AS _score",
+      "cypher" : "CALL db.index.fulltext.queryNodes('Odd Label_the text_a.b_it\\'s_fulltext', $_cy_ft1, {limit: $_cy_ft2})\nYIELD node, score\nWITH node, score WHERE node:`Odd Label`:`Q'uote\"d```\nWITH node, score\nORDER BY score DESC\nLIMIT $_cy_ft2\nWITH collect({node: node, score: score}) AS _ftResults, max(score) AS _ftMax\nUNWIND _ftResults AS _ftRow\nWITH _ftRow.node AS n, (CASE WHEN _ftMax > 0 THEN _ftRow.score / _ftMax ELSE 1.0 END) AS _score",
       "parameters" : {
         "_cy_ft1" : "\"la la\"",
         "_cy_ft2" : 250
@@ -22200,7 +22200,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL text_search.search_all('Odd Label_the text_a.b_it's_fulltext', $_cy_ft1, {limit: CASE WHEN $_cy_ft2 < 1000000 THEN $_cy_ft2 ELSE 1000000 END})\nYIELD node, score\nWITH node, score WHERE node:`Odd Label`:`Q'uote\"d```\nWITH node, score\nORDER BY score DESC\nLIMIT $_cy_ft2\nWITH collect({node: node, score: score}) AS _ftResults, max(score) AS _ftMax\nUNWIND _ftResults AS _ftRow\nWITH _ftRow.node AS n, (CASE WHEN _ftMax > 0 THEN _ftRow.score / _ftMax ELSE 1.0 END) AS _score",
+      "cypher" : "CALL text_search.search_all('Odd Label_the text_a.b_it\\'s_fulltext', $_cy_ft1, {limit: CASE WHEN $_cy_ft2 < 1000000 THEN $_cy_ft2 ELSE 1000000 END})\nYIELD node, score\nWITH node, score WHERE node:`Odd Label`:`Q'uote\"d```\nWITH node, score\nORDER BY score DESC\nLIMIT $_cy_ft2\nWITH collect({node: node, score: score}) AS _ftResults, max(score) AS _ftMax\nUNWIND _ftResults AS _ftRow\nWITH _ftRow.node AS n, (CASE WHEN _ftMax > 0 THEN _ftRow.score / _ftMax ELSE 1.0 END) AS _score",
       "parameters" : {
         "_cy_ft1" : "\"la la\"",
         "_cy_ft2" : 250
@@ -22362,7 +22362,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL db.index.fulltext.queryNodes('Odd Label_the text_a.b_it's_fulltext', $_cy_ft1, {limit: $_cy_ft2})\nYIELD node, score\nWITH node, score WHERE node:`Odd Label`:`Q'uote\"d```\nWITH node, score\nORDER BY score DESC\nLIMIT $_cy_ft2\nWITH collect({node: node, score: score}) AS _ftResults, max(score) AS _ftMax\nUNWIND _ftResults AS _ftRow\nWITH _ftRow.node AS n, (CASE WHEN _ftMax > 0 THEN _ftRow.score / _ftMax ELSE 1.0 END) AS _score",
+      "cypher" : "CALL db.index.fulltext.queryNodes('Odd Label_the text_a.b_it\\'s_fulltext', $_cy_ft1, {limit: $_cy_ft2})\nYIELD node, score\nWITH node, score WHERE node:`Odd Label`:`Q'uote\"d```\nWITH node, score\nORDER BY score DESC\nLIMIT $_cy_ft2\nWITH collect({node: node, score: score}) AS _ftResults, max(score) AS _ftMax\nUNWIND _ftResults AS _ftRow\nWITH _ftRow.node AS n, (CASE WHEN _ftMax > 0 THEN _ftRow.score / _ftMax ELSE 1.0 END) AS _score",
       "parameters" : {
         "_cy_ft1" : "it's O'Brien",
         "_cy_ft2" : 250
@@ -22383,7 +22383,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL text_search.search_all('Odd Label_the text_a.b_it's_fulltext', $_cy_ft1, {limit: CASE WHEN $_cy_ft2 < 1000000 THEN $_cy_ft2 ELSE 1000000 END})\nYIELD node, score\nWITH node, score WHERE node:`Odd Label`:`Q'uote\"d```\nWITH node, score\nORDER BY score DESC\nLIMIT $_cy_ft2\nWITH collect({node: node, score: score}) AS _ftResults, max(score) AS _ftMax\nUNWIND _ftResults AS _ftRow\nWITH _ftRow.node AS n, (CASE WHEN _ftMax > 0 THEN _ftRow.score / _ftMax ELSE 1.0 END) AS _score",
+      "cypher" : "CALL text_search.search_all('Odd Label_the text_a.b_it\\'s_fulltext', $_cy_ft1, {limit: CASE WHEN $_cy_ft2 < 1000000 THEN $_cy_ft2 ELSE 1000000 END})\nYIELD node, score\nWITH node, score WHERE node:`Odd Label`:`Q'uote\"d```\nWITH node, score\nORDER BY score DESC\nLIMIT $_cy_ft2\nWITH collect({node: node, score: score}) AS _ftResults, max(score) AS _ftMax\nUNWIND _ftResults AS _ftRow\nWITH _ftRow.node AS n, (CASE WHEN _ftMax > 0 THEN _ftRow.score / _ftMax ELSE 1.0 END) AS _score",
       "parameters" : {
         "_cy_ft1" : "it's O'Brien",
         "_cy_ft2" : 250

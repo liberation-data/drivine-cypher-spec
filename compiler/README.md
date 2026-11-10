@@ -172,7 +172,8 @@ FullTextSearch.plan(store, graph, SearchRequest(labels, properties, query, index
      alone.
    - On a graph engine, `cypher` is the search's head: the index's `CALL` given the query as it is, the hits that have every
      root label, the best of them, and each node and its score against the best, as `alias` and `scoreAlias` (`n` and
-     `_score` where left out), best first. The index is asked for `topK` hits, or with `filtered` (a caller's filter or a
+     `_score` where left out), best first. The index's name (FalkorDB's label) is a Cypher string, its quotes and
+     backslashes escaped, and each label a backtick-quoted name, whatever they hold. The index is asked for `topK` hits, or with `filtered` (a caller's filter or a
      required relationship prunes them after the index; a threshold, which keeps a prefix of the ranking, does not) or a
      root label beyond the first ten times as many (`indexLimit`), and Memgraph's no more than 1,000,000.
    - `parameters` are named with the compiler's reserved prefix, `_cy_ft1`, `_cy_ft2`, …, which no library binds, so they
@@ -197,7 +198,9 @@ drivine4j's statements are the module's byte for byte. `src/commonTest/resources
 drivine4j's own code (`matching` and `matchingThrough` of its Postgres, Oracle and SQLite selects, and its grammars'
 `fullTextSearchHead`) at the commit it names, for every query of drivine4j's `TextQueryTest` and `OracleSelectTest`, the 22 of
 its ranking test over `docs-corpus.json`, and labels and properties of other shapes, on each store and in each state of its
-index: only the parameters' names were changed, drivine4j's `$_pN` to `$_cy_ft<N+1>`. `FullTextSearchGoldenTest` checks
+index: only the parameters' names were changed, drivine4j's `$_pN` to `$_cy_ft<N+1>`, and on the graph engines an index
+name or label with a quote or a backslash, which drivine4j wrote raw, is written escaped (liberation-data/drivine4j#767).
+`FullTextSearchGoldenTest` checks
 `plan`, and the JSON request, against each on every target. On a SQL store drivine4j's statement goes on to its projection of
 each node's row, which the module leaves to the library, so the test puts that back before it compares: the rest is
 byte for byte.
