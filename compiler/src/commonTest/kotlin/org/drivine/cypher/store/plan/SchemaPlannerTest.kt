@@ -4,6 +4,7 @@ import org.drivine.cypher.store.ddl.DdlStatement
 import org.drivine.cypher.store.ddl.Neo4jDdl
 import org.drivine.cypher.store.ddl.SqliteDdl
 import org.drivine.cypher.store.schema.Cause
+import org.drivine.cypher.store.schema.FalkorDbSchema
 import org.drivine.cypher.store.schema.Neo4jSchema
 import org.drivine.cypher.store.schema.SqliteSchema
 import org.drivine.cypher.store.schema.StoreError
@@ -12,6 +13,7 @@ import org.drivine.schema.FalkorDbVectorOptions
 import org.drivine.schema.FullTextIndexSpec
 import org.drivine.schema.Neo4jVectorOptions
 import org.drivine.schema.RangeIndexSpec
+import org.drivine.schema.SchemaItemInfo
 import org.drivine.schema.SchemaItemKind
 import org.drivine.schema.SchemaMode
 import org.drivine.schema.SchemaPolicy
@@ -95,6 +97,36 @@ class SchemaPlannerTest {
         val report = (step as PlanStep.Done).report
         assertEquals("Neo4j RANGE_INDEX 'Person_name_range' on Person[name] is still being built, having waited PT1M: did not complete", report.failure)
         assertNull(report.item)
+    }
+
+    @Test
+    fun anIndexFalkorDbIsStillBuildingWhenItsWaitRunsOutIsUnbuiltAndFailsTheOwner() {
+        // drivine4j's IndexManager looks at its clock after each listing, and sleeps the poll or what is left of the
+        // wait, whichever is less: 300 ms is a poll of 200 and one of 100, and then the wait has run out.
+        val falkor = SchemaPlanner(FalkorDbSchema)
+        val building = ListingRows.rows("falkordb", listOf(SchemaItemInfo(SchemaItemKind.RANGE_INDEX, "Person", listOf("name"), status = "UNDER CONSTRUCTION")), constraints = false)
+        var now = 1_000_000L
+        var step = falkor.start(PlanRequest("default", Operation.Enforce(), listOf(DeclaredCatalog(null, items = listOf(name))), buildTimeoutMillis = 300), now)
+        val polls = mutableListOf<Long>()
+        while (step is PlanStep.Run) {
+            val outcomes = step.actions.map { action ->
+                when {
+                    action is PlanAction.Query && action.purpose == Purpose.LISTING -> PlanOutcome.Rows(building)
+                    action is PlanAction.Query -> PlanOutcome.Rows(emptyList())
+                    else -> PlanOutcome.Ran
+                }
+            }
+            step.actions.filterIsInstance<PlanAction.Query>().filter { it.delayMillis > 0 }.forEach { polls += it.delayMillis; now += it.delayMillis }
+            assertTrue(step.actions.none { it is PlanAction.WriteMarker }, "an owner that fails writes no marker")
+            step = falkor.resume(step.state, outcomes, now)
+        }
+        assertEquals(listOf(200L, 100L), polls)
+        val report = (step as PlanStep.Done).report
+        val owner = report.owners.single()
+        val message = "FalkorDB RANGE_INDEX on Person[name] is still being built, having waited PT0.3S: it is UNDER CONSTRUCTION"
+        assertEquals(listOf(UnbuiltIndex(name, stillBuilding = true, message)), owner.unbuilt)
+        assertNull(owner.marker)
+        assertTrue(report.failure!!.contains("  - STILL BUILDING: $message. It is left to be built"), report.failure)
     }
 
     @Test
