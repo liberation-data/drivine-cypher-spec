@@ -243,9 +243,14 @@ class StorePlanTest {
                     )
                     answer { entry["failed"]?.let(::failedWith) ?: PlanOutcome.Ran }
                 }
+                entry["readLowerCopies"] != null -> {
+                    val read = entry["readLowerCopies"]!!
+                    actions += PlanAction.ReadLowerCopies(read["label"]!!.textValue()!!, texts(read["properties"]!!))
+                    answer { entry["failed"]?.let(::failedWith) ?: PlanOutcome.Rows(entry["rows"]!!.map(::plain)) }
+                }
                 entry["fillLowerCopies"] != null -> {
                     val fill = entry["fillLowerCopies"]!!
-                    actions += PlanAction.FillLowerCopies(fill["label"]!!.textValue()!!, texts(fill["properties"]!!), fill["again"]!!.booleanValue())
+                    actions += PlanAction.FillLowerCopies(fill["label"]!!.textValue()!!, texts(fill["properties"]!!))
                     answer { entry["failed"]?.let(::failedWith) ?: PlanOutcome.Ran }
                 }
                 entry["writeMarker"] != null -> {

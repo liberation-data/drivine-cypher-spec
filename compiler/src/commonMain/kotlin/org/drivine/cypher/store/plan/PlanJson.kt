@@ -117,7 +117,8 @@ internal object PlanJson {
             "purpose" to action.purpose.name, "retry" to action.retry.name,
         )
         is PlanAction.AwaitIndex -> linkedMapOf("type" to "awaitIndex", "statement" to action.statement, "parameters" to action.parameters)
-        is PlanAction.FillLowerCopies -> linkedMapOf("type" to "fillLowerCopies", "label" to action.label, "properties" to action.properties, "again" to action.again)
+        is PlanAction.ReadLowerCopies -> linkedMapOf("type" to "readLowerCopies", "label" to action.label, "properties" to action.properties)
+        is PlanAction.FillLowerCopies -> linkedMapOf("type" to "fillLowerCopies", "label" to action.label, "properties" to action.properties)
         is PlanAction.WriteMarker -> linkedMapOf("type" to "writeMarker", "scope" to action.scope, "statement" to action.statement, "parameters" to action.parameters)
     }
 
@@ -213,7 +214,8 @@ internal object PlanJson {
             )
             "execute" -> PlanAction.Execute(statement(node.at("statement")), parameters(), Purpose.valueOf(node.text("purpose")!!), Retry.valueOf(node.text("retry")!!))
             "awaitIndex" -> PlanAction.AwaitIndex(node.text("statement")!!, parameters())
-            "fillLowerCopies" -> PlanAction.FillLowerCopies(node.text("label")!!, node.texts("properties"), node.at("again").booleanValue())
+            "readLowerCopies" -> PlanAction.ReadLowerCopies(node.text("label")!!, node.texts("properties"))
+            "fillLowerCopies" -> PlanAction.FillLowerCopies(node.text("label")!!, node.texts("properties"))
             "writeMarker" -> PlanAction.WriteMarker(node.text("scope")!!, node.text("statement")!!, parameters())
             else -> throw IllegalArgumentException("No action is $type")
         }

@@ -3984,7 +3984,7 @@ cases:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
               - now: 1000000
                 actions:
-                  - {fillLowerCopies: {label: "Person", properties: ["email"], again: true}, failed: [{sqlState: "57014", vendorCode: 0, message: "canceling statement due to statement timeout"}]}
+                  - {fillLowerCopies: {label: "Person", properties: ["email"]}, failed: [{sqlState: "57014", vendorCode: 0, message: "canceling statement due to statement timeout"}]}
                   - {execute: {create: "Range index that ignores case"}}
                   - {query: {listing: "indexes.RANGE_INDEX"}}
               - now: 1000000
@@ -4034,7 +4034,7 @@ cases:
                   - {query: {listing: "indexes.FULLTEXT_INDEX"}, items: []}
               - now: 1000000
                 actions:
-                  - {fillLowerCopies: {label: "Person", properties: ["email"], again: true}, failed: [{sqlState: "57014", vendorCode: 0, message: "canceling statement due to statement timeout"}]}
+                  - {fillLowerCopies: {label: "Person", properties: ["email"]}, failed: [{sqlState: "57014", vendorCode: 0, message: "canceling statement due to statement timeout"}]}
                   - {execute: {create: "Range index that ignores case"}}
                   - {query: {listing: "indexes.RANGE_INDEX"}}
               - now: 1000000
@@ -4177,7 +4177,7 @@ cases:
                   - {query: {listing: "constraints"}, items: []}
               - now: 1000000
                 actions:
-                  - {fillLowerCopies: {label: "Person", properties: ["email"], again: true}}
+                  - {fillLowerCopies: {label: "Person", properties: ["email"]}}
                   - {execute: {create: "Range index that ignores case"}}
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["__drivine.lower.email"], name: "Person_email_ci_range"}]}
               - now: 1000000
@@ -4185,7 +4185,7 @@ cases:
                   - {query: {listing: "constraints"}, items: []}
               - now: 1000000
                 actions:
-                  - {fillLowerCopies: {label: "Person", properties: ["email"], again: true}}
+                  - {fillLowerCopies: {label: "Person", properties: ["email"]}}
                   - {execute: {create: "Uniqueness constraint that ignores case"}}
                   - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["__drivine.lower.email"], name: "Person_email_ci_unique"}]}
               - now: 1000000
@@ -4210,7 +4210,7 @@ cases:
                   - {query: {listing: "constraints"}, items: []}
               - now: 1000000
                 actions:
-                  - {fillLowerCopies: {label: "Person", properties: ["email"], again: true}}
+                  - {fillLowerCopies: {label: "Person", properties: ["email"]}}
                   - {execute: {create: "Range index that ignores case"}}
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["__drivine.lower.email"], name: "Person_email_ci_range"}]}
               - now: 1000000
@@ -4218,7 +4218,7 @@ cases:
                   - {query: {listing: "constraints"}, items: []}
               - now: 1000000
                 actions:
-                  - {fillLowerCopies: {label: "Person", properties: ["email"], again: true}}
+                  - {fillLowerCopies: {label: "Person", properties: ["email"]}}
                   - {execute: {create: "Uniqueness constraint that ignores case"}}
                   - {query: {listing: "constraints"}, items: []}
               - now: 1000000
@@ -4245,8 +4245,14 @@ cases:
                   - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["__drivine.lower.email"], name: "Person_email_ci_unique"}]}
               - now: 1000000
                 actions:
-                  - {fillLowerCopies: {label: "Person", properties: ["email"], again: false}}
-                  - {fillLowerCopies: {label: "Person", properties: ["email"], again: false}}
+                  - {readLowerCopies: {label: "Person", properties: ["email"]}, rows: []}
+              - now: 1000000
+                actions:
+                  - {fillLowerCopies: {label: "Person", properties: ["email"]}}
+                  - {readLowerCopies: {label: "Person", properties: ["email"]}, rows: []}
+              - now: 1000000
+                actions:
+                  - {fillLowerCopies: {label: "Person", properties: ["email"]}}
                   - {writeMarker: {scope: "schema", version: null, items: "RANGE_INDEX:Person:__drivine.lower.email:Person_email_ci_range\nUNIQUENESS_CONSTRAINT:Person:__drivine.lower.email:Person_email_ci_unique"}}
             done: 1000000
             report:
@@ -4265,8 +4271,11 @@ cases:
                   - {query: {listing: "constraints"}, items: []}
               - now: 1000000
                 actions:
-                  - {fillLowerCopies: {label: "Person", properties: ["email"], again: false}}
-                  - {fillLowerCopies: {label: "Person", properties: ["email"], again: true}}
+                  - {readLowerCopies: {label: "Person", properties: ["email"]}, rows: []}
+              - now: 1000000
+                actions:
+                  - {fillLowerCopies: {label: "Person", properties: ["email"]}}
+                  - {fillLowerCopies: {label: "Person", properties: ["email"]}}
                   - {execute: {create: "Uniqueness constraint that ignores case"}}
                   - {query: {listing: "constraints"}, items: []}
               - now: 1000000
@@ -4298,7 +4307,7 @@ cases:
                   - {query: {listing: "indexes.RANGE_INDEX"}, failed: [{message: "connection reset"}]}
               - now: 1000000
                 actions:
-                  - {fillLowerCopies: {label: "Person", properties: ["email"], again: true}}
+                  - {fillLowerCopies: {label: "Person", properties: ["email"]}}
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["__drivine.lower.email"], name: "Person_email_ci_range"}]}
               - now: 1000000
                 actions:
@@ -4310,6 +4319,35 @@ cases:
               log:
                 - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=null)"]
                 - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 1 already matching, 0 recreated, 0 needing attention"]
+  - case: "29c"
+    name: "Ignore-case lower copies, whose record can't be read"
+    description: "The index is there, so the record of the copies is read, on a schema connection, and the read fails: the store's error, thrown as it is."
+    stores: ["postgres", "oracle", "sqlite"]
+    catalogs:
+      - {owner: null, version: null, items: ["Range index that ignores case"]}
+      - {owner: "b", version: null, items: ["Full-text index"]}
+    steps:
+      - operation: {enforce: "all"}
+        runs:
+          - stores: ["postgres", "oracle", "sqlite"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {marker: "read.items", scope: "b"}, rows: []}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["__drivine.lower.email"], name: "Person_email_ci_range"}]}
+                  - {query: {listing: "indexes.FULLTEXT_INDEX"}, items: []}
+              - now: 1000000
+                actions:
+                  - {readLowerCopies: {label: "Person", properties: ["email"]}, failed: [{message: "connection reset"}]}
+            done: 1000000
+            report:
+              owners:
+                - {owner: null, marker: null}
+              rethrown: {round: 1, causes: [{message: "connection reset"}]}
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=null)"]
   - case: "item"
     name: "The public IndexManager and ConstraintManager calls"
     description: "Each on one item, with no marker: a constraint ensured and recreated, an index recreated where there is none, and dropped, where it is there and where it is not."

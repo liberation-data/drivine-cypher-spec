@@ -743,10 +743,25 @@ internal class SchemaProgram(
         if (outcome is PlanOutcome.Failed) throw RawFailure(outcome.error, action, io.lastRound)
     }
 
-    /** Fills in the lowercased copies [spec] is made over, where it ignores case; [again], asked only then, where they are filled in whether or not recorded. */
+    /**
+     * `IndexManager.fillIn` and `LowerCopyCatalog.fillIn`: fills in the lowercased copies [spec] is made over, where it
+     * ignores case; [again], asked only then, where they are filled in whether or not recorded. Otherwise the record is
+     * read first, on a schema connection, which drivine4j doesn't catch, and those recorded are left out. A fill or its
+     * record that fails, through the auto-commit manager, fails the owner.
+     */
     private fun fillIn(spec: SchemaItemSpec, again: () -> Boolean) {
         val properties = spec.lowercased.ifEmpty { return }
-        val outcome = io.run(PlanAction.FillLowerCopies(spec.label, properties, again()))
+        val missing = if (again()) properties else {
+            val read = PlanAction.ReadLowerCopies(spec.label, properties)
+            val outcome = io.ask(read)
+            if (outcome is PlanOutcome.Failed) throw RawFailure(outcome.error, read, io.lastRound)
+            val recorded = (outcome as PlanOutcome.Rows).rows.mapNotNull { row ->
+                (row as? List<*>)?.takeIf { it.size == 2 && it[0] == spec.label }?.get(1) as? String
+            }.toSet()
+            properties.filter { it !in recorded }
+        }
+        if (missing.isEmpty()) return
+        val outcome = io.run(PlanAction.FillLowerCopies(spec.label, missing))
         if (outcome is PlanOutcome.Failed) throw OwnerFailure(messageOf(outcome.error))
     }
 

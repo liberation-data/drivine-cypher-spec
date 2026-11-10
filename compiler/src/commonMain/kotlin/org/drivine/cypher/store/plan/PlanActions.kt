@@ -47,11 +47,20 @@ sealed interface PlanAction {
     data class AwaitIndex(val statement: String, val parameters: Map<String, Any?>) : PlanAction
 
     /**
-     * Fills in the lowercased copies of [properties] on the nodes of [label], and records that every node has them, as
-     * drivine4j's `LowerCopyCatalog.fillIn` does: those recorded as there already are left as they are, unless [again].
-     * Its statements stay the library's for now.
+     * Reads the store's record of which lowercased copies every node of a label has, as drivine4j's
+     * `LowerCopyCatalog.stored()` reads it before a fill of [properties] on the nodes of [label]: on a schema connection,
+     * after what its statements need made (drivine4j's `prepare`, run once). It is answered [PlanOutcome.Rows], each row a
+     * record as the list of its label and its property; the planner reads those of [label] and [properties]. Its
+     * statements stay the library's for now. A read that fails is the store's error, which ends the plan.
      */
-    data class FillLowerCopies(val label: String, val properties: List<String>, val again: Boolean) : PlanAction
+    data class ReadLowerCopies(val label: String, val properties: List<String>) : PlanAction
+
+    /**
+     * Fills in the lowercased copies of [properties] on the nodes of [label], and records that every node has them, as
+     * drivine4j's `LowerCopyCatalog.fillIn` does, through the auto-commit manager; the planner leaves out those
+     * [ReadLowerCopies] found recorded. Its statements stay the library's for now.
+     */
+    data class FillLowerCopies(val label: String, val properties: List<String>) : PlanAction
 
     /**
      * The marker's merge ([org.drivine.cypher.store.marker.MarkerStatements.merge]) of the owner [scope], with what it
@@ -103,7 +112,7 @@ enum class Retry {
 @DrivineInternalApi
 sealed interface PlanOutcome {
 
-    /** The rows of a [PlanAction.Query], as plain values: maps, lists, text, numbers, booleans and null. */
+    /** The rows of a [PlanAction.Query] or a [PlanAction.ReadLowerCopies], as plain values: maps, lists, text, numbers, booleans and null. */
     data class Rows(val rows: List<Any?>) : PlanOutcome
 
     /** An action that ran, whose rows aren't read. */

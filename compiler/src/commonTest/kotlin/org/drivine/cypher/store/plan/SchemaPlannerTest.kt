@@ -198,7 +198,8 @@ class SchemaPlannerTest {
                         PlanAction.Query("SELECT 1", mapOf("scope" to "rag"), Purpose.MARKER, 200, compiled = true),
                         PlanAction.Execute(DdlStatement.Native(listOf("GRAPH.CONSTRAINT", "CREATE", "{graphName}")), purpose = Purpose.DDL, retry = Retry.CONTENDED),
                         PlanAction.AwaitIndex("CALL db.awaitIndex(\$name, \$timeout)", mapOf("name" to "x", "timeout" to 60L)),
-                        PlanAction.FillLowerCopies("Person", listOf("email"), again = true),
+                        PlanAction.ReadLowerCopies("Person", listOf("email")),
+                        PlanAction.FillLowerCopies("Person", listOf("email")),
                         PlanAction.WriteMarker("rag", "MERGE", mapOf("scope" to "rag", "version" to null, "items" to "a\nb", "now" to 5L)),
                     ),
                     listOf(
@@ -232,6 +233,37 @@ class SchemaPlannerTest {
         // A state that isn't its request's is refused, rather than planned from.
         val other = resumed.state.copy(request = resumed.state.request.copy(operation = Operation.Remove(null, listOf(name))))
         assertFailsWith<IllegalStateException> { planner.resume(other, resumed.actions.map { if (it is PlanAction.Query) PlanOutcome.Rows(emptyList()) else PlanOutcome.Ran }, 0) }
+    }
+
+    @Test
+    fun copiesRecordedAsThereAreNotFilledInAgain() {
+        val ignoring = RangeIndexSpec("Person", listOf("email", "name"), ignoreCase = true)
+        val listed = ListingRows.rows("sqlite", listOf(SchemaItemInfo(SchemaItemKind.RANGE_INDEX, "Person", ignoring.made().properties, ignoring.effectiveName)), constraints = false)
+        var step = planner.start(request(Operation.Enforce(), DeclaredCatalog(null, items = listOf(ignoring))), 0)
+        val run = mutableListOf<PlanAction>()
+        while (step is PlanStep.Run) {
+            val actions = step.actions
+            run += actions
+            val read = actions.filterIsInstance<PlanAction.ReadLowerCopies>().singleOrNull()
+            if (read != null) {
+                // The read is answered rows, and nothing else.
+                assertFailsWith<IllegalArgumentException> { planner.resume(step.state, actions.map { if (it is PlanAction.Query) PlanOutcome.Rows(emptyList()) else PlanOutcome.Ran }, 0) }
+            }
+            step = planner.resume(step.state, actions.map {
+                when {
+                    it is PlanAction.Query && it.purpose == Purpose.LISTING -> PlanOutcome.Rows(listed)
+                    // A record of another label, and one that isn't a record, are not this one's.
+                    it is PlanAction.ReadLowerCopies -> PlanOutcome.Rows(listOf(listOf("Person", "email"), listOf("Doc", "name"), "Person"))
+                    it is PlanAction.Query -> PlanOutcome.Rows(emptyList())
+                    else -> PlanOutcome.Ran
+                }
+            }, 0)
+        }
+        assertEquals(listOf(PlanAction.ReadLowerCopies("Person", listOf("email", "name"))), run.filterIsInstance<PlanAction.ReadLowerCopies>())
+        assertEquals(listOf(PlanAction.FillLowerCopies("Person", listOf("name"))), run.filterIsInstance<PlanAction.FillLowerCopies>())
+        val report = assertIs<PlanStep.Done>(step).report
+        assertNull(report.failure)
+        assertIs<EnsureResult.AlreadyMatching>(report.owners.single().results.single().result)
     }
 
     @Test

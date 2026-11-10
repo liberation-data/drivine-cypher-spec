@@ -56,9 +56,9 @@ class SchemaPlanner(
 
     /**
      * The next round, after the last round of [state] gave [outcomes], one for each of its actions that ran, in order: all
-     * of them, or those up to and with the first that failed. [now] is the library's clock. A [PlanAction.Query] is
-     * answered [PlanOutcome.Rows] and every other action [PlanOutcome.Ran], or either [PlanOutcome.Failed]; an outcome that
-     * doesn't fit its action is refused.
+     * of them, or those up to and with the first that failed. [now] is the library's clock. A [PlanAction.Query] and a
+     * [PlanAction.ReadLowerCopies] are answered [PlanOutcome.Rows] and every other action [PlanOutcome.Ran], or either
+     * [PlanOutcome.Failed]; an outcome that doesn't fit its action is refused.
      */
     fun resume(state: PlannerState, outcomes: List<PlanOutcome>, now: Long): PlanStep {
         val last = requireNotNull(state.rounds.lastOrNull()) { "A plan that has not started has nothing to resume" }
@@ -72,9 +72,9 @@ class SchemaPlanner(
         require(outcomes.dropLast(1).none { it is PlanOutcome.Failed }) { "A round stops at the first action that fails" }
         outcomes.forEachIndexed { i, outcome ->
             val action = last.actions[i]
-            require(outcome is PlanOutcome.Failed || (outcome is PlanOutcome.Rows) == (action is PlanAction.Query)) {
-                "Action $i of round ${state.rounds.size - 1}, $action, is answered " +
-                    (if (action is PlanAction.Query) "Rows" else "Ran") + " or Failed, not $outcome"
+            val rows = action is PlanAction.Query || action is PlanAction.ReadLowerCopies
+            require(outcome is PlanOutcome.Failed || (outcome is PlanOutcome.Rows) == rows) {
+                "Action $i of round ${state.rounds.size - 1}, $action, is answered " + (if (rows) "Rows" else "Ran") + " or Failed, not $outcome"
             }
         }
         return step(state.copy(rounds = state.rounds.dropLast(1) + last.copy(outcomes = outcomes)), now)
