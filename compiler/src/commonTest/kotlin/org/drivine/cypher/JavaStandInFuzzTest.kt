@@ -20,7 +20,9 @@ import org.drivine.cypher.sql.RoundingMode
 import org.drivine.cypher.sql.Temporal
 import org.drivine.cypher.sql.Temporals
 import org.drivine.cypher.sql.formatted
+import org.drivine.cypher.text.CommonUnicode
 import org.drivine.cypher.text.JavaText
+import org.drivine.cypher.text.SearchText
 import org.drivine.cypher.time.CommonTime
 import org.drivine.cypher.time.JVM_ZONE_IDS
 import org.drivine.cypher.time.knownRegion
@@ -234,6 +236,36 @@ class JavaStandInFuzzTest {
             else -> linkedMapOf(fields[1] to fields[2], "k" to listOf(fields[2]))
         }
         differs(java, CypherJson.writeValueAsString(value))
+    }
+
+    /**
+     * A full-text query's reading ([SearchText]): Java's classes of a word's characters and of Oracle's `[[:alnum:]]`, over
+     * every code point, and Java's lower case of texts a final sigma's word turns on. The tables the targets but the JVM
+     * read ([CommonUnicode]) are checked on every target, the JVM's among them, as well as what each target reads.
+     */
+    @Test
+    fun searchTextIsReadAsJavaReadsIt() = check("search") { fields ->
+        when (fields[0]) {
+            "W" -> unlikeCodePoints(fields[1], SearchText::isWordChar) ?: unlikeCodePoints(fields[1], CommonUnicode::isWordChar)?.let { "tables: $it" }
+            "O" -> unlikeCodePoints(fields[1], SearchText::isOracleAlnum) ?: unlikeCodePoints(fields[1], CommonUnicode::isOracleAlnum)?.let { "tables: $it" }
+            else -> {
+                val (_, text, java) = fields
+                differs(java, SearchText.lowercase(text)) ?: differs(java, CommonUnicode.lowercase(text))?.let { "tables: $it" }
+            }
+        }
+    }
+
+    /** The code points [test] and Java's ranges [java] differ by, of every plane: null where none. */
+    private fun unlikeCodePoints(java: String, test: (Int) -> Boolean): String? {
+        val ranges = java.split(',').map { r -> r.substringBefore('-').toInt(16)..r.substringAfter('-').toInt(16) }
+        var r = 0
+        val wrong = mutableListOf<Int>()
+        for (cp in 0..0x10FFFF) {
+            while (r < ranges.size && cp > ranges[r].last) r++
+            val javas = r < ranges.size && cp in ranges[r]
+            if (test(cp) != javas) wrong += cp
+        }
+        return if (wrong.isEmpty()) null else "${wrong.size} code points unlike Java's, such as ${wrong.take(20).joinToString(",") { it.toString(16) }}"
     }
 
     @Test

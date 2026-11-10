@@ -3,7 +3,9 @@ import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.text.BreakIterator;
 import java.time.ZoneId;
+import java.util.Locale;
 import java.time.zone.ZoneRulesProvider;
 import java.util.TreeSet;
 
@@ -14,6 +16,10 @@ import java.util.TreeSet;
  *   database is not the JVM's (Kotlin/Native reads the OS's, wasmJs Node's ICU).
  * - org/drivine/cypher/number/DoubleTables.kt: the powers of ten Schubfach writes a double with, and the powers of five
  *   Eisel-Lemire reads one with. Both are exact arithmetic, worked out here with BigInteger.
+ * - org/drivine/cypher/text/UnicodeTables.kt: what a full-text query's reading asks of Java's Unicode, as that JVM answers
+ *   it, for the platforms whose own tables are of another Unicode release (see CommonUnicode): the characters a word
+ *   holds, those Oracle's [[:alnum:]] was measured to hold, each code point's lower case, the characters
+ *   `String.toLowerCase` counts as cased before a final sigma, and the classes its word breaks read each character as.
  *
  *   java gen/Generate.java <output directory> [<pinned JDK version> <pinned tzdb>]
  */
@@ -33,6 +39,7 @@ public class Generate {
         }
         write(out.resolve("org/drivine/cypher/time/JvmZoneIds.kt"), zoneIds());
         write(out.resolve("org/drivine/cypher/number/DoubleTables.kt"), doubleTables());
+        write(out.resolve("org/drivine/cypher/text/UnicodeTables.kt"), unicodeTables());
     }
 
     private static void write(Path file, String text) throws IOException {
@@ -148,5 +155,129 @@ public class Generate {
         BigInteger c = BigInteger.ONE.shiftLeft(b).divide(p).add(BigInteger.ONE);
         while (c.bitLength() > 128) c = c.shiftRight(1);
         return c;
+    }
+
+    // ----- What a full-text query's reading asks of Java's Unicode (org.drivine.cypher.text.CommonUnicode) -----
+
+    private interface CodePointTest { boolean test(int cp); }
+
+    /** The code points [test] holds, as `start-end` ranges in hexadecimal, a space between them. */
+    private static String ranges(CodePointTest test) {
+        StringBuilder out = new StringBuilder();
+        int start = -1;
+        for (int cp = 0; cp <= 0x110000; cp++) {
+            boolean in = cp < 0x110000 && test.test(cp);
+            if (in && start < 0) start = cp;
+            if (!in && start >= 0) {
+                if (out.length() > 0) out.append(' ');
+                out.append(Integer.toHexString(start)).append('-').append(Integer.toHexString(cp - 1));
+                start = -1;
+            }
+        }
+        return out.toString();
+    }
+
+    private static String text(int cp) {
+        return new String(Character.toChars(cp));
+    }
+
+    // The classes a character is to the word breaks `String.toLowerCase` reads a final sigma by, as CommonUnicode reads them.
+    static final int LET = 1, DGT = 2, MID_WORD = 4, MID_NUM = 8, PRE_NUM = 16, POST_NUM = 32, DANDA = 64, MARK = 128,
+        FORMAT = 256, KANJI = 512, KATA = 1024, HIRA = 2048, SPACE = 4096, CR = 8192, LINE = 16384;
+
+    /** Whether [words] reads [text] as one segment. */
+    private static boolean one(BreakIterator words, String text) {
+        words.setText(text);
+        words.first();
+        return words.next() == text.length();
+    }
+
+    /**
+     * What the word breaks of the JDK's `BreakIterator.getWordInstance` read [cp] as: a letter, a digit, what may stand
+     * between letters or between digits, before or after a number, a danda, a mark that goes with the letter or digit before
+     * it, a format character that is passed over, the runs of ideographs, katakana and hiragana, and the gaps. Each class a
+     * word is read by is measured on [words] itself, by the texts it reads as one segment, as its own data, and not
+     * `Character.getType`, says what a code point is: they differ for some, such as code points not yet assigned in blocks
+     * of ideographs, which it reads as letters. The runs and the gaps, which no word holds, are by `Character.getType`.
+     */
+    private static int breakClass(BreakIterator words, int cp) {
+        String c = text(cp);
+        int type = Character.getType(cp);
+        int flags = 0;
+        boolean let = one(words, "a-" + c);
+        boolean dgt = one(words, "1," + c);
+        boolean afterLetter = one(words, "a" + c);
+        boolean afterDigit = one(words, "1" + c);
+        boolean beforeLetter = one(words, c + "a");
+        if (let) flags |= LET;
+        if (dgt) flags |= DGT;
+        if (one(words, "a" + c + "b") && !afterLetter) flags |= MID_WORD;
+        if (one(words, "1" + c + "2") && !afterDigit) flags |= MID_NUM;
+        if (one(words, c + "1") && !beforeLetter) flags |= PRE_NUM;
+        if (afterDigit && !afterLetter) flags |= POST_NUM;
+        if (afterLetter && !afterDigit && !beforeLetter) flags |= DANDA;
+        if (afterLetter && afterDigit && !beforeLetter) flags |= MARK;
+        if (afterLetter && beforeLetter && !let && !dgt) flags |= FORMAT;
+        if (cp == 0x3005 || (cp >= 0x4E00 && cp <= 0x9FA5) || (cp >= 0xF900 && cp <= 0xFA2D)) flags |= KANJI;
+        if ((cp >= 0x3099 && cp <= 0x309C) || (cp >= 0x30A1 && cp <= 0x30FE)) flags |= KATA;
+        if ((cp >= 0x3041 && cp <= 0x3094) || (cp >= 0x3099 && cp <= 0x309E) || cp == 0x30FB || cp == 0x30FC) flags |= HIRA;
+        if (type == Character.SPACE_SEPARATOR || cp == '\t') flags |= SPACE;
+        if (cp == '\r') flags |= CR;
+        if (cp == '\n' || cp == '\f' || cp == 0x2028 || cp == 0x2029) flags |= LINE;
+        return flags;
+    }
+
+    private static String unicodeTables() {
+        String jvm = System.getProperty("java.vendor") + " " + System.getProperty("java.runtime.version");
+        StringBuilder lower = new StringBuilder();
+        for (int cp = 0; cp < 0x110000; cp++) {
+            if (cp >= 0xD800 && cp <= 0xDFFF) continue;
+            String one = text(cp);
+            String lowered = one.toLowerCase(Locale.ROOT);
+            if (lowered.equals(one)) continue;
+            if (lower.length() > 0) lower.append(' ');
+            lower.append(Integer.toHexString(cp)).append(':');
+            int[] cps = lowered.codePoints().toArray();
+            for (int i = 0; i < cps.length; i++) lower.append(i == 0 ? "" : ",").append(Integer.toHexString(cps[i]));
+        }
+        // Cased, as String.toLowerCase reads a final sigma: a character is cased where it makes the sigma after it final,
+        // read where it is in the sigma's word, alone before it or after a digit. A character in no word with a sigma is never
+        // asked.
+        BreakIterator words = BreakIterator.getWordInstance(Locale.ROOT);
+        CodePointTest cased = cp -> {
+            if (cp >= 0xD800 && cp <= 0xDFFF) return false;
+            for (String probe : new String[] {text(cp) + "Σ", "1" + text(cp) + "Σ"}) {
+                words.setText(probe);
+                words.first();
+                if (words.next() == probe.length()) return probe.toLowerCase(Locale.ROOT).endsWith("ς");
+            }
+            return false;
+        };
+        StringBuilder classes = new StringBuilder();
+        int last = -1;
+        for (int cp = 0; cp < 0x110000; cp++) {
+            int flags = cp >= 0xD800 && cp <= 0xDFFF ? 0 : breakClass(words, cp);
+            if (flags == last) continue;
+            if (classes.length() > 0) classes.append(' ');
+            classes.append(Integer.toHexString(cp)).append(':').append(Integer.toHexString(flags));
+            last = flags;
+        }
+        return "// Generated by gen/Generate.java from " + jvm + ". Do not edit.\n"
+            + "package org.drivine.cypher.text\n\n"
+            + "/** What a full-text query's reading asks of Java's Unicode, as " + jvm + " answers it: see CommonUnicode. */\n"
+            + "internal object UnicodeTables {\n"
+            + "    /** The characters a word holds: Java's Alphabetic, its Nd and `_`, as ranges. */\n"
+            + "    val WORD: String =\n" + chunks(ranges(cp -> Character.isAlphabetic(cp) || Character.getType(cp) == Character.DECIMAL_DIGIT_NUMBER || cp == '_')) + "\n\n"
+            + "    /** What Oracle's `[[:alnum:]]` was measured to hold: Java's letters, digits, letter numbers and marks, as ranges. */\n"
+            + "    val ORACLE_ALNUM: String =\n" + chunks(ranges(cp -> Character.isLetter(cp) || Character.isDigit(cp)
+                || Character.getType(cp) == Character.LETTER_NUMBER || Character.getType(cp) == Character.NON_SPACING_MARK
+                || Character.getType(cp) == Character.COMBINING_SPACING_MARK)) + "\n\n"
+            + "    /** Each code point whose lower case, as `String.toLowerCase(Locale.ROOT)` writes it alone, is another: `cp:lower`. */\n"
+            + "    val LOWER: String =\n" + chunks(lower.toString()) + "\n\n"
+            + "    /** The characters `String.toLowerCase` counts as cased before a final sigma, as ranges. */\n"
+            + "    val CASED: String =\n" + chunks(ranges(cased)) + "\n\n"
+            + "    /** Each code point's classes to the word breaks a final sigma is read by, from where they change: `cp:flags`. */\n"
+            + "    val BREAK_CLASSES: String =\n" + chunks(classes.toString()) + "\n"
+            + "}\n";
     }
 }

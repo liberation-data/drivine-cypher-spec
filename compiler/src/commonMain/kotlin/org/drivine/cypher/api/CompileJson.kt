@@ -33,6 +33,9 @@ import kotlin.io.encoding.ExperimentalEncodingApi
  * `{"nullsEqual": …, "era": …}`), `{"refusal": "<message>"}` where the compiler refuses the statement, or
  * `{"error": "<message>"}` where the request is no request.
  *
+ * A request with `search` or `searchIndex` in place of `cypher` is a full-text search, answered by [FullTextSearch]: see
+ * [SearchJson]. A request that gives more than one of the three is an error.
+ *
  * Values, in the parameters given and those bound, are plain JSON, tagged only where JSON, or a host's reading of it, loses
  * what the SQL depends on:
  * - a JSON integer is a whole number, a Long (or past a Long, a big integer); a JSON number with a fraction or an exponent is
@@ -57,14 +60,23 @@ import kotlin.io.encoding.ExperimentalEncodingApi
 object CompileJson {
 
     fun compile(request: String): String {
+        val tree = try {
+            CypherJson.readTree(request) as? ObjectNode ?: throw IllegalArgumentException("A request is a JSON object.")
+        } catch (e: Exception) {
+            return error(e.message ?: e.toString())
+        }
+        // A full-text search, asked of the same entry: a request with "search" or "searchIndex" in place of "cypher".
+        // A request asks one thing: one that gives two would have the other read past as though it were not there.
+        if (listOf("cypher", "search", "searchIndex").count { tree.has(it) } > 1) return error("A request gives one of cypher, search and searchIndex.")
+        if (tree.has("search") || tree.has("searchIndex")) return SearchJson.answer(tree)
         val call = try {
-            read(request)
+            read(tree)
         } catch (e: Exception) {
             return error(e.message ?: e.toString())
         }
         // A value bound is one given, or text, so it nests no deeper than the request: writing it can't be refused.
         return when (val result = CypherCompiler.compile(call.store, call.graph, call.cypher, call.parameters)) {
-            is Refusal -> StringBuilder().apply { append("{\"refusal\":"); TypedJson.write(result.message, this); append('}') }.toString()
+            is Refusal -> refusal(result.message)
             is Compiled -> StringBuilder().apply {
                 append("{\"sql\":"); TypedJson.write(result.sql, this)
                 append(",\"parameters\":"); TypedJson.write(result.parameters, this, 2)
@@ -79,8 +91,7 @@ object CompileJson {
 
     private class Call(val store: Store, val graph: GraphOptions, val cypher: String, val parameters: Map<String, Any?>)
 
-    private fun read(request: String): Call {
-        val tree = CypherJson.readTree(request) as? ObjectNode ?: throw IllegalArgumentException("A request is a JSON object.")
+    private fun read(tree: ObjectNode): Call {
         val storeId = tree["store"]?.textValue() ?: throw IllegalArgumentException("A request names its store: postgres, oracle or sqlite.")
         val store = Store.of(storeId) ?: throw IllegalArgumentException("No store $storeId: postgres, oracle or sqlite.")
         val graph = tree["graph"] as? ObjectNode ?: throw IllegalArgumentException("A request gives its graph: {\"name\": …}.")
@@ -116,7 +127,9 @@ object CompileJson {
         return given.booleanValue()
     }
 
-    private fun error(message: String) = StringBuilder().apply { append("{\"error\":"); TypedJson.write(message, this); append('}') }.toString()
+    internal fun error(message: String) = StringBuilder().apply { append("{\"error\":"); TypedJson.write(message, this); append('}') }.toString()
+
+    internal fun refusal(message: String) = StringBuilder().apply { append("{\"refusal\":"); TypedJson.write(message, this); append('}') }.toString()
 }
 
 /** The tagged JSON of values that [CompileJson] reads and writes. */

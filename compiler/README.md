@@ -47,9 +47,10 @@ each store's tables, the probe that finds them made, and its indexes, constraint
 `org.drivine.cypher.store.Stamps`: each store's statements for the marker and the store's stamp, the marker's inventory
 and version token, and the node stamp's form, as the spec's `marker.yaml` pins them), the schema plan
 (`org.drivine.cypher.store.plan`: drivine4j's schema manager as a planner with no store, which gives a library each round
-of statements to run and decides from what the store gave back, as the spec's `plans.yaml` pins it), and a few of the
-schema specs' and compilers' functions. The compiler classes are public and unmarked; the rest are public only so that drivine4j, built apart from
-the module, can call them, and are marked `@org.drivine.DrivineInternalApi`, an opt-in at the level of an error:
+of statements to run and decides from what the store gave back, as the spec's `plans.yaml` pins it), full-text search
+(`org.drivine.cypher.api.FullTextSearch`, see [Full-text search](#full-text-search)), and a few of the schema specs' and
+compilers' functions. The compiler classes are public and unmarked; the rest are public only so that drivine4j, built apart
+from the module, can call them, and are marked `@org.drivine.DrivineInternalApi`, an opt-in at the level of an error:
 drivine4j opts in module-wide, and any other caller that doesn't is refused at compile time. They may change or go in
 any release.
 
@@ -104,6 +105,80 @@ a host's JSON reads as a double, losing digits. An untagged JSON number in the a
 
 A request nests its arrays and objects at most 64 deep, its own object and `parameters` two of them; a deeper one is
 an error.
+
+### Full-text search
+
+`org.drivine.cypher.api.FullTextSearch` writes a full-text search for each store, as drivine4j writes it: the user's query
+read (words ORed, a `"phrase"`, `+required`, `-excluded` and `NOT`, `prefix*`, `AND`/`OR`, `field:word`, and backslash
+escapes), and the statement each store answers it with. It is pure, and marked `@DrivineInternalApi` as the store's DDL is:
+the library runs the statements it gives, and keeps its own projection.
+
+```kotlin
+FullTextSearch.lookup(store, graph, label, properties): CatalogLookup?                 // the catalog's record of the index
+FullTextSearch.plan(store, graph, SearchRequest(labels, properties, query, index)): SearchResult   // SearchPlan or Refusal
+```
+
+`store` is a `SearchStore`: `POSTGRES`, `ORACLE`, `SQLITE`, `NEO4J`, `MEMGRAPH` or `FALKORDB`.
+
+1. `lookup` gives the statement that finds what the graph's catalog records of the full-text index on the label's
+   properties: on Postgres a row where its trigram index is made, on Oracle the side table of its Oracle Text index (the
+   row's `object_name`), and no row where none is made. It is null on the other stores.
+   `label` is the one the index is on, and `properties` every property the index covers, in the order its declaration
+   gives them, as the record holds them: not only one a caller named to choose the index. Choosing the index, and refusing a
+   property no index covers, is the library's, as drivine4j's `FullTextIndexResolver` chooses it. The search's `labels` are
+   the root's, that label first, and its `properties` the same list, in the same order: Postgres's trigram index, Oracle's
+   side table and the derived index name are all over that order.
+2. The library gives what it found as the request's `SearchIndex`: `trigram` on Postgres, `oracleText` (the side table, or
+   null) on Oracle, and on Neo4j and Memgraph the index's `name` where it isn't `<label>_<properties joined by _>_fulltext` (a blank one is none).
+3. `plan` gives a `SearchPlan`, or a `Refusal` of a query with no word to score (`A full-text query needs a word to look
+   for: '-only' has none.`), or of a graph name the store can't take.
+   - On a SQL store, `sql` is one `SELECT` of the ranked candidates, `nid` and `score`: the nodes whose text meets the query,
+     each scored by BM25 as Lucene scores it (or on Oracle with an Oracle Text index, by Oracle Text), against the best of
+     them, so the best scores 1, and only those above 0. The library joins them back to its node table by `nid` for its
+     projection, and adds its threshold (`score >= threshold`), its predicates, the view's required relationships, `ORDER BY score DESC, nid` and
+     its `LIMIT`. On SQLite it calls the functions the library registers, `drivine_lower`, `drivine_regexp_count` and
+     `drivine_math`, and its expressions hold what the compiler's own don't (see the spec's README, *Regular
+     expressions*): POSIX's `[[:alnum:]]`, read as Java's `\p{Alnum}` with Unicode's classes, `$` and a lookahead `(?=…)`,
+     as drivine4j's `SqlitePatterns` reads them. `TextQueryCountTest` counts its terms so, by Java's expressions, on the JVM
+     alone.
+   - On a graph engine, `cypher` is the search's head: the index's `CALL` given the query as it is, the hits that have every
+     root label, the best of them, and each node and its score against the best, as `alias` and `scoreAlias` (`n` and
+     `_score` where left out), best first. The index is asked for `topK` hits, or with `filtered` (a caller's filter or a
+     required relationship prunes them after the index; a threshold, which keeps a prefix of the ranking, does not) or a
+     root label beyond the first ten times as many (`indexLimit`), and Memgraph's no more than 1,000,000.
+   - `parameters` are named with the compiler's reserved prefix, `_cy_ft1`, `_cy_ft2`, …, which no library binds, so they
+     never clash with the library's own; each is written `$_cy_ft<n>` in the statement, as the compiler writes its own.
+
+Over JSON it is the same entry, `CompileJson.compile` (`compile`, `drivine_compile`): a request with `search` in place of
+`cypher` is a search, and one that gives more than one of `cypher`, `search` and `searchIndex` is an error.
+
+```json
+{"store": "postgres", "graph": {"name": "g"},
+ "search": {"labels": ["Chunk"], "properties": ["text"], "query": "how do I define an action", "index": {"trigram": true}}}
+```
+
+`search` holds `labels` (or one `label`, not both), `properties`, `query`, `index` (`{"trigram": …}`, `{"oracleText": "<side table>" |
+null}` or `{"name": …}`, left out where there's none), and on a graph engine `topK`, and `filtered`, `alias` and
+`scoreAlias` where they aren't false, `n` and `_score`. `graph` is the SQL stores' alone. The answer is
+`{"sql": …, "parameters": {…}, "warnings": […]}`, with `cypher` in place of `sql` on a graph engine, or `{"refusal": …}`, or
+`{"error": …}` where the request is no request. A request with `searchIndex`, `{"label": …, "properties": […]}`, in place of
+`cypher` is given the lookup: `{"sql": …, "parameters": {…}}`, `sql` null on a store with no record of the index.
+
+drivine4j's statements are the module's byte for byte. `src/commonTest/resources/search-golden.json` holds them, written by
+drivine4j's own code (`matching` and `matchingThrough` of its Postgres, Oracle and SQLite selects, and its grammars'
+`fullTextSearchHead`) at the commit it names, for every query of drivine4j's `TextQueryTest` and `OracleSelectTest`, the 22 of
+its ranking test over `docs-corpus.json`, and labels and properties of other shapes, on each store and in each state of its
+index: only the parameters' names were changed, drivine4j's `$_pN` to `$_cy_ft<N+1>`. `FullTextSearchGoldenTest` checks
+`plan`, and the JSON request, against each on every target. On a SQL store drivine4j's statement goes on to its projection of
+each node's row, which the module leaves to the library, so the test puts that back before it compares: the rest is
+byte for byte.
+
+The query is read as Java reads it on every target: a word's characters are Java's `\p{IsAlphabetic}`, `\p{Nd}` and `_`, and
+its lower case is Java's `String.toLowerCase(Locale.ROOT)`, a final sigma among it, which Java reads by the word around it as
+`BreakIterator` finds the word. The JVM asks Java; the other targets read tables of the pinned JDK's answers
+(`org.drivine.cypher.text.CommonUnicode`, see [Building](#building)), which the stand-in fuzz checks on every target and the
+JVM's tests check against Java on every code point. Lengths are in characters (drivine4j#665 measures them in words), and the
+graph engines are given the query as it is (FalkorDB's own syntax is drivine4j#666).
 
 ### Oracle's rows as text
 
@@ -217,7 +292,10 @@ Run `./gradlew clean` before a build you check: the wasm optimize step can leave
 
 What the build generates (`gen/Generate.java`, run on the pinned JDK): the zone ids that JDK's `ZoneId.of` takes, which
 the other targets check a zone name against, as their own zone databases (the OS's, Node's ICU) are other tzdb releases;
-and the tables of powers of ten and five the double text and parse use.
+the tables of powers of ten and five the double text and parse use; and the answers of that JDK's Unicode that a full-text
+query is read by off the JVM (`UnicodeTables`): the characters a word holds, those Oracle's `[[:alnum:]]` was measured to
+hold, each code point's lower case, the characters `String.toLowerCase` counts as cased before a final sigma, and the class
+each character is to the word breaks it reads a final sigma by, measured on `BreakIterator` itself.
 
 ### Dependency verification
 
@@ -304,8 +382,10 @@ The JVM is the oracle. `./gradlew jvmOracle` writes, into `build/oracle`:
   inventories it must write and read back, the version tokens, and the node stamps `Stamps` must read and write.
 - `plans.json`: the spec's `plans.yaml` as JSON, which `StorePlanTest` reads on every target: each case's rounds that
   `org.drivine.cypher.store.plan`'s planner must give on each store, the answers it is given back, and its report.
+- `search-golden.json`: drivine4j's full-text search statements (see [Full-text search](#full-text-search)), which
+  `FullTextSearchGoldenTest` reads on every target. Its requests are in `corpus.jsonl` too.
 - `standins-<name>.txt`: what Java gives where the module stands in for it, worked out by Java's own API on the pinned
-  JDK (`StandIns`): `ZoneId.of`'s reading of a zone; java.time's calendar dates, and its parse and text of a temporal
+  JDK (`StandIns`): `ZoneId.of`'s reading of a zone; a full-text query's classes of characters and its lower case; java.time's calendar dates, and its parse and text of a temporal
   value, with java.math's of a duration; `substring`, `Integer.parseInt(s, 16)` and `appendCodePoint` of a string
   literal's escape; a text's UTF-8; SHA-256; case mapping and character classes; `String.format`'s `%s`;
   `parseDouble`'s refusals, `BigInteger`'s reading and `doubleValue`, `BigDecimal`'s text of a double, `Math.rint`;

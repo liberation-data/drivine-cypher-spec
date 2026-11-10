@@ -983,6 +983,12 @@ abstract class SqlCypherCompiler(
      */
     protected open val undirectedBothWays: Boolean = true
 
+    /**
+     * That the relationship type [type], a walk's step's, is [name]: an equality, as any relationship's type is tested.
+     * SQLite's is a range: see its compiler.
+     */
+    protected open fun stepType(type: String, name: String): String = "$type = ${literal(name)}"
+
     /** The rows a relationship row of [direction] is read from: [bothWays] for either way where [undirectedBothWays], else the relationship table. */
     protected fun edgesFor(direction: RelationshipPattern.Direction): String =
         if (direction == RelationshipPattern.Direction.EITHER && undirectedBothWays) bothWays else edges
@@ -1929,10 +1935,10 @@ abstract class SqlCypherCompiler(
             found.forEach { (variable, value, column) -> select.bind(variable, value.columnsOf(PENDING, column).laterally(name, kinds)) }
         }
 
-        /** That the relationship type [type] is one of [types]; null when any will do. */
-        private fun types(type: String, types: List<String>): String? = when (types.size) {
+        /** That the relationship type [type] is one of [types], in a walk's [step] or not; null when any will do. */
+        private fun types(type: String, types: List<String>, step: Boolean = false): String? = when (types.size) {
             0 -> null
-            1 -> "$type = ${literal(types.single())}"
+            1 -> if (step) stepType(type, types.single()) else "$type = ${literal(types.single())}"
             else -> "$type IN (${types.joinToString(", ") { literal(it) }})"
         }
 
@@ -1961,7 +1967,7 @@ abstract class SqlCypherCompiler(
             val range = relationship.range!!
             val edge = alias("e")
             val conditions = listOfNotNull(
-                types("$edge.type", relationship.types),
+                types("$edge.type", relationship.types, step = true),
                 relationship.properties?.let { propertiesMatch("$edge.props", it, select.scope) },
             )
             val walked = walked(
@@ -2011,7 +2017,7 @@ abstract class SqlCypherCompiler(
                         node.properties?.let { propertiesMatch("$row.props", it, within, node.labels) },
                     )
                 } + inner.relationships.zip(links).flatMap { (relationship, edge) ->
-                    listOfNotNull(types("$edge.type", relationship.types), relationship.properties?.let { propertiesMatch("$edge.props", it, within) })
+                    listOfNotNull(types("$edge.type", relationship.types, step = true), relationship.properties?.let { propertiesMatch("$edge.props", it, within) })
                 } + listOfNotNull(group.where?.let { condition(it, within) })
             } finally {
                 stepping = outer

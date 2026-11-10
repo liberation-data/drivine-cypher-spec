@@ -26,6 +26,8 @@ import java.time.format.DateTimeFormatter
  *   other targets have no YAML reader. See `StoreDdlTest`.
  * - `marker.json`: the spec's `marker.yaml`, the schema marker and the stamps, as JSON likewise. See `StoreMarkerTest`.
  * - `plans.json`: the spec's `plans.yaml`, the schema plan's cases, as JSON likewise. See `StorePlanTest`.
+ * - `search-golden.json`: drivine4j's full-text search statements, the module's golden (`src/commonTest/resources`), for
+ *   each target's `FullTextSearchGoldenTest`. Its requests are in `corpus.jsonl` too, as [CompileJson] answers them.
  *
  *   Oracle <spec directory> <output directory> <fuzz count> <seed> <mutant count>
  */
@@ -54,6 +56,8 @@ object Oracle {
         File(out, "marker.json").writeText(json.writeValueAsString(yaml.readTree(File(spec, "marker.yaml"))))
         // The schema plan's cases, for each target's StorePlanTest.
         File(out, "plans.json").writeText(json.writeValueAsString(yaml.readTree(File(spec, "plans.yaml"))))
+        // drivine4j's full-text search statements, for each target's FullTextSearchGoldenTest.
+        File(out, "search-golden.json").writeBytes(searchGolden())
         println("jvmOracle: ${corpus.first} statements in the corpus (${corpus.second} left out, as they embed the clock); $doubles double cases.")
         println("jvmOracle: ${mutants.made} mutant requests, ${mutants.kept} of interest, ${mutants.written} of them in mutants.jsonl.")
         println("jvmOracle: stand-in cases ${standIns.entries.joinToString { (name, n) -> "$name $n" }}.")
@@ -98,9 +102,31 @@ object Oracle {
             val text = request("oracle", cypher, parameters, ROWS_AS_TEXT)
             if (CompileJson.compile(text) != CompileJson.compile(request("oracle", cypher, parameters))) add(text)
         }
+        // Full-text searches: each of the golden's requests, and searches that are no request.
+        addAll(searchRequests())
         // Requests that are no request.
         addAll(listOf("", "[]", "{\"store\": \"neo4j\", \"graph\": {\"name\": \"g\"}, \"cypher\": \"RETURN 1\"}", "{\"store\": \"postgres\", \"cypher\": \"RETURN 1\"}"))
     }
+
+    /** The module's golden of drivine4j's full-text search statements, `src/commonTest/resources/search-golden.json`. */
+    private fun searchGolden(): ByteArray = requireNotNull(Oracle::class.java.getResource("/search-golden.json")) { "No search-golden.json on the classpath." }.readBytes()
+
+    /** Written with every character outside ASCII escaped, so a lone surrogate in a query is a request's as it is. */
+    private val ascii = ObjectMapper().also { it.factory.enable(com.fasterxml.jackson.core.JsonGenerator.Feature.ESCAPE_NON_ASCII) }
+
+    /** Each search request of the golden, as JSON text, and those that are no request. */
+    private fun searchRequests(): List<String> =
+        json.readTree(searchGolden())["entries"].map { ascii.writeValueAsString(it["request"]) } + listOf(
+            """{"store": "redis", "graph": {"name": "g"}, "search": {"labels": ["A"], "properties": ["t"], "query": "x"}}""",
+            """{"store": "postgres", "graph": {"name": "g"}, "search": {"labels": ["A"], "properties": ["t"]}}""",
+            """{"store": "postgres", "graph": {"name": "g"}, "search": {"labels": [], "properties": ["t"], "query": "x"}}""",
+            """{"store": "postgres", "graph": {"name": "9g"}, "search": {"labels": ["A"], "properties": ["t"], "query": "x"}}""",
+            """{"store": "postgres", "graph": {"name": "g"}, "search": {"label": "A", "properties": ["t"], "query": "x", "index": {"trigram": "yes"}}}""",
+            """{"store": "neo4j", "search": {"labels": ["A"], "properties": ["t"], "query": "x"}}""",
+            """{"store": "neo4j", "search": {"labels": ["A"], "properties": ["t"], "query": "x", "topK": 2147483647, "filtered": true}}""",
+            """{"store": "sqlite", "graph": {"name": "g"}, "searchIndex": {"label": "A", "properties": ["t"]}}""",
+            """{"store": "oracle", "graph": {"name": "g"}, "search": [1]}""",
+        )
 
     /** Every statement in the spec's files, with its parameters, in the files' order. */
     internal fun statements(spec: File): List<Mutants.Statement> = buildList {
