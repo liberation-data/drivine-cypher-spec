@@ -352,15 +352,17 @@ val pythonWheels by tasks.registering(Exec::class) {
     )
     dependsOn(libraries.keys.map { "linkDrivinecypherReleaseShared${it.replaceFirstChar(Char::uppercase)}" })
     val out = layout.buildDirectory.dir("wheels").get().asFile
+    val built = libraries.map { (target, library) -> target to layout.buildDirectory.file("bin/$target/drivinecypherReleaseShared/$library").get().asFile }
+    // The libraries and the LICENSE as well as the binding, so a library linked again is packed again.
     inputs.dir(layout.projectDirectory.dir("python"))
+    inputs.files(built.map { it.second })
+    inputs.file(layout.projectDirectory.file("../LICENSE"))
     outputs.dir(out)
     doFirst { out.deleteRecursively() }
     executable(providers.gradleProperty("python").getOrElse("python3"))
     args(
         listOf(layout.projectDirectory.file("python/build_wheels.py").asFile.absolutePath, version, out.absolutePath) +
-            libraries.map { (target, library) ->
-                "$target=" + layout.buildDirectory.file("bin/$target/drivinecypherReleaseShared/$library").get().asFile.absolutePath
-            },
+            built.map { (target, file) -> "$target=${file.absolutePath}" },
     )
 }
 

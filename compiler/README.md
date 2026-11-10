@@ -175,7 +175,8 @@ C API alone (a version script on Linux and a symbol list on macOS, in `native/`,
 Windows), so the Kotlin/Native runtime's symbols can't clash with another library in the host's process; on Linux it is
 linked `--as-needed`, which leaves out `libcrypt.so.1` and the other system libraries it doesn't call. The binding loads
 the library on the first compile, once, and frees each answer with `drivine_free`. `python/build_wheels.py` packs the
-wheels with the standard library alone, the same bytes from the same libraries; `python/check_wheel.py` checks each.
+wheels with the standard library alone, the same bytes from the same libraries; `python/check_wheel.py` checks each,
+and `python/check_wheel_test.py`, which CI runs, tests both over made-up libraries.
 
 ### C
 
@@ -418,7 +419,8 @@ desk's and Drivine for TypeScript's releases do: trusted publishing needs 11.5.1
 registry tarball only once the tarball has the integrity pinned beside the version (`NPM_CLI_VERSION` and
 `NPM_CLI_INTEGRITY` in `compiler-release.yml`; npm bundles its dependencies, so the tarball is the whole of it). To bump
 npm, set both, the integrity from `npm view npm@<version> dist.integrity`; to bump Node, set `node-version` in both npm
-jobs. A version with a suffix is published under the npm tag `next`, and
+jobs. A version with a suffix (`-alpha.N`, `-beta.N` or `-rc.N`, the ones PyPI's versions can say too: the release refuses
+any other tag) is published under the npm tag `next`, and
 any other under `latest`. The two publishes don't wait on each other, so a failure of one neither undoes nor holds up
 the other. A re-run publishes nothing where npm has the version as this tarball (by its integrity), and fails where npm
 has another tarball under the version, as npm never takes a version twice. Once Maven Central has the version, a

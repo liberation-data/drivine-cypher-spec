@@ -84,6 +84,8 @@ jobs:
         with:
           path: ~/.konan
           key: konan-${{ runner.os }}-${{ hashFiles('compiler/build.gradle.kts') }}
+      - name: The Python wheels' check, over made-up libraries
+        run: python python/check_wheel_test.py
       - run: ./gradlew --no-daemon clean linuxX64Test nativeCorpusCheck -Ppython="$(command -v python)" | tee corpus.log
       - name: The shared library for linuxArm64 and mingwX64, cross-compiled
         run: ./gradlew --no-daemon linkDrivinecypherReleaseSharedLinuxArm64 linkDrivinecypherReleaseSharedMingwX64
