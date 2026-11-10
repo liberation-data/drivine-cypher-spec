@@ -22,8 +22,9 @@ import org.drivine.cypher.store.Stamps
  * [texts]), or compared (see [jsonEquals] and [ordered]). An empty text is null, as Oracle's empty text is. `reduce` is a function the query
  * declares, and does not run in a statement that writes, in the step of a `reduce`, or where its step reads a path.
  *
- * A list of ids is text, each id between commas (`,1,2,`): Oracle has no array, and a recursive query
- * takes no `JSON` that changes from row to row. A recursive query reads no row outside it, so a walk
+ * A list of ids is text, each id between commas (`,1,2,`), where the statement's longest fits in a `VARCHAR2`, and else
+ * a JSON list (`[1,2]`), which a recursive query grows only `RETURNING JSON` (see [idsAtMost]): Oracle has no array. A
+ * recursive query reads no row outside it, so a walk
  * starts from every node that meets what the node walked from meets of its own, and carries the node
  * it started from.
  *
@@ -1371,53 +1372,94 @@ class OracleCypherCompiler(
 
     override fun page(skip: String?, limit: String?) = listOfNotNull(skip?.let { "OFFSET $it ROWS" }, limit?.let { "FETCH NEXT $it ROWS ONLY" })
 
-    override fun ids(id: String) = "(',' || $id || ',')"
+    /**
+     * How the statement compiled holds its lists of ids: as text, each id between commas (`,1,2,`), where its longest list
+     * fits in a `VARCHAR2`, else as a JSON list (`[1,2]`), which has no limit. One choice for the whole statement, made as it
+     * starts ([idsAtMost]), so that every list of it, and every helper over one, is of one form: a path joins a walk's lists
+     * to the ids of the pattern's other relationships, and is read back from a row by [storeIds].
+     */
+    private var idsAsJson = false
 
-    override fun joinIds(lists: List<String>) = "(${lists.first()}${lists.drop(1).joinToString("") { " || SUBSTR($it, 2)" }})"
+    /**
+     * Text where [most] ids fit in a `VARCHAR2(4000)`, as [ID_TEXT] bytes each after the first comma, so a walk past 4,000
+     * bytes of ids does not fail (ORA-01489, drivine4j#177); JSON for a walk with no bound or one too long, and where
+     * [jsonIdsForced]. Text is two to three times the faster to walk.
+     */
+    override fun idsAtMost(most: Long?) {
+        idsAsJson = jsonIdsForced || most == null || most > (SHORT_TEXT - 1) / ID_TEXT
+    }
 
-    override fun storeIds(json: String) = shared(json) { (ids) ->
+    override fun ids(id: String) = if (idsAsJson) "JSON_ARRAY($id RETURNING JSON)" else "(',' || $id || ',')"
+
+    /** As JSON, each list's ids in turn, a list's in its order: JSON's path reads them in the order they are written. */
+    override fun joinIds(lists: List<String>) = when {
+        idsAsJson && lists.size == 1 -> lists.single()
+        idsAsJson -> "JSON_QUERY(JSON_ARRAY(${lists.joinToString(", ")} RETURNING JSON), '\$[*][*]' RETURNING JSON WITH ARRAY WRAPPER EMPTY ARRAY ON EMPTY)"
+        else -> "(${lists.first()}${lists.drop(1).joinToString("") { " || SUBSTR($it, 2)" }})"
+    }
+
+    /** As JSON, the list is the JSON list itself. */
+    override fun storeIds(json: String) = if (idsAsJson) json else shared(json) { (ids) ->
         val listed = "LISTAGG(x.id, ',') WITHIN GROUP (ORDER BY x.ord)"
         "CASE WHEN $ids IS NOT NULL THEN (SELECT NVL2($listed, ',' || $listed || ',', ',') FROM JSON_TABLE($ids, '\$[*]' COLUMNS (ord FOR ORDINALITY, id NUMBER PATH '\$')) x) END"
     }
 
-    override val noIds = "','"
+    override val noIds get() = if (idsAsJson) "JSON('[]')" else "','"
 
-    override fun idIn(id: String, list: String) = "INSTR($list, ',' || $id || ',') > 0"
+    override fun idIn(id: String, list: String) =
+        if (idsAsJson) "JSON_EXISTS($list, '\$[*]?(@ == \$id)' PASSING $id AS \"id\")" else "INSTR($list, ',' || $id || ',') > 0"
 
-    override fun idsOverlap(a: String, b: String) = "EXISTS (SELECT 1 FROM ${idRows(a, "ov")} WHERE INSTR($b, ',' || ov.id || ',') > 0)"
+    override fun idsOverlap(a: String, b: String) =
+        "EXISTS (SELECT 1 FROM ${idRows(a, "ov")} WHERE ${if (idsAsJson) idIn("ov.id", b) else "INSTR($b, ',' || ov.id || ',') > 0"})"
 
-    override fun idCount(list: String) = "JSON_SCALAR(REGEXP_COUNT($list, ',') - 1)"
+    override fun idCount(list: String) =
+        if (idsAsJson) "JSON_SCALAR(JSON_VALUE($list, '\$.size()' RETURNING NUMBER))" else "JSON_SCALAR(REGEXP_COUNT($list, ',') - 1)"
 
     override fun idRows(list: String, alias: String) =
-        "JSON_TABLE(JSON('[' || TRIM(BOTH ',' FROM $list) || ']'), '\$[*]' COLUMNS (ord FOR ORDINALITY, id NUMBER PATH '\$')) $alias"
+        "JSON_TABLE(${if (idsAsJson) list else "JSON('[' || TRIM(BOTH ',' FROM $list) || ']')"}, '\$[*]' COLUMNS (ord FOR ORDINALITY, id NUMBER PATH '\$')) $alias"
 
     /** Oracle's recursive queries read nothing of the row they are in. */
     override val walksReadRow = false
 
-    /** A recursive query from each node that meets the seed, each row carrying the node it started from. */
+    /**
+     * A recursive query from each node that meets the seed, each row carrying the node it started from, and the lists of the
+     * ids of the nodes it reached and the relationships it took, in the form [idsAsJson] says.
+     */
     override fun walk(walk: Walk): Walked {
         val w = walk.step
         val n = "${walk.name}_n"
         val (joins, reached, distinct) = steps(walk, "$w.nid")
         val eids = walk.hops.map { "${it.edge}.eid" }
-        val conditions = eids.map { "INSTR($w.eids, ',' || $it || ',') = 0" } + distinct + listOfNotNull(walk.max?.let { "$w.depth < $it" }) + walk.conditions
+        val unique = eids.map { if (idsAsJson) "NOT ${idIn(it, "$w.eids")}" else "INSTR($w.eids, ',' || $it || ',') = 0" }
+        val conditions = unique + distinct + listOfNotNull(walk.max?.let { "$w.depth < $it" }) + walk.conditions
         // Oracle adapts a step's plan as the statement runs, and a second session that runs the statement then finds no
         // rows where a walk either way goes around a cycle (#182): no plan adapts.
         val select = "SELECT /*+ NO_ADAPTIVE_PLAN */"
+        val none = if (idsAsJson) "JSON('[]')" else "CAST(',' AS VARCHAR2(4000))"
+        // A JSON list grown in a recursive query is one only RETURNING JSON: without, it is text, and not the seed's JSON (ORA-01790).
+        fun appended(list: String, ids: List<String>) = "JSON_TRANSFORM($list, ${ids.joinToString(", ") { "APPEND '\$' = $it" }} RETURNING JSON)"
+        val step = when {
+            // Walked backwards, each node it leaves goes first, so its nodes end with the one it started from.
+            walk.backwards && idsAsJson ->
+                "$w.depth + 1, JSON_TRANSFORM($w.nids, INSERT '\$[0]' = $w.nid RETURNING JSON), JSON_TRANSFORM($w.eids, INSERT '\$[0]' = ${eids.single()} RETURNING JSON)"
+            walk.backwards -> "$w.depth + 1, ',' || $w.nid || $w.nids, ',' || ${eids.single()} || $w.eids"
+            idsAsJson -> "$w.depth + 1, ${appended("$w.nids", reached)}, ${appended("$w.eids", eids)}"
+            else -> "$w.depth + 1, $w.nids${reached.joinToString("") { " || $it || ','" }}, $w.eids${eids.joinToString("") { " || $it || ','" }}"
+        }
         val text = listOf(
             "WITH $w (src, nid, depth, nids, eids) AS (",
-            "    SELECT $n.nid, $n.nid, 0, CAST(',' AS VARCHAR2(4000)), CAST(',' AS VARCHAR2(4000))",
+            "    SELECT $n.nid, $n.nid, 0, $none, $none",
             "    FROM $nodes $n${walk.seed?.let { " WHERE ${it(n)}" }.orEmpty()}",
             "    UNION ALL",
-            // Walked backwards, each node it leaves goes first, so its nodes end with the one it started from.
-            if (walk.backwards) "    $select $w.src, ${reached.single()}, $w.depth + 1, ',' || $w.nid || $w.nids, ',' || ${eids.single()} || $w.eids"
-            else "    $select $w.src, ${reached.last()}, $w.depth + 1, $w.nids${reached.joinToString("") { " || $it || ','" }}, $w.eids${eids.joinToString("") { " || $it || ','" }}",
+            "    $select $w.src, ${if (walk.backwards) reached.single() else reached.last()}, $step",
             "    FROM $w",
             joins.joinToString("\n") { "    $it" },
             "    WHERE ${conditions.joinToString(" AND ")}",
-            // A walk may come back to a node it left, which Oracle takes for a cycle unless told what one is: a step
-            // takes no relationship twice, so no row's relationships are an earlier row's.
-            ") CYCLE eids SET looped TO 'Y' DEFAULT 'N'",
+            // A walk may come back to a node it left, which Oracle takes for a cycle unless told what one is (ORA-32044, a
+            // quantified path pattern's walk of two hops a step among them): a step takes no relationship twice, so no row's
+            // relationships are an earlier row's. A JSON list is no cycle column, so a JSON walk names its depth, which no
+            // row has the same of as a row before it: its relationships are kept apart by JSON_EXISTS.
+            ") CYCLE ${if (idsAsJson) "depth" else "eids"} SET looped TO 'Y' DEFAULT 'N'",
             "SELECT src, nid, nids, eids FROM $w WHERE depth >= ${walk.min}",
         ).joinToString("\n")
         return Walked(
@@ -1879,6 +1921,20 @@ class OracleCypherCompiler(
     private fun kind(json: String) = "JSON_VALUE($json, '\$.type()')"
 
     companion object {
+        /**
+         * Whether every statement holds its lists of ids as JSON ([idsAsJson]), whatever its walks' bounds: for tests only, so
+         * that the JSON form is run over every walk and path a spec has, not only over a walk with no bound. False but in a
+         * test, and the same for every compiler while it is set.
+         */
+        @DrivineInternalApi
+        var jsonIdsForced: Boolean = false
+
+        /**
+         * The bytes an id takes in a list of ids as text, its comma after it among them: a node's or a relationship's id is
+         * an identity column's `NUMBER`, at most 28 digits (its `MAXVALUE`, 10^28 - 1), and positive.
+         */
+        private const val ID_TEXT = 29
+
         /** The cursor a procedure returns its rows by. */
         private const val CURSOR = "cy_cursor"
 

@@ -29,9 +29,14 @@ jobs:
     name: JVM tests, double fuzz and metadata compile
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        # No token left on disk while the build runs Gradle and its plugins: no step here needs git credentials.
+        with: { persist-credentials: false }
       - uses: ./.github/actions/pinned-toolchain
-      - uses: gradle/actions/setup-gradle@748248ddd2a24f49513d8f472f81c3a07d4d50e1 # v4.4.4
+      # Stay on setup-gradle 5.x: v6's caching is a proprietary component under Gradle's terms, which we don't take.
+      # v5.0.2 is the last v5, and security fixes now ship only on v6; we don't use dependency-submission.
+      # Re-check on each GitHub advisory for gradle/actions.
+      - uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5.0.2
       # Clean, as the wasm optimize step leaves stale output behind.
       - run: ./gradlew --no-daemon clean jvmTest metadataCompile
       - name: The sync from drivine4j, over a made-up drivine4j
@@ -47,11 +52,16 @@ jobs:
     name: wasmJs (Node 22) double fuzz and corpus
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        # No token left on disk while the build runs Gradle and its plugins: no step here needs git credentials.
+        with: { persist-credentials: false }
       - uses: ./.github/actions/pinned-toolchain
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with: { node-version: '22' }
-      - uses: gradle/actions/setup-gradle@748248ddd2a24f49513d8f472f81c3a07d4d50e1 # v4.4.4
+      # Stay on setup-gradle 5.x: v6's caching is a proprietary component under Gradle's terms, which we don't take.
+      # v5.0.2 is the last v5, and security fixes now ship only on v6; we don't use dependency-submission.
+      # Re-check on each GitHub advisory for gradle/actions.
+      - uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5.0.2
       - name: The npm corpus check, over made-up packages
         run: check/corpus-node-test.sh
       - name: The npm package's check, over made-up tarballs
@@ -67,7 +77,7 @@ jobs:
       - name: Summary
         if: always()
         run: ../.github/scripts/compiler-summary.sh build/test-results/wasmJsNodeTest corpus.log >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with: { name: wasmjs-differences, path: compiler/build/oracle/differences-*.jsonl, if-no-files-found: ignore }
 
@@ -75,11 +85,16 @@ jobs:
     name: linuxX64 double fuzz and corpus, and the other native targets built
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        # No token left on disk while the build runs Gradle and its plugins: no step here needs git credentials.
+        with: { persist-credentials: false }
       - uses: ./.github/actions/pinned-toolchain
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with: { python-version: '3.12' }
-      - uses: gradle/actions/setup-gradle@748248ddd2a24f49513d8f472f81c3a07d4d50e1 # v4.4.4
+      # Stay on setup-gradle 5.x: v6's caching is a proprietary component under Gradle's terms, which we don't take.
+      # v5.0.2 is the last v5, and security fixes now ship only on v6; we don't use dependency-submission.
+      # Re-check on each GitHub advisory for gradle/actions.
+      - uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5.0.2
       - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: ~/.konan
@@ -97,7 +112,7 @@ jobs:
       - name: Summary
         if: always()
         run: ../.github/scripts/compiler-summary.sh build/test-results/linuxX64Test corpus.log >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with: { name: linux-differences, path: compiler/build/oracle/differences-*.jsonl, if-no-files-found: ignore }
 
@@ -105,11 +120,16 @@ jobs:
     name: macosArm64 double fuzz and corpus
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        # No token left on disk while the build runs Gradle and its plugins: no step here needs git credentials.
+        with: { persist-credentials: false }
       - uses: ./.github/actions/pinned-toolchain
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with: { python-version: '3.12' }
-      - uses: gradle/actions/setup-gradle@748248ddd2a24f49513d8f472f81c3a07d4d50e1 # v4.4.4
+      # Stay on setup-gradle 5.x: v6's caching is a proprietary component under Gradle's terms, which we don't take.
+      # v5.0.2 is the last v5, and security fixes now ship only on v6; we don't use dependency-submission.
+      # Re-check on each GitHub advisory for gradle/actions.
+      - uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5.0.2
       - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: ~/.konan
@@ -135,7 +155,9 @@ jobs:
     if: github.ref_type != 'tag' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        # No token left on disk while the build runs Gradle and its plugins: no step here needs git credentials.
+        with: { persist-credentials: false }
       # As compiler-release.yml's dependencies job names it: keep the two in step.
       - name: The cache key
         id: key
