@@ -1,9 +1,12 @@
 # What the module's sources were ported from in drivine4j: <drivine4j path> <module path>. A path that ends with / is a
 # directory, every file under it mapped. scripts/sync-from-drivine4j.sh merges drivine4j's changes to these into the module.
 # Module files with no drivine4j source (api/, json/, number/, text/, time/, the platform source sets) are the module's own.
-# So are store/, the part of drivine4j's OracleSql, SqliteSql, SqliteCypherValues, SqliteFunctions, SqliteTimestamps,
-# Stamps and LowerCopies that the compiler calls, and CompilerException, which drivine4j's DrivineException stands for in
-# its copy: drivine4j keeps those files and calls store/, and scripts/port-rewrites.sed renames them in what it merges.
+# So are store/, the part of drivine4j's OracleSql, PostgresSql, SqliteSql, SqliteCypherValues, SqliteFunctions,
+# SqliteTimestamps, Stamps and LowerCopies that the compiler calls, and CompilerException, which drivine4j's
+# DrivineException stands for in its copy: drivine4j keeps those files and calls store/, and scripts/port-rewrites.sed
+# renames them in what it merges. And store/ddl/, the store layout's DDL, written from drivine4j's schema grammars and
+# graph classes (backend/*/…Graph.kt, …SchemaGrammar.kt, OracleSideTable.kt, PostgresWriteFunctions.kt and
+# schema/{Neo4j,Memgraph,FalkorDb}SchemaGrammar.kt) after the sync ended, and pinned by the spec's store.yaml.
 src/main/antlr/org/drivine/cypher/grammar/Cypher.g4 src/commonMain/antlr/Cypher.g4
 src/main/kotlin/org/drivine/cypher/ src/commonMain/kotlin/org/drivine/cypher/
 src/main/kotlin/org/drivine/schema/ConstraintSpec.kt src/commonMain/kotlin/org/drivine/schema/ConstraintSpec.kt

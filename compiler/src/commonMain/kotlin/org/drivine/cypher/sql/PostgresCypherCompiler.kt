@@ -9,6 +9,7 @@ import org.drivine.cypher.CompilerException
 import org.drivine.cypher.ast.RelationshipPattern
 import org.drivine.cypher.json.CypherEncoder
 import org.drivine.cypher.json.CypherJson
+import org.drivine.cypher.store.PostgresSql
 import org.drivine.cypher.store.Stamps
 import com.ionspin.kotlin.bignum.decimal.BigDecimal
 import org.drivine.cypher.json.jvmDoubleText
@@ -185,7 +186,8 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
 
     override fun containsAll(props: String, map: String) = "$props @> $map"
 
-    override fun hasLabel(labels: String, label: String) = "$labels @> ${literal(CypherJson.writeValueAsString(listOf(label), encoder = encoder))}"
+    /** The test a partial index over the label's nodes is made with: see [PostgresSql.holdsLabel]. */
+    override fun hasLabel(labels: String, label: String) = PostgresSql.holdsLabel(labels, label, encoder)
 
     /**
      * A probe of the key for each row, which Postgres plans as a scan of the primary key's index whatever the table's
@@ -209,9 +211,9 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
     override fun endProbe(rows: String, row: String, end: String, id: String): String =
         lateral("SELECT * FROM $rows $row WHERE $row.$end = $id OFFSET 0", row, optional = false, columns = emptyList())
 
-    /** The property's text, as a range index or a uniqueness constraint reads it with `->>`, compared with the value's. */
+    /** The property's text, as a range index or a uniqueness constraint reads it ([PostgresSql.propertyText]), compared with the value's. */
     override fun indexedEquality(property: String, value: String, of: IndexedProperty?): String? =
-        PROPERTY_READ.matchEntire(property)?.let { "(${it.groupValues[1]} ->> ${it.groupValues[2]}) = ($value #>> '{}')" }
+        PROPERTY_READ.matchEntire(property)?.let { "${PostgresSql.propertyText(it.groupValues[1], it.groupValues[2])} = ($value #>> '{}')" }
 
     /**
      * The property's text, as its index holds it, among the texts the [value] can be stored as: a text's or a truth value's
@@ -229,14 +231,14 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
             shared(value) { (x) ->
                 val number = "trim_scale(($x)::numeric)::text"
                 fun zeros(point: String) = (1..TRAILING_ZEROS).joinToString(", ") { "$number || '$point${"0".repeat(it)}'" }
-                "(${read.groupValues[1]} ->> ${read.groupValues[2]}) = ANY(CASE WHEN jsonb_typeof($x) <> 'number' THEN ARRAY[$x #>> '{}'] " +
+                "${PostgresSql.propertyText(read.groupValues[1], read.groupValues[2])} = ANY(CASE WHEN jsonb_typeof($x) <> 'number' THEN ARRAY[$x #>> '{}'] " +
                     "WHEN scale(trim_scale(($x)::numeric)) = 0 THEN ARRAY[$number, ${zeros(".")}] ELSE ARRAY[$number, ${zeros("")}] END)"
             }
         }
     }
 
     /** The JSON [json]'s text, where it is a text: a property's read with `->>`, which costs less than `#>>`. */
-    private fun textOf(json: String) = PROPERTY_READ.matchEntire(json)?.let { "(${it.groupValues[1]} ->> ${it.groupValues[2]})" } ?: "($json #>> '{}')"
+    private fun textOf(json: String) = PROPERTY_READ.matchEntire(json)?.let { PostgresSql.propertyText(it.groupValues[1], it.groupValues[2]) } ?: "($json #>> '{}')"
 
     /**
      * A whole number as the `bigint` the key is: a key compared with a `numeric` is cast to one, and read by no index. A number

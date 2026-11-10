@@ -3,8 +3,9 @@ package org.drivine.cypher.store
 import org.drivine.DrivineInternalApi
 
 /**
- * The SQLite SQL the compiler writes that drivine4j's `org.drivine.backend.sqlite.SqliteSql` writes too: drivine4j's
- * calls these, so each is written once.
+ * The SQLite SQL the compiler writes that drivine4j's `org.drivine.backend.sqlite.SqliteSql` writes too, and the
+ * expressions the store's DDL (`store.ddl.SqliteDdl`) makes its indexes over: drivine4j's calls these, so each is written
+ * once.
  */
 @DrivineInternalApi
 object SqliteSql {
@@ -33,4 +34,20 @@ object SqliteSql {
      */
     fun propertyText(props: String, path: String): String =
         "(CASE json_type($props, $path) WHEN 'text' THEN $props ->> $path WHEN 'null' THEN NULL ELSE $props -> $path END)"
+
+    /**
+     * The path of the property [key] of a JSON object, as a literal: the key quoted, so a key with a dot in it is one
+     * property and not a path into another. Refused when it is empty, which names no property.
+     */
+    fun path(key: String): String {
+        require(key.isNotEmpty()) { "A property name is empty: an empty name is no property a statement can read." }
+        return literal("$.${quoted(key)}")
+    }
+
+    /**
+     * The property [key] of the node or relationship [alias], read as text ([propertyText]). The stamp ([Stamps.PROPERTY])
+     * is a column of its own. For an empty alias, the table's own column, as an index over the property names it.
+     */
+    fun property(alias: String, key: String): String =
+        if (key == Stamps.PROPERTY) column(alias, "stamp") else propertyText(column(alias, "props"), path(key))
 }

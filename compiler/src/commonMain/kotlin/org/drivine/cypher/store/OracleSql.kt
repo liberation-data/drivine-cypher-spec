@@ -1,9 +1,11 @@
 package org.drivine.cypher.store
 
 import org.drivine.DrivineInternalApi
+import org.drivine.schema.SimilarityFunction
 
 /**
- * The Oracle SQL the compiler writes that drivine4j's `org.drivine.backend.oracle.OracleSql` writes too: drivine4j's
+ * The Oracle SQL the compiler writes that drivine4j's `org.drivine.backend.oracle.OracleSql` writes too, and the
+ * expressions the store's DDL (`store.ddl.OracleDdl`) makes its indexes, side tables and property graph over: drivine4j's
  * calls these, so each is written once.
  */
 @DrivineInternalApi
@@ -87,6 +89,39 @@ object OracleSql {
     fun unique(alias: String, label: String, keys: List<String>, key: String): String {
         val constrained = (listOf(hasLabel(alias, label)) + keys.map { "JSON_EXISTS($alias.props, ${path(it)})" }).joinToString(" AND ")
         return "CASE WHEN $constrained THEN JSON_VALUE($alias.props, ${path(key)}) END"
+    }
+
+    /**
+     * Whether the node [alias] carries [label], written so the index over labels cannot answer it: the form for a node
+     * that is found some other way, by its id or at the end of a relationship, and the test a side table's trigger makes.
+     * The label is looked for by its text: see [holdsLabel].
+     */
+    fun carriesLabel(alias: String, label: String): String = holdsLabel("$alias.labels", label)
+
+    /** The embedding stored under [key] of the node [alias], as a vector. */
+    fun embedding(alias: String, key: String): String = "TO_VECTOR(JSON_QUERY($alias.props, ${path(key)} RETURNING CLOB))"
+
+    /**
+     * Whether the embedding stored under [key] of [alias] is of [dimensions]: a search measures only those, as Oracle
+     * refuses to measure vectors of two sizes against each other, and a vector index holds only those, so a node written
+     * with another is left out of it and not refused.
+     */
+    fun holdsEmbedding(alias: String, key: String, dimensions: Int): String = "VECTOR_DIMENSION_COUNT(${embedding(alias, key)}) = $dimensions"
+
+    /** The distance a vector index is built with for [similarity], and a search by it must name. */
+    fun metric(similarity: SimilarityFunction): String = when (similarity) {
+        SimilarityFunction.COSINE -> "COSINE"
+        SimilarityFunction.EUCLIDEAN -> "EUCLIDEAN_SQUARED"
+    }
+
+    /**
+     * The map a load returns for a node, put together from the columns of the row [alias] (`""` for the columns
+     * themselves): its properties, with its labels under `labels` and its stamp under the property the graph engines store
+     * it as. What the property graph's `doc` property is.
+     */
+    fun transform(alias: String): String {
+        val of = if (alias.isEmpty()) "" else "$alias."
+        return "JSON_TRANSFORM(${of}props, SET '$.labels' = ${of}labels, SET ${path(Stamps.PROPERTY)} = ${of}stamp)"
     }
 
     /** [text] as JSON writes a string. */
