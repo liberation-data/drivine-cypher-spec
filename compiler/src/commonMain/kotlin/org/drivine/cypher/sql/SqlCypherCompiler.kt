@@ -103,12 +103,6 @@ abstract class SqlCypherCompiler(
      */
     protected open fun deletedIds(query: String): String = planned(query)
 
-    /**
-     * Whether a value's identity is carried out of a query as a column of its own (see [Value.Json.identity]): not where the
-     * queries of a `UNION` in `CALL { … }` would give different columns, which compare by their properties instead.
-     */
-    private var identities = true
-
     /** Whether the store aggregates a `CASE` whose result holds a subquery: see `casesFirst`. */
     protected open val aggregatesCaseSubqueries = true
 
@@ -349,20 +343,29 @@ abstract class SqlCypherCompiler(
         writer.give(query)
         // Its rows are compared, as a UNION without ALL compares them: see [Writer.distinctParts].
         writer.distinctParts = !query.unions.first().all
+        writer.identifiedParts = writer.distinctParts
         // Each query's result is of one type, as one may build a list or a map, Postgres's `json`, and another give a `jsonb`
         // (drivine4j#679, as drivine4j#516 for a UNION in CALL { … }). Without ALL, it is as JSON compares it.
         val result = if (query.unions.first().all) orderedJson("q.result") else comparable(Value.Json("q.result", ordered = true))
-        val rows = parts.mapIndexed { i, clauses ->
-            "SELECT ${i + 1} AS part, $rowNumber AS n, $result AS result FROM (\n${indent(writer.query(Query(clauses)))}\n) q"
+        val projected = parts.map { clauses -> writer.projected(Query(clauses)) }
+        // Where a query's rows hold a node or a relationship, each query gives its row's identity beside it, and a query whose rows
+        // hold none its value, which is its identity (drivine4j#213): see [Writer.rowIdentity]. Where none does, there is none, nor
+        // where one may hold a node without its identity, as `head(collect(n))` does: then each compares by its value.
+        val identities = projected.any { it.identity } && writer.comparedByProperties(parts.map { (it.last() as Clause.Return).projection }, projected).isEmpty()
+        val rows = projected.mapIndexed { i, part ->
+            val identity = if (!identities) "" else ", ${if (part.identity) "q.identity" else result} AS identity"
+            "SELECT ${i + 1} AS part, $rowNumber AS n, $result AS result$identity FROM (\n${indent(part.sql)}\n) q"
         }.joinToString("\nUNION ALL\n")
         val sql = if (query.unions.first().all) {
             "SELECT u.result FROM (\n${indent(rows)}\n) u\nORDER BY u.part, u.n"
         } else {
-            // A row is given once, where it is first given: its rows are compared as JSON compares them. One whose item is NaN,
-            // equal to nothing, is given each time, as Neo4j gives it (drivine4j#688): by its own place beside the result.
+            // A row is given once, where it is first given: its rows are compared as JSON compares them, and where they hold a node
+            // or a relationship, by its identity too. One whose item is NaN, equal to nothing, is given each time, as Neo4j gives it
+            // (drivine4j#688): by its own place beside the result.
             val nan = (if (names.first().size == 1) listOf("u.result") else names.first().indices.map { itemAt("u.result", it) }).mapNotNull(::bareNaN)
             val apart = if (nan.isEmpty()) "" else ", CASE WHEN ${nan.joinToString(" OR ") { "($it)" }} THEN u.part * 1000000000.0 + u.n END"
-            "SELECT d.result FROM (\n${indent("SELECT u.result, MIN(u.part * 1000000000.0 + u.n) AS k FROM (\n${indent(rows)}\n) u\nGROUP BY u.result$apart")}\n) d\nORDER BY d.k"
+            val keys = "u.result${if (identities) ", u.identity" else ""}$apart"
+            "SELECT d.result FROM (\n${indent("SELECT u.result, MIN(u.part * 1000000000.0 + u.n) AS k FROM (\n${indent(rows)}\n) u\nGROUP BY $keys")}\n) d\nORDER BY d.k"
         }
         return CompiledCypher(planned(sql), writer.parameters.values, nonFinite)
     }
@@ -1207,6 +1210,12 @@ abstract class SqlCypherCompiler(
          */
         var distinctParts = false
 
+        /**
+         * Whether such a part's rows are compared by their identity too, where they hold a node or a relationship ([rowIdentity]):
+         * not in an `EXISTS { … }`, which keeps no row once.
+         */
+        var identifiedParts = false
+
         /** The queries given to compile, [query] and [procedure], whose names [hidden] keeps clear of, not yet in [queryTexts]. */
         private val queries = mutableListOf<Query>()
 
@@ -1239,11 +1248,14 @@ abstract class SqlCypherCompiler(
         /** A variable of [madeAnew]'s, new, and no variable of the statement's: see [hidden]. */
         private fun anewVariable() = hidden(ANEW).also { madeAnew += it }
 
-        fun query(query: Query): String {
+        fun query(query: Query): String = projected(query).sql
+
+        /** [query], a statement that ends with `RETURN`, as that `RETURN` projects it: see [Projected.identity]. */
+        fun projected(query: Query): Projected {
             give(query)
             var select = Select(emptyMap())
             for (clause in query.clauses) {
-                if (clause is Clause.Return) return project(select, clause.projection, final = true).sql
+                if (clause is Clause.Return) return project(select, clause.projection, final = true)
                 select = read(select, clause)
             }
             throw CompilerException("A Cypher statement ends with RETURN.")
@@ -1500,23 +1512,30 @@ abstract class SqlCypherCompiler(
 
         /**
          * The query a subquery is, for the row it is in, whose variables [scope] holds: its rows, or with no `RETURN`,
-         * a row for each way its reading clauses are met.
+         * a row for each way its reading clauses are met. Its `UNION`'s rows are compared by identity too where [identified]
+         * ([identifiedParts]): not for an `EXISTS { … }`, which keeps no row once.
          */
-        private fun correlated(query: Query, scope: Map<String, Value>, what: String): String {
+        private fun correlated(query: Query, scope: Map<String, Value>, what: String, identified: Boolean = true): String {
             if ((query.clauses + query.unions.flatMap { it.clauses }).any(::writes)) unsupported("A write in $what")
             if (query.unions.isNotEmpty()) {
                 // Each query's rows as one value each, as a statement's are; without ALL, each once.
                 val distinct = !query.unions.first().all
                 val order = rowOrder
                 try {
-                    return comparingParts(distinct) {
-                        (listOf(query.clauses) + query.unions.map { it.clauses }).joinToString(if (distinct) "\nUNION\n" else "\nUNION ALL\n") { clauses ->
+                    return comparingParts(distinct, identified = distinct && identified) {
+                        val returns = (listOf(query.clauses) + query.unions.map { it.clauses }).map { (it.last() as Clause.Return).projection }
+                        val projected = (listOf(query.clauses) + query.unions.map { it.clauses }).map { clauses ->
                             var select = Select(scope)
                             clauses.dropLast(1).forEach { select = read(select, it, scope) }
-                            val sql = project(select, (clauses.last() as Clause.Return).projection, final = true).sql
-                            // Of one type in each query, compared or not (drivine4j#679).
-                            val result = if (distinct) comparable(Value.Json("q.result", ordered = true)) else orderedJson("q.result")
-                            "SELECT $result AS result FROM (\n${indent(sql)}\n) q"
+                            project(select, (clauses.last() as Clause.Return).projection, final = true)
+                        }
+                        // Of one type in each query, compared or not (drivine4j#679).
+                        val result = if (distinct) comparable(Value.Json("q.result", ordered = true)) else orderedJson("q.result")
+                        // Compared by identity too, where a query's rows hold a node or a relationship, as a statement's are (drivine4j#213).
+                        val identities = projected.any { it.identity } && comparedByProperties(returns, projected).isEmpty()
+                        projected.joinToString(if (distinct) "\nUNION\n" else "\nUNION ALL\n") { part ->
+                            val identity = if (!identities) "" else ", ${if (part.identity) "q.identity" else result} AS identity"
+                            "SELECT $result AS result$identity FROM (\n${indent(part.sql)}\n) q"
                         }
                     }
                 } finally {
@@ -1635,14 +1654,19 @@ abstract class SqlCypherCompiler(
             return "(${boundSelect(columns.joinToString(", "))}) $name" to named.associate { (variable, value, column) -> variable to value.columnsOf(name, column) }
         }
 
-        /** [work], its parts of a `UNION` compared as a whole where [distinct] ([distinctParts]), as it was after. */
-        private fun <T> comparingParts(distinct: Boolean, work: () -> T): T {
-            val was = distinctParts
+        /**
+         * [work], its parts of a `UNION` compared as a whole where [distinct] ([distinctParts]), and by identity too where
+         * [identified] ([identifiedParts]), as it was after.
+         */
+        private fun <T> comparingParts(distinct: Boolean, identified: Boolean = distinct, work: () -> T): T {
+            val was = distinctParts to identifiedParts
             distinctParts = distinct
+            identifiedParts = identified
             try {
                 return work()
             } finally {
-                distinctParts = was
+                distinctParts = was.first
+                identifiedParts = was.second
             }
         }
 
@@ -1656,20 +1680,20 @@ abstract class SqlCypherCompiler(
             val names = returns.first().projection.items.map { it.name }
             if (returns.any { r -> r.projection.items.map { it.name }.toSet() != names.toSet() }) throw CompilerException("Each query of a UNION returns the same names, as in Cypher.")
             val distinct = !query.unions.first().all
-            var projected = comparingParts(distinct) { parts.map { calledPart(select, call, it, names, distinct) } }
+            val projected = comparingParts(distinct) { parts.map { calledPart(select, call, it, names, distinct) } }
             if (projected.map { p -> p.scope.values.map { it::class } }.distinct().size > 1) unsupported("A UNION in CALL { … } whose queries return values of different kinds")
-            // A map or a list that holds a node carries a column more, of its identity. Where one query's value has it and
-            // another's has none, as `collect([r])` beside `[]`, the queries are compiled again without identities, so their
-            // columns match, and what they return compares by its properties, as it did before identities.
-            if (projected.map { p -> p.scope.values.map { (it as? Value.Json)?.identity != null } }.distinct().size > 1) {
-                val was = identities
-                identities = false
-                try {
-                    projected = comparingParts(distinct) { parts.map { calledPart(select, call, it, names, distinct) } }
-                } finally {
-                    identities = was
+            // A map or a list that holds a node carries a column more, of its identity. Where one query's value has it and another's
+            // has none, as `{x: c}` beside `{x: 1}`, the other gives its value as its identity, which it is, so their columns match
+            // and what they return compares by identity, as on a graph engine (drivine4j#213). Where the other's may hold a node without
+            // its identity, as `head(collect(n))` does, each gives its value as its identity, and it compares by its properties.
+            val byProperties = comparedByProperties(returns.map { it.projection }, projected)
+            val identified = projected.first().scope.keys.filter { variable -> projected.any { (it.scope.getValue(variable) as? Value.Json)?.identity != null } }
+            // Of each such variable whose value [part] gives with no identity, the column its value is in, and that value.
+            fun unidentified(part: Projected) = identified.mapNotNull { variable ->
+                (part.scope.getValue(variable) as Value.Json).takeIf { it.identity == null }?.let { value ->
+                    PENDING_COLUMN.find(value.sql)?.groupValues?.get(1)?.let { column -> variable to (column to value) }
                 }
-            }
+            }.toMap()
             // A value one query writes as JSON that keeps its keys' order ([Value.Json.ordered]), as Postgres's `json` of a list or a map
             // it builds, and another as it compares, Postgres's `jsonb`, is written as one that keeps them in each ([orderedJson]), so
             // the parts' columns are of one type (drivine4j#516). That is a cast on Postgres alone, where writing each as it compares
@@ -1683,9 +1707,18 @@ abstract class SqlCypherCompiler(
                 val unordered = mixed.mapNotNull { variable ->
                     (part.scope.getValue(variable) as? Value.Json)?.takeUnless { it.ordered }?.let { PENDING_COLUMN.find(it.sql)?.groupValues?.get(1) }
                 }.toSet()
-                val columns = returned(part).joinToString(", ") { (column, _) ->
-                    if (column in unordered) "${orderedJson("$q.$column")} AS $column" else "$q.$column"
-                }
+                val plain = unidentified(part).values.toMap()
+                // Of a variable compared by its properties, the identity column of a query whose value has one, and that value.
+                val valued = byProperties.mapNotNull { variable ->
+                    (part.scope.getValue(variable) as Value.Json).takeIf { it.identity != null }?.let { value ->
+                        PENDING_COLUMN.find(value.sql)?.groupValues?.get(1)?.let { column -> "${column}_identity" to (column to value) }
+                    }
+                }.toMap()
+                val columns = returned(part).flatMap { (column, _) ->
+                    val valuedAs = valued[column]?.let { (named, value) -> "${comparable(Value.Json("$q.$named", ordered = value.ordered))} AS $column" }
+                    listOf(valuedAs ?: if (column in unordered) "${orderedJson("$q.$column")} AS $column" else "$q.$column") +
+                        listOfNotNull(plain[column]?.let { "${comparable(Value.Json("$q.$column", ordered = it.ordered))} AS ${column}_identity" })
+                }.joinToString(", ")
                 "SELECT $columns FROM (\n${indent(part.sql)}\n) $q"
             }
             // A value is of a temporal kind where each query makes it of that one. It is at keys of a write's row ([Value.Json.rowKeys])
@@ -1696,6 +1729,7 @@ abstract class SqlCypherCompiler(
             // It is a list ([Value.Json.list]) only where each query makes it one, so that an order sorts the others' numbers and
             // maps by their kinds, not as lists; and it holds no null ([Value.Json.flat]) only where each query's holds none. It keeps
             // its keys' order ([Value.Json.ordered]) where any query's does, as each is then written as one that does ([orderedJson]).
+            val first = unidentified(projected.first())
             val scope = projected.first().scope.mapValues { (variable, value) ->
                 val all = projected.map { it.scope.getValue(variable) as? Value.Json }
                 if (value !is Value.Json) value
@@ -1707,9 +1741,13 @@ abstract class SqlCypherCompiler(
                     text = all.all { it?.text == true }, texts = all.all { it?.texts == true },
                     known = all.map { it?.known }.distinct().singleOrNull(), jsonNull = all.any { it?.jsonNull == true },
                     list = all.all { it?.list == true }, itemLists = all.all { it?.itemLists == true }, flat = all.all { it?.flat == true },
+                    // Its identity is the column beside it where any query gives one, the first query's own or its value's.
+                    identity = if (variable in byProperties) null else value.identity ?: first[variable]?.let { (column, _) -> "$PENDING.${column}_identity" },
                 )
             }
-            return Projected(sql, scope, emptyList(), returned(projected.first()))
+            val added = first.values.map { it.first }.toSet()
+            val columns = returned(projected.first()).flatMap { column -> listOf(column) + listOfNotNull(("${column.first}_identity" to true).takeIf { column.first in added }) }
+            return Projected(sql, scope, emptyList(), columns)
         }
 
         /** The columns of [part], a query of a `UNION` in `CALL { … }`, that carry what it returns: not those it orders its rows by. */
@@ -2797,9 +2835,17 @@ abstract class SqlCypherCompiler(
         /**
          * What a `WITH` or a `RETURN` makes of the rows it reads: the [sql] of its query, what each item's name is
          * bound to among its columns, the order of its rows, each term a column of the query and whether it descends,
-         * and its [columns], each named and whether it holds JSON, as a [lateral] join of the query reads them.
+         * and its [columns], each named and whether it holds JSON, as a [lateral] join of the query reads them. With
+         * [identity], the `RETURN` of a part of a `UNION` that compares rows, a statement's or a subquery's, gives its row's identity beside its
+         * `result`, as a column `identity`: see [rowIdentity].
          */
-        inner class Projected(val sql: String, val scope: Map<String, Value>, val order: List<Pair<String, Boolean>>, val columns: List<Pair<String, Boolean>>)
+        inner class Projected(
+            val sql: String,
+            val scope: Map<String, Value>,
+            val order: List<Pair<String, Boolean>>,
+            val columns: List<Pair<String, Boolean>>,
+            val identity: Boolean = false,
+        )
 
         /**
          * The query a `WITH` or a `RETURN` makes of [select]: its items as columns, grouped where it
@@ -2953,13 +2999,17 @@ abstract class SqlCypherCompiler(
                     terms.mapIndexed { i, term -> (if (i == terms.lastIndex) column else "${column}_${i + 1}") to term }
                 }
             val order = sorts.flatMap { (column, descending) -> sortedBy(column).map { (named, _) -> named to descending } }
+            var identity: String? = null
             val outerColumns = if (final) {
-                val values = columns.map { (column, value) -> json(value.columnsOf(name, column)) }
+                val read = columns.map { (column, value) -> value.columnsOf(name, column) }
+                val values = read.map(::json)
                 // A value that may be JSON's null is given as SQL's where a UNION compares rows by it; in a row of several, a list's item,
                 // SQL's null is JSON's (#500).
                 val result = if (values.size == 1) values.single().let { if (distinctParts && it.jsonNull) comparedNull(it.sql) else it.sql }
                 else jsonArray(values.map { it.sql })
-                "$result AS result"
+                // Where a UNION compares rows by it, a row that holds a node or a relationship is compared by its identity too (drivine4j#213).
+                identity = if (distinctParts && identifiedParts) rowIdentity(read) else null
+                "$result AS result${identity?.let { ", $it AS identity" }.orEmpty()}"
             } else {
                 (columns.flatMap { (column, value) -> value.columns(column).map { "$name.${it.substringAfterLast(" AS ")}" } } +
                     sorts.flatMap { (column, _) -> sortedBy(column).map { (named, term) -> "$term AS $named" } }).joinToString(", ")
@@ -2975,7 +3025,21 @@ abstract class SqlCypherCompiler(
             // What each item is bound to in the query that reads this one: its columns, which that query names.
             val scope = items.zip(columns).associate { (item, pair) -> item.name to pair.second.columnsOf(PENDING, pair.first) }
             val kinds = columns.flatMap { (column, value) -> value.columnKinds(column) } + order.map { (column, _) -> column to false }
-            return Projected(outer, scope, order, kinds)
+            return Projected(outer, scope, order, kinds, identity = identity != null)
+        }
+
+        /**
+         * The identity of a row of the items [items], as a part of a `UNION` that compares rows gives it beside its `result`: the
+         * row's value as JSON that compares, with each node or relationship in it as its id ([identityOf]), so that two
+         * different nodes or relationships with equal properties are two rows, as on a graph engine (drivine4j#213). Null where
+         * no item holds one: such a row is compared by its value alone, and the SQL is as it was.
+         */
+        private fun rowIdentity(items: List<Value>): String? {
+            if (items.size > 1) return identityHolding(items) { ids -> jsonArray(ids) }
+            val item = items.single()
+            val identity = identityOf(item) ?: return null
+            // JSON's null as SQL's, as the result gives it.
+            return if ((item as? Value.Json)?.jsonNull == true) comparedNull(identity) else identity
         }
 
         /**
@@ -3824,7 +3888,7 @@ abstract class SqlCypherCompiler(
             is Expression.PatternPredicate -> exists(listOf(expression.pattern), null, scope)
             is Expression.Exists -> exists(expression.patterns, expression.where, scope)
             is Expression.Subquery -> when (expression.kind) {
-                Expression.Subquery.Kind.EXISTS -> Value.Bool("EXISTS (\n${indent(existsQuery(correlated(expression.query, scope, "EXISTS { … }")))}\n)")
+                Expression.Subquery.Kind.EXISTS -> Value.Bool("EXISTS (\n${indent(existsQuery(correlated(expression.query, scope, "EXISTS { … }", identified = false)))}\n)")
                 Expression.Subquery.Kind.COUNT ->
                     Value.Json(scalar("(SELECT count(*) FROM (\n${indent(correlated(expression.query, scope, "COUNT { … }"))}\n) ${alias("q")})"))
             }
@@ -4563,6 +4627,38 @@ abstract class SqlCypherCompiler(
         }
 
         /**
+         * Whether [expression] is written out or given all the way down, so it holds no node or relationship: see [compared].
+         * `{a: ms[0]}` and `n {.*, x: r}` hold what may be a node without its identity.
+         */
+        private fun writtenOut(expression: Expression): Boolean = when (expression) {
+            is Expression.Literal, is Expression.Parameter -> true
+            is Expression.MapLiteral -> expression.entries.all { writtenOut(it.second) }
+            is Expression.ListLiteral -> expression.items.all(::writtenOut)
+            is Expression.MapProjection -> expression.elements.all {
+                it is Expression.MapProjection.Element.Selected || it is Expression.MapProjection.Element.Entry && writtenOut(it.value)
+            }
+            is Expression.Case -> (expression.alternatives.map { it.second } + listOfNotNull(expression.otherwise)).all(::writtenOut)
+            else -> false
+        }
+
+        /**
+         * The names of the items of a `UNION`'s queries, each [Projected] of its `RETURN` in [returns], that compare by their
+         * properties, not by identity (drivine4j#213): where one query's item holds a node or a relationship by its identity
+         * ([identityOf]) and another's may hold one without it, as `head(collect(n))` does, as [compared] compares the two. An
+         * item holds none where it is written out all the way down ([writtenOut]) or is a value of one kind, as `{x: 1}` or `count(*)` is.
+         */
+        fun comparedByProperties(returns: List<Projection>, parts: List<Projected>): Set<String> =
+            parts.first().scope.keys.filterTo(mutableSetOf()) { name ->
+                val held = parts.map { part -> part.scope[name]?.let { identityOf(it) != null } }
+                held.any { it == true } && parts.indices.any { i ->
+                    val value = parts[i].scope[name]
+                    val expression = returns[i].items.firstOrNull { it.name == name }?.expression
+                    held[i] == false && !(value is Value.Bool || expression != null && (writtenOut(expression) || scalar(expression, emptyMap())) ||
+                        (value as? Value.Json)?.let { it.text || it.temporal != null || (it.known != null && it.known != Value.Known.LIST && it.known != Value.Known.MAP) } == true)
+                }
+            }
+
+        /**
          * [left] and [right], the sides of [binary], as compared: where one holds a node or a relationship by identity and the
          * other may hold one without it (an item taken from a list, a collect, a variable), both by their properties, as
          * before identities: only a value the statement writes out or is given, all the way down (a literal, a parameter, a
@@ -4571,26 +4667,15 @@ abstract class SqlCypherCompiler(
          * compared by its identity, so `r = {}` is false.
          */
         private fun compared(left: Value, right: Value, binary: Expression.Binary): Pair<Value, Value> {
-            // Written all the way down: `{a: ms[0]}` and `n {.*, x: r}` hold what may be a node without its identity.
-            fun written(expression: Expression): Boolean = when (expression) {
-                is Expression.Literal, is Expression.Parameter -> true
-                is Expression.MapLiteral -> expression.entries.all { written(it.second) }
-                is Expression.ListLiteral -> expression.items.all(::written)
-                is Expression.MapProjection -> expression.elements.all {
-                    it is Expression.MapProjection.Element.Selected || it is Expression.MapProjection.Element.Entry && written(it.value)
-                }
-                is Expression.Case -> (expression.alternatives.map { it.second } + listOfNotNull(expression.otherwise)).all(::written)
-                else -> false
-            }
             fun held(value: Value) = (value as? Value.Json)?.identity != null
             fun plain(value: Value) = if (value is Value.Json) value.copy(identity = null) else value
             fun entity(value: Value) = value is Value.Node || value is Value.Relationship
             fun identity(value: Value) = Value.Json(json(value).sql, identity = identityOf(value), flat = true)
             return when {
-                entity(left) && right is Value.Json && !held(right) && written(binary.right) -> identity(left) to right
-                entity(right) && left is Value.Json && !held(left) && written(binary.left) -> left to identity(right)
-                held(left) && right is Value.Json && !held(right) && !written(binary.right) -> plain(left) to right
-                held(right) && left is Value.Json && !held(left) && !written(binary.left) -> left to plain(right)
+                entity(left) && right is Value.Json && !held(right) && writtenOut(binary.right) -> identity(left) to right
+                entity(right) && left is Value.Json && !held(left) && writtenOut(binary.left) -> left to identity(right)
+                held(left) && right is Value.Json && !held(right) && !writtenOut(binary.right) -> plain(left) to right
+                held(right) && left is Value.Json && !held(left) && !writtenOut(binary.left) -> left to plain(right)
                 else -> left to right
             }
         }
@@ -6672,7 +6757,7 @@ abstract class SqlCypherCompiler(
 
     /** The select-list entries that carry this value out of a query, under [name]. */
     private fun Value.columns(name: String): List<String> = when (this) {
-        is Value.Json -> listOf("$sql AS $name") + listOfNotNull(identity?.takeIf { identities }?.let { "$it AS ${name}_identity" })
+        is Value.Json -> listOf("$sql AS $name") + listOfNotNull(identity?.let { "$it AS ${name}_identity" })
         is Value.Entities -> listOf("$ids AS $name")
         is Value.Bool -> listOf("$sql AS $name")
         is Value.Node -> listOf("$nid AS ${name}_nid", "$labels AS ${name}_labels", "$props AS ${name}_props", "$stamp AS ${name}_stamp")
@@ -6689,7 +6774,7 @@ abstract class SqlCypherCompiler(
         val prefix = "$alias."
         val base = name
         return when (this) {
-            is Value.Json -> copy(sql = "$prefix$base", identity = identity?.takeIf { identities }?.let { "$prefix${base}_identity" })
+            is Value.Json -> copy(sql = "$prefix$base", identity = identity?.let { "$prefix${base}_identity" })
             is Value.Entities -> Value.Entities("$prefix$base", relationships, flat = flat)
             is Value.Bool -> Value.Bool("$prefix$base")
             is Value.Node -> Value.Node("$prefix${base}_nid", "$prefix${base}_labels", "$prefix${base}_props", "$prefix${base}_stamp")
@@ -6722,7 +6807,7 @@ abstract class SqlCypherCompiler(
 
     /** The columns [columns] gives this value under [name], each named and whether it holds JSON, in the same order. */
     private fun Value.columnKinds(name: String): List<Pair<String, Boolean>> = when (this) {
-        is Value.Json -> listOf(name to true) + listOfNotNull(identity?.takeIf { identities }?.let { "${name}_identity" to true })
+        is Value.Json -> listOf(name to true) + listOfNotNull(identity?.let { "${name}_identity" to true })
         is Value.Entities -> listOf(name to true)
         is Value.Bool -> listOf(name to false)
         is Value.Node -> listOf("${name}_nid" to false, "${name}_labels" to true, "${name}_props" to true, "${name}_stamp" to false)
