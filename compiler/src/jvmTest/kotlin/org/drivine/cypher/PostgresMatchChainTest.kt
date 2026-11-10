@@ -82,6 +82,10 @@ class PostgresMatchChainTest {
             "MATCH (a)-[:R]-(b {id: 1}) RETURN a" to listOf("e3 b n2 nid", "n1 nid e3 a"),
             "MATCH (a)-[:R]->(b {id: 1})-[:S]->(c) RETURN a, c" to listOf("e4 dst n2 nid", "n1 nid e4 src", "e5 src n2 nid", "n3 nid e5 dst"),
             "MATCH (a {id: 1})-[:R]->(b {id: 2}) RETURN b" to listOf("e3 src n1 nid", "n2 nid e3 dst"),
+            // A variable given properties where it appears again: the chain starts where it first appears.
+            "MATCH (a)-[:R]->(a {id: 1}) RETURN a" to listOf("e2 src n1 nid"),
+            "MATCH (a)-[:R]->(b)<-[:S]-(c)-[:T]->(b {id: 1}) RETURN a" to
+                listOf("e4 dst n2 nid", "n1 nid e4 src", "e5 dst n2 nid", "n3 nid e5 src", "e6 src n3 nid"),
         )
         for ((cypher, expected) in chains) assertEquals(expected, chain(sql(cypher)).map { it.joinToString(" ") }, cypher)
         // Bound before: the walk starts there, and reads nothing whole of its own.

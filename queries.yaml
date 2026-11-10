@@ -107,6 +107,9 @@ cases:
         rows: ["Keanu"]
       - cypher: "MATCH (p:Person)-[:KNOWS|ACTED_IN]->(:Person) RETURN DISTINCT p.name ORDER BY p.name"
         rows: ["Keanu", "Laurence"]
+      - note: "Properties given on the relationship alone, and no label on either node (drivine#680)."
+        cypher: "MATCH (a)-[:ACTED_IN {role: 'Trinity'}]->(m) RETURN a.name, m.title ORDER BY m.title"
+        rows: [["Carrie", "The Matrix"], ["Carrie", "The Matrix Reloaded"]]
 
   - name: "Distinct relationships in one match"
     description: "Two relationships in one pattern never match the same relationship."
@@ -114,6 +117,19 @@ cases:
       - note: "Keanu's co-actors: the same ACTED_IN is not read for both sides."
         cypher: "MATCH (a:Person {name: 'Keanu'})-[:ACTED_IN]->(m)<-[:ACTED_IN]-(other) RETURN other.name ORDER BY other.name"
         rows: ["Carrie", "Carrie", "Laurence"]
+      - note: "A variable met twice, given properties where it is met again: each place is the same node (drivine#680)."
+        cypher: "MATCH (a)-[:ACTED_IN]->(m)<-[:ACTED_IN]-(b)-[:KNOWS]->(a {name: 'Carrie'}) RETURN b.name, m.title ORDER BY m.title"
+        rows: [["Keanu", "The Matrix"], ["Keanu", "The Matrix Reloaded"]]
+      - note: "Two patterns that share a node, and two that share none, whose relationships are still distinct (drivine#680)."
+        cypher: "MATCH (a:Person {name: 'Laurence'})-[:KNOWS]->(b), (b)-[:KNOWS]->(c) RETURN a.name, b.name, c.name"
+        rows: [["Laurence", "Keanu", "Carrie"]]
+      - cypher: "MATCH (a)-[:KNOWS]->(b), (c)-[:KNOWS]->(d) RETURN a.name, b.name, c.name, d.name ORDER BY a.name"
+        rows: [["Keanu", "Carrie", "Laurence", "Keanu"], ["Laurence", "Keanu", "Keanu", "Carrie"]]
+      - note: "A pattern from nodes a MATCH of a pattern found, and from nodes an UNWIND reads from a list (drivine#680)."
+        cypher: "MATCH (a)-[:KNOWS]->(b) MATCH (b)-[:ACTED_IN]->(m) RETURN a.name, m.title ORDER BY a.name, m.title"
+        rows: [["Keanu", "The Matrix"], ["Keanu", "The Matrix Reloaded"], ["Laurence", "Johnny Mnemonic"], ["Laurence", "The Matrix"], ["Laurence", "The Matrix Reloaded"]]
+      - cypher: "MATCH (p:Person) WITH collect(p) AS ps UNWIND ps AS p MATCH (p)-[:KNOWS]->(f) RETURN p.name, f.name ORDER BY p.name"
+        rows: [["Keanu", "Carrie"], ["Laurence", "Keanu"]]
 
   - name: "Optional match"
     description: "OPTIONAL MATCH keeps the row, with null where it finds nothing."
@@ -123,6 +139,9 @@ cases:
       - note: One that binds nothing new keeps the row too.
         cypher: "MATCH (p:Person {name: 'Hugo'}) OPTIONAL MATCH (p)-[:KNOWS]->() RETURN p.name"
         rows: ["Hugo"]
+      - note: "A pattern of two relationships finds the row's node, or nothing, not a part of it (drivine#680)."
+        cypher: "MATCH (p:Person) OPTIONAL MATCH (p)<-[:KNOWS]-(f)<-[:KNOWS]-(g) RETURN p.name, f.name, g.name ORDER BY p.name"
+        rows: [["Carrie", "Keanu", "Laurence"], ["Hugo", null, null], ["Keanu", null, null], ["Laurence", null, null]]
 
   - name: "WITH aggregates and pages"
     description: "WITH aggregates, filters, orders and pages rows."

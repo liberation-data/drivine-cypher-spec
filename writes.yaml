@@ -662,6 +662,13 @@ cases:
         rows: [["c", 1], ["b", 2], ["a", 3]]
       - cypher: "MATCH (:CyWrite {id: 's'})-[rs:R*]-(n) RETURN [n.id, size(rs)]"
         rows: [["s", 1]]
+      - note: "A relationship of one hop from a node to itself is matched once either way, and so counted (drivine#680)."
+        cypher: "MATCH (n:CyWrite)-[r:R]-(m) RETURN count(r)"
+        rows: [7]
+      - cypher: "MATCH (n:CyWrite)-[r:R]-(n) RETURN n.id"
+        rows: ["s"]
+      - cypher: "MATCH (n:CyWrite)-[:R]->(n) RETURN n.id"
+        rows: ["s"]
       - cypher: "MATCH p = shortestPath((:CyWrite {id: 'a'})-[:R*]->(:CyWrite {id: 'c'})) RETURN length(p)"
         rows: [2]
       - cypher: "MATCH (:CyWrite {id: 'a'}) ((x)-[:R]->(y))+ (n) RETURN [n.id, [m IN x | m.id]] ORDER BY size(x)"

@@ -1804,7 +1804,11 @@ abstract class SqlCypherCompiler(
             val before = select.scope
             val chained = chaining && chains(pattern)
             val start = if (!chained) -1 else pattern.nodes.indexOfFirst { node -> node.variable?.let { before[it] } != null }
-                .takeIf { it >= 0 } ?: pinned.indexOf(true)
+                .takeIf { it >= 0 } ?: pinned.indexOf(true).let { at ->
+                    // A variable given properties where it appears again, as `(a)-[:R]->(a {k: 1})`'s, is read where it first
+                    // appears: its alias is made there, and each later place is that alias, which a chain may not probe before.
+                    pattern.nodes.getOrNull(at)?.variable?.let { v -> pattern.nodes.indexOfFirst { it.variable == v } } ?: at
+                }
             // The aliases of the nodes a chain reads by their keys, each joined after the relationship that reaches it.
             val probed = mutableSetOf<String>()
             // A MERGE's read probes each relationship by its end toward the node the walk starts from: the first bound before
