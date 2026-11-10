@@ -264,17 +264,19 @@ cases:
     steps:
       - search: {label: "Doc", properties: ["body"], query: "graph", topK: 1}
         ranked: ["graphs"]
-        note: "On FalkorDB graphs and about score alike (liberation-data/drivine4j#666), so it gives graphs here by the tie's order."
+        except: ["falkordb"]
+        note: "FalkorDB scores graphs and about alike (liberation-data/drivine4j#666), so which it gives is the tie's: it gave graphs in one run and about in another. It runs this step once #666 lands."
       - search: {label: "Doc", properties: ["body"], query: "graph", topK: 3}
         ranked: ["graphs", "about", "note"]
-        except: ["oracle-text"]
-        today: [{stores: ["falkordb"], ranked: ["about", "graphs", "note"], issue: "liberation-data/drivine4j#666 (graphs and about score alike there, so the tie goes by node)"}]
+        except: ["oracle-text", "falkordb"]
       - search: {label: "Doc", properties: ["body"], query: "graph", topK: 3}
         ids: ["about", "graphs", "note"]
-        only: ["oracle-text"]
-        note: "Oracle Text scores by its own measure, not BM25 (liberation-data/drivine-cypher-spec#102), and scores note and about alike, so the step pins the hits and not their order; topK 1 pins its best."
+        only: ["oracle-text", "falkordb"]
+        note: "Oracle Text scores by its own measure, not BM25 (liberation-data/drivine-cypher-spec#102), and scores note and about alike; FalkorDB scores graphs and about alike (liberation-data/drivine4j#666). So on them the step pins the hits and not their order; on Oracle Text topK 1 pins its best."
       - search: {label: "Doc", properties: ["body"], query: "kiwi", topK: 1}
         ranked: ["kiwi"]
+        except: ["falkordb"]
+        note: "FalkorDB stems kiwis to kiwi and scores the two alike (liberation-data/drivine4j#666), so which it gives is the tie's. It runs this step once #666 lands."
 
   - name: "No word to look for"
     description: "A query of operators, punctuation or excluded words alone is refused, on every store, before it reaches one."
@@ -335,10 +337,12 @@ ranking:
   # Each bar holds over the queries Neo4j gives any hit for (21 of the 22): the same top hit as Neo4j's for at least
   # `sameTop` of them, and a mean, over them, of at least `overlap` of the top five in common with Neo4j's, as sets.
   # Each store's bar is what it gave when this file was recorded (2026-11-10, drivine4j at dd4a66f0), rounded down, so
-  # the move into the module can't regress any of them. `measured` is what each store gave then, and is not read, nor
-  # is a bar's `note`. `target` is the bar a store is to reach: the BM25 stores' once liberation-data/drivine4j#665 and
-  # the norms land. Memgraph, Oracle Text (its own measure, liberation-data/drivine-cypher-spec#102) and FalkorDB
-  # (liberation-data/drivine4j#666) have none yet.
+  # the move into the module can't regress any of them; but no higher than the store gives however it breaks a tie
+  # between hits that score alike, at the top or at the fifth: where a tie could give less, the bar is that, and its
+  # note says so. `measured` is what each store gave then, and is not read, nor is a bar's `note`. `target` is the bar
+  # a store is to reach: the BM25 stores' once liberation-data/drivine4j#665 and the norms land. Memgraph, Oracle Text
+  # (its own measure, liberation-data/drivine-cypher-spec#102) and FalkorDB (liberation-data/drivine4j#666) have none
+  # yet.
   bars:
     - stores: ["postgres", "oracle", "sqlite"]
       sameTop: 17
@@ -350,14 +354,14 @@ ranking:
       overlap: 4.09
       measured: {memgraph: {sameTop: 16, overlap: 4.095}}
     - stores: ["oracle-text"]
-      sameTop: 6
-      overlap: 2.8
-      note: "Oracle Text scores by its own measure, not BM25 (liberation-data/drivine-cypher-spec#102)."
+      sameTop: 5
+      overlap: 2.57
+      note: "Oracle Text scores by its own measure, not BM25 (liberation-data/drivine-cypher-spec#102). Its scores are whole numbers, so many hits tie: for 4 queries at the top and 10 at the fifth. Its bar is the worst those ties can give, 5 and 2.571, not what it gave."
       measured: {oracle-text: {sameTop: 6, overlap: 2.81}}
     - stores: ["falkordb"]
       sameTop: 9
-      overlap: 2.09
-      note: "RediSearch ANDs the words and stems them (liberation-data/drivine4j#666)."
+      overlap: 2.04
+      note: "RediSearch ANDs the words and stems them (liberation-data/drivine4j#666). Its hits tie at the fifth for 3 queries, and it broke one of them differently at topK 5 and 10, so its bar is the worst those ties can give, 2.048, not what it gave."
       measured: {falkordb: {sameTop: 9, overlap: 2.095}}
   queries:
     - query: "GraphObjectManager"
