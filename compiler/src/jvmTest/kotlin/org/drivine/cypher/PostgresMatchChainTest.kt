@@ -104,6 +104,9 @@ class PostgresMatchChainTest {
             "MATCH (a)-[:R]->(b) WHERE 1 IN b.ks RETURN a" to listOf("n1 nid e3 src", "n2 nid e3 dst"),
             // Given properties in another of the match's patterns.
             "MATCH (a)-[:R]->(b), (b {id: 1}) RETURN a" to listOf("e3 dst n2 nid", "n1 nid e3 src"),
+            // Properties that read another of the pattern's nodes pin nothing: no index finds the node before that one is read.
+            "MATCH (a:L)-[:R]->(b {k: a.k}) RETURN b" to listOf("e3 src n1 nid", "n2 nid e3 dst"),
+            "MATCH (a:L)-[:R]->(b), (b {k: a.k}) RETURN b" to listOf("e3 src n1 nid", "n2 nid e3 dst"),
             // A variable given properties where it appears again: the chain starts where it first appears.
             "MATCH (a)-[:R]->(a {id: 1}) RETURN a" to listOf("e2 src n1 nid"),
             "MATCH (a)-[:R]->(b)<-[:S]-(c)-[:T]->(b {id: 1}) RETURN a" to
@@ -116,6 +119,9 @@ class PostgresMatchChainTest {
         // A node bound before wins over one given properties, as a MERGE's does.
         val both = sql("MATCH (a:A) MATCH (b {id: 1})-[:R]->(a) RETURN b")
         assertEquals(listOf("e3 dst n1 nid", "n2 nid e3 src"), chain(both).map { it.joinToString(" ") }, both)
+        // Properties that read a node bound before pin as a value does.
+        val byRow = sql("MATCH (p:A) MATCH (a:L)-[:R]->(b {k: p.k}) RETURN a")
+        assertEquals(listOf("e4 dst n3 nid", "n2 nid e4 src"), chain(byRow, whole = 2).map { it.joinToString(" ") }, byRow)
     }
 
     @Test

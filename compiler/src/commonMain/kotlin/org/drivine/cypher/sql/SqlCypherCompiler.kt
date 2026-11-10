@@ -1474,7 +1474,7 @@ abstract class SqlCypherCompiler(
             // A node given properties in another of its patterns pins it as well: started at its first relationship,
             // `MATCH (a)-[:R]->(b), (b {id: 1})` read every relationship, and b by its key from each.
             val pinning = where?.let { pinnedBy(it, row.scope) }.orEmpty() +
-                match.patterns.flatMap { pattern -> pattern.nodes.filter { it.properties != null }.mapNotNull { it.variable } }
+                match.patterns.flatMap { pattern -> pattern.nodes.filter { givenBy(it, row.scope) }.mapNotNull { it.variable } }
             if (!match.optional) {
                 patterns(row, match.patterns, metByPaths, chaining = true, pinnedBy = pinning)
                 return where?.let { filtered(row, it) } ?: row
@@ -1810,7 +1810,7 @@ abstract class SqlCypherCompiler(
             val before = select.scope
             val chained = chaining && chains(pattern)
             val start = if (!chained) -1 else pattern.nodes.indexOfFirst { node -> node.variable?.let { before[it] } != null }
-                .takeIf { it >= 0 } ?: (pattern.nodes.indices.indexOfFirst { pinned[it] || pattern.nodes[it].variable in pinnedBy }.takeIf { it >= 0 }
+                .takeIf { it >= 0 } ?: (pattern.nodes.indexOfFirst { givenBy(it, before) || it.variable in pinnedBy }.takeIf { it >= 0 }
                     // Else the first with a label, read by the labels' index: the relationships' has none that leads with the
                     // type, so read whole, the first would be every relationship of every type, where `(:Rare)-[:COMMON]->(b)`
                     // read its few nodes. Each node of the label is one probe of the ends' index, so it stays linear.
@@ -1948,6 +1948,14 @@ abstract class SqlCypherCompiler(
                 else -> emptySet()
             }
         }
+
+        /**
+         * Whether [node] is given properties that read only [scope], the variables bound before its `MATCH`, as [pinnedBy]'s
+         * values do: a chain starts at it ([pattern]). Properties that read another node of the match, as `(a:L)-[:R]->(b {k:
+         * a.k})`'s, pin none: started at `b`, the chain read every node, where the plain join read the few of `L`.
+         */
+        private fun givenBy(node: NodePattern, scope: Map<String, Value>): Boolean =
+            node.properties?.let { properties -> variablesIn(properties).all { it in scope } } == true
 
         /** Whether [pattern] is read as a chain of probes by a store that probes: it has relationships, each of one hop. */
         private fun chains(pattern: Pattern): Boolean =
