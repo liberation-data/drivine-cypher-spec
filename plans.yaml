@@ -1874,6 +1874,499 @@ cases:
                 - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 1 already matching, 0 recreated, 0 needing attention"]
                 - ["INFO", "SchemaManager", "Applying schema for owner 'rag' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=v1)"]
                 - ["INFO", "SchemaManager", "Schema for owner 'rag' on 'default': 0 created, 1 already matching, 0 recreated, 0 needing attention"]
+  - case: "11b"
+    name: "An owner named schema, after the unnamed owner"
+    description: "Both have the scope 'schema'. The unnamed owner is applied first, and writes the marker; the owner named 'schema' reads it again, so the unnamed owner's item is its orphan."
+    stores: ["postgres", "oracle", "sqlite", "neo4j", "memgraph"]
+    catalogs:
+      - {owner: null, version: null, items: ["Range index"]}
+      - {owner: "schema", version: null, items: ["Uniqueness constraint"]}
+    steps:
+      - operation: {enforce: "all"}
+        runs:
+          - stores: ["postgres", "sqlite"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Range index"}}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: "RANGE_INDEX:Person:name:Person_name_range"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: ["RANGE_INDEX:Person:name:Person_name_range"]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Uniqueness constraint"}}
+                  - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], name: "Person_email_unique"}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+            done: 1000000
+            report:
+              owners:
+                - {owner: null, results: [{spec: "Range index", created: {kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}}], marker: {version: null, items: "RANGE_INDEX:Person:name:Person_name_range"}}
+                - {owner: "schema", results: [{spec: "Uniqueness constraint", created: {kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], name: "Person_email_unique"}}], orphans: ["RANGE_INDEX:Person:name:Person_name_range"], marker: {version: null, items: "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["INFO", "IndexManager", "Created {engine} RANGE_INDEX on Person[name]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 1 created, 0 already matching, 0 recreated, 0 needing attention"]
+                - ["WARN", "SchemaManager", "Owner 'schema' on 'default' previously applied 1 item(s) it no longer declares (orphans): [RANGE_INDEX:Person:name:Person_name_range]. They are left in place; drop them manually, or via a deliberate recreate, if unwanted."]
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["INFO", "ConstraintManager", "Created {engine} UNIQUENESS_CONSTRAINT on Person[email]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 1 created, 0 already matching, 0 recreated, 0 needing attention"]
+          - stores: ["oracle"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Range index"}}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: "RANGE_INDEX:Person:name:Person_name_range"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: ["items:RANGE_INDEX:Person:name:Person_name_range"]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Uniqueness constraint"}}
+                  - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], name: "Person_email_unique"}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+            done: 1000000
+            report:
+              owners:
+                - {owner: null, results: [{spec: "Range index", created: {kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}}], marker: {version: null, items: "RANGE_INDEX:Person:name:Person_name_range"}}
+                - {owner: "schema", results: [{spec: "Uniqueness constraint", created: {kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], name: "Person_email_unique"}}], orphans: ["RANGE_INDEX:Person:name:Person_name_range"], marker: {version: null, items: "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["INFO", "IndexManager", "Created {engine} RANGE_INDEX on Person[name]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 1 created, 0 already matching, 0 recreated, 0 needing attention"]
+                - ["WARN", "SchemaManager", "Owner 'schema' on 'default' previously applied 1 item(s) it no longer declares (orphans): [RANGE_INDEX:Person:name:Person_name_range]. They are left in place; drop them manually, or via a deliberate recreate, if unwanted."]
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["INFO", "ConstraintManager", "Created {engine} UNIQUENESS_CONSTRAINT on Person[email]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 1 created, 0 already matching, 0 recreated, 0 needing attention"]
+          - stores: ["neo4j"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Range index"}}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
+              - now: 1000000
+                actions:
+                  - {awaitIndex: {name: "Person_name_range", timeout: 60}}
+                  - {writeMarker: {scope: "schema", version: null, items: "RANGE_INDEX:Person:name:Person_name_range"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: ["RANGE_INDEX:Person:name:Person_name_range"]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Uniqueness constraint"}}
+                  - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], name: "Person_email_unique"}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+            done: 1000000
+            report:
+              owners:
+                - {owner: null, results: [{spec: "Range index", created: {kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}}], marker: {version: null, items: "RANGE_INDEX:Person:name:Person_name_range"}}
+                - {owner: "schema", results: [{spec: "Uniqueness constraint", created: {kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], name: "Person_email_unique"}}], orphans: ["RANGE_INDEX:Person:name:Person_name_range"], marker: {version: null, items: "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["INFO", "IndexManager", "Created {engine} RANGE_INDEX on Person[name]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 1 created, 0 already matching, 0 recreated, 0 needing attention"]
+                - ["WARN", "SchemaManager", "Owner 'schema' on 'default' previously applied 1 item(s) it no longer declares (orphans): [RANGE_INDEX:Person:name:Person_name_range]. They are left in place; drop them manually, or via a deliberate recreate, if unwanted."]
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["INFO", "ConstraintManager", "Created {engine} UNIQUENESS_CONSTRAINT on Person[email]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 1 created, 0 already matching, 0 recreated, 0 needing attention"]
+          - stores: ["memgraph"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Range index"}}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"]}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: "RANGE_INDEX:Person:name:Person_name_range"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: ["RANGE_INDEX:Person:name:Person_name_range"]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Uniqueness constraint"}}
+                  - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"]}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+            done: 1000000
+            report:
+              owners:
+                - {owner: null, results: [{spec: "Range index", created: {kind: "RANGE_INDEX", label: "Person", properties: ["name"]}}], marker: {version: null, items: "RANGE_INDEX:Person:name:Person_name_range"}}
+                - {owner: "schema", results: [{spec: "Uniqueness constraint", created: {kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"]}}], orphans: ["RANGE_INDEX:Person:name:Person_name_range"], marker: {version: null, items: "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["INFO", "IndexManager", "Created {engine} RANGE_INDEX on Person[name]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 1 created, 0 already matching, 0 recreated, 0 needing attention"]
+                - ["WARN", "SchemaManager", "Owner 'schema' on 'default' previously applied 1 item(s) it no longer declares (orphans): [RANGE_INDEX:Person:name:Person_name_range]. They are left in place; drop them manually, or via a deliberate recreate, if unwanted."]
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["INFO", "ConstraintManager", "Created {engine} UNIQUENESS_CONSTRAINT on Person[email]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 1 created, 0 already matching, 0 recreated, 0 needing attention"]
+  - case: "11c"
+    name: "An owner named schema, after the unnamed owner, both versioned"
+    description: "As 11b, both versioned: the owner named 'schema' reads the version the unnamed owner wrote."
+    stores: ["postgres", "oracle", "sqlite", "neo4j", "memgraph"]
+    catalogs:
+      - {owner: null, version: "v1", items: ["Range index"]}
+      - {owner: "schema", version: "v2", items: ["Uniqueness constraint"]}
+    steps:
+      - operation: {enforce: "all"}
+        runs:
+          - stores: ["postgres", "sqlite"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.version", scope: "schema"}, rows: []}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "deleteAllButNewest", scope: "schema"}}
+                  - {execute: {marker: "constraint"}}
+                  - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "_DrivineSchema", properties: ["scope"], name: "_DrivineSchema_scope_unique"}]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Range index"}}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: "v1", items: "RANGE_INDEX:Person:name:Person_name_range"}}
+                  - {execute: {marker: "deleteAllButNewest", scope: "schema"}}
+                  - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "_DrivineSchema", properties: ["scope"], name: "_DrivineSchema_scope_unique"}]}
+              - now: 1000000
+                actions:
+                  - {query: {marker: "read.version", scope: "schema"}, rows: ["v1"]}
+              - now: 1000000
+                actions:
+                  - {query: {marker: "read.items", scope: "schema"}, rows: ["RANGE_INDEX:Person:name:Person_name_range"]}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Uniqueness constraint"}}
+                  - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "_DrivineSchema", properties: ["scope"], name: "_DrivineSchema_scope_unique"}, {kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], name: "Person_email_unique"}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: "v2", items: "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+            done: 1000000
+            report:
+              owners:
+                - {owner: null, results: [{spec: "Range index", created: {kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}}], marker: {version: "v1", items: "RANGE_INDEX:Person:name:Person_name_range"}}
+                - {owner: "schema", results: [{spec: "Uniqueness constraint", recreated: {previous: null, current: {kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], name: "Person_email_unique"}}}], orphans: ["RANGE_INDEX:Person:name:Person_name_range"], marker: {version: "v2", items: "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+              log:
+                - ["INFO", "ConstraintManager", "Created {engine} UNIQUENESS_CONSTRAINT on _DrivineSchema[scope]"]
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=v1)"]
+                - ["INFO", "IndexManager", "Created {engine} RANGE_INDEX on Person[name]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 1 created, 0 already matching, 0 recreated, 0 needing attention"]
+                - ["WARN", "SchemaManager", "Owner 'schema' on 'default' previously applied 1 item(s) it no longer declares (orphans): [RANGE_INDEX:Person:name:Person_name_range]. They are left in place; drop them manually, or via a deliberate recreate, if unwanted."]
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=false, versionChanged=true, version=v2)"]
+                - ["INFO", "ConstraintManager", "Created {engine} UNIQUENESS_CONSTRAINT on Person[email]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 0 already matching, 1 recreated, 0 needing attention"]
+          - stores: ["oracle"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.version", scope: "schema"}, rows: []}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "deleteAllButNewest", scope: "schema"}}
+                  - {execute: {marker: "constraint"}}
+                  - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "_DrivineSchema", properties: ["scope"], name: "_DrivineSchema_scope_unique"}]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Range index"}}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: "v1", items: "RANGE_INDEX:Person:name:Person_name_range"}}
+                  - {execute: {marker: "deleteAllButNewest", scope: "schema"}}
+                  - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "_DrivineSchema", properties: ["scope"], name: "_DrivineSchema_scope_unique"}]}
+              - now: 1000000
+                actions:
+                  - {query: {marker: "read.version", scope: "schema"}, rows: ["v1"]}
+              - now: 1000000
+                actions:
+                  - {query: {marker: "read.items", scope: "schema"}, rows: ["items:RANGE_INDEX:Person:name:Person_name_range"]}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Uniqueness constraint"}}
+                  - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "_DrivineSchema", properties: ["scope"], name: "_DrivineSchema_scope_unique"}, {kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], name: "Person_email_unique"}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: "v2", items: "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+            done: 1000000
+            report:
+              owners:
+                - {owner: null, results: [{spec: "Range index", created: {kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}}], marker: {version: "v1", items: "RANGE_INDEX:Person:name:Person_name_range"}}
+                - {owner: "schema", results: [{spec: "Uniqueness constraint", recreated: {previous: null, current: {kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], name: "Person_email_unique"}}}], orphans: ["RANGE_INDEX:Person:name:Person_name_range"], marker: {version: "v2", items: "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+              log:
+                - ["INFO", "ConstraintManager", "Created {engine} UNIQUENESS_CONSTRAINT on _DrivineSchema[scope]"]
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=v1)"]
+                - ["INFO", "IndexManager", "Created {engine} RANGE_INDEX on Person[name]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 1 created, 0 already matching, 0 recreated, 0 needing attention"]
+                - ["WARN", "SchemaManager", "Owner 'schema' on 'default' previously applied 1 item(s) it no longer declares (orphans): [RANGE_INDEX:Person:name:Person_name_range]. They are left in place; drop them manually, or via a deliberate recreate, if unwanted."]
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=false, versionChanged=true, version=v2)"]
+                - ["INFO", "ConstraintManager", "Created {engine} UNIQUENESS_CONSTRAINT on Person[email]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 0 already matching, 1 recreated, 0 needing attention"]
+          - stores: ["neo4j"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {query: {marker: "read.version", scope: "schema"}, rows: []}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "deleteAllButNewest", scope: "schema"}}
+                  - {execute: {marker: "constraint"}}
+                  - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "_DrivineSchema", properties: ["scope"], name: "_DrivineSchema_scope_unique"}]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Range index"}}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
+              - now: 1000000
+                actions:
+                  - {awaitIndex: {name: "Person_name_range", timeout: 60}}
+                  - {writeMarker: {scope: "schema", version: "v1", items: "RANGE_INDEX:Person:name:Person_name_range"}}
+                  - {execute: {marker: "deleteAllButNewest", scope: "schema"}}
+                  - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "_DrivineSchema", properties: ["scope"], name: "_DrivineSchema_scope_unique"}]}
+              - now: 1000000
+                actions:
+                  - {query: {marker: "read.version", scope: "schema"}, rows: ["v1"]}
+              - now: 1000000
+                actions:
+                  - {query: {marker: "read.items", scope: "schema"}, rows: ["RANGE_INDEX:Person:name:Person_name_range"]}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Uniqueness constraint"}}
+                  - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "_DrivineSchema", properties: ["scope"], name: "_DrivineSchema_scope_unique"}, {kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], name: "Person_email_unique"}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: "v2", items: "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+            done: 1000000
+            report:
+              owners:
+                - {owner: null, results: [{spec: "Range index", created: {kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}}], marker: {version: "v1", items: "RANGE_INDEX:Person:name:Person_name_range"}}
+                - {owner: "schema", results: [{spec: "Uniqueness constraint", recreated: {previous: null, current: {kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], name: "Person_email_unique"}}}], orphans: ["RANGE_INDEX:Person:name:Person_name_range"], marker: {version: "v2", items: "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+              log:
+                - ["INFO", "ConstraintManager", "Created {engine} UNIQUENESS_CONSTRAINT on _DrivineSchema[scope]"]
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=v1)"]
+                - ["INFO", "IndexManager", "Created {engine} RANGE_INDEX on Person[name]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 1 created, 0 already matching, 0 recreated, 0 needing attention"]
+                - ["WARN", "SchemaManager", "Owner 'schema' on 'default' previously applied 1 item(s) it no longer declares (orphans): [RANGE_INDEX:Person:name:Person_name_range]. They are left in place; drop them manually, or via a deliberate recreate, if unwanted."]
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=false, versionChanged=true, version=v2)"]
+                - ["INFO", "ConstraintManager", "Created {engine} UNIQUENESS_CONSTRAINT on Person[email]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 0 already matching, 1 recreated, 0 needing attention"]
+          - stores: ["memgraph"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {query: {marker: "read.version", scope: "schema"}, rows: []}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "deleteAllButNewest", scope: "schema"}}
+                  - {execute: {marker: "constraint"}}
+                  - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "_DrivineSchema", properties: ["scope"]}]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Range index"}}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"]}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: "v1", items: "RANGE_INDEX:Person:name:Person_name_range"}}
+                  - {execute: {marker: "deleteAllButNewest", scope: "schema"}}
+                  - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "_DrivineSchema", properties: ["scope"]}]}
+              - now: 1000000
+                actions:
+                  - {query: {marker: "read.version", scope: "schema"}, rows: ["v1"]}
+              - now: 1000000
+                actions:
+                  - {query: {marker: "read.items", scope: "schema"}, rows: ["RANGE_INDEX:Person:name:Person_name_range"]}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Uniqueness constraint"}}
+                  - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "_DrivineSchema", properties: ["scope"]}, {kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"]}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: "v2", items: "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+            done: 1000000
+            report:
+              owners:
+                - {owner: null, results: [{spec: "Range index", created: {kind: "RANGE_INDEX", label: "Person", properties: ["name"]}}], marker: {version: "v1", items: "RANGE_INDEX:Person:name:Person_name_range"}}
+                - {owner: "schema", results: [{spec: "Uniqueness constraint", recreated: {previous: null, current: {kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"]}}}], orphans: ["RANGE_INDEX:Person:name:Person_name_range"], marker: {version: "v2", items: "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+              log:
+                - ["INFO", "ConstraintManager", "Created {engine} UNIQUENESS_CONSTRAINT on _DrivineSchema[scope]"]
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=v1)"]
+                - ["INFO", "IndexManager", "Created {engine} RANGE_INDEX on Person[name]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 1 created, 0 already matching, 0 recreated, 0 needing attention"]
+                - ["WARN", "SchemaManager", "Owner 'schema' on 'default' previously applied 1 item(s) it no longer declares (orphans): [RANGE_INDEX:Person:name:Person_name_range]. They are left in place; drop them manually, or via a deliberate recreate, if unwanted."]
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=false, versionChanged=true, version=v2)"]
+                - ["INFO", "ConstraintManager", "Created {engine} UNIQUENESS_CONSTRAINT on Person[email]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 0 already matching, 1 recreated, 0 needing attention"]
+  - case: "11d"
+    name: "An owner named schema, after the unnamed owner fails to read the marker"
+    description: "The unnamed owner's read of the marker fails, which fails it; the owner named 'schema' reads the marker again, and is applied."
+    stores: ["postgres", "oracle", "sqlite", "neo4j", "memgraph"]
+    catalogs:
+      - {owner: null, version: null, items: ["Range index"]}
+      - {owner: "schema", version: null, items: ["Uniqueness constraint"]}
+    steps:
+      - operation: {enforce: "all"}
+        runs:
+          - stores: ["postgres", "oracle", "sqlite"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "schema"}, failed: [{}]}
+                  - {query: {listing: "indexes.RANGE_INDEX"}}
+                  - {query: {listing: "constraints"}}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Uniqueness constraint"}}
+                  - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], name: "Person_email_unique"}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+            done: 1000000
+            report:
+              owners:
+                - {owner: null, marker: null, failure: "An unknown error occurred"}
+                - {owner: "schema", results: [{spec: "Uniqueness constraint", created: {kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], name: "Person_email_unique"}}], marker: {version: null, items: "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+              failure: "Schema application on database 'default' failed for 1 owner(s):\nAn unknown error occurred"
+              log:
+                - ["ERROR", "SchemaManager", "Schema application for owner 'schema' on 'default' failed: An unknown error occurred"]
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["INFO", "ConstraintManager", "Created {engine} UNIQUENESS_CONSTRAINT on Person[email]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 1 created, 0 already matching, 0 recreated, 0 needing attention"]
+          - stores: ["neo4j"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {query: {marker: "read.items", scope: "schema"}, failed: [{}]}
+                  - {query: {listing: "indexes.RANGE_INDEX"}}
+                  - {query: {listing: "constraints"}}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Uniqueness constraint"}}
+                  - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], name: "Person_email_unique"}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+            done: 1000000
+            report:
+              owners:
+                - {owner: null, marker: null, failure: "An unknown error occurred"}
+                - {owner: "schema", results: [{spec: "Uniqueness constraint", created: {kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], name: "Person_email_unique"}}], marker: {version: null, items: "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+              failure: "Schema application on database 'default' failed for 1 owner(s):\nAn unknown error occurred"
+              log:
+                - ["ERROR", "SchemaManager", "Schema application for owner 'schema' on 'default' failed: An unknown error occurred"]
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["INFO", "ConstraintManager", "Created {engine} UNIQUENESS_CONSTRAINT on Person[email]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 1 created, 0 already matching, 0 recreated, 0 needing attention"]
+          - stores: ["memgraph"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {query: {marker: "read.items", scope: "schema"}, failed: [{}]}
+                  - {query: {listing: "indexes.RANGE_INDEX"}}
+                  - {query: {listing: "constraints"}}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Uniqueness constraint"}}
+                  - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"]}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+            done: 1000000
+            report:
+              owners:
+                - {owner: null, marker: null, failure: "An unknown error occurred"}
+                - {owner: "schema", results: [{spec: "Uniqueness constraint", created: {kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"]}}], marker: {version: null, items: "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+              failure: "Schema application on database 'default' failed for 1 owner(s):\nAn unknown error occurred"
+              log:
+                - ["ERROR", "SchemaManager", "Schema application for owner 'schema' on 'default' failed: An unknown error occurred"]
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["INFO", "ConstraintManager", "Created {engine} UNIQUENESS_CONSTRAINT on Person[email]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 1 created, 0 already matching, 0 recreated, 0 needing attention"]
   - case: "12a"
     name: "Drift under FAIL_FAST"
     description: "A vector index of another size: drift, which fails the owner, and its marker is not written."

@@ -480,7 +480,11 @@ internal class SchemaProgram(
         val outcome = markerReads.getOrPut(scope to property) { io.ask(markerRead(scope, property)) }
         return when (outcome) {
             is PlanOutcome.Rows -> outcome.rows.firstOrNull()?.let(::value)
-            is PlanOutcome.Failed -> throw OwnerFailure(messageOf(outcome.error))
+            // Not kept: drivine4j reads it again for the next owner of the scope, an owner named `schema` after the unnamed one.
+            is PlanOutcome.Failed -> {
+                markerReads.remove(scope to property)
+                throw OwnerFailure(messageOf(outcome.error))
+            }
             else -> null
         }
     }
