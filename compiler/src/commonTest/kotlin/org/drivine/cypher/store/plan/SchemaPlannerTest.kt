@@ -168,6 +168,14 @@ class SchemaPlannerTest {
     }
 
     @Test
+    fun anEnsureOrARemoveOfNoItemsIsNothingRunAsDrivine4jReturnsAtOnce() {
+        val versioned = DeclaredCatalog(null, "v1", listOf(name))
+        val ensure = PlanRequest("default", Operation.Ensure(null, emptyList()), listOf(versioned), listOf(DeclaredCatalog(null, items = listOf(name))))
+        assertEquals(DatabaseReport("default"), assertIs<PlanStep.Done>(planner.start(ensure, 0)).report)
+        assertEquals(DatabaseReport("default"), assertIs<PlanStep.Done>(planner.start(request(Operation.Remove(null, emptyList()), versioned), 0)).report)
+    }
+
+    @Test
     fun nothingDeclaredOnTheDatabaseIsNothingRun() {
         val done = assertIs<PlanStep.Done>(planner.start(request(Operation.Enforce(), DeclaredCatalog(null, items = emptyList())), 0)).report
         assertEquals(DatabaseReport("default"), done)

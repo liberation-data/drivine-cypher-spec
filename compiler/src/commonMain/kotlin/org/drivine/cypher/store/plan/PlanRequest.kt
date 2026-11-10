@@ -85,11 +85,16 @@ sealed interface Operation {
     /**
      * `SchemaManager.ensure(catalog)`: the [items] given to [owner] at runtime, applied as its others are, its version as
      * the marker records it. The library has added them to the [PlanRequest.runtime] items, and checked every database
-     * with [SchemaPlanner.validate] first.
+     * with [SchemaPlanner.validate] first. An ensure of no items plans nothing, as drivine4j's returns at once (its
+     * `Nothing to ensure for owner '…': no items given`, logged once for the call, not for each database, is the
+     * library's, as is its refusal of a catalog that carries a version).
      */
     data class Ensure(val owner: String?, val items: List<SchemaItemSpec>) : Operation
 
-    /** `SchemaManager.remove(catalog)`: the [items] taken from what [owner] declares, dropped where no one else declares them. */
+    /**
+     * `SchemaManager.remove(catalog)`: the [items] taken from what [owner] declares, dropped where no one else declares
+     * them. A remove of no items plans nothing, as drivine4j's returns at once.
+     */
     data class Remove(val owner: String?, val items: List<SchemaItemSpec>) : Operation
 
     /** One of the public `IndexManager` and `ConstraintManager` calls, on [spec] alone, with no marker. */

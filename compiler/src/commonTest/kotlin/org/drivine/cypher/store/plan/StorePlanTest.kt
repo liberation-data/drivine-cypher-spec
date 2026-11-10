@@ -64,10 +64,11 @@ class StorePlanTest {
     private val cases: List<JsonNode> = plans["cases"]!!.toList()
 
     @Test
-    fun theCasesAreTheDesignsCasesOneToTwentyNine() {
-        val numbers = cases.map { it["case"]!!.textValue()!!.takeWhile(Char::isDigit).toInt() }.distinct().sorted()
+    fun theCasesAreTheDesignsCasesOneToTwentyNineAndTheItemCalls() {
+        val names = cases.map { it["case"]!!.textValue()!! }
+        val numbers = names.filter { it.first().isDigit() }.map { it.takeWhile(Char::isDigit).toInt() }.distinct().sorted()
         assertEquals((1..29).toList(), numbers)
-        val names = cases.map { it["case"]!!.textValue() }
+        assertEquals(listOf("item"), names.filterNot { it.first().isDigit() })
         assertEquals(names.distinct(), names, "each case once")
     }
 

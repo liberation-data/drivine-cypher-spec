@@ -66,8 +66,11 @@ internal class SchemaProgram(
     fun run(): DatabaseReport = when (val operation = request.operation) {
         is Operation.Enforce -> apply(forceRecreate = false, operation.owners, only = null)
         is Operation.RecreateAll -> apply(forceRecreate = true, operation.owners, only = null)
-        is Operation.Ensure -> apply(forceRecreate = false, Owners.One(operation.owner), only = operation.items.map { it.inventoryKey }.toSet())
-        is Operation.Remove -> remove(operation)
+        // drivine4j's ensure and remove of no items return before anything is read: an ensure would otherwise write the
+        // owner's marker, and keep it single, with nothing applied.
+        is Operation.Ensure -> if (operation.items.isEmpty()) report() else
+            apply(forceRecreate = false, Owners.One(operation.owner), only = operation.items.map { it.inventoryKey }.toSet())
+        is Operation.Remove -> if (operation.items.isEmpty()) report() else remove(operation)
         is Operation.Item -> item(operation)
     }
 
