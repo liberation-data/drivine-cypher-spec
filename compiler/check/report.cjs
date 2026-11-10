@@ -21,7 +21,7 @@ function report(target, results, loadMs, differencesFile, what = 'Corpus') {
     console.log(
         `${what} on ${target}: ${results.length - differ.length} of ${results.length} answers byte-identical to the JVM's, ` +
             `${differ.length} differ. Load and first compile ${loadMs.toFixed(1)} ms; compile mean ${(sum / ms.length).toFixed(3)} ms, ` +
-            `median ${at(0.5)} ms, p99 ${at(0.99)} ms, max ${ms[ms.length - 1].toFixed(1)} ms (${JSON.parse(slowest.request).cypher.slice(0, 80)}).`
+            `median ${at(0.5)} ms, p99 ${at(0.99)} ms, max ${ms[ms.length - 1].toFixed(1)} ms (${(JSON.parse(slowest.request).cypher ?? slowest.request).slice(0, 80)}).`
     );
     for (const d of differ.slice(0, 5)) {
         console.log(`  differs: ${d.request.slice(0, 300)}\n    JVM:  ${d.answer.slice(0, 300)}\n    here: ${d.got.slice(0, 300)}`);

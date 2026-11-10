@@ -78,6 +78,7 @@ data class SearchRequest(
  * What planning a full-text search ([FullTextSearch.plan]) gives: a [SearchPlan], or the [Refusal] of the query, as compiling
  * a statement gives [Compiled] or the refusal of it.
  */
+@DrivineInternalApi
 sealed interface SearchResult
 
 /**
