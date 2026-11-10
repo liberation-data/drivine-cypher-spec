@@ -107,8 +107,20 @@ kotlin {
 
     // The shared library (drivine_compile, drivine_free) a host without a JVM or JS loads, such as Python over ctypes.
     // macosArm64 is built and checked on macOS; the others build anywhere Kotlin/Native runs, and linuxX64 is checked in CI.
+    // It exports the C API alone: Linux by a version script, macOS by a list (native/), Windows by Kotlin/Native's .def,
+    // which names the API already. On Linux, --as-needed leaves out a system library the library doesn't call, as
+    // libcrypt.so.1, which newer distributions don't have, and which a manylinux wheel may not need.
+    val exports = layout.projectDirectory.dir("native")
     listOf(macosArm64(), linuxX64(), linuxArm64(), mingwX64()).forEach { target ->
-        target.binaries.sharedLib("drivinecypher")
+        target.binaries.sharedLib("drivinecypher") {
+            when (target.konanTarget.family) {
+                org.jetbrains.kotlin.konan.target.Family.LINUX ->
+                    linkerOpts("-Wl,--as-needed", "-Wl,--version-script=${exports.file("exports.map").asFile.absolutePath}")
+                org.jetbrains.kotlin.konan.target.Family.OSX ->
+                    linkerOpts("-Wl,-exported_symbols_list,${exports.file("exports.txt").asFile.absolutePath}")
+                else -> {}
+            }
+        }
     }
 
     applyDefaultHierarchyTemplate()
@@ -321,6 +333,34 @@ tasks.register<Exec>("nativeCorpusCheck") {
         oracleDir.get().file("differences-$target.jsonl").asFile.absolutePath,
         oracleDir.get().file("mutants.jsonl").asFile.absolutePath,
         oracleDir.get().file("differences-mutants-$target.jsonl").asFile.absolutePath,
+    )
+}
+
+/**
+ * The Python package drivine-cypher-compiler, one wheel a target that builds a shared library, in build/wheels: each the
+ * package's binding (python/drivine_cypher_compiler) and that target's release library, packed by python/build_wheels.py
+ * with the standard library alone (`python3` on the PATH, or -Ppython=<path>). The release publishes them to PyPI.
+ */
+val pythonWheels by tasks.registering(Exec::class) {
+    description = "Packs each target's shared library as a wheel of drivine-cypher-compiler, in build/wheels."
+    group = "build"
+    val libraries = mapOf(
+        "macosArm64" to "libdrivinecypher.dylib",
+        "linuxX64" to "libdrivinecypher.so",
+        "linuxArm64" to "libdrivinecypher.so",
+        "mingwX64" to "drivinecypher.dll",
+    )
+    dependsOn(libraries.keys.map { "linkDrivinecypherReleaseShared${it.replaceFirstChar(Char::uppercase)}" })
+    val out = layout.buildDirectory.dir("wheels").get().asFile
+    inputs.dir(layout.projectDirectory.dir("python"))
+    outputs.dir(out)
+    doFirst { out.deleteRecursively() }
+    executable(providers.gradleProperty("python").getOrElse("python3"))
+    args(
+        listOf(layout.projectDirectory.file("python/build_wheels.py").asFile.absolutePath, version, out.absolutePath) +
+            libraries.map { (target, library) ->
+                "$target=" + layout.buildDirectory.file("bin/$target/drivinecypherReleaseShared/$library").get().asFile.absolutePath
+            },
     )
 }
 

@@ -1,0 +1,9 @@
+/* The shared library's exports on Linux: the C API alone (see Exports.native.kt), so the Kotlin/Native runtime's own
+   symbols stay inside it and can't clash with another library a host loads. */
+{
+  global:
+    drivine_compile;
+    drivine_free;
+  local:
+    *;
+};

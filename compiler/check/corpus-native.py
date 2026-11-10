@@ -4,6 +4,9 @@ through its C ABI (drivine_compile, drivine_free), as a Python host loads it, an
 for byte. Then the same of the mutants (build/oracle/mutants.jsonl), where given.
 
     python3 check/corpus-native.py <libdrivinecypher.so|.dylib|.dll> <corpus.jsonl> [<differences.jsonl> [<mutants.jsonl> <their differences.jsonl>]]
+
+In place of the library, `--installed` checks the installed Python package drivine-cypher-compiler instead: each request
+compiled by its compile(), so a wheel is checked as a Python host loads it, binding and all.
 """
 import ctypes
 import json
@@ -14,18 +17,24 @@ import time
 
 def main(library, corpus, differences=None, mutants=None, mutant_differences=None):
     started = time.perf_counter()
-    lib = ctypes.CDLL(library)
-    lib.drivine_compile.argtypes = [ctypes.c_char_p]
-    lib.drivine_compile.restype = ctypes.c_void_p
-    lib.drivine_free.argtypes = [ctypes.c_void_p]
-    lib.drivine_free.restype = None
+    if library == "--installed":
+        import drivine_cypher_compiler
 
-    def compile_(request):
-        answer = lib.drivine_compile(request.encode("utf-8"))
-        try:
-            return ctypes.string_at(answer).decode("utf-8")
-        finally:
-            lib.drivine_free(answer)
+        print(f"The installed drivine-cypher-compiler {drivine_cypher_compiler.__version__}, {drivine_cypher_compiler.library_path()}")
+        compile_ = drivine_cypher_compiler.compile
+    else:
+        lib = ctypes.CDLL(library)
+        lib.drivine_compile.argtypes = [ctypes.c_char_p]
+        lib.drivine_compile.restype = ctypes.c_void_p
+        lib.drivine_free.argtypes = [ctypes.c_void_p]
+        lib.drivine_free.restype = None
+
+        def compile_(request):
+            answer = lib.drivine_compile(request.encode("utf-8"))
+            try:
+                return ctypes.string_at(answer).decode("utf-8")
+            finally:
+                lib.drivine_free(answer)
 
     compile_(json.dumps({"store": "postgres", "graph": {"name": "g"}, "cypher": "RETURN 1"}))
     load_ms = (time.perf_counter() - started) * 1000

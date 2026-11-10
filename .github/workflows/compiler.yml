@@ -130,7 +130,7 @@ jobs:
         id: key
         env:
           PINS: ${{ hashFiles('compiler/gradle/verification-metadata.xml', 'compiler/gradle/kotlin-native-dependencies.txt', 'compiler/gradle/pinned-jdk.properties', 'compiler/gradle/wrapper/gradle-wrapper.properties', '.github/scripts/compiler-release-dependencies.sh') }}
-        run: echo "key=compiler-release-dependencies-v1-$RUNNER_OS-$RUNNER_ARCH-$PINS" | tee -a "$GITHUB_OUTPUT"
+        run: echo "key=compiler-release-dependencies-v2-$RUNNER_OS-$RUNNER_ARCH-$PINS" | tee -a "$GITHUB_OUTPUT"
       - uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         id: kept
         with:
@@ -145,10 +145,11 @@ jobs:
       - name: Kotlin/Native can fetch nothing of its own
         if: steps.kept.outputs.cache-hit != 'true'
         run: ../.github/scripts/compiler-konan-dependencies.sh block
-      # What compiler-release.yml's build job builds, so Gradle and Kotlin/Native fetch what it uses.
+      # What compiler-release.yml's build job builds, so Gradle and Kotlin/Native fetch what it uses: its pythonWheels
+      # as the four shared libraries it packs, as packing them fetches nothing.
       - name: The release's build
         if: steps.kept.outputs.cache-hit != 'true'
-        run: ./gradlew --no-daemon --dependency-verification strict zipAggregationPublication npmPackage -Pcompiler.version=0.0.0-dependencies
+        run: ./gradlew --no-daemon --dependency-verification strict zipAggregationPublication npmPackage jvmOracle linkDrivinecypherReleaseSharedMacosArm64 linkDrivinecypherReleaseSharedLinuxX64 linkDrivinecypherReleaseSharedLinuxArm64 linkDrivinecypherReleaseSharedMingwX64 -Pcompiler.version=0.0.0-dependencies
       - name: Kotlin/Native used only its pinned dependencies
         if: steps.kept.outputs.cache-hit != 'true'
         run: ../.github/scripts/compiler-konan-dependencies.sh check gradle/kotlin-native-dependencies.txt
