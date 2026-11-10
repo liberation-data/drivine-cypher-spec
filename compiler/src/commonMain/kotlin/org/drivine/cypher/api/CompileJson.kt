@@ -27,10 +27,11 @@ import kotlin.io.encoding.ExperimentalEncodingApi
  *
  * `store` is `postgres`, `oracle` or `sqlite`. `graph` is [GraphOptions]: `name`, and on Oracle `nullsEqualStored`,
  * `eraStored` (true where left out), `indexedProperties` (`[["Person", "name"], …]`), `oracleRowsAsText` and
- * `oracleReencodeJson` (false where left out). `parameters` may be left out.
+ * `oracleReencodeJson` (false where left out). `parameters` may be left out. With `"typed": true` (false where left out),
+ * the rows' nodes and relationships are tagged with their labels and type: see [org.drivine.cypher.sql.ColumnKind].
  *
  * The answer is [Compiled] (`sql`, `parameters`, `setup`, `warnings`, `nonFinite`, and on Oracle `storedFunctions`:
- * `{"nullsEqual": …, "era": …}`), `{"refusal": "<message>"}` where the compiler refuses the statement, or
+ * `{"nullsEqual": …, "era": …}`, and with `typed` `columns`: `[{"name": "p", "kind": "node"}, …]`), `{"refusal": "<message>"}` where the compiler refuses the statement, or
  * `{"error": "<message>"}` where the request is no request.
  *
  * A request with `search` or `searchIndex` in place of `cypher` is a full-text search, answered by [FullTextSearch]: see
@@ -75,7 +76,7 @@ object CompileJson {
             return error(e.message ?: e.toString())
         }
         // A value bound is one given, or text, so it nests no deeper than the request: writing it can't be refused.
-        return when (val result = CypherCompiler.compile(call.store, call.graph, call.cypher, call.parameters)) {
+        return when (val result = CypherCompiler.compile(call.store, call.graph, call.cypher, call.parameters, call.typed)) {
             is Refusal -> refusal(result.message)
             is Compiled -> StringBuilder().apply {
                 append("{\"sql\":"); TypedJson.write(result.sql, this)
@@ -84,12 +85,23 @@ object CompileJson {
                 append(",\"warnings\":"); TypedJson.write(result.warnings, this)
                 append(",\"nonFinite\":").append(result.nonFinite)
                 result.storedFunctions?.let { append(",\"storedFunctions\":{\"nullsEqual\":").append(it.nullsEqual).append(",\"era\":").append(it.era).append('}') }
+                // Only where asked, so an answer to a request without it is byte for byte as before.
+                if (call.typed) {
+                    append(",\"columns\":[")
+                    result.columns.forEachIndexed { i, column ->
+                        if (i > 0) append(',')
+                        append("{\"name\":"); TypedJson.write(column.name, this)
+                        append(",\"kind\":"); TypedJson.write(column.kind.id, this)
+                        append('}')
+                    }
+                    append(']')
+                }
                 append('}')
             }.toString()
         }
     }
 
-    private class Call(val store: Store, val graph: GraphOptions, val cypher: String, val parameters: Map<String, Any?>)
+    private class Call(val store: Store, val graph: GraphOptions, val cypher: String, val parameters: Map<String, Any?>, val typed: Boolean)
 
     private fun read(tree: ObjectNode): Call {
         val storeId = tree["store"]?.textValue() ?: throw IllegalArgumentException("A request names its store: postgres, oracle or sqlite.")
@@ -118,7 +130,9 @@ object CompileJson {
             is ObjectNode -> given.properties().associate { (key, value) -> key to TypedJson.value(value, 3) }
             else -> if (given.isNull) emptyMap() else throw IllegalArgumentException("A request's parameters are a JSON object.")
         }
-        return Call(store, options, cypher, parameters)
+        val typedGiven = tree["typed"]?.takeUnless { it.isNull }
+        require(typedGiven == null || typedGiven.isBoolean) { "A request gives typed as true or false." }
+        return Call(store, options, cypher, parameters, typedGiven?.booleanValue() ?: false)
     }
 
     /** The graph's option [name], [default] where it is left out; refused where it is no boolean, as `"false"` would be read as true. */

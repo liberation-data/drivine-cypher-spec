@@ -169,6 +169,24 @@ class OracleReencodeJsonTest {
         }
     }
 
+    @Test
+    fun `typed, a statement's tagged nodes and relationships are encoded again as its result, once, and the rest is as typed gives it`() {
+        fun typed(cypher: String, reencodeJson: Boolean, rowsAsText: Boolean = false) = (CypherCompiler.compile(
+            Store.ORACLE, GraphOptions("g", oracleRowsAsText = rowsAsText, oracleReencodeJson = reencodeJson), cypher, parameters, typed = true,
+        ) as Compiled)
+        for (cypher in listOf(
+            "MATCH (n:N) RETURN n", "MATCH (n:N)-[r]->(m) RETURN n, r, m", "MATCH (n:N) RETURN n.x AS x, n",
+            "MATCH (n:N) RETURN n UNION MATCH (n:M) RETURN n", "MERGE (t:N {id: 1}) SET t.x = 2 RETURN t",
+        )) for (rowsAsText in listOf(false, true)) {
+            val plain = typed(cypher, reencodeJson = false, rowsAsText)
+            val again = typed(cypher, reencodeJson = true, rowsAsText)
+            val wraps = Regex(Regex.escape(", KEEP '\$') AS result")).findAll(again.sql).count()
+            assertEquals(if ("UNION" in cypher) 2 else 1, wraps, "$cypher, rowsAsText $rowsAsText: ${again.sql}")
+            assertEquals(plain.sql, unwrapped(again.sql), cypher)
+            assertEquals(plain.copy(sql = again.sql), again, cypher)
+        }
+    }
+
     private fun compiled(cypher: String, graph: GraphOptions, store: Store = Store.ORACLE) =
         CypherCompiler.compile(store, graph, cypher, parameters)
 }

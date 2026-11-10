@@ -1,6 +1,8 @@
 package org.drivine.cypher.api
 
+import org.drivine.cypher.sql.ColumnKind
 import org.drivine.cypher.sql.OracleCypherCompiler
+import org.drivine.cypher.sql.ResultColumn
 import org.drivine.cypher.sql.PostgresCypherCompiler
 import org.drivine.cypher.sql.SqlCypherCompiler
 import org.drivine.cypher.sql.SqliteCypherCompiler
@@ -74,6 +76,8 @@ sealed interface CompileResult
  * @param nonFinite whether the statement is given NaN or an infinity, or works one out: a store whose JSON holds no such
  *   float then gives it in the rows as a value of its own (`{"$numberDouble": "NaN"}`), which the host reads back.
  * @param storedFunctions on Oracle, which of the graph's stored functions [sql] calls; null on the other stores.
+ * @param columns the columns of the statement's rows, each named as a graph engine names it, and of the kind the compiler
+ *   knows it holds: see [ColumnKind]. None for a statement that returns nothing.
  */
 data class Compiled(
     val sql: String,
@@ -82,6 +86,7 @@ data class Compiled(
     val warnings: List<String>,
     val nonFinite: Boolean,
     val storedFunctions: StoredFunctions?,
+    val columns: List<ResultColumn> = emptyList(),
 ) : CompileResult
 
 /** Which of the graph's stored functions an Oracle statement calls: see [GraphOptions]. */
@@ -102,14 +107,21 @@ data class Refusal(val message: String) : CompileResult, SearchResult
  */
 object CypherCompiler {
 
-    fun compile(store: Store, graph: GraphOptions, cypher: String, parameters: Map<String, Any?> = emptyMap()): CompileResult {
+    fun compile(store: Store, graph: GraphOptions, cypher: String, parameters: Map<String, Any?> = emptyMap()): CompileResult =
+        compile(store, graph, cypher, parameters, typed = false)
+
+    /**
+     * [cypher] compiled as the [compile] above compiles it, and with [typed] its rows' nodes and relationships tagged with their
+     * labels and type, in the columns [ColumnKind.tagged] names. Untyped, the SQL is byte for byte the other's.
+     */
+    fun compile(store: Store, graph: GraphOptions, cypher: String, parameters: Map<String, Any?>, typed: Boolean): CompileResult {
         val compiler: SqlCypherCompiler = when (store) {
             Store.POSTGRES -> PostgresCypherCompiler(graph.name)
             Store.ORACLE -> OracleCypherCompiler(graph.name, graph.nullsEqualStored, graph.eraStored, graph.indexedProperties, encoder = null, rowsAsText = graph.oracleRowsAsText, reencodeJson = graph.oracleReencodeJson)
             Store.SQLITE -> SqliteCypherCompiler(graph.name)
         }
         val compiled = try {
-            compiler.compile(cypher, parameters)
+            compiler.compile(cypher, parameters, typed)
         } catch (e: Exception) {
             return Refusal(e.message ?: e.toString())
         }
@@ -121,6 +133,7 @@ object CypherCompiler {
             warnings = compiler.warnings.toList(),
             nonFinite = compiled.nonFinite,
             storedFunctions = (compiler as? OracleCypherCompiler)?.let { StoredFunctions(it.callsStoredNullsEqual, it.callsStoredEra) },
+            columns = compiled.columns,
         )
     }
 

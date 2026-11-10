@@ -151,6 +151,30 @@ abstract class SqlCypherCompiler(
     }
 
     /**
+     * The statement [cypher] as [compile] gives it, and with [typed] its rows' nodes and relationships tagged with their labels
+     * and type, in the columns [ColumnKind.tagged] names: see [ColumnKind]. Untyped, it is compiled byte for byte as [compile]
+     * compiles it. For a host that gives a result's values as the graph engines' drivers do, as the drivine CLI prints them.
+     */
+    fun compile(cypher: String, parameters: Map<String, Any?>, typed: Boolean): CompiledCypher {
+        this.typed = typed
+        try {
+            return compile(cypher, parameters)
+        } finally {
+            this.typed = false
+        }
+    }
+
+    /** Whether the statement is compiled typed: see the [compile] that takes it. */
+    protected var typed = false
+        private set
+
+    /** The columns of the statement's rows, as its last `RETURN`, or its `UNION`'s first query's, gives them: see [CompiledCypher.columns]. */
+    private var returned: List<ResultColumn>? = null
+
+    /** The places among [returned] that a query of the statement gives a node, a relationship or a list of them in: see `union`. */
+    private val taggedReturned = mutableSetOf<Int>()
+
+    /**
      * Whether the statement's parameters hold NaN or an infinity, at any depth: set as [compile] starts. A store whose JSON holds
      * no such float as a number writes one as a value of its own, and works with that value as the float it is only where the
      * statement is given one, so a statement given none compiles as it would without it (see Postgres's and SQLite's).
@@ -209,7 +233,11 @@ abstract class SqlCypherCompiler(
     protected open val infinitiesStored = false
 
     /** The statement [query], read already, with its parameters' values [parameters], as SQL: a query, or a procedure where it writes. */
-    fun compile(query: Query, parameters: Map<String, Any?>): CompiledCypher = finished(compiled(query, parameters))
+    fun compile(query: Query, parameters: Map<String, Any?>): CompiledCypher {
+        returned = null
+        taggedReturned.clear()
+        return finished(compiled(query, parameters)).copy(columns = returned.orEmpty())
+    }
 
     /** The statement [compiled] as the store runs it, after the last pass the store makes over it: none here. */
     protected open fun finished(compiled: CompiledCypher): CompiledCypher = compiled
@@ -344,16 +372,32 @@ abstract class SqlCypherCompiler(
         if (names.distinct().size > 1) {
             throw CompilerException("Each query of a UNION returns the same names, as in Cypher: ${names.joinToString(" and ") { it.joinToString(prefix = "(", postfix = ")") }}.")
         }
-        val writer = Writer(Parameters(parameters, ::parameterJson, ::parameterCount, text = ::parameterText, asPath = parameterPath))
-        // Every query's names, before any is compiled: a name made in one is no variable of a later one's.
-        writer.give(query)
-        // Its rows are compared, as a UNION without ALL compares them: see [Writer.distinctParts].
-        writer.distinctParts = !query.unions.first().all
-        writer.identifiedParts = writer.distinctParts
+        fun written(untagged: Set<Int>): Pair<Writer, List<Writer.Projected>> {
+            val writer = Writer(Parameters(parameters, ::parameterJson, ::parameterCount, text = ::parameterText, asPath = parameterPath))
+            writer.untagged = untagged
+            // Every query's names, before any is compiled: a name made in one is no variable of a later one's.
+            writer.give(query)
+            // Its rows are compared, as a UNION without ALL compares them: see [Writer.distinctParts].
+            writer.distinctParts = !query.unions.first().all
+            writer.identifiedParts = writer.distinctParts
+            return writer to parts.map { clauses -> writer.projected(Query(clauses)) }
+        }
         // Each query's result is of one type, as one may build a list or a map, Postgres's `json`, and another give a `jsonb`
         // (drivine4j#679, as drivine4j#516 for a UNION in CALL { … }). Without ALL, it is as JSON compares it.
         val result = if (query.unions.first().all) orderedJson("q.result") else comparable(Value.Json("q.result", ordered = true))
-        val projected = parts.map { clauses -> writer.projected(Query(clauses)) }
+        val warnedBefore = warned.size
+        val declaredBefore = functions.size
+        val first = written(emptySet())
+        // Compiled typed, a column a query gives a node in and another a value of another kind is a value's, which a host reads
+        // no tag in: so the queries are written again with that column untagged in each, as compiling untyped gives it.
+        val untagged = if (!typed) emptySet() else returned.orEmpty().withIndex().filter { (i, column) -> i in taggedReturned && !column.kind.tagged }.map { it.index }.toSet()
+        val (writer, projected) = if (untagged.isEmpty()) first else {
+            warned.subList(warnedBefore, warned.size).clear()
+            functions.subList(declaredBefore, functions.size).clear()
+            returned = null
+            taggedReturned.clear()
+            written(untagged)
+        }
         // Where a query's rows hold a node or a relationship, each query gives its row's identity beside it, and a query whose rows
         // hold none its value, which is its identity (drivine4j#213): see [Writer.rowIdentity]. Where none does, there is none, nor
         // where one may hold a node without its identity, as `head(collect(n))` does: then each compares by its value.
@@ -1228,6 +1272,9 @@ abstract class SqlCypherCompiler(
          */
         var identifiedParts = false
 
+        /** The places of the statement's columns it gives as compiling untyped gives them though compiled [typed]: see `union`. */
+        var untagged: Set<Int> = emptySet()
+
         /** The queries given to compile, [query] and [procedure], whose names [hidden] keeps clear of, not yet in [queryTexts]. */
         private val queries = mutableListOf<Query>()
 
@@ -1267,7 +1314,7 @@ abstract class SqlCypherCompiler(
             give(query)
             var select = Select(emptyMap())
             for (clause in query.clauses) {
-                if (clause is Clause.Return) return project(select, clause.projection, final = true)
+                if (clause is Clause.Return) return project(select, clause.projection, final = true, statement = true)
                 select = read(select, clause)
             }
             throw CompilerException("A Cypher statement ends with RETURN.")
@@ -1539,7 +1586,7 @@ abstract class SqlCypherCompiler(
                         val projected = (listOf(query.clauses) + query.unions.map { it.clauses }).map { clauses ->
                             var select = Select(scope)
                             clauses.dropLast(1).forEach { select = read(select, it, scope) }
-                            project(select, (clauses.last() as Clause.Return).projection, final = true, ofStatement = false)
+                            project(select, (clauses.last() as Clause.Return).projection, final = true)
                         }
                         // Of one type in each query, compared or not (drivine4j#679).
                         val result = if (distinct) comparable(Value.Json("q.result", ordered = true)) else orderedJson("q.result")
@@ -2118,14 +2165,19 @@ abstract class SqlCypherCompiler(
             return "CASE WHEN $list IS NOT NULL THEN (SELECT ${comparable(Value.Json(aggregateList(scalar(rowId(u)), rowOrd(u)), ordered = true))} FROM ${idRows(list, u)}) END"
         }
 
-        /** The nodes or relationships [entities] lists, as a JSON list of their properties in its order: null where the list is. */
-        private fun entitiesJson(entities: Value.Entities): String = entities.gathered ?: shared(entities.ids) { (ids) ->
+        /**
+         * The nodes or relationships [entities] lists, as a JSON list of their properties in its order, or with [tagged] of each
+         * tagged as [output] gives it: null where the list is.
+         */
+        private fun entitiesJson(entities: Value.Entities, tagged: Boolean = false): String = entities.gathered?.takeUnless { tagged } ?: shared(entities.ids) { (ids) ->
             val u = alias("u")
             val row = alias(if (entities.relationships) "e" else "n")
             val (table, value) = if (entities.relationships) {
-                edges to json(Value.Relationship("$row.eid", "$row.src", "$row.dst", "$row.type", "$row.props")).sql
+                val relationship = Value.Relationship("$row.eid", "$row.src", "$row.dst", "$row.type", "$row.props")
+                edges to if (tagged) taggedRelationship(relationship) else json(relationship).sql
             } else {
-                nodes to json(Value.Node("$row.nid", "$row.labels", "$row.props", "$row.stamp")).sql
+                val node = Value.Node("$row.nid", "$row.labels", "$row.props", "$row.stamp")
+                nodes to if (tagged) taggedNode(node) else json(node).sql
             }
             val id = if (entities.relationships) "eid" else "nid"
             "CASE WHEN $ids IS NOT NULL THEN (SELECT ${aggregateList(value, itemNo(u))} FROM ${elements(ids, u)} ${keyJoin(table, row, id, idOf(item(u), null))}) END"
@@ -2261,7 +2313,7 @@ abstract class SqlCypherCompiler(
             val clauses = creates(query.clauses)
             clauses.forEachIndexed { i, clause ->
                 when {
-                    clause is Clause.Return -> step(ProcedureStep.Return(project(select, clause.projection, final = true).sql))
+                    clause is Clause.Return -> step(ProcedureStep.Return(project(select, clause.projection, final = true, statement = true).sql))
                     clause is Clause.Delete && i == clauses.lastIndex && deleteMatched(select, clause) -> Unit
                     else -> select = next(select, clause)
                 }
@@ -2862,11 +2914,12 @@ abstract class SqlCypherCompiler(
         /**
          * The query a `WITH` or a `RETURN` makes of [select]: its items as columns, grouped where it
          * aggregates, then ordered, skipped and limited. Rows it does not order, group or keep distinct
-         * stay in the order [select] reads them, as a graph engine keeps them. Where [final], its rows are one `result` each, and
-         * where [ofStatement] too, the statement's own, which a host reads, so each is as [returned] gives it: not a subquery's
-         * `UNION` part, which the statement reads on.
+         * stay in the order [select] reads them, as a graph engine keeps them. With [statement], it is the statement's own last
+         * `RETURN`, or one of its `UNION`'s, not a subquery's: it names the statement's columns ([returned]), and where the
+         * statement is compiled [typed], gives its nodes and relationships tagged ([output]), and its `result` as the host's
+         * driver reads it back (`returned(json)`, which Oracle encodes again with `oracleReencodeJson`).
          */
-        fun project(select: Select, written: Projection, final: Boolean, ofStatement: Boolean = final): Projected {
+        fun project(select: Select, written: Projection, final: Boolean, statement: Boolean = false): Projected {
             // As in Neo4j, a star gives the variables in the order of their names, before the items named after it.
             // Not a randomUUID() made first for a CALL or a condition (see `anewCall`), which the statement never named.
             val starred = select.bound.keys.filterNot { it in madeAnew }.sorted()
@@ -2881,13 +2934,13 @@ abstract class SqlCypherCompiler(
             )
             // Before aggregatesFirst, which names each variable it groups by as an item of its own.
             requireExplicitGrouping(items, projection.orderBy, select.scope.keys)
-            anewFirst(select, projection, items)?.let { (made, kept) -> return project(made, kept, final, ofStatement) }
-            casesFirst(select, projection, items)?.let { (cased, kept) -> return project(cased, kept, final, ofStatement) }
+            anewFirst(select, projection, items)?.let { (made, kept) -> return project(made, kept, final, statement) }
+            casesFirst(select, projection, items)?.let { (cased, kept) -> return project(cased, kept, final, statement) }
             // After casesFirst, which refuses what it must of an aggregate's CASE before working it out first.
-            sharedFirst(select, projection, items)?.let { (shared, kept) -> return project(shared, kept, final, ofStatement) }
-            sortsFirst(select, projection, items)?.let { (sorted, kept) -> return project(sorted, kept, final, ofStatement) }
-            aggregatesFirst(select, projection, items)?.let { (grouped, kept) -> return project(grouped, kept, final, ofStatement) }
-            heldFirst(select, projection, items)?.let { (held, keyed) -> return project(held, keyed, final, ofStatement) }
+            sharedFirst(select, projection, items)?.let { (shared, kept) -> return project(shared, kept, final, statement) }
+            sortsFirst(select, projection, items)?.let { (sorted, kept) -> return project(sorted, kept, final, statement) }
+            aggregatesFirst(select, projection, items)?.let { (grouped, kept) -> return project(grouped, kept, final, statement) }
+            heldFirst(select, projection, items)?.let { (held, keyed) -> return project(held, keyed, final, statement) }
             if (final && items.size > 1) {
                 warn(
                     "The statement returns ${items.size} items (${items.joinToString { it.name }}). Prefer returning a single map or value, such as RETURN { key1: val1, key2: val2 }: " +
@@ -3016,14 +3069,15 @@ abstract class SqlCypherCompiler(
             var identity: String? = null
             val outerColumns = if (final) {
                 val read = columns.map { (column, value) -> value.columnsOf(name, column) }
-                val values = read.map(::json)
+                if (statement) returned = columnsReturned(items.map { it.name }, read)
+                val values = if (statement && typed) read.mapIndexed { i, value -> if (i in untagged) json(value) else output(value) } else read.map(::json)
                 // A value that may be JSON's null is given as SQL's where a UNION compares rows by it; in a row of several, a list's item,
                 // SQL's null is JSON's (#500).
                 val result = if (values.size == 1) values.single().let { if (distinctParts && it.jsonNull) comparedNull(it.sql) else it.sql }
                 else jsonArray(values.map { it.sql })
                 // Where a UNION compares rows by it, a row that holds a node or a relationship is compared by its identity too (drivine4j#213).
                 identity = if (distinctParts && identifiedParts) rowIdentity(read) else null
-                "${if (ofStatement) returned(result) else result} AS result${identity?.let { ", $it AS identity" }.orEmpty()}"
+                "${if (statement) returned(result) else result} AS result${identity?.let { ", $it AS identity" }.orEmpty()}"
             } else {
                 (columns.flatMap { (column, value) -> value.columns(column).map { "$name.${it.substringAfterLast(" AS ")}" } } +
                     sorts.flatMap { (column, _) -> sortedBy(column).map { (named, term) -> "$term AS $named" } }).joinToString(", ")
@@ -5829,6 +5883,41 @@ abstract class SqlCypherCompiler(
         }
 
         /**
+         * A value as the statement's last `RETURN` gives it compiled [typed]: a node, a relationship, or a list of them, tagged
+         * with its labels or type beside its properties, as [ColumnKind] has it; any other value as [json] gives it. Only
+         * there: anywhere before it, a node is still read, compared and indexed as [json] gives it.
+         */
+        private fun output(value: Value): Value.Json = when (value) {
+            is Value.Node -> Value.Json(taggedNode(value))
+            is Value.Relationship -> Value.Json(taggedRelationship(value))
+            is Value.Entities -> Value.Json(entitiesJson(value, tagged = true), ordered = true, list = true)
+            else -> json(value)
+        }
+
+        private fun taggedNode(node: Value.Node): String =
+            "CASE WHEN ${node.nid} IS NOT NULL THEN ${jsonObject(listOf(TAG to literalJson("node"), "labels" to node.labels, "properties" to nodeJson(node)))} END"
+
+        private fun taggedRelationship(relationship: Value.Relationship): String =
+            "CASE WHEN ${relationship.eid} IS NOT NULL THEN ${jsonObject(listOf(TAG to literalJson("relationship"), "type" to scalar(relationship.type), "properties" to relationship.props))} END"
+
+        /** The columns [names] of a statement's last `RETURN`, their values [read] as its outer query reads them: see [CompiledCypher.columns]. */
+        private fun columnsReturned(names: List<String>, read: List<Value>): List<ResultColumn> {
+            val columns = names.zip(read).map { (name, value) -> ResultColumn(name, columnKind(value)) }
+            columns.forEachIndexed { i, column -> if (column.kind.tagged) taggedReturned += i }
+            // A UNION's columns are its first query's, of the kind every query's is, or a value.
+            val first = returned ?: return columns
+            return first.zip(columns).map { (named, other) -> if (named.kind == other.kind) named else named.copy(kind = ColumnKind.VALUE) }
+        }
+
+        private fun columnKind(value: Value): ColumnKind = when (value) {
+            is Value.Node -> ColumnKind.NODE
+            is Value.Relationship -> ColumnKind.RELATIONSHIP
+            is Value.Entities -> if (value.relationships) ColumnKind.RELATIONSHIPS else ColumnKind.NODES
+            is Value.Json -> value.temporal?.let(ColumnKind::of) ?: ColumnKind.VALUE
+            is Value.Bool, is Value.Path -> ColumnKind.VALUE
+        }
+
+        /**
          * A value as a condition: a boolean as itself, JSON's `true` and `false` as theirs, anything else as null. One the statement
          * writes as a value of another kind ([Value.Json.known]) is refused, as Neo4j refuses it when it plans the statement.
          */
@@ -6029,6 +6118,9 @@ abstract class SqlCypherCompiler(
 
         /** The parameters, a JSON map. */
         const val PARAMS = "cy_params"
+
+        /** The key a typed node or relationship is tagged by: see [ColumnKind]. */
+        const val TAG = "\$t"
 
         /** The rows, a JSON list of maps, each variable a row holds at its key. */
         const val ROWS = "cy_rows"
