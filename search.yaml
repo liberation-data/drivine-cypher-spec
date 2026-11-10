@@ -264,14 +264,15 @@ cases:
     steps:
       - search: {label: "Doc", properties: ["body"], query: "graph", topK: 1}
         ranked: ["graphs"]
+        note: "On FalkorDB graphs and about score alike (liberation-data/drivine4j#666), so it gives graphs here by the tie's order."
       - search: {label: "Doc", properties: ["body"], query: "graph", topK: 3}
         ranked: ["graphs", "about", "note"]
         except: ["oracle-text"]
         today: [{stores: ["falkordb"], ranked: ["about", "graphs", "note"], issue: "liberation-data/drivine4j#666 (graphs and about score alike there, so the tie goes by node)"}]
       - search: {label: "Doc", properties: ["body"], query: "graph", topK: 3}
-        ranked: ["graphs", "note", "about"]
+        ids: ["about", "graphs", "note"]
         only: ["oracle-text"]
-        note: "Oracle Text scores by its own measure, not BM25 (liberation-data/drivine-cypher-spec#102)."
+        note: "Oracle Text scores by its own measure, not BM25 (liberation-data/drivine-cypher-spec#102), and scores note and about alike, so the step pins the hits and not their order; topK 1 pins its best."
       - search: {label: "Doc", properties: ["body"], query: "kiwi", topK: 1}
         ranked: ["kiwi"]
 
