@@ -134,8 +134,14 @@ class PostgresMatchChainTest {
             val sql = sql(cypher)
             assertFalse(Regex("""SELECT \* FROM ${GRAPH}_node n\d+ WHERE n\d+\.nid = e\d+\.""").containsMatchIn(sql), "$cypher:\n$sql")
         }
-        // A WHERE that pins a node by its elementId(), or with the value on the left, joins plainly too.
-        for (cypher in listOf("MATCH (a:L)-[:R]->(b) WHERE elementId(b) = '1' RETURN a", "MATCH (a:L)-[:R]->(b) WHERE 1 = b.k RETURN a")) {
+        // A WHERE that pins a node by its elementId(), with the value on the left, or equal to or in a node of the row, as
+        // its key, joins plainly too.
+        for (cypher in listOf(
+            "MATCH (a:L)-[:R]->(b) WHERE elementId(b) = '1' RETURN a",
+            "MATCH (a:L)-[:R]->(b) WHERE 1 = b.k RETURN a",
+            "MATCH (p:P) MATCH (a:L)-[:R]->(b) WHERE b = p RETURN a",
+            "MATCH (p:P) WITH collect(p) AS ps MATCH (a:L)-[:R]->(b) WHERE b IN ps RETURN a",
+        )) {
             val sql = sql(cypher)
             assertFalse(Regex("""SELECT \* FROM ${GRAPH}_node n\d+ WHERE n\d+\.nid = e\d+\.""").containsMatchIn(sql), "$cypher:\n$sql")
         }

@@ -1944,14 +1944,16 @@ abstract class SqlCypherCompiler(
 
         /**
          * The variables [where], a `MATCH`'s, pins as a node's properties do: each one a term it is the `AND` of sets a property
-         * of, or the key of (`id()`, `elementId()`), equal to, or the key in, a value that reads only variables [reads] takes,
-         * those bound before the `MATCH`. A match that pins a node or relationship of its patterns so is joined plainly, not read
-         * as a chain ([match]): an index finds it, and Postgres plans the join from it well.
+         * of, or the key of (`id()`, `elementId()`, or the variable itself), equal to, or the key in, a value that reads only
+         * variables [reads] takes, those bound before the `MATCH`. A match that pins a node or relationship of its patterns so is
+         * joined plainly, not read as a chain ([match]): an index finds it, and Postgres plans the join from it well.
          */
         private fun pinnedBy(where: Expression, reads: (String) -> Boolean): Set<String> {
             if (where !is Expression.Binary) return emptySet()
             if (where.operator == Operator.AND) return pinnedBy(where.left, reads) + pinnedBy(where.right, reads)
             fun subject(side: Expression): String? = when {
+                // The variable itself, as `b = p` or `b IN ps` sets its key equal to, or in, the key of a node of the row.
+                side is Expression.Variable -> side.name
                 side is Expression.Property -> (side.subject as? Expression.Variable)?.name
                 side is Expression.Function && !side.distinct && side.name.lowercase() in setOf("id", "elementid") ->
                     (side.arguments.singleOrNull() as? Expression.Variable)?.name
