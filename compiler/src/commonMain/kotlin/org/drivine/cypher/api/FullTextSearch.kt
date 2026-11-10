@@ -53,13 +53,17 @@ data class SearchIndex(val trigram: Boolean = false, val oracleText: String? = n
  * A full-text search, as a library asks it.
  *
  * @param labels the root's labels; the index is on the first.
- * @param properties the properties the index covers, by the names they are stored under.
+ * @param properties every property the index covers, by the names they are stored under and in the order its declaration
+ *   gives them, as the catalog's record, Postgres's trigram index, Oracle's side table and the derived index name hold them:
+ *   not only one a caller named to choose the index. Choosing it, and refusing a property no index covers or a root with
+ *   several and none named, is the library's (drivine4j's `FullTextIndexResolver`).
  * @param query the user's query, in the plain core of the Lucene syntax (see `org.drivine.cypher.search.TextQuery`).
  * @param index what the library found of the index.
  * @param topK on a graph engine, how many rows the search wants: the index is asked for that many hits, or with [filtered]
  *   ten times as many ([indexLimit]).
  * @param filtered on a graph engine, whether the hits are pruned after the index: by a caller's filter or by a required
- *   relationship. A root label beyond the first prunes them too, and is counted without it.
+ *   relationship. A root label beyond the first prunes them too, and is counted without it. A threshold does not: it keeps
+ *   a prefix of the ranking.
  * @param alias on a graph engine, what the head names a hit's node: drivine4j's fragment search's `n`, or a view's root.
  * @param scoreAlias on a graph engine, what the head names a hit's score.
  */
@@ -87,11 +91,12 @@ sealed interface SearchResult
  *
  * @param sql on a SQL store, one `SELECT` of the ranked candidates, `nid` and `score`: the nodes whose text meets the query,
  *   each scored against the best of them, so the best scores 1, and only those that score above 0. The library joins them
- *   back to its node table by `nid` for its projection, and adds its threshold, its predicates, `ORDER BY score DESC, nid`
- *   and its `LIMIT`.
+ *   back to its node table by `nid` for its projection, and adds its threshold (`score >= threshold`), its predicates,
+ *   `ORDER BY score DESC, nid` and its `LIMIT`.
  * @param cypher on a graph engine, the search's head: the index's `CALL`, the hits that have every root label, the best
  *   [SearchRequest.topK] of them (or the over-fetch), and each node and its score against the best as
- *   [SearchRequest.alias] and [SearchRequest.scoreAlias], to which the library adds its filters, projection and `LIMIT`.
+ *   [SearchRequest.alias] and [SearchRequest.scoreAlias], best first, to which the library adds its threshold
+ *   (`score >= threshold`), filters, projection and `LIMIT`.
  * @param parameters the values the statement binds, each named `_cy_ft<n>`.
  * @param warnings what the module warns of, for the library to log.
  */
@@ -147,7 +152,8 @@ object FullTextSearch {
 
     /**
      * The statement that finds what [graph]'s catalog records of the full-text index on [label]'s [properties], on Postgres
-     * and Oracle; null on a store that keeps no such record. drivine4j's backends' `made`.
+     * and Oracle; null on a store that keeps no such record. drivine4j's backends' `made`. [label] is the one the index is on,
+     * the first of the search's labels, and [properties] are the search's, in the same order: the record is found by them.
      */
     fun lookup(store: SearchStore, graph: GraphOptions, label: String, properties: List<String>): CatalogLookup? {
         if (store != SearchStore.POSTGRES && store != SearchStore.ORACLE) return null

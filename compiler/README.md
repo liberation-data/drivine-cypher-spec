@@ -121,6 +121,11 @@ FullTextSearch.plan(store, graph, SearchRequest(labels, properties, query, index
 1. `lookup` gives the statement that finds what the graph's catalog records of the full-text index on the label's
    properties: on Postgres a row where its trigram index is made, on Oracle the side table of its Oracle Text index (the
    row's `object_name`), and no row where none is made. It is null on the other stores.
+   `label` is the one the index is on, and `properties` every property the index covers, in the order its declaration
+   gives them, as the record holds them: not only one a caller named to choose the index. Choosing the index, and refusing a
+   property no index covers, is the library's, as drivine4j's `FullTextIndexResolver` chooses it. The search's `labels` are
+   the root's, that label first, and its `properties` the same list, in the same order: Postgres's trigram index, Oracle's
+   side table and the derived index name are all over that order.
 2. The library gives what it found as the request's `SearchIndex`: `trigram` on Postgres, `oracleText` (the side table, or
    null) on Oracle, and on Neo4j and Memgraph the index's `name` where it isn't `<label>_<properties joined by _>_fulltext` (a blank one is none).
 3. `plan` gives a `SearchPlan`, or a `Refusal` of a query with no word to score (`A full-text query needs a word to look
@@ -128,7 +133,7 @@ FullTextSearch.plan(store, graph, SearchRequest(labels, properties, query, index
    - On a SQL store, `sql` is one `SELECT` of the ranked candidates, `nid` and `score`: the nodes whose text meets the query,
      each scored by BM25 as Lucene scores it (or on Oracle with an Oracle Text index, by Oracle Text), against the best of
      them, so the best scores 1, and only those above 0. The library joins them back to its node table by `nid` for its
-     projection, and adds its threshold, its predicates, the view's required relationships, `ORDER BY score DESC, nid` and
+     projection, and adds its threshold (`score >= threshold`), its predicates, the view's required relationships, `ORDER BY score DESC, nid` and
      its `LIMIT`. On SQLite it calls the functions the library registers, `drivine_lower`, `drivine_regexp_count` and
      `drivine_math`, and its expressions hold what the compiler's own don't (see the spec's README, *Regular
      expressions*): POSIX's `[[:alnum:]]`, read as Java's `\p{Alnum}` with Unicode's classes, `$` and a lookahead `(?=…)`,
@@ -136,9 +141,9 @@ FullTextSearch.plan(store, graph, SearchRequest(labels, properties, query, index
      alone.
    - On a graph engine, `cypher` is the search's head: the index's `CALL` given the query as it is, the hits that have every
      root label, the best of them, and each node and its score against the best, as `alias` and `scoreAlias` (`n` and
-     `_score` where left out). The index is asked for `topK` hits, or with `filtered` (a caller's filter or a required
-     relationship prunes them after the index) or a root label beyond the first ten times as many (`indexLimit`),
-     and Memgraph's no more than 1,000,000.
+     `_score` where left out), best first. The index is asked for `topK` hits, or with `filtered` (a caller's filter or a
+     required relationship prunes them after the index; a threshold, which keeps a prefix of the ranking, does not) or a
+     root label beyond the first ten times as many (`indexLimit`), and Memgraph's no more than 1,000,000.
    - `parameters` are named with the compiler's reserved prefix, `_cy_ft1`, `_cy_ft2`, …, which no library binds, so they
      never clash with the library's own; each is written `$_cy_ft<n>` in the statement, as the compiler writes its own.
 
