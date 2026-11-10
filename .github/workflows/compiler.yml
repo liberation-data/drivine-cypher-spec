@@ -80,7 +80,7 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with: { python-version: '3.12' }
       - uses: gradle/actions/setup-gradle@748248ddd2a24f49513d8f472f81c3a07d4d50e1 # v4.4.4
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: ~/.konan
           key: konan-${{ runner.os }}-${{ hashFiles('compiler/build.gradle.kts') }}
@@ -103,7 +103,7 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with: { python-version: '3.12' }
       - uses: gradle/actions/setup-gradle@748248ddd2a24f49513d8f472f81c3a07d4d50e1 # v4.4.4
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: ~/.konan
           key: konan-${{ runner.os }}-${{ hashFiles('compiler/build.gradle.kts') }}
@@ -131,7 +131,7 @@ jobs:
         env:
           PINS: ${{ hashFiles('compiler/gradle/verification-metadata.xml', 'compiler/gradle/kotlin-native-dependencies.txt', 'compiler/gradle/pinned-jdk.properties', 'compiler/gradle/wrapper/gradle-wrapper.properties', '.github/scripts/compiler-release-dependencies.sh') }}
         run: echo "key=compiler-release-dependencies-v1-$RUNNER_OS-$RUNNER_ARCH-$PINS" | tee -a "$GITHUB_OUTPUT"
-      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      - uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         id: kept
         with:
           path: ~/release-dependencies
@@ -156,7 +156,7 @@ jobs:
         if: steps.kept.outputs.cache-hit != 'true'
         run: ../.github/scripts/compiler-release-dependencies.sh stage "$HOME/release-dependencies"
       - if: steps.kept.outputs.cache-hit != 'true'
-        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: ~/release-dependencies
           key: ${{ steps.key.outputs.key }}
