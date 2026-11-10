@@ -127,6 +127,8 @@ class PostgresMatchChainTest {
             "MATCH (p:P) RETURN COUNT { MATCH (a:L)-[:R]->(b) MATCH (b) WHERE b.k = 1 RETURN a }",
             // By a clause of a CALL's query: one after the match, or one after it within the same CALL.
             "MATCH (a:L)-[:R]->(b) CALL { WITH b MATCH (b) WHERE b.k = 1 RETURN b.k AS k } RETURN a, k",
+            // Or by a later part of its UNION.
+            "MATCH (a:L)-[:R]->(b) CALL { WITH b RETURN b.k AS k UNION WITH b MATCH (b) WHERE b.k = 1 RETURN b.k AS k } RETURN a, k",
             "MATCH (p:P) CALL { WITH p MATCH (a:L)-[:R]->(b) MATCH (b {k: 1}) RETURN a } RETURN a",
         )) {
             val sql = sql(cypher)
