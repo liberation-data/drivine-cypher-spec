@@ -17,7 +17,7 @@ the spec's files at the top of the repository and nothing here.
 |---|---|---|
 | `jvm` | a jar | drivine4j, and Android |
 | `wasmJs` | `@liberation-data/drivine-cypher-compiler`, an npm package (`./gradlew npmPackage`, in `build/npm`) | Drivine for TypeScript |
-| `macosArm64`, `linuxX64`, `linuxArm64`, `mingwX64` | `libdrivinecypher`, a shared library with a C ABI | drivine-python, over ctypes |
+| `macosArm64`, `linuxX64`, `linuxArm64`, `mingwX64` | `libdrivinecypher`, a shared library with a C ABI, packed for PyPI as `drivine-cypher-compiler` wheels (`./gradlew pythonWheels`, in `build/wheels`) | drivine-python, over ctypes |
 
 macosArm64 builds on macOS only. The others build anywhere Kotlin/Native runs.
 
@@ -153,6 +153,33 @@ The package holds the wasm, its loaders, the CommonJS entry, the types of each, 
 the repository's LICENSE. The package's name is set once, as `compiler.npmName` in `gradle.properties`. The corpus check on wasmJs fails when the
 package it loads has another (`check/corpus-node-test.sh` tests that).
 
+### Python
+
+```python
+import json, drivine_cypher_compiler
+answer = json.loads(drivine_cypher_compiler.compile(json.dumps({"store": "sqlite", "graph": {"name": "g"}, "cypher": "RETURN 1"})))
+```
+
+The package `drivine-cypher-compiler` is the shared library with a small ctypes binding (`python/drivine_cypher_compiler`),
+one wheel a platform, `py3-none-<platform>`, as the library is the same for every Python 3:
+
+| Target | Wheel's platform tag | Why that one |
+|---|---|---|
+| `macosArm64` | `macosx_11_0_arm64` | Kotlin/Native builds for macOS 11 and later. |
+| `linuxX64` | `manylinux_2_17_x86_64`, `manylinux2014_x86_64` | It calls nothing newer than `GLIBC_2.14`; auditwheel checks it. |
+| `linuxArm64` | `manylinux_2_17_aarch64`, `manylinux2014_aarch64` | It calls nothing newer than `GLIBC_2.17`; auditwheel checks it. |
+| `mingwX64` | `win_amd64` | |
+
+There's none for Intel Macs (Kotlin/Native deprecates `macosX64`) or musl Linux (Kotlin/Native has no musl target): pip
+finds no wheel there, and drivine-python names the platform where it would load the compiler. The library exports the C
+API alone (a version script on Linux and a symbol list on macOS, in `native/`, which CI checks the library's exports
+against, and Kotlin/Native's `.def` on Windows, which adds only its `drivinecypher_symbols`), so the Kotlin/Native
+runtime's symbols can't clash with another library in the host's process; on Linux it is linked `--as-needed`, which
+leaves out `libcrypt.so.1` and the other system libraries it doesn't call. The binding loads the library on the first
+compile, once, and frees each answer with `drivine_free`. `python/build_wheels.py` packs the wheels with the standard
+library alone, the same bytes from the same libraries; `python/check_wheel.py` checks each, and
+`python/check_wheel_test.py`, which CI runs, tests both over made-up libraries.
+
 ### C
 
 ```c
@@ -178,6 +205,7 @@ and the JVM's answers on the exact JDK it pins (see [The pinned JDK](#the-pinned
 ./gradlew nativeCorpusCheck        # the corpus on the host's native target (python3, or -Ppython=<path>)
 ./gradlew metadataCompile          # common code compiled alone
 ./gradlew npmPackage               # the npm package, in build/npm
+./gradlew pythonWheels             # the Python wheels, one a native target, in build/wheels (python3, or -Ppython=<path>)
 ```
 
 Run `./gradlew clean` before a build you check: the wasm optimize step can leave stale output behind.
@@ -348,7 +376,7 @@ After the merge, it lists what to look at by hand (`scripts/sync-report.py`):
 A spec tag is a compiler release: pushing the tag `vX.Y.Z` on `main` publishes the compiler to Maven Central as
 `org.drivine:drivine-cypher-compiler` `X.Y.Z`, with one artifact for each target (`-jvm`, `-wasm-js`, `-macosarm64`,
 `-linuxx64`, `-linuxarm64`, `-mingwx64`), and its wasmJs build to npm as `@liberation-data/drivine-cypher-compiler`
-`X.Y.Z` (the name is `compiler.npmName` in `gradle.properties`). The compiler and the spec it was checked against then share one number, so a
+`X.Y.Z` (the name is `compiler.npmName` in `gradle.properties`), and its native libraries to PyPI as `drivine-cypher-compiler` `X.Y.Z`. The compiler and the spec it was checked against then share one number, so a
 library pins one tag for both. A tag that changes only the spec publishes the compiler again, unchanged, under the new
 number.
 
@@ -396,8 +424,9 @@ desk's and Drivine for TypeScript's releases do: trusted publishing needs 11.5.1
 registry tarball only once the tarball has the integrity pinned beside the version (`NPM_CLI_VERSION` and
 `NPM_CLI_INTEGRITY` in `compiler-release.yml`; npm bundles its dependencies, so the tarball is the whole of it). To bump
 npm, set both, the integrity from `npm view npm@<version> dist.integrity`; to bump Node, set `node-version` in both npm
-jobs. A version with a suffix is published under the npm tag `next`, and
-any other under `latest`. The two publishes don't wait on each other, so a failure of one neither undoes nor holds up
+jobs. A version with a suffix (`-alpha.N`, `-beta.N` or `-rc.N`, the ones PyPI's versions can say too: the release refuses
+any other tag) is published under the npm tag `next`, and
+any other under `latest`. The publishes don't wait on each other, so a failure of one neither undoes nor holds up
 the other. A re-run publishes nothing where npm has the version as this tarball (by its integrity), and fails where npm
 has another tarball under the version, as npm never takes a version twice. Once Maven Central has the version, a
 failed `publish-npm` is finished with its own "Re-run this job", which keeps step 2's tarball and its outputs, and never
@@ -407,6 +436,27 @@ re-runs step 2: a re-run of step 2 builds again, and its build stops at "Maven C
 too, installs it into an empty project with only the dependencies its `package.json` names, and compiles the corpus
 through it, byte for byte the JVM's (`.github/scripts/compiler-npm-clean-install.sh`). A dry run gives the tarball to
 `npm publish --dry-run`, which sends nothing.
+
+**PyPI.** Step 2 also links the four shared libraries and packs them as wheels (`./gradlew pythonWheels`, at the tag's
+version, as PEP 440 writes it: `X.Y.Z-rc.N` as `X.Y.ZrcN`), and checks each (`python/check_wheel.py`): the package's
+name and version, one platform's library, the binding and the `.dist-info`, and nothing else, with every file's hash its
+`RECORD`'s. It keeps the wheels, in `python-release/` (not `release/`, which the bundle's check empties), as the run's
+artifact, with their SHA-256s, a list as a job output, and the JVM's answers to the corpus and its mutants, with a SHA-256
+each file. `wheels-smoke` then takes each wheel to its own platform (Linux x86_64 and
+aarch64, macOS and Windows), checks it is step 2's, installs it alone into a fresh venv, and compiles the corpus and the
+mutants through the installed package, every answer byte for byte the JVM's (`check/corpus-native.py --installed`). On
+Linux it checks the wheel holds to its manylinux tag with auditwheel, installed by hash
+(`python/check-requirements.txt`); on macOS, that every library it loads (its `LC_LOAD_DYLIB`s) is the system's, under `/usr/lib/` or
+`/System/Library/`. The publish is a job of its own,
+`publish-pypi`, which needs every `wheels-smoke` and waits in the `release` environment for its reviewer, and needs only
+the wheels: it downloads them into the workspace's `dist/` (the publish action runs in a Docker container, which sees
+the workspace and not the runner's temp directory), checks they are exactly step 2's, by SHA-256, then publishes them with `pypa/gh-action-pypi-publish` by
+PyPI's trusted publishing, with no PyPI token stored anywhere: PyPI's settings for `drivine-cypher-compiler` name this
+repository, `compiler-release.yml` and the `release` environment as its publisher (the project was claimed with a
+placeholder 0.0.0, by hand, before the first tag), and the job's OIDC token proves it. The same token signs a PEP 740 attestation of each wheel. A re-run leaves
+out a wheel PyPI has already as this file (by its SHA-256), and fails where PyPI has another under its name, as PyPI
+never replaces a file. Like `publish-npm`, a failed `publish-pypi` is finished with its own "Re-run this job", which
+keeps step 2's wheels and outputs. A dry run checks the wheels as `publish-pypi` does and uploads nothing.
 
 The jobs that build install the pinned JDK and Gradle with `.github/actions/pinned-toolchain`: from Adoptium's archive
 of `gradle/pinned-jdk.properties`'s `version` and the zip `gradle/wrapper/gradle-wrapper.properties` names, each checked
@@ -434,7 +484,8 @@ into step 2 could change what it builds whatever it then checked. So:
   them is kept (Gradle's index of them, transformed jars, compiled build scripts, unpacked distributions, the Kotlin
   daemon), as nothing would check it. Its key hashes what pins them (`gradle/verification-metadata.xml`,
   `gradle/kotlin-native-dependencies.txt`, `gradle/pinned-jdk.properties`, `gradle/wrapper/gradle-wrapper.properties`)
-  and `compiler-release-dependencies.sh`, whose layout the entry is, so a change of either makes a new entry, kept by
+  and `compiler-release-dependencies.sh`, whose layout the entry is, after a version (`v2`), bumped in both workflows
+  where step 2 comes to build more than the entry was made for, so a change of either makes a new entry, kept by
   the first run that finds none: the change's pull request, for its own runs, and its merge, for the tags after. A run
   that finds the entry kept does nothing more. `stage` keeps only the files `unpack` keeps, by the same check (below),
   so an entry it made unpacks with no warning, and a warning at `unpack` means the entry isn't one `stage` made. It
