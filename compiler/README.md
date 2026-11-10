@@ -421,7 +421,7 @@ registry tarball only once the tarball has the integrity pinned beside the versi
 npm, set both, the integrity from `npm view npm@<version> dist.integrity`; to bump Node, set `node-version` in both npm
 jobs. A version with a suffix (`-alpha.N`, `-beta.N` or `-rc.N`, the ones PyPI's versions can say too: the release refuses
 any other tag) is published under the npm tag `next`, and
-any other under `latest`. The two publishes don't wait on each other, so a failure of one neither undoes nor holds up
+any other under `latest`. The publishes don't wait on each other, so a failure of one neither undoes nor holds up
 the other. A re-run publishes nothing where npm has the version as this tarball (by its integrity), and fails where npm
 has another tarball under the version, as npm never takes a version twice. Once Maven Central has the version, a
 failed `publish-npm` is finished with its own "Re-run this job", which keeps step 2's tarball and its outputs, and never
@@ -435,19 +435,23 @@ through it, byte for byte the JVM's (`.github/scripts/compiler-npm-clean-install
 **PyPI.** Step 2 also links the four shared libraries and packs them as wheels (`./gradlew pythonWheels`, at the tag's
 version, as PEP 440 writes it: `X.Y.Z-rc.N` as `X.Y.ZrcN`), and checks each (`python/check_wheel.py`): the package's
 name and version, one platform's library, the binding and the `.dist-info`, and nothing else, with every file's hash its
-`RECORD`'s. It keeps the wheels and their SHA-256s, a list as a job output, beside the bundle, and the JVM's answers to
-the corpus and its mutants with their SHA-256. `wheels-smoke` then takes each wheel to its own platform (Linux x86_64 and
+`RECORD`'s. It keeps the wheels, in `python-release/` (not `release/`, which the bundle's check empties), as the run's
+artifact, with their SHA-256s, a list as a job output, and the JVM's answers to the corpus and its mutants, with a SHA-256
+each file. `wheels-smoke` then takes each wheel to its own platform (Linux x86_64 and
 aarch64, macOS and Windows), checks it is step 2's, installs it alone into a fresh venv, and compiles the corpus and the
 mutants through the installed package, every answer byte for byte the JVM's (`check/corpus-native.py --installed`). On
 Linux it checks the wheel holds to its manylinux tag with auditwheel, installed by hash
-(`python/check-requirements.txt`); on macOS, that the library links only the system's. The publish is a job of its own,
+(`python/check-requirements.txt`); on macOS, that every library it loads (its `LC_LOAD_DYLIB`s) is the system's, under `/usr/lib/` or
+`/System/Library/`. The publish is a job of its own,
 `publish-pypi`, which needs every `wheels-smoke` and waits in the `release` environment for its reviewer, and needs only
-the wheels: it checks they are exactly step 2's, by SHA-256, then publishes them with `pypa/gh-action-pypi-publish` by
+the wheels: it downloads them into the workspace's `dist/` (the publish action runs in a Docker container, which sees
+the workspace and not the runner's temp directory), checks they are exactly step 2's, by SHA-256, then publishes them with `pypa/gh-action-pypi-publish` by
 PyPI's trusted publishing, with no PyPI token stored anywhere: PyPI's settings for `drivine-cypher-compiler` name this
 repository, `compiler-release.yml` and the `release` environment as its publisher (the project was claimed with a
 placeholder 0.0.0, by hand, before the first tag), and the job's OIDC token proves it. The same token signs a PEP 740 attestation of each wheel. A re-run leaves
 out a wheel PyPI has already as this file (by its SHA-256), and fails where PyPI has another under its name, as PyPI
-never replaces a file. A dry run checks the wheels as `publish-pypi` does and uploads nothing.
+never replaces a file. Like `publish-npm`, a failed `publish-pypi` is finished with its own "Re-run this job", which
+keeps step 2's wheels and outputs. A dry run checks the wheels as `publish-pypi` does and uploads nothing.
 
 The jobs that build install the pinned JDK and Gradle with `.github/actions/pinned-toolchain`: from Adoptium's archive
 of `gradle/pinned-jdk.properties`'s `version` and the zip `gradle/wrapper/gradle-wrapper.properties` names, each checked
