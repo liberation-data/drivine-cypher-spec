@@ -46,7 +46,8 @@ class OracleDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
             nid    NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
             labels JSON NOT NULL,
             props  JSON NOT NULL,
-            stamp  VARCHAR2(33)
+            stamp  VARCHAR2(33),
+            words  JSON
         )
         """,
         """

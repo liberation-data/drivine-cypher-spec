@@ -48,9 +48,13 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
             nid    bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
             labels jsonb NOT NULL,
             props  jsonb NOT NULL,
-            stamp  varchar(33)
+            stamp  varchar(33),
+            words  jsonb
         )
         """,
+        // The derived fields of a node beside its properties (see the README's Values in the store), on a store an earlier
+        // version made: nothing writes or reads them yet.
+        "ALTER TABLE $nodes ADD COLUMN IF NOT EXISTS words jsonb",
         """
         CREATE TABLE IF NOT EXISTS $edges (
             eid   bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,

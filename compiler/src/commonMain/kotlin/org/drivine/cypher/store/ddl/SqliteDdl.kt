@@ -43,7 +43,8 @@ class SqliteDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
             nid    INTEGER PRIMARY KEY AUTOINCREMENT,
             labels TEXT NOT NULL,
             props  TEXT NOT NULL,
-            stamp  TEXT
+            stamp  TEXT,
+            words  TEXT
         )
         """,
         """
