@@ -15,8 +15,9 @@ import org.drivine.schema.SchemaPolicy
  * @param catalogs the startup catalogs that apply to [database], each as one catalog of the library declares it, in the
  *   order the library was given them
  * @param runtime the items ensured at runtime that apply to [database], a catalog for each owner and target, as drivine4j's
- *   `SchemaManager` keeps them: for an [Operation.Ensure], with the items being ensured already among them, and for an
- *   [Operation.Remove], with the items being removed already taken out
+ *   `SchemaManager` keeps them: [SchemaPlanner.runtimeOn] of the library's [RuntimeCatalog]s. For an [Operation.Ensure],
+ *   they are those [SchemaPlanner.runtimeAfter] gives, with the items being ensured among them, and for an
+ *   [Operation.Remove], those it gives, with the items being removed taken out
  * @param policy how drift, violations and the rest are treated
  * @param buildTimeoutMillis how long an index built in the background (Neo4j, FalkorDB) is waited for, each time it is
  *   applied, before it is taken as still being built: drivine4j's `indexBuildTimeout`, 60 seconds unless given. An
@@ -52,6 +53,27 @@ data class DeclaredCatalog(
     val version: String? = null,
     val items: List<SchemaItemSpec>,
 )
+
+/**
+ * Items ensured at runtime, as drivine4j's `SchemaManager` holds them for the life of a manager: one [owner]'s, on one
+ * target, the [databases] its ensure named (null for every database, drivine4j's `DatabaseTarget.All`), each item once by
+ * its identity (kind, label and the set of its properties), in the order first ensured. The library holds them, starting
+ * with none; [SchemaPlanner.runtimeAfter] says how an ensure or a remove changes them, and [SchemaPlanner.runtimeOn]
+ * gives the [PlanRequest.runtime] of a database from them.
+ */
+@DrivineInternalApi
+data class RuntimeCatalog(
+    val owner: String?,
+    val databases: Set<String>? = null,
+    val items: List<SchemaItemSpec>,
+) {
+    init {
+        require(databases == null || databases.isNotEmpty()) { "A runtime catalog's databases are null, for all, or at least one" }
+    }
+
+    /** Whether these items apply to [database]. */
+    fun includes(database: String): Boolean = databases == null || database in databases
+}
 
 /** Which owners an [Operation.Enforce] or an [Operation.RecreateAll] applies: all, or one, by name (null for the unnamed one). */
 @DrivineInternalApi
@@ -91,10 +113,10 @@ sealed interface Operation {
 
     /**
      * `SchemaManager.ensure(catalog)`: the [items] given to [owner] at runtime, applied as its others are, its version as
-     * the marker records it. The library has added them to the [PlanRequest.runtime] items, merged first as drivine4j's
-     * catalog merges them (`SchemaDeclarations.deduplicate`, which keeps the declaration that pins engine options or names
-     * a constraint's node id property, not the last), and checked every database with [SchemaPlanner.validate] first,
-     * which refuses two of the [items] that conflict. An ensure of no items plans nothing, as drivine4j's returns at once (its
+     * the marker records it. The library takes its runtime items [SchemaPlanner.runtimeAfter] the ensure, plans none of
+     * the databases until it has checked every one with [SchemaPlanner.validate] over them (which refuses two of the
+     * [items] that conflict, or one that conflicts with what an owner declares), keeps them only then, a refusal leaving
+     * its runtime items as they were, and then plans each database with them. An ensure of no items plans nothing, as drivine4j's returns at once (its
      * `Nothing to ensure for owner '…': no items given`, logged once for the call, not for each database, is the
      * library's, as is its refusal of a catalog that carries a version).
      */
@@ -102,8 +124,10 @@ sealed interface Operation {
 
     /**
      * `SchemaManager.remove(catalog)`: the [items] taken from what [owner] declares, dropped where no one else declares
-     * them, merged first as drivine4j's catalog merges them (the indexes before the constraints, each once). A remove of
-     * no items plans nothing, as drivine4j's returns at once.
+     * them, merged first as drivine4j's catalog merges them (the indexes before the constraints, each once). The library
+     * checks it with [SchemaPlanner.validate], and then, before it plans any database, takes its runtime items
+     * [SchemaPlanner.runtimeAfter] the remove, and plans each database with them. A remove of no items plans nothing, as
+     * drivine4j's returns at once.
      */
     data class Remove(val owner: String?, val items: List<SchemaItemSpec>) : Operation
 

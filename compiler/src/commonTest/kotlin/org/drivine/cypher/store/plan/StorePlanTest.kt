@@ -80,16 +80,29 @@ class StorePlanTest {
             val catalogs = case["catalogs"]!!.map(::catalog)
             val policy = policy(case["policy"])
             val timeout = case["buildTimeoutMillis"]?.longValue() ?: PlanRequest.DEFAULT_BUILD_TIMEOUT_MILLIS
+            // The runtime items the manager holds, as the module changes them.
+            var held = emptyList<RuntimeCatalog>()
             for ((index, step) in case["steps"]!!.withIndex()) {
+                val database = plans["database"]!!.textValue()!!
+                val operation = operation(step["operation"]!!)
+                val candidate = SchemaPlanner.runtimeAfter(operation, held)
                 val request = PlanRequest(
-                    database = plans["database"]!!.textValue()!!,
-                    operation = operation(step["operation"]!!),
+                    database = database,
+                    operation = operation,
                     catalogs = catalogs,
-                    runtime = step["runtime"]?.map(::catalog).orEmpty(),
+                    runtime = SchemaPlanner.runtimeOn(database, candidate),
                     policy = policy,
                     buildTimeoutMillis = timeout,
                 )
                 val refused = step["refused"]?.textValue()
+                if (refused == null) {
+                    assertEquals(step["runtime"]?.map(::catalog).orEmpty(), request.runtime, "$name, step $index: the runtime items planned with")
+                    held = candidate
+                }
+                step["runtimeAfter"]?.let { after ->
+                    assertEquals(after.map { RuntimeCatalog(it["owner"]?.textValue(), items = it["items"]!!.map(::spec)) }, held, "$name, step $index: the runtime items after it")
+                }
+                if (operation is Operation.Ensure || operation is Operation.Remove) assertTrue(step.has("runtimeAfter"), "$name, step $index: pins the runtime items after it")
                 if (refused != null) {
                     for (id in stores) assertEquals(refused, planner(id).validate(request), "$name, step $index on $id: refused")
                     continue

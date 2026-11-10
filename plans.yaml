@@ -690,6 +690,7 @@ cases:
                 - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 0 already matching, 1 recreated, 0 needing attention"]
       - operation: {ensure: {owner: null, items: ["Vector index by cosine"]}}
         runtime: [{owner: null, items: ["Vector index by cosine"]}]
+        runtimeAfter: [{owner: null, items: ["Vector index by cosine"]}]
         runs:
           - stores: ["postgres", "sqlite"]
             rounds:
@@ -1162,6 +1163,7 @@ cases:
     steps:
       - operation: {ensure: {owner: null, items: ["Vector index by cosine"]}}
         runtime: [{owner: null, items: ["Vector index by cosine"]}]
+        runtimeAfter: [{owner: null, items: ["Vector index by cosine"]}]
         runs:
           - stores: ["postgres", "sqlite"]
             rounds:
@@ -1295,6 +1297,7 @@ cases:
     steps:
       - operation: {ensure: {owner: null, items: ["Vector index by cosine"]}}
         runtime: [{owner: null, items: ["Vector index by cosine"]}]
+        runtimeAfter: [{owner: null, items: ["Vector index by cosine"]}]
         runs:
           - stores: ["postgres", "oracle", "sqlite"]
             rounds:
@@ -1343,6 +1346,7 @@ cases:
                 - ["ERROR", "SchemaManager", "Schema application for owner 'schema' on 'default' failed: An unknown error occurred"]
       - operation: {ensure: {owner: null, items: ["Full-text index"]}}
         runtime: [{owner: null, items: ["Vector index by cosine", "Full-text index"]}]
+        runtimeAfter: [{owner: null, items: ["Vector index by cosine", "Full-text index"]}]
         runs:
           - stores: ["postgres", "sqlite"]
             rounds:
@@ -1426,6 +1430,7 @@ cases:
     catalogs: []
     steps:
       - operation: {ensure: {owner: null, items: ["Vector index by cosine", {kind: "VECTOR_INDEX", label: "Chunk", properties: ["embedding"], options: {dimensions: 768, similarity: "COSINE"}}]}}
+        runtimeAfter: []
         refused: "Conflicting schema declarations for VECTOR_INDEX on Chunk[embedding] (they disagree on portable parameters): VectorIndexSpec(label=Chunk, property=embedding, dimensions=384, similarity=COSINE, name=null, hnswM=null, hnswEfConstruction=null, engineOptions=[]); VectorIndexSpec(label=Chunk, property=embedding, dimensions=768, similarity=COSINE, name=null, hnswM=null, hnswEfConstruction=null, engineOptions=[])"
   - case: "8"
     name: "A renamed runtime item, which is an orphan"
@@ -1435,6 +1440,7 @@ cases:
     steps:
       - operation: {ensure: {owner: null, items: ["Named range index"]}}
         runtime: [{owner: null, items: ["Named range index"]}]
+        runtimeAfter: [{owner: null, items: ["Named range index"]}]
         runs:
           - stores: ["postgres", "sqlite"]
             rounds:
@@ -3549,6 +3555,7 @@ cases:
     steps:
       - operation: {ensure: {owner: null, items: ["Vector index by cosine"]}}
         runtime: [{owner: null, items: ["Vector index by cosine"]}]
+        runtimeAfter: [{owner: null, items: ["Vector index by cosine"]}]
         runs:
           - stores: ["postgres", "sqlite"]
             rounds:
@@ -3637,6 +3644,7 @@ cases:
     steps:
       - operation: {ensure: {owner: null, items: ["Range index over two properties", "Vector index by cosine"]}}
         runtime: [{owner: null, items: ["Range index over two properties", "Vector index by cosine"]}]
+        runtimeAfter: [{owner: null, items: ["Range index over two properties", "Vector index by cosine"]}]
         runs:
           - stores: ["postgres", "oracle", "sqlite"]
             rounds:
@@ -3702,6 +3710,7 @@ cases:
                 - ["INFO", "IndexManager", "Vector index Chunk_embedding_vector on Chunk[embedding] effective config (engine defaults): dimensions=384, similarity=COSINE"]
                 - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 2 created, 0 already matching, 0 recreated, 0 needing attention"]
       - operation: {remove: {owner: null, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["born", "name"]}, "Vector index by cosine", "Uniqueness constraint"]}}
+        runtimeAfter: []
         runs:
           - stores: ["postgres", "sqlite"]
             rounds:
@@ -3795,6 +3804,7 @@ cases:
     catalogs: []
     steps:
       - operation: {remove: {owner: null, items: ["Uniqueness constraint"]}}
+        runtimeAfter: []
         runs:
           - stores: ["postgres", "oracle", "sqlite"]
             rounds:
@@ -3832,6 +3842,7 @@ cases:
               failure: "connection reset"
               log: []
       - operation: {remove: {owner: null, items: ["Uniqueness constraint"]}}
+        runtimeAfter: []
         runs:
           - stores: ["postgres", "oracle", "sqlite"]
             rounds:
@@ -3875,6 +3886,7 @@ cases:
     catalogs: []
     steps:
       - operation: {remove: {owner: null, items: ["Range index", "Range index over two properties"]}}
+        runtimeAfter: []
         runs:
           - stores: ["postgres", "oracle", "sqlite"]
             rounds:
@@ -3924,6 +3936,7 @@ cases:
     catalogs: []
     steps:
       - operation: {remove: {owner: null, items: ["Range index"]}}
+        runtimeAfter: []
         runs:
           - stores: ["postgres", "oracle", "sqlite"]
             rounds:
@@ -3973,6 +3986,7 @@ cases:
     catalogs: []
     steps:
       - operation: {remove: {owner: null, items: ["Uniqueness constraint", "Range index"]}}
+        runtimeAfter: []
         runs:
           - stores: ["postgres", "oracle", "sqlite"]
             rounds:
@@ -4028,6 +4042,7 @@ cases:
     catalogs: []
     steps:
       - operation: {remove: {owner: null, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["born", "name"]}]}}
+        runtimeAfter: []
         runs:
           - stores: ["postgres", "sqlite"]
             rounds:
@@ -4101,6 +4116,7 @@ cases:
     catalogs: []
     steps:
       - operation: {remove: {owner: null, items: ["Range index that ignores case"]}}
+        runtimeAfter: []
         runs:
           - stores: ["postgres", "oracle", "sqlite"]
             rounds:

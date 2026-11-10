@@ -17,6 +17,7 @@ import org.drivine.schema.Neo4jVectorOptions
 import org.drivine.schema.RangeIndexSpec
 import org.drivine.schema.SchemaItemInfo
 import org.drivine.schema.SchemaItemKind
+import org.drivine.schema.SchemaItemSpec
 import org.drivine.schema.SchemaMode
 import org.drivine.schema.SchemaPolicy
 import org.drivine.schema.SimilarityFunction
@@ -54,6 +55,100 @@ class SchemaPlannerTest {
         assertEquals(refusal, done.failure)
         assertNull(planner.validate(conflicting.copy(operation = Operation.Enforce(Owners.One("other")))))
         assertNull(planner.validate(conflicting.copy(operation = Operation.Remove(null, listOf(small)))))
+    }
+
+    /**
+     * The runtime items after each ensure and remove, as a library runs them: an ensure kept only where [SchemaPlanner.validate]
+     * passes its database, a remove's before it. Each expected list is what drivine4j's `SchemaManager` held then, captured
+     * from its `ensured` over a scripted store.
+     */
+    @Test
+    fun theRuntimeItemsChangeAsDrivine4jsManagerChangesThem() {
+        val plain = VectorIndexSpec("Chunk", "embedding", 384)
+        val pinned = VectorIndexSpec("Chunk", "embedding", 384, engineOptions = listOf(Neo4jVectorOptions(quantizationEnabled = false)))
+        val large = VectorIndexSpec("Chunk", "embedding", 768)
+        val bare = UniquenessConstraintSpec("Person", listOf("email"))
+        val withId = UniquenessConstraintSpec("Person", listOf("email"), nodeIdProperty = "uuid")
+        val range = RangeIndexSpec("Person", listOf("name"))
+        val named = RangeIndexSpec("Person", listOf("name"), name = "person_by_name")
+        val text = FullTextIndexSpec("Doc", listOf("title", "body"))
+        val composite = RangeIndexSpec("Person", listOf("name", "born"))
+        val reversed = RangeIndexSpec("Person", listOf("born", "name"))
+        val everywhere: Set<String>? = null
+        val onDefault = setOf("default")
+        var held = emptyList<RuntimeCatalog>()
+        fun ensure(owner: String?, vararg items: SchemaItemSpec, databases: Set<String>? = everywhere): String? {
+            val operation = Operation.Ensure(owner, items.toList())
+            val candidate = SchemaPlanner.runtimeAfter(operation, held, databases)
+            val refusal = planner.validate(PlanRequest("default", operation, runtime = SchemaPlanner.runtimeOn("default", candidate)))
+            if (refusal == null) held = candidate
+            return refusal
+        }
+        fun remove(owner: String?, vararg items: SchemaItemSpec, databases: Set<String>? = everywhere) {
+            val operation = Operation.Remove(owner, items.toList())
+            assertNull(planner.validate(PlanRequest("default", operation)))
+            held = SchemaPlanner.runtimeAfter(operation, held, databases)
+        }
+        fun of(owner: String?, vararg items: SchemaItemSpec, databases: Set<String>? = everywhere) = RuntimeCatalog(owner, databases, items.toList())
+
+        // In one ensure, the declaration that pins engine options wins, and the constraint's that names its nodes' id property.
+        assertNull(ensure(null, plain, pinned))
+        assertEquals(listOf(of(null, pinned)), held)
+        held = emptyList()
+        assertNull(ensure(null, pinned, plain))
+        assertEquals(listOf(of(null, pinned)), held)
+        held = emptyList()
+        assertNull(ensure(null, bare, withId))
+        assertEquals(listOf(of(null, withId)), held)
+
+        // Across ensures, the later replaces the earlier of its identity, whatever it pins.
+        held = emptyList()
+        ensure(null, pinned)
+        ensure(null, plain)
+        assertEquals(listOf(of(null, plain)), held)
+        ensure(null, withId)
+        ensure(null, bare)
+        assertEquals(listOf(of(null, plain, bare)), held)
+
+        // The indexes before the constraints, and a replacement in the place of the one it replaces.
+        held = emptyList()
+        ensure(null, bare, range)
+        assertEquals(listOf(of(null, range, bare)), held)
+        ensure(null, text)
+        ensure(null, named)
+        assertEquals(listOf(of(null, named, bare, text)), held)
+
+        // A refused ensure leaves the items as they were.
+        held = emptyList()
+        ensure(null, range)
+        assertTrue(ensure(null, plain, large)!!.startsWith("Conflicting schema declarations for VECTOR_INDEX on Chunk[embedding] (they disagree"))
+        assertEquals(listOf(of(null, range)), held)
+        assertNull(ensure("rag", large))
+        assertNull(ensure("rag", plain))
+        assertEquals(listOf(of(null, range), of("rag", plain)), held)
+        assertTrue(ensure(null, large)!!.startsWith("Conflicting schema declarations for VECTOR_INDEX on Chunk[embedding] on database 'default', across owners"))
+        assertEquals(listOf(of(null, range), of("rag", plain)), held)
+
+        // A remove takes the owner's items by identity, its properties in any order, and leaves another owner's.
+        held = emptyList()
+        ensure(null, range, composite, text)
+        ensure("rag", range)
+        remove(null, reversed, range)
+        assertEquals(listOf(of(null, text), of("rag", range)), held)
+        remove(null, text)
+        assertEquals(listOf(of("rag", range)), held)
+
+        // An owner's items on one target are apart from its items on another, and a remove of every database takes from each.
+        held = emptyList()
+        ensure(null, range, databases = onDefault)
+        ensure(null, text)
+        assertTrue(ensure(null, named)!!.startsWith("Conflicting schema declarations for RANGE_INDEX on Person[name] (they disagree"))
+        ensure(null, text, databases = onDefault)
+        assertEquals(listOf(of(null, range, text, databases = onDefault), of(null, text)), held)
+        remove(null, range, databases = onDefault)
+        assertEquals(listOf(of(null, text, databases = onDefault), of(null, text)), held)
+        remove(null, text)
+        assertEquals(emptyList(), held)
     }
 
     @Test

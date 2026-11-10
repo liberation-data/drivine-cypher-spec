@@ -3,6 +3,9 @@ package org.drivine.cypher.store.plan
 import org.drivine.DrivineInternalApi
 import org.drivine.cypher.store.marker.MarkerStatements
 import org.drivine.cypher.store.schema.StoreSchema
+import org.drivine.schema.SchemaDeclarations
+import org.drivine.schema.SchemaItemSpec
+import org.drivine.schema.made
 
 /**
  * drivine4j's schema manager (its `SchemaManager`, `IndexManager` and `ConstraintManager`), as a planner with no store:
@@ -92,6 +95,64 @@ class SchemaPlanner(
         }
         if (report != null && replay.pending.isEmpty()) return PlanStep.Done(report)
         return PlanStep.Run(replay.pending.toList(), state.copy(rounds = state.rounds + PlanRound(now, replay.pending.toList())))
+    }
+
+    companion object {
+
+        /**
+         * The library's runtime items after [operation], given to the [databases] its call names (null for every
+         * database), as drivine4j's `SchemaManager` changes them; [runtime] where the operation changes none.
+         *
+         * - An [Operation.Ensure] adds its items, merged as drivine4j's catalog merges them (`SchemaDeclarations.deduplicate`,
+         *   which keeps the declaration that pins engine options, or that names a constraint's node id property), to the
+         *   owner's items on the same [databases], each replacing the one of its identity where there is one, in that one's
+         *   place, and after them where there isn't. The library keeps what this gives only once [validate] has passed
+         *   every database planned with it, and plans them with it then.
+         * - An [Operation.Remove] takes the items of its items' identities from the owner's items on every target where
+         *   [databases] is null, and on the same [databases] where it isn't, leaving out a catalog it empties. The library
+         *   keeps what this gives before it plans any database, and plans each with it.
+         *
+         * An ensure or a remove of no items, or of items that conflict, which [validate] refuses, changes nothing.
+         */
+        fun runtimeAfter(operation: Operation, runtime: List<RuntimeCatalog>, databases: Set<String>? = null): List<RuntimeCatalog> {
+            fun identity(spec: SchemaItemSpec) = SchemaDeclarations.Key(spec.kind, spec.label, spec.made().properties.toSet())
+            return when (operation) {
+                is Operation.Ensure -> {
+                    val given = try {
+                        Declarations.merged(operation.items)
+                    } catch (_: PlanRefusal) {
+                        return runtime
+                    }
+                    if (given.isEmpty()) return runtime
+                    val at = runtime.indexOfFirst { it.owner == operation.owner && it.databases == databases }
+                    val items = linkedMapOf<SchemaDeclarations.Key, SchemaItemSpec>()
+                    runtime.getOrNull(at)?.items?.forEach { items[identity(it)] = it }
+                    given.forEach { items[identity(it)] = it }
+                    val ensured = RuntimeCatalog(operation.owner, databases, items.values.toList())
+                    if (at < 0) runtime + ensured else runtime.mapIndexed { i, it -> if (i == at) ensured else it }
+                }
+                is Operation.Remove -> {
+                    try {
+                        Declarations.merged(operation.items)
+                    } catch (_: PlanRefusal) {
+                        return runtime
+                    }
+                    val removed = operation.items.map(::identity).toSet()
+                    runtime.map {
+                        if (it.owner == operation.owner && (databases == null || it.databases == databases)) {
+                            it.copy(items = it.items.filter { spec -> identity(spec) !in removed })
+                        } else {
+                            it
+                        }
+                    }.filter { it.items.isNotEmpty() }
+                }
+                is Operation.Enforce, is Operation.RecreateAll, is Operation.Item -> runtime
+            }
+        }
+
+        /** The [PlanRequest.runtime] of [database]: the [runtime] items that apply to it, a catalog for each owner and target. */
+        fun runtimeOn(database: String, runtime: List<RuntimeCatalog>): List<DeclaredCatalog> =
+            runtime.filter { it.includes(database) }.map { DeclaredCatalog(it.owner, null, it.items) }
     }
 }
 
