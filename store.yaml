@@ -4366,6 +4366,12 @@ listings:
             "vector.dimensions": 4
             "vector.similarity_function": "COSINE"
             "vector.quantization.type": "scalar"
+      - name: "d"
+        type: "VECTOR"
+        entityType: "NODE"
+        labelsOrTypes: ["Chunk"]
+        properties: ["d"]
+        options: {indexConfig: {"vector.dimensions": 4, "vector.similarity_function": "COSINE", "vector.quantization.type": "none"}}
       - name: "c"
         type: "VECTOR"
         entityType: "NODE"
@@ -4389,8 +4395,15 @@ listings:
             dimensions: 4
             similarity: "COSINE"
             quantizationEnabled: true
+          - kind: "VECTOR_INDEX"
+            label: "Chunk"
+            properties: ["d"]
+            name: "d"
+            dimensions: 4
+            similarity: "COSINE"
+            quantizationEnabled: false
           - {kind: "VECTOR_INDEX", label: "Chunk", properties: ["c"], name: "c", dimensions: 4}
-        aliases: [[], [], []]
+        aliases: [[], [], [], []]
   - name: "Numbers a driver gives with a fraction, read as whole numbers"
     listing: "indexes"
     rows:
@@ -5632,3 +5645,8 @@ declarations:
     items:
       - {kind: "RANGE_INDEX", label: "Person", properties: ["email"]}
       - {kind: "RANGE_INDEX", label: "Person", properties: ["email"], ignoreCase: true}
+  - name: "Declarations that ignore case are compared as declared, and the conflict names the copies they are made over"
+    specs:
+      - {kind: "RANGE_INDEX", label: "Person", properties: ["email"], ignoreCase: true}
+      - {kind: "RANGE_INDEX", label: "Person", properties: ["email"], name: "Person_email_ci_range", ignoreCase: true}
+    conflict: "Conflicting schema declarations for RANGE_INDEX on Person[__drivine.lower.email] (they disagree on portable parameters): RangeIndexSpec(label=Person, properties=[email], name=null, ignoreCase=true); RangeIndexSpec(label=Person, properties=[email], name=Person_email_ci_range, ignoreCase=true)"
