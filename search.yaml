@@ -340,7 +340,8 @@ ranking:
   # Each store's bar is what it gave when this file was recorded (2026-11-10, drivine4j at dd4a66f0), rounded down, so
   # the move into the module can't regress any of them; but no higher than the store gives however it breaks a tie
   # between hits that score alike, at the top or at the fifth: where a tie could give less, the bar is that, and its
-  # note says so. `measured` is what each store gave then, and is not read, nor is a bar's `note`. `target` is the bar
+  # note says so. Neo4j's own bar is full agreement with its lists, so an image that has drifted from the recording
+  # fails. `measured` is what each store gave then, and is not read, nor is a bar's `note`. `target` is the bar
   # a store is to reach: the BM25 stores' once liberation-data/drivine4j#665 and the norms land. Memgraph, Oracle Text
   # (its own measure, liberation-data/drivine-cypher-spec#102) and FalkorDB (liberation-data/drivine4j#666) have none
   # yet.
