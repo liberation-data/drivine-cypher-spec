@@ -91,8 +91,10 @@ sealed interface Operation {
 
     /**
      * `SchemaManager.ensure(catalog)`: the [items] given to [owner] at runtime, applied as its others are, its version as
-     * the marker records it. The library has added them to the [PlanRequest.runtime] items, and checked every database
-     * with [SchemaPlanner.validate] first. An ensure of no items plans nothing, as drivine4j's returns at once (its
+     * the marker records it. The library has added them to the [PlanRequest.runtime] items, merged first as drivine4j's
+     * catalog merges them (`SchemaDeclarations.deduplicate`, which keeps the declaration that pins engine options or names
+     * a constraint's node id property, not the last), and checked every database with [SchemaPlanner.validate] first,
+     * which refuses two of the [items] that conflict. An ensure of no items plans nothing, as drivine4j's returns at once (its
      * `Nothing to ensure for owner '…': no items given`, logged once for the call, not for each database, is the
      * library's, as is its refusal of a catalog that carries a version).
      */

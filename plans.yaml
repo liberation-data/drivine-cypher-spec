@@ -1419,6 +1419,14 @@ cases:
                 - ["INFO", "SchemaManager", "Ensuring schema for owner 'schema' on 'default': 1 runtime items, 3 declared in all"]
                 - ["INFO", "IndexManager", "Created {engine} FULLTEXT_INDEX on Doc[title, body]"]
                 - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 1 created, 0 already matching, 0 recreated, 0 needing attention"]
+  - case: "7c"
+    name: "An ensure of two items that conflict"
+    description: "drivine4j's catalog refuses the two vector indexes of different sizes before anything is read."
+    stores: ["postgres", "oracle", "sqlite", "neo4j"]
+    catalogs: []
+    steps:
+      - operation: {ensure: {owner: null, items: ["Vector index by cosine", {kind: "VECTOR_INDEX", label: "Chunk", properties: ["embedding"], options: {dimensions: 768, similarity: "COSINE"}}]}}
+        refused: "Conflicting schema declarations for VECTOR_INDEX on Chunk[embedding] (they disagree on portable parameters): VectorIndexSpec(label=Chunk, property=embedding, dimensions=384, similarity=COSINE, name=null, hnswM=null, hnswEfConstruction=null, engineOptions=[]); VectorIndexSpec(label=Chunk, property=embedding, dimensions=768, similarity=COSINE, name=null, hnswM=null, hnswEfConstruction=null, engineOptions=[])"
   - case: "8"
     name: "A renamed runtime item, which is an orphan"
     description: "An item ensured under another name, of the same identity: the one recorded is an orphan, and the item there is the one ensured."
@@ -3958,6 +3966,160 @@ cases:
               failure: "An unknown error occurred"
               log:
                 - ["INFO", "IndexManager", "Dropped {engine} RANGE_INDEX on Person[name]"]
+  - case: "25e"
+    name: "remove, of a constraint given before an index"
+    description: "drivine4j's catalog merges the items first, the indexes before the constraints: the index is dropped first, then the constraint."
+    stores: ["postgres", "oracle", "sqlite", "neo4j"]
+    catalogs: []
+    steps:
+      - operation: {remove: {owner: null, items: ["Uniqueness constraint", "Range index"]}}
+        runs:
+          - stores: ["postgres", "oracle", "sqlite"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "scopes"}, rows: []}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
+                  - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], name: "Person_email_unique"}]}
+              - now: 1000000
+                actions:
+                  - {execute: {drop: "Range index"}}
+                  - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], name: "Person_email_unique"}]}
+              - now: 1000000
+                actions:
+                  - {execute: {drop: "Uniqueness constraint"}}
+            done: 1000000
+            report:
+              owners:
+                - {owner: null, marker: null, removed: {dropped: 2, kept: []}}
+              log:
+                - ["INFO", "IndexManager", "Dropped {engine} RANGE_INDEX on Person[name]"]
+                - ["INFO", "ConstraintManager", "Dropped {engine} UNIQUENESS_CONSTRAINT on Person[email]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 2 removed, 2 dropped, 0 left in place"]
+          - stores: ["neo4j"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {query: {marker: "scopes"}, rows: []}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
+                  - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], name: "Person_email_unique"}]}
+              - now: 1000000
+                actions:
+                  - {execute: {drop: "Range index"}}
+                  - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], name: "Person_email_unique"}]}
+              - now: 1000000
+                actions:
+                  - {execute: {drop: "Uniqueness constraint"}}
+            done: 1000000
+            report:
+              owners:
+                - {owner: null, marker: null, removed: {dropped: 2, kept: []}}
+              log:
+                - ["INFO", "IndexManager", "Dropped {engine} RANGE_INDEX on Person[name]"]
+                - ["INFO", "ConstraintManager", "Dropped {engine} UNIQUENESS_CONSTRAINT on Person[email]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 2 removed, 2 dropped, 0 left in place"]
+  - case: "25f"
+    name: "remove, of a composite index given in another order"
+    description: "The index is found by its identity, its properties in any order, dropped, and taken out of the marker."
+    stores: ["postgres", "oracle", "sqlite", "neo4j"]
+    catalogs: []
+    steps:
+      - operation: {remove: {owner: null, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["born", "name"]}]}}
+        runs:
+          - stores: ["postgres", "sqlite"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "scopes"}, rows: ["schema"]}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: ["RANGE_INDEX:Person:name,born:Person_name_born_range"]}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name", "born"], name: "Person_name_born_range"}]}
+              - now: 1000000
+                actions:
+                  - {execute: {drop: "Range index over two properties"}}
+                  - {query: {marker: "read.version", scope: "schema"}, rows: []}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: ""}}
+            done: 1000000
+            report:
+              owners:
+                - {owner: null, marker: {version: null, items: ""}, removed: {dropped: 1, kept: []}}
+              log:
+                - ["INFO", "IndexManager", "Dropped {engine} RANGE_INDEX on Person[born, name]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 1 removed, 1 dropped, 0 left in place"]
+          - stores: ["oracle"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "scopes"}, rows: ["schema"]}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: ["items:RANGE_INDEX:Person:name,born:Person_name_born_range"]}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name", "born"], name: "Person_name_born_range"}]}
+              - now: 1000000
+                actions:
+                  - {execute: {drop: "Range index over two properties"}}
+                  - {query: {marker: "read.version", scope: "schema"}, rows: []}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: ""}}
+            done: 1000000
+            report:
+              owners:
+                - {owner: null, marker: {version: null, items: ""}, removed: {dropped: 1, kept: []}}
+              log:
+                - ["INFO", "IndexManager", "Dropped {engine} RANGE_INDEX on Person[born, name]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 1 removed, 1 dropped, 0 left in place"]
+          - stores: ["neo4j"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {query: {marker: "scopes"}, rows: ["schema"]}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: ["RANGE_INDEX:Person:name,born:Person_name_born_range"]}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name", "born"], name: "Person_name_born_range"}]}
+              - now: 1000000
+                actions:
+                  - {execute: {drop: "Range index over two properties"}}
+                  - {query: {marker: "read.version", scope: "schema"}, rows: []}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: ""}}
+            done: 1000000
+            report:
+              owners:
+                - {owner: null, marker: {version: null, items: ""}, removed: {dropped: 1, kept: []}}
+              log:
+                - ["INFO", "IndexManager", "Dropped {engine} RANGE_INDEX on Person[born, name]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 1 removed, 1 dropped, 0 left in place"]
+  - case: "25g"
+    name: "remove, of an index that ignores case"
+    description: "The index over the lowercased copies is dropped."
+    stores: ["postgres", "oracle", "sqlite"]
+    catalogs: []
+    steps:
+      - operation: {remove: {owner: null, items: ["Range index that ignores case"]}}
+        runs:
+          - stores: ["postgres", "oracle", "sqlite"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "scopes"}, rows: []}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["__drivine.lower.email"], name: "Person_email_ci_range"}]}
+              - now: 1000000
+                actions:
+                  - {execute: {drop: "Range index that ignores case"}}
+            done: 1000000
+            report:
+              owners:
+                - {owner: null, marker: null, removed: {dropped: 1, kept: []}}
+              log:
+                - ["INFO", "IndexManager", "Dropped {engine} RANGE_INDEX on Person[__drivine.lower.email]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 1 removed, 1 dropped, 0 left in place"]
   - case: "26"
     name: "A failure mid-plan under FAIL_FAST"
     description: "Owner 'a' fails at its second item: its third isn't tried, and its marker isn't written; owner 'b' is applied."

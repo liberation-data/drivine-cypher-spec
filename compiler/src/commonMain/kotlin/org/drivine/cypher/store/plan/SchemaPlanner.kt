@@ -35,8 +35,8 @@ class SchemaPlanner(
 
     /**
      * Why [request] is refused before anything is applied: the conflict between two declarations, of one owner or of two,
-     * as drivine4j's `SchemaManager` refuses it, with its message, or of two items an [Operation.Remove] is given, as
-     * drivine4j's `SchemaCatalog.of` refuses them. Null where nothing conflicts, or the operation declares nothing to
+     * as drivine4j's `SchemaManager` refuses it, with its message, or of two items an [Operation.Ensure] or an
+     * [Operation.Remove] is given, as drivine4j's `SchemaCatalog.of` refuses them, first. Null where nothing conflicts, or the operation declares nothing to
      * conflict ([Operation.Item]). A library checks every database before it starts on any of an [Operation.Ensure] or an
      * [Operation.Remove], and before it takes a remove's items from its runtime items, so a conflict leaves them all as
      * they were.
@@ -45,7 +45,7 @@ class SchemaPlanner(
         when (val operation = request.operation) {
             is Operation.Enforce -> Declarations.of(request, operation.owners)
             is Operation.RecreateAll -> Declarations.of(request, operation.owners)
-            is Operation.Ensure -> Declarations.of(request, Owners.One(operation.owner))
+            is Operation.Ensure -> Declarations.merged(operation.items).also { Declarations.of(request, Owners.One(operation.owner)) }
             is Operation.Remove -> Declarations.merged(operation.items)
             is Operation.Item -> null
         }
