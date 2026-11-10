@@ -31,7 +31,8 @@ class SqliteRegexpPatternsTest {
     /** The SQL of each SQLite statement of the requests [requests], its setup too, with its Cypher. */
     private fun sqliteSql(requests: Sequence<String>) = requests.mapNotNull { request ->
         val read = runCatching { json.readTree(request) }.getOrNull()?.takeIf { it.isObject } ?: return@mapNotNull null
-        if (read["store"]?.textValue() != "sqlite") return@mapNotNull null
+        // The compiler's statements: a full-text search's, which holds no Cypher, is FullTextSearchGoldenTest's.
+        if (read["store"]?.textValue() != "sqlite" || !read.has("cypher")) return@mapNotNull null
         val answer = json.readTree(CompileJson.compile(request))
         val sql = answer["sql"]?.textValue() ?: return@mapNotNull null
         read["cypher"].textValue() to (listOf(sql) + (answer["setup"]?.map { it.textValue() } ?: emptyList())).joinToString("\n")

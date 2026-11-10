@@ -48,6 +48,7 @@ object StandIns {
         file("numbers", ::numbers)
         file("json", ::json)
         file("timestamps", ::timestamps)
+        file("search", ::search)
         return counts
     }
 
@@ -468,6 +469,56 @@ object StandIns {
             val nanos = listOf(0, 999, 1000, 999_999_999, random.nextInt(0, 1_000_000_000)).random(random)
             val clock = LocalDateTime.of(date, java.time.LocalTime.of(random.nextInt(24), random.nextInt(60), random.nextInt(60), nanos))
             emit(listOf(clock.year.toString(), clock.monthValue.toString(), clock.dayOfMonth.toString(), clock.hour.toString(), clock.minute.toString(), clock.second.toString(), clock.nano.toString(), format.format(clock)))
+        }
+    }
+
+    // ----- A full-text query's reading: SearchText's lower case, and its classes of a word's and Oracle's characters -----
+
+    /**
+     * The characters a full-text query's lower case and its words turn on, each several times over: a capital sigma, which
+     * is final or not by the word around it as `BreakIterator` reads it, and what that reads a word by: letters cased and
+     * uncased, digits, what stands between them, before and after a number, a danda, marks, a format character, the kana and
+     * ideographs, the gaps, surrogates alone and in pairs, and Unicode 14's new letters.
+     */
+    private val SEARCH_CHARACTERS = intArrayOf(
+        0x3A3, 0x3A3, 0x3A3, 'a'.code, 'A'.code, '1'.code, '-'.code, '.'.code, '\''.code, '"'.code, ','.code, '_'.code, ' '.code,
+        '$'.code, '%'.code, '#'.code, 0xA2, 0x964, 0x301, 0x345, 0x200D, 0x2160, 0x24B6, 0x2B0, 0x1DAC, 0x4E00, 0x30A2, 0x3042,
+        0x30FC, 0x3095, '\r'.code, '\n'.code, 0xD800, 0xDC00, 0x1D400, 0x66B, 0x2027, 0xAD, 0x903, 0x37A, 0x1D2C, 0x2C2F, 0xA7C0,
+        0x10570, 0x130, 0x1C5, 0xDF, 0xFB01, 0x2AFAA,
+    )
+
+    /** A text of up to 15 code points, among them a capital sigma, drawn from [SEARCH_CHARACTERS] and from any code point. */
+    fun searchText(random: Random): String = buildString {
+        val length = 1 + random.nextInt(if (random.nextBoolean()) 7 else 15)
+        repeat(length) {
+            val cp = if (random.nextInt(3) == 0) random.nextInt(0, 0x110000) else SEARCH_CHARACTERS[random.nextInt(SEARCH_CHARACTERS.size)]
+            if (cp in 0xD800..0xDFFF) append(cp.toChar()) else appendCodePoint(cp)
+        }
+        if ('\u03a3' !in this) insert(random.nextInt(length + 1).coerceAtMost(this.length), '\u03a3')
+    }
+
+    /** [test]'s code points, of every plane, as `start-end` ranges in hexadecimal. */
+    private fun codePointRanges(test: (Int) -> Boolean): String {
+        val out = mutableListOf<String>()
+        var cp = 0
+        while (cp <= 0x10FFFF) {
+            if (!test(cp)) { cp++; continue }
+            val start = cp
+            while (cp <= 0x10FFFF && test(cp)) cp++
+            out += "${start.toString(16)}-${(cp - 1).toString(16)}"
+        }
+        return out.joinToString(",")
+    }
+
+    private fun search(random: Random, emit: (List<String>) -> Unit) {
+        // Java's own classes, as drivine4j's TextQuery reads them: `[^\p{IsAlphabetic}\p{Nd}_]` and its Oracle's [[:alnum:]].
+        emit(listOf("W", codePointRanges { Character.isAlphabetic(it) || Character.getType(it) == Character.DECIMAL_DIGIT_NUMBER.toInt() || it == '_'.code }))
+        val oracle = setOf(Character.LETTER_NUMBER, Character.NON_SPACING_MARK, Character.COMBINING_SPACING_MARK)
+        emit(listOf("O", codePointRanges { Character.isLetter(it) || Character.isDigit(it) || Character.getType(it).toByte() in oracle }))
+        // Texts in lower case, as Kotlin's lowercase() on the JVM, Java's toLowerCase(Locale.ROOT), writes them.
+        for (i in 0 until 50_000) {
+            val text = searchText(random)
+            emit(listOf("L", text, text.lowercase()))
         }
     }
 }
