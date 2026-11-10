@@ -13,6 +13,8 @@
 # EnsureResult.kt, SchemaPolicy.kt, SchemaMode.kt and SchemaDeclarations.kt, written from drivine4j's schema/SchemaGrammar.kt,
 # {Neo4j,Memgraph,FalkorDb}SchemaGrammar.kt, backend/*/…SchemaGrammar.kt, SchemaAliases.kt, the files of those names and
 # SchemaCatalog.kt's merge, and pinned by the spec's store.yaml (schema, listings, matching, errors and declarations).
+# And store/plan/, the schema plan, written from drivine4j's schema/SchemaManager.kt, IndexManager.kt,
+# ConstraintManager.kt and SchemaVersionStore.kt, and pinned by the spec's plans.yaml.
 src/main/antlr/org/drivine/cypher/grammar/Cypher.g4 src/commonMain/antlr/Cypher.g4
 src/main/kotlin/org/drivine/cypher/ src/commonMain/kotlin/org/drivine/cypher/
 src/main/kotlin/org/drivine/schema/ConstraintSpec.kt src/commonMain/kotlin/org/drivine/schema/ConstraintSpec.kt
