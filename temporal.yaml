@@ -1023,3 +1023,188 @@ cases:
       - note: "As a WHERE compares them."
         cypher: "UNWIND [{at: datetime('2024-03-15T10:00:00+02:00')}, {at: 'x'}] AS row MATCH (n:CyTemporal) WHERE n.at = row.at RETURN n.id"
         rows: ["a"]
+
+  - name: "Zoned values at one instant"
+    description: "Two moments, or two times, at one instant and two offsets are not equal, as Neo4j has them (#161): they are two values under =, IN, DISTINCT and a list's =, and order by their instant, then their offset, the larger offset later."
+    steps:
+      - cypher: "WITH datetime('2024-01-01T10:00:00+02:00') AS a, datetime('2024-01-01T08:00:00Z') AS b RETURN [a = b, a < b, a > b, a <= b, a >= b, a <> b, b IN [a], [a] = [b]]"
+        only: [neo4j, sql]
+        rows: [[false, false, true, false, true, true, false, false]]
+      - cypher: "UNWIND [datetime('2024-01-01T10:00:00+02:00'), datetime('2024-01-01T08:00:00Z')] AS x RETURN count(DISTINCT x)"
+        only: [neo4j, sql]
+        rows: [2]
+      - cypher: "WITH time('10:00:00+02:00') AS a, time('08:00:00Z') AS b RETURN [a = b, a > b, a < b]"
+        only: [neo4j, sql]
+        rows: [[false, true, false]]
+      - cypher: "UNWIND [datetime('2024-01-01T08:00:00Z'), datetime('2024-01-01T10:00:00+02:00'), datetime('2024-01-01T09:00:00+02:00')] AS t RETURN toString(t) ORDER BY t"
+        only: [neo4j, sql]
+        rows: ["2024-01-01T09:00:00+02:00", "2024-01-01T08:00:00Z", "2024-01-01T10:00:00+02:00"]
+      - cypher: "UNWIND [time('08:00:00Z'), time('10:00:00+02:00'), time('09:00:00+02:00')] AS t RETURN toString(t) ORDER BY t"
+        only: [neo4j, sql]
+        rows: ["09:00:00+02:00", "08:00:00Z", "10:00:00+02:00"]
+      - cypher: "CREATE (:CyTemporal {id: 'a', at: datetime('2024-01-01T08:00:00Z'), t: time('08:00:00Z')}), (:CyTemporal {id: 'b', at: datetime('2024-01-01T10:00:00+02:00'), t: time('10:00:00+02:00')}), (:CyTemporal {id: 'c', at: datetime('2024-01-01T09:00:00+02:00'), t: time('09:00:00+02:00')})"
+        only: [neo4j, sql]
+      - note: "Read from the store, their kind told by their tags: two stored zoned values compare and sort by their instant, then their offset, where they sorted by their text before (drivine4j#524)."
+        cypher: "MATCH (n:CyTemporal) RETURN n.id ORDER BY n.at"
+        only: [neo4j, sql]
+        rows: ["c", "a", "b"]
+      - cypher: "MATCH (n:CyTemporal) RETURN n.id ORDER BY n.t DESC"
+        only: [neo4j, sql]
+        rows: ["b", "a", "c"]
+      - cypher: "MATCH (a:CyTemporal {id: 'a'}), (n:CyTemporal) RETURN [n.id, n.at < a.at, n.at = a.at, n.t > a.t] ORDER BY n.id"
+        only: [neo4j, sql]
+        rows: [["a", false, true, false], ["b", false, false, true], ["c", true, false, false]]
+      - cypher: "MATCH (n:CyTemporal) RETURN [toString(min(n.at)), toString(max(n.at)), toString(min(n.t)), toString(max(n.t))]"
+        only: [neo4j, sql]
+        rows: [["2024-01-01T09:00:00+02:00", "2024-01-01T10:00:00+02:00", "09:00:00+02:00", "10:00:00+02:00"]]
+      - cypher: "MATCH (n:CyTemporal) RETURN count(DISTINCT n.at)"
+        only: [neo4j, sql]
+        rows: [3]
+      - note: "Memgraph, probed (3.14): the same answers for moments; it has no zoned time."
+        cypher: "WITH datetime('2024-01-01T10:00:00+02:00') AS a, datetime('2024-01-01T08:00:00Z') AS b RETURN [a = b, a < b, a > b, a <= b, b IN [a], [a] = [b]]"
+        only: [memgraph]
+        rows: [[false, false, true, false, false, false]]
+
+  - name: "A zoned time across midnight"
+    description: "A zoned time compares by its nanoseconds of the day in UTC, from -18 to 42 hours, with no wrap at midnight, as Neo4j compares it (#161): time('01:00+02:00') is -1 hour, before time('22:00Z')."
+    steps:
+      - cypher: "RETURN [time('01:00:00+02:00') < time('22:00:00Z'), time('01:00:00+02:00') = time('22:00:00Z'), time('01:00:00+02:00') > time('22:00:00Z'), time('00:30:00+01:00') < time('23:30:00Z')]"
+        only: [neo4j, sql]
+        rows: [[true, false, false, true]]
+      - cypher: "UNWIND [time('01:00:00+02:00'), time('22:00:00Z'), time('23:30:00Z'), time('00:30:00+01:00')] AS t RETURN toString(t) ORDER BY t"
+        only: [neo4j, sql]
+        rows: ["01:00:00+02:00", "00:30:00+01:00", "22:00:00Z", "23:30:00Z"]
+      - cypher: "UNWIND [time('01:00:00+02:00'), time('22:00:00Z'), time('23:30:00Z'), time('00:30:00+01:00')] AS t RETURN [toString(min(t)), toString(max(t))]"
+        only: [neo4j, sql]
+        rows: [["01:00:00+02:00", "23:30:00Z"]]
+      - cypher: "UNWIND [['a', time('01:00:00+02:00')], ['b', time('22:00:00Z')], ['c', time('23:30:00Z')], ['d', time('00:30:00+01:00')]] AS r CREATE (:CyTemporal {id: r[0], t: r[1]})"
+        only: [neo4j, sql]
+      - note: "Read from the store."
+        cypher: "MATCH (n:CyTemporal) RETURN n.id ORDER BY n.t"
+        only: [neo4j, sql]
+        rows: ["a", "d", "b", "c"]
+      - cypher: "MATCH (a:CyTemporal {id: 'a'}), (b:CyTemporal {id: 'b'}) RETURN [a.t < b.t, a.t = b.t, a.t > b.t]"
+        only: [neo4j, sql]
+        rows: [[true, false, false]]
+
+  - name: "A zoned time at the offsets' limits"
+    description: "The least zoned time is 00:00 at +18:00, 18 hours before midnight UTC, and the greatest 23:59:59.999999999 at -18:00, 42 hours after it less a nanosecond, as Neo4j orders them (#161)."
+    steps:
+      - cypher: "RETURN [time('00:00:00+18:00') < time('23:59:59.999999999-18:00'), time('00:00:00+18:00') = time('23:59:59.999999999-18:00'), time('00:00:00+18:00') > time('23:59:59.999999999-18:00'), time('00:00:00+18:00') < time('00:00:00Z'), time('00:00:00+18:00') = time('06:00:00Z')]"
+        only: [neo4j, sql]
+        rows: [[true, false, false, true, false]]
+      - cypher: "UNWIND [time('23:59:59.999999999-18:00'), time('00:00:00Z'), time('00:00:00+18:00'), time('23:59:59.999999999Z'), time('00:00:00-18:00'), time('23:59:59.999999999+18:00')] AS t RETURN [t.hour, t.nanosecond, t.offsetSeconds] ORDER BY t"
+        only: [neo4j, sql]
+        rows: [[0, 0, 64800], [0, 0, 0], [23, 999999999, 64800], [0, 0, -64800], [23, 999999999, 0], [23, 999999999, -64800]]
+
+  - name: "A date and the text that spells it"
+    description: "A date is not equal to the text that spells it, read from the store or not, as Neo4j has it: a stored date is no longer found by its text (#161)."
+    steps:
+      - cypher: "RETURN [date('2024-01-01') = '2024-01-01', '2024-01-01' IN [date('2024-01-01')], date('2024-01-01') < '2024-01-02']"
+        rows: [[false, false, null]]
+      - cypher: "CREATE (:CyTemporal {id: 'a', d: date('2024-01-01'), s: '2024-01-01'}), (:CyTemporal {id: 'b', d: '2024-01-01'})"
+      - cypher: "MATCH (n:CyTemporal) RETURN [n.id, n.d = date('2024-01-01'), n.d = '2024-01-01', n.d = n.s] ORDER BY n.id"
+        rows: [["a", true, false, false], ["b", false, true, null]]
+      - cypher: "MATCH (n:CyTemporal {d: date('2024-01-01')}) RETURN n.id"
+        rows: ["a"]
+      - cypher: "MATCH (n:CyTemporal {d: '2024-01-01'}) RETURN n.id"
+        rows: ["b"]
+      - cypher: "MATCH (n:CyTemporal) WHERE n.d = $d RETURN n.id"
+        parameters: {d: "2024-01-01"}
+        rows: ["b"]
+
+  - name: "Durations of one length"
+    description: "Two durations are equal only where their months, days and seconds are, and are in no order, as Neo4j has them: P1D is not PT24H. Memgraph compares durations as one length."
+    steps:
+      - cypher: "RETURN [duration('P1D') = duration('PT24H'), duration('P1D') < duration('PT25H'), duration('P1D') = duration('P1D'), duration('P1W') = duration('P7D')]"
+        only: [neo4j, sql]
+        rows: [[false, null, true, true]]
+      - cypher: "CREATE (:CyTemporal {id: 'a', d: duration('P1D')}), (:CyTemporal {id: 'b', d: duration('PT24H')})"
+        only: [neo4j, sql]
+      - cypher: "MATCH (a:CyTemporal {id: 'a'}), (b:CyTemporal {id: 'b'}) RETURN [a.d = b.d, a.d < b.d, a.d = duration('P1D')]"
+        only: [neo4j, sql]
+        rows: [[false, null, true]]
+      - note: "Memgraph, probed (3.14): durations of one length are equal, and ordered."
+        cypher: "RETURN [duration('P1D') = duration('PT24H'), duration('P1D') < duration('PT25H')]"
+        only: [memgraph]
+        rows: [[true, true]]
+
+  - name: "A named zone beside its offset"
+    description: "A moment in a named zone is a value apart from the same moment at its offset, as Neo4j has it. The SQL stores hold no named zone (see README.md, Values in the store)."
+    steps:
+      - cypher: "RETURN datetime('2024-01-01T10:00:00+01:00[Europe/Paris]') = datetime('2024-01-01T10:00:00+01:00')"
+        only: [neo4j, memgraph]
+        rows: [false]
+
+  - name: "UTC written as Z and as +00:00"
+    description: "A moment at UTC is one value however its offset is written, Z or +00:00, as Neo4j has it: its canonical text writes Z. Memgraph reads Z as the named zone Etc/UTC, a value apart."
+    steps:
+      - cypher: "RETURN [datetime('2024-01-01T08:00:00Z') = datetime('2024-01-01T08:00:00+00:00'), toString(datetime('2024-01-01T08:00:00+00:00'))]"
+        only: [neo4j, sql]
+        rows: [[true, "2024-01-01T08:00:00Z"]]
+      - note: "Memgraph, probed (3.14)."
+        cypher: "RETURN datetime('2024-01-01T08:00:00Z') = datetime('2024-01-01T08:00:00+00:00')"
+        only: [memgraph]
+        rows: [false]
+
+  - name: "The extremes of a year, an offset and a fraction"
+    description: "A year from -999,999,999 to +999,999,999, an offset of ±18:00 and nine digits of a second's fraction are held, read back, compared and ordered, as Neo4j holds them (#161). Memgraph holds years 0000 to 9999 and microseconds alone."
+    steps:
+      - cypher: "RETURN [toString(date('+999999999-12-31')), toString(date('-999999999-01-01')), date('+999999999-12-31').year, date('-999999999-01-01') < date('-0001-12-31')]"
+        only: [neo4j, sql]
+        rows: [["+999999999-12-31", "-999999999-01-01", 999999999, true]]
+      - cypher: "CREATE (:CyTemporal {id: 'max', at: datetime('+999999999-12-31T23:59:59.999999999-18:00'), d: date('+999999999-12-31')}), (:CyTemporal {id: 'min', at: datetime('-999999999-01-01T00:00:00+18:00'), d: date('-999999999-01-01')}), (:CyTemporal {id: 'now', at: datetime('2024-01-01T00:00:00Z'), d: date('2024-01-01')})"
+        only: [neo4j, sql]
+      - cypher: "MATCH (n:CyTemporal) RETURN [n.id, n.at.year, n.at.nanosecond, n.at.offsetSeconds, n.d.year] ORDER BY n.at"
+        only: [neo4j, sql]
+        note: "The fields of a moment are read off its text: no store's timestamp reaches these years."
+        rows: [["min", -999999999, 0, 64800, -999999999], ["now", 2024, 0, 0, 2024], ["max", 999999999, 999999999, -64800, 999999999]]
+      - cypher: "MATCH (n:CyTemporal) RETURN n.id ORDER BY n.d DESC"
+        only: [neo4j, sql]
+        rows: ["max", "now", "min"]
+      - cypher: "MATCH (n:CyTemporal {at: datetime('+999999999-12-31T23:59:59.999999999-18:00')}) RETURN n.id"
+        only: [neo4j, sql]
+        rows: ["max"]
+
+  - name: "Nanoseconds kept"
+    description: "A moment written with nine digits of a second's fraction keeps them, read back, compared and ordered, as Neo4j keeps them (#161). Memgraph keeps microseconds."
+    steps:
+      - cypher: "RETURN [datetime('2024-01-01T00:00:00.123456789Z') = datetime('2024-01-01T00:00:00.123456788Z'), datetime('2024-01-01T00:00:00.123456789Z') > datetime('2024-01-01T00:00:00.123456788Z'), datetime('2024-01-01T00:00:00.123456789Z').nanosecond]"
+        only: [neo4j, sql]
+        rows: [[false, true, 123456789]]
+      - cypher: "CREATE (:CyTemporal {id: 'a', at: datetime('2024-01-01T00:00:00.123456789Z'), t: localtime('10:00:00.000000001')}), (:CyTemporal {id: 'b', at: datetime('2024-01-01T00:00:00.123456788Z'), t: localtime('10:00:00')})"
+        only: [neo4j, sql]
+      - cypher: "MATCH (n:CyTemporal) RETURN [n.id, n.at.nanosecond, n.t.nanosecond] ORDER BY n.at"
+        only: [neo4j, sql]
+        rows: [["b", 123456788, 0], ["a", 123456789, 1]]
+      - cypher: "MATCH (n:CyTemporal) RETURN n.id ORDER BY n.t DESC"
+        only: [neo4j, sql]
+        rows: ["a", "b"]
+
+  - name: "A sort key worked out as the statement runs"
+    description: "A temporal value the statement works out, of its fields or by arithmetic, is held as the one written as text is, its sort key worked out of its text as Temporals.key works it out (see host.yaml, Temporal values' sort keys): so the two are equal, one under DISTINCT, and found by each other in the store, across a day and a year in UTC and at the offsets' limits."
+    steps:
+      - cypher: |
+          RETURN [datetime({year: 2024, month: 1, day: 1, hour: 1, timezone: '+02:00'}) = datetime('2024-01-01T01:00:00+02:00'),
+                  [datetime({year: 2024, month: 3, day: 1, hour: 0, minute: 30, timezone: '+01:00'})] = [datetime('2024-03-01T00:30:00+01:00')],
+                  [datetime({year: 2024, month: 12, day: 31, hour: 23, timezone: '-02:00'})] = [datetime('2024-12-31T23:00:00-02:00')],
+                  [time({hour: 1, timezone: '+02:00'})] = [time('01:00:00+02:00')],
+                  [time({hour: 0, timezone: '+18:00'})] = [time('00:00:00+18:00')],
+                  [time({hour: 23, minute: 59, second: 59, timezone: '-18:00'})] = [time('23:59:59-18:00')],
+                  [localdatetime({year: 2024, month: 3, day: 15, hour: 10, minute: 30, millisecond: 500})] = [localdatetime('2024-03-15T10:30:00.500')],
+                  [date({year: -44, month: 3, day: 15})] = [date('-0044-03-15')],
+                  [date('2024-02-28') + duration('P1D')] = [date('2024-02-29')]]
+        only: [neo4j, sql]
+        rows: [[true, true, true, true, true, true, true, true, true]]
+      - cypher: "UNWIND [datetime({year: 2024, month: 1, day: 1, hour: 1, timezone: '+02:00'}), datetime('2024-01-01T01:00:00+02:00'), datetime('2023-12-31T23:00:00Z') + duration('PT2H')] AS x RETURN count(DISTINCT x)"
+        only: [neo4j, sql]
+        rows: [2]
+      - cypher: "CREATE (:CyTemporal {id: 'a', at: datetime({year: 2024, month: 1, day: 1, hour: 1, timezone: '+02:00'}), t: time({hour: 0, timezone: '+18:00'})})"
+        only: [neo4j, sql]
+      - cypher: "MATCH (n:CyTemporal {at: datetime('2024-01-01T01:00:00+02:00'), t: time('00:00:00+18:00')}) RETURN n.id"
+        only: [neo4j, sql]
+        rows: ["a"]
+      - cypher: "MATCH (n:CyTemporal) WHERE n.at = datetime({year: 2023, month: 12, day: 31, hour: 23, timezone: 'Z'}) + duration('PT1H') - duration('PT1H') RETURN n.id"
+        only: [neo4j, sql]
+        note: "Another moment: the same instant at UTC."
+        rows: []

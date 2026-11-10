@@ -26,6 +26,9 @@ import java.time.format.DateTimeFormatter
  *   other targets have no YAML reader. See `StoreDdlTest`.
  * - `marker.json`: the spec's `marker.yaml`, the schema marker and the stamps, as JSON likewise. See `StoreMarkerTest`.
  * - `plans.json`: the spec's `plans.yaml`, the schema plan's cases, as JSON likewise. See `StorePlanTest`.
+ * - `typed-values-golden.json`: the module's golden of the store layout's typed values compiled (`src/commonTest/resources`),
+ *   for each target's `TypedValuesGoldenTest`.
+ * - `host.json`: the spec's `host.yaml`, as JSON likewise: its sort keys and its reads of the store layout's tags. See `ValueLayoutTest`.
  * - `search-golden.json`: drivine4j's full-text search statements, the module's golden (`src/commonTest/resources`), for
  *   each target's `FullTextSearchGoldenTest`. Its requests are in `corpus.jsonl` too, as [CompileJson] answers them.
  *
@@ -54,10 +57,14 @@ object Oracle {
         File(out, "store.json").writeText(json.writeValueAsString(yaml.readTree(File(spec, "store.yaml"))))
         // The schema marker and the stamps, for each target's StoreMarkerTest.
         File(out, "marker.json").writeText(json.writeValueAsString(yaml.readTree(File(spec, "marker.yaml"))))
+        // The host's functions and readers, for each target's ValueLayoutTest: the sort keys and the reads of the store layout's tags.
+        File(out, "host.json").writeText(json.writeValueAsString(yaml.readTree(File(spec, "host.yaml"))))
         // The schema plan's cases, for each target's StorePlanTest.
         File(out, "plans.json").writeText(json.writeValueAsString(yaml.readTree(File(spec, "plans.yaml"))))
         // drivine4j's full-text search statements, for each target's FullTextSearchGoldenTest.
         File(out, "search-golden.json").writeBytes(searchGolden())
+        // The store layout's typed values compiled, for each target's TypedValuesGoldenTest.
+        File(out, "typed-values-golden.json").writeBytes(requireNotNull(Oracle::class.java.getResource("/typed-values-golden.json")) { "No typed-values-golden.json on the classpath." }.readBytes())
         println("jvmOracle: ${corpus.first} statements in the corpus (${corpus.second} left out, as they embed the clock); $doubles double cases.")
         println("jvmOracle: ${mutants.made} mutant requests, ${mutants.kept} of interest, ${mutants.written} of them in mutants.jsonl.")
         println("jvmOracle: stand-in cases ${standIns.entries.joinToString { (name, n) -> "$name $n" }}.")
