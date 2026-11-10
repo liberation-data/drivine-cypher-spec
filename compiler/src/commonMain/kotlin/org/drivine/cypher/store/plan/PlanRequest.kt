@@ -18,7 +18,8 @@ import org.drivine.schema.SchemaPolicy
  *   [Operation.Remove], with the items being removed already taken out
  * @param policy how drift, violations and the rest are treated
  * @param buildTimeoutMillis how long an index built in the background (Neo4j, FalkorDB) is waited for, each time it is
- *   applied, before it is taken as still being built: drivine4j's `indexBuildTimeout`, 60 seconds unless given
+ *   applied, before it is taken as still being built: drivine4j's `indexBuildTimeout`, 60 seconds unless given. An
+ *   [Operation.Item] doesn't read it: drivine4j's public `IndexManager` always waits 60 seconds
  */
 @DrivineInternalApi
 data class PlanRequest(
@@ -76,7 +77,12 @@ sealed interface Owners {
 @DrivineInternalApi
 sealed interface Operation {
 
-    /** `SchemaManager.enforce()` and `enforce(name)`: every item of the owners, made where missing, recreated where their version changed. */
+    /**
+     * `SchemaManager.enforce()` and `enforce(name)`: every item of the owners, made where missing, recreated where their
+     * version changed. What drivine4j's `apply` logs before it reaches a database is the library's, once for the call, as
+     * for [RecreateAll]: its `Schema management found … SchemaCatalog …; nothing to apply` where every catalog, startup
+     * and runtime, is empty (and no database is planned), and its `Skipping schema management for database …` warnings.
+     */
     data class Enforce(val owners: Owners = Owners.All) : Operation
 
     /** `SchemaManager.recreateAll()` and `recreateAll(name)`: every item of the owners dropped and made again, co-owned ones too. */
@@ -97,7 +103,11 @@ sealed interface Operation {
      */
     data class Remove(val owner: String?, val items: List<SchemaItemSpec>) : Operation
 
-    /** One of the public `IndexManager` and `ConstraintManager` calls, on [spec] alone, with no marker. */
+    /**
+     * One of the public `IndexManager` and `ConstraintManager` calls, on [spec] alone, with no marker. A constraint's
+     * `violationSampleSize` and `replaceBlockingIndex` are the request's [PlanRequest.policy]'s: the call's arguments,
+     * drivine4j's defaults (a default [SchemaPolicy]) where the caller gives none, not the schema manager's policy.
+     */
     data class Item(val call: ItemCall, val spec: SchemaItemSpec) : Operation
 }
 

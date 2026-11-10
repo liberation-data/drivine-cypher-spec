@@ -77,6 +77,7 @@ class SchemaPlannerTest {
 
     @Test
     fun anIndexEnsuredAloneThatIsNotBuiltFailsAsTheIndexManagersEnsureThrows() {
+        // The public IndexManager waits 60 seconds, whatever the request's buildTimeoutMillis, which is SchemaManager's.
         val neo4j = SchemaPlanner(Neo4jSchema())
         val item = mapOf("name" to "Person_name_range", "type" to "RANGE", "entityType" to "NODE", "labelsOrTypes" to listOf("Person"), "properties" to listOf("name"))
         var step = neo4j.start(PlanRequest("default", Operation.Item(ItemCall.ENSURE, name), buildTimeoutMillis = 500), 0)
@@ -85,14 +86,14 @@ class SchemaPlannerTest {
             val outcomes = step.actions.map { action ->
                 when (action) {
                     is PlanAction.Query -> PlanOutcome.Rows(listOf(item))
-                    is PlanAction.AwaitIndex -> PlanOutcome.Failed(timedOut).also { assertEquals(1L, action.parameters["timeout"]) }
+                    is PlanAction.AwaitIndex -> PlanOutcome.Failed(timedOut).also { assertEquals(60L, action.parameters["timeout"]) }
                     else -> PlanOutcome.Ran
                 }
             }
             step = neo4j.resume(step.state, outcomes.take(outcomes.indexOfFirst { it is PlanOutcome.Failed }.let { if (it < 0) outcomes.size else it + 1 }), 0)
         }
         val report = (step as PlanStep.Done).report
-        assertEquals("Neo4j RANGE_INDEX 'Person_name_range' on Person[name] is still being built, having waited PT0.5S: did not complete", report.failure)
+        assertEquals("Neo4j RANGE_INDEX 'Person_name_range' on Person[name] is still being built, having waited PT1M: did not complete", report.failure)
         assertNull(report.item)
     }
 
@@ -150,11 +151,19 @@ class SchemaPlannerTest {
         assertFailsWith<IllegalArgumentException> { planner.resume(first.state, emptyList(), 0) }
         assertFailsWith<IllegalArgumentException> { planner.resume(first.state, listOf(PlanOutcome.Ran), 0) }
         assertFailsWith<IllegalArgumentException> { planner.resume(first.state, first.actions.map { PlanOutcome.Failed(StoreError()) }, 0) }
-        val resumed = assertIs<PlanStep.Run>(planner.resume(first.state, first.actions.map { PlanOutcome.Rows(emptyList()) }, 0))
+        // An outcome that doesn't fit its action is refused, naming the action and the round.
+        assertIs<PlanAction.Execute>(first.actions.first())
+        assertIs<PlanAction.Query>(first.actions[1])
+        val rowsForExecute = assertFailsWith<IllegalArgumentException> { planner.resume(first.state, first.actions.map { PlanOutcome.Rows(emptyList()) }, 0) }
+        assertTrue(rowsForExecute.message!!.startsWith("Action 0 of round 0, ${first.actions.first()}, is answered Ran or Failed, not Rows"), rowsForExecute.message)
+        val ranForQuery = assertFailsWith<IllegalArgumentException> { planner.resume(first.state, first.actions.map { PlanOutcome.Ran }, 0) }
+        assertTrue(ranForQuery.message!!.startsWith("Action 1 of round 0, ${first.actions[1]}, is answered Rows or Failed, not Ran"), ranForQuery.message)
+        val fitting = first.actions.map { if (it is PlanAction.Query) PlanOutcome.Rows(emptyList()) else PlanOutcome.Ran }
+        val resumed = assertIs<PlanStep.Run>(planner.resume(first.state, fitting, 0))
         assertFailsWith<IllegalArgumentException> { planner.resume(first.state.copy(rounds = resumed.state.rounds.dropLast(1)), listOf(PlanOutcome.Ran), 0) }
         // A state that isn't its request's is refused, rather than planned from.
         val other = resumed.state.copy(request = resumed.state.request.copy(operation = Operation.Remove(null, listOf(name))))
-        assertFailsWith<IllegalStateException> { planner.resume(other, resumed.actions.map { PlanOutcome.Ran }, 0) }
+        assertFailsWith<IllegalStateException> { planner.resume(other, resumed.actions.map { if (it is PlanAction.Query) PlanOutcome.Rows(emptyList()) else PlanOutcome.Ran }, 0) }
     }
 
     @Test

@@ -429,7 +429,10 @@ internal class SchemaProgram(
         return properties == made.properties.joinToString(",") || properties.split(",").sorted() == made.properties.sorted()
     }
 
-    /** One of the public `IndexManager` and `ConstraintManager` calls. */
+    /**
+     * One of the public `IndexManager` and `ConstraintManager` calls. Their index waits 60 seconds, whatever the request's
+     * [PlanRequest.buildTimeoutMillis]: drivine4j's public manager is made with `IndexManager.DEFAULT_BUILD_TIMEOUT`.
+     */
     private fun item(operation: Operation.Item): DatabaseReport {
         val spec = operation.spec
         prefetchListings(listOf(spec))
@@ -437,11 +440,11 @@ internal class SchemaProgram(
         return try {
             val item = when (operation.call) {
                 ItemCall.ENSURE -> ItemReport(result = when (spec) {
-                    is IndexSpec -> ensureIndex(spec, Build(request.buildTimeoutMillis, null))
+                    is IndexSpec -> ensureIndex(spec, Build(PlanRequest.DEFAULT_BUILD_TIMEOUT_MILLIS, null))
                     is ConstraintSpec -> ensureConstraint(spec, policy.violationSampleSize, policy.replaceBlockingIndex)
                 })
                 ItemCall.RECREATE -> ItemReport(result = when (spec) {
-                    is IndexSpec -> recreateIndex(spec, Build(request.buildTimeoutMillis, null))
+                    is IndexSpec -> recreateIndex(spec, Build(PlanRequest.DEFAULT_BUILD_TIMEOUT_MILLIS, null))
                     is ConstraintSpec -> recreateConstraint(spec, policy.violationSampleSize, policy.replaceBlockingIndex)
                 })
                 ItemCall.DROP -> ItemReport(dropped = when (spec) {
