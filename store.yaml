@@ -5435,7 +5435,7 @@ errors:
   - name: "SQLite: UNIQUE constraint failed, said in a driver's error"
     causes:
       - sqlState: null
-        vendorCode: 2067
+        vendorCode: 19
         message: "[SQLITE_CONSTRAINT_UNIQUE] A UNIQUE constraint failed (UNIQUE constraint failed: index 'drivine_uq_x')"
     stores:
       neo4j: {violation: false, blockedByIndex: false, buildTimeout: false}
@@ -5446,14 +5446,16 @@ errors:
       sqlite: {violation: true, blockedByIndex: false, buildTimeout: false}
   - name: "SQLite: the words in no driver's error, beneath a driver's error that doesn't say them"
     causes:
-      - {sqlState: null, vendorCode: 1, message: "[SQLITE_ERROR] SQL error"}
+      - sqlState: null
+        vendorCode: 19
+        message: "[SQLITE_CONSTRAINT_NOTNULL] A NOT NULL constraint failed (NOT NULL constraint failed: drivine_node.x)"
       - {message: "UNIQUE constraint failed"}
     stores:
       neo4j: {violation: false, blockedByIndex: false, buildTimeout: false}
       memgraph: {violation: false, blockedByIndex: false, buildTimeout: false}
       falkordb: {violation: false, blockedByIndex: false, buildTimeout: false}
       postgres: {violation: false, blockedByIndex: false, buildTimeout: false}
-      oracle: {violation: true, blockedByIndex: false, buildTimeout: false}
+      oracle: {violation: false, blockedByIndex: false, buildTimeout: false}
       sqlite: {violation: false, blockedByIndex: false, buildTimeout: false}
   - name: "SQLite: a driver's error with no code"
     causes: [{sqlState: null, vendorCode: 0, message: "UNIQUE constraint failed: drivine_node.x"}]

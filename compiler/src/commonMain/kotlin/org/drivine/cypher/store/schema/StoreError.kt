@@ -11,8 +11,9 @@ import org.drivine.DrivineInternalApi
  *
  * - from a SQL driver's error (a JDBC `SQLException`, a Postgres, Oracle or SQLite driver's error): its [sqlState], and its
  *   [vendorCode], the driver's own number (JDBC's `getErrorCode`, `0` where the driver gives none);
- * - from a Neo4j driver's error, which Memgraph's errors are too: its [code] (`Neo.ClientError…`), and its [gqlStatus], or
- *   null where the driver has none to give;
+ * - from a Neo4j driver's error, which Memgraph's errors are too: its [code] (`Neo.ClientError…`, or `N/A` where the
+ *   driver gives none, as drivine4j's Java driver does, since a null code would read as no driver's error), and its
+ *   [gqlStatus], or null where the driver has none to give;
  * - from any other error: its [message] alone.
  *
  * Every error gives its [message], null where it has none.

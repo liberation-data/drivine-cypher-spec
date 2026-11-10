@@ -9,6 +9,7 @@ import org.drivine.cypher.store.ddl.Neo4jDdl
 import org.drivine.cypher.store.ddl.OracleDdl
 import org.drivine.cypher.store.ddl.PostgresDdl
 import org.drivine.cypher.store.ddl.SqliteDdl
+import org.drivine.cypher.store.ddl.SqlStoreDdl
 import org.drivine.cypher.store.ddl.StoreDdl
 import org.drivine.schema.ConstraintSpec
 import org.drivine.schema.EnsureResult
@@ -201,8 +202,8 @@ interface StoreSchema {
 
     companion object {
 
-        /** The key of a record's `details` that holds its aliases. */
-        const val ALIASES = "aliases"
+        /** The key of a record's `details` that holds its aliases, as the module's DDL writes them there. */
+        const val ALIASES = SqlStoreDdl.ALIASES
 
         /** The schema of the store [ddl] makes: for [Neo4jDdl], Neo4j 5's and later (see [Neo4jSchema] for Neo4j 4's). */
         fun of(ddl: StoreDdl): StoreSchema = when (ddl) {
