@@ -30,7 +30,7 @@ sealed interface PlanAction {
      * A statement run for what it does: DDL in auto-commit, on a schema connection of its own, as drivine4j's
      * `SchemaExecutor` runs it (a FalkorDB [DdlStatement.Native] as a command of its driver), or a marker's, as its
      * auto-commit manager runs it. A DDL statement, or one that sets a record's aliases, tells the library's own caches
-     * that the store's schema changed, as drivine4j's `SchemaGrammar.changed()`.
+     * that the store's schema changed, whether it ran or failed, as drivine4j's `SchemaGrammar.changed()` in a `finally`.
      */
     data class Execute(
         val statement: DdlStatement,

@@ -6,8 +6,9 @@ import org.drivine.schema.SchemaPolicy
 
 /**
  * What a schema manager is asked to do on one database: the [operation], over the catalogs that apply there, under a
- * [policy]. The library resolves which databases a catalog applies to, and asks once for each, in its own order; the
- * planner decides everything that happens on one.
+ * [policy]. The library resolves which databases a catalog applies to, and asks once for each, in order of their names,
+ * as drivine4j sorts them: the first whose report throws ends the call, and those after it aren't asked. The planner
+ * decides everything that happens on one.
  *
  * @param database the database's name, as the log lines and failures name it
  * @param operation what is asked
