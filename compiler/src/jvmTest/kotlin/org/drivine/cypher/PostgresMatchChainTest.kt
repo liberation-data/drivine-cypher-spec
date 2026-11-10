@@ -16,7 +16,7 @@ import kotlin.test.assertTrue
  * each node it reaches by a probe of its key, `CROSS JOIN LATERAL (SELECT * FROM g_node n WHERE n.nid = e.dst OFFSET 0) n`.
  * Joined plainly, Postgres planned `MATCH (:CyLoop)-[r:CY_SELF]->(:CyLoop) RETURN count(r)`, with the node table analyzed
  * just after it was emptied (statistics of no rows over its pages), as a nested loop that read every node again for each
- * node: 475 s over 20,000 relationships, where the chain takes 30 ms (drivine#680, drivine4j#673). A pinned match is
+ * node: 475 s over 20,000 relationships, where the chain takes 61 ms (drivine#680, drivine4j#673). A pinned match is
  * selective, which Postgres plans well joined plainly, so it is compiled exactly as before: chaining it too is
  * drivine4j#742. The rows are the spec's; the plan and its time need a store, and are drivine4j's. This pins the shape: that
  * one table is read whole, the start, and every other read is a probe whose one condition an index answers, of a row read
@@ -79,6 +79,8 @@ class PostgresMatchChainTest {
             // The first with a label, read by the labels' index, and the relationships before it backwards.
             "MATCH (a:Rare)-[:COMMON]->(b) RETURN b" to listOf("e3 src n1 nid", "n2 nid e3 dst"),
             "MATCH (a)-[:R]->(b:L) RETURN a" to listOf("e3 dst n2 nid", "n1 nid e3 src"),
+            "MATCH (a)<-[:R]-(b:L) RETURN a" to listOf("e3 src n2 nid", "n1 nid e3 dst"),
+            "MATCH (a)-[:R]-(b:L) RETURN a" to listOf("e3 b n2 nid", "n1 nid e3 a"),
             "MATCH (a)-[:R]->(b:L)-[:S]->(c:M) RETURN a, c" to listOf("e4 dst n2 nid", "n1 nid e4 src", "e5 src n2 nid", "n3 nid e5 dst"),
             "MATCH (n:CyLoop)-[r:CY_SELF]->(n) RETURN count(r)" to listOf("e2 src n1 nid"),
             // A variable given its label where it is met again: the chain starts where it first appears.

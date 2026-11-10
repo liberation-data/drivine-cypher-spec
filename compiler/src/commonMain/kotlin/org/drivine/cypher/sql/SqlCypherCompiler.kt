@@ -1811,7 +1811,7 @@ abstract class SqlCypherCompiler(
          * each node it reaches by a probe of its key, the relationship's other end, so each row reads what it reaches by an
          * index, in that order, whatever the tables' statistics say. Joined plainly, Postgres planned `MATCH (:A)-[r:R]->(:A)
          * RETURN count(r)`, with the node table analyzed just after it was emptied (statistics of no rows over its pages), to
-         * read every node again for each node: 475 s over 20,000 relationships, where it takes 30 ms (drivine#680,
+         * read every node again for each node: 475 s over 20,000 relationships, where it takes 61 ms (drivine#680,
          * drivine4j#673). A `MATCH` chains only where nothing pins it ([match]): a node bound before it, given properties or
          * pinned by its `WHERE` makes the read selective, which Postgres plans well joined plainly, and a chain started there
          * kept meeting plans slower than the join's. Chaining every match from its most selective node is drivine4j#742.

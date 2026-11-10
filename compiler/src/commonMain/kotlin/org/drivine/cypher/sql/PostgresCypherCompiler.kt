@@ -204,7 +204,8 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
      * it: pages, no rows), as a scan of the whole of an index by the relationship's type alone, filtered for the row's node:
      * `MATCH (n) MERGE (n)-[:R]->(n)` took 18 s over 20,000 nodes where it takes 0.5 s (drivine4j#663, drivine#671). In the
      * probe the end's equality is the only condition an index can answer. `OFFSET 0` keeps the subquery from being pulled
-     * up into a plain join. A `MATCH` reads its nodes so too, by `nid`, from the relationship that reaches them: joined
+     * up into a plain join. A `MATCH` nothing pins reads its relationships and nodes so too, its nodes by `nid`, from the
+     * relationship that reaches them (see the base class's `pattern`): joined
      * plainly, with the node table analyzed just after it was emptied, `MATCH (:A)-[r:R]->(:A) RETURN count(r)` read every
      * node again for each node, 475 s over 20,000 relationships (drivine#680).
      */
