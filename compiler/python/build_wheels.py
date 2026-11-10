@@ -41,9 +41,10 @@ DATE = (1980, 1, 1, 0, 0, 0)
 def python_version(version: str) -> str:
     """
     The compiler's version as PEP 440 has it: 1.2.3 as it is, 1.2.3-rc.1 as 1.2.3rc1 (and alpha, beta as a, b), and a
-    dry run's 0.0.0-dry-run as 0.0.0.dev0. Anything else is refused, as PyPI would refuse it.
+    dry run's 0.0.0-dry-run, and a local build's 0.0.0-SNAPSHOT (build.gradle.kts's default), as 0.0.0.dev0. Anything
+    else is refused, as PyPI would refuse it.
     """
-    if version == "0.0.0-dry-run":
+    if version in ("0.0.0-dry-run", "0.0.0-SNAPSHOT"):
         return "0.0.0.dev0"
     match = re.fullmatch(r"(\d+\.\d+\.\d+)(?:-(alpha|beta|rc)\.(\d+))?", version)
     if not match:

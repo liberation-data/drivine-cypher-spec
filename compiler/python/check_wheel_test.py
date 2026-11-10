@@ -70,6 +70,7 @@ def main() -> None:
         ("1.2.3-alpha.2", "1.2.3a2"),
         ("1.2.3-beta.10", "1.2.3b10"),
         ("0.0.0-dry-run", "0.0.0.dev0"),
+        ("0.0.0-SNAPSHOT", "0.0.0.dev0"),
     ]:
         if build_wheels.python_version(version) != expected:
             fail(f"{version} as {build_wheels.python_version(version)}, not {expected}")

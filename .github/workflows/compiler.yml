@@ -87,6 +87,11 @@ jobs:
       - name: The Python wheels' check, over made-up libraries
         run: python python/check_wheel_test.py
       - run: ./gradlew --no-daemon clean linuxX64Test nativeCorpusCheck -Ppython="$(command -v python)" | tee corpus.log
+      # The version script (native/exports.map) leaves the C API the library's only exports.
+      - name: The shared library exports the C API alone
+        run: |
+          nm -D --defined-only build/bin/linuxX64/drivinecypherReleaseShared/libdrivinecypher.so | awk '{ print $NF }' | sort > exports.txt
+          diff <(printf 'drivine_compile\ndrivine_free\n') exports.txt || { echo "::error::libdrivinecypher.so exports more than drivine_compile and drivine_free."; exit 1; }
       - name: The shared library for linuxArm64 and mingwX64, cross-compiled
         run: ./gradlew --no-daemon linkDrivinecypherReleaseSharedLinuxArm64 linkDrivinecypherReleaseSharedMingwX64
       - name: Summary
@@ -110,6 +115,10 @@ jobs:
           path: ~/.konan
           key: konan-${{ runner.os }}-${{ hashFiles('compiler/build.gradle.kts') }}
       - run: ./gradlew --no-daemon clean macosArm64Test nativeCorpusCheck -Ppython="$(command -v python)" | tee corpus.log
+      # The symbol list (native/exports.txt) leaves the C API the library's only exports.
+      - name: The shared library exports the C API alone
+        run: |
+          diff native/exports.txt <(nm -gU build/bin/macosArm64/drivinecypherReleaseShared/libdrivinecypher.dylib | awk '{ print $NF }' | sort) || { echo "::error::libdrivinecypher.dylib exports more than native/exports.txt."; exit 1; }
       - name: Summary
         if: always()
         run: ../.github/scripts/compiler-summary.sh build/test-results/macosArm64Test corpus.log >> "$GITHUB_STEP_SUMMARY"

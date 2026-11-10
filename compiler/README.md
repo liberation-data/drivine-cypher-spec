@@ -170,13 +170,14 @@ one wheel a platform, `py3-none-<platform>`, as the library is the same for ever
 | `mingwX64` | `win_amd64` | |
 
 There's none for Intel Macs (Kotlin/Native deprecates `macosX64`) or musl Linux (Kotlin/Native has no musl target): pip
-finds no wheel there, and drivine-python names the platform where it would load the compiler. The library exports the
-C API alone (a version script on Linux and a symbol list on macOS, in `native/`, and Kotlin/Native's `.def` on
-Windows), so the Kotlin/Native runtime's symbols can't clash with another library in the host's process; on Linux it is
-linked `--as-needed`, which leaves out `libcrypt.so.1` and the other system libraries it doesn't call. The binding loads
-the library on the first compile, once, and frees each answer with `drivine_free`. `python/build_wheels.py` packs the
-wheels with the standard library alone, the same bytes from the same libraries; `python/check_wheel.py` checks each,
-and `python/check_wheel_test.py`, which CI runs, tests both over made-up libraries.
+finds no wheel there, and drivine-python names the platform where it would load the compiler. The library exports the C
+API alone (a version script on Linux and a symbol list on macOS, in `native/`, which CI checks the library's exports
+against, and Kotlin/Native's `.def` on Windows, which adds only its `drivinecypher_symbols`), so the Kotlin/Native
+runtime's symbols can't clash with another library in the host's process; on Linux it is linked `--as-needed`, which
+leaves out `libcrypt.so.1` and the other system libraries it doesn't call. The binding loads the library on the first
+compile, once, and frees each answer with `drivine_free`. `python/build_wheels.py` packs the wheels with the standard
+library alone, the same bytes from the same libraries; `python/check_wheel.py` checks each, and
+`python/check_wheel_test.py`, which CI runs, tests both over made-up libraries.
 
 ### C
 
