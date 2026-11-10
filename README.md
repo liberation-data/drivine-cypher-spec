@@ -10,7 +10,7 @@ These files say what a statement in Drivine's flavour of Cypher gives on each st
 - `store.yaml`: the store layout's DDL: the tables, the probe that finds them made, and each index and constraint as each store makes, drops and lists it, for the graph `drivine` and a set of schema specs, with a read for each index that the compiler must answer from it. Read with no store. See [The store layout](#the-store-layout). It also holds the store's schema: how each store's listings are read back, whether an item is a spec's and in its shape, what each store can do, and what its errors say. See [The store's schema](#the-stores-schema).
 - `marker.yaml`: the schema marker (`_DrivineSchema`) and the stamps: the statements each store reads and writes the marker and the store's stamp (`DrivineStore`) with, the marker's inventory as it is written and read back, the version token, and the form of the stamp each node carries. Read with no store. See [The schema marker and the stamps](#the-schema-marker-and-the-stamps).
 - `host.yaml`: what each library's own code does with the values compiled SQL hands it: the functions it registers on SQLite, and how it reads a column of a statement's rows. Read with no store. See [Host functions and readers](#host-functions-and-readers).
-- `search.yaml`: full-text search: the nodes a search finds on each store, over the graph the file's `graph` writes, and how closely each SQL store ranks a corpus, `search/docs-corpus.json`, as Neo4j's full-text index ranks it. See [Full-text search](#full-text-search).
+- `search.yaml`: full-text search: the nodes a search finds on each store, over the graph the file's `graph` writes, and how closely each other store ranks a corpus, `search/docs-corpus.json`, as Neo4j's full-text index ranks it. See [Full-text search](#full-text-search).
 - `cli/`: the `drivine` CLI's contract, which runs Cypher on every store and prints its results as cypher-shell does, and `cli.yaml`, the cases each build of it runs. See `cli/README.md`.
 - `model/`: the model file each library writes of an application's fragments, views and how they are stored, which Drivine Studio reads. See `model/README.md`.
 
@@ -274,7 +274,7 @@ A change to a host vector names the store cases it moves, and a change to a pair
 
 ## Full-text search
 
-A full-text search (a library's `loadMatching`) is given a label, the properties of its full-text index, a query as a user writes it, and `topK`, and gives the best `topK` nodes that match, each with a score. On a graph engine the store's own index answers it: Lucene's on Neo4j, Tantivy's on Memgraph, RediSearch's on FalkorDB. On a SQL store Drivine parses the query and scores the nodes itself, by BM25, or through Oracle Text where Oracle has the index. `search.yaml` pins what a search finds, the same on every store, and how close each SQL store's ranking must come to Neo4j's. Neo4j's is the one the others are held to.
+A full-text search (a library's `loadMatching`) is given a label, the properties of its full-text index, a query as a user writes it, and `topK`, and gives the best `topK` nodes that match, each with a score. On a graph engine the store's own index answers it: Lucene's on Neo4j, Tantivy's on Memgraph, RediSearch's on FalkorDB. On a SQL store Drivine parses the query and scores the nodes itself, by BM25, or through Oracle Text where Oracle has the index. `search.yaml` pins what a search finds, the same on every store, and how close each other store's ranking must come to Neo4j's. Neo4j's is the one the others are held to.
 
 ```yaml
 graph: |
@@ -296,8 +296,10 @@ ranking:
   top: 5
   recorded: {image: "neo4j:2026.10.1", digest: "neo4j@sha256:…", statements: [...]}
   bars:
-    - {stores: ["postgres", "oracle", "sqlite"], sameTop: 15, overlap: 3.5, target: {sameTop: 21, overlap: 4.5}}
-    - {stores: ["oracle-text"], sameTop: 6, overlap: 2.8}
+    - {stores: ["postgres", "oracle", "sqlite"], sameTop: 17, overlap: 4.3, target: {sameTop: 21, overlap: 4.5}, measured: {...}}
+    - {stores: ["memgraph"], sameTop: 16, overlap: 4.09, measured: {...}}
+    - {stores: ["oracle-text"], sameTop: 6, overlap: 2.8, note: "...", measured: {...}}
+    - {stores: ["falkordb"], sameTop: 9, overlap: 2.09, note: "...", measured: {...}}
   queries:
     - {query: "GraphObjectManager", neo4j: ["legacy-graph-object-manager#1", ...]}
 ```
@@ -318,11 +320,11 @@ ranking:
 
 A case says what Neo4j's index gives, with Neo4j's default analyzer, `standard-no-stop-words`: words ORed, a phrase, `+` and `-`, `AND`, `OR` and `NOT` (and `&&`, `||`), `word*`, `field:word`, escapes, case and Unicode. A refusal is Drivine's own, not Neo4j's: a query with no word to look for (operators, punctuation or excluded words alone) and an empty one are refused with `A full-text query needs a word to look for: '<query>' has none.`, on every store, where Neo4j gives no hits, every node, or a parse error.
 
-**The ranking.** Scores differ between stores in scale, so the ranking pins ids and order, not scores. A runner writes the corpus (`search/docs-corpus.json`, a section of Drivine's docs to a node, `{id, title, body}`) with `write`, bound as `$rows`, makes `index` and waits for it as the exact cases do (on `oracle`, none; on Postgres, with it and without it), and asks each of `queries` for its best `top`, by `search`. Over the queries whose `neo4j` is not empty, it counts those whose top hit is Neo4j's, and the mean of how many of the top five are in Neo4j's top five, as sets. On each store of a bar, the count must be at least `sameTop` and the mean at least `overlap`. `target` is where the SQL stores' bar goes once BM25 measures a text's length in words (liberation-data/drivine4j#665); `measured` is what each store gave when the file was recorded, and is not read, and so is a bar's `note`. Each store's bar is what it gave when the file was recorded, rounded down, so a change can't make any store rank further from Neo4j; Oracle Text's is its own, as it isn't BM25, and Memgraph's and FalkorDB's are their search engines'.
+**The ranking.** Scores differ between stores in scale, so the ranking pins ids and order, not scores. A runner writes the corpus (`search/docs-corpus.json`, a section of Drivine's docs to a node, `{id, title, body}`) with `write`, bound as `$rows`, makes `index` and waits for it as the exact cases do (on `oracle`, none; on Postgres, with it and without it), and asks each of `queries` for its best `top`, by `search`. Over the queries whose `neo4j` is not empty, it counts those whose top hit is Neo4j's, and the mean of how many of the top five are in Neo4j's top five, as sets. On each store of a bar, the count must be at least `sameTop` and the mean at least `overlap`. `target` is where the BM25 stores' bar goes once BM25 measures a text's length in words (liberation-data/drivine4j#665), and the other bars have none yet; `measured` is what each store gave when the file was recorded, and is not read, and so is a bar's `note`. Each store's bar is what it gave when the file was recorded, rounded down, so a change can't make any store rank further from Neo4j; Oracle Text's is its own, as it isn't BM25, and Memgraph's and FalkorDB's are their search engines'.
 
 **The corpus** is drivine4j's `src/test/resources/fulltext/docs-corpus.json` at dd4a66f0, byte for byte (SHA-256 `865f814ceaba8ade6ba604dcb3614aa344529c0f701991c40b6c169ee4c9c0e5`), which drivine4j's `FullTextRankingAgreementTest` reads: the sections of Drivine's own docs at 3a8b0b12, as that test says, each a node. Its `queries` are that test's.
 
-**Recording Neo4j's ranking again.** `recorded` names the image the `neo4j` lists were recorded on, by digest, and the statements that record them: the index made and filled, and each query asked of it. When Neo4j's pin moves, run them on the new image, through the test lock, and write the lists again with the new image's name and digest; a change of a list is Neo4j's and is said so in the pull request. drivine4j's `Neo4jRanking` asks Neo4j the same way.
+**Recording Neo4j's ranking again.** `recorded` names the image the `neo4j` lists were recorded on, by digest, the `version` it reported and the `date`, and the statements that record them: the index made and filled, and each query asked of it. When Neo4j's pin moves, run them on the new image, through the test lock, and write the lists again with the new image's name and digest; a change of a list is Neo4j's and is said so in the pull request. drivine4j's `Neo4jRanking` asks Neo4j the same way.
 
 ## Changing the spec
 

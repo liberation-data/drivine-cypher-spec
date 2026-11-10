@@ -307,7 +307,7 @@ cases:
         error: "A full-text query needs a word to look for: '   ' has none."
         today: [{stores: ["graph"], issue: "liberation-data/drivine-cypher-spec#100"}]
 
-# Neo4j's own ranking of a corpus, and how closely each SQL store's must agree with it.
+# Neo4j's own ranking of a corpus, and how closely each other store's must agree with it.
 ranking:
   # drivine4j's src/test/resources/fulltext/docs-corpus.json at dd4a66f0, byte for byte (SHA-256 865f814c…c9c0e5): the
   # sections of Drivine's docs, a node each, and the 22 queries of its FullTextRankingAgreementTest.
@@ -331,11 +331,11 @@ ranking:
       - "CALL db.index.fulltext.queryNodes('Article_body_fulltext', $query, {limit: 5}) YIELD node RETURN node.id"
   # Each bar holds over the queries Neo4j gives any hit for (21 of the 22): the same top hit as Neo4j's for at least
   # `sameTop` of them, and a mean, over them, of at least `overlap` of the top five in common with Neo4j's, as sets.
-  # `target` is where the bar goes once liberation-data/drivine4j#665 and the norms land. `measured` is what each store
-  # gave when this file was recorded, by drivine4j at dd4a66f0, and is not read.
-  # Each store's bar is what it gives today (2026-11-10), rounded down, so the move into the module can't regress any of them; a
-  # store's target is the bar it is to reach. The BM25 stores aim at 4.5 and 21; Oracle Text's and FalkorDB's targets
-  # come with liberation-data/drivine4j#763 and #666.
+  # Each store's bar is what it gave when this file was recorded (2026-11-10, drivine4j at dd4a66f0), rounded down, so
+  # the move into the module can't regress any of them. `measured` is what each store gave then, and is not read, nor
+  # is a bar's `note`. `target` is the bar a store is to reach: the BM25 stores' once liberation-data/drivine4j#665 and
+  # the norms land. Memgraph, Oracle Text (its own measure, liberation-data/drivine-cypher-spec#102) and FalkorDB
+  # (liberation-data/drivine4j#666) have none yet.
   bars:
     - stores: ["postgres", "oracle", "sqlite"]
       sameTop: 17
