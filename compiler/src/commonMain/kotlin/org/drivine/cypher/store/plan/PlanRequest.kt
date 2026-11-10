@@ -12,7 +12,8 @@ import org.drivine.schema.SchemaPolicy
  *
  * @param database the database's name, as the log lines and failures name it
  * @param operation what is asked
- * @param catalogs the startup catalogs that apply to [database], each as one catalog of the library declares it, in the
+ * @param catalogs the startup catalogs that apply to [database], of every owner, whichever owners [operation] applies (a
+ *   co-owned item and a conflict are found across them all), each as one catalog of the library declares it, in the
  *   order the library was given them
  * @param runtime the items ensured at runtime that apply to [database], a catalog for each owner and target, as drivine4j's
  *   `SchemaManager` keeps them: [SchemaPlanner.runtimeOn] of the library's [RuntimeCatalog]s. For an [Operation.Ensure],

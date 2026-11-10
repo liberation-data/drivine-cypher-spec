@@ -377,6 +377,15 @@ class SchemaPlannerTest {
         val ensure = PlanRequest("default", Operation.Ensure(null, emptyList()), listOf(versioned), listOf(DeclaredCatalog(null, items = listOf(name))))
         assertEquals(DatabaseReport("default"), assertIs<PlanStep.Done>(planner.start(ensure, 0)).report)
         assertEquals(DatabaseReport("default"), assertIs<PlanStep.Done>(planner.start(request(Operation.Remove(null, emptyList()), versioned), 0)).report)
+        // Nor is it refused where the owners declare items that conflict: captured from drivine4j, which only logs that
+        // there is nothing to ensure.
+        val conflicting = request(
+            Operation.Ensure(null, emptyList()),
+            DeclaredCatalog(null, items = listOf(VectorIndexSpec("Chunk", "embedding", 384))),
+            DeclaredCatalog("rag", items = listOf(VectorIndexSpec("Chunk", "embedding", 768))),
+        )
+        assertNull(planner.validate(conflicting))
+        assertEquals(DatabaseReport("default"), assertIs<PlanStep.Done>(planner.start(conflicting, 0)).report)
     }
 
     @Test
