@@ -52,12 +52,12 @@ runs:
     # Each archive cached under its own checksum, and saved as soon as it is fetched, so a job that fetches one and fails
     # on the other, as in an outage, leaves the first for its re-run.
     - if: inputs.cache == 'true'
-      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
       with:
         path: ${{ steps.pins.outputs.jdk_file }}
         key: pinned-jdk-${{ steps.pins.outputs.jdk_sha }}
     - if: inputs.cache == 'true'
-      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
       with:
         path: ${{ steps.pins.outputs.gradle_file }}
         key: pinned-gradle-${{ steps.pins.outputs.gradle_sha }}
@@ -70,7 +70,7 @@ runs:
         SHA: ${{ steps.pins.outputs.jdk_sha }}
         FILE: ${{ steps.pins.outputs.jdk_file }}
     - if: inputs.cache == 'true' && steps.jdk.outputs.fetched == 'true'
-      uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
       with:
         path: ${{ steps.pins.outputs.jdk_file }}
         key: pinned-jdk-${{ steps.pins.outputs.jdk_sha }}
@@ -83,7 +83,7 @@ runs:
         SHA: ${{ steps.pins.outputs.gradle_sha }}
         FILE: ${{ steps.pins.outputs.gradle_file }}
     - if: inputs.cache == 'true' && steps.gradle.outputs.fetched == 'true'
-      uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
       with:
         path: ${{ steps.pins.outputs.gradle_file }}
         key: pinned-gradle-${{ steps.pins.outputs.gradle_sha }}
@@ -104,7 +104,7 @@ runs:
     - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
       with:
         distribution: jdkfile
-        jdkFile: ${{ steps.pins.outputs.jdk_file }}
+        jdk-file: ${{ steps.pins.outputs.jdk_file }}
         java-version: ${{ steps.pins.outputs.version }}
     - name: The JDK is the pinned one
       shell: bash
