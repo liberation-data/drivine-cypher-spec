@@ -6,7 +6,10 @@
 # DrivineException stands for in its copy: drivine4j keeps those files and calls store/, and scripts/port-rewrites.sed
 # renames them in what it merges. And store/ddl/, the store layout's DDL, written from drivine4j's schema grammars and
 # graph classes (backend/*/…Graph.kt, …SchemaGrammar.kt, OracleSideTable.kt, PostgresWriteFunctions.kt and
-# schema/{Neo4j,Memgraph,FalkorDb}SchemaGrammar.kt) after the sync ended, and pinned by the spec's store.yaml.
+# schema/{Neo4j,Memgraph,FalkorDb}SchemaGrammar.kt) after the sync ended, and pinned by the spec's store.yaml. And
+# store/marker/, the schema marker and the stamps, written from drivine4j's schema/SchemaVersionStore.kt, ReservedNodes.kt,
+# SchemaCatalog.kt, backend/*/…ReservedNodes.kt, …VersionMarker.kt, …StoreStamp.kt and model/Stamps.kt, and pinned by
+# the spec's marker.yaml.
 src/main/antlr/org/drivine/cypher/grammar/Cypher.g4 src/commonMain/antlr/Cypher.g4
 src/main/kotlin/org/drivine/cypher/ src/commonMain/kotlin/org/drivine/cypher/
 src/main/kotlin/org/drivine/schema/ConstraintSpec.kt src/commonMain/kotlin/org/drivine/schema/ConstraintSpec.kt

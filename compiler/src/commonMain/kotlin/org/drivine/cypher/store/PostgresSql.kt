@@ -66,6 +66,13 @@ object PostgresSql {
     }
 
     /**
+     * The property [key] of [alias] as a number where one is stored, and null for anything else: what the schema marker is
+     * ordered by (`store.marker`), so a marker whose moment is not a number is read as never applied, not as text.
+     */
+    fun number(alias: String, key: String): String =
+        "CASE WHEN jsonb_typeof(${value(alias, key)}) = 'number' THEN (${column(alias, "props")} ->> ${keyOf(key)})::numeric END"
+
+    /**
      * The embedding stored under [key] of [alias] as a pgvector `vector`: the JSON array's text, which is the text pgvector
      * reads a vector from. Of [dimensions] when given, as an index over it is made, so a statement that reads it so is
      * answered by the index.

@@ -50,4 +50,20 @@ object SqliteSql {
      */
     fun property(alias: String, key: String): String =
         if (key == Stamps.PROPERTY) column(alias, "stamp") else propertyText(column(alias, "props"), path(key))
+
+    /**
+     * The property [key] of [alias] as a number where one is stored, and null for anything else: what the schema marker is
+     * ordered by (`store.marker`), so a marker whose moment is not a number is read as never applied.
+     */
+    fun number(alias: String, key: String): String =
+        "(CASE WHEN json_type(${column(alias, "props")}, ${path(key)}) IN ('integer', 'real') THEN ${column(alias, "props")} ->> ${path(key)} END)"
+
+    /** The labels of a node that carries [label] alone, as a literal of the JSON array they are stored as. */
+    fun labelArray(label: String): String = literal("[${quoted(label)}]")
+
+    /**
+     * What a statement whose text values are JSON opens with: SQLite has no JSON type for a column to say so, so a
+     * library reads a row of such a statement as the JSON it holds, as drivine4j's row mapper does.
+     */
+    const val JSON_ROWS = "/* drivine:json */"
 }
