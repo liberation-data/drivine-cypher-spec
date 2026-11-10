@@ -1,0 +1,45 @@
+package org.drivine.cypher.store.ddl
+
+import org.drivine.cypher.api.FullTextSearch
+import org.drivine.cypher.api.GraphOptions
+import org.drivine.cypher.api.SearchIndex
+import org.drivine.cypher.api.SearchPlan
+import org.drivine.cypher.api.SearchRequest
+import org.drivine.cypher.api.SearchStore
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertTrue
+
+/** How a name is written into a graph engine's Cypher as a string literal (liberation-data/drivine4j#767). */
+class CypherNamesTest {
+
+    @Test
+    fun aStringIsOneLiteralWhateverItHolds() {
+        assertEquals("'plain'", CypherNames.string("plain"))
+        assertEquals("'it\\'s'", CypherNames.string("it's"))
+        assertEquals("'a\\\\b'", CypherNames.string("a\\b"))
+        // A backslash before a quote is escaped on its own, so it cannot escape the quote that follows.
+        assertEquals("'a\\\\\\'b'", CypherNames.string("a\\'b"))
+        assertEquals("'ends\\\\'", CypherNames.string("ends\\"))
+        // A backtick and a double quote are text inside single quotes.
+        assertEquals("'b`a\"d'", CypherNames.string("b`a\"d"))
+        // The Unicode escape of a quote, which Neo4j decodes before it reads the statement, is the quote it is.
+        assertEquals("'x\\'y'", CypherNames.string("x\\u0027y"))
+        assertEquals("'x\\'y'", CypherNames.string("x\\uuu0027y"))
+    }
+
+    @Test
+    fun aGraphEnginesSearchWritesItsIndexNameOrLabelAsAString() {
+        fun cypher(store: SearchStore, request: SearchRequest) =
+            requireNotNull((FullTextSearch.plan(store, GraphOptions("g"), request) as SearchPlan).cypher).lineSequence().first()
+        val odd = "it's\\"
+        for (store in listOf(SearchStore.NEO4J, SearchStore.MEMGRAPH)) {
+            val named = cypher(store, SearchRequest(listOf("L"), listOf("p"), "q", SearchIndex(name = odd), topK = 5))
+            assertTrue("('it\\'s\\\\', \$" in named, "$store: $named")
+            val derived = cypher(store, SearchRequest(listOf(odd), listOf("p"), "q", topK = 5))
+            assertTrue("('it\\'s\\\\_p_fulltext', \$" in derived, "$store: $derived")
+        }
+        val falkor = cypher(SearchStore.FALKORDB, SearchRequest(listOf(odd), listOf("p"), "q", topK = 5))
+        assertTrue("queryNodes('it\\'s\\\\', \$" in falkor, falkor)
+    }
+}

@@ -33,6 +33,17 @@ object CypherNames {
      * spelling.
      */
     fun quoted(name: String): String = "`${name.replace(ESCAPED_BACKTICK, "`").replace("`", "``")}`"
+
+    /** The Unicode escape of a single quote, with as many `u` as an escape may have. */
+    private val ESCAPED_QUOTE = Regex("\\\\u+0027")
+
+    /**
+     * [text] as a Cypher string literal, between single quotes, whatever it holds: a backslash and a quote in it escaped with
+     * a backslash, as Cypher reads them, so it is one string on Neo4j, Memgraph and FalkorDB. As [quoted] does of a backtick,
+     * the `\uXXXX` escape of a quote, which Neo4j decodes before it reads the statement, is taken for the quote it is, so a
+     * name can end its own quotes in neither spelling (liberation-data/drivine4j#767).
+     */
+    fun string(text: String): String = "'${text.replace(ESCAPED_QUOTE, "'").replace("\\", "\\\\").replace("'", "\\'")}'"
 }
 
 /** The name the graph engines give [similarity]. */
