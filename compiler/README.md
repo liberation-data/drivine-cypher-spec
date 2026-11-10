@@ -41,8 +41,9 @@ calls into the compiler.
 ### drivine4j's own calls
 
 drivine4j calls more of the module than the API above: the compiler classes themselves, the parts of its own SQL
-helpers that the compiler calls too (`org.drivine.cypher.store`), and a few of the schema specs' and compilers'
-functions. The compiler classes are public and unmarked; the rest are public only so that drivine4j, built apart from
+helpers that the compiler calls too (`org.drivine.cypher.store`), the store layout's DDL (`org.drivine.cypher.store.ddl`:
+each store's tables, the probe that finds them made, and its indexes, constraints and catalog statements, as the spec's
+`store.yaml` pins them), and a few of the schema specs' and compilers' functions. The compiler classes are public and unmarked; the rest are public only so that drivine4j, built apart from
 the module, can call them, and are marked `@org.drivine.DrivineInternalApi`, an opt-in at the level of an error:
 drivine4j opts in module-wide, and any other caller that doesn't is refused at compile time. They may change or go in
 any release.
@@ -262,6 +263,9 @@ The JVM is the oracle. `./gradlew jvmOracle` writes, into `build/oracle`:
   value, a function's name a letter off. Only a mutant whose answer isn't the parser's syntax refusal is kept, as the
   stdlib's exceptions and texts reach a refusal off those paths: 10,000 of them (`-Pmutants.count=<n>`), from the seed.
   Where fewer are of interest, `jvmOracle` fails.
+- `store.json`: the spec's `store.yaml` as JSON, which `StoreDdlTest` reads on every target: the store layout's DDL
+  each generator in `org.drivine.cypher.store.ddl` must give, the object names Java's `String.hashCode` gives, and the
+  reads the compiler must answer from each index.
 - `standins-<name>.txt`: what Java gives where the module stands in for it, worked out by Java's own API on the pinned
   JDK (`StandIns`): `ZoneId.of`'s reading of a zone; java.time's calendar dates, and its parse and text of a temporal
   value, with java.math's of a duration; `substring`, `Integer.parseInt(s, 16)` and `appendCodePoint` of a string

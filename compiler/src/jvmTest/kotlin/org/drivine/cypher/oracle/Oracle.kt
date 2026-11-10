@@ -22,6 +22,8 @@ import java.time.format.DateTimeFormatter
  * - `standins-<name>.txt`: what Java gives where the module stands in for it, a file for each stand-in. See [StandIns].
  * - `mutants.jsonl`: a sample of the spec's statements mutated, whose answers the parser's syntax refusal isn't, as
  *   `corpus.jsonl` has them. See [Mutants].
+ * - `store.json`: the spec's `store.yaml`, the store layout's DDL, as JSON, which every target's JSON reader reads: the
+ *   other targets have no YAML reader. See `StoreDdlTest`.
  *
  *   Oracle <spec directory> <output directory> <fuzz count> <seed> <mutant count>
  */
@@ -44,6 +46,8 @@ object Oracle {
         }
         val doubles = Doubles.write(File(out, "doubles.txt"), count, seed)
         val standIns = StandIns.write(out, seed)
+        // The store layout's DDL, for each target's StoreDdlTest.
+        File(out, "store.json").writeText(json.writeValueAsString(yaml.readTree(File(spec, "store.yaml"))))
         println("jvmOracle: ${corpus.first} statements in the corpus (${corpus.second} left out, as they embed the clock); $doubles double cases.")
         println("jvmOracle: ${mutants.made} mutant requests, ${mutants.kept} of interest, ${mutants.written} of them in mutants.jsonl.")
         println("jvmOracle: stand-in cases ${standIns.entries.joinToString { (name, n) -> "$name $n" }}.")
