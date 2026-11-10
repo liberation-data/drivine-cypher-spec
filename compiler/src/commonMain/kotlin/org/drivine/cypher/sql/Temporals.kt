@@ -39,6 +39,13 @@ class Temporals(
         shared(listOf(text)) { (t) -> ofKinds(listOf(t), kinds) { kind -> body(kind, t) } }
 
     /**
+     * [body] of the kind among [kinds] that a temporal value's tag names, its word [kind], a SQL text, and of the tag's text
+     * [text], written once: null where it names none of them. A tag names its kind, so no text's shape is read.
+     */
+    fun byTag(kind: String, text: String, kinds: List<Temporal> = Temporal.instants, body: (Temporal, String) -> String): String =
+        shared(listOf(kind, text)) { (k, t) -> ofKinds(listOf(t), kinds, { of -> "$k = '${of.function}'" }) { of -> body(of, t) } }
+
+    /**
      * A `CASE` that gives [body] of the kind among [kinds] that each of [texts] is: null where they are of none. On a store
      * that reads a year BC otherwise than ISO 8601 writes it, a kind with a date has a `WHEN` first, where each is a text
      * of a year from 1000 on ([Temporal.adPattern]), and [body] there reads them as they are ([TemporalSql.knownAd]); the
@@ -48,17 +55,85 @@ class Temporals(
      * binds nothing ([binding]), as in an aggregate's argument: a value made of another is written out wherever it is read
      * there, and a long [body] written twice would double it again at each (see [TemporalSql.bcOnly]).
      */
-    private fun ofKinds(texts: List<String>, kinds: List<Temporal>, body: (Temporal) -> String): String {
+    private fun ofKinds(texts: List<String>, kinds: List<Temporal>, tagged: ((Temporal) -> String)? = null, body: (Temporal) -> String): String {
         fun whens(test: (String) -> String, sql: String) = "WHEN ${texts.joinToString(" AND ", transform = test)} THEN $sql"
         val first = mutableListOf<String>()
         val own = mutableListOf<String>()
         for (kind in kinds) {
             val ad = kind.adPattern?.takeIf { sql.numbersBcFromOne }
             val (plain, read) = if (ad == null) body(kind) to false else sql.knownAd(texts) { body(kind) }
-            if (read && ad != null && (binding() || plain.length <= TemporalSql.GUARDED_UP_TO)) first += whens({ sql.matches(it, literal(sql.regex(ad))) }, plain)
-            own += whens({ isKind(it, kind) }, if (read) body(kind) else plain)
+            // A tag's text is of its kind: the year's test alone tells it is from 1000 on.
+            val tag = tagged?.let { "${it(kind)} AND " }.orEmpty()
+            if (read && ad != null && (binding() || plain.length <= TemporalSql.GUARDED_UP_TO)) first += "WHEN " + tag + whens({ sql.matches(it, literal(sql.regex(ad))) }, plain).removePrefix("WHEN ")
+            own += if (tagged != null) "WHEN ${tagged(kind)} THEN ${if (read) body(kind) else plain}" else whens({ isKind(it, kind) }, if (read) body(kind) else plain)
         }
         return "CASE ${(first + own).joinToString(" ")} END"
+    }
+
+    // ----- The stored tag's sort key -----
+
+    /**
+     * The sort key `s` of the canonical text [text] of [kind], a SQL text, as [key] works it out in Kotlin, by text and integer
+     * arithmetic on the text alone, never from a store's timestamp, which holds neither every year nor nanoseconds: null where
+     * [text] is null, and for a duration, which has no order.
+     */
+    fun sortKey(text: String, kind: Temporal): String? = if (kind == Temporal.DURATION) null else sql.storedKey(text, kind) ?: shared(listOf(text)) { (t) ->
+        fun sub(of: String, from: String, length: String? = null) = "SUBSTR($of, $from${length?.let { ", $it" }.orEmpty()})"
+        fun int(of: String) = sql.integer(of)
+        val len = "LENGTH($t)"
+        // The nine digits of a time's fraction, written from its tenth character where it has one: of a zoned time, [local] long.
+        fun fraction(time: String, local: String? = null) =
+            sub("${if (local == null) sub(time, "10") else "CASE WHEN $local > 9 THEN ${sub(time, "10", "$local - 9")} ELSE '' END"} || '000000000'", "1", "9")
+        fun date(day: String, hhmmss: String = "") = shared(listOf(day)) { (d) ->
+            "${sql.digits("${int(sub(d, "1", "LENGTH($d) - 6"))} + $YEAR_BIAS", 10)} || ${sub(d, "LENGTH($d) - 4", "2")} || ${sub(d, "LENGTH($d) - 1", "2")}$hhmmss"
+        }
+        // A zoned text's offset, in seconds, and how long its text is: `Z`, or `+hh:mm`.
+        val zulu = "${sub(t, len, "1")} = 'Z'"
+        val offset = "CASE WHEN $zulu THEN 0 ELSE CASE WHEN ${sub(t, "$len - 5", "1")} = '-' THEN -1 ELSE 1 END * " +
+            "(${int(sub(t, "$len - 4", "2"))} * 3600 + ${int(sub(t, "$len - 1", "2"))} * 60) END"
+        fun seconds(time: String) = "(${int(sub(time, "1", "2"))} * 3600 + ${int(sub(time, "4", "2"))} * 60 + ${int(sub(time, "7", "2"))})"
+        when (kind) {
+            Temporal.DATE -> date(t)
+            Temporal.LOCAL_TIME -> sql.digits("${seconds(t)} * $NANOS + ${int(fraction(t))}", 14)
+            Temporal.TIME -> shared(listOf(offset)) { (o) ->
+                val local = "CASE WHEN $zulu THEN $len - 1 ELSE $len - 6 END"
+                "${sql.digits("${seconds(t)} * $NANOS + ${int(fraction(t, local))} - $o * $NANOS + $TIME_BIAS", 15)} || ${sql.digits("$o + $OFFSET_BIAS", 6)}"
+            }
+            Temporal.LOCAL_DATE_TIME -> shared(listOf(sql.position(t, "'T'"))) { (p) ->
+                val time = sub(t, "$p + 1")
+                date(sub(t, "1", "$p - 1"), " || ${sub(time, "1", "2")} || ${sub(time, "4", "2")} || ${sub(time, "7", "2")} || ${fraction(time)}")
+            }
+            Temporal.DATE_TIME -> shared(listOf(sql.position(t, "'T'"), offset)) { (p, o) ->
+                val day = sub(t, "1", "$p - 1")
+                val time = sub(t, "$p + 1")
+                val local = "CASE WHEN $zulu THEN $len - $p - 1 ELSE $len - $p - 6 END"
+                shared(listOf(int(sub(day, "1", "$p - 7")), int(sub(day, "$p - 5", "2")), int(sub(day, "$p - 2", "2")), "${seconds(time)} - $o")) { (y, m, d, u) ->
+                    val carry = "CASE WHEN $u < 0 THEN -1 WHEN $u >= 86400 THEN 1 ELSE 0 END"
+                    shared(listOf(carry)) { (c) ->
+                        fun daysIn(year: String, month: String) = "CASE WHEN $month IN (4, 6, 9, 11) THEN 30 WHEN $month = 2 THEN CASE WHEN ${sql.mod(year, "4")} = 0 AND " +
+                            "(${sql.mod(year, "100")} <> 0 OR ${sql.mod(year, "400")} = 0) THEN 29 ELSE 28 END ELSE 31 END"
+                        val year = "CASE WHEN $c < 0 AND $m = 1 AND $d = 1 THEN $y - 1 WHEN $c > 0 AND $m = 12 AND $d = 31 THEN $y + 1 ELSE $y END"
+                        val month = "CASE WHEN $c < 0 AND $d = 1 THEN CASE WHEN $m = 1 THEN 12 ELSE $m - 1 END " +
+                            "WHEN $c > 0 AND $d = ${daysIn(y, m)} THEN CASE WHEN $m = 12 THEN 1 ELSE $m + 1 END ELSE $m END"
+                        val dayOf = "CASE WHEN $c < 0 AND $d = 1 THEN CASE WHEN $m = 1 THEN 31 ELSE ${daysIn(y, "$m - 1")} END " +
+                            "WHEN $c > 0 AND $d = ${daysIn(y, m)} THEN 1 ELSE $d + $c END"
+                        val clock = "$u - $c * 86400"
+                        "${sql.digits("$year + $YEAR_BIAS", 10)} || ${sql.digits(month, 2)} || ${sql.digits(dayOf, 2)} || " +
+                            "${sql.digits(sql.div(clock, "3600"), 2)} || ${sql.digits(sql.mod(sql.div(clock, "60"), "60"), 2)} || ${sql.digits(sql.mod(clock, "60"), 2)} || " +
+                            "${fraction(time, local)} || ${sql.digits("$o + $OFFSET_BIAS", 6)}"
+                    }
+                }
+            }
+            Temporal.DURATION -> error("a duration has no sort key")
+        }
+    }
+
+    /**
+     * [sortKey] of the canonical text [text] of the kind whose word the SQL [kind] gives, as the statement runs: by the store's
+     * function where it keeps one, else by a `CASE` of each kind's.
+     */
+    fun sortKeyOf(text: String, kind: String): String = sql.storedKeyOf(text, kind) ?: shared(listOf(text, kind)) { (t, k) ->
+        "CASE $k ${Temporal.instants.joinToString(" ") { "WHEN '${it.function}' THEN ${sortKey(t, it)}" }} END"
     }
 
     // ----- Moments and times of day -----
@@ -470,6 +545,7 @@ class Temporals(
      * negated whole opens with its sign.
      */
     private fun parts(text: String): Parts {
+        literalParts(text)?.let { return it }
         fun group(name: String) = Temporal.DURATION_PARTS.getValue(name).let { (pattern, group) -> sql.group(text, literal(sql.regex(pattern)), group) }
         fun part(name: String) = "COALESCE(${sql.number(group(name))}, 0)"
         val sign = "CASE WHEN SUBSTR($text, 1, 1) = '-' THEN -1 WHEN $text IS NOT NULL THEN 1 END"
@@ -479,6 +555,24 @@ class Temporals(
             "($sign * (${part("hours")} * 3600 + ${part("minutes")} * 60 + ${part("seconds")}))",
         )
     }
+
+    /**
+     * The parts of the duration text [text] where it is a SQL literal, as a duration the statement writes is: worked out here, as
+     * the store would work them out, so the SQL reads no regular expression of a text it was given.
+     */
+    private fun literalParts(text: String): Parts? {
+        if (text.length < 3 || !text.startsWith("'") || !text.endsWith("'") || text.drop(1).dropLast(1).contains('\'')) return null
+        val groups = Regex(Temporal.DURATION.pattern).matchEntire(text.drop(1).dropLast(1))?.groupValues ?: return null
+        fun part(group: Int) = groups[group].ifEmpty { "0" }.takeIf { Regex("-?[0-9]+([.][0-9]+)?").matches(it) }?.let(BigDecimal::parseString)
+        val (y, mo, w, d, h, mi, sec) = listOf(3, 5, 7, 9, 12, 14, 16).map { part(it) ?: return null }
+        val sign = if (groups[1] == "-") BigDecimal.ONE.negate() else BigDecimal.ONE
+        // As the store reads a part it works out, a number of the type it reads a text's number as.
+        fun of(value: BigDecimal) = sql.number(literal((sign * value).toPlainString()))
+        return Parts(of(y * BigDecimal.fromInt(12) + mo), of(w * BigDecimal.fromInt(7) + d), of(h * BigDecimal.fromInt(3600) + mi * BigDecimal.fromInt(60) + sec))
+    }
+
+    private operator fun <T> List<T>.component6() = this[5]
+    private operator fun <T> List<T>.component7() = this[6]
 
     /** The duration text of the fields [fields], SQL numbers each by Cypher's names (`years`, `months`, `weeks`, `days`, `hours`…). */
     fun duration(fields: Map<String, String>): String {
@@ -589,6 +683,16 @@ class Temporals(
          */
         fun canonical(text: String, kind: Temporal): String? {
             if (kind == Temporal.DURATION) return if (Regex(Temporal.DURATION.pattern).matches(text)) canonicalDuration(text) else null
+            // A year past 9999, or before -9999, as ISO 8601 and Neo4j write one, signed (`+999999999-12-31`): read as the year of the
+            // same place in the Gregorian calendar's 400-year cycle, which has the same days, and written back with its own.
+            EXTENDED_YEAR.find(text)?.let { found ->
+                val year = found.groupValues[1].toLong()
+                if (year !in -999_999_999L..999_999_999L) return null
+                if (year in -9999L..9999L) return null
+                val stand = 2000 + ((year % 400) + 400) % 400
+                val read = canonical(stand.toString() + text.substring(found.groupValues[1].length), kind) ?: return null
+                return if (kind.function.contains("time") && !kind.function.contains("date")) read else isoYear(year) + read.substring(4)
+            }
             val from = Temporal.instants.firstOrNull { Regex(it.pattern).matches(text) } ?: return null
             val written = if (from.zoned) Regex(Temporal.OFFSET).find(text)!!.value else null
             val local = if (written != null) text.removeSuffix(written) else text
@@ -600,12 +704,7 @@ class Temporals(
                 Temporal.LOCAL_DATE_TIME, Temporal.DATE_TIME -> kotlinx.datetime.LocalDateTime.parse(local)
                 else -> kotlinx.datetime.LocalTime.parse(local).atDate(kotlinx.datetime.LocalDate(1970, 1, 1))
             }
-            val micros = clock.nanosecond / 1000
-            val fraction = when {
-                micros == 0 -> ""
-                micros % 1000 == 0 -> "." + (micros / 1000).toString().padStart(3, '0')
-                else -> "." + micros.toString().padStart(6, '0')
-            }
+            val fraction = fraction(clock.nanosecond)
             val time = listOf(clock.hour, clock.minute, clock.second).joinToString(":") { it.toString().padStart(2, '0') } + fraction
             val zone = if (kind.zoned) offset ?: "Z" else ""
             return when (kind) {
@@ -615,14 +714,111 @@ class Temporals(
             }
         }
 
+        /**
+         * A second's fraction of [nanos] nanoseconds as the canonical text writes it, as `Instant.toString` does: none for a
+         * whole second, else the fewest of three, six or nine digits that hold it.
+         */
+        fun fraction(nanos: Int): String = when {
+            nanos == 0 -> ""
+            nanos % 1_000_000 == 0 -> "." + (nanos / 1_000_000).toString().padStart(3, '0')
+            nanos % 1000 == 0 -> "." + (nanos / 1000).toString().padStart(6, '0')
+            else -> "." + nanos.toString().padStart(9, '0')
+        }
+
+        /**
+         * The sort key `s` of the canonical text [v] of [kind], as the stored tag `{"$t", "v", "s"}` holds it (see
+         * [org.drivine.cypher.store.ValueLayout]): digits all, of one width for each kind, so that two values of one kind
+         * order as their keys compare, under any collation, as Neo4j orders them. Null for a duration, which has no order.
+         * Worked out of [v] alone, by the text and integer arithmetic each store's SQL does too ([sortKey]), so that every
+         * writer's `s` of a value is the same:
+         * - a date: its year plus 10^9 ([YEAR_BIAS]), in 10 digits, then `MMDD`;
+         * - a local moment: the same, then `hhmmss` and nine digits of nanoseconds;
+         * - a zoned moment: the same of its clock in UTC, then its offset in seconds plus 64,800 ([OFFSET_BIAS]), in 6 digits;
+         * - a local time: its nanoseconds of the day, in 14 digits;
+         * - a zoned time: its nanoseconds of the day in UTC plus 18 hours ([TIME_BIAS]), in 15 digits, then its offset as a
+         *   zoned moment's. Neo4j compares a zoned time so, with no wrap at midnight: `time('01:00+02:00')` is before `time('22:00Z')`.
+         */
+        fun key(kind: Temporal, v: String): String? {
+            fun digits(n: Long, width: Int) = n.toString().padStart(width, '0')
+            fun nanos(time: String): Long {
+                val h = time.substring(0, 2).toLong()
+                val m = time.substring(3, 5).toLong()
+                val s = time.substring(6, 8).toLong()
+                val f = (time.substring(8).removePrefix(".") + "000000000").substring(0, 9).toLong()
+                return ((h * 60 + m) * 60 + s) * NANOS + f
+            }
+            fun offset(text: String): Pair<String, Long> {
+                if (text.endsWith("Z")) return text.dropLast(1) to 0L
+                val sign = if (text[text.length - 6] == '-') -1 else 1
+                return text.dropLast(6) to sign * (text.substring(text.length - 5, text.length - 3).toLong() * 3600 + text.takeLast(2).toLong() * 60)
+            }
+            fun date(year: Long, month: Long, day: Long) = digits(year + YEAR_BIAS, 10) + digits(month, 2) + digits(day, 2)
+            fun clock(n: Long) = digits(n / 3600, 2) + digits(n / 60 % 60, 2) + digits(n % 60, 2)
+            fun ymd(date: String) = Triple(date.dropLast(6).toLong(), date.substring(date.length - 5, date.length - 3).toLong(), date.takeLast(2).toLong())
+            return when (kind) {
+                Temporal.DURATION -> null
+                Temporal.DATE -> ymd(v).let { (y, m, d) -> date(y, m, d) }
+                Temporal.LOCAL_TIME -> digits(nanos(v), 14)
+                Temporal.TIME -> offset(v).let { (local, seconds) -> digits(nanos(local) - seconds * NANOS + TIME_BIAS, 15) + digits(seconds + OFFSET_BIAS, 6) }
+                Temporal.LOCAL_DATE_TIME -> {
+                    val t = v.indexOf('T')
+                    val (y, m, d) = ymd(v.substring(0, t))
+                    val n = nanos(v.substring(t + 1))
+                    date(y, m, d) + clock(n / NANOS) + digits(n % NANOS, 9)
+                }
+                Temporal.DATE_TIME -> {
+                    val t = v.indexOf('T')
+                    val (local, seconds) = offset(v.substring(t + 1))
+                    var (y, m, d) = ymd(v.substring(0, t))
+                    val n = nanos(local)
+                    val u = n / NANOS - seconds
+                    val carry = if (u < 0) -1 else if (u >= 86400) 1 else 0
+                    if (carry < 0) when {
+                        d > 1 -> d--
+                        m > 1 -> { m--; d = daysIn(y, m) }
+                        else -> { y--; m = 12; d = 31 }
+                    } else if (carry > 0) when {
+                        d < daysIn(y, m) -> d++
+                        m < 12 -> { m++; d = 1 }
+                        else -> { y++; m = 1; d = 1 }
+                    }
+                    date(y, m, d) + clock(u - carry * 86400L) + digits(n % NANOS, 9) + digits(seconds + OFFSET_BIAS, 6)
+                }
+            }
+        }
+
+        /** The days of the month [month] of the year [year], numbered astronomically, as the proleptic Gregorian calendar has them. */
+        private fun daysIn(year: Long, month: Long): Long = when (month) {
+            4L, 6L, 9L, 11L -> 30
+            2L -> if (year % 4 == 0L && (year % 100 != 0L || year % 400 == 0L)) 29 else 28
+            else -> 31
+        }
+
+        /** Nanoseconds in a second. */
+        const val NANOS = 1_000_000_000L
+
+        /** What `s` adds to a year, so that every year Neo4j holds, and UTC's of them at the offsets' limits, is ten digits: see [key]. */
+        const val YEAR_BIAS = 1_000_000_000L
+
+        /** What `s` adds to a zoned time's nanoseconds of the day in UTC, 18 hours', so that each is at least 0: see [key]. */
+        const val TIME_BIAS = 64_800L * NANOS
+
+        /** What `s` adds to an offset's seconds, 18 hours', so that each is at least 0: see [key]. */
+        const val OFFSET_BIAS = 64_800L
+
+        /** A year as ISO 8601 writes it, as java.time does: past 9999 signed, before 0 with its sign, four digits at least. */
+        private fun isoYear(y: Long): String = when {
+            y > 9999 -> "+$y"
+            y < 0 -> "-" + (-y).toString().padStart(4, '0')
+            else -> y.toString().padStart(4, '0')
+        }
+
+        /** The year of a text that opens with one past four digits, signed: see [canonical]. */
+        private val EXTENDED_YEAR = Regex("^([+-][0-9]{5,10})-[0-9]{2}-[0-9]{2}")
+
         /** SPIKE: ISO 8601's date, as java.time writes it: a year past 9999 signed, one before 0 with its sign, four digits at least. */
         private fun isoDate(date: kotlinx.datetime.LocalDate): String {
-            val y = date.year
-            val year = when {
-                y > 9999 -> "+$y"
-                y < 0 -> "-" + (-y).toString().padStart(4, '0')
-                else -> y.toString().padStart(4, '0')
-            }
+            val year = isoYear(date.year.toLong())
             return "$year-${date.month.number.toString().padStart(2, '0')}-${date.day.toString().padStart(2, '0')}"
         }
 

@@ -39,9 +39,9 @@ object SqliteSql {
      * The path of the property [key] of a JSON object, as a literal: the key quoted, so a key with a dot in it is one
      * property and not a path into another. Refused when it is empty, which names no property.
      */
-    fun path(key: String): String {
+    fun path(key: String, suffix: String = ""): String {
         require(key.isNotEmpty()) { "A property name is empty: an empty name is no property a statement can read." }
-        return literal("$.${quoted(key)}")
+        return literal("$.${quoted(key)}$suffix")
     }
 
     /**
@@ -51,6 +51,39 @@ object SqliteSql {
     fun property(alias: String, key: String): String =
         if (key == Stamps.PROPERTY) column(alias, "stamp") else propertyText(column(alias, "props"), path(key))
 
+    /** [property], a temporal value's tag read as its text `v` (see [ValueLayout]): what a full-text search reads. */
+    fun searchedProperty(alias: String, key: String): String {
+        if (key == Stamps.PROPERTY) return property(alias, key)
+        return "COALESCE(${column(alias, "props")} ->> ${path(key, ".${ValueLayout.TEXT}")}, ${property(alias, key)})"
+    }
+
+    /**
+     * The class of the value at [path] of the JSON [json], as a range index or a uniqueness constraint holds it beside its
+     * [indexKey]: a temporal value's tag's kind (`$t`), else `text`, `number` (an integer and a real as one) or `boolean`, or
+     * the JSON's kind (`array`); null where there is no value. Two values are equal, as Neo4j has them, where their classes and
+     * their keys are.
+     */
+    fun indexClass(json: String, path: String): String =
+        "COALESCE($json ->> ${extended(path, ".\"${ValueLayout.KIND}\"")}, CASE json_type($json, $path) WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' " +
+            "WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'null' THEN NULL ELSE json_type($json, $path) END)"
+
+    /**
+     * The key of the value at [path] of the JSON [json], beside its [indexClass]: a temporal value's tag's sort key `s`, or
+     * its text `v` where it has none, a duration's; any other value as `->>` reads it, which SQLite compares as Neo4j does
+     * within a class, the integer 1 equal to the real 1.0, and each integer exactly.
+     */
+    fun indexKey(json: String, path: String): String =
+        "COALESCE($json ->> ${extended(path, ".${ValueLayout.KEY}")}, $json ->> ${extended(path, ".${ValueLayout.TEXT}")}, $json ->> $path)"
+
+    /** [indexClass] of the JSON value [json] itself, as a statement compares a value with a property its index holds. */
+    fun valueClass(json: String): String = indexClass(json, "'$'")
+
+    /** [indexKey] of the JSON value [json] itself, as a statement compares a value with a property its index holds. */
+    fun valueKey(json: String): String = indexKey(json, "'$'")
+
+    /** The literal JSON path [path] with [step] after it. */
+    private fun extended(path: String, step: String): String = path.removeSuffix("'") + step.replace("'", "''") + "'"
+
     /**
      * The text a full-text search reads of [alias]: its properties [keys], each as text, a space between them, in lower case
      * by the library's [SqliteFunctions.LOWER]. A property it does not have is no text.
@@ -59,7 +92,7 @@ object SqliteSql {
 
     /** [searchedText] before it is lowered: what a full-text search measures a text's length by (drivine4j#604). */
     fun joinedText(alias: String, keys: List<String>): String =
-        keys.joinToString(" || ' ' || ") { "COALESCE(${property(alias, it)}, '')" }
+        keys.joinToString(" || ' ' || ") { "COALESCE(${searchedProperty(alias, it)}, '')" }
 
     /**
      * The property [key] of [alias] as a number where one is stored, and null for anything else: what the schema marker is

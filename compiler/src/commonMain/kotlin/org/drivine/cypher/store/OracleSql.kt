@@ -77,29 +77,80 @@ object OracleSql {
         "INSTR(',' || LTRIM(RTRIM(JSON_SERIALIZE($labels), ']'), '[') || ',\"', ${literal(",${serialized(label)},\"")}) > 0"
 
     /**
-     * The property [key] of the node [alias], read as text, where the node carries [label], and null
-     * where it does not: the expression of the index a range index makes over the nodes of its label
-     * (see [OracleSchemaGrammar]). A comparison with it is met only by a node of the label, so the one
-     * index answers both the label and the property.
+     * The class of the property [key] of the JSON [props], as a range index or a uniqueness constraint holds it beside its
+     * [indexKey], written with Oracle's built-ins alone, as an index over a function of the store's would be disabled where
+     * the function is made again (ORA-30554): a temporal value's tag's kind (`$t`), else the JSON's kind by its `type()`, a
+     * binary double and a number as one, `number`. A `VARCHAR2(16)`, so the two fit an index's key. Null where the key is,
+     * so a value the index holds no key of (a list, an empty text, a text past 4,000 bytes) is constrained by none, as before.
+     * Two values are equal, as Neo4j has them, where their classes and their keys are.
      */
-    fun labelled(alias: String, label: String, key: String): String =
-        "CASE WHEN ${hasLabel(alias, label)} THEN JSON_VALUE($alias.props, ${path(key)}) END"
+    fun indexClass(props: String, key: String): String = classAt(props, "$.${step(key)}")
+
+    /** [indexClass] of the JSON value [json] itself, as a statement compares a value with a property its index holds. */
+    fun valueClass(json: String): String = classAt(json, "$")
+
+    /** [indexClass] of the value at the JSON path [at], written bare, of [json]. */
+    private fun classAt(json: String, at: String): String =
+        "CASE WHEN ${keyAt(json, at)} IS NOT NULL THEN COALESCE(JSON_VALUE($json, ${literal("$at.\"${ValueLayout.KIND}\"")} RETURNING VARCHAR2(16)), " +
+            "CASE ${type(json, at)} WHEN 'double' THEN 'number' ELSE ${type(json, at)} END) END"
 
     /**
-     * The property [key] of the node [alias], read as text, where the node carries [label] and has
-     * each of [keys], and null where it does not: the expression of each column of a uniqueness
-     * constraint's index over [keys] (see [OracleSchemaGrammar]). A unique index skips a row only
-     * when every column is null, so a node without the label or without one of the properties is
-     * not constrained.
+     * The key of the property [key] of the JSON [props], beside its [indexClass]: a temporal value's tag's sort key `s`, or its
+     * text `v` where it has none, a duration's; a number's exact digits, `TO_CHAR(…, 'TM9')`, so that a `NUMBER` and a binary
+     * double of the same whole value are one key, and integers past 2^53 stay apart; any other double as `d` and its 17
+     * significant digits, which tell any two doubles apart; any other value as `JSON_VALUE` reads it.
      *
-     * For a constraint over the one property [key] it is the same value as [labelled] on every
-     * node: a node without the property, or with it stored as JSON null, `""`, an array or an
-     * object, reads as null either way. So a filter on the property may be read through it.
+     * A binary double is read whole to its digits by halves at 2^32: Oracle makes no `NUMBER` of a double exactly, `CAST` and
+     * `TO_NUMBER` rounding to 17 digits, and `JSON_SERIALIZE` and `RETURNING NUMBER` write the double 2^53 as
+     * `9007199254740993`; each half, worked out in binary double, is exact, and so is `NUMBER`'s arithmetic of the two. Kept to
+     * the range of a long, so no `CAST` overflows: `CASE` takes its branches in order.
      */
-    fun unique(alias: String, label: String, keys: List<String>, key: String): String {
-        val constrained = (listOf(hasLabel(alias, label)) + keys.map { "JSON_EXISTS($alias.props, ${path(it)})" }).joinToString(" AND ")
-        return "CASE WHEN $constrained THEN JSON_VALUE($alias.props, ${path(key)}) END"
+    fun indexKey(props: String, key: String): String = keyAt(props, "$.${step(key)}")
+
+    /** [indexKey] of the JSON value [json] itself, as a statement compares a value with a property its index holds. */
+    fun valueKey(json: String): String = keyAt(json, "$")
+
+    /** [indexKey] of the value at the JSON path [at], written bare, of [json]. */
+    private fun keyAt(json: String, at: String): String {
+        val d = "JSON_VALUE($json, ${literal(at)} RETURNING BINARY_DOUBLE)"
+        val whole = "TO_CHAR(CAST(FLOOR($d / 4294967296) AS NUMBER) * 4294967296 + CAST($d - FLOOR($d / 4294967296) * 4294967296 AS NUMBER), 'TM9')"
+        return "COALESCE(JSON_VALUE($json, ${literal("$at.${ValueLayout.KEY}")}), JSON_VALUE($json, ${literal("$at.${ValueLayout.TEXT}")}), " +
+            "CASE ${type(json, at)} WHEN 'number' THEN TO_CHAR(JSON_VALUE($json, ${literal(at)} RETURNING NUMBER), 'TM9') " +
+            "WHEN 'double' THEN CASE WHEN $d = FLOOR($d) AND $d >= -9223372036854775808 AND $d < 9223372036854775808 THEN $whole ELSE 'd' || TO_CHAR($d) END " +
+            "ELSE JSON_VALUE($json, ${literal(at)}) END)"
     }
+
+    /** The JSON kind of the value at [at] of [json], by the `type()` item method: `string`, `number`, `double`, `boolean` … */
+    private fun type(json: String, at: String) = "JSON_VALUE($json, ${literal("$at.type()")} RETURNING VARCHAR2(16))"
+
+    /**
+     * [indexClass] and [indexKey] of the property [key] of the node [alias], where the node carries [label], and null where
+     * it does not: the two expressions of the index a range index makes over the nodes of its label (see `OracleDdl`). A
+     * comparison with them is met only by a node of the label, so the one index answers both the label and the property.
+     */
+    fun labelled(alias: String, label: String, key: String): List<String> =
+        listOf(indexClass(props(alias), key), indexKey(props(alias), key)).map { "CASE WHEN ${hasLabel(alias, label)} THEN $it END" }
+
+    /**
+     * [indexClass] and [indexKey] of the property [key] of the node [alias], where the node carries [label] and has each of
+     * [keys], and null where it does not: the expressions of a uniqueness constraint's index over [keys], two for each. A
+     * unique index skips a row only where every column is null, so a node without the label or one of the properties is not
+     * constrained. Of a constraint over the one property [key], the same values as [labelled] on every node.
+     */
+    fun unique(alias: String, label: String, keys: List<String>, key: String): List<String> {
+        val constrained = (listOf(hasLabel(alias, label)) + keys.map { "JSON_EXISTS(${props(alias)}, ${path(it)})" }).joinToString(" AND ")
+        return listOf(indexClass(props(alias), key), indexKey(props(alias), key)).map { "CASE WHEN $constrained THEN $it END" }
+    }
+
+    /**
+     * The text a full-text search reads of the property [key] of [alias], a CLOB: a temporal value's tag's text `v` (see
+     * [ValueLayout]), any other value's as `JSON_VALUE` reads it. Oracle Text's document, a side table's payload, reads it so too.
+     */
+    fun searchedText(alias: String, key: String): String =
+        "COALESCE(JSON_VALUE(${props(alias)}, ${path(key, ".${ValueLayout.TEXT}")} RETURNING CLOB), JSON_VALUE(${props(alias)}, ${path(key)} RETURNING CLOB))"
+
+    /** The `props` column of [alias], or of the table itself for the empty alias. */
+    private fun props(alias: String) = if (alias.isEmpty()) "props" else "$alias.props"
 
     /**
      * Whether the node [alias] carries [label], written so the index over labels cannot answer it: the form for a node

@@ -159,7 +159,10 @@ object StandIns {
 
     // ----- java.time's parse and text of a temporal value, java.math's of a duration: Temporals.canonical -----
 
-    /** drivine4j's `Temporals.canonical` (12847912), by java.time and java.math: the lines the port replaced. */
+    /**
+     * drivine4j's `Temporals.canonical` (12847912), by java.time and java.math: the lines the port replaced, with the store
+     * layout's fraction (#161): nanoseconds kept, in the fewest of three, six or nine digits, as `Instant.toString` writes them.
+     */
     private fun canonical(text: String, kind: Temporal): String? {
         if (kind == Temporal.DURATION) return if (Regex(Temporal.DURATION.pattern).matches(text)) canonicalDuration(text) else null
         val from = Temporal.instants.firstOrNull { Regex(it.pattern).matches(text) } ?: return null
@@ -171,11 +174,12 @@ object StandIns {
             Temporal.LOCAL_DATE_TIME, Temporal.DATE_TIME -> java.time.LocalDateTime.parse(local)
             else -> java.time.LocalTime.parse(local).atDate(java.time.LocalDate.of(1970, 1, 1))
         }
-        val micros = clock.nano / 1000
+        val nanos = clock.nano
         val fraction = when {
-            micros == 0 -> ""
-            micros % 1000 == 0 -> ".%03d".format(java.util.Locale.ROOT, micros / 1000)
-            else -> ".%06d".format(java.util.Locale.ROOT, micros)
+            nanos == 0 -> ""
+            nanos % 1_000_000 == 0 -> ".%03d".format(java.util.Locale.ROOT, nanos / 1_000_000)
+            nanos % 1000 == 0 -> ".%06d".format(java.util.Locale.ROOT, nanos / 1000)
+            else -> ".%09d".format(java.util.Locale.ROOT, nanos)
         }
         val time = "%02d:%02d:%02d".format(java.util.Locale.ROOT, clock.hour, clock.minute, clock.second) + fraction
         val zone = if (kind.zoned) offset ?: "Z" else ""
@@ -455,7 +459,8 @@ object StandIns {
         repeat(500) {
             val a = randomText(random, 4); val b = randomText(random, 4)
             case("A", listOf(a, b), listOf(a, b, null, true, 1L, 2.5))
-            case("M", listOf(a, b), linkedMapOf(a to b, "k" to listOf(b)))
+            // A key that begins with `$` is the user's with one more `$` before it, as the store layout holds it (#161).
+            case("M", listOf(a, b), linkedMapOf((if (a.startsWith('$')) "$$a" else a) to b, "k" to listOf(b)))
         }
     }
 

@@ -24,6 +24,9 @@ class OracleTemporalSql(
     /** The store's function [date] calls, where it keeps one. */
     private val storedEraDate = storedEra?.let(OracleCypherCompiler::eraDateName)
 
+    /** The store's function [storedKey] calls, where it keeps one. */
+    private val storedTemporalKey = storedEra?.let(OracleCypherCompiler::temporalKeyName)
+
     override fun local(text: String, kind: Temporal) = when (kind) {
         Temporal.DATE -> "TO_TIMESTAMP(${eraOf(text)}, 'SYYYY-MM-DD')"
         Temporal.LOCAL_DATE_TIME -> iso(eraOf(text), "TIMESTAMP")
@@ -89,7 +92,18 @@ class OracleTemporalSql(
      */
     override val now get() = if (procedural()) NOW else CLOCK
 
-    override fun matches(text: String, pattern: String) = "REGEXP_LIKE($text, $pattern)"
+    /** The store's [OracleCypherCompiler.temporalKeyFunction], where it keeps the era's functions: the inline SQL is long. */
+    override fun storedKey(text: String, kind: Temporal): String? = storedKeyOf(text, "'${kind.function}'")
+
+    override fun storedKeyOf(text: String, kind: String): String? = storedTemporalKey?.let { callsStored(); "$it($kind, $text)" }
+
+    override fun integer(text: String) = "TO_NUMBER($text)"
+
+    override fun digits(n: String, width: Int) = "LPAD(TO_CHAR($n), $width, '0')"
+
+    override fun div(a: String, b: String) = "TRUNC($a / $b)"
+
+        override fun matches(text: String, pattern: String) = "REGEXP_LIKE($text, $pattern)"
 
     override fun group(text: String, pattern: String, group: Int) = "REGEXP_SUBSTR($text, $pattern, 1, 1, NULL, $group)"
 

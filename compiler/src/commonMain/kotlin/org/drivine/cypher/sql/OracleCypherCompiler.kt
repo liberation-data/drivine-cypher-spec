@@ -109,8 +109,9 @@ class OracleCypherCompiler(
     private val extendedParameters = mutableSetOf<String>()
 
     /**
-     * A float that is a whole number, `2.0`, written as Oracle's extended JSON writes a double, `{"${'$'}numberDouble": "2.0"}`, which
-     * `JSON(… EXTENDED)` reads as one: Oracle reads JSON's `2.0` as the number 2, a whole number, as it reads `2`. So are NaN and
+     * A float, `2.0` or `1.5`, written as Oracle's extended JSON writes a double, `{"${'$'}numberDouble": "2.0"}`, which
+     * `JSON(… EXTENDED)` reads as one: Oracle reads JSON's `2.0` as the number 2, a whole number, as it reads `2`, and JSON's `1.5`
+     * as a `NUMBER`, where the store layout holds every float as a binary double (#146). So are NaN and
      * the infinities, `{"${'$'}numberDouble": "NaN"}`, which JSON writes as no number, and `BINARY_DOUBLE` holds. Not in a
      * value that holds a map with a key as extended JSON's are, `{"${'$'}numberLong": "5"}`, which `JSON(… EXTENDED)` would read as
      * the value it writes: such a value is written as JSON is, its floats that are whole numbers read as whole numbers. A
@@ -132,11 +133,13 @@ class OracleCypherCompiler(
         (node is ObjectNode && node.fieldNames().asSequence().any { it.startsWith("$") }) || node.any(::keyedAsExtended)
 
     /**
-     * [node] with each float in it that is a whole number written as extended JSON's double, calling [doubled] for each. A
+     * [node] with each float in it written as extended JSON's double, calling [doubled] for each. A
      * `BigDecimal` is no float: it stays the number it is, every digit kept.
      */
     private fun doubles(node: JsonNode, doubled: () -> Unit): JsonNode = when {
-        (node.isDouble || node.isFloat) && node.doubleValue().let { !it.isFinite() || it == kotlin.math.round(it) } -> {
+        // Every float, as the store layout holds one (#146): a binary double, which `JSON(… EXTENDED)` reads of extended JSON's
+        // double, and not of JSON's `1.5`, which it reads as a `NUMBER`.
+        node.isDouble || node.isFloat -> {
             doubled()
             JsonNodeFactory.instance.objectNode().put(DOUBLE, org.drivine.cypher.json.jvmDoubleText(node.doubleValue()))
         }
@@ -165,8 +168,11 @@ class OracleCypherCompiler(
      * is ranked null, so the value needs no [nullIfJsonNull], which would read it again: as fast as [sortKey] over 100,000 rows.
      */
     override fun openSortKey(json: String) = shared(json) { (x) ->
-        "DECODE(${kind(x)}, 'object', 1, 'array', 2, 'string', 3, 'boolean', 4, 'number', 5, 'double', 5, 'float', 5)"
-    }.let { rank -> listOf(rank, json) }
+        "DECODE(${kind(x)}, 'object', ${tagRank(x, "1")}, 'array', 2, 'string', 3, 'boolean', 4, 'number', 5, 'double', 5, 'float', 5)"
+    }.let { rank -> listOf(rank, shared(json) { (x) -> sortValue(x) }) }
+
+    /** The JSON [x] as it sorts among values of its kind: a temporal value's tag by its sort key, a duration by its text; any other as it is. */
+    private fun sortValue(x: String) = "CASE WHEN ${tagKind(x)} IS NOT NULL THEN JSON_SCALAR(COALESCE(${tagKey(x)}, ${tagText(x)})) ELSE $x END"
 
     /** JSON's null is ranked null, as SQL's is, but `JSON` orders it apart from SQL's: so the value is read as [groupedNull] has it (#500). */
     override fun jsonNullSortKey(json: String) = openSortKey(json).let { (rank) -> listOf(rank, groupedNull(json)) }
@@ -536,6 +542,12 @@ class OracleCypherCompiler(
     override fun jsonArray(items: List<String>) =
         if (items.isEmpty()) "JSON('[]')" else "JSON_ARRAY(${items.joinToString(", ")} NULL ON NULL RETURNING JSON)"
 
+    override fun tagKind(json: String) = "JSON_VALUE($json, '\$.\"\$t\"')"
+
+    override fun tagText(json: String) = "JSON_VALUE($json, '\$.v')"
+
+    override fun tagKey(json: String) = "JSON_VALUE($json, '\$.s')"
+
     override fun jsonObject(entries: List<Pair<String, String>>) =
         if (entries.isEmpty()) "JSON('{}')"
         else "JSON_OBJECT(${entries.joinToString(", ") { (key, value) -> "${literal(key)} VALUE $value" }} NULL ON NULL RETURNING JSON)"
@@ -549,11 +561,11 @@ class OracleCypherCompiler(
      * as JSON, inside a `CASE`, which no index answers, and a node found by a property was found by reading every node of
      * the label (#617).
      */
-    override fun indexedEquality(property: String, value: String, of: IndexedProperty?): String? =
-        labelledEquals(of, "JSON_VALUE($value, '\$')")
+    override fun indexedEquality(property: String, value: String, of: IndexedProperty?): String? = labelledEquals(of, value)
 
     /** An empty text, and one past [SHORT_TEXT] bytes, which the index's `JSON_VALUE` reads as null: see [readShort]. */
-    override fun indexHolds(given: Any) = readShort(given)
+    /** A temporal value too, whose tag the index holds by its kind and key; and a float, bound as a binary double as one is stored. */
+    override fun indexHolds(given: Any) = Temporal.ofValue(given) != null || readShort(given)
 
     /**
      * As [indexedEquality], for a value of any kind: `JSON_VALUE` gives a number's text as Oracle holds the number, so `1` and
@@ -563,8 +575,8 @@ class OracleCypherCompiler(
      */
     override fun indexedEqualityOfAny(property: String, value: String, of: IndexedProperty?, scalar: Boolean): String? {
         if (labelledEquals(of, value) == null) return null
-        if (scalar) return labelledEquals(of, "JSON_VALUE($value, '\$')")
-        return shared(value) { (x) -> "(${labelledEquals(of, "JSON_VALUE($x, '\$')")} OR JSON_VALUE($x, '\$') IS NULL)" }
+        if (scalar) return labelledEquals(of, value)
+        return shared(value) { (x) -> "(${labelledEquals(of, x)} OR ${OracleSql.valueKey(x)} IS NULL)" }
     }
 
     /**
@@ -573,12 +585,15 @@ class OracleCypherCompiler(
      * written, for each label [indexedProperties] says has an index over the property: on a node with the label and the
      * property they are the same value, and Oracle reads through whichever index is there. Null where it names no such label.
      */
-    private fun labelledEquals(of: IndexedProperty?, text: String): String? {
+    private fun labelledEquals(of: IndexedProperty?, value: String): String? {
         if (of == null || of.labels.isEmpty() || !of.props.endsWith(".props")) return null
         val alias = of.props.removeSuffix(".props")
         val indexed = of.labels.filter { (it to of.key) in indexedProperties }.ifEmpty { return null }
-        return indexed.joinToString(" AND ") { label ->
-            "${OracleSql.labelled(alias, label, of.key)} = $text AND ${OracleSql.unique(alias, label, listOf(of.key), of.key)} = $text"
+        return shared(value) { (x) ->
+            val held = listOf(OracleSql.valueClass(x), OracleSql.valueKey(x))
+            indexed.joinToString(" AND ") { label ->
+                (OracleSql.labelled(alias, label, of.key) + OracleSql.unique(alias, label, listOf(of.key), of.key)).zip(held + held).joinToString(" AND ") { (column, it) -> "$column = $it" }
+            }
         }
     }
 
@@ -796,7 +811,8 @@ class OracleCypherCompiler(
      */
     override fun keyed(json: String, key: String): String {
         val entries = "JSON_QUERY($json, '\$.keyvalue()' RETURNING JSON WITH ARRAY WRAPPER)"
-        val entry = shared(entries) { (e) -> listItem(e, KEYED, " PASSING $key AS \"k\"") }
+        // The key as the map holds it: see escapedKey.
+        val entry = shared(entries) { (e) -> listItem(e, KEYED, " PASSING ${escapedKey("JSON_VALUE($key, '\$')")} AS \"k\"") }
         return "CASE WHEN ${kind(json)} = 'object' THEN $entry END"
     }
 
@@ -951,7 +967,9 @@ class OracleCypherCompiler(
     /** Of the values of the kind that comes first, or last, as [kindOrder] orders them; by [key] first where there is one. */
     override fun extreme(value: String, min: Boolean, key: String?): String {
         val direction = if (min) "ASC" else "DESC"
-        return "${if (min) "MIN" else "MAX"}(${nullIfJsonNull(value)}) KEEP (DENSE_RANK FIRST ORDER BY ${kindOrder(value)} $direction NULLS LAST${key?.let { ", $it $direction NULLS LAST" }.orEmpty()})"
+        // A temporal value's tag of a kind the statement does not know, by its sort key, as MIN reads no tag's order.
+        val ordered = key ?: "CASE WHEN ${tagKind(value)} IS NOT NULL THEN COALESCE(${tagKey(value)}, ${tagText(value)}) END"
+        return "${if (min) "MIN" else "MAX"}(${nullIfJsonNull(value)}) KEEP (DENSE_RANK FIRST ORDER BY ${kindOrder(value)} $direction NULLS LAST, $ordered $direction NULLS LAST)"
     }
 
     /**
@@ -1360,14 +1378,14 @@ class OracleCypherCompiler(
      * 100,000 maps so take 7 s, where a `JSON_TABLE` over each guide takes 4.4 s.
      * Null has no keys, and gives null; a value of another kind fails, as in Neo4j.
      */
-    private fun keys(json: String): String = bound(json) { (map) -> keysOrFailure(kind(map), keysOf(map)) }
+    private fun keys(json: String): String = bound(json) { (map) -> keysOrFailure(map, kind(map), keysOf(map)) }
 
     private fun keysOf(json: String): String {
         val key = """CASE WHEN SUBSTR(d.p, 3, 1) = '"' THEN JSON_VALUE(JSON(SUBSTR(d.p, 3)), '${'$'}') ELSE SUBSTR(d.p, 3) END"""
         val paths = temporalElements("JSON_DATAGUIDE($json, 2)", "dg")
         val guide = """(SELECT JSON_VALUE(dg.item, '${'$'}."o:path"' RETURNING VARCHAR2(4000)) AS p FROM $paths) d"""
         val topLevel = """REGEXP_LIKE(d.p, '^\${'$'}\.(\w+|"([^"\\]|\\.)*")${'$'}')"""
-        return "(SELECT COALESCE(JSON_ARRAYAGG(g.k ORDER BY g.k RETURNING JSON), JSON('[]')) FROM (SELECT $key AS k FROM $guide WHERE $topLevel) g)"
+        return "(SELECT COALESCE(JSON_ARRAYAGG(g.k ORDER BY g.k RETURNING JSON), JSON('[]')) FROM (SELECT ${unescapedKey("e.k")} AS k FROM (SELECT $key AS k FROM $guide WHERE $topLevel) e) g)"
     }
 
     override fun page(skip: String?, limit: String?) = listOfNotNull(skip?.let { "OFFSET $it ROWS" }, limit?.let { "FETCH NEXT $it ROWS ONLY" })
@@ -2109,6 +2127,89 @@ class OracleCypherCompiler(
         /** The function the store keeps beside the graph [graph]'s tables that renumbers the year of an ISO text as Oracle does: see [eraFunction]. */
         @DrivineInternalApi
         fun eraName(graph: String) = "${graph}_era"
+
+        /** The function the store keeps beside the graph [graph]'s tables that works out a temporal value's sort key: see [temporalKeyFunction]. */
+        @DrivineInternalApi
+        fun temporalKeyName(graph: String) = "${graph}_temporal_key"
+
+        /**
+         * The function [name], which gives the sort key `s` of the canonical text `t` of a temporal value of the kind `k`, its
+         * word (`date`, `datetime` …), as `Temporals.key` works it out in Kotlin and `Temporals.sortKey` in SQL: by text and
+         * integer arithmetic on the text alone. Null for a duration, and for null. See `OracleTemporalSql.storedKey`, which calls it
+         * where the store keeps it: written inline, the key of a zoned moment is some 3,000 characters, for each value a
+         * statement works out. Never in an index's expression: the store makes it again with `CREATE OR REPLACE`, which would
+         * disable such an index (ORA-30554).
+         *
+         * The store's copy is part of the store layout the three libraries share, as [eraFunction]'s is: it is
+         * `CREATE OR REPLACE ` and this text with [name] as [temporalKeyName] gives it, its lines joined by `\n` with no
+         * newline after the last.
+         */
+        @DrivineInternalApi
+        fun temporalKeyFunction(name: String): String = listOf(
+            "FUNCTION $name(k VARCHAR2, t VARCHAR2) RETURN VARCHAR2 DETERMINISTIC IS",
+            "    l PLS_INTEGER := LENGTH(t);",
+            "    p PLS_INTEGER := INSTR(t, 'T');",
+            "    z PLS_INTEGER := 0;",
+            "    o NUMBER := 0;",
+            "    y NUMBER;",
+            "    m NUMBER;",
+            "    d NUMBER;",
+            "    u NUMBER;",
+            "    c NUMBER;",
+            "    tm VARCHAR2(40);",
+            "    f VARCHAR2(9);",
+            "    FUNCTION days(yy NUMBER, mm NUMBER) RETURN NUMBER IS",
+            "    BEGIN",
+            "        IF mm IN (4, 6, 9, 11) THEN RETURN 30; END IF;",
+            "        IF mm = 2 THEN",
+            "            IF MOD(yy, 4) = 0 AND (MOD(yy, 100) <> 0 OR MOD(yy, 400) = 0) THEN RETURN 29; END IF;",
+            "            RETURN 28;",
+            "        END IF;",
+            "        RETURN 31;",
+            "    END;",
+            "    FUNCTION digits(n NUMBER, w PLS_INTEGER) RETURN VARCHAR2 IS",
+            "    BEGIN",
+            "        RETURN LPAD(TO_CHAR(n), w, '0');",
+            "    END;",
+            "BEGIN",
+            "    IF t IS NULL OR k IS NULL OR k = 'duration' THEN RETURN NULL; END IF;",
+            "    IF k IN ('time', 'datetime') THEN",
+            "        IF SUBSTR(t, l, 1) = 'Z' THEN",
+            "            z := 1;",
+            "        ELSE",
+            "            z := 6;",
+            "            o := CASE WHEN SUBSTR(t, l - 5, 1) = '-' THEN -1 ELSE 1 END * (TO_NUMBER(SUBSTR(t, l - 4, 2)) * 3600 + TO_NUMBER(SUBSTR(t, l - 1, 2)) * 60);",
+            "        END IF;",
+            "    END IF;",
+            "    IF k = 'date' THEN",
+            "        RETURN digits(TO_NUMBER(SUBSTR(t, 1, l - 6)) + ${Temporals.YEAR_BIAS}, 10) || SUBSTR(t, l - 4, 2) || SUBSTR(t, l - 1, 2);",
+            "    ELSIF k IN ('localdatetime', 'datetime') THEN",
+            "        y := TO_NUMBER(SUBSTR(t, 1, p - 7));",
+            "        m := TO_NUMBER(SUBSTR(t, p - 5, 2));",
+            "        d := TO_NUMBER(SUBSTR(t, p - 2, 2));",
+            "        tm := SUBSTR(t, p + 1, l - p - z);",
+            "    ELSE",
+            "        tm := SUBSTR(t, 1, l - z);",
+            "    END IF;",
+            "    f := SUBSTR(SUBSTR(tm, 10) || '000000000', 1, 9);",
+            "    u := TO_NUMBER(SUBSTR(tm, 1, 2)) * 3600 + TO_NUMBER(SUBSTR(tm, 4, 2)) * 60 + TO_NUMBER(SUBSTR(tm, 7, 2));",
+            "    IF k = 'localtime' THEN RETURN digits(u * ${Temporals.NANOS} + TO_NUMBER(f), 14); END IF;",
+            "    IF k = 'time' THEN RETURN digits(u * ${Temporals.NANOS} + TO_NUMBER(f) - o * ${Temporals.NANOS} + ${Temporals.TIME_BIAS}, 15) || digits(o + ${Temporals.OFFSET_BIAS}, 6); END IF;",
+            "    IF k = 'localdatetime' THEN",
+            "        RETURN digits(y + ${Temporals.YEAR_BIAS}, 10) || SUBSTR(t, p - 5, 2) || SUBSTR(t, p - 2, 2) || SUBSTR(tm, 1, 2) || SUBSTR(tm, 4, 2) || SUBSTR(tm, 7, 2) || f;",
+            "    END IF;",
+            "    u := u - o;",
+            "    c := CASE WHEN u < 0 THEN -1 WHEN u >= 86400 THEN 1 ELSE 0 END;",
+            "    u := u - c * 86400;",
+            "    IF c < 0 THEN",
+            "        IF d > 1 THEN d := d - 1; ELSIF m > 1 THEN m := m - 1; d := days(y, m); ELSE y := y - 1; m := 12; d := 31; END IF;",
+            "    ELSIF c > 0 THEN",
+            "        IF d < days(y, m) THEN d := d + 1; ELSIF m < 12 THEN m := m + 1; d := 1; ELSE y := y + 1; m := 1; d := 1; END IF;",
+            "    END IF;",
+            "    RETURN digits(y + ${Temporals.YEAR_BIAS}, 10) || digits(m, 2) || digits(d, 2) || digits(TRUNC(u / 3600), 2) || digits(MOD(TRUNC(u / 60), 60), 2) || " +
+                "digits(MOD(u, 60), 2) || f || digits(o + ${Temporals.OFFSET_BIAS}, 6);",
+            "END;",
+        ).joinToString("\n")
 
         /** The function the store keeps beside the graph [graph]'s tables that renumbers the year Oracle writes as ISO 8601 does: see [eraDateFunction]. */
         @DrivineInternalApi

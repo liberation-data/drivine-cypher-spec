@@ -23,7 +23,13 @@ class SqliteTemporalSql(shared: (List<String>, (List<String>) -> String) -> Stri
      */
     override val now = "'${SqliteTimestamps.write(@OptIn(kotlin.time.ExperimentalTime::class) kotlin.time.Clock.System.now().toLocalDateTime(TimeZone.UTC))}'"
 
-    override fun matches(text: String, pattern: String) = "($text REGEXP $pattern)"
+    override fun digits(n: String, width: Int) = "printf('%0${width}d', $n)"
+
+    override fun mod(a: String, b: String) = "($a % $b)"
+
+    override fun div(a: String, b: String) = "($a / $b)"
+
+        override fun matches(text: String, pattern: String) = "($text REGEXP $pattern)"
 
     /**
      * [pattern] ending at `\z`, the text's end, in place of the `$` it ends with, where no backslash escapes it: `REGEXP` and the functions Drivine registers read it with

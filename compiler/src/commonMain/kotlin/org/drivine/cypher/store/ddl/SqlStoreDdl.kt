@@ -2,6 +2,7 @@ package org.drivine.cypher.store.ddl
 
 import org.drivine.DrivineInternalApi
 import org.drivine.cypher.CompilerException
+import org.drivine.cypher.store.ValueLayout
 import org.drivine.schema.ConstraintSpec
 import org.drivine.schema.IndexSpec
 import org.drivine.schema.SchemaItemKind
@@ -136,7 +137,9 @@ abstract class SqlStoreDdl(val name: String, final override val engine: String, 
     fun vectors(label: String, property: String): String = objectName("v", listOf(label, property))
 
     /**
-     * A name for an object of [kind] made for [parts], a label and properties: the graph's name, the kind, what of the parts
+     * A name for an object of [kind] made for [parts], a label and properties: the graph's name, the kind and the store layout
+     * it holds values in ([ValueLayout.LAYOUT], `ix2`), so that an index an earlier layout made, over values held otherwise, is
+     * never taken for this one's, and is found as an orphan to drop (see `StoreLayout`); then what of the parts
      * reads as a name, and a hash of the parts whole, which tells apart two objects whose parts read as one name: a label
      * and a property that run together as another pair does, or names that differ only in what a name cannot hold. It is a
      * hash of 32 bits and not a proof: two sets of parts that read alike and hash alike would share a name. It leaves room
@@ -148,9 +151,10 @@ abstract class SqlStoreDdl(val name: String, final override val engine: String, 
      */
     fun objectName(kind: String, parts: List<String>): String {
         val hash = javaHashCode(parts.joinToString("\u0000")).toUInt().toString(16)
-        val fixed = "${name}_${kind}__${hash}".length + BESIDE.length
+        val layered = "$kind${ValueLayout.LAYOUT}"
+        val fixed = "${name}_${layered}__${hash}".length + BESIDE.length
         val readable = parts.joinToString("") { it.replace(NOT_READABLE, "") }.take((maxObjectName - fixed).coerceIn(0, 40))
-        return "${name}_${kind}_${readable}_$hash"
+        return "${name}_${layered}_${readable}_$hash"
     }
 
     /** The properties of an item as its record holds them: part of the catalog's key, so written byte for byte the same each time. */

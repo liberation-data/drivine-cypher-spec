@@ -11,7 +11,7 @@ sealed interface Value {
     /**
      * A JSON value: `jsonb`, or with [ordered] `json`, whose object keys keep the order they were written in. Where
      * the statement makes it of a [temporal] kind (a constructor, a parameter of a `java.time` type, temporal
-     * arithmetic), it is that kind's ISO text; where it makes it a list whose every item is of one, [items] is that
+     * arithmetic), it is that kind's tag, `{"$t", "v", "s"}` (see [org.drivine.cypher.store.ValueLayout]); where it makes it a list whose every item is of one, [items] is that
      * kind, so an item taken from it, unwound or indexed, is of it. Where it is a map or a list the statement builds that holds
      * a node or a relationship, [identity] is the same value, as JSON that compares, with each node or relationship in it as
      * its id: it is compared by that, as a graph engine compares what it holds by identity, not by its properties.
@@ -72,6 +72,14 @@ sealed interface Value {
          * read from the store is never JSON's null, as a graph engine stores none, so the SQL that reads one is unchanged.
          */
         val jsonNull: Boolean = false,
+        /**
+         * Where the compiler makes it a temporal value's tag (see [org.drivine.cypher.store.ValueLayout]), the SQL of the tag's
+         * text `v`, which reads it without taking it out of the tag again: so a value worked out of another reads that one's
+         * text, and SQL nested value in value grows as the values do, not as each tag holds its text and its key worked out of it.
+         */
+        val tagText: String? = null,
+        /** As [tagText], the SQL of the tag's sort key `s`: null where it has none, a duration's. */
+        val tagKey: String? = null,
     ) : Value
 
     /** A kind of value the statement writes: see [Json.known]. [noun] names a value of it, as a message does. */

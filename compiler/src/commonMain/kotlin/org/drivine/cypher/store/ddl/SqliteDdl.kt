@@ -129,7 +129,7 @@ class SqliteDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
      * the label a statement makes, both of the table's own columns.
      */
     private fun over(label: String, properties: List<String>): String =
-        "$nodes (${properties.joinToString(", ") { SqliteSql.property("", it) }}) WHERE ${hasLabel("", label)}"
+        "$nodes (${properties.joinToString(", ") { "${SqliteSql.indexClass("props", SqliteSql.path(it))}, ${SqliteSql.indexKey("props", SqliteSql.path(it))}" }}) WHERE ${hasLabel("", label)}"
 
     override fun createIndex(spec: IndexSpec, existing: CatalogItem?): List<DdlStatement> = when (spec) {
         is RangeIndexSpec -> {

@@ -1,7 +1,16 @@
 package org.drivine.cypher.sql
 
 /** Postgres's SQL for temporal values: see [TemporalSql]. Its intervals keep months, days and time apart, as Cypher's durations do. */
-class PostgresTemporalSql(shared: (List<String>, (List<String>) -> String) -> String) : TemporalSql(shared) {
+class PostgresTemporalSql(
+    shared: (List<String>, (List<String>) -> String) -> String,
+    /** The graph whose store keeps the function [storedKey] calls (see `PostgresDdl.temporalKey`); null where the SQL is written inline. */
+    private val graph: String? = null,
+) : TemporalSql(shared) {
+
+    /** The store's `PostgresDdl.temporalKey`: written inline, the key of a zoned moment is some 2,500 characters. */
+    override fun storedKey(text: String, kind: Temporal): String? = storedKeyOf(text, "'${kind.function}'")
+
+    override fun storedKeyOf(text: String, kind: String): String? = graph?.let { "${org.drivine.cypher.store.ddl.PostgresDdl.temporalKeyName(it)}($kind, $text)" }
 
     override fun local(text: String, kind: Temporal) = when (kind) {
         Temporal.DATE -> "CAST(CAST(${eraOf(text)} AS date) AS timestamp)"
@@ -50,7 +59,15 @@ class PostgresTemporalSql(shared: (List<String>, (List<String>) -> String) -> St
 
     override val now = "(statement_timestamp() AT TIME ZONE 'UTC')"
 
-    override fun matches(text: String, pattern: String) = "($text ~ $pattern)"
+    override fun integer(text: String) = "CAST($text AS bigint)"
+
+    override fun position(text: String, char: String) = "strpos($text, $char)"
+
+    override fun digits(n: String, width: Int) = "lpad(CAST($n AS text), $width, '0')"
+
+    override fun div(a: String, b: String) = "div($a, $b)"
+
+        override fun matches(text: String, pattern: String) = "($text ~ $pattern)"
 
     override fun group(text: String, pattern: String, group: Int) = "(regexp_match($text, $pattern))[$group]"
 

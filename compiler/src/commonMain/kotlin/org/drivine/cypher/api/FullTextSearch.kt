@@ -220,7 +220,7 @@ object FullTextSearch {
      */
     private fun oracle(ddl: OracleDdl, request: SearchRequest, query: TextQuery, scope: SearchParameters): String {
         val keys = request.properties
-        val values = keys.map { "JSON_VALUE(c.props, ${OracleSql.path(it)} RETURNING CLOB)" }
+        val values = keys.map { OracleSql.searchedText("c", it) }
         val text = values.joinToString(" || ' ' || ") { "LOWER($it)" }
         val len = "NVL(LENGTH(${values.joinToString(" || ' ' || ")}), 0)"
         fun scanned() = GraphTable(ddl.name, "(c IS node WHERE ${oracleLabels("c", request.labels, scanned = true)})", ORACLE_NODE_COLUMNS, "c")

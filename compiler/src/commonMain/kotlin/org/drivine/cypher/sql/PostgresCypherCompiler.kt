@@ -114,6 +114,15 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
 
     override fun text(json: String) = shared(json) { (x) -> "CASE WHEN jsonb_typeof($x) = 'string' THEN $x #>> '{}' END" }
 
+    override fun tagKind(json: String) = "($json ->> '\$t')"
+
+    override fun tagText(json: String) = "($json ->> 'v')"
+
+    override fun tagKey(json: String) = "($json ->> 's')"
+
+    /** `jsonb`, as a stored value is: a tag the statement makes compares with one it reads with no cast. */
+    override fun tagObject(entries: List<Pair<String, String>>) = "jsonb_build_object(${entries.joinToString(", ") { (key, value) -> "${literal(key)}, $value" }})"
+
     override fun boolOf(json: String) = shared(json) { (x) -> "CASE WHEN jsonb_typeof($x) = 'boolean' THEN CAST($x AS boolean) END" }
 
     /**
@@ -182,7 +191,7 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
 
     override fun element(json: String, index: String) = "($json -> CAST($index #>> '{}' AS int))"
 
-    override fun keyed(json: String, key: String) = "$json -> ($key #>> '{}')"
+    override fun keyed(json: String, key: String) = "$json -> ${escapedKey("($key #>> '{}')")}"
 
     override fun containsAll(props: String, map: String) = "$props @> $map"
 
@@ -211,31 +220,19 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
     override fun endProbe(rows: String, row: String, end: String, id: String): String =
         lateral("SELECT * FROM $rows $row WHERE $row.$end = $id OFFSET 0", row, optional = false, columns = emptyList())
 
-    /** The property's text, as a range index or a uniqueness constraint reads it ([PostgresSql.propertyText]), compared with the value's. */
-    override fun indexedEquality(property: String, value: String, of: IndexedProperty?): String? =
-        PROPERTY_READ.matchEntire(property)?.let { "${PostgresSql.propertyText(it.groupValues[1], it.groupValues[2])} = ($value #>> '{}')" }
+    /**
+     * None: a range index or a uniqueness constraint holds the property's JSON ([PostgresSql.indexed]), whose equality is the
+     * compiler's own, `(props -> 'k') = $p`, which the index answers as it is.
+     */
+    override fun indexedEquality(property: String, value: String, of: IndexedProperty?): String? = null
 
     /**
-     * The property's text, as its index holds it, among the texts the [value] can be stored as: a text's or a truth value's
-     * own, and a number's with no trailing zeros and with each count of them up to [TRAILING_ZEROS]: `numeric` keeps the
-     * scale a sum or a product makes, so `0.25 * 10` is stored as `2.50`, and `1` finds `1.0` and `1.00` as `2.5` finds
-     * `2.50`; `jsonb` writes no number with an exponent. `= ANY` of an array is a test the index answers for each row, where
-     * a `CASE` around the comparison was not (#617).
-     *
-     * Only where the value is known to be no list or map ([scalar]): a list's numbers may be stored at any scale, `[1.0]`
-     * equal to `[1]`, which no list of texts holds, so a value that may be a list is compared as JSON alone, as before.
+     * The property's JSON, as its index holds it, equal to the [value]'s, `(props -> 'k') = x`, which the index answers for each
+     * row where a `CASE` around the comparison is not (#617): it holds wherever the comparison does, as `jsonb`'s equality is
+     * the comparison's, `1` equal to `1.0` and `[1]` to `[1.0]`, and leaves the comparison to say where either is null.
      */
-    override fun indexedEqualityOfAny(property: String, value: String, of: IndexedProperty?, scalar: Boolean): String? {
-        if (!scalar) return null
-        return PROPERTY_READ.matchEntire(property)?.let { read ->
-            shared(value) { (x) ->
-                val number = "trim_scale(($x)::numeric)::text"
-                fun zeros(point: String) = (1..TRAILING_ZEROS).joinToString(", ") { "$number || '$point${"0".repeat(it)}'" }
-                "${PostgresSql.propertyText(read.groupValues[1], read.groupValues[2])} = ANY(CASE WHEN jsonb_typeof($x) <> 'number' THEN ARRAY[$x #>> '{}'] " +
-                    "WHEN scale(trim_scale(($x)::numeric)) = 0 THEN ARRAY[$number, ${zeros(".")}] ELSE ARRAY[$number, ${zeros("")}] END)"
-            }
-        }
-    }
+    override fun indexedEqualityOfAny(property: String, value: String, of: IndexedProperty?, scalar: Boolean): String? =
+        PROPERTY_READ.matchEntire(property)?.let { "$property = $value" }
 
     /** The JSON [json]'s text, where it is a text: a property's read with `->>`, which costs less than `#>>`. */
     private fun textOf(json: String) = PROPERTY_READ.matchEntire(json)?.let { PostgresSql.propertyText(it.groupValues[1], it.groupValues[2]) } ?: "($json #>> '{}')"
@@ -459,7 +456,9 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
     override fun containsText(a: String, b: String) = "strpos($a, $b) > 0"
 
     override fun function(name: String, json: String): String? = when (name) {
-        "keys" -> shared(json) { (x) -> keysOrFailure("jsonb_typeof($x)", "(SELECT COALESCE(jsonb_agg(k ORDER BY k), '[]'::jsonb) FROM jsonb_object_keys($x) k)") }
+        "keys" -> shared(json) { (x) ->
+            keysOrFailure(x, "jsonb_typeof($x)", "(SELECT COALESCE(jsonb_agg(u.k ORDER BY u.k), '[]'::jsonb) FROM (SELECT ${unescapedKey("o.k")} AS k FROM jsonb_object_keys($x) o (k)) u)")
+        }
         "size" -> "CASE jsonb_typeof($json) WHEN 'array' THEN to_jsonb(jsonb_array_length($json)) WHEN 'string' THEN to_jsonb(length($json #>> '{}')) END"
         "tolower" -> "to_jsonb(lower(${text(json)}))"
         "toupper" -> "to_jsonb(upper(${text(json)}))"
@@ -613,7 +612,7 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
      */
     override fun boundSelect(columns: String) = "SELECT $columns OFFSET 0"
 
-    override val temporalSql = PostgresTemporalSql(sharedList)
+    override val temporalSql = PostgresTemporalSql(sharedList, graph)
 
     /**
      * Flags the pattern opens with, `(?i)`, are put before the anchors, where Postgres reads them, after `p`: a dot
@@ -806,13 +805,6 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
     override fun withoutLabel(labels: String, label: String) = "($labels - ${literal(label)})"
 
     companion object {
-        /**
-         * The most trailing zeros a stored number's text is looked for with, past the row's number's own ([indexedEqualityOfAny]):
-         * a number past them, as one a long chain of products of numbers with zeros after their point makes, is found where
-         * the index is not read, and is missed where it is.
-         */
-        const val TRAILING_ZEROS = 16
-
         /** The planner's settings a loop's statements for each row are planned with off: see [plannedAsNestedLoops]. */
         private val JOIN_METHODS = listOf("enable_seqscan", "enable_hashjoin", "enable_mergejoin", "enable_material")
 

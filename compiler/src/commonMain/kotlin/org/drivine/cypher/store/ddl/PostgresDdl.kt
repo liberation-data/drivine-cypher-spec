@@ -74,7 +74,24 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
         "CREATE INDEX IF NOT EXISTS ${name}_edge_src ON $edges (src, type)",
         "CREATE INDEX IF NOT EXISTS ${name}_edge_dst ON $edges (dst, type)",
         "CREATE INDEX IF NOT EXISTS ${name}_node_labels ON $nodes USING GIN (labels jsonb_path_ops)",
-    ).map { it.trimIndent() } + writes.ddl + "COMMENT ON TABLE $nodes IS '$VERSION'"
+    ).map { it.trimIndent() } + writes.ddl + temporalKeyFunction() + "COMMENT ON TABLE $nodes IS '$VERSION'"
+
+    /** The function compiled Cypher works out a temporal value's sort key by: see [temporalKeyFunction]. */
+    val temporalKey: String = temporalKeyName(name)
+
+    /**
+     * Makes [temporalKey]: the sort key `s` of the canonical text `t` of a temporal value of the kind `k`, its word, as
+     * `Temporals.key` works it out in Kotlin, by the text and integer arithmetic of `Temporals.sortKey`; null for a duration
+     * and for null. A SQL function, immutable, which Postgres writes out where it is called, so it costs nothing to run;
+     * compiled Cypher calls it where it makes a temporal value as it runs. Never in an index's expression.
+     */
+    private fun temporalKeyFunction(): String {
+        val inline: (List<String>, (List<String>) -> String) -> String = { values, body -> body(values) }
+        val temporals = org.drivine.cypher.sql.Temporals(org.drivine.cypher.sql.PostgresTemporalSql(inline), inline)
+        val kinds = org.drivine.cypher.sql.Temporal.instants.joinToString("\n") { "        WHEN '${it.function}' THEN ${temporals.sortKey("t", it)}" }
+        return "CREATE OR REPLACE FUNCTION ${temporalKeyName(name)}(k text, t text) RETURNS text LANGUAGE sql IMMUTABLE PARALLEL SAFE AS ${'$'}fn${'$'}\n" +
+            "    SELECT CASE k\n$kinds\n    END\n${'$'}fn${'$'}"
+    }
 
     /**
      * The block that makes the store when it is not there, and does nothing when it is: the probe, the lock and the [ddl]
@@ -162,7 +179,7 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
      * the label a statement makes, both of the table's own columns.
      */
     private fun over(label: String, properties: List<String>): String =
-        "$nodes (${properties.joinToString(", ") { "(${PostgresSql.property("", it)})" }}) WHERE ${hasLabel("", label)}"
+        "$nodes (${properties.joinToString(", ") { "(${PostgresSql.indexed("", it)})" }}) WHERE ${hasLabel("", label)}"
 
     override fun createIndex(spec: IndexSpec, existing: CatalogItem?): List<DdlStatement> = when (spec) {
         is RangeIndexSpec -> {
@@ -224,7 +241,10 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
         const val MAX_OBJECT_NAME = 63
 
         /** What the node table's comment says of a store this version made. */
-        const val VERSION = "drivine:7"
+        const val VERSION = "drivine:8"
+
+        /** The function the store of the graph [graph] keeps that works out a temporal value's sort key: see [temporalKey]. */
+        fun temporalKeyName(graph: String) = "${graph}_temporal_key"
 
         /** Why [name] cannot name a graph here; null where it can (see [SqlStoreDdl.refusal]). */
         fun refusal(name: String): String? = SqlStoreDdl.refusal(name, ENGINE, MAX_OBJECT_NAME)

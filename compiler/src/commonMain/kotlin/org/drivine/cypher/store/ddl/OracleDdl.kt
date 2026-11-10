@@ -100,11 +100,18 @@ class OracleDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
     /** See [era]. */
     val eraDate: String = OracleCypherCompiler.eraDateName(name)
 
+    /**
+     * The function a compiled Cypher statement works out the sort key of a temporal value it makes by (see
+     * `OracleCypherCompiler.temporalKeyFunction`), called where [era]'s are. Never in an index.
+     */
+    val temporalKey: String = OracleCypherCompiler.temporalKeyName(name)
+
     /** Each function the store keeps beside the graph's tables, by name, and what makes it: safe to run again. */
     private val made: Map<String, String> = linkedMapOf(
         nullsEqual to OracleCypherCompiler.nullsEqualFunction(nullsEqual),
         era to OracleCypherCompiler.eraFunction(era),
         eraDate to OracleCypherCompiler.eraDateFunction(eraDate),
+        temporalKey to OracleCypherCompiler.temporalKeyFunction(temporalKey),
     ).mapValues { (_, function) -> "CREATE OR REPLACE $function" }
 
     /** What makes [nullsEqual], [era] and [eraDate]: safe to run again. */
@@ -295,7 +302,7 @@ ${made.entries.joinToString("\n") { (function, making) ->
     /** The index over the property of every node, whatever the label: what a save and a load by id find a node by. */
     private fun sharedIndex(spec: RangeIndexSpec): Pair<String, String> {
         val name = objectName("ix", spec.properties)
-        val expressions = spec.properties.joinToString(", ") { "JSON_VALUE(props, ${path(it)})" }
+        val expressions = spec.properties.joinToString(", ") { "${OracleSql.indexClass("props", it)}, ${OracleSql.indexKey("props", it)}" }
         return name to busyWaiting("CREATE INDEX IF NOT EXISTS $name ON $nodes ($expressions)")
     }
 
@@ -308,7 +315,7 @@ ${made.entries.joinToString("\n") { (function, making) ->
     private fun rangeIndex(spec: RangeIndexSpec): List<String> {
         val (name, shared) = sharedIndex(spec)
         val labelled = objectName("lx", listOf(spec.label) + spec.properties)
-        val scoped = spec.properties.joinToString(", ") { OracleSql.labelled("n", spec.label, it) }
+        val scoped = spec.properties.flatMap { OracleSql.labelled("n", spec.label, it) }.joinToString(", ")
         // Not where a uniqueness constraint's index over the one property stands for it, as when the
         // range index is made again under a constraint: the record then names an index that is not
         // there, and the unique index is read through.
@@ -384,7 +391,7 @@ ${made.entries.joinToString("\n") { (function, making) ->
             columnType = "JSON",
             payload = { row ->
                 spec.properties.joinToString(", ", "JSON_OBJECT(", " ABSENT ON NULL RETURNING JSON)") {
-                    "${literal(it)} VALUE JSON_VALUE($row.props, ${path(it)} RETURNING CLOB)"
+                    "${literal(it)} VALUE ${OracleSql.searchedText(row, it)}"
                 }
             },
             indexed = { row -> OracleSql.carriesLabel(row, spec.label) },
@@ -430,7 +437,7 @@ ${made.entries.joinToString("\n") { (function, making) ->
         is UniquenessConstraintSpec -> {
             val name = objectName("uq", listOf(spec.label) + spec.properties)
             // A node that lacks any of the properties is not constrained, as on the graph engines.
-            val expressions = spec.properties.joinToString(", ") { OracleSql.unique("n", spec.label, spec.properties, it) }
+            val expressions = spec.properties.flatMap { OracleSql.unique("n", spec.label, spec.properties, it) }.joinToString(", ")
             val unique = busyWaiting("CREATE UNIQUE INDEX IF NOT EXISTS $name ON $nodes n ($expressions)")
             val range = RangeIndexSpec(spec.label, spec.properties)
             if (spec.properties.size > 1) {
