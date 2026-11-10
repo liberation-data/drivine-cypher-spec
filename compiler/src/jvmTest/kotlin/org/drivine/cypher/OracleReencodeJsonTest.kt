@@ -103,6 +103,16 @@ class OracleReencodeJsonTest {
     }
 
     @Test
+    fun `a write that returns nothing compiles alike either way`() {
+        for (rowsAsText in listOf(false, true)) for (cypher in listOf(
+            "CREATE (n:N {i: 1})",
+            "MATCH (n:N) SET n.x = 1",
+            "MATCH (n:N) DETACH DELETE n",
+            "UNWIND [1, 2] AS i CALL { WITH i CREATE (:N {i: i}) }",
+        )) assertEquals(sql(cypher, reencodeJson = false, rowsAsText), sql(cypher, reencodeJson = true, rowsAsText), cypher)
+    }
+
+    @Test
     fun `the option reaches the compiler through GraphOptions, beside oracleRowsAsText`() {
         val cypher = returning.first().first
         assertEquals(sql(cypher, reencodeJson = true), (compiled(cypher, GraphOptions("g", oracleReencodeJson = true)) as Compiled).sql)

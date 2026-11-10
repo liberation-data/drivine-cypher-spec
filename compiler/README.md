@@ -239,7 +239,9 @@ SELECT JSON_TRANSFORM(<the value>, KEEP '$') AS result
 ```
 
 With `oracleRowsAsText` too, a write's rows are serialized to text already; its reads still return `JSON`, so the host
-sets both. Every statement on the other stores is compiled alike either way.
+sets both. A statement that returns nothing, and every statement on the other stores, is compiled alike either way. The
+option is temporary: a host sets it until its thin driver reads OSON version 2 (oracle/python-oracledb#622,
+oracle/node-oracledb#1796), then drops it, and it goes from the module with them.
 
 ### npm
 

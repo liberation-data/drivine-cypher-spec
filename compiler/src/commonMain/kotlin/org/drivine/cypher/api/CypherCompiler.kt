@@ -49,7 +49,7 @@ enum class Store(val id: String) {
  *   thin mode gives `DPY-3021: OSON version 2 is not supported` (oracle/python-oracledb#622), node-oracledb's
  *   `NJS-126` (oracle/node-oracledb#1796). For a host on a thin driver, reading or writing; JDBC reads version 2, so
  *   drivine4j leaves it false. With [oracleRowsAsText] a write's rows are text already, and its reads still need this.
- *   Every statement on the other stores is compiled alike either way.
+ *   A statement that returns nothing, and every statement on the other stores, is compiled alike either way.
  */
 data class GraphOptions(
     val name: String,
