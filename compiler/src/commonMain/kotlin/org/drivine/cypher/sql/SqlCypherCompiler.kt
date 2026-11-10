@@ -165,6 +165,9 @@ abstract class SqlCypherCompiler(
     /** The columns of the statement's rows, as its last `RETURN`, or its `UNION`'s first query's, gives them: see [CompiledCypher.columns]. */
     private var returned: List<ResultColumn>? = null
 
+    /** The places among [returned] that a query of the statement gives a node, a relationship or a list of them in: see `union`. */
+    private val taggedReturned = mutableSetOf<Int>()
+
     /**
      * Whether the statement's parameters hold NaN or an infinity, at any depth: set as [compile] starts. A store whose JSON holds
      * no such float as a number writes one as a value of its own, and works with that value as the float it is only where the
@@ -226,6 +229,7 @@ abstract class SqlCypherCompiler(
     /** The statement [query], read already, with its parameters' values [parameters], as SQL: a query, or a procedure where it writes. */
     fun compile(query: Query, parameters: Map<String, Any?>): CompiledCypher {
         returned = null
+        taggedReturned.clear()
         return finished(compiled(query, parameters)).copy(columns = returned.orEmpty())
     }
 
@@ -362,16 +366,32 @@ abstract class SqlCypherCompiler(
         if (names.distinct().size > 1) {
             throw CompilerException("Each query of a UNION returns the same names, as in Cypher: ${names.joinToString(" and ") { it.joinToString(prefix = "(", postfix = ")") }}.")
         }
-        val writer = Writer(Parameters(parameters, ::parameterJson, ::parameterCount, text = ::parameterText, asPath = parameterPath))
-        // Every query's names, before any is compiled: a name made in one is no variable of a later one's.
-        writer.give(query)
-        // Its rows are compared, as a UNION without ALL compares them: see [Writer.distinctParts].
-        writer.distinctParts = !query.unions.first().all
-        writer.identifiedParts = writer.distinctParts
+        fun written(untagged: Set<Int>): Pair<Writer, List<Writer.Projected>> {
+            val writer = Writer(Parameters(parameters, ::parameterJson, ::parameterCount, text = ::parameterText, asPath = parameterPath))
+            writer.untagged = untagged
+            // Every query's names, before any is compiled: a name made in one is no variable of a later one's.
+            writer.give(query)
+            // Its rows are compared, as a UNION without ALL compares them: see [Writer.distinctParts].
+            writer.distinctParts = !query.unions.first().all
+            writer.identifiedParts = writer.distinctParts
+            return writer to parts.map { clauses -> writer.projected(Query(clauses)) }
+        }
         // Each query's result is of one type, as one may build a list or a map, Postgres's `json`, and another give a `jsonb`
         // (drivine4j#679, as drivine4j#516 for a UNION in CALL { … }). Without ALL, it is as JSON compares it.
         val result = if (query.unions.first().all) orderedJson("q.result") else comparable(Value.Json("q.result", ordered = true))
-        val projected = parts.map { clauses -> writer.projected(Query(clauses)) }
+        val warnedBefore = warned.size
+        val declaredBefore = functions.size
+        val first = written(emptySet())
+        // Compiled typed, a column a query gives a node in and another a value of another kind is a value's, which a host reads
+        // no tag in: so the queries are written again with that column untagged in each, as compiling untyped gives it.
+        val untagged = if (!typed) emptySet() else returned.orEmpty().withIndex().filter { (i, column) -> i in taggedReturned && !column.kind.tagged }.map { it.index }.toSet()
+        val (writer, projected) = if (untagged.isEmpty()) first else {
+            warned.subList(warnedBefore, warned.size).clear()
+            functions.subList(declaredBefore, functions.size).clear()
+            returned = null
+            taggedReturned.clear()
+            written(untagged)
+        }
         // Where a query's rows hold a node or a relationship, each query gives its row's identity beside it, and a query whose rows
         // hold none its value, which is its identity (drivine4j#213): see [Writer.rowIdentity]. Where none does, there is none, nor
         // where one may hold a node without its identity, as `head(collect(n))` does: then each compares by its value.
@@ -1245,6 +1265,9 @@ abstract class SqlCypherCompiler(
          * not in an `EXISTS { … }`, which keeps no row once.
          */
         var identifiedParts = false
+
+        /** The places of the statement's columns it gives as compiling untyped gives them though compiled [typed]: see `union`. */
+        var untagged: Set<Int> = emptySet()
 
         /** The queries given to compile, [query] and [procedure], whose names [hidden] keeps clear of, not yet in [queryTexts]. */
         private val queries = mutableListOf<Query>()
@@ -3040,7 +3063,7 @@ abstract class SqlCypherCompiler(
             val outerColumns = if (final) {
                 val read = columns.map { (column, value) -> value.columnsOf(name, column) }
                 if (statement) returned = columnsReturned(items.map { it.name }, read)
-                val values = if (statement && typed) read.map(::output) else read.map(::json)
+                val values = if (statement && typed) read.mapIndexed { i, value -> if (i in untagged) json(value) else output(value) } else read.map(::json)
                 // A value that may be JSON's null is given as SQL's where a UNION compares rows by it; in a row of several, a list's item,
                 // SQL's null is JSON's (#500).
                 val result = if (values.size == 1) values.single().let { if (distinctParts && it.jsonNull) comparedNull(it.sql) else it.sql }
@@ -5873,6 +5896,7 @@ abstract class SqlCypherCompiler(
         /** The columns [names] of a statement's last `RETURN`, their values [read] as its outer query reads them: see [CompiledCypher.columns]. */
         private fun columnsReturned(names: List<String>, read: List<Value>): List<ResultColumn> {
             val columns = names.zip(read).map { (name, value) -> ResultColumn(name, columnKind(value)) }
+            columns.forEachIndexed { i, column -> if (column.kind.tagged) taggedReturned += i }
             // A UNION's columns are its first query's, of the kind every query's is, or a value.
             val first = returned ?: return columns
             return first.zip(columns).map { (named, other) -> if (named.kind == other.kind) named else named.copy(kind = ColumnKind.VALUE) }

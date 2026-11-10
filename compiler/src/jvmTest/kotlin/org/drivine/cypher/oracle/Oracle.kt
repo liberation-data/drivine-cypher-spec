@@ -117,6 +117,15 @@ object Oracle {
             val answer = CompileJson.compile(typed)
             if (answer != plain && answer.substringBefore(",\"columns\":") != plain.removeSuffix("}")) add(typed)
         }
+        // And on Oracle with its rows as text, each statement whose typed SQL the option changes: a write that returns a node or a relationship.
+        for ((cypher, parameters) in results + statements) {
+            val untyped = request("oracle", cypher, parameters, ROWS_AS_TEXT)
+            val typed = typedRequest(untyped)
+            val plain = CompileJson.compile(untyped)
+            val answer = CompileJson.compile(typed)
+            val changed = answer != CompileJson.compile(typedRequest(request("oracle", cypher, parameters)))
+            if (changed && answer.substringBefore(",\"columns\":") != plain.removeSuffix("}")) add(typed)
+        }
         add("{\"store\": \"sqlite\", \"graph\": {\"name\": \"g\"}, \"typed\": \"yes\", \"cypher\": \"RETURN 1\"}")
     }
 

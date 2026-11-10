@@ -44,7 +44,8 @@ A compiled statement gives its columns (`CompiledCypher.columns`, `Compiled.colu
 names it (an item's alias, or its text as written, `RETURN *`'s variables in the order of their names, a `UNION`'s first
 query's names), and the kind the compiler knows it holds (`ColumnKind`). That's `node`, `relationship`, `nodes` or
 `relationships` (a list of them), a temporal kind (`date`, `localtime`, `time`, `localdatetime`, `datetime`,
-`duration`), or `value`. A result with no rows still has them, and a statement that returns nothing has none.
+`duration`), or `value`. A `UNION`'s column is of the kind each of its queries gives there, and `value` where they
+differ. A result with no rows still has them, and a statement that returns nothing has none.
 
 Compiled typed (`compile(cypher, parameters, typed = true)`, or the request's `"typed": true`), the columns of a node,
 a relationship or a list of them hold each one tagged:
@@ -53,7 +54,7 @@ a relationship or a list of them hold each one tagged:
 - a relationship as `{"$t": "relationship", "type": "...", "properties": {...}}`.
 
 A host reads tags only in those columns. Every other column holds what compiling untyped gives, so a map there with a
-`$t` key of its own is a map. A temporal value is its ISO text until liberation-data/drivine-cypher-spec#161. After that it's
+`$t` key of its own is a map, and a node one query of a `UNION` gives in a `value` column is its properties. A temporal value is its ISO text until liberation-data/drivine-cypher-spec#161. After that it's
 `{"$t": "datetime", "v": "..."}` and the like: the tag scheme is agreed with #161's, and output stays a contract apart
 from how the store keeps a value. A path is still refused (#163). A node held in a map or a list the statement builds
 comes back as its properties (#164). Each library decodes the rows itself. Untyped, a statement compiles byte for byte
@@ -388,7 +389,9 @@ The JVM is the oracle. `./gradlew jvmOracle` writes, into `build/oracle`:
   `schema.yaml`), compiled for Postgres, Oracle and SQLite, and some with parameters the spec has no form for (whole
   floats, temporal values, bytes, `$` keys) and Oracle's graph options, and on Oracle with `oracleRowsAsText` each of
   those statements whose SQL it changes (every write that returns rows), and two writes of its own, of a long text and of
-  many rows: each request and the JVM's answer. A statement whose SQL embeds the moment it was compiled, as SQLite's
+  many rows. Last, compiled typed: `results.yaml`'s statements, and each other statement whose SQL typed changes (one
+  that returns a node or a relationship), on Oracle with `oracleRowsAsText` too where that changes it. Each request and
+  the JVM's answer. A statement whose SQL embeds the moment it was compiled, as SQLite's
   does for `datetime()` and the like, is left out, found by its SQL holding that moment.
 - `doubles.txt`: random doubles (subnormals included) and Java's text of each, and random decimal and hexadecimal texts,
   halfway points between doubles and texts a digit either side, and Java's reading of each.

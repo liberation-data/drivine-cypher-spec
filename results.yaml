@@ -49,6 +49,12 @@ cases:
         only: [neo4j, sql]
         columns: ["label"]
         rows: ["CyTest", "Movie", "Person"]
+      - note: "A procedure called alone gives a column for each value it yields."
+        cypher: "CALL db.relationshipTypes()"
+        only: [neo4j, sql]
+        unordered: true
+        columns: ["relationshipType"]
+        rows: ["ACTED_IN", "KNOWS"]
 
   - name: "A node and a relationship"
     description: "A node comes back with its labels and properties, a relationship with its type and properties, and one OPTIONAL MATCH doesn't find as null."
@@ -80,6 +86,13 @@ cases:
         rows: [["The Matrix", 2, [
           {$t: "node", labels: ["CyTest", "Person"], properties: {name: "Carrie", born: 1967}},
           {$t: "node", labels: ["CyTest", "Person"], properties: {name: "Keanu", born: 1964}}
+        ]]]
+      - cypher: "MATCH (:Person)-[r:ACTED_IN]->(m) RETURN m.title, collect(r) AS rs"
+        unorderedLists: true
+        columns: ["m.title", "rs"]
+        rows: [["The Matrix", [
+          {$t: "relationship", type: "ACTED_IN", properties: {role: "Neo"}},
+          {$t: "relationship", type: "ACTED_IN", properties: {role: "Trinity"}}
         ]]]
 
   - name: "Other values"
