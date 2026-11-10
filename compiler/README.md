@@ -389,7 +389,8 @@ The JVM is the oracle. `./gradlew jvmOracle` writes, into `build/oracle`:
   `schema.yaml`), compiled for Postgres, Oracle and SQLite, and some with parameters the spec has no form for (whole
   floats, temporal values, bytes, `$` keys) and Oracle's graph options, and on Oracle with `oracleRowsAsText` each of
   those statements whose SQL it changes (every write that returns rows), and two writes of its own, of a long text and of
-  many rows: each request and the JVM's answer. A statement whose SQL embeds the moment it was compiled, as SQLite's
+  many rows, and with `oracleReencodeJson` each of those statements whose SQL it changes (every one that returns rows):
+  each request and the JVM's answer. A statement whose SQL embeds the moment it was compiled, as SQLite's
   does for `datetime()` and the like, is left out, found by its SQL holding that moment.
 - `doubles.txt`: random doubles (subnormals included) and Java's text of each, and random decimal and hexadecimal texts,
   halfway points between doubles and texts a digit either side, and Java's reading of each.

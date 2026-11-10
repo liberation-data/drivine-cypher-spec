@@ -97,7 +97,10 @@ abstract class SqlCypherCompiler(
     /** The query [query], a statement of its own that opens with `SELECT`, with what the store's planner is told of it: nothing here. */
     protected open fun planned(query: String): String = query
 
-    /** The value a statement returns, a row's `result`, as the host's driver reads it back: as it is, but where a store's says. */
+    /**
+     * The value a statement returns, a row's `result`, as the host's driver reads it back: as it is, but where a store's says.
+     * Only the statement's own, each of its `UNION`'s queries' among them, not a subquery's, which the statement reads on.
+     */
     protected open fun returned(json: String): String = json
 
     /**
@@ -1536,7 +1539,7 @@ abstract class SqlCypherCompiler(
                         val projected = (listOf(query.clauses) + query.unions.map { it.clauses }).map { clauses ->
                             var select = Select(scope)
                             clauses.dropLast(1).forEach { select = read(select, it, scope) }
-                            project(select, (clauses.last() as Clause.Return).projection, final = true)
+                            project(select, (clauses.last() as Clause.Return).projection, final = true, ofStatement = false)
                         }
                         // Of one type in each query, compared or not (drivine4j#679).
                         val result = if (distinct) comparable(Value.Json("q.result", ordered = true)) else orderedJson("q.result")
@@ -2859,9 +2862,11 @@ abstract class SqlCypherCompiler(
         /**
          * The query a `WITH` or a `RETURN` makes of [select]: its items as columns, grouped where it
          * aggregates, then ordered, skipped and limited. Rows it does not order, group or keep distinct
-         * stay in the order [select] reads them, as a graph engine keeps them.
+         * stay in the order [select] reads them, as a graph engine keeps them. Where [final], its rows are one `result` each, and
+         * where [ofStatement] too, the statement's own, which a host reads, so each is as [returned] gives it: not a subquery's
+         * `UNION` part, which the statement reads on.
          */
-        fun project(select: Select, written: Projection, final: Boolean): Projected {
+        fun project(select: Select, written: Projection, final: Boolean, ofStatement: Boolean = final): Projected {
             // As in Neo4j, a star gives the variables in the order of their names, before the items named after it.
             // Not a randomUUID() made first for a CALL or a condition (see `anewCall`), which the statement never named.
             val starred = select.bound.keys.filterNot { it in madeAnew }.sorted()
@@ -2876,13 +2881,13 @@ abstract class SqlCypherCompiler(
             )
             // Before aggregatesFirst, which names each variable it groups by as an item of its own.
             requireExplicitGrouping(items, projection.orderBy, select.scope.keys)
-            anewFirst(select, projection, items)?.let { (made, kept) -> return project(made, kept, final) }
-            casesFirst(select, projection, items)?.let { (cased, kept) -> return project(cased, kept, final) }
+            anewFirst(select, projection, items)?.let { (made, kept) -> return project(made, kept, final, ofStatement) }
+            casesFirst(select, projection, items)?.let { (cased, kept) -> return project(cased, kept, final, ofStatement) }
             // After casesFirst, which refuses what it must of an aggregate's CASE before working it out first.
-            sharedFirst(select, projection, items)?.let { (shared, kept) -> return project(shared, kept, final) }
-            sortsFirst(select, projection, items)?.let { (sorted, kept) -> return project(sorted, kept, final) }
-            aggregatesFirst(select, projection, items)?.let { (grouped, kept) -> return project(grouped, kept, final) }
-            heldFirst(select, projection, items)?.let { (held, keyed) -> return project(held, keyed, final) }
+            sharedFirst(select, projection, items)?.let { (shared, kept) -> return project(shared, kept, final, ofStatement) }
+            sortsFirst(select, projection, items)?.let { (sorted, kept) -> return project(sorted, kept, final, ofStatement) }
+            aggregatesFirst(select, projection, items)?.let { (grouped, kept) -> return project(grouped, kept, final, ofStatement) }
+            heldFirst(select, projection, items)?.let { (held, keyed) -> return project(held, keyed, final, ofStatement) }
             if (final && items.size > 1) {
                 warn(
                     "The statement returns ${items.size} items (${items.joinToString { it.name }}). Prefer returning a single map or value, such as RETURN { key1: val1, key2: val2 }: " +
@@ -3018,7 +3023,7 @@ abstract class SqlCypherCompiler(
                 else jsonArray(values.map { it.sql })
                 // Where a UNION compares rows by it, a row that holds a node or a relationship is compared by its identity too (drivine4j#213).
                 identity = if (distinctParts && identifiedParts) rowIdentity(read) else null
-                "${returned(result)} AS result${identity?.let { ", $it AS identity" }.orEmpty()}"
+                "${if (ofStatement) returned(result) else result} AS result${identity?.let { ", $it AS identity" }.orEmpty()}"
             } else {
                 (columns.flatMap { (column, value) -> value.columns(column).map { "$name.${it.substringAfterLast(" AS ")}" } } +
                     sorts.flatMap { (column, _) -> sortedBy(column).map { (named, term) -> "$term AS $named" } }).joinToString(", ")
