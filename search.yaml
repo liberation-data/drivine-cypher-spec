@@ -13,7 +13,8 @@
 # Each case says what Neo4j's index gives (Neo4j 2026.10.1, the analyzer `standard-no-stop-words`), which is what every
 # store is to give, except where a refusal says otherwise. Where a store gives something else today, `today` says what,
 # and the issue; a library holds such a step in its own HELD list until the issue's fix lands. `today` is not read.
-# "to decide" marks a difference kept on purpose by the libraries, whose wanted behaviour is to be settled under #100.
+# Where a library differs from Neo4j on purpose, the case still states Neo4j's answer: for search, Neo4j's answer is the
+# rule (liberation-data/drivine-cypher-spec#100, decided 2026-11-10), and the difference is filed as a bug.
 
 graph: |
   CREATE (:Doc {id: 'graphs', body: 'graph databases store graph data'}),
@@ -253,7 +254,7 @@ cases:
       - search: {label: "Doc", properties: ["body"], query: 'graph\ data', topK: 50}
         ids: ["about", "graphs", "note"]
         today:
-          - {stores: ["sql", "memgraph"], ids: ["graphs"], issue: "to decide: TextQuery reads an escaped space as a phrase on purpose (its doc says a graph engine may differ); liberation-data/drivine-cypher-spec#100"}
+          - {stores: ["sql", "memgraph"], ids: ["graphs"], issue: "liberation-data/drivine4j#765"}
           - {stores: ["falkordb"], ids: [], issue: "liberation-data/drivine4j#666"}
 
   - name: "Ranked"
@@ -263,9 +264,12 @@ cases:
         ranked: ["graphs"]
       - search: {label: "Doc", properties: ["body"], query: "graph", topK: 3}
         ranked: ["graphs", "about", "note"]
-        today:
-          - {stores: ["falkordb"], ranked: ["about", "graphs", "note"], issue: "liberation-data/drivine4j#666 (graphs and about score alike there, so the tie goes by node)"}
-          - {stores: ["oracle-text"], ranked: ["graphs", "note", "about"], issue: "none: Oracle Text's own measure"}
+        except: ["oracle-text"]
+        today: [{stores: ["falkordb"], ranked: ["about", "graphs", "note"], issue: "liberation-data/drivine4j#666 (graphs and about score alike there, so the tie goes by node)"}]
+      - search: {label: "Doc", properties: ["body"], query: "graph", topK: 3}
+        ranked: ["graphs", "note", "about"]
+        only: ["oracle-text"]
+        note: "Oracle Text scores by its own measure, not BM25 (liberation-data/drivine-cypher-spec#102)."
       - search: {label: "Doc", properties: ["body"], query: "kiwi", topK: 1}
         ranked: ["kiwi"]
 
@@ -327,22 +331,31 @@ ranking:
       - "CALL db.index.fulltext.queryNodes('Article_body_fulltext', $query, {limit: 5}) YIELD node RETURN node.id"
   # Each bar holds over the queries Neo4j gives any hit for (21 of the 22): the same top hit as Neo4j's for at least
   # `sameTop` of them, and a mean, over them, of at least `overlap` of the top five in common with Neo4j's, as sets.
-  # `target` is where the bar goes once #665 and the norms land. `measured` is what each store gave when this file was
-  # recorded, by drivine4j at dd4a66f0, and is not read.
+  # `target` is where the bar goes once liberation-data/drivine4j#665 and the norms land. `measured` is what each store
+  # gave when this file was recorded, by drivine4j at dd4a66f0, and is not read.
+  # Each store's bar is what it gives today (2026-11-10), rounded down, so the move into the module can't regress any of them; a
+  # store's target is the bar it is to reach. The BM25 stores aim at 4.5 and 21; Oracle Text's and FalkorDB's targets
+  # come with liberation-data/drivine4j#763 and #666.
   bars:
     - stores: ["postgres", "oracle", "sqlite"]
-      sameTop: 15
-      overlap: 3.5
+      sameTop: 17
+      overlap: 4.3
       target: {sameTop: 21, overlap: 4.5}
       measured: {postgres: {sameTop: 17, overlap: 4.33}, oracle: {sameTop: 17, overlap: 4.33}, sqlite: {sameTop: 17, overlap: 4.33}}
+    - stores: ["memgraph"]
+      sameTop: 16
+      overlap: 4.09
+      measured: {memgraph: {sameTop: 16, overlap: 4.095}}
     - stores: ["oracle-text"]
       sameTop: 6
       overlap: 2.8
-      note: "Oracle Text scores by its own measure, not BM25 (liberation-data/drivine-cypher-spec#102), so its bar is what it gave: 6 and 2.81."
+      note: "Oracle Text scores by its own measure, not BM25 (liberation-data/drivine-cypher-spec#102)."
       measured: {oracle-text: {sameTop: 6, overlap: 2.81}}
-  # Not held to a bar: measured alike, for reference.
-  graphEngines:
-    measured: {memgraph: {sameTop: 16, overlap: 4.10}, falkordb: {sameTop: 9, overlap: 2.10}}
+    - stores: ["falkordb"]
+      sameTop: 9
+      overlap: 2.09
+      note: "RediSearch ANDs the words and stems them (liberation-data/drivine4j#666)."
+      measured: {falkordb: {sameTop: 9, overlap: 2.095}}
   queries:
     - query: "GraphObjectManager"
       neo4j: ["legacy-graph-object-manager#1", "0.1.0-stateless-object-manager#8", "vector-search#1", "13-java-query-dsl#1", "oracle-sql-pgq-plan#4"]
