@@ -226,9 +226,9 @@ cases:
   - name: "Several properties"
     description: "An index over several properties finds a word in any of them; a node that lacks one is searched by the rest."
     steps:
-      # Memgraph's three below are its arm64 build's: Memgraph 3.14.0 on arm64 indexes only the first property of a text
-      # index over several when another text index was made before it, as this file's Doc index is (memgraph/memgraph#5353,
-      # liberation-data/drivine4j#762). Its amd64 build searches every property, as Neo4j does. A runner holds them on arm64.
+      # Memgraph's three below: Memgraph 3.14.0 indexes only the first property of a text index over several when another
+      # text index was made before it, as this file's Doc index is (memgraph/memgraph#5353, liberation-data/drivine4j#762),
+      # on every architecture. A runner whose store has made a text index of several properties first may pass them.
       - search: {label: "Paper", properties: ["title", "body"], query: "kiwi", topK: 50}
         ids: ["p1", "p2", "p4"]
         today: [{stores: ["memgraph"], ids: ["p1", "p4"], issue: "liberation-data/drivine4j#762"}]
