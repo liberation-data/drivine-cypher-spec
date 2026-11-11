@@ -6711,3 +6711,170 @@ forms:
       - {"kind": "FULLTEXT_INDEX", "label": "Doc", "properties": ["title", "body"], "name": "Doc_title_body_fulltext"}
     items:
       - {spec: {"kind": "FULLTEXT_INDEX", "label": "Doc", "properties": ["title", "body"]}, form: {"stale": "form 0"}}
+  - name: "Oracle: an index named as a vector index's table beside the nodes"
+    description: "drivine4j's vector index, its record saying no form, and an index Drivine didn't make under its table's name: Oracle names indexes apart from tables, so the table is read as itself."
+    store: "oracle"
+    listing: "indexes.VECTOR_INDEX"
+    rows:
+      - {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "name": "Chunk_embedding_vector", "details": {"dimensions": 384, "similarity": "COSINE"}, "status": null}
+      - {"object": "DRIVINE_V_CHUNKEMBEDDING_7E60BD64", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "indexType": "NORMAL", "columns": ["STAMP"], "tableColumns": null, "source": null}
+      - {"object": "DRIVINE_V_CHUNKEMBEDDING_7E60BD64", "type": "TABLE", "table": null, "uniqueness": null, "indexType": null, "columns": null, "tableColumns": ["NID NUMBER", "EMBEDDING VECTOR"], "source": null}
+      - {"object": "DRIVINE_V_CHUNKEMBEDDING_7E60BD64_I", "type": "INDEX", "table": "DRIVINE_V_CHUNKEMBEDDING_7E60BD64", "uniqueness": "NONUNIQUE", "indexType": "VECTOR", "columns": ["EMBEDDING"], "tableColumns": null, "source": null}
+      - {"object": "DRIVINE_V_CHUNKEMBEDDING_7E60BD64_T", "type": "TRIGGER", "table": "DRIVINE_NODE", "uniqueness": null, "indexType": null, "columns": null, "tableColumns": null, "source": ["TRIGGER drivine_v_Chunkembedding_7e60bd64_t AFTER INSERT OR UPDATE OF labels, props ON drivine_node FOR EACH ROW\n", "BEGIN\n", "    IF INSTR(',' || LTRIM(RTRIM(JSON_SERIALIZE(:NEW.labels), ']'), '[') || ',\"', ',\"Chunk\",\"') > 0 AND JSON_EXISTS(:NEW.props, '$.embedding') THEN\n", "                BEGIN\n", "            MERGE INTO drivine_v_Chunkembedding_7e60bd64 s USING (SELECT :NEW.nid AS nid, TO_VECTOR(JSON_QUERY(:NEW.props, '$.embedding' RETURNING CLOB)) AS embedding FROM dual) n ON (s.nid = n.nid)\n", "WHEN MATCHED THEN UPDATE SET s.embedding = n.embedding\n", "WHEN NOT MATCHED THEN INSERT (nid, embedding) VALUES (n.nid, n.embedding);\n", "        EXCEPTION WHEN OTHERS THEN\n", "            -- Not a payload the column takes: the node is kept, and left out of the table, as the graph engines leave it out of the index.\n", "            DELETE FROM drivine_v_Chunkembedding_7e60bd64 WHERE nid = :NEW.nid;\n", "        END;\n", "    ELSE\n", "        DELETE FROM drivine_v_Chunkembedding_7e60bd64 WHERE nid = :NEW.nid;\n", "    END IF;\n", "END;"]}
+    listed:
+      - {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "name": "Chunk_embedding_vector", "dimensions": 384, "similarity": "COSINE"}
+    items:
+      - {spec: {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "options": {"dimensions": 384, "similarity": "COSINE"}}, form: {"unrecorded": "UPDATE drivine_schema SET details = JSON_MERGEPATCH(details, '{\"form\": 1}') WHERE kind = 'VECTOR_INDEX' AND label = 'Chunk' AND properties = '[\"embedding\"]'"}}
+  - name: "Postgres: a full-text index over the stamp"
+    description: "The stamp is a column of its own, COALESCE(stamp, ''), and read as the stamp."
+    store: "postgres"
+    listing: "indexes.FULLTEXT_INDEX"
+    rows:
+      - {"kind": "FULLTEXT_INDEX", "name": "Doc_title___drivine.stamp_fulltext", "label": "Doc", "details": {}, "properties": ["title", "__drivine.stamp"]}
+      - {"type": "i", "table": "drivine_node", "where": "labels @> '[\"Doc\"]'::jsonb", "method": "gin", "object": "drivine_t_doctitledrivinestamp_cf81e1ea", "unique": false, "columns": ["lower((COALESCE(props ->> 'title'::text, ''::text) || ' '::text) || COALESCE(stamp, ''::character varying)::text)"], "opclasses": ["gin_trgm_ops"]}
+    listed:
+      - {"kind": "FULLTEXT_INDEX", "label": "Doc", "properties": ["title", "__drivine.stamp"], "name": "Doc_title___drivine.stamp_fulltext"}
+    items:
+      - {spec: {"kind": "FULLTEXT_INDEX", "label": "Doc", "properties": ["title", "__drivine.stamp"]}, form: "current"}
+  - name: "Postgres: a unique index under a range index's name"
+    description: "Made unique by hand where the range index is."
+    store: "postgres"
+    listing: "indexes.RANGE_INDEX"
+    rows:
+      - {"kind": "RANGE_INDEX", "name": "Person_name_range", "label": "Person", "details": {}, "properties": ["name"]}
+      - {"type": "i", "table": "drivine_node", "where": "labels @> '[\"Person\"]'::jsonb", "method": "btree", "object": "drivine_ix_personname_44ce5436", "unique": true, "columns": ["(props ->> 'name'::text)"], "opclasses": ["text_ops"]}
+    listed:
+      - {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": "Person_name_range"}
+    items:
+      - {spec: {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"]}, form: {"mismatch": {"name": "drivine_ix_personname_44ce5436", "reason": "a unique index", "droppable": true}}}
+  - name: "Postgres: a vector index over vectors of another size"
+    description: "An HNSW index by cosine over vectors of 768 dimensions where 384 are declared."
+    store: "postgres"
+    listing: "indexes.VECTOR_INDEX"
+    rows:
+      - {"kind": "VECTOR_INDEX", "name": "Chunk_embedding_vector", "label": "Chunk", "details": {"dimensions": 384, "similarity": "COSINE"}, "properties": ["embedding"]}
+      - {"type": "i", "table": "drivine_node", "where": "labels @> '[\"Chunk\"]'::jsonb", "method": "hnsw", "object": "drivine_v_chunkembedding_7e60bd64", "unique": false, "columns": ["((((props -> 'embedding'::text)::text))::vector(768))"], "opclasses": ["vector_cosine_ops"]}
+    listed:
+      - {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "name": "Chunk_embedding_vector", "dimensions": 384, "similarity": "COSINE"}
+    items:
+      - {spec: {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "options": {"dimensions": 384, "similarity": "COSINE"}}, form: {"mismatch": {"name": "drivine_v_chunkembedding_7e60bd64", "reason": "an index over vectors of 768 dimensions", "droppable": true}}}
+  - name: "Postgres: a full-text index over another label's nodes"
+    description: "The trigram index over the properties' text, of the nodes of Page."
+    store: "postgres"
+    listing: "indexes.FULLTEXT_INDEX"
+    rows:
+      - {"kind": "FULLTEXT_INDEX", "name": "Doc_title_body_fulltext", "label": "Doc", "details": {}, "properties": ["title", "body"]}
+      - {"type": "i", "table": "drivine_node", "where": "labels @> '[\"Page\"]'::jsonb", "method": "gin", "object": "drivine_t_doctitlebody_f4762232", "unique": false, "columns": ["lower((COALESCE(props ->> 'title'::text, ''::text) || ' '::text) || COALESCE(props ->> 'body'::text, ''::text))"], "opclasses": ["gin_trgm_ops"]}
+    listed:
+      - {"kind": "FULLTEXT_INDEX", "label": "Doc", "properties": ["title", "body"], "name": "Doc_title_body_fulltext"}
+    items:
+      - {spec: {"kind": "FULLTEXT_INDEX", "label": "Doc", "properties": ["title", "body"]}, form: {"mismatch": {"name": "drivine_t_doctitlebody_f4762232", "reason": "an index over the nodes of Page", "droppable": true}}}
+  - name: "Postgres: a vector index by another access method"
+    description: "A B-tree index under the vector index's name."
+    store: "postgres"
+    listing: "indexes.VECTOR_INDEX"
+    rows:
+      - {"kind": "VECTOR_INDEX", "name": "Chunk_embedding_vector", "label": "Chunk", "details": {"dimensions": 384, "similarity": "COSINE"}, "properties": ["embedding"]}
+      - {"type": "i", "table": "drivine_node", "where": "labels @> '[\"Chunk\"]'::jsonb", "method": "btree", "object": "drivine_v_chunkembedding_7e60bd64", "unique": false, "columns": ["(props ->> 'embedding'::text)"], "opclasses": ["text_ops"]}
+    listed:
+      - {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "name": "Chunk_embedding_vector", "dimensions": 384, "similarity": "COSINE"}
+    items:
+      - {spec: {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "options": {"dimensions": 384, "similarity": "COSINE"}}, form: {"mismatch": {"name": "drivine_v_chunkembedding_7e60bd64", "reason": "an index by btree", "droppable": true}}}
+  - name: "SQLite: a unique index under a range index's name"
+    description: "Made unique by hand where the range index is."
+    store: "sqlite"
+    listing: "indexes.RANGE_INDEX"
+    rows:
+      - {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": "Person_name_range", "details": {}}
+      - {"object": "drivine_ix_Personname_44ce5436", "type": "index", "table": "drivine_node", "sql": "CREATE UNIQUE INDEX drivine_ix_Personname_44ce5436 ON drivine_node ((CASE json_type(props, '$.\"name\"') WHEN 'text' THEN props ->> '$.\"name\"' WHEN 'null' THEN NULL ELSE props -> '$.\"name\"' END)) WHERE instr(labels, '\"Person\"') > 0", "unique": 1}
+    listed:
+      - {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": "Person_name_range"}
+    items:
+      - {spec: {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"]}, form: {"mismatch": {"name": "drivine_ix_Personname_44ce5436", "reason": "a unique index", "droppable": true}}}
+  - name: "SQLite: a constraint's index over another label's nodes"
+    description: "A unique index over the property, of the nodes of Page."
+    store: "sqlite"
+    listing: "constraints"
+    rows:
+      - {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique", "details": {}}
+      - {"object": "drivine_uq_Personemail_5482a751", "type": "index", "table": "drivine_node", "sql": "CREATE UNIQUE INDEX drivine_uq_Personemail_5482a751 ON drivine_node ((CASE json_type(props, '$.\"email\"') WHEN 'text' THEN props ->> '$.\"email\"' WHEN 'null' THEN NULL ELSE props -> '$.\"email\"' END)) WHERE instr(labels, '\"Page\"') > 0", "unique": 1}
+    listed:
+      - {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique"}
+    items:
+      - {spec: {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"]}, form: {"mismatch": {"name": "drivine_uq_Personemail_5482a751", "reason": "an index over the nodes of Page", "droppable": true}}}
+  - name: "Oracle: a unique labelled index"
+    description: "The labelled index made unique by hand."
+    store: "oracle"
+    listing: "indexes.RANGE_INDEX"
+    rows:
+      - {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": "Person_name_range", "details": {"labelled": "drivine_lx_Personname_44ce5436"}, "status": null}
+      - {"object": "DRIVINE_IX_NAME_337A8B", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.name' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"], "tableColumns": null, "source": null}
+      - {"object": "DRIVINE_LX_PERSONNAME_44CE5436", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "UNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["CASE JSON_EXISTS2(\"LABELS\" FORMAT OSON , '$[*]?(@ == \"Person\")' /* json_path_str  $[*]?(@.string() == \"Person\")  */  FALSE ON ERROR TYPE(LAX) ) WHEN 1 THEN JSON_VALUE(\"PROPS\" FORMAT OSON , '$.name' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) ) END "], "tableColumns": null, "source": null}
+    listed:
+      - {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": "Person_name_range"}
+    items:
+      - {spec: {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"]}, form: {"mismatch": {"name": "DRIVINE_LX_PERSONNAME_44CE5436", "reason": "a unique index", "droppable": true}}}
+  - name: "Oracle: a vector index's trigger on another table"
+    description: "A trigger Drivine didn't make, on the relationships, under the vector index's trigger's name."
+    store: "oracle"
+    listing: "indexes.VECTOR_INDEX"
+    rows:
+      - {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "name": "Chunk_embedding_vector", "details": {"dimensions": 384, "similarity": "COSINE"}, "status": null}
+      - {"object": "DRIVINE_V_CHUNKEMBEDDING_7E60BD64", "type": "TABLE", "table": null, "uniqueness": null, "indexType": null, "columns": null, "tableColumns": ["NID NUMBER", "EMBEDDING VECTOR"], "source": null}
+      - {"object": "DRIVINE_V_CHUNKEMBEDDING_7E60BD64_I", "type": "INDEX", "table": "DRIVINE_V_CHUNKEMBEDDING_7E60BD64", "uniqueness": "NONUNIQUE", "indexType": "VECTOR", "columns": ["EMBEDDING"], "tableColumns": null, "source": null}
+      - {"object": "DRIVINE_V_CHUNKEMBEDDING_7E60BD64_T", "type": "TRIGGER", "table": "DRIVINE_EDGE", "uniqueness": null, "indexType": null, "columns": null, "tableColumns": null, "source": ["TRIGGER drivine_v_Chunkembedding_7e60bd64_t AFTER INSERT ON drivine_edge FOR EACH ROW BEGIN NULL; END;"]}
+    listed:
+      - {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "name": "Chunk_embedding_vector", "dimensions": 384, "similarity": "COSINE"}
+    items:
+      - {spec: {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "options": {"dimensions": 384, "similarity": "COSINE"}}, form: {"mismatch": {"name": "DRIVINE_V_CHUNKEMBEDDING_7E60BD64_T", "reason": "a trigger on DRIVINE_EDGE", "droppable": false}}}
+  - name: "Oracle: a full-text index's trigger over another label's nodes"
+    description: "Its trigger tests the label Page."
+    store: "oracle"
+    listing: "indexes.FULLTEXT_INDEX"
+    rows:
+      - {"kind": "FULLTEXT_INDEX", "label": "Doc", "properties": ["title", "body"], "name": "Doc_title_body_fulltext", "details": {}, "status": null}
+      - {"object": "DRIVINE_T_DOCTITLEBODY_F4762232", "type": "TABLE", "table": null, "uniqueness": null, "indexType": null, "columns": null, "tableColumns": ["NID NUMBER", "DOC JSON"], "source": null}
+      - {"object": "DRIVINE_T_DOCTITLEBODY_F4762232_I", "type": "INDEX", "table": "DRIVINE_T_DOCTITLEBODY_F4762232", "uniqueness": "NONUNIQUE", "indexType": "DOMAIN", "columns": ["DOC"], "tableColumns": null, "source": null}
+      - {"object": "DRIVINE_T_DOCTITLEBODY_F4762232_T", "type": "TRIGGER", "table": "DRIVINE_NODE", "uniqueness": null, "indexType": null, "columns": null, "tableColumns": null, "source": ["TRIGGER drivine_t_Doctitlebody_f4762232_t AFTER INSERT OR UPDATE OF labels, props ON drivine_node FOR EACH ROW BEGIN IF INSTR(',' || LTRIM(RTRIM(JSON_SERIALIZE(:NEW.labels), ']'), '[') || ',\"', ',\"Page\",\"') > 0 THEN NULL; END IF; END;"]}
+    listed:
+      - {"kind": "FULLTEXT_INDEX", "label": "Doc", "properties": ["title", "body"], "name": "Doc_title_body_fulltext"}
+    items:
+      - {spec: {"kind": "FULLTEXT_INDEX", "label": "Doc", "properties": ["title", "body"]}, form: {"mismatch": {"name": "DRIVINE_T_DOCTITLEBODY_F4762232_T", "reason": "a trigger over the nodes of Page", "droppable": false}}}
+  - name: "Oracle: a labelled index over another label's nodes"
+    description: "The labelled index made by hand over the nodes of Page."
+    store: "oracle"
+    listing: "indexes.RANGE_INDEX"
+    rows:
+      - {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": "Person_name_range", "details": {"labelled": "drivine_lx_Personname_44ce5436"}, "status": null}
+      - {"object": "DRIVINE_IX_NAME_337A8B", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.name' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"], "tableColumns": null, "source": null}
+      - {"object": "DRIVINE_LX_PERSONNAME_44CE5436", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["CASE JSON_EXISTS2(\"LABELS\" FORMAT OSON , '$[*]?(@ == \"Page\")' /* json_path_str  $[*]?(@.string() == \"Page\")  */  FALSE ON ERROR TYPE(LAX) ) WHEN 1 THEN JSON_VALUE(\"PROPS\" FORMAT OSON , '$.name' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) ) END "], "tableColumns": null, "source": null}
+    listed:
+      - {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": "Person_name_range"}
+    items:
+      - {spec: {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"]}, form: {"mismatch": {"name": "DRIVINE_LX_PERSONNAME_44CE5436", "reason": "an index over the nodes of Page", "droppable": true}}}
+  - name: "Oracle: a vector index's trigger over another property"
+    description: "Its trigger reads the property other."
+    store: "oracle"
+    listing: "indexes.VECTOR_INDEX"
+    rows:
+      - {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "name": "Chunk_embedding_vector", "details": {"dimensions": 384, "similarity": "COSINE"}, "status": null}
+      - {"object": "DRIVINE_V_CHUNKEMBEDDING_7E60BD64", "type": "TABLE", "table": null, "uniqueness": null, "indexType": null, "columns": null, "tableColumns": ["NID NUMBER", "EMBEDDING VECTOR"], "source": null}
+      - {"object": "DRIVINE_V_CHUNKEMBEDDING_7E60BD64_I", "type": "INDEX", "table": "DRIVINE_V_CHUNKEMBEDDING_7E60BD64", "uniqueness": "NONUNIQUE", "indexType": "VECTOR", "columns": ["EMBEDDING"], "tableColumns": null, "source": null}
+      - {"object": "DRIVINE_V_CHUNKEMBEDDING_7E60BD64_T", "type": "TRIGGER", "table": "DRIVINE_NODE", "uniqueness": null, "indexType": null, "columns": null, "tableColumns": null, "source": ["TRIGGER drivine_v_Chunkembedding_7e60bd64_t AFTER INSERT OR UPDATE OF labels, props ON drivine_node FOR EACH ROW BEGIN IF INSTR(',' || LTRIM(RTRIM(JSON_SERIALIZE(:NEW.labels), ']'), '[') || ',\"', ',\"Chunk\",\"') > 0 THEN DELETE FROM drivine_v_Chunkembedding_7e60bd64 WHERE nid = :NEW.nid AND JSON_VALUE(:NEW.props, '$.other') IS NULL; END IF; END;"]}
+    listed:
+      - {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "name": "Chunk_embedding_vector", "dimensions": 384, "similarity": "COSINE"}
+    items:
+      - {spec: {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "options": {"dimensions": 384, "similarity": "COSINE"}}, form: {"mismatch": {"name": "DRIVINE_V_CHUNKEMBEDDING_7E60BD64_T", "reason": "a trigger over [other]", "droppable": false}}}
+  - name: "Oracle: a full-text index's index of another type"
+    description: "A B-tree index Drivine didn't make, under the name of the Oracle Text index over its table."
+    store: "oracle"
+    listing: "indexes.FULLTEXT_INDEX"
+    rows:
+      - {"kind": "FULLTEXT_INDEX", "label": "Doc", "properties": ["title", "body"], "name": "Doc_title_body_fulltext", "details": {}, "status": null}
+      - {"object": "DRIVINE_T_DOCTITLEBODY_F4762232", "type": "TABLE", "table": null, "uniqueness": null, "indexType": null, "columns": null, "tableColumns": ["NID NUMBER", "DOC JSON"], "source": null}
+      - {"object": "DRIVINE_T_DOCTITLEBODY_F4762232_I", "type": "INDEX", "table": "DRIVINE_T_DOCTITLEBODY_F4762232", "uniqueness": "NONUNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["\"NID\""], "tableColumns": null, "source": null}
+      - {"object": "DRIVINE_T_DOCTITLEBODY_F4762232_T", "type": "TRIGGER", "table": "DRIVINE_NODE", "uniqueness": null, "indexType": null, "columns": null, "tableColumns": null, "source": ["TRIGGER drivine_t_Doctitlebody_f4762232_t AFTER INSERT OR UPDATE OF labels, props ON drivine_node FOR EACH ROW\n", "BEGIN\n", "    IF INSTR(',' || LTRIM(RTRIM(JSON_SERIALIZE(:NEW.labels), ']'), '[') || ',\"', ',\"Doc\",\"') > 0 THEN\n", "        MERGE INTO drivine_t_Doctitlebody_f4762232 s USING (SELECT :NEW.nid AS nid, JSON_OBJECT('title' VALUE JSON_VALUE(:NEW.props, '$.title' RETURNING CLOB), 'body' VALUE JSON_VALUE(:NEW.props, '$.body' RETURNING CLOB) ABSENT ON NULL RETURNING JSON) AS doc FROM dual) n ON (s.nid = n.nid)\n", "WHEN MATCHED THEN UPDATE SET s.doc = n.doc\n", "WHEN NOT MATCHED THEN INSERT (nid, doc) VALUES (n.nid, n.doc);\n", "    ELSE\n", "        DELETE FROM drivine_t_Doctitlebody_f4762232 WHERE nid = :NEW.nid;\n", "    END IF;\n", "END;"]}
+    listed:
+      - {"kind": "FULLTEXT_INDEX", "label": "Doc", "properties": ["title", "body"], "name": "Doc_title_body_fulltext"}
+    items:
+      - {spec: {"kind": "FULLTEXT_INDEX", "label": "Doc", "properties": ["title", "body"]}, form: {"mismatch": {"name": "DRIVINE_T_DOCTITLEBODY_F4762232_I", "reason": "an index of the type FUNCTION-BASED NORMAL", "droppable": true}}}
