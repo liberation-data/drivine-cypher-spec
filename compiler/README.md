@@ -327,10 +327,13 @@ one wheel a platform, `py3-none-<platform>`, as the library is the same for ever
 | `mingwX64` | `win_amd64` | |
 
 There's none for Intel Macs (Kotlin/Native deprecates `macosX64`) or musl Linux (Kotlin/Native has no musl target): pip
-finds no wheel there, and drivine-python names the platform where it would load the compiler. The library exports the C
-API alone (a version script on Linux and a symbol list on macOS, in `native/`, which CI checks the library's exports
-against, and Kotlin/Native's `.def` on Windows, which adds only its `drivinecypher_symbols`), so the Kotlin/Native
-runtime's symbols can't clash with another library in the host's process; on Linux it is linked `--as-needed`, which
+finds no wheel there, and drivine-python names the platform where it would load the compiler. On Linux and macOS the
+library exports the C API alone (a version script on Linux and a symbol list on macOS, in `native/`, which CI checks the
+library's exports against), so the Kotlin/Native runtime's symbols can't clash with another library in the host's
+process. On Windows, Kotlin/Native's `.def` names the C API and its own `drivinecypher_symbols`, which CI checks, but the
+DLL also exports the C runtime it links statically, about 170 symbols of libgcc's unwinder and winpthreads
+(`_Unwind_*`, `pthread_*`, `sem_*`); none of the Kotlin/Native runtime's, and a Windows DLL's exports bind only to a
+caller that imports them by this DLL's name, so they can't clash either. On Linux it is linked `--as-needed`, which
 leaves out `libcrypt.so.1` and the other system libraries it doesn't call. The binding loads the library on the first
 compile, once, and frees each answer with `drivine_free`. `python/build_wheels.py` packs the wheels with the standard
 library alone, the same bytes from the same libraries; `python/check_wheel.py` checks each, and
@@ -353,8 +356,9 @@ Each call stands alone, so a host may call it from several threads at once.
 `libdrivinecypher` is also a SQLite loadable extension: the host functions that compiled SQL calls on SQLite, written once
 in the module, in place of a copy in each library (#108). It is the same library as `drivine_compile`, so a process that
 compiles and runs SQLite has one Kotlin/Native runtime. It links against no SQLite: every call into SQLite goes through
-the routines the loading SQLite passes to its entry point, so it binds to whatever SQLite loads it (CI checks that the
-library imports no `sqlite3_` symbol, and exports only the C API and these):
+the routines the loading SQLite passes to its entry point, so it binds to whatever SQLite loads it (CI checks, on Linux
+and macOS, that the library imports no `sqlite3_` symbol and exports only the C API and these, and on Windows that the
+`.def` names them; see [Python](#python) for what else the DLL exports):
 
 ```c
 int sqlite3_drivinecypher_init(sqlite3 *db, char **errorMessage, const sqlite3_api_routines *routines);

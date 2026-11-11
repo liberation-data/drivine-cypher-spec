@@ -35,6 +35,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import org.drivine.sqlite.ext.SQLITE_BUSY
 import org.drivine.sqlite.ext.SQLITE_DETERMINISTIC
 import org.drivine.sqlite.ext.SQLITE_DIRECTONLY
 import org.drivine.sqlite.ext.SQLITE_ERROR
@@ -57,6 +58,12 @@ private class Registered(
 
 private val registered = mutableListOf<Registered>()
 
+/** A code the fake's create_function_v2 fails with, destroying the user data as SQLite does; SQLITE_OK to register. */
+private var failRegistrations = SQLITE_OK
+
+/** The user data the fake's create_function_v2 destroyed on failing. */
+private var destroyedOnFailure = 0
+
 /** What the last call wrote as its result: its kind and value. */
 private var result: Pair<String, Any?>? = null
 
@@ -78,8 +85,14 @@ private fun fakeRoutines(version: Int): CPointer<sqlite3_api_routines> {
                                                     _: CPointer<CFunction<(CPointer<sqlite3_context>?, Int, CPointer<CPointerVar<sqlite3_value>>?) -> Unit>>?,
                                                     _: CPointer<CFunction<(CPointer<sqlite3_context>?) -> Unit>>?,
                                                     destroy: CPointer<CFunction<(COpaquePointer?) -> Unit>>? ->
-        registered += Registered(name!!.toKString(), arity, flags, app, call, destroy)
-        SQLITE_OK
+        if (failRegistrations != SQLITE_OK) {
+            destroy!!(app)
+            destroyedOnFailure++
+            failRegistrations
+        } else {
+            registered += Registered(name!!.toKString(), arity, flags, app, call, destroy)
+            SQLITE_OK
+        }
     }
     routines.user_data = staticCFunction { ctx: CPointer<sqlite3_context>? -> ctx?.reinterpret<ByteVar>() }
     routines.value_type = staticCFunction { _: CPointer<sqlite3_value>? -> SQLITE_INTEGER }
@@ -188,6 +201,22 @@ class SqliteExtensionTest {
         assertEquals(SQLITE_ERROR to "libdrivinecypher needs SQLite 3.31.0 or later, not 3.30.1.", load(fakeRoutines(3_030_001)))
         assertNotEquals(other.toLong(), sqlite.toLong())
         nativeHeap.free(other)
+    }
+
+    @Test
+    fun aRegistrationThatFailsFailsTheInitWithSqlitesCode() {
+        load(sqlite)
+        registered.clear()
+        destroyedOnFailure = 0
+        failRegistrations = SQLITE_BUSY
+        try {
+            assertEquals(SQLITE_BUSY to "libdrivinecypher couldn't register drivine_extension_version (SQLite's code 5).", load(sqlite))
+        } finally {
+            failRegistrations = SQLITE_OK
+        }
+        // The init stops at the first, whose reference SQLite's destructor released: none is held, or released twice.
+        assertEquals(1, destroyedOnFailure)
+        assertTrue(registered.isEmpty())
     }
 
     @Test

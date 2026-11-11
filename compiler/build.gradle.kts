@@ -127,8 +127,9 @@ kotlin {
     // The shared library (drivine_compile, drivine_free, and the SQLite extension's sqlite3_drivinecypher_init and
     // drivine_gc_collect) a host without a JVM or JS loads, such as Python over ctypes.
     // macosArm64 is built and checked on macOS; the others build anywhere Kotlin/Native runs, and linuxX64 is checked in CI.
-    // It exports the C API alone: Linux by a version script, macOS by a list (native/), Windows by Kotlin/Native's .def,
-    // which names the API and its own drivinecypher_symbols alone. On Linux, --as-needed leaves out a system library
+    // It exports the C API alone on Linux, by a version script, and macOS, by a list (native/). On Windows Kotlin/Native's
+    // .def names the API and its own drivinecypher_symbols, and the DLL exports libgcc's unwinder and winpthreads too
+    // (README.md, "Python"). On Linux, --as-needed leaves out a system library
     // the library doesn't call, as libcrypt.so.1, which newer distributions don't have, and which a manylinux wheel may
     // not need.
     val exports = layout.projectDirectory.dir("native")

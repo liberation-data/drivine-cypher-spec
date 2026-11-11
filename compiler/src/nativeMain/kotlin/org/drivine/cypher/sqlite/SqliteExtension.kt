@@ -18,7 +18,7 @@ import kotlinx.cinterop.reinterpret
 import kotlinx.cinterop.set
 import kotlinx.cinterop.usePinned
 import kotlinx.cinterop.value
-import kotlin.concurrent.AtomicLong
+import kotlin.concurrent.AtomicInt
 import kotlin.native.runtime.GC
 import org.drivine.sqlite.ext.SQLITE_ERROR
 import org.drivine.sqlite.ext.SQLITE_INTEGER
@@ -119,14 +119,32 @@ internal object GcFloor {
     /** 64 MiB: about 200k rows of the regexp prototype's garbage (~300 bytes a row), against ~16k at 5 MiB. */
     const val DEFAULT_BYTES: Long = 64L * 1024 * 1024
 
-    /** The runtime's own floor and target, as they were before the extension first raised them: what 0 restores. */
-    private val runtimeFloor = AtomicLong(-1)
-    private val runtimeTarget = AtomicLong(-1)
+    /**
+     * The runtime's own floor and target, as they were before the extension first raised them: what 0 restores; -1 until
+     * then. Read and written under [lock], as two connections' inits, or an init and a drivine_gc_heap, may run at once
+     * on two threads: unlocked, a host's floor could be overwritten by another init's first raise, or 0 restore a target
+     * not yet read.
+     */
+    private var runtimeFloor = -1L
+    private var runtimeTarget = -1L
+    private val lock = AtomicInt(0)
+
+    private inline fun <T> locked(block: () -> T): T {
+        while (!lock.compareAndSet(0, 1)) { /* held for a few field writes alone */ }
+        try {
+            return block()
+        } finally {
+            lock.value = 0
+        }
+    }
 
     /** Raises the floor to [DEFAULT_BYTES], once in the process: a later connection's init leaves a host's setting be. */
-    fun deferOnce() {
-        if (runtimeFloor.compareAndSet(-1, GC.minHeapBytes)) {
-            runtimeTarget.value = GC.targetHeapBytes
+    fun deferOnce() = locked { deferOnceLocked() }
+
+    private fun deferOnceLocked() {
+        if (runtimeFloor == -1L) {
+            runtimeFloor = GC.minHeapBytes
+            runtimeTarget = GC.targetHeapBytes
             raise(DEFAULT_BYTES)
         }
     }
@@ -137,14 +155,16 @@ internal object GcFloor {
     fun set(bytes: Long): Long {
         require(bytes >= 0) { "the floor is 0 bytes or more, not $bytes." }
         require(bytes <= GC.maxHeapBytes) { "the floor is at most the heap's maximum, ${GC.maxHeapBytes} bytes, not $bytes." }
-        deferOnce()
-        if (bytes == 0L) {
-            GC.minHeapBytes = runtimeFloor.value
-            GC.targetHeapBytes = runtimeTarget.value
-        } else {
-            raise(bytes)
+        return locked {
+            deferOnceLocked()
+            if (bytes == 0L) {
+                GC.minHeapBytes = runtimeFloor
+                GC.targetHeapBytes = runtimeTarget
+            } else {
+                raise(bytes)
+            }
+            GC.minHeapBytes
         }
-        return GC.minHeapBytes
     }
 
     /** The target too, as the one in force until the next collection is the runtime's, set before the floor moved. */
