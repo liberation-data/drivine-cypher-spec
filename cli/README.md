@@ -214,7 +214,7 @@ The expression is Cypher. It's evaluated by running `RETURN expression` on the s
 
 ## Explaining
 
-`--explain` prints, for each statement, what the store would run, and runs none. It prints the same in every format. It still connects, to evaluate each `-P` and `:param` expression, as [Parameters](#parameters) says. Each statement's explanation ends in one line, `-- parameters: ` and the Cypher parameters the statement uses, by their names, in the order it first uses them, as compact JSON, written as `json` writes values. A parameter that is set but not used isn't printed, nor one that is used but not set, which has no value, and a statement that uses none prints `{}`. These are the statement's own parameters, not the values the SQL binds.
+`--explain` prints, for each statement, what the store would run, and runs none. It prints the same in every format. It still connects: to evaluate each `-P` and `:param` expression, as [Parameters](#parameters) says, and to ask the store for a plan. Each statement's explanation ends in one line, `-- parameters: ` and the Cypher parameters the statement uses, by their names, in the order it first uses them, as compact JSON, written as `json` writes values. A parameter that is set but not used isn't printed, nor one that is used but not set, which has no value, and a statement that uses none prints `{}`. These are the statement's own parameters, not the values the SQL binds.
 
 `--explain` takes a value after `=`, and only there, as `--explain plan` would read `plan` as the statement:
 
@@ -286,7 +286,7 @@ The CLI reads cypher-shell's files and prints values as cypher-shell does, but i
 - **`verbose`.** `drivine`'s `table` is cypher-shell's `verbose`, and prints the same. `auto` picks `table` where cypher-shell picks `verbose`, so it prints the same too.
 - **Exit codes.** cypher-shell exits with 1 for every failure. `drivine` exits with 2 for a bad invocation and 3 for a store it can't connect to.
 - **A node's labels.** cypher-shell prints them in the order Neo4j gives them. `drivine` prints them sorted, so `(:Q:P)` there may be `(:P:Q)` here. No case marked `cypherShell: true` holds a node of two labels.
-- **`EXPLAIN`.** cypher-shell prints an `EXPLAIN`'s plan as a table of operators, its estimated rows among them. `drivine` prints it as [Explaining](#explaining) says, on every store.
+- **`EXPLAIN`.** cypher-shell prints an `EXPLAIN`'s plan in its own form, which isn't recorded here. `drivine` prints it as [Explaining](#explaining) says, on every store, so no case marked `cypherShell: true` holds one.
 - **`-d` and `--graph`.** cypher-shell's `-d` names a Neo4j database. `drivine`'s names the database or the service, and is refused on FalkorDB and SQLite. A graph is named with `--graph`, which cypher-shell doesn't have.
 
 The cases marked `mode: cypher-shell` are the mode's tests. Each also marked `cypherShell: true` keeps its expected output, its exit code among it, as cypher-shell gives it. The runner gives them the store's user and password in `DRIVINE_USER` and `DRIVINE_PASSWORD`, as it gives every case, so the mode reads those before `NEO4J_USERNAME` and `NEO4J_PASSWORD`. `record-cypher-shell.py` checks every case marked `cypherShell: true` against cypher-shell, in either mode.
