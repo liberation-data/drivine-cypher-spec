@@ -9,11 +9,12 @@ import org.drivine.cypher.ast.Query
 import org.drivine.cypher.ast.SetItem
 
 /**
- * Where a statement aggregates, as Neo4j refuses it when it plans the statement: an aggregate in the `ORDER BY` of a
- * `WITH` or a `RETURN` that neither aggregates nor is `DISTINCT`, and one in a `WHERE` (its InvalidAggregation), of a `MATCH`, a `WITH`, a comprehension, a quantifier, a pattern's or `EXISTS { … }`'s, in a
- * `CALL { … }` or a subquery too. Read from the statement alone, before it is compiled, so a statement that compiles is
- * compiled as it was. A subquery's own query, `COUNT { MATCH … RETURN count(*) }`, aggregates in its own projections. The
- * `WHERE` of a `WITH` that aggregates, or is `DISTINCT`, filters its groups, and holds an aggregate as Neo4j has it (#497).
+ * Where a statement aggregates, as Neo4j refuses it when it plans the statement (its InvalidAggregation): an aggregate in
+ * a `WHERE`, of a `MATCH`, a `WITH`, a comprehension, a quantifier, a pattern's or `EXISTS { … }`'s, and one in the
+ * `ORDER BY` of a `WITH` or a `RETURN` that neither aggregates nor is `DISTINCT` (#439), in a `CALL { … }` or a subquery
+ * too. Read from the statement alone, before it is compiled, so a statement that compiles is compiled as it was. A
+ * subquery's own query, `COUNT { MATCH … RETURN count(*) }`, aggregates in its own projections. The `WHERE` of a `WITH`
+ * that aggregates, or is `DISTINCT`, filters its groups, and holds an aggregate as Neo4j has it (#497).
  *
  * [isAggregate] and [children] are the compiler's, passed in so that its companion, part of what a subclass outside
  * Drivine sees, stays as it is.
@@ -34,9 +35,7 @@ internal class Aggregates(
             is Clause.Unwind -> expression(clause.list)
             is Clause.With -> {
                 projection(clause.projection)
-                // One that is DISTINCT groups its rows by its items, as one that aggregates does by those that do not.
-                val groups = clause.projection.distinct || clause.projection.items.any { grouped(it.expression) != null }
-                if (groups) having(clause.where) else where(clause.where)
+                if (groups(clause.projection)) having(clause.where) else where(clause.where)
             }
             is Clause.Create -> clause.patterns.forEach(::pattern)
             is Clause.Merge -> { pattern(clause.pattern); (clause.onCreate + clause.onMatch).forEach(::setItem) }
@@ -60,15 +59,18 @@ internal class Aggregates(
 
     private fun projection(projection: Projection) {
         projection.items.forEach { expression(it.expression) }
-        // One that neither aggregates nor is DISTINCT has no groups for its ORDER BY to aggregate over (Neo4j's
-        // InvalidAggregation, #439): compiled, the aggregate would make the query aggregate with no GROUP BY.
-        if (!projection.distinct && projection.items.none { grouped(it.expression) != null }) {
+        // One that doesn't group has none for its ORDER BY to aggregate over (Neo4j's InvalidAggregation, #439): compiled,
+        // the aggregate would make the query aggregate with no GROUP BY.
+        if (!groups(projection)) {
             projection.orderBy.firstNotNullOfOrNull { grouped(it.expression) }?.let(::refuseInOrder)
         }
         projection.orderBy.forEach { expression(it.expression) }
         expression(projection.skip)
         expression(projection.limit)
     }
+
+    /** Whether [projection] groups its rows: by its items where it is DISTINCT, by those that don't aggregate where one does. */
+    private fun groups(projection: Projection) = projection.distinct || projection.items.any { grouped(it.expression) != null }
 
     private fun pattern(pattern: Pattern) {
         pattern.nodes.forEach { expression(it.properties) }
