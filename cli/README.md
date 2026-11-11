@@ -25,7 +25,7 @@ drivine [flags] [cypher]
 | stdin, when it isn't a terminal or `--non-interactive` is given | Its statements, then exit. |
 | none of these, stdin a terminal | The [REPL](#the-repl). |
 
-Each statement runs in its own transaction, unless it falls between `:begin` and `:commit`.
+Each statement runs in its own transaction, unless one that `:begin` opened is open: `:commit` or `:rollback` closes it, and so may a failure (see [Failures and exit codes](#failures-and-exit-codes)).
 
 Only one of `cypher`, `-c` and `-f` may be given, and only one positional argument. Given two, the CLI refuses them as a bad invocation (see [Failures and exit codes](#failures-and-exit-codes)). Given one, stdin isn't read.
 
@@ -114,7 +114,7 @@ Flags and environment variables override the profile, key by key. So `DRIVINE_PA
 | `--sample-rows N` | For `table`, the number of rows sampled to size its columns. The default is 1000. |
 | `--wrap {true,false}` | For `table`, whether a value wider than its column wraps. The default is `true`. |
 | `--continue` | Keeps going past a failed statement or command: see [Failures and exit codes](#failures-and-exit-codes). |
-| `--explain` | On a SQL store, prints for each statement the SQL it compiles to, which may run over several lines, then one line, `-- parameters: ` and the Cypher parameters the statement is given, by their names, as compact JSON, written as `json` writes values. These are the statement's own parameters, not the values the SQL binds. It runs no statement of the input, but it still connects to evaluate each `-P` and `:param` expression, as [Parameters](#parameters) says. The SQL is the compiler's, and cases don't compare it. On a graph engine, it's refused as a bad invocation: there, the store runs the Cypher itself. |
+| `--explain` | On a SQL store, prints for each statement the SQL it compiles to, which may run over several lines, then one line, `-- parameters: ` and the Cypher parameters the statement uses, by their names, in the order it first uses them, as compact JSON, written as `json` writes values: a parameter set but not used isn't printed, nor one used but not set, which has no value, and a statement that uses none prints `{}`. These are the statement's own parameters, not the values the SQL binds. The SQL is what an application's query compiles to; the CLI's own output adds typed reads (#162). It runs no statement of the input, but it still connects to evaluate each `-P` and `:param` expression, as [Parameters](#parameters) says. The SQL is the compiler's, and cases don't compare it. On a graph engine, it's refused as a bad invocation: there, the store runs the Cypher itself. |
 | `--non-interactive` | No REPL, even on a terminal: see [The REPL](#the-repl). |
 | `--history FILE` | The REPL's history file, or `in-memory` or `disable`. The default is `~/.drivine/history`. |
 | `--idle-timeout T` | Leaves the REPL after T without input, given as `<hours>h<minutes>m<seconds>s`, as in `1h30m`. |
@@ -206,13 +206,17 @@ The expression is Cypher. It's evaluated by running `RETURN expression` on the s
 
 **`table`'s timing line**, `ready to start consuming query after N ms, results consumed after another M ms`, varies from run to run. Cases don't compare it.
 
-**Counts.** `table` prints the store's counts of what a statement wrote (`Created 1 node, deleted 1 node, added 1 label`) where the store gives them. A SQL store that gives none prints none.
+**`table`'s tables.** A column is as wide as the widest of its name and its values, in the rows `--sample-rows` samples, and each cell has a space either side and `|` between it and the next. The lines above and below the header and below the last row are one `+`, then `-` across the whole row, then one `+`, with no `+` between columns: `+-----------+` over `| x   | s   |`. An empty line follows the table, then its count of rows, `1 row` or `3 rows`.
+
+**Counts.** `table` prints the store's counts of what a statement wrote where the store gives them, on one line after its count of rows: each kind that isn't zero, `, ` between them and the line's first letter in upper case, nodes created, nodes deleted, relationships created, relationships deleted, properties set, labels added and labels removed in that order, as in `Created 2 nodes, deleted 2 nodes, created 1 relationship, deleted 1 relationship, set 1 property, added 2 labels` and `Created 1 node, set 2 properties, added 2 labels, removed 1 label`. An index or a constraint is one per statement: `Added 1 index`, `Removed 1 index`, `Added 1 constraint`, `Removed 1 constraint`. These are the wordings cypher-shell was recorded giving; its plurals of relationships, labels removed, indexes and constraints, and its order for indexes and constraints beside the other kinds, aren't recorded. A SQL store that gives none prints none.
 
 **Errors** go to stderr. Each is the store's message, or Drivine's own: a refusal by the compiler, a failure to connect, a bad flag. A case compares Drivine's own messages, but not the store's.
 
 ## Failures and exit codes
 
 **Stopping.** By default, the CLI stops at the first statement or command that fails. With `--continue`, it runs everything and reports each failure as it comes.
+
+**A failure inside a transaction**, with `--continue`: a statement that fails between `:begin` and `:commit`, or a `:param` whose expression fails there, rolls the transaction back and closes it, since a store's transaction may be unusable after a failed statement, as Postgres's is. The statements after it run on their own, each in its own transaction, so the `:commit` that would have ended it fails, as no transaction is open. A command that fails there without reaching the store, as `:nope`, a second `:begin` or a `:source` of a file that can't be read does, leaves the transaction open: an unknown command and such a `:source`, which [Files](#files) says fail as a statement does, fail so in what they print and in their exit code, not in this. Without `--continue`, the first failure stops the run, and the transaction is rolled back, as at an input's end. FalkorDB opens no transaction, so none of this applies there.
 
 | Exit code | When |
 |---|---|

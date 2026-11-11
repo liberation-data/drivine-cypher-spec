@@ -303,6 +303,37 @@ cases:
     args: ["--format", "plain", "-f", "h.cypher"]
     exit: 0
 
+  - name: "With --continue, a statement that fails inside a transaction rolls it back, and the statements after it run on their own"
+    except: [falkordb]
+    files: {"t.cypher": ":begin\nCREATE (:Gone);\nRETURN 1/0;\nCREATE (:Kept);\n:commit\nMATCH (n) RETURN count(n) AS c;\n"}
+    args: ["--format", "plain", "--continue", "-f", "t.cypher"]
+    stdout: "c\n1\n"
+    exit: 1
+    note: "The failure rolls back :Gone, and :Kept then commits on its own, so one node is left; :commit fails, as no transaction is open."
+
+  - name: "With --continue, a :param whose expression fails inside a transaction rolls it back too"
+    except: [falkordb]
+    files: {"t.cypher": ":begin\nCREATE (:Gone);\n:param x => 1/0\n:commit\nMATCH (n) RETURN count(n) AS c;\n"}
+    args: ["--format", "plain", "--continue", "-f", "t.cypher"]
+    stdout: "c\n0\n"
+    exit: 1
+
+  - name: "With --continue, a command that fails inside a transaction leaves it open"
+    except: [falkordb]
+    files: {"t.cypher": ":begin\nCREATE (:Kept);\n:nope\n:commit\nMATCH (n:Kept) RETURN count(n) AS c;\n"}
+    args: ["--format", "plain", "--continue", "-f", "t.cypher"]
+    stdout: "c\n1\n"
+    stderr: "Could not find command :nope, use :help to see available commands"
+    exit: 1
+
+  - name: "With --continue, a :source file that can't be read inside a transaction leaves it open"
+    except: [falkordb]
+    files: {"t.cypher": ":begin\nCREATE (:Kept);\n:source missing.cypher\n:commit\nMATCH (n:Kept) RETURN count(n) AS c;\n"}
+    args: ["--format", "plain", "--continue", "-f", "t.cypher"]
+    stdout: "c\n1\n"
+    exit: 1
+    note: "Reading the file doesn't reach the store, so the transaction is still open, and :commit keeps :Kept."
+
   - name: "Statements piped to stdin run"
     cypherShell: true
     stdin: "RETURN 3 AS three;\n"
@@ -459,6 +490,64 @@ cases:
     args: ["--format", "xml", "RETURN 1"]
     stdout: ""
     exit: 2
+
+  - name: "verbose prints each kind of count cypher-shell gives, nodes and relationships"
+    cypherShell: true
+    mode: cypher-shell
+    only: [neo4j]
+    args: ["--format", "verbose", "CREATE (a:A)-[r:R {w: 1}]->(b:B) DELETE r, a, b"]
+    stdout: "0 rows\nCreated 2 nodes, deleted 2 nodes, created 1 relationship, deleted 1 relationship, set 1 property, added 2 labels\n"
+    exit: 0
+
+  - name: "table prints each kind of count cypher-shell gives, nodes and relationships"
+    only: [neo4j]
+    args: ["--format", "table", "CREATE (a:A)-[r:R {w: 1}]->(b:B) DELETE r, a, b"]
+    stdout: "0 rows\nCreated 2 nodes, deleted 2 nodes, created 1 relationship, deleted 1 relationship, set 1 property, added 2 labels\n"
+    exit: 0
+
+  - name: "verbose prints labels removed and properties set on a node it returns"
+    cypherShell: true
+    mode: cypher-shell
+    only: [neo4j]
+    args: ["--format", "verbose", "CREATE (n:A:B {x: 1}) REMOVE n:B SET n.y = 2 RETURN n.x AS x"]
+    stdout: "+---+\n| x |\n+---+\n| 1 |\n+---+\n\n1 row\nCreated 1 node, set 2 properties, added 2 labels, removed 1 label\n"
+    exit: 0
+
+  - name: "table prints labels removed and properties set on a node it returns"
+    only: [neo4j]
+    args: ["--format", "table", "CREATE (n:A:B {x: 1}) REMOVE n:B SET n.y = 2 RETURN n.x AS x"]
+    stdout: "+---+\n| x |\n+---+\n| 1 |\n+---+\n\n1 row\nCreated 1 node, set 2 properties, added 2 labels, removed 1 label\n"
+    exit: 0
+
+  - name: "verbose prints an index and a constraint added and removed"
+    cypherShell: true
+    mode: cypher-shell
+    only: [neo4j]
+    stdin: "CREATE INDEX i FOR (n:A) ON (n.x);\nDROP INDEX i;\nCREATE CONSTRAINT c FOR (n:A) REQUIRE n.y IS UNIQUE;\nDROP CONSTRAINT c;\n"
+    args: ["--format", "verbose"]
+    stdout: "0 rows\nAdded 1 index\n0 rows\nRemoved 1 index\n0 rows\nAdded 1 constraint\n0 rows\nRemoved 1 constraint\n"
+    exit: 0
+
+  - name: "table prints an index and a constraint added and removed"
+    only: [neo4j]
+    stdin: "CREATE INDEX i FOR (n:A) ON (n.x);\nDROP INDEX i;\nCREATE CONSTRAINT c FOR (n:A) REQUIRE n.y IS UNIQUE;\nDROP CONSTRAINT c;\n"
+    args: ["--format", "table"]
+    stdout: "0 rows\nAdded 1 index\n0 rows\nRemoved 1 index\n0 rows\nAdded 1 constraint\n0 rows\nRemoved 1 constraint\n"
+    exit: 0
+
+  - name: "verbose prints several results, a table of several rows, and a column as wide as its widest value"
+    cypherShell: true
+    mode: cypher-shell
+    stdin: "UNWIND [1, 22, 333] AS x RETURN x, 'a' AS s;\nRETURN 'longer text' AS t;\n"
+    args: ["--format", "verbose"]
+    stdout: "+-----------+\n| x   | s   |\n+-----------+\n| 1   | \"a\" |\n| 22  | \"a\" |\n| 333 | \"a\" |\n+-----------+\n\n3 rows\n+---------------+\n| t             |\n+---------------+\n| \"longer text\" |\n+---------------+\n\n1 row\n"
+    exit: 0
+
+  - name: "table prints several results, a table of several rows, and a column as wide as its widest value"
+    stdin: "UNWIND [1, 22, 333] AS x RETURN x, 'a' AS s;\nRETURN 'longer text' AS t;\n"
+    args: ["--format", "table"]
+    stdout: "+-----------+\n| x   | s   |\n+-----------+\n| 1   | \"a\" |\n| 22  | \"a\" |\n| 333 | \"a\" |\n+-----------+\n\n3 rows\n+---------------+\n| t             |\n+---------------+\n| \"longer text\" |\n+---------------+\n\n1 row\n"
+    exit: 0
 
   - name: "verbose isn't a format"
     store: false
@@ -626,6 +715,19 @@ cases:
     only: [sql]
     args: ["--explain", "-P", "x => 1", "CREATE (n:Explained {x: $x}) RETURN n"]
     stdoutLines: ["\\S", "^-- parameters: \\{.*\"x\":1.*\\}$"]
+    exit: 0
+
+  - name: "--explain prints the parameters a statement uses, in the order it first uses them, and no other"
+    only: [sql]
+    args: ["--explain", "-P", "a => 1", "-P", "b => 2", "-P", "c => 3", "RETURN $b AS x, $a AS y, $b AS z"]
+    stdoutLines: ['^-- parameters: \{"b":2,"a":1\}$']
+    exit: 0
+    note: "c is set and not used, so isn't printed; b, first used before a, comes first."
+
+  - name: "--explain prints no parameters for a statement that uses none"
+    only: [sql]
+    args: ["--explain", "-P", "a => 1", "RETURN 1 AS n"]
+    stdoutLines: ['^-- parameters: \{\}$']
     exit: 0
 
   - name: "--explain is refused on a graph engine"

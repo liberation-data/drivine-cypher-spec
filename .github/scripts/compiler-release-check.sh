@@ -22,14 +22,15 @@ repo="$out/maven-repo/org/drivine"
 # Only files and directories: asked of find alone, which stops at the first, not piped (see compiler-release-sign.sh).
 [[ -z "$(find "$out/maven-repo" ! -type f ! -type d -print -quit)" ]] || fail "The bundle holds an entry that is neither a file nor a directory, such as a link."
 # Only what each artifact's publication makes at this version: its files (a target's metadata jar, the root's Kotlin
-# tooling metadata, where it makes them), each file's checksums, and with verify each file's signature.
+# tooling metadata, where it makes them, and a native target's klib of the SQLite extension's cinterop), each file's
+# checksums, and with verify each file's signature.
 allowed="$out/allowed.txt" present="$out/present.txt" extra="$out/extra.txt"
 {
     printf '%s\n' org org/drivine
     for a in $ARTIFACTS; do
         d="org/drivine/$a/$version"
         printf '%s\n' "org/drivine/$a" "$d"
-        for s in .pom .module -sources.jar -javadoc.jar .jar .klib -metadata.jar -kotlin-tooling-metadata.json; do
+        for s in .pom .module -sources.jar -javadoc.jar .jar .klib -metadata.jar -kotlin-tooling-metadata.json -cinterop-sqlite3ext.klib; do
             for c in "" .md5 .sha1 .sha256 .sha512; do printf '%s\n' "$d/$a-$version$s$c"; done
             if [[ "$signatures" == verify ]]; then printf '%s\n' "$d/$a-$version$s.asc"; fi
         done

@@ -241,4 +241,34 @@ class CompileJsonTest {
         assertEquals("{\"\$decimal\":\"12345678901234567890.123456789\"}", written(BigDecimal.parseString("12345678901234567890.123456789")))
         assertEquals("[{\"\$decimal\":\"0.1\"}]", written(listOf(BigDecimal.parseString("0.1"))))
     }
+
+    @Test
+    fun aSettingsRequestIsRefusedWhereItGivesNoSettingAsItIs() {
+        val cap = CypherCompiler.parserCacheStates
+        try {
+            for ((request, error) in listOf(
+                "{\"settings\": {\"parserCacheStates\": 0}}" to "parserCacheStates as a whole number, 1 or more",
+                "{\"settings\": {\"parserCacheStates\": -5}}" to "parserCacheStates as a whole number, 1 or more",
+                "{\"settings\": {\"parserCacheStates\": 1.5}}" to "parserCacheStates as a whole number, 1 or more",
+                "{\"settings\": {\"parserCacheStates\": 2147483648}}" to "parserCacheStates as a whole number, 1 or more",
+                "{\"settings\": {\"parserCacheStates\": 99999999999999999999}}" to "parserCacheStates as a whole number, 1 or more",
+                "{\"settings\": {\"parserCacheStates\": \"300\"}}" to "parserCacheStates as a whole number, 1 or more",
+                "{\"settings\": {\"parserCacheStates\": null}}" to "parserCacheStates as a whole number, 1 or more",
+                "{\"settings\": {\"other\": 1}}" to "give no other",
+                "{\"settings\": 3}" to "settings are a JSON object",
+                "{\"settings\": null}" to "settings are a JSON object",
+                "{\"settings\": {}, \"cypher\": \"RETURN 1\"}" to "one of cypher, search, searchIndex and settings",
+                "{\"settings\": {}, \"search\": {}}" to "one of cypher, search, searchIndex and settings",
+            )) {
+                val answer = CompileJson.compile(request)
+                assertTrue(answer.startsWith("{\"error\":") && error in answer, "$request: $answer")
+            }
+            assertEquals(cap, CypherCompiler.parserCacheStates, "a refused setting leaves the cap as it was")
+            assertFailsWith<IllegalArgumentException> { CypherCompiler.parserCacheStates = 0 }
+            assertTrue(CompileJson.compile("{\"settings\": {\"parserCacheStates\": 2147483647}}").startsWith("{\"settings\":{\"parserCacheStates\":2147483647,"))
+            assertEquals(Int.MAX_VALUE, CypherCompiler.parserCacheStates)
+        } finally {
+            CypherCompiler.parserCacheStates = cap
+        }
+    }
 }

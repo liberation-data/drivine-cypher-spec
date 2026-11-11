@@ -41,25 +41,42 @@ object CypherReader {
      * a statement that is not Cypher is refused with. The lexer is the same in both stages, and refuses as it did.
      */
     fun read(cypher: String): Query {
-        val tokens = CommonTokenStream(lexer(cypher))
-        val tree = try {
-            CypherParser(tokens).apply {
-                removeErrorListeners()
-                interpreter.predictionMode = PredictionMode.SLL
-                errorHandler = BailErrorStrategy()
-            }.oC_Cypher()
-        } catch (e: ParseCancellationException) {
-            tokens.seek(0)
-            fullContext(tokens)
+        val lexer = lexer(cypher)
+        val tokens = CommonTokenStream(lexer)
+        val sll = CypherParser(tokens)
+        // Through the bounded caches, not the generated classes' own, which grow for as long as the process runs (#179).
+        val caches = ParserCaches.of(lexer.atn, sll.atn)
+        ParserCaches.reading(lexer, caches)
+        try {
+            val tree = try {
+                sll.apply {
+                    ParserCaches.predicting(this, caches)
+                    removeErrorListeners()
+                    interpreter.predictionMode = PredictionMode.SLL
+                    errorHandler = BailErrorStrategy()
+                }.oC_Cypher()
+            } catch (e: ParseCancellationException) {
+                tokens.seek(0)
+                fullContext(tokens, caches)
+            }
+            return query(tree.oC_Statement().oC_Query())
+        } finally {
+            ParserCaches.parsed(caches, lexer.atn, sll.atn)
         }
-        return query(tree.oC_Statement().oC_Query())
     }
 
     /** The statement [cypher], parsed with LL prediction alone: what [read] gives where SLL bails. */
-    internal fun readFullContext(cypher: String): Query = query(fullContext(CommonTokenStream(lexer(cypher))).oC_Statement().oC_Query())
+    internal fun readFullContext(cypher: String): Query {
+        val lexer = lexer(cypher)
+        val tokens = CommonTokenStream(lexer)
+        val parser = CypherParser(tokens)
+        val caches = ParserCaches.of(lexer.atn, parser.atn)
+        ParserCaches.reading(lexer, caches)
+        return query(fullContext(tokens, caches, parser).oC_Statement().oC_Query())
+    }
 
-    private fun fullContext(tokens: CommonTokenStream): OC_CypherContext =
-        CypherParser(tokens).apply { removeErrorListeners(); addErrorListener(refusing) }.oC_Cypher()
+    private fun fullContext(tokens: CommonTokenStream, caches: ParserCaches.Set, parser: CypherParser = CypherParser(tokens)): OC_CypherContext =
+        parser.apply { ParserCaches.predicting(this, caches); removeErrorListeners(); addErrorListener(refusing) }.oC_Cypher()
 
     private fun lexer(cypher: String) = CypherLexer(CharStreams.fromString(cypher)).apply { removeErrorListeners(); addErrorListener(refusing) }
 
