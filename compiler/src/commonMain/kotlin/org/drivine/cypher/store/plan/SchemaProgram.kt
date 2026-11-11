@@ -611,10 +611,14 @@ internal class SchemaProgram(
     }
 
     private fun recreateMadeIndex(spec: IndexSpec, build: Build): EnsureResult {
-        val cleared = clearMismatched(spec, findIndex(spec)) { findIndex(spec) }
+        // The record, and its aliases, as found before anything under the item's names is dropped: once what stood under
+        // its name is gone the listing leaves the record out, and it is still to be forgotten, and written again in this
+        // version's form.
+        val found = findIndex(spec)
+        val aliases = if (found != null) aliasesOfIndex(spec) else emptyList()
+        val cleared = clearMismatched(spec, found) { findIndex(spec) }
         cleared.drift?.let { return it }
-        val existing = cleared.existing
-        val aliases = if (existing != null) aliasesOfIndex(spec) else emptyList()
+        val existing = cleared.existing ?: found
         if (existing != null) dropExisting(existing, spec)
         // Read again after the drop: on a store with an index a label, the label may still have one over other
         // properties, which the create takes into account.
@@ -883,10 +887,9 @@ internal class SchemaProgram(
     /** `ConstraintManager.recreate`: the constraint made again keeps the aliases its record kept. */
     private fun recreateConstraint(spec: ConstraintSpec, violationSampleSize: Int, replaceBlockingIndex: Boolean): EnsureResult {
         requireConstrainable(spec.made())
-        val cleared = clearMismatched(spec.made(), findConstraint(spec)) { findConstraint(spec) }
-        cleared.drift?.let { return it }
-        val existing = cleared.existing
-        val aliases = if (existing != null && store.ddl is SqlStoreDdl) {
+        // The record, and its aliases, as found before anything under the item's names is dropped (see recreateMadeIndex).
+        val found = findConstraint(spec)
+        val aliases = if (found != null && store.ddl is SqlStoreDdl) {
             val rows = listingRows(store.ddl.listConstraintsQuery()).orEmpty()
             rows.firstNotNullOfOrNull { row ->
                 store.parseConstraintRows(listOf(row)).firstOrNull { store.matchesIdentity(it, spec.made()) }?.let { store.aliasesOf(row) }
@@ -894,6 +897,9 @@ internal class SchemaProgram(
         } else {
             emptyList()
         }
+        val cleared = clearMismatched(spec.made(), found) { findConstraint(spec) }
+        cleared.drift?.let { return it }
+        val existing = cleared.existing ?: found
         if (existing != null) ddl(store.ddl.dropConstraint(existing.catalogItem))
         // The copies are filled in again too, where a write that bypassed Drivine left one out of step.
         fillIn(spec) { true }

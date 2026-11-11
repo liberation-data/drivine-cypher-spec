@@ -72,7 +72,7 @@ abstract class SqlStoreSchema internal constructor() : StoreSchema {
     override fun formOf(spec: SchemaItemSpec, rows: List<Any?>): ItemForm {
         val objects = StoreObject.read(rows)
         for (made in madeAs(spec)) {
-            val there = objects[made.name.uppercase()] ?: continue
+            val there = objects[made.name] ?: continue
             // Where indexes are named apart from other objects, a name another object has is no index's.
             if (!there.isIndex && indexesNamedApart) continue
             mismatchOf(made, there)?.let { return ItemForm.Mismatch(there.name, it, droppable = there.isIndex) }
@@ -92,7 +92,7 @@ abstract class SqlStoreSchema internal constructor() : StoreSchema {
      * The form of [spec]'s item whose [record] says none, from [objects]: the module's, here, as on Postgres and SQLite the
      * three libraries made every item byte for byte alike before records said their form.
      */
-    protected open fun unrecordedForm(spec: SchemaItemSpec, record: Map<*, *>, objects: Map<String, StoreObject>): ItemForm = ItemForm.Current
+    protected open fun unrecordedForm(spec: SchemaItemSpec, record: Map<*, *>, objects: StoreObjects): ItemForm = ItemForm.Current
 
     override fun dropMismatched(name: String): List<DdlStatement> = listOf(DdlStatement.Text(ddl.droppedIndex(name)))
 
@@ -107,7 +107,7 @@ abstract class SqlStoreSchema internal constructor() : StoreSchema {
      * What else the store has under a name Drivine gives one of [spec]'s objects that isn't the item, where an item is made
      * as more than indexes (Oracle's tables beside the nodes); null where nothing is.
      */
-    protected open fun otherMismatch(spec: SchemaItemSpec, objects: Map<String, StoreObject>): ItemForm.Mismatch? = null
+    protected open fun otherMismatch(spec: SchemaItemSpec, objects: StoreObjects): ItemForm.Mismatch? = null
 
     /** The objects the store makes [spec]'s item as, under the names Drivine gives them, and what each holds. */
     protected abstract fun madeAs(spec: SchemaItemSpec): List<MadeObject>
@@ -221,8 +221,8 @@ data class StoreObject(
          * `where`; `method`; `opclasses`; `indexType`; `sql`; `tableColumns`; `source`, a list of lines or one text. The rows
          * of a name are one object.
          */
-        fun read(rows: List<Any?>): Map<String, StoreObject> {
-            val objects = linkedMapOf<String, StoreObject>()
+        fun read(rows: List<Any?>): StoreObjects {
+            val objects = linkedMapOf<String, MutableList<StoreObject>>()
             for (row in rows) {
                 val map = row as? Map<*, *> ?: continue
                 val name = map[SqlStoreSchema.OBJECT] as? String ?: continue
@@ -250,16 +250,9 @@ data class StoreObject(
                     tableColumns = (map["tableColumns"] as? List<*>).orEmpty().map { it.toString() },
                     source = (map["source"] as? List<*>)?.joinToString("") { it?.toString().orEmpty() } ?: map["source"] as? String,
                 )
-                val key = name.uppercase()
-                val before = objects[key]
-                objects[key] = when {
-                    before == null -> read
-                    // The index's facts, whichever row gives them; every type the name is taken by.
-                    read.isIndex -> read.copy(types = (before.types + read.types).distinct())
-                    else -> before.copy(types = (before.types + read.types).distinct())
-                }
+                objects.getOrPut(name.uppercase()) { mutableListOf() } += read
             }
-            return objects
+            return StoreObjects(objects)
         }
     }
 }
@@ -303,14 +296,17 @@ class PostgresSchema(override val ddl: PostgresDdl) : SqlStoreSchema() {
             }
         }
         val label = there.predicate?.let { LABEL.find(it) }?.let { SqlText.jsonLabel(SqlText.unquoted(it.groupValues[1])) }
-        val keys = there.columns.filterNotNull().flatMap { column -> KEY.findAll(column).map { SqlText.unquoted(it.groupValues[1]) } }.distinct()
+        val keys = there.columns.filterNotNull().flatMap { column ->
+            KEY.findAll(column).map { if (it.value == "stamp") Stamps.PROPERTY else SqlText.unquoted(it.groupValues[1]) }
+        }.distinct()
         val dimensions = there.columns.filterNotNull().firstNotNullOfOrNull { DIMENSIONS.find(it)?.groupValues?.get(1)?.toInt() }
         return Shape(columns, listOf(label), keys, dimensions)
     }
 
     private companion object {
         val PROPERTY = Regex("""props ->> '${SqlText.LITERAL}'::text""")
-        val KEY = Regex("""props ->>? '${SqlText.LITERAL}'::text""")
+        /** A property an expression reads: a key of `props`, or the stamp, a column of its own (`COALESCE(stamp, ''::text)`). */
+        val KEY = Regex("""props ->>? '${SqlText.LITERAL}'::text|(?<![\w'".])stamp(?![\w'"])""")
         val DIMENSIONS = Regex("""vector\((\d+)\)""")
         val LABEL = Regex("""labels @> '${SqlText.LITERAL}'::jsonb""")
 
@@ -392,11 +388,11 @@ class OracleSchema(override val ddl: OracleDdl) : SqlStoreSchema() {
      * drivine-python's, which test it as `'$?(@ == …)'` and read a property as `'$."p"'`, is another, kept as it is. What
      * neither is, or an item with neither index, is taken as this version's, and left as it is.
      */
-    override fun unrecordedForm(spec: SchemaItemSpec, record: Map<*, *>, objects: Map<String, StoreObject>): ItemForm {
+    override fun unrecordedForm(spec: SchemaItemSpec, record: Map<*, *>, objects: StoreObjects): ItemForm {
         val properties = (record["properties"] as List<*>).map { it.toString() }
         side(spec)?.let { side ->
             // A table beside the nodes is told by its trigger's text, which is as each library wrote it.
-            val source = objects[(side + TRIGGER).uppercase()]?.source ?: return ItemForm.Current
+            val source = objects.of(side + TRIGGER, "TRIGGER")?.source ?: return ItemForm.Current
             return when {
                 LIBRARIES_SIDE_LABEL.containsMatchIn(source) -> ItemForm.Stale(LIBRARIES_FORM, SqlStoreDdl.CURRENT_FORM)
                 MODULES_SIDE_LABEL.containsMatchIn(source) -> ItemForm.Unrecorded(ddl.formRecorded(CatalogItem(spec.kind, spec.label, properties)))
@@ -404,7 +400,7 @@ class OracleSchema(override val ddl: OracleDdl) : SqlStoreSchema() {
             }
         }
         val kind = if (spec.kind == SchemaItemKind.UNIQUENESS_CONSTRAINT) OracleDdl.UNIQUE else OracleDdl.LABELLED
-        val there = objects[ddl.objectName(kind, listOf(spec.label) + spec.properties).uppercase()]?.takeIf { it.isIndex } ?: return ItemForm.Current
+        val there = objects.of(ddl.objectName(kind, listOf(spec.label) + spec.properties), StoreObject.INDEX) ?: return ItemForm.Current
         val paths = there.columns.filterNotNull().mapNotNull { column -> LABEL_TEST.find(column)?.let { SqlText.unquoted(it.groupValues[1]) } }
         if (paths.isEmpty()) return ItemForm.Current
         return when {
@@ -433,14 +429,14 @@ class OracleSchema(override val ddl: OracleDdl) : SqlStoreSchema() {
      * or by a path (`JSON_EXISTS(:NEW.labels, '$?(@ == "Chunk")')`, TypeScript's and Python's), and each property by the
      * path it reads (`'$.p'` or `'$."p"'`). Only an index can be dropped by its name.
      */
-    override fun otherMismatch(spec: SchemaItemSpec, objects: Map<String, StoreObject>): ItemForm.Mismatch? {
+    override fun otherMismatch(spec: SchemaItemSpec, objects: StoreObjects): ItemForm.Mismatch? {
         val side = side(spec) ?: return null
         val keys = spec.properties
         val (column, type) = if (spec.kind == SchemaItemKind.VECTOR_INDEX) "EMBEDDING" to "VECTOR" else "DOC" to "JSON"
-        objects[side.uppercase()]?.takeIf { "TABLE" in it.types }?.let { table ->
+        objects.of(side, "TABLE")?.let { table ->
             if ("$column $type" !in table.tableColumns) return ItemForm.Mismatch(table.name, "a table without the $type column $column", droppable = false)
         }
-        objects[(side + TRIGGER).uppercase()]?.takeIf { "TRIGGER" in it.types }?.let { trigger ->
+        objects.of(side + TRIGGER, "TRIGGER")?.let { trigger ->
             val source = trigger.source.orEmpty()
             val reason = when {
                 trigger.table != null && !trigger.table.equals(ddl.nodes, ignoreCase = true) -> "a trigger on ${trigger.table}"
@@ -456,7 +452,7 @@ class OracleSchema(override val ddl: OracleDdl) : SqlStoreSchema() {
             }
             if (reason != null) return ItemForm.Mismatch(trigger.name, reason, droppable = false)
         }
-        objects[(side + INDEX).uppercase()]?.takeIf { it.isIndex }?.let { index ->
+        objects.of(side + INDEX, StoreObject.INDEX)?.let { index ->
             val made = if (spec.kind == SchemaItemKind.VECTOR_INDEX) "VECTOR" else "DOMAIN"
             if (index.indexType != null && !index.indexType.equals(made, ignoreCase = true)) return ItemForm.Mismatch(index.name, "an index of the type ${index.indexType}", droppable = true)
             if (index.table != null && !index.table.equals(side, ignoreCase = true)) return ItemForm.Mismatch(index.name, "an index on ${index.table}", droppable = true)
@@ -621,4 +617,25 @@ class SqliteSchema(override val ddl: SqliteDdl) : SqlStoreSchema() {
             LIMIT $limit
         """.trimIndent()
     }
+}
+
+/**
+ * What a SQL store has under each name its listing gives, by the name in upper case: an object of each type a name is taken
+ * by, each with its own facts (on Oracle a name can be an index's and a table's, which are named apart).
+ */
+@DrivineInternalApi
+class StoreObjects(private val byName: Map<String, List<StoreObject>>) {
+
+    /**
+     * What stands under [name], taken whole: every type the name is taken by, and the facts of its index where one is,
+     * as an index is what the name is compared as; null where nothing is.
+     */
+    operator fun get(name: String): StoreObject? {
+        val all = byName[name.uppercase()] ?: return null
+        val first = all.firstOrNull { it.isIndex } ?: all.first()
+        return first.copy(types = all.flatMap { it.types }.distinct())
+    }
+
+    /** The object of [type] under [name] (`TABLE`, `TRIGGER`, `INDEX`), with its own facts; null where there is none. */
+    fun of(name: String, type: String): StoreObject? = byName[name.uppercase()]?.firstOrNull { it.types.any { t -> t.equals(type, ignoreCase = true) } }
 }
