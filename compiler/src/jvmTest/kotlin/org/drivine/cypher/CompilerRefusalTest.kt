@@ -300,6 +300,29 @@ class CompilerRefusalTest {
     }
 
     @Test
+    fun `arithmetic, toBoolean(), SKIP and LIMIT of a parameter of another kind, or a negated float, are refused, each kind named`() {
+        // #420: the spec's refusals hold a text and a list given; a map, a truth value, a float and a temporal value given are
+        // refused as they are.
+        val date = org.drivine.cypher.json.TemporalValue(org.drivine.cypher.sql.Temporal.DATE, "2024-01-01")
+        listOf({ PostgresCypherCompiler("g") }, { OracleCypherCompiler("g") }, { SqliteCypherCompiler("g") }).forEach { compiler ->
+            listOf(
+                Triple("RETURN \$m * 2", mapOf("m" to mapOf("a" to 1)), "* takes numbers, not a map, as in Neo4j."),
+                Triple("RETURN 2 ^ \$l", mapOf("l" to listOf(1)), "^ takes numbers, not a list, as in Neo4j."),
+                Triple("RETURN \$b / 2", mapOf("b" to true), "/ takes numbers, not a truth value, as in Neo4j."),
+                Triple("RETURN toBoolean(\$f)", mapOf("f" to 1.5), "toBoolean() takes a truth value, an integer or a text, not a float, as in Neo4j."),
+                Triple("RETURN toBoolean(\$m)", mapOf("m" to mapOf("a" to 1)), "toBoolean() takes a truth value, an integer or a text, not a map, as in Neo4j."),
+                Triple("UNWIND [1] AS x RETURN x SKIP -1.5", emptyMap(), "SKIP and LIMIT take a whole number of 0 or more, not -1.5, as in Neo4j."),
+                Triple("UNWIND [1] AS x RETURN x SKIP \$s", mapOf("s" to listOf(1)), "SKIP and LIMIT take a whole number of 0 or more, and \$s is a list, as in Neo4j."),
+                Triple("UNWIND [1] AS x RETURN x SKIP \$s", mapOf("s" to mapOf("a" to 1)), "SKIP and LIMIT take a whole number of 0 or more, and \$s is a map, as in Neo4j."),
+                Triple("UNWIND [1] AS x RETURN x LIMIT \$s", mapOf("s" to true), "SKIP and LIMIT take a whole number of 0 or more, and \$s is a truth value, as in Neo4j."),
+                Triple("UNWIND [1] AS x RETURN x LIMIT \$s", mapOf("s" to date), "SKIP and LIMIT take a whole number of 0 or more, and \$s is of another kind, as in Neo4j."),
+            ).forEach { (cypher, parameters, message) ->
+                assertEquals(message, assertThrows<CompilerException>(cypher) { compiler().compile(cypher, parameters) }.message, cypher)
+            }
+        }
+    }
+
+    @Test
     fun `a start or length that may be an integer, or whose kind is known only when the row is read, is compiled, as Neo4j runs it`() {
         // #285: the spec's refusals hold a float the statement makes. Neo4j runs each of the first group, cutting a float toward
         // zero: a parameter, a property, an item of a list of an integer and a float or a null, a CASE of an integer and a float
