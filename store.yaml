@@ -1,6 +1,8 @@
 # The store layout's DDL: what each store makes of the graph `drivine` and of a set of schema specs, the tables, the
 # probe that finds them made, each index and constraint, and the catalog's statements. Captured from drivine4j's grammars,
-# the reference, before the module wrote them. Read with no store. See README.md.
+# the reference, before the module wrote them; since then each record says the form its item is made in ("form": 1),
+# which drivine4j's grammars didn't write, and each SQL store's create is pinned to its form by a digest. Read with no
+# store. See README.md.
 
 graph: "drivine"
 tables:
@@ -4585,7 +4587,9 @@ cases:
 
 # The store's schema: how each store's listings are read back as items, whether an item is the one a spec declares and in
 # its shape, what each store can do, and what its errors say. Captured with no store from drivine4j's schema grammars
-# (10f825b8), the reference, before the module wrote them. See README.md, "The store's schema".
+# (10f825b8), the reference, before the module wrote them. Its forms, which listing rows say an item is of another form or
+# another item under Drivine's names, are the module's own, over rows captured from each SQL store. See README.md, "The
+# store's schema".
 schema:
   stores:
     neo4j:

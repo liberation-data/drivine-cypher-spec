@@ -297,7 +297,7 @@ ${made.entries.joinToString("\n") { (function, making) ->
 
     /** The index over the property of every node, whatever the label: what a save and a load by id find a node by. */
     private fun sharedIndex(spec: RangeIndexSpec): Pair<String, String> {
-        val name = objectName("ix", spec.properties)
+        val name = objectName(SHARED, spec.properties)
         val expressions = spec.properties.joinToString(", ") { "JSON_VALUE(props, ${path(it)})" }
         return name to busyWaiting("CREATE INDEX IF NOT EXISTS $name ON $nodes ($expressions)")
     }
@@ -310,7 +310,7 @@ ${made.entries.joinToString("\n") { (function, making) ->
      */
     private fun rangeIndex(spec: RangeIndexSpec): List<String> {
         val (name, shared) = sharedIndex(spec)
-        val labelled = objectName("lx", listOf(spec.label) + spec.properties)
+        val labelled = objectName(LABELLED, listOf(spec.label) + spec.properties)
         val scoped = spec.properties.joinToString(", ") { OracleSql.labelled("n", spec.label, it) }
         // Not where a uniqueness constraint's index over the one property stands for it, as when the
         // range index is made again under a constraint: the record then names an index that is not
@@ -431,7 +431,7 @@ ${made.entries.joinToString("\n") { (function, making) ->
      */
     override fun createConstraint(spec: ConstraintSpec): List<DdlStatement> = when (spec) {
         is UniquenessConstraintSpec -> {
-            val name = objectName("uq", listOf(spec.label) + spec.properties)
+            val name = objectName(UNIQUE, listOf(spec.label) + spec.properties)
             // A node that lacks any of the properties is not constrained, as on the graph engines.
             val expressions = spec.properties.joinToString(", ") { OracleSql.unique("n", spec.label, spec.properties, it) }
             val unique = busyWaiting("CREATE UNIQUE INDEX IF NOT EXISTS $name ON $nodes n ($expressions)")

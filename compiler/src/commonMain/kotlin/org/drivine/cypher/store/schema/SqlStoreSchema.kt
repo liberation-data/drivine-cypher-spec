@@ -218,7 +218,8 @@ data class StoreObject(
         /**
          * The objects [rows] give, by their names in upper case, as each store's listing gives them: `object`, the name;
          * `type`, the type; `table`; `unique`, a boolean, or Oracle's `uniqueness`, `UNIQUE` or `NONUNIQUE`; `columns`;
-         * `where`; `method`; `sql`. The rows of a name are one object.
+         * `where`; `method`; `opclasses`; `indexType`; `sql`; `tableColumns`; `source`, a list of lines or one text. The rows
+         * of a name are one object.
          */
         fun read(rows: List<Any?>): Map<String, StoreObject> {
             val objects = linkedMapOf<String, StoreObject>()

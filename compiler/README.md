@@ -431,8 +431,10 @@ The JVM is the oracle. `./gradlew jvmOracle` writes, into `build/oracle`:
   stdlib's exceptions and texts reach a refusal off those paths: 10,000 of them (`-Pmutants.count=<n>`), from the seed.
   Where fewer are of interest, `jvmOracle` fails.
 - `store.json`: the spec's `store.yaml` as JSON, which `StoreDdlTest` reads on every target: the store layout's DDL
-  each generator in `org.drivine.cypher.store.ddl` must give, the object names Java's `String.hashCode` gives, and the
-  reads the compiler must answer from each index.
+  each generator in `org.drivine.cypher.store.ddl` must give, with the form each SQL store's create is pinned to by its
+  digest, the object names Java's `String.hashCode` gives, and the reads the compiler must answer from each index; and,
+  which `StoreSchemaTest` reads, the form `org.drivine.cypher.store.schema` must read each item as from listing rows
+  captured from each SQL store.
 - `marker.json`: the spec's `marker.yaml` as JSON, which `StoreMarkerTest` reads on every target: each store's
   statements for the schema marker and the store's stamp that `org.drivine.cypher.store.marker` must give, the
   inventories it must write and read back, the version tokens, and the node stamps `Stamps` must read and write.

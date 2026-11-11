@@ -204,7 +204,6 @@ class StoreSchemaTest {
         assertNotNull(schemas.getValue("postgres").ddl.drop(item.catalogItem).singleOrNull())
     }
 
-    /** The value [node] holds, as a driver gives a row's: a map, a list, text, a whole number as a Long, a boolean or null. */
     /**
      * Each SQL store's listing, its rows captured from the store, says the form of each item it lists, and tells another
      * item under a name Drivine gives from the item: [StoreSchema.formOf], over the spec as it is made.
@@ -241,6 +240,7 @@ class StoreSchemaTest {
         else -> fail("no form $node")
     }
 
+    /** The value [node] holds, as a driver gives a row's: a map, a list, text, a whole number as a Long, a boolean or null. */
     private fun plain(node: JsonNode): Any? = when {
         node.isNull -> null
         node.isTextual -> node.textValue()
