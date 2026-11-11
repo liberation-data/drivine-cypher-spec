@@ -210,8 +210,8 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
      * What is recorded of [kinds], and still there: an index dropped by hand is not listed, so that it is made again when
      * asked for. After the records, a row for each relation of the schema the store reads under a name Drivine gives an
      * object of [objects], recorded or not, with what it is: its `type` (`relkind`), and of an index its `table`, whether
-     * it is `unique`, its access `method`, the text of each of its `columns`, and its predicate (`where`), as Postgres
-     * writes them, which `store.schema` reads to tell another item under the name ([org.drivine.cypher.store.schema.ItemForm]).
+     * it is `unique`, its access `method`, the text of each of its `columns`, its predicate (`where`), as Postgres
+     * writes them, and its operator classes (`opclasses`), which `store.schema` reads to tell another item under the name ([org.drivine.cypher.store.schema.ItemForm]).
      */
     private fun listed(kinds: String, objects: List<String>): String = if (objects.isEmpty()) """
         SELECT jsonb_build_object('kind', kind, 'label', label, 'properties', properties::jsonb, 'name', name, 'details', details)
@@ -229,7 +229,8 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
             SELECT 1, o.relname::varchar, NULL,
                    jsonb_build_object('object', o.relname, 'type', o.relkind, 'table', t.relname, 'unique', i.indisunique, 'method', a.amname,
                                       'columns', (SELECT jsonb_agg(pg_get_indexdef(i.indexrelid, k, true) ORDER BY k) FROM generate_series(1, i.indnatts) k),
-                                      'where', pg_get_expr(i.indpred, i.indrelid, true))
+                                      'where', pg_get_expr(i.indpred, i.indrelid, true),
+                                      'opclasses', (SELECT jsonb_agg(oc.opcname ORDER BY k.n) FROM unnest(i.indclass::oid[]) WITH ORDINALITY AS k(oid, n) JOIN pg_opclass oc ON oc.oid = k.oid))
             FROM pg_class o
             LEFT JOIN pg_index i ON i.indexrelid = o.oid
             LEFT JOIN pg_class t ON t.oid = i.indrelid

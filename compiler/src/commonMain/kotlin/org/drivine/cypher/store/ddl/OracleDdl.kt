@@ -484,10 +484,11 @@ ${made.entries.joinToString("\n") { (function, making) ->
      * there were any, is listed as it is, [INCOMPLETE], so that `ensure` makes the rest.
      *
      * After the records, where [objects] names any, a row for each of `user_objects` under a name Drivine gives an object
-     * of [objects], recorded or not: its `type`, and of an index its `table`, its `uniqueness`, and its `columns` in order,
-     * each the text Oracle keeps of the hidden column it made for an expression (`user_tab_cols.data_default_vc`, null
-     * where it keeps none), or a plain column's name, which `store.schema` reads to tell another item under the name and
-     * the form of the item's ([org.drivine.cypher.store.schema.ItemForm]).
+     * of [objects], recorded or not: its `type`; of an index its `table`, its `uniqueness`, its `indexType`, and its
+     * `columns` in order, each the text Oracle keeps of the hidden column it made for an expression
+     * (`user_tab_cols.data_default_vc`, null where it keeps none), or a plain column's name; of a table its `tableColumns`,
+     * each its name and type; and of a trigger its `table` and its `source`, line by line (`user_source`). `store.schema`
+     * reads them to tell another item under the name, and the form of the item's ([org.drivine.cypher.store.schema.ItemForm]).
      */
     private fun listed(kinds: String, objects: List<String>): String {
         val record = """
@@ -511,14 +512,20 @@ ${made.entries.joinToString("\n") { (function, making) ->
                 ${recorded.replace("\n", "\n                ")}
                 UNION ALL
                 SELECT 1, o.object_name, NULL,
-                       JSON_OBJECT('object' VALUE o.object_name, 'type' VALUE o.object_type, 'table' VALUE i.table_name, 'uniqueness' VALUE i.uniqueness,
+                       JSON_OBJECT('object' VALUE o.object_name, 'type' VALUE o.object_type, 'table' VALUE NVL(i.table_name, g.table_name),
+                                   'uniqueness' VALUE i.uniqueness, 'indexType' VALUE i.index_type,
                                    'columns' VALUE (SELECT JSON_ARRAYAGG(CASE WHEN v.column_name IS NULL THEN ic.column_name ELSE v.data_default_vc END ORDER BY ic.column_position NULL ON NULL RETURNING JSON)
                                                     FROM user_ind_columns ic
                                                     LEFT JOIN user_tab_cols v ON v.table_name = ic.table_name AND v.column_name = ic.column_name AND v.virtual_column = 'YES'
-                                                    WHERE ic.index_name = i.index_name)
+                                                    WHERE ic.index_name = i.index_name),
+                                   'tableColumns' VALUE (SELECT JSON_ARRAYAGG(tc.column_name || ' ' || tc.data_type ORDER BY tc.column_id RETURNING JSON)
+                                                         FROM user_tab_columns tc WHERE o.object_type = 'TABLE' AND tc.table_name = o.object_name),
+                                   'source' VALUE (SELECT JSON_ARRAYAGG(s.text ORDER BY s.line RETURNING JSON)
+                                                   FROM user_source s WHERE o.object_type = 'TRIGGER' AND s.type = 'TRIGGER' AND s.name = o.object_name)
                                    RETURNING JSON)
                 FROM user_objects o
                 LEFT JOIN user_indexes i ON i.index_name = o.object_name AND o.object_type = 'INDEX'
+                LEFT JOIN user_triggers g ON g.trigger_name = o.object_name AND o.object_type = 'TRIGGER'
                 WHERE ${namedAs("o.object_name", objects, upper = true)}
             )
             ORDER BY part, label, properties
@@ -538,7 +545,15 @@ ${made.entries.joinToString("\n") { (function, making) ->
     """.trimIndent()
 
     override fun listIndexesQuery(kind: SchemaItemKind): String =
-        listed(literal(kind.name), if (kind == SchemaItemKind.RANGE_INDEX) listOf(SHARED, LABELLED) else emptyList())
+        listed(
+            literal(kind.name),
+            when (kind) {
+                SchemaItemKind.RANGE_INDEX -> listOf(SHARED, LABELLED)
+                SchemaItemKind.VECTOR_INDEX -> listOf(VECTORS)
+                SchemaItemKind.FULLTEXT_INDEX -> listOf(TEXTS)
+                else -> emptyList()
+            },
+        )
 
     override fun listConstraintsQuery(): String = listed(literal(SchemaItemKind.UNIQUENESS_CONSTRAINT.name), listOf(UNIQUE, SHARED))
     companion object {
@@ -570,6 +585,10 @@ ${made.entries.joinToString("\n") { (function, making) ->
         const val SHARED = "ix"
         const val LABELLED = "lx"
         const val UNIQUE = "uq"
+
+        /** What the names of a vector index's and a full-text index's tables beside the nodes say they are, and their triggers' and indexes' after them. */
+        const val VECTORS = "v"
+        const val TEXTS = "t"
 
         /** The status a range index is listed with when it lacks what this version makes for it. */
         const val INCOMPLETE = "INCOMPLETE"

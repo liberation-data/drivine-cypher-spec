@@ -161,7 +161,10 @@ class StorePlanTest {
         execute["create"]?.let { return ddl(prefix(id) + storeCase(it.textValue()!!)["stores"]!![id]!!["create"]!!.map(::statement)) }
         execute["drop"]?.let { return ddl(storeCase(it.textValue()!!)["stores"]!![id]!!["drop"]!!.map(::statement)) }
         execute["dropUnnamed"]?.let { return ddl(storeCase(it.textValue()!!)["stores"]!![id]!!["dropUnnamed"]!!.map(::statement)) }
-        execute["statement"]?.let { return ddl(listOf(DdlStatement.Text(it.textValue()!!))) }
+        execute["statement"]?.let { statement ->
+            val purpose = execute["purpose"]?.textValue()?.let(Purpose::valueOf) ?: return ddl(listOf(DdlStatement.Text(statement.textValue()!!)))
+            return listOf(PlanAction.Execute(DdlStatement.Text(statement.textValue()!!), purpose = purpose))
+        }
         // The record of the catalog's item made in the current form, recorded so (`store.yaml`'s `catalog`).
         execute["formRecorded"]?.let {
             return listOf(PlanAction.Execute(DdlStatement.Text(store["catalog"]!!["stores"]!![id]!!["formRecorded"]!!.textValue()!!), purpose = Purpose.ALIASES))

@@ -872,7 +872,8 @@ catalog:
               SELECT 1, o.relname::varchar, NULL,
                      jsonb_build_object('object', o.relname, 'type', o.relkind, 'table', t.relname, 'unique', i.indisunique, 'method', a.amname,
                                         'columns', (SELECT jsonb_agg(pg_get_indexdef(i.indexrelid, k, true) ORDER BY k) FROM generate_series(1, i.indnatts) k),
-                                        'where', pg_get_expr(i.indpred, i.indrelid, true))
+                                        'where', pg_get_expr(i.indpred, i.indrelid, true),
+                                        'opclasses', (SELECT jsonb_agg(oc.opcname ORDER BY k.n) FROM unnest(i.indclass::oid[]) WITH ORDINALITY AS k(oid, n) JOIN pg_opclass oc ON oc.oid = k.oid))
               FROM pg_class o
               LEFT JOIN pg_index i ON i.indexrelid = o.oid
               LEFT JOIN pg_class t ON t.oid = i.indrelid
@@ -890,7 +891,8 @@ catalog:
               SELECT 1, o.relname::varchar, NULL,
                      jsonb_build_object('object', o.relname, 'type', o.relkind, 'table', t.relname, 'unique', i.indisunique, 'method', a.amname,
                                         'columns', (SELECT jsonb_agg(pg_get_indexdef(i.indexrelid, k, true) ORDER BY k) FROM generate_series(1, i.indnatts) k),
-                                        'where', pg_get_expr(i.indpred, i.indrelid, true))
+                                        'where', pg_get_expr(i.indpred, i.indrelid, true),
+                                        'opclasses', (SELECT jsonb_agg(oc.opcname ORDER BY k.n) FROM unnest(i.indclass::oid[]) WITH ORDINALITY AS k(oid, n) JOIN pg_opclass oc ON oc.oid = k.oid))
               FROM pg_class o
               LEFT JOIN pg_index i ON i.indexrelid = o.oid
               LEFT JOIN pg_class t ON t.oid = i.indrelid
@@ -908,7 +910,8 @@ catalog:
               SELECT 1, o.relname::varchar, NULL,
                      jsonb_build_object('object', o.relname, 'type', o.relkind, 'table', t.relname, 'unique', i.indisunique, 'method', a.amname,
                                         'columns', (SELECT jsonb_agg(pg_get_indexdef(i.indexrelid, k, true) ORDER BY k) FROM generate_series(1, i.indnatts) k),
-                                        'where', pg_get_expr(i.indpred, i.indrelid, true))
+                                        'where', pg_get_expr(i.indpred, i.indrelid, true),
+                                        'opclasses', (SELECT jsonb_agg(oc.opcname ORDER BY k.n) FROM unnest(i.indclass::oid[]) WITH ORDINALITY AS k(oid, n) JOIN pg_opclass oc ON oc.oid = k.oid))
               FROM pg_class o
               LEFT JOIN pg_index i ON i.indexrelid = o.oid
               LEFT JOIN pg_class t ON t.oid = i.indrelid
@@ -938,7 +941,8 @@ catalog:
             SELECT 1, o.relname::varchar, NULL,
                    jsonb_build_object('object', o.relname, 'type', o.relkind, 'table', t.relname, 'unique', i.indisunique, 'method', a.amname,
                                       'columns', (SELECT jsonb_agg(pg_get_indexdef(i.indexrelid, k, true) ORDER BY k) FROM generate_series(1, i.indnatts) k),
-                                      'where', pg_get_expr(i.indpred, i.indrelid, true))
+                                      'where', pg_get_expr(i.indpred, i.indrelid, true),
+                                      'opclasses', (SELECT jsonb_agg(oc.opcname ORDER BY k.n) FROM unnest(i.indclass::oid[]) WITH ORDINALITY AS k(oid, n) JOIN pg_opclass oc ON oc.oid = k.oid))
             FROM pg_class o
             LEFT JOIN pg_index i ON i.indexrelid = o.oid
             LEFT JOIN pg_class t ON t.oid = i.indrelid
@@ -952,17 +956,36 @@ catalog:
     oracle:
       indexes:
         VECTOR_INDEX: |-
-          SELECT JSON_OBJECT('kind' VALUE kind, 'label' VALUE label, 'properties' VALUE JSON(properties), 'name' VALUE name, 'details' VALUE details,
-                             'status' VALUE CASE WHEN kind = 'RANGE_INDEX' AND NOT EXISTS (SELECT 1 FROM user_indexes l WHERE l.index_name = UPPER(JSON_VALUE(c.details, '$.labelled')))
-                                                  AND NOT EXISTS (SELECT 1 FROM drivine_schema u WHERE u.label = c.label AND u.properties = c.properties AND u.kind = 'UNIQUENESS_CONSTRAINT' AND JSON_VALUE(u.properties, '$.size()' RETURNING NUMBER) = 1 AND EXISTS (SELECT 1 FROM user_indexes q WHERE q.index_name = UPPER(u.object_name)))
-                                            THEN 'INCOMPLETE' END
-                             RETURNING JSON)
-          FROM drivine_schema c
-          WHERE kind IN ('VECTOR_INDEX')
-            AND (object_name IS NULL
-                 OR EXISTS (SELECT 1 FROM user_indexes i WHERE i.index_name = UPPER(c.object_name))
-                 OR EXISTS (SELECT 1 FROM user_tables t WHERE t.table_name = UPPER(c.object_name)))
-          ORDER BY label, properties
+          SELECT listed FROM (
+              SELECT 0 AS part, label, properties, JSON_OBJECT('kind' VALUE kind, 'label' VALUE label, 'properties' VALUE JSON(properties), 'name' VALUE name, 'details' VALUE details,
+                                 'status' VALUE CASE WHEN kind = 'RANGE_INDEX' AND NOT EXISTS (SELECT 1 FROM user_indexes l WHERE l.index_name = UPPER(JSON_VALUE(c.details, '$.labelled')))
+                                                      AND NOT EXISTS (SELECT 1 FROM drivine_schema u WHERE u.label = c.label AND u.properties = c.properties AND u.kind = 'UNIQUENESS_CONSTRAINT' AND JSON_VALUE(u.properties, '$.size()' RETURNING NUMBER) = 1 AND EXISTS (SELECT 1 FROM user_indexes q WHERE q.index_name = UPPER(u.object_name)))
+                                                THEN 'INCOMPLETE' END
+                                 RETURNING JSON) AS listed
+              FROM drivine_schema c
+              WHERE kind IN ('VECTOR_INDEX')
+                AND (object_name IS NULL
+                     OR EXISTS (SELECT 1 FROM user_indexes i WHERE i.index_name = UPPER(c.object_name))
+                     OR EXISTS (SELECT 1 FROM user_tables t WHERE t.table_name = UPPER(c.object_name)))
+              UNION ALL
+              SELECT 1, o.object_name, NULL,
+                     JSON_OBJECT('object' VALUE o.object_name, 'type' VALUE o.object_type, 'table' VALUE NVL(i.table_name, g.table_name),
+                                 'uniqueness' VALUE i.uniqueness, 'indexType' VALUE i.index_type,
+                                 'columns' VALUE (SELECT JSON_ARRAYAGG(CASE WHEN v.column_name IS NULL THEN ic.column_name ELSE v.data_default_vc END ORDER BY ic.column_position NULL ON NULL RETURNING JSON)
+                                                  FROM user_ind_columns ic
+                                                  LEFT JOIN user_tab_cols v ON v.table_name = ic.table_name AND v.column_name = ic.column_name AND v.virtual_column = 'YES'
+                                                  WHERE ic.index_name = i.index_name),
+                                 'tableColumns' VALUE (SELECT JSON_ARRAYAGG(tc.column_name || ' ' || tc.data_type ORDER BY tc.column_id RETURNING JSON)
+                                                       FROM user_tab_columns tc WHERE o.object_type = 'TABLE' AND tc.table_name = o.object_name),
+                                 'source' VALUE (SELECT JSON_ARRAYAGG(s.text ORDER BY s.line RETURNING JSON)
+                                                 FROM user_source s WHERE o.object_type = 'TRIGGER' AND s.type = 'TRIGGER' AND s.name = o.object_name)
+                                 RETURNING JSON)
+              FROM user_objects o
+              LEFT JOIN user_indexes i ON i.index_name = o.object_name AND o.object_type = 'INDEX'
+              LEFT JOIN user_triggers g ON g.trigger_name = o.object_name AND o.object_type = 'TRIGGER'
+              WHERE o.object_name LIKE 'DRIVINE\_V\_%' ESCAPE '\'
+          )
+          ORDER BY part, label, properties
         RANGE_INDEX: |-
           SELECT listed FROM (
               SELECT 0 AS part, label, properties, JSON_OBJECT('kind' VALUE kind, 'label' VALUE label, 'properties' VALUE JSON(properties), 'name' VALUE name, 'details' VALUE details,
@@ -977,29 +1000,54 @@ catalog:
                      OR EXISTS (SELECT 1 FROM user_tables t WHERE t.table_name = UPPER(c.object_name)))
               UNION ALL
               SELECT 1, o.object_name, NULL,
-                     JSON_OBJECT('object' VALUE o.object_name, 'type' VALUE o.object_type, 'table' VALUE i.table_name, 'uniqueness' VALUE i.uniqueness,
+                     JSON_OBJECT('object' VALUE o.object_name, 'type' VALUE o.object_type, 'table' VALUE NVL(i.table_name, g.table_name),
+                                 'uniqueness' VALUE i.uniqueness, 'indexType' VALUE i.index_type,
                                  'columns' VALUE (SELECT JSON_ARRAYAGG(CASE WHEN v.column_name IS NULL THEN ic.column_name ELSE v.data_default_vc END ORDER BY ic.column_position NULL ON NULL RETURNING JSON)
                                                   FROM user_ind_columns ic
                                                   LEFT JOIN user_tab_cols v ON v.table_name = ic.table_name AND v.column_name = ic.column_name AND v.virtual_column = 'YES'
-                                                  WHERE ic.index_name = i.index_name)
+                                                  WHERE ic.index_name = i.index_name),
+                                 'tableColumns' VALUE (SELECT JSON_ARRAYAGG(tc.column_name || ' ' || tc.data_type ORDER BY tc.column_id RETURNING JSON)
+                                                       FROM user_tab_columns tc WHERE o.object_type = 'TABLE' AND tc.table_name = o.object_name),
+                                 'source' VALUE (SELECT JSON_ARRAYAGG(s.text ORDER BY s.line RETURNING JSON)
+                                                 FROM user_source s WHERE o.object_type = 'TRIGGER' AND s.type = 'TRIGGER' AND s.name = o.object_name)
                                  RETURNING JSON)
               FROM user_objects o
               LEFT JOIN user_indexes i ON i.index_name = o.object_name AND o.object_type = 'INDEX'
+              LEFT JOIN user_triggers g ON g.trigger_name = o.object_name AND o.object_type = 'TRIGGER'
               WHERE o.object_name LIKE 'DRIVINE\_IX\_%' ESCAPE '\' OR o.object_name LIKE 'DRIVINE\_LX\_%' ESCAPE '\'
           )
           ORDER BY part, label, properties
         FULLTEXT_INDEX: |-
-          SELECT JSON_OBJECT('kind' VALUE kind, 'label' VALUE label, 'properties' VALUE JSON(properties), 'name' VALUE name, 'details' VALUE details,
-                             'status' VALUE CASE WHEN kind = 'RANGE_INDEX' AND NOT EXISTS (SELECT 1 FROM user_indexes l WHERE l.index_name = UPPER(JSON_VALUE(c.details, '$.labelled')))
-                                                  AND NOT EXISTS (SELECT 1 FROM drivine_schema u WHERE u.label = c.label AND u.properties = c.properties AND u.kind = 'UNIQUENESS_CONSTRAINT' AND JSON_VALUE(u.properties, '$.size()' RETURNING NUMBER) = 1 AND EXISTS (SELECT 1 FROM user_indexes q WHERE q.index_name = UPPER(u.object_name)))
-                                            THEN 'INCOMPLETE' END
-                             RETURNING JSON)
-          FROM drivine_schema c
-          WHERE kind IN ('FULLTEXT_INDEX')
-            AND (object_name IS NULL
-                 OR EXISTS (SELECT 1 FROM user_indexes i WHERE i.index_name = UPPER(c.object_name))
-                 OR EXISTS (SELECT 1 FROM user_tables t WHERE t.table_name = UPPER(c.object_name)))
-          ORDER BY label, properties
+          SELECT listed FROM (
+              SELECT 0 AS part, label, properties, JSON_OBJECT('kind' VALUE kind, 'label' VALUE label, 'properties' VALUE JSON(properties), 'name' VALUE name, 'details' VALUE details,
+                                 'status' VALUE CASE WHEN kind = 'RANGE_INDEX' AND NOT EXISTS (SELECT 1 FROM user_indexes l WHERE l.index_name = UPPER(JSON_VALUE(c.details, '$.labelled')))
+                                                      AND NOT EXISTS (SELECT 1 FROM drivine_schema u WHERE u.label = c.label AND u.properties = c.properties AND u.kind = 'UNIQUENESS_CONSTRAINT' AND JSON_VALUE(u.properties, '$.size()' RETURNING NUMBER) = 1 AND EXISTS (SELECT 1 FROM user_indexes q WHERE q.index_name = UPPER(u.object_name)))
+                                                THEN 'INCOMPLETE' END
+                                 RETURNING JSON) AS listed
+              FROM drivine_schema c
+              WHERE kind IN ('FULLTEXT_INDEX')
+                AND (object_name IS NULL
+                     OR EXISTS (SELECT 1 FROM user_indexes i WHERE i.index_name = UPPER(c.object_name))
+                     OR EXISTS (SELECT 1 FROM user_tables t WHERE t.table_name = UPPER(c.object_name)))
+              UNION ALL
+              SELECT 1, o.object_name, NULL,
+                     JSON_OBJECT('object' VALUE o.object_name, 'type' VALUE o.object_type, 'table' VALUE NVL(i.table_name, g.table_name),
+                                 'uniqueness' VALUE i.uniqueness, 'indexType' VALUE i.index_type,
+                                 'columns' VALUE (SELECT JSON_ARRAYAGG(CASE WHEN v.column_name IS NULL THEN ic.column_name ELSE v.data_default_vc END ORDER BY ic.column_position NULL ON NULL RETURNING JSON)
+                                                  FROM user_ind_columns ic
+                                                  LEFT JOIN user_tab_cols v ON v.table_name = ic.table_name AND v.column_name = ic.column_name AND v.virtual_column = 'YES'
+                                                  WHERE ic.index_name = i.index_name),
+                                 'tableColumns' VALUE (SELECT JSON_ARRAYAGG(tc.column_name || ' ' || tc.data_type ORDER BY tc.column_id RETURNING JSON)
+                                                       FROM user_tab_columns tc WHERE o.object_type = 'TABLE' AND tc.table_name = o.object_name),
+                                 'source' VALUE (SELECT JSON_ARRAYAGG(s.text ORDER BY s.line RETURNING JSON)
+                                                 FROM user_source s WHERE o.object_type = 'TRIGGER' AND s.type = 'TRIGGER' AND s.name = o.object_name)
+                                 RETURNING JSON)
+              FROM user_objects o
+              LEFT JOIN user_indexes i ON i.index_name = o.object_name AND o.object_type = 'INDEX'
+              LEFT JOIN user_triggers g ON g.trigger_name = o.object_name AND o.object_type = 'TRIGGER'
+              WHERE o.object_name LIKE 'DRIVINE\_T\_%' ESCAPE '\'
+          )
+          ORDER BY part, label, properties
         UNIQUENESS_CONSTRAINT: |-
           SELECT JSON_OBJECT('kind' VALUE kind, 'label' VALUE label, 'properties' VALUE JSON(properties), 'name' VALUE name, 'details' VALUE details,
                              'status' VALUE CASE WHEN kind = 'RANGE_INDEX' AND NOT EXISTS (SELECT 1 FROM user_indexes l WHERE l.index_name = UPPER(JSON_VALUE(c.details, '$.labelled')))
@@ -1038,14 +1086,20 @@ catalog:
                    OR EXISTS (SELECT 1 FROM user_tables t WHERE t.table_name = UPPER(c.object_name)))
             UNION ALL
             SELECT 1, o.object_name, NULL,
-                   JSON_OBJECT('object' VALUE o.object_name, 'type' VALUE o.object_type, 'table' VALUE i.table_name, 'uniqueness' VALUE i.uniqueness,
+                   JSON_OBJECT('object' VALUE o.object_name, 'type' VALUE o.object_type, 'table' VALUE NVL(i.table_name, g.table_name),
+                               'uniqueness' VALUE i.uniqueness, 'indexType' VALUE i.index_type,
                                'columns' VALUE (SELECT JSON_ARRAYAGG(CASE WHEN v.column_name IS NULL THEN ic.column_name ELSE v.data_default_vc END ORDER BY ic.column_position NULL ON NULL RETURNING JSON)
                                                 FROM user_ind_columns ic
                                                 LEFT JOIN user_tab_cols v ON v.table_name = ic.table_name AND v.column_name = ic.column_name AND v.virtual_column = 'YES'
-                                                WHERE ic.index_name = i.index_name)
+                                                WHERE ic.index_name = i.index_name),
+                               'tableColumns' VALUE (SELECT JSON_ARRAYAGG(tc.column_name || ' ' || tc.data_type ORDER BY tc.column_id RETURNING JSON)
+                                                     FROM user_tab_columns tc WHERE o.object_type = 'TABLE' AND tc.table_name = o.object_name),
+                               'source' VALUE (SELECT JSON_ARRAYAGG(s.text ORDER BY s.line RETURNING JSON)
+                                               FROM user_source s WHERE o.object_type = 'TRIGGER' AND s.type = 'TRIGGER' AND s.name = o.object_name)
                                RETURNING JSON)
             FROM user_objects o
             LEFT JOIN user_indexes i ON i.index_name = o.object_name AND o.object_type = 'INDEX'
+            LEFT JOIN user_triggers g ON g.trigger_name = o.object_name AND o.object_type = 'TRIGGER'
             WHERE o.object_name LIKE 'DRIVINE\_UQ\_%' ESCAPE '\' OR o.object_name LIKE 'DRIVINE\_IX\_%' ESCAPE '\'
         )
         ORDER BY part, label, properties
@@ -6334,14 +6388,14 @@ forms:
       - {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": "Person_name_range", "details": {"labelled": "drivine_lx_Personname_44ce5436"}, "status": null}
       - {"kind": "RANGE_INDEX", "label": "TsAccount", "properties": ["email"], "name": "TsAccount_email_range", "details": {"unique": "drivine_uq_TsAccountemail_5ffe5faa"}, "status": null}
       - {"kind": "RANGE_INDEX", "label": "TsPerson", "properties": ["name"], "name": "TsPerson_name_range", "details": {"labelled": "drivine_lx_TsPersonname_fc99c037"}, "status": null}
-      - {"object": "DRIVINE_IX_CODE_2EADED", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.code' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"]}
-      - {"object": "DRIVINE_IX_EMAIL_5C24B9C", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"]}
-      - {"object": "DRIVINE_IX_NAME_337A8B", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.name' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"]}
-      - {"object": "DRIVINE_IX_SERIAL_CA01FDF4", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.\"couponRef\"' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"]}
-      - {"object": "DRIVINE_LX_OLDNAME_A75F0E4", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "columns": ["CASE JSON_EXISTS2(\"LABELS\" FORMAT OSON , '$[*]?(@ == \"Old\")' /* json_path_str  $[*]?(@.string() == \"Old\")  */  FALSE ON ERROR TYPE(LAX) ) WHEN 1 THEN JSON_VALUE(\"PROPS\" FORMAT OSON , '$.name' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) ) END "]}
-      - {"object": "DRIVINE_LX_PERSONNAME_44CE5436", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "columns": ["CASE JSON_EXISTS2(\"LABELS\" FORMAT OSON , '$[*]?(@ == \"Person\")' /* json_path_str  $[*]?(@.string() == \"Person\")  */  FALSE ON ERROR TYPE(LAX) ) WHEN 1 THEN JSON_VALUE(\"PROPS\" FORMAT OSON , '$.name' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) ) END "]}
-      - {"object": "DRIVINE_LX_STAMPEDSKU_36D1AF9F", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "columns": ["STAMP"]}
-      - {"object": "DRIVINE_LX_TSPERSONNAME_FC99C037", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "columns": ["CASE JSON_EXISTS2(\"LABELS\" FORMAT OSON , '$?(@ == \"TsPerson\")' /* json_path_str  $?(@.string() == \"TsPerson\")  */  FALSE ON ERROR TYPE(LAX) ) WHEN 1 THEN JSON_VALUE(\"PROPS\" FORMAT OSON , '$.\"name\"' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) ) END "]}
+      - {"object": "DRIVINE_IX_CODE_2EADED", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.code' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"], "tableColumns": null, "source": null}
+      - {"object": "DRIVINE_IX_EMAIL_5C24B9C", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"], "tableColumns": null, "source": null}
+      - {"object": "DRIVINE_IX_NAME_337A8B", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.name' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"], "tableColumns": null, "source": null}
+      - {"object": "DRIVINE_IX_SERIAL_CA01FDF4", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.\"couponRef\"' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"], "tableColumns": null, "source": null}
+      - {"object": "DRIVINE_LX_OLDNAME_A75F0E4", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["CASE JSON_EXISTS2(\"LABELS\" FORMAT OSON , '$[*]?(@ == \"Old\")' /* json_path_str  $[*]?(@.string() == \"Old\")  */  FALSE ON ERROR TYPE(LAX) ) WHEN 1 THEN JSON_VALUE(\"PROPS\" FORMAT OSON , '$.name' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) ) END "], "tableColumns": null, "source": null}
+      - {"object": "DRIVINE_LX_PERSONNAME_44CE5436", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["CASE JSON_EXISTS2(\"LABELS\" FORMAT OSON , '$[*]?(@ == \"Person\")' /* json_path_str  $[*]?(@.string() == \"Person\")  */  FALSE ON ERROR TYPE(LAX) ) WHEN 1 THEN JSON_VALUE(\"PROPS\" FORMAT OSON , '$.name' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) ) END "], "tableColumns": null, "source": null}
+      - {"object": "DRIVINE_LX_STAMPEDSKU_36D1AF9F", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "indexType": "NORMAL", "columns": ["STAMP"], "tableColumns": null, "source": null}
+      - {"object": "DRIVINE_LX_TSPERSONNAME_FC99C037", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["CASE JSON_EXISTS2(\"LABELS\" FORMAT OSON , '$?(@ == \"TsPerson\")' /* json_path_str  $?(@.string() == \"TsPerson\")  */  FALSE ON ERROR TYPE(LAX) ) WHEN 1 THEN JSON_VALUE(\"PROPS\" FORMAT OSON , '$.\"name\"' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) ) END "], "tableColumns": null, "source": null}
     listed:
       - {"kind": "RANGE_INDEX", "label": "Account", "properties": ["email"], "name": "Account_email_range"}
       - {"kind": "RANGE_INDEX", "label": "Badge", "properties": ["code"], "name": "Badge_code_range"}
@@ -6364,15 +6418,15 @@ forms:
       - {"kind": "UNIQUENESS_CONSTRAINT", "label": "Account", "properties": ["email"], "name": "Account_email_unique", "details": {"form": 1}, "status": null}
       - {"kind": "UNIQUENESS_CONSTRAINT", "label": "Badge", "properties": ["code"], "name": "Badge_code_unique", "details": {}, "status": null}
       - {"kind": "UNIQUENESS_CONSTRAINT", "label": "TsAccount", "properties": ["email"], "name": "TsAccount_email_unique", "details": {}, "status": null}
-      - {"object": "DRIVINE_IX_CODE_2EADED", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.code' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"]}
-      - {"object": "DRIVINE_IX_EMAIL_5C24B9C", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"]}
-      - {"object": "DRIVINE_IX_NAME_337A8B", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.name' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"]}
-      - {"object": "DRIVINE_IX_SERIAL_CA01FDF4", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.\"couponRef\"' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"]}
-      - {"object": "DRIVINE_UQ_ACCOUNTEMAIL_6D5DEFE9", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "UNIQUE", "columns": ["CASE  WHEN (JSON_EXISTS2(\"LABELS\" FORMAT OSON , '$[*]?(@ == \"Account\")' /* json_path_str  $[*]?(@.string() == \"Account\")  */  FALSE ON ERROR TYPE(LAX) )=1 AND JSON_EXISTS2(\"PROPS\" FORMAT OSON , '$.email' FALSE ON ERROR TYPE(LAX) )=1) THEN JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) ) END "]}
-      - {"object": "DRIVINE_UQ_BADGECODE_B1FCBC4A", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "columns": ["CASE  WHEN (JSON_EXISTS2(\"LABELS\" FORMAT OSON , '$[*]?(@ == \"Badge\")' /* json_path_str  $[*]?(@.string() == \"Badge\")  */  FALSE ON ERROR TYPE(LAX) )=1 AND JSON_EXISTS2(\"PROPS\" FORMAT OSON , '$.code' FALSE ON ERROR TYPE(LAX) )=1) THEN JSON_VALUE(\"PROPS\" FORMAT OSON , '$.code' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) ) END "]}
-      - {"object": "DRIVINE_UQ_TICKETCODE_73B4F241", "type": "TABLE", "table": null, "uniqueness": null, "columns": null}
-      - {"object": "DRIVINE_UQ_TSACCOUNTEMAIL_5FFE5FAA", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "UNIQUE", "columns": ["CASE JSON_EXISTS2(\"LABELS\" FORMAT OSON , '$?(@ == \"TsAccount\")' /* json_path_str  $?(@.string() == \"TsAccount\")  */  FALSE ON ERROR TYPE(LAX) ) WHEN 1 THEN JSON_VALUE(\"PROPS\" FORMAT OSON , '$.\"email\"' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) ) END "]}
-      - {"object": "DRIVINE_UQ_VOUCHERCODE_F5E5701F", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.\"voucherRef\"' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"]}
+      - {"object": "DRIVINE_IX_CODE_2EADED", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.code' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"], "tableColumns": null, "source": null}
+      - {"object": "DRIVINE_IX_EMAIL_5C24B9C", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"], "tableColumns": null, "source": null}
+      - {"object": "DRIVINE_IX_NAME_337A8B", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.name' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"], "tableColumns": null, "source": null}
+      - {"object": "DRIVINE_IX_SERIAL_CA01FDF4", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.\"couponRef\"' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"], "tableColumns": null, "source": null}
+      - {"object": "DRIVINE_UQ_ACCOUNTEMAIL_6D5DEFE9", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "UNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["CASE  WHEN (JSON_EXISTS2(\"LABELS\" FORMAT OSON , '$[*]?(@ == \"Account\")' /* json_path_str  $[*]?(@.string() == \"Account\")  */  FALSE ON ERROR TYPE(LAX) )=1 AND JSON_EXISTS2(\"PROPS\" FORMAT OSON , '$.email' FALSE ON ERROR TYPE(LAX) )=1) THEN JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) ) END "], "tableColumns": null, "source": null}
+      - {"object": "DRIVINE_UQ_BADGECODE_B1FCBC4A", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["CASE  WHEN (JSON_EXISTS2(\"LABELS\" FORMAT OSON , '$[*]?(@ == \"Badge\")' /* json_path_str  $[*]?(@.string() == \"Badge\")  */  FALSE ON ERROR TYPE(LAX) )=1 AND JSON_EXISTS2(\"PROPS\" FORMAT OSON , '$.code' FALSE ON ERROR TYPE(LAX) )=1) THEN JSON_VALUE(\"PROPS\" FORMAT OSON , '$.code' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) ) END "], "tableColumns": null, "source": null}
+      - {"object": "DRIVINE_UQ_TICKETCODE_73B4F241", "type": "TABLE", "table": null, "uniqueness": null, "indexType": null, "columns": null, "tableColumns": ["X NUMBER"], "source": null}
+      - {"object": "DRIVINE_UQ_TSACCOUNTEMAIL_5FFE5FAA", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "UNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["CASE JSON_EXISTS2(\"LABELS\" FORMAT OSON , '$?(@ == \"TsAccount\")' /* json_path_str  $?(@.string() == \"TsAccount\")  */  FALSE ON ERROR TYPE(LAX) ) WHEN 1 THEN JSON_VALUE(\"PROPS\" FORMAT OSON , '$.\"email\"' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) ) END "], "tableColumns": null, "source": null}
+      - {"object": "DRIVINE_UQ_VOUCHERCODE_F5E5701F", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.\"voucherRef\"' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"], "tableColumns": null, "source": null}
     listed:
       - {"kind": "UNIQUENESS_CONSTRAINT", "label": "Account", "properties": ["email"], "name": "Account_email_unique"}
       - {"kind": "UNIQUENESS_CONSTRAINT", "label": "Badge", "properties": ["code"], "name": "Badge_code_unique"}
@@ -6390,9 +6444,9 @@ forms:
     rows:
       - {"kind": "RANGE_INDEX", "name": "Old_name_range", "label": "Old", "details": {"form": 0}, "properties": ["name"]}
       - {"kind": "RANGE_INDEX", "name": "Person_name_range", "label": "Person", "details": {}, "properties": ["name"]}
-      - {"type": "i", "table": "drivine_node", "where": "labels @> '[\"Coupon\"]'::jsonb", "method": "btree", "object": "drivine_ix_couponserial_6567feee", "unique": false, "columns": ["(props ->> 'couponRef'::text)"]}
-      - {"type": "i", "table": "drivine_node", "where": "labels @> '[\"Old\"]'::jsonb", "method": "btree", "object": "drivine_ix_oldname_a75f0e4", "unique": false, "columns": ["(props ->> 'name'::text)"]}
-      - {"type": "i", "table": "drivine_node", "where": "labels @> '[\"Person\"]'::jsonb", "method": "btree", "object": "drivine_ix_personname_44ce5436", "unique": false, "columns": ["(props ->> 'name'::text)"]}
+      - {"type": "i", "table": "drivine_node", "where": "labels @> '[\"Coupon\"]'::jsonb", "method": "btree", "object": "drivine_ix_couponserial_6567feee", "unique": false, "columns": ["(props ->> 'couponRef'::text)"], "opclasses": ["text_ops"]}
+      - {"type": "i", "table": "drivine_node", "where": "labels @> '[\"Old\"]'::jsonb", "method": "btree", "object": "drivine_ix_oldname_a75f0e4", "unique": false, "columns": ["(props ->> 'name'::text)"], "opclasses": ["text_ops"]}
+      - {"type": "i", "table": "drivine_node", "where": "labels @> '[\"Person\"]'::jsonb", "method": "btree", "object": "drivine_ix_personname_44ce5436", "unique": false, "columns": ["(props ->> 'name'::text)"], "opclasses": ["text_ops"]}
     listed:
       - {"kind": "RANGE_INDEX", "label": "Old", "properties": ["name"], "name": "Old_name_range"}
       - {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": "Person_name_range"}
@@ -6407,10 +6461,10 @@ forms:
     rows:
       - {"kind": "UNIQUENESS_CONSTRAINT", "name": "Account_email_unique", "label": "Account", "details": {"form": 1}, "properties": ["email"]}
       - {"kind": "UNIQUENESS_CONSTRAINT", "name": "Badge_code_unique", "label": "Badge", "details": {}, "properties": ["code"]}
-      - {"type": "i", "table": "drivine_node", "where": "labels @> '[\"Account\"]'::jsonb", "method": "btree", "object": "drivine_uq_accountemail_6d5defe9", "unique": true, "columns": ["(props ->> 'email'::text)"]}
-      - {"type": "i", "table": "drivine_node", "where": "labels @> '[\"Badge\"]'::jsonb", "method": "btree", "object": "drivine_uq_badgecode_b1fcbc4a", "unique": false, "columns": ["(props ->> 'code'::text)"]}
-      - {"type": "r", "table": null, "where": null, "method": "heap", "object": "drivine_uq_ticketcode_73b4f241", "unique": null, "columns": null}
-      - {"type": "i", "table": "drivine_node", "where": null, "method": "btree", "object": "drivine_uq_vouchercode_f5e5701f", "unique": false, "columns": ["(props ->> 'voucherRef'::text)"]}
+      - {"type": "i", "table": "drivine_node", "where": "labels @> '[\"Account\"]'::jsonb", "method": "btree", "object": "drivine_uq_accountemail_6d5defe9", "unique": true, "columns": ["(props ->> 'email'::text)"], "opclasses": ["text_ops"]}
+      - {"type": "i", "table": "drivine_node", "where": "labels @> '[\"Badge\"]'::jsonb", "method": "btree", "object": "drivine_uq_badgecode_b1fcbc4a", "unique": false, "columns": ["(props ->> 'code'::text)"], "opclasses": ["text_ops"]}
+      - {"type": "r", "table": null, "where": null, "method": "heap", "object": "drivine_uq_ticketcode_73b4f241", "unique": null, "columns": null, "opclasses": null}
+      - {"type": "i", "table": "drivine_node", "where": null, "method": "btree", "object": "drivine_uq_vouchercode_f5e5701f", "unique": false, "columns": ["(props ->> 'voucherRef'::text)"], "opclasses": ["text_ops"]}
     listed:
       - {"kind": "UNIQUENESS_CONSTRAINT", "label": "Account", "properties": ["email"], "name": "Account_email_unique"}
       - {"kind": "UNIQUENESS_CONSTRAINT", "label": "Badge", "properties": ["code"], "name": "Badge_code_unique"}
@@ -6455,3 +6509,201 @@ forms:
       - {spec: {"kind": "UNIQUENESS_CONSTRAINT", "label": "Voucher", "properties": ["code"]}, form: {"mismatch": {"name": "drivine_uq_Vouchercode_f5e5701f", "reason": "an index that is not unique", "droppable": true}}}
       - {spec: {"kind": "UNIQUENESS_CONSTRAINT", "label": "Badge", "properties": ["code"]}, form: {"mismatch": {"name": "drivine_uq_Badgecode_b1fcbc4a", "reason": "an index that is not unique", "droppable": true}}}
       - {spec: {"kind": "UNIQUENESS_CONSTRAINT", "label": "Ticket", "properties": ["code"]}, form: {"mismatch": {"name": "drivine_uq_Ticketcode_73b4f241", "reason": "a table, not an index", "droppable": false}}}
+  - name: "Oracle: a vector and a full-text index of TypeScript's form (vectors)"
+    description: "Tables beside the nodes, their triggers and indexes as TypeScript's Oracle DDL makes them (Python's trigger is the same text), their records saying no form."
+    store: "oracle"
+    listing: "indexes.VECTOR_INDEX"
+    rows:
+      - {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "name": "Chunk_embedding_vector", "details": {"dimensions": 384, "similarity": "COSINE"}, "status": null}
+      - {"object": "DRIVINE_V_CHUNKEMBEDDING_7E60BD64", "type": "TABLE", "table": null, "uniqueness": null, "indexType": null, "columns": null, "tableColumns": ["NID NUMBER", "EMBEDDING VECTOR"], "source": null}
+      - {"object": "DRIVINE_V_CHUNKEMBEDDING_7E60BD64_I", "type": "INDEX", "table": "DRIVINE_V_CHUNKEMBEDDING_7E60BD64", "uniqueness": "NONUNIQUE", "indexType": "VECTOR", "columns": ["EMBEDDING"], "tableColumns": null, "source": null}
+      - {"object": "DRIVINE_V_CHUNKEMBEDDING_7E60BD64_T", "type": "TRIGGER", "table": "DRIVINE_NODE", "uniqueness": null, "indexType": null, "columns": null, "tableColumns": null, "source": ["TRIGGER drivine_v_Chunkembedding_7e60bd64_t AFTER INSERT OR UPDATE OF labels, props ON drivine_node FOR EACH ROW BEGIN IF JSON_EXISTS(:NEW.labels, '$?(@ == \"Chunk\")') AND JSON_EXISTS(:NEW.props, '$.\"embedding\"') THEN BEGIN MERGE INTO drivine_v_Chunkembedding_7e60bd64 s USING (SELECT :NEW.nid AS nid, TO_VECTOR(JSON_QUERY(:NEW.props, '$.\"embedding\"' RETURNING CLOB)) AS embedding FROM dual) n ON (s.nid = n.nid) WHEN MATCHED THEN UPDATE SET s.embedding = n.embedding WHEN NOT MATCHED THEN INSERT (nid, embedding) VALUES (n.nid, n.embedding); EXCEPTION WHEN OTHERS THEN DELETE FROM drivine_v_Chunkembedding_7e60bd64 WHERE nid = :NEW.nid; END; ELSE DELETE FROM drivine_v_Chunkembedding_7e60bd64 WHERE nid = :NEW.nid; END IF; END;"]}
+    listed:
+      - {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "name": "Chunk_embedding_vector", "dimensions": 384, "similarity": "COSINE"}
+    items:
+      - {spec: {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "options": {"dimensions": 384, "similarity": "COSINE"}}, form: {"stale": "TS's or Python's Oracle form"}}
+  - name: "Oracle: a vector and a full-text index of TypeScript's form (full text)"
+    description: "Tables beside the nodes, their triggers and indexes as TypeScript's Oracle DDL makes them (Python's trigger is the same text), their records saying no form."
+    store: "oracle"
+    listing: "indexes.FULLTEXT_INDEX"
+    rows:
+      - {"kind": "FULLTEXT_INDEX", "label": "Doc", "properties": ["title", "body"], "name": "Doc_title_body_fulltext", "details": {}, "status": null}
+      - {"object": "DRIVINE_T_DOCTITLEBODY_F4762232", "type": "TABLE", "table": null, "uniqueness": null, "indexType": null, "columns": null, "tableColumns": ["NID NUMBER", "DOC JSON"], "source": null}
+      - {"object": "DRIVINE_T_DOCTITLEBODY_F4762232_I", "type": "INDEX", "table": "DRIVINE_T_DOCTITLEBODY_F4762232", "uniqueness": "NONUNIQUE", "indexType": "DOMAIN", "columns": ["DOC"], "tableColumns": null, "source": null}
+      - {"object": "DRIVINE_T_DOCTITLEBODY_F4762232_T", "type": "TRIGGER", "table": "DRIVINE_NODE", "uniqueness": null, "indexType": null, "columns": null, "tableColumns": null, "source": ["TRIGGER drivine_t_Doctitlebody_f4762232_t AFTER INSERT OR UPDATE OF labels, props ON drivine_node FOR EACH ROW BEGIN IF JSON_EXISTS(:NEW.labels, '$?(@ == \"Doc\")') THEN MERGE INTO drivine_t_Doctitlebody_f4762232 s USING (SELECT :NEW.nid AS nid, JSON_OBJECT('title' VALUE JSON_VALUE(:NEW.props, '$.\"title\"' RETURNING CLOB), 'body' VALUE JSON_VALUE(:NEW.props, '$.\"body\"' RETURNING CLOB) ABSENT ON NULL RETURNING JSON) AS doc FROM dual) n ON (s.nid = n.nid) WHEN MATCHED THEN UPDATE SET s.doc = n.doc WHEN NOT MATCHED THEN INSERT (nid, doc) VALUES (n.nid, n.doc); ELSE DELETE FROM drivine_t_Doctitlebody_f4762232 WHERE nid = :NEW.nid; END IF; END;"]}
+    listed:
+      - {"kind": "FULLTEXT_INDEX", "label": "Doc", "properties": ["title", "body"], "name": "Doc_title_body_fulltext"}
+    items:
+      - {spec: {"kind": "FULLTEXT_INDEX", "label": "Doc", "properties": ["title", "body"]}, form: {"stale": "TS's or Python's Oracle form"}}
+  - name: "Oracle: a vector and a full-text index of drivine4j's form, their records saying none (vectors)"
+    description: "Made by drivine4j's managers."
+    store: "oracle"
+    listing: "indexes.VECTOR_INDEX"
+    rows:
+      - {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "name": "Chunk_embedding_vector", "details": {"dimensions": 384, "similarity": "COSINE"}, "status": null}
+      - {"object": "DRIVINE_V_CHUNKEMBEDDING_7E60BD64", "type": "TABLE", "table": null, "uniqueness": null, "indexType": null, "columns": null, "tableColumns": ["NID NUMBER", "EMBEDDING VECTOR"], "source": null}
+      - {"object": "DRIVINE_V_CHUNKEMBEDDING_7E60BD64_I", "type": "INDEX", "table": "DRIVINE_V_CHUNKEMBEDDING_7E60BD64", "uniqueness": "NONUNIQUE", "indexType": "VECTOR", "columns": ["EMBEDDING"], "tableColumns": null, "source": null}
+      - {"object": "DRIVINE_V_CHUNKEMBEDDING_7E60BD64_T", "type": "TRIGGER", "table": "DRIVINE_NODE", "uniqueness": null, "indexType": null, "columns": null, "tableColumns": null, "source": ["TRIGGER drivine_v_Chunkembedding_7e60bd64_t AFTER INSERT OR UPDATE OF labels, props ON drivine_node FOR EACH ROW\n", "BEGIN\n", "    IF INSTR(',' || LTRIM(RTRIM(JSON_SERIALIZE(:NEW.labels), ']'), '[') || ',\"', ',\"Chunk\",\"') > 0 AND JSON_EXISTS(:NEW.props, '$.embedding') THEN\n", "                BEGIN\n", "            MERGE INTO drivine_v_Chunkembedding_7e60bd64 s USING (SELECT :NEW.nid AS nid, TO_VECTOR(JSON_QUERY(:NEW.props, '$.embedding' RETURNING CLOB)) AS embedding FROM dual) n ON (s.nid = n.nid)\n", "WHEN MATCHED THEN UPDATE SET s.embedding = n.embedding\n", "WHEN NOT MATCHED THEN INSERT (nid, embedding) VALUES (n.nid, n.embedding);\n", "        EXCEPTION WHEN OTHERS THEN\n", "            -- Not a payload the column takes: the node is kept, and left out of the table, as the graph engines leave it out of the index.\n", "            DELETE FROM drivine_v_Chunkembedding_7e60bd64 WHERE nid = :NEW.nid;\n", "        END;\n", "    ELSE\n", "        DELETE FROM drivine_v_Chunkembedding_7e60bd64 WHERE nid = :NEW.nid;\n", "    END IF;\n", "END;"]}
+    listed:
+      - {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "name": "Chunk_embedding_vector", "dimensions": 384, "similarity": "COSINE"}
+    items:
+      - {spec: {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "options": {"dimensions": 384, "similarity": "COSINE"}}, form: {"unrecorded": "UPDATE drivine_schema SET details = JSON_MERGEPATCH(details, '{\"form\": 1}') WHERE kind = 'VECTOR_INDEX' AND label = 'Chunk' AND properties = '[\"embedding\"]'"}}
+  - name: "Oracle: a vector and a full-text index of drivine4j's form, their records saying none (full text)"
+    description: "Made by drivine4j's managers."
+    store: "oracle"
+    listing: "indexes.FULLTEXT_INDEX"
+    rows:
+      - {"kind": "FULLTEXT_INDEX", "label": "Doc", "properties": ["title", "body"], "name": "Doc_title_body_fulltext", "details": {}, "status": null}
+      - {"object": "DRIVINE_T_DOCTITLEBODY_F4762232", "type": "TABLE", "table": null, "uniqueness": null, "indexType": null, "columns": null, "tableColumns": ["NID NUMBER", "DOC JSON"], "source": null}
+      - {"object": "DRIVINE_T_DOCTITLEBODY_F4762232_I", "type": "INDEX", "table": "DRIVINE_T_DOCTITLEBODY_F4762232", "uniqueness": "NONUNIQUE", "indexType": "DOMAIN", "columns": ["DOC"], "tableColumns": null, "source": null}
+      - {"object": "DRIVINE_T_DOCTITLEBODY_F4762232_T", "type": "TRIGGER", "table": "DRIVINE_NODE", "uniqueness": null, "indexType": null, "columns": null, "tableColumns": null, "source": ["TRIGGER drivine_t_Doctitlebody_f4762232_t AFTER INSERT OR UPDATE OF labels, props ON drivine_node FOR EACH ROW\n", "BEGIN\n", "    IF INSTR(',' || LTRIM(RTRIM(JSON_SERIALIZE(:NEW.labels), ']'), '[') || ',\"', ',\"Doc\",\"') > 0 THEN\n", "        MERGE INTO drivine_t_Doctitlebody_f4762232 s USING (SELECT :NEW.nid AS nid, JSON_OBJECT('title' VALUE JSON_VALUE(:NEW.props, '$.title' RETURNING CLOB), 'body' VALUE JSON_VALUE(:NEW.props, '$.body' RETURNING CLOB) ABSENT ON NULL RETURNING JSON) AS doc FROM dual) n ON (s.nid = n.nid)\n", "WHEN MATCHED THEN UPDATE SET s.doc = n.doc\n", "WHEN NOT MATCHED THEN INSERT (nid, doc) VALUES (n.nid, n.doc);\n", "    ELSE\n", "        DELETE FROM drivine_t_Doctitlebody_f4762232 WHERE nid = :NEW.nid;\n", "    END IF;\n", "END;"]}
+    listed:
+      - {"kind": "FULLTEXT_INDEX", "label": "Doc", "properties": ["title", "body"], "name": "Doc_title_body_fulltext"}
+    items:
+      - {spec: {"kind": "FULLTEXT_INDEX", "label": "Doc", "properties": ["title", "body"]}, form: {"unrecorded": "UPDATE drivine_schema SET details = JSON_MERGEPATCH(details, '{\"form\": 1}') WHERE kind = 'FULLTEXT_INDEX' AND label = 'Doc' AND properties = '[\"title\",\"body\"]'"}}
+  - name: "Oracle: a vector and a full-text index whose records say form 0 (vectors)"
+    description: "Made by drivine4j's managers, their records then set to form 0."
+    store: "oracle"
+    listing: "indexes.VECTOR_INDEX"
+    rows:
+      - {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "name": "Chunk_embedding_vector", "details": {"dimensions": 384, "similarity": "COSINE", "form": 0}, "status": null}
+      - {"object": "DRIVINE_V_CHUNKEMBEDDING_7E60BD64", "type": "TABLE", "table": null, "uniqueness": null, "indexType": null, "columns": null, "tableColumns": ["NID NUMBER", "EMBEDDING VECTOR"], "source": null}
+      - {"object": "DRIVINE_V_CHUNKEMBEDDING_7E60BD64_I", "type": "INDEX", "table": "DRIVINE_V_CHUNKEMBEDDING_7E60BD64", "uniqueness": "NONUNIQUE", "indexType": "VECTOR", "columns": ["EMBEDDING"], "tableColumns": null, "source": null}
+      - {"object": "DRIVINE_V_CHUNKEMBEDDING_7E60BD64_T", "type": "TRIGGER", "table": "DRIVINE_NODE", "uniqueness": null, "indexType": null, "columns": null, "tableColumns": null, "source": ["TRIGGER drivine_v_Chunkembedding_7e60bd64_t AFTER INSERT OR UPDATE OF labels, props ON drivine_node FOR EACH ROW\n", "BEGIN\n", "    IF INSTR(',' || LTRIM(RTRIM(JSON_SERIALIZE(:NEW.labels), ']'), '[') || ',\"', ',\"Chunk\",\"') > 0 AND JSON_EXISTS(:NEW.props, '$.embedding') THEN\n", "                BEGIN\n", "            MERGE INTO drivine_v_Chunkembedding_7e60bd64 s USING (SELECT :NEW.nid AS nid, TO_VECTOR(JSON_QUERY(:NEW.props, '$.embedding' RETURNING CLOB)) AS embedding FROM dual) n ON (s.nid = n.nid)\n", "WHEN MATCHED THEN UPDATE SET s.embedding = n.embedding\n", "WHEN NOT MATCHED THEN INSERT (nid, embedding) VALUES (n.nid, n.embedding);\n", "        EXCEPTION WHEN OTHERS THEN\n", "            -- Not a payload the column takes: the node is kept, and left out of the table, as the graph engines leave it out of the index.\n", "            DELETE FROM drivine_v_Chunkembedding_7e60bd64 WHERE nid = :NEW.nid;\n", "        END;\n", "    ELSE\n", "        DELETE FROM drivine_v_Chunkembedding_7e60bd64 WHERE nid = :NEW.nid;\n", "    END IF;\n", "END;"]}
+    listed:
+      - {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "name": "Chunk_embedding_vector", "dimensions": 384, "similarity": "COSINE"}
+    items:
+      - {spec: {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "options": {"dimensions": 384, "similarity": "COSINE"}}, form: {"stale": "form 0"}}
+  - name: "Oracle: a vector and a full-text index whose records say form 0 (full text)"
+    description: "Made by drivine4j's managers, their records then set to form 0."
+    store: "oracle"
+    listing: "indexes.FULLTEXT_INDEX"
+    rows:
+      - {"kind": "FULLTEXT_INDEX", "label": "Doc", "properties": ["title", "body"], "name": "Doc_title_body_fulltext", "details": {"form": 0}, "status": null}
+      - {"object": "DRIVINE_T_DOCTITLEBODY_F4762232", "type": "TABLE", "table": null, "uniqueness": null, "indexType": null, "columns": null, "tableColumns": ["NID NUMBER", "DOC JSON"], "source": null}
+      - {"object": "DRIVINE_T_DOCTITLEBODY_F4762232_I", "type": "INDEX", "table": "DRIVINE_T_DOCTITLEBODY_F4762232", "uniqueness": "NONUNIQUE", "indexType": "DOMAIN", "columns": ["DOC"], "tableColumns": null, "source": null}
+      - {"object": "DRIVINE_T_DOCTITLEBODY_F4762232_T", "type": "TRIGGER", "table": "DRIVINE_NODE", "uniqueness": null, "indexType": null, "columns": null, "tableColumns": null, "source": ["TRIGGER drivine_t_Doctitlebody_f4762232_t AFTER INSERT OR UPDATE OF labels, props ON drivine_node FOR EACH ROW\n", "BEGIN\n", "    IF INSTR(',' || LTRIM(RTRIM(JSON_SERIALIZE(:NEW.labels), ']'), '[') || ',\"', ',\"Doc\",\"') > 0 THEN\n", "        MERGE INTO drivine_t_Doctitlebody_f4762232 s USING (SELECT :NEW.nid AS nid, JSON_OBJECT('title' VALUE JSON_VALUE(:NEW.props, '$.title' RETURNING CLOB), 'body' VALUE JSON_VALUE(:NEW.props, '$.body' RETURNING CLOB) ABSENT ON NULL RETURNING JSON) AS doc FROM dual) n ON (s.nid = n.nid)\n", "WHEN MATCHED THEN UPDATE SET s.doc = n.doc\n", "WHEN NOT MATCHED THEN INSERT (nid, doc) VALUES (n.nid, n.doc);\n", "    ELSE\n", "        DELETE FROM drivine_t_Doctitlebody_f4762232 WHERE nid = :NEW.nid;\n", "    END IF;\n", "END;"]}
+    listed:
+      - {"kind": "FULLTEXT_INDEX", "label": "Doc", "properties": ["title", "body"], "name": "Doc_title_body_fulltext"}
+    items:
+      - {spec: {"kind": "FULLTEXT_INDEX", "label": "Doc", "properties": ["title", "body"]}, form: {"stale": "form 0"}}
+  - name: "Oracle: tables of another shape under a vector and a full-text index's tables' names (vectors)"
+    description: "Tables Drivine didn't make, not recorded, under the names of the tables beside the nodes."
+    store: "oracle"
+    listing: "indexes.VECTOR_INDEX"
+    rows:
+      - {"object": "DRIVINE_V_CHUNKEMBEDDING_7E60BD64", "type": "TABLE", "table": null, "uniqueness": null, "indexType": null, "columns": null, "tableColumns": ["X NUMBER"], "source": null}
+    listed:
+    items:
+      - {spec: {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "options": {"dimensions": 384, "similarity": "COSINE"}}, form: {"mismatch": {"name": "DRIVINE_V_CHUNKEMBEDDING_7E60BD64", "reason": "a table without the VECTOR column EMBEDDING", "droppable": false}}}
+  - name: "Oracle: tables of another shape under a vector and a full-text index's tables' names (full text)"
+    description: "Tables Drivine didn't make, not recorded, under the names of the tables beside the nodes."
+    store: "oracle"
+    listing: "indexes.FULLTEXT_INDEX"
+    rows:
+      - {"object": "DRIVINE_T_DOCTITLEBODY_F4762232", "type": "TABLE", "table": null, "uniqueness": null, "indexType": null, "columns": null, "tableColumns": ["X NUMBER"], "source": null}
+    listed:
+    items:
+      - {spec: {"kind": "FULLTEXT_INDEX", "label": "Doc", "properties": ["title", "body"]}, form: {"mismatch": {"name": "DRIVINE_T_DOCTITLEBODY_F4762232", "reason": "a table without the JSON column DOC", "droppable": false}}}
+  - name: "Postgres: a vector and a full-text index whose records say no form (vectors)"
+    description: "Made by drivine4j's managers: current, as the libraries made them alike here."
+    store: "postgres"
+    listing: "indexes.VECTOR_INDEX"
+    rows:
+      - {"kind": "VECTOR_INDEX", "name": "Chunk_embedding_vector", "label": "Chunk", "details": {"dimensions": 384, "similarity": "COSINE"}, "properties": ["embedding"]}
+      - {"type": "i", "table": "drivine_node", "where": "labels @> '[\"Chunk\"]'::jsonb AND jsonb_typeof(props -> 'embedding'::text) = 'array'::text AND jsonb_array_length(props -> 'embedding'::text) = 384", "method": "hnsw", "object": "drivine_v_chunkembedding_7e60bd64", "unique": false, "columns": ["((((props -> 'embedding'::text)::text))::vector(384))"], "opclasses": ["vector_cosine_ops"]}
+    listed:
+      - {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "name": "Chunk_embedding_vector", "dimensions": 384, "similarity": "COSINE"}
+    items:
+      - {spec: {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "options": {"dimensions": 384, "similarity": "COSINE"}}, form: "current"}
+  - name: "Postgres: a vector and a full-text index whose records say no form (full text)"
+    description: "Made by drivine4j's managers: current, as the libraries made them alike here."
+    store: "postgres"
+    listing: "indexes.FULLTEXT_INDEX"
+    rows:
+      - {"kind": "FULLTEXT_INDEX", "name": "Doc_title_body_fulltext", "label": "Doc", "details": {}, "properties": ["title", "body"]}
+      - {"type": "i", "table": "drivine_node", "where": "labels @> '[\"Doc\"]'::jsonb", "method": "gin", "object": "drivine_t_doctitlebody_f4762232", "unique": false, "columns": ["lower((COALESCE(props ->> 'title'::text, ''::text) || ' '::text) || COALESCE(props ->> 'body'::text, ''::text))"], "opclasses": ["gin_trgm_ops"]}
+    listed:
+      - {"kind": "FULLTEXT_INDEX", "label": "Doc", "properties": ["title", "body"], "name": "Doc_title_body_fulltext"}
+    items:
+      - {spec: {"kind": "FULLTEXT_INDEX", "label": "Doc", "properties": ["title", "body"]}, form: "current"}
+  - name: "Postgres: a vector and a full-text index whose records say form 0 (vectors)"
+    description: "Made by drivine4j's managers, their records then set to form 0."
+    store: "postgres"
+    listing: "indexes.VECTOR_INDEX"
+    rows:
+      - {"kind": "VECTOR_INDEX", "name": "Chunk_embedding_vector", "label": "Chunk", "details": {"form": 0, "dimensions": 384, "similarity": "COSINE"}, "properties": ["embedding"]}
+      - {"type": "i", "table": "drivine_node", "where": "labels @> '[\"Chunk\"]'::jsonb AND jsonb_typeof(props -> 'embedding'::text) = 'array'::text AND jsonb_array_length(props -> 'embedding'::text) = 384", "method": "hnsw", "object": "drivine_v_chunkembedding_7e60bd64", "unique": false, "columns": ["((((props -> 'embedding'::text)::text))::vector(384))"], "opclasses": ["vector_cosine_ops"]}
+    listed:
+      - {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "name": "Chunk_embedding_vector", "dimensions": 384, "similarity": "COSINE"}
+    items:
+      - {spec: {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "options": {"dimensions": 384, "similarity": "COSINE"}}, form: {"stale": "form 0"}}
+  - name: "Postgres: a vector and a full-text index whose records say form 0 (full text)"
+    description: "Made by drivine4j's managers, their records then set to form 0."
+    store: "postgres"
+    listing: "indexes.FULLTEXT_INDEX"
+    rows:
+      - {"kind": "FULLTEXT_INDEX", "name": "Doc_title_body_fulltext", "label": "Doc", "details": {"form": 0}, "properties": ["title", "body"]}
+      - {"type": "i", "table": "drivine_node", "where": "labels @> '[\"Doc\"]'::jsonb", "method": "gin", "object": "drivine_t_doctitlebody_f4762232", "unique": false, "columns": ["lower((COALESCE(props ->> 'title'::text, ''::text) || ' '::text) || COALESCE(props ->> 'body'::text, ''::text))"], "opclasses": ["gin_trgm_ops"]}
+    listed:
+      - {"kind": "FULLTEXT_INDEX", "label": "Doc", "properties": ["title", "body"], "name": "Doc_title_body_fulltext"}
+    items:
+      - {spec: {"kind": "FULLTEXT_INDEX", "label": "Doc", "properties": ["title", "body"]}, form: {"stale": "form 0"}}
+  - name: "Postgres: indexes of another shape under a vector and a full-text index's names (vectors)"
+    description: "An HNSW index by Euclidean distance where one by cosine is declared, and a trigram index over one of the two properties, neither recorded."
+    store: "postgres"
+    listing: "indexes.VECTOR_INDEX"
+    rows:
+      - {"type": "i", "table": "drivine_node", "where": "labels @> '[\"Chunk\"]'::jsonb", "method": "hnsw", "object": "drivine_v_chunkembedding_7e60bd64", "unique": false, "columns": ["((((props -> 'embedding'::text)::text))::vector(384))"], "opclasses": ["vector_l2_ops"]}
+    listed:
+    items:
+      - {spec: {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "options": {"dimensions": 384, "similarity": "COSINE"}}, form: {"mismatch": {"name": "drivine_v_chunkembedding_7e60bd64", "reason": "an index with vector_l2_ops", "droppable": true}}}
+  - name: "Postgres: indexes of another shape under a vector and a full-text index's names (full text)"
+    description: "An HNSW index by Euclidean distance where one by cosine is declared, and a trigram index over one of the two properties, neither recorded."
+    store: "postgres"
+    listing: "indexes.FULLTEXT_INDEX"
+    rows:
+      - {"type": "i", "table": "drivine_node", "where": "labels @> '[\"Doc\"]'::jsonb", "method": "gin", "object": "drivine_t_doctitlebody_f4762232", "unique": false, "columns": ["lower(COALESCE(props ->> 'title'::text, ''::text))"], "opclasses": ["gin_trgm_ops"]}
+    listed:
+    items:
+      - {spec: {"kind": "FULLTEXT_INDEX", "label": "Doc", "properties": ["title", "body"]}, form: {"mismatch": {"name": "drivine_t_doctitlebody_f4762232", "reason": "an index over [title]", "droppable": true}}}
+  - name: "SQLite: a vector and a full-text index whose records say no form (vectors)"
+    description: "SQLite makes no object for either, only the record: current."
+    store: "sqlite"
+    listing: "indexes.VECTOR_INDEX"
+    rows:
+      - {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "name": "Chunk_embedding_vector", "details": {"dimensions": 384, "similarity": "COSINE"}}
+    listed:
+      - {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "name": "Chunk_embedding_vector", "dimensions": 384, "similarity": "COSINE"}
+    items:
+      - {spec: {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "options": {"dimensions": 384, "similarity": "COSINE"}}, form: "current"}
+  - name: "SQLite: a vector and a full-text index whose records say no form (full text)"
+    description: "SQLite makes no object for either, only the record: current."
+    store: "sqlite"
+    listing: "indexes.FULLTEXT_INDEX"
+    rows:
+      - {"kind": "FULLTEXT_INDEX", "label": "Doc", "properties": ["title", "body"], "name": "Doc_title_body_fulltext", "details": {}}
+    listed:
+      - {"kind": "FULLTEXT_INDEX", "label": "Doc", "properties": ["title", "body"], "name": "Doc_title_body_fulltext"}
+    items:
+      - {spec: {"kind": "FULLTEXT_INDEX", "label": "Doc", "properties": ["title", "body"]}, form: "current"}
+  - name: "SQLite: a vector and a full-text index whose records say form 0 (vectors)"
+    description: "Their records set to form 0."
+    store: "sqlite"
+    listing: "indexes.VECTOR_INDEX"
+    rows:
+      - {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "name": "Chunk_embedding_vector", "details": {"dimensions": 384, "similarity": "COSINE", "form": 0}}
+    listed:
+      - {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "name": "Chunk_embedding_vector", "dimensions": 384, "similarity": "COSINE"}
+    items:
+      - {spec: {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "options": {"dimensions": 384, "similarity": "COSINE"}}, form: {"stale": "form 0"}}
+  - name: "SQLite: a vector and a full-text index whose records say form 0 (full text)"
+    description: "Their records set to form 0."
+    store: "sqlite"
+    listing: "indexes.FULLTEXT_INDEX"
+    rows:
+      - {"kind": "FULLTEXT_INDEX", "label": "Doc", "properties": ["title", "body"], "name": "Doc_title_body_fulltext", "details": {"form": 0}}
+    listed:
+      - {"kind": "FULLTEXT_INDEX", "label": "Doc", "properties": ["title", "body"], "name": "Doc_title_body_fulltext"}
+    items:
+      - {spec: {"kind": "FULLTEXT_INDEX", "label": "Doc", "properties": ["title", "body"]}, form: {"stale": "form 0"}}
