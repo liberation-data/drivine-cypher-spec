@@ -64,7 +64,7 @@ abstract class SqlStoreSchema internal constructor() : StoreSchema {
      * ([madeAs]) must be the object it would make: one of its kind, on the node table, as unique as it, over the item's
      * properties in order, and of its label's nodes alone where it is; otherwise the item is a [ItemForm.Mismatch], whatever
      * its record says. Where the record says a later form, only the structure is compared ([mismatchOf]'s `structureOnly`),
-     * and nothing else under its names ([otherMismatch]). An object that isn't there is no mismatch: a record whose object is gone isn't listed, and one
+     * and of the side objects only a side table's index ([otherMismatch]'s `structureOnly`). An object that isn't there is no mismatch: a record whose object is gone isn't listed, and one
      * that lacks part is made whole ([isIncomplete]).
      *
      * Then its record's `details.form`: [SqlStoreDdl.CURRENT_FORM] is current, a later one [ItemForm.Newer], and an earlier
