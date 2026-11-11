@@ -157,7 +157,13 @@ class SqliteDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
 
     override fun dropConstraint(item: CatalogItem): List<DdlStatement> = forgotten(item)
 
-    /** What is recorded of [kinds], and still there: an index dropped by hand is not listed, so that it is made again when asked for. */
+    /**
+     * What is recorded of [kinds], and still there: an index dropped by hand is not listed, so that it is made again when
+     * asked for. After the records, where [objects] names any, a row for each object of `sqlite_master` under a name
+     * Drivine gives an object of [objects], recorded or not: its `type`, its `table`, the statement that made it (`sql`),
+     * and of an index whether it is `unique` (`pragma_index_list`), which `store.schema` reads to tell another item under
+     * the name ([org.drivine.cypher.store.schema.ItemForm]).
+     */
     private fun listed(kinds: String, objects: List<String>): String = if (objects.isEmpty()) """
         $JSON_ROWS
         SELECT json_object('kind', kind, 'label', label, 'properties', json(properties), 'name', name, 'details', json(details))

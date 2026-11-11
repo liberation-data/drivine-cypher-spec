@@ -482,6 +482,12 @@ ${made.entries.joinToString("\n") { (function, making) ->
      * hand is not listed, so that it is made again when asked for. A range index with neither its
      * labelled index nor a uniqueness constraint's to stand for it, dropped by hand or made before
      * there were any, is listed as it is, [INCOMPLETE], so that `ensure` makes the rest.
+     *
+     * After the records, where [objects] names any, a row for each of `user_objects` under a name Drivine gives an object
+     * of [objects], recorded or not: its `type`, and of an index its `table`, its `uniqueness`, and its `columns` in order,
+     * each the text Oracle keeps of the hidden column it made for an expression (`user_tab_cols.data_default_vc`, null
+     * where it keeps none), or a plain column's name, which `store.schema` reads to tell another item under the name and
+     * the form of the item's ([org.drivine.cypher.store.schema.ItemForm]).
      */
     private fun listed(kinds: String, objects: List<String>): String {
         val record = """
