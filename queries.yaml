@@ -3138,14 +3138,22 @@ cases:
         rows: [[3, ["a", "b"]], [1, ["b", "a", "d"]], [2, ["c"]]]
       - cypher: "MATCH (p:Person)-[:ACTED_IN]->(m) WITH p, m ORDER BY m.released WITH p, collect(m.title) AS ts RETURN p.name ORDER BY ts DESC"
         rows: ["Carrie", "Laurence", "Keanu"]
-      - note: "Null sorts last within a list, as it does among values. Oracle sorts it first (drivine4j#205)."
+      - note: "Null sorts last within a list, as it does among values, and first descending. Oracle's JSON sorts it first; Oracle sorts a list by a key of its own (drivine4j#205)."
         cypher: "UNWIND [[1, 2], [1, null], [1], [null], [0]] AS xs RETURN xs ORDER BY xs"
-        except: [oracle]
         rows: [[0], [1], [1, 2], [1, null], [null]]
-      - note: "Items of different kinds sort as Cypher orders kinds: a text before a number. Oracle sorts a number first (drivine4j#205)."
+      - cypher: "UNWIND [[1, 2], [1, null], [1], [null], [0]] AS xs RETURN xs ORDER BY xs DESC"
+        rows: [[null], [1, null], [1, 2], [1], [0]]
+      - note: "Items of different kinds sort as Cypher orders kinds: a text before a number."
         cypher: "UNWIND [[1, 'a'], [1, 2], ['a'], [1.5]] AS xs RETURN xs ORDER BY xs"
-        except: [oracle]
         rows: [["a"], [1, "a"], [1, 2], [1.5]]
+      - note: "A number that another begins, as 1 begins 1.04 in Oracle's NUMBER, comes first whatever follows it."
+        cypher: "UNWIND [[1.04], [1, 5], [1]] AS xs RETURN xs ORDER BY xs"
+        rows: [[1], [1, 5], [1.04]]
+      - note: "A list collected, and a list read from a map, whose kind the statement leaves open, sort so too."
+        cypher: "UNWIND [1, 2] AS g UNWIND (CASE g WHEN 1 THEN [5] ELSE ['a'] END) AS v WITH g, collect(v) AS c RETURN g ORDER BY c"
+        rows: [2, 1]
+      - cypher: "UNWIND [{l: [1, 'a']}, {l: ['a']}, {l: [1, null]}] AS m RETURN m.l ORDER BY m.l"
+        rows: [["a"], [1, "a"], [1, null]]
       - note: "A list of lists compares each inner list item by item too."
         cypher: "UNWIND [[[1, 2]], [[3]], [[1]], [[1], [0]]] AS xs RETURN xs ORDER BY xs"
         rows: [[[1]], [[1], [0]], [[1, 2]], [[3]]]
@@ -3156,13 +3164,11 @@ cases:
         rows: [[[[[3]], [[[2]]]], [[[1, 2]]], []]]
       - cypher: "UNWIND [[[1]], [[]], [[], 1], []] AS xs RETURN xs ORDER BY xs"
         rows: [[], [[]], [[], 1], [[1]]]
-      - note: "Within a list, a list sorts before a number, as Cypher orders kinds. Oracle sorts a number first (drivine4j#205)."
+      - note: "Within a list, a list sorts before a number, as Cypher orders kinds."
         cypher: "UNWIND [[[1]], [[[]]]] AS xs RETURN xs ORDER BY xs"
-        except: [oracle]
         rows: [[[[]]], [[1]]]
-      - note: "So does a list that holds null, and a shorter list before a longer one it begins. Oracle sorts a number before a list (drivine4j#205)."
+      - note: "So does a list that holds null, and a shorter list before a longer one it begins."
         cypher: "UNWIND [[1, 2], [[null]], [1, [2, null]], [1, [2]], [1, [1, 5]]] AS xs RETURN xs ORDER BY xs"
-        except: [oracle]
         rows: [[[null]], [1, [1, 5]], [1, [2]], [1, [2, null]], [1, 2]]
       - note: "A list worked out in the order term, by reverse(), tail(), a slice, +, range() or split(), sorts so too."
         cypher: "UNWIND [[1, 2], [3], [0, 5, 6]] AS xs RETURN xs ORDER BY reverse(xs)"
