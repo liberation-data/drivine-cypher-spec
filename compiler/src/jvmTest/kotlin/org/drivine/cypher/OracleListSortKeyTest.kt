@@ -79,6 +79,8 @@ class OracleListSortKeyTest {
         // A text is read from its list as itself, and one past a VARCHAR2 from its CLOB.
         assertTrue(sql.contains("a.get_String(i)") && sql.contains("EXCEPTION WHEN too_long OR VALUE_ERROR THEN") && sql.contains("a.get_Clob(i)") && sql.contains("SUBSTR(s, 1, 2000)"), sql)
         assertTrue(!sql.contains("to_String"), sql)
+        // A 0 and a 1 in a text are each written as two bytes, a 0's first, and neither as the byte 0 that ends a text.
+        assertTrue(sql.contains("REPLACE(REPLACE(SUBSTR(s, 1, 2000), CHR(1), CHR(1) || CHR(2)), CHR(0), CHR(1) || CHR(1))"), sql)
     }
 
     @Test

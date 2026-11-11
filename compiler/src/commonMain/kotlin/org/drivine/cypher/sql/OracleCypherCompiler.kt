@@ -2222,7 +2222,7 @@ class OracleCypherCompiler(
          * The function a query declares to sort a list as Cypher sorts lists (drivine4j#205): a key of bytes, compared
          * byte by byte, as `RAW` is ordered. Each item is where its kind comes ([kindOrder]'s ranks, null last), then the
          * item: a list its items' keys and a byte 0, so a list that another starts with comes first; a text its UTF-8 bytes,
-         * which are in its code points' order, and a byte 0 (a 0 in the text is read as 1); a truth value false before true;
+         * which are in its code points' order, and a byte 0 (a 0 in the text is written as the bytes 1 and 1, and a 1 as 1 and 2, so the two keep their order); a truth value false before true;
          * a number its `NUMBER` bytes, which Oracle keeps in the number's order, and a byte 0, below any of them, so `1` comes before `1.04` whatever follows it.
          * The list is read as extended JSON, so a double is one, not a map: -Infinity comes before any `NUMBER`, and a double
          * past one's range before or after them all, Infinity after that and NaN last, as Cypher orders them. A text is cut at
@@ -2258,7 +2258,7 @@ class OracleCypherCompiler(
             "        EXCEPTION WHEN too_long OR VALUE_ERROR THEN",
             "            s := DBMS_LOB.SUBSTR(a.get_Clob(i), 2000, 1);",
             "        END;",
-            "        add(UTL_RAW.CONCAT(HEXTORAW('03'), UTL_RAW.CAST_TO_RAW(REPLACE(SUBSTR(s, 1, 2000), CHR(0), CHR(1))), HEXTORAW('00')));",
+            "        add(UTL_RAW.CONCAT(HEXTORAW('03'), UTL_RAW.CAST_TO_RAW(REPLACE(REPLACE(SUBSTR(s, 1, 2000), CHR(1), CHR(1) || CHR(2)), CHR(0), CHR(1) || CHR(1))), HEXTORAW('00')));",
             "    END;",
             "    PROCEDURE k(v JSON_ELEMENT_T) IS",
             "        a JSON_ARRAY_T;",

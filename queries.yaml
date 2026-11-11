@@ -3162,6 +3162,10 @@ cases:
         cypher: "UNWIND [[$p], [$i], [3.0], [$n], ['a']] AS xs RETURN xs ORDER BY xs"
         parameters: {p: {$float: "NaN"}, i: {$float: "Infinity"}, n: {$float: "-Infinity"}}
         rows: [["a"], [{$float: "-Infinity"}], [3.0], [{$float: "Infinity"}], [{$float: "NaN"}]]
+      - note: "A text that holds U+0000 comes before one that holds U+0001, whatever follows, as Oracle's key writes each as two bytes. Postgres fails, as its JSON holds no U+0000."
+        only: [neo4j, oracle]
+        cypher: "UNWIND [['a\\u0001', 1], ['a\\u0000', 2], ['a', 3]] AS xs RETURN xs[1] ORDER BY xs"
+        rows: [3, 2, 1]
       - note: "A text too long for Oracle's VARCHAR2 sorts so too."
         cypher: "UNWIND [[$t, 2], ['a' + $t, 1], [1, 0]] AS xs RETURN xs[1] ORDER BY xs"
         parameters: {t: {$repeat: "x", times: 40000}}
