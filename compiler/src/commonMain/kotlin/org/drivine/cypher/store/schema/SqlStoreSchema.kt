@@ -72,17 +72,23 @@ abstract class SqlStoreSchema internal constructor() : StoreSchema {
      */
     override fun formOf(spec: SchemaItemSpec, rows: List<Any?>): ItemForm {
         val objects = StoreObject.read(rows)
+        val record = rows.filterIsInstance<Map<*, *>>().firstOrNull { row ->
+            OBJECT !in row && parseIndexRows(listOf(row)).singleOrNull()?.let { matchesIdentity(it, spec) } == true
+        }
+        val form = ((record?.get("details") as? Map<*, *>)?.get(SqlStoreDdl.FORM) as? Number)?.toLong()
+        // A newer version's item is made in a form this version may not read: the record is trusted so long as what stands
+        // under each name is of its structure, and its expressions aren't compared, so an older version in a rolling deploy
+        // never drops a newer one's index, nor reports it drift, for what it can't read.
+        val newer = form != null && form > SqlStoreDdl.CURRENT_FORM
         for (made in madeAs(spec)) {
             val there = objects[made.name] ?: continue
             // Where indexes are named apart from other objects, a name another object has is no index's.
             if (!there.isIndex && indexesNamedApart) continue
-            mismatchOf(made, there)?.let { return ItemForm.Mismatch(there.name, it, droppable = there.isIndex) }
+            mismatchOf(made, there, structureOnly = newer)?.let { return ItemForm.Mismatch(there.name, it, droppable = there.isIndex) }
         }
-        otherMismatch(spec, objects)?.let { return it }
-        val record = rows.filterIsInstance<Map<*, *>>().firstOrNull { row ->
-            OBJECT !in row && parseIndexRows(listOf(row)).singleOrNull()?.let { matchesIdentity(it, spec) } == true
-        } ?: return ItemForm.Current
-        return when (val form = ((record["details"] as? Map<*, *>)?.get(SqlStoreDdl.FORM) as? Number)?.toLong()) {
+        if (!newer) otherMismatch(spec, objects)?.let { return it }
+        if (record == null) return ItemForm.Current
+        return when (form) {
             SqlStoreDdl.CURRENT_FORM.toLong() -> ItemForm.Current
             null -> unrecordedForm(spec, record, objects)
             // A newer version's: what this version would make of it is older.
@@ -115,12 +121,17 @@ abstract class SqlStoreSchema internal constructor() : StoreSchema {
     /** The objects the store makes [spec]'s item as, under the names Drivine gives them, and what each holds. */
     protected abstract fun madeAs(spec: SchemaItemSpec): List<MadeObject>
 
-    /** What [made] would be, said of [there], what the store has under its name; null where it is that. */
-    private fun mismatchOf(made: MadeObject, there: StoreObject): String? {
+    /**
+     * What [made] would be, said of [there], what the store has under its name; null where it is that. With
+     * [structureOnly], only what the store says of it without its expressions being read: that it is an index, on the
+     * node table, as unique as [made], by its access method.
+     */
+    private fun mismatchOf(made: MadeObject, there: StoreObject, structureOnly: Boolean): String? {
         if (!there.isIndex) return "${there.types.joinToString(" and ") { article(it.lowercase()) }}, not an index"
         if (there.table != null && !there.table.equals(ddl.nodes, ignoreCase = true)) return "an index on ${there.table}"
         if (there.unique != null && there.unique != made.unique) return if (there.unique) "a unique index" else "an index that is not unique"
         if (made.method != null && there.method != null && !there.method.equals(made.method, ignoreCase = true)) return "an index by ${there.method}"
+        if (structureOnly) return null
         if (made.opclasses != null && there.opclasses.isNotEmpty() && there.opclasses != made.opclasses) return "an index with ${there.opclasses.joinToString(", ")}"
         val shape = shapeOf(there) ?: return null
         made.properties?.let { properties ->
