@@ -1761,3 +1761,27 @@ cases:
       - only: [neo4j, sql]
         cypher: "DROP CONSTRAINT cy_unique_n"
         rows: []
+
+  - name: "Unique over moments, found by a value worked out"
+    description: "A node under a uniqueness constraint over a moment is found by a moment the statement works out of values written and given, whole, its sort key worked out once for the statement: so a store's index over the property can answer it (#161)."
+    steps:
+      - only: [neo4j, sql]
+        cypher: "CREATE CONSTRAINT cy_unique_at IF NOT EXISTS FOR (n:CyUnique) REQUIRE n.at IS UNIQUE"
+        rows: []
+      - {only: [neo4j, sql], cypher: "CREATE (:CyUnique {id: 'a', at: datetime('2024-01-01T10:00:00+02:00')}), (:CyUnique {id: 'b', at: datetime('2024-01-01T08:00:00Z')})"}
+      - only: [neo4j, sql]
+        cypher: "MATCH (n:CyUnique {at: datetime('2024-01-01T09:00:00+02:00') + duration('PT1H')}) RETURN n.id"
+        rows: ["a"]
+      - only: [neo4j, sql]
+        cypher: "MATCH (n:CyUnique) WHERE n.at = datetime($t) + duration({hours: $h}) RETURN n.id"
+        parameters: {t: "2024-01-01T07:00:00Z", h: 1}
+        rows: ["b"]
+      - only: [neo4j, sql]
+        cypher: "MATCH (m:CyUnique {id: 'b'}), (n:CyUnique) WHERE n.at = m.at - duration('PT1H') + duration('PT1H') RETURN n.id"
+        rows: ["b"]
+      - only: [neo4j, sql]
+        cypher: "CREATE (:CyUnique {id: 'c', at: datetime('2024-01-01T07:00:00Z') + duration('PT1H')})"
+        error: true
+      - only: [neo4j, sql]
+        cypher: "DROP CONSTRAINT cy_unique_at"
+        rows: []

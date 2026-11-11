@@ -648,3 +648,89 @@ cases:
       - read: {store: "sqlite", nonFinite: false, column: '{"$t":"date","v":1}'}
         value: {"$t": "date", v: 1}
 
+
+  - name: "Random temporal values' sort keys"
+    description: "Forty values, eight of each kind with a key, drawn at random once (seed 1610) from every year Neo4j holds, every offset to ±18:00 and fractions to the nanosecond: each key as Temporals.key works it out of the canonical text alone, which a store's SQL gives the same (#161). temporal.yaml has them in Neo4j's order."
+    pairs:
+      temporal.yaml: ["Random temporal values in Neo4j's order"]
+    steps:
+      - key: {kind: "date", v: "2065-06-27"}
+        result: "10000020650627"
+      - key: {kind: "date", v: "+821765819-09-24"}
+        result: "18217658190924"
+      - key: {kind: "date", v: "-1806-10-13"}
+        result: "09999981941013"
+      - key: {kind: "date", v: "+839561317-09-05"}
+        result: "18395613170905"
+      - key: {kind: "date", v: "2044-03-01"}
+        result: "10000020440301"
+      - key: {kind: "date", v: "2077-03-08"}
+        result: "10000020770308"
+      - key: {kind: "date", v: "1966-02-20"}
+        result: "10000019660220"
+      - key: {kind: "date", v: "1989-05-18"}
+        result: "10000019890518"
+      - key: {kind: "localtime", v: "00:00:00.339676"}
+        result: "00000339676000"
+      - key: {kind: "localtime", v: "21:41:51.499241"}
+        result: "78111499241000"
+      - key: {kind: "localtime", v: "13:22:53.023888"}
+        result: "48173023888000"
+      - key: {kind: "localtime", v: "22:03:18.358120558"}
+        result: "79398358120558"
+      - key: {kind: "localtime", v: "20:00:22"}
+        result: "72022000000000"
+      - key: {kind: "localtime", v: "10:24:47.675661"}
+        result: "37487675661000"
+      - key: {kind: "localtime", v: "14:22:18.962937739"}
+        result: "51738962937739"
+      - key: {kind: "localtime", v: "10:30:31.687834683"}
+        result: "37831687834683"
+      - key: {kind: "time", v: "05:01:41-01:13"}
+        result: "087281000000000060420"
+      - key: {kind: "time", v: "21:56:37.317258+00:46"}
+        result: "141037317258000067560"
+      - key: {kind: "time", v: "02:00:12.756-15:51"}
+        result: "129072756000000007740"
+      - key: {kind: "time", v: "23:59:59.896-15:13"}
+        result: "205979896000000010020"
+      - key: {kind: "time", v: "11:44:02.351977-14:40"}
+        result: "159842351977000012000"
+      - key: {kind: "time", v: "00:00:00.636515+18:00"}
+        result: "000000636515000129600"
+      - key: {kind: "time", v: "01:54:18.783017Z"}
+        result: "071658783017000064800"
+      - key: {kind: "time", v: "00:00:00.156083-18:00"}
+        result: "129600156083000000000"
+      - key: {kind: "localdatetime", v: "2081-09-22T12:04:27.895794"}
+        result: "10000020810922120427895794000"
+      - key: {kind: "localdatetime", v: "2010-11-13T01:31:46.696"}
+        result: "10000020101113013146696000000"
+      - key: {kind: "localdatetime", v: "2075-10-19T08:03:20"}
+        result: "10000020751019080320000000000"
+      - key: {kind: "localdatetime", v: "-749579651-02-05T06:46:44.697560"}
+        result: "02504203490205064644697560000"
+      - key: {kind: "localdatetime", v: "1988-02-24T07:36:53.243"}
+        result: "10000019880224073653243000000"
+      - key: {kind: "localdatetime", v: "1933-11-08T00:00:00.476886"}
+        result: "10000019331108000000476886000"
+      - key: {kind: "localdatetime", v: "1938-09-11T00:00:00.222765348"}
+        result: "10000019380911000000222765348"
+      - key: {kind: "localdatetime", v: "2036-10-15T00:00:00.304"}
+        result: "10000020361015000000304000000"
+      - key: {kind: "datetime", v: "+308673642-03-14T12:55:21-18:00"}
+        result: "13086736420315065521000000000000000"
+      - key: {kind: "datetime", v: "1989-03-01T00:00:00.609289164+07:25"}
+        result: "10000019890228163500609289164091500"
+      - key: {kind: "datetime", v: "-8997-07-31T16:07:06.922963255+07:31"}
+        result: "09999910030731083606922963255091860"
+      - key: {kind: "datetime", v: "+980281921-01-15T17:43:39-18:00"}
+        result: "19802819210116114339000000000000000"
+      - key: {kind: "datetime", v: "1925-07-04T05:45:22.355634+05:27"}
+        result: "10000019250704001822355634000084420"
+      - key: {kind: "datetime", v: "2008-11-28T10:21:08+03:36"}
+        result: "10000020081128064508000000000077760"
+      - key: {kind: "datetime", v: "+948027483-03-02T14:49:43.418664-18:00"}
+        result: "19480274830303084943418664000000000"
+      - key: {kind: "datetime", v: "1932-02-22T04:38:45.447+07:36"}
+        result: "10000019320221210245447000000092160"

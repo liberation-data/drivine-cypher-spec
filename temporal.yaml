@@ -1305,3 +1305,96 @@ cases:
         only: [neo4j, sql]
         note: "Another moment: the same instant at UTC."
         rows: []
+
+  - name: "Values worked out beside values stored, compared whole"
+    description: "A temporal value the statement works out as it runs is whole wherever it leaves the expression it is made in (#161): under DISTINCT, IN, a grouping, UNION, a list's = and a collect() compared with a list stored, it is the value stored, its sort key and all; inside the expression, a sum of sums, a field and a comparison read it as it is made."
+    steps:
+      - cypher: "CREATE (:CyTemporal {id: 'a', d: date('2024-03-14'), next: date('2024-03-15'), list: [date('2024-03-15')], at: datetime('2024-01-01T10:00:00+02:00')}), (:CyTemporal {id: 'b', d: date('2024-03-15'), next: date('2024-03-16'), list: [date('2024-03-16')], at: datetime('2024-01-01T08:00:00Z')})"
+        only: [neo4j, sql]
+      - cypher: "MATCH (n:CyTemporal) UNWIND [n.next, n.d + duration('P1D')] AS x RETURN count(DISTINCT x)"
+        only: [neo4j, sql]
+        rows: [2]
+      - cypher: "MATCH (n:CyTemporal) RETURN [n.id, n.d + duration('P1D') IN [n.next], n.next IN [n.d + duration('P1D')], n.d + duration('P1D') IN n.list, n.d IN [n.next - duration('P1D')]] ORDER BY n.id"
+        only: [neo4j, sql]
+        rows: [["a", true, true, true, true], ["b", true, true, true, true]]
+      - cypher: "MATCH (n:CyTemporal) UNWIND [n.next, n.d + duration('P1D')] AS x RETURN toString(x), count(*) ORDER BY toString(x)"
+        only: [neo4j, sql]
+        rows: [["2024-03-15", 2], ["2024-03-16", 2]]
+      - cypher: "MATCH (n:CyTemporal) WITH n.id AS id, n.list AS l, [n.d + duration('P1D')] AS w, collect(n.d + duration('P1D')) AS c RETURN [id, w = l, c = l] ORDER BY id"
+        only: [neo4j, sql]
+        rows: [["a", true, true], ["b", true, true]]
+      - cypher: "CALL { MATCH (n:CyTemporal) RETURN n.next AS x UNION MATCH (n:CyTemporal) RETURN n.d + duration('P1D') AS x } RETURN count(x)"
+        only: [neo4j, sql]
+        rows: [2]
+      - note: "Zoned: at one instant and two offsets, a moment worked out is the one stored at its own offset only."
+        cypher: "MATCH (n:CyTemporal) RETURN count(DISTINCT n.at - duration('PT1H') + duration('PT1H'))"
+        only: [neo4j, sql]
+        rows: [2]
+      - cypher: "MATCH (n:CyTemporal) UNWIND [n.at, n.at + duration('PT0S')] AS x RETURN count(DISTINCT x)"
+        only: [neo4j, sql]
+        rows: [2]
+      - cypher: "MATCH (n:CyTemporal) RETURN [n.id, (n.d + duration('P1D') + duration('P1D')).day, n.d + duration('P1D') < n.next + duration('P1D'), n.at + duration('PT1H') > n.at] ORDER BY n.id"
+        only: [neo4j, sql]
+        rows: [["a", 16, true, true], ["b", 17, true, true]]
+      - cypher: "MATCH (n:CyTemporal) SET n.copy = n.d + duration('P1D') RETURN [n.id, n.copy = n.next, [n.copy] = n.list] ORDER BY n.id"
+        only: [neo4j, sql]
+        rows: [["a", true, true], ["b", true, true]]
+      - cypher: "MATCH (n:CyTemporal) WITH n.d + duration('P1D') AS x MATCH (m:CyTemporal {next: x}) RETURN m.id ORDER BY m.id"
+        only: [neo4j, sql]
+        rows: ["a", "b"]
+
+  - name: "Two sums of values stored, one worked out of the other"
+    description: "A value read from the store, a duration added in a CALL and again outside it, and a list a moment and then a duration are added to: Oracle without the store's functions planned each for minutes when every sum held its own sort key (#161). Each sum's key is worked out once, where the value leaves the expression."
+    steps:
+      - cypher: "CREATE (:CyTemporal {id: 'a', day: date('2024-03-15')})"
+        only: [neo4j, sql]
+      - cypher: "MATCH (n:CyTemporal) CALL { WITH n CALL { WITH n RETURN n.day + duration('P1D') AS e } RETURN e AS d } RETURN [(d + duration('P1D')).day, d + duration('P1D') > d]"
+        only: [neo4j, sql]
+        rows: [[17, true]]
+      - cypher: "WITH ['x'] AS list RETURN size((list + datetime('2024-03-15T10:00:00Z')) + duration('P1D'))"
+        only: [neo4j, sql]
+        rows: [3]
+
+  - name: "Random temporal values in Neo4j's order"
+    description: "The forty values host.yaml keys (Random temporal values' sort keys), stored: ordered by them, each kind's are in Neo4j's order, and each is found by its own value, written again (#161)."
+    steps:
+      - cypher: "CREATE (:CyTemporal {id: 'date0', at: date('2065-06-27')}), (:CyTemporal {id: 'date1', at: date('+821765819-09-24')}), (:CyTemporal {id: 'date2', at: date('-1806-10-13')}), (:CyTemporal {id: 'date3', at: date('+839561317-09-05')}), (:CyTemporal {id: 'date4', at: date('2044-03-01')}), (:CyTemporal {id: 'date5', at: date('2077-03-08')}), (:CyTemporal {id: 'date6', at: date('1966-02-20')}), (:CyTemporal {id: 'date7', at: date('1989-05-18')})"
+        only: [neo4j, sql]
+      - cypher: "CREATE (:CyTemporal {id: 'localtime0', at: localtime('00:00:00.339676000')}), (:CyTemporal {id: 'localtime1', at: localtime('21:41:51.499241000')}), (:CyTemporal {id: 'localtime2', at: localtime('13:22:53.023888000')}), (:CyTemporal {id: 'localtime3', at: localtime('22:03:18.358120558')}), (:CyTemporal {id: 'localtime4', at: localtime('20:00:22')}), (:CyTemporal {id: 'localtime5', at: localtime('10:24:47.675661000')}), (:CyTemporal {id: 'localtime6', at: localtime('14:22:18.962937739')}), (:CyTemporal {id: 'localtime7', at: localtime('10:30:31.687834683')})"
+        only: [neo4j, sql]
+      - cypher: "CREATE (:CyTemporal {id: 'time0', at: time('05:01:41-01:13')}), (:CyTemporal {id: 'time1', at: time('21:56:37.317258000+00:46')}), (:CyTemporal {id: 'time2', at: time('02:00:12.756000000-15:51')}), (:CyTemporal {id: 'time3', at: time('23:59:59.896000000-15:13')}), (:CyTemporal {id: 'time4', at: time('11:44:02.351977000-14:40')}), (:CyTemporal {id: 'time5', at: time('00:00:00.636515000+18:00')}), (:CyTemporal {id: 'time6', at: time('01:54:18.783017000Z')}), (:CyTemporal {id: 'time7', at: time('00:00:00.156083000-18:00')})"
+        only: [neo4j, sql]
+      - cypher: "CREATE (:CyTemporal {id: 'localdatetime0', at: localdatetime('2081-09-22T12:04:27.895794000')}), (:CyTemporal {id: 'localdatetime1', at: localdatetime('2010-11-13T01:31:46.696000000')}), (:CyTemporal {id: 'localdatetime2', at: localdatetime('2075-10-19T08:03:20')}), (:CyTemporal {id: 'localdatetime3', at: localdatetime('-749579651-02-05T06:46:44.697560000')}), (:CyTemporal {id: 'localdatetime4', at: localdatetime('1988-02-24T07:36:53.243000000')}), (:CyTemporal {id: 'localdatetime5', at: localdatetime('1933-11-08T00:00:00.476886000')}), (:CyTemporal {id: 'localdatetime6', at: localdatetime('1938-09-11T00:00:00.222765348')}), (:CyTemporal {id: 'localdatetime7', at: localdatetime('2036-10-15T00:00:00.304000000')})"
+        only: [neo4j, sql]
+      - cypher: "CREATE (:CyTemporal {id: 'datetime0', at: datetime('+308673642-03-14T12:55:21-18:00')}), (:CyTemporal {id: 'datetime1', at: datetime('1989-03-01T00:00:00.609289164+07:25')}), (:CyTemporal {id: 'datetime2', at: datetime('-8997-07-31T16:07:06.922963255+07:31')}), (:CyTemporal {id: 'datetime3', at: datetime('+980281921-01-15T17:43:39-18:00')}), (:CyTemporal {id: 'datetime4', at: datetime('1925-07-04T05:45:22.355634000+05:27')}), (:CyTemporal {id: 'datetime5', at: datetime('2008-11-28T10:21:08+03:36')}), (:CyTemporal {id: 'datetime6', at: datetime('+948027483-03-02T14:49:43.418664000-18:00')}), (:CyTemporal {id: 'datetime7', at: datetime('1932-02-22T04:38:45.447000000+07:36')})"
+        only: [neo4j, sql]
+      - cypher: "MATCH (n:CyTemporal) WHERE n.id =~ 'date[0-9]' RETURN n.id ORDER BY n.at"
+        only: [neo4j, sql]
+        rows: ["date2", "date6", "date7", "date4", "date0", "date5", "date1", "date3"]
+      - cypher: "MATCH (n:CyTemporal) WHERE n.id =~ 'localtime[0-9]' RETURN n.id ORDER BY n.at"
+        only: [neo4j, sql]
+        rows: ["localtime0", "localtime5", "localtime7", "localtime2", "localtime6", "localtime4", "localtime1", "localtime3"]
+      - cypher: "MATCH (n:CyTemporal) WHERE n.id =~ 'time[0-9]' RETURN n.id ORDER BY n.at"
+        only: [neo4j, sql]
+        rows: ["time5", "time6", "time0", "time2", "time7", "time1", "time4", "time3"]
+      - cypher: "MATCH (n:CyTemporal) WHERE n.id =~ 'localdatetime[0-9]' RETURN n.id ORDER BY n.at"
+        only: [neo4j, sql]
+        rows: ["localdatetime3", "localdatetime5", "localdatetime6", "localdatetime4", "localdatetime1", "localdatetime7", "localdatetime2", "localdatetime0"]
+      - cypher: "MATCH (n:CyTemporal) WHERE n.id =~ 'datetime[0-9]' RETURN n.id ORDER BY n.at"
+        only: [neo4j, sql]
+        rows: ["datetime2", "datetime4", "datetime7", "datetime1", "datetime5", "datetime0", "datetime6", "datetime3"]
+      - cypher: "MATCH (n:CyTemporal) WHERE n.at IN [date('2065-06-27'), date('+821765819-09-24'), date('-1806-10-13'), date('+839561317-09-05'), date('2044-03-01'), date('2077-03-08'), date('1966-02-20'), date('1989-05-18')] RETURN count(n)"
+        only: [neo4j, sql]
+        rows: [8]
+      - cypher: "MATCH (n:CyTemporal) WHERE n.at IN [localtime('00:00:00.339676000'), localtime('21:41:51.499241000'), localtime('13:22:53.023888000'), localtime('22:03:18.358120558'), localtime('20:00:22'), localtime('10:24:47.675661000'), localtime('14:22:18.962937739'), localtime('10:30:31.687834683')] RETURN count(n)"
+        only: [neo4j, sql]
+        rows: [8]
+      - cypher: "MATCH (n:CyTemporal) WHERE n.at IN [time('05:01:41-01:13'), time('21:56:37.317258000+00:46'), time('02:00:12.756000000-15:51'), time('23:59:59.896000000-15:13'), time('11:44:02.351977000-14:40'), time('00:00:00.636515000+18:00'), time('01:54:18.783017000Z'), time('00:00:00.156083000-18:00')] RETURN count(n)"
+        only: [neo4j, sql]
+        rows: [8]
+      - cypher: "MATCH (n:CyTemporal) WHERE n.at IN [localdatetime('2081-09-22T12:04:27.895794000'), localdatetime('2010-11-13T01:31:46.696000000'), localdatetime('2075-10-19T08:03:20'), localdatetime('-749579651-02-05T06:46:44.697560000'), localdatetime('1988-02-24T07:36:53.243000000'), localdatetime('1933-11-08T00:00:00.476886000'), localdatetime('1938-09-11T00:00:00.222765348'), localdatetime('2036-10-15T00:00:00.304000000')] RETURN count(n)"
+        only: [neo4j, sql]
+        rows: [8]
+      - cypher: "MATCH (n:CyTemporal) WHERE n.at IN [datetime('+308673642-03-14T12:55:21-18:00'), datetime('1989-03-01T00:00:00.609289164+07:25'), datetime('-8997-07-31T16:07:06.922963255+07:31'), datetime('+980281921-01-15T17:43:39-18:00'), datetime('1925-07-04T05:45:22.355634000+05:27'), datetime('2008-11-28T10:21:08+03:36'), datetime('+948027483-03-02T14:49:43.418664000-18:00'), datetime('1932-02-22T04:38:45.447000000+07:36')] RETURN count(n)"
+        only: [neo4j, sql]
+        rows: [8]
