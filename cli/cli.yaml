@@ -624,8 +624,8 @@ cases:
     stdout: "{\"columns\":[\"m\",\"t\"],\"rows\":[[{\"k\":\"é😀\"},\"é😀\\n\"]]}\n"
     exit: 0
 
-  - name: "json writes a node and a relationship as objects, with no store's ids"
-    args: ["--format", "json", "CREATE (n:P:Q {name: 'x'})-[r:K {w: 1}]->(m:Q) RETURN n, r, m"]
+  - name: "json writes a node, its labels sorted, and a relationship as objects, with no store's ids"
+    args: ["--format", "json", "CREATE (n:Q:P {name: 'x'})-[r:K {w: 1}]->(m:Q) RETURN n, r, m"]
     stdout: "{\"columns\":[\"n\",\"r\",\"m\"],\"rows\":[[{\"labels\":[\"P\",\"Q\"],\"properties\":{\"name\":\"x\"}},{\"type\":\"K\",\"properties\":{\"w\":1}},{\"labels\":[\"Q\"],\"properties\":{}}]]}\n"
     exit: 0
 
