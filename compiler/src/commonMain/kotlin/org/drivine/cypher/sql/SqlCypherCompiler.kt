@@ -489,13 +489,15 @@ abstract class SqlCypherCompiler(
      * the texts, as [texts] reads them. A store whose empty text reads as null, so [body] gives null where it makes an empty
      * text, gives [empty] there instead, where each text is one and each count is not null: where [whereFirstEmpty], only where
      * the first text is empty. [counts] reads them as [countOf] does beside the first text's length, which is not null there,
-     * so a count out of range still fails. See Oracle's (#416).
+     * so a count out of range still fails. Where [guarded], a store whose [body] may give a text where one of the texts is
+     * null, as Oracle's `REPLACE` does, gives null there. See Oracle's (#416).
      */
     protected open fun madeText(
         vararg jsons: String,
         counts: (String) -> List<String> = { emptyList() },
         empty: Any = "",
         whereFirstEmpty: Boolean = false,
+        guarded: Boolean = false,
         body: (List<String>) -> String,
     ): String = texts(*jsons, body = body)
 
@@ -5827,7 +5829,7 @@ abstract class SqlCypherCompiler(
                     if (arguments.size != 3) throw CompilerException("replace() takes a text, what to replace, and what with.")
                     // How long what to replace, and what with, are, in bytes, where the statement gives them.
                     val (searchBytes, replacementBytes) = function.arguments.drop(1).map { (given(it) as? String)?.let(org.drivine.cypher.text.JavaText::utf8)?.size }
-                    Value.Json(madeText(*arguments.map { comparable(json(it)) }.toTypedArray()) { (text, search, replacement) ->
+                    Value.Json(madeText(*arguments.map { comparable(json(it)) }.toTypedArray(), guarded = true) { (text, search, replacement) ->
                         scalar(replaceText(text, search, replacement, searchBytes, replacementBytes))
                     }, text = true)
                 }

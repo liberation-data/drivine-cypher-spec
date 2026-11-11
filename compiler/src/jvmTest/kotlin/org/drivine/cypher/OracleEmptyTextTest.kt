@@ -99,11 +99,21 @@ class OracleEmptyTextTest {
             "RETURN toString(\$e)" to "CASE WHEN JSON_VALUE(JSON(\$_cy_e), '\$.type()') = 'string' THEN JSON('\"\"') END",
         )) {
             val sql = sql(cypher)
-            // The fallback is the COALESCE's last value, inside the guard that each text is one: toString(), of one value of
-            // any kind, has no guard.
-            val end = if (cypher.startsWith("RETURN toString")) ") AS c1" else ") END AS c1"
+            // The fallback is the COALESCE's last value; replace()'s inside the guard that each text is one.
+            val end = if (cypher.startsWith("RETURN replace")) ") END AS c1" else ") AS c1"
             assertTrue(sql.contains(", $last$end"), "$cypher: $sql")
         }
+    }
+
+    @Test
+    fun `only replace() reads its texts' lengths before its text, as Oracle's REPLACE alone makes a text of a null one`() {
+        for (cypher in listOf("RETURN toUpper(\$e)", "RETURN trim(\$e)", "RETURN left(\$e, \$n)", "RETURN substring(\$e, \$n)", "RETURN reverse(\$e)", "RETURN split(\$e, \$t)")) {
+            val sql = sql(cypher)
+            assertTrue(!sql.contains("IS NOT NULL THEN COALESCE("), "$cypher: $sql")
+        }
+        val e = length("JSON(\$_cy_e)")
+        val t = length("JSON(\$_cy_t)")
+        assertTrue(sql("RETURN replace(\$e, \$t, \$e)").contains("CASE WHEN $e IS NOT NULL AND $t IS NOT NULL AND $e IS NOT NULL THEN COALESCE("))
     }
 
     @Test

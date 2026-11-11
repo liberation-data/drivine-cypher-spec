@@ -300,15 +300,16 @@ class OracleCypherCompiler(
      * Oracle's empty text is null as a `VARCHAR2` and as a CLOB, so a function that makes an empty text, as `toUpper('')`
      * and `left('ab', 0)` do, gives null there: where each text is one, its length not null, and each count not null, it gives
      * [empty] instead (#416). A text whose function gives null for another reason, as `substring('ab', 1, null)`, is still null,
-     * and a count out of range, as in `left('', -1)`, still fails. A null text makes null, though Oracle's `REPLACE` with a null
-     * replacement takes it as the empty text and removes what it replaces.
+     * and a count out of range, as in `left('', -1)`, still fails. Where [guarded], a null text makes null, though Oracle's
+     * `REPLACE` with a null replacement takes it as the empty text and removes what it replaces: the texts' lengths are then
+     * read first, on every row, where the other functions read them only where both reads give null.
      */
-    override fun madeText(vararg jsons: String, counts: (String) -> List<String>, empty: Any, whereFirstEmpty: Boolean, body: (List<String>) -> String) =
+    override fun madeText(vararg jsons: String, counts: (String) -> List<String>, empty: Any, whereFirstEmpty: Boolean, guarded: Boolean, body: (List<String>) -> String) =
         texts(*jsons, lengths = { lengths ->
             val given = (if (whereFirstEmpty) listOf("${lengths.first()} = 0") else emptyList()) +
                 lengths.map { "$it IS NOT NULL" } + counts(lengths.first()).map { "$it IS NOT NULL" }
             "CASE WHEN ${given.joinToString(" AND ")} THEN ${literalJson(empty)} END"
-        }, guarded = true, body = body)
+        }, guarded = guarded, body = body)
 
     /** Whether [json] is a property as [propertyOf] reads it, short beside a long value: see [texts] and [sharedSum]. */
     private fun besideLong(json: String) = json.length <= SHARED_ABOVE && propertyRead(json) != null
