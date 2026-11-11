@@ -1955,7 +1955,8 @@ abstract class SqlCypherCompiler(
             }
             // A value that is no list is one row, and null no rows, as in Cypher. A list written with items in flight is unwound so.
             val inflight = (list as? Value.Json)?.inflightItems
-            val items = shared(inflight ?: comparable(json(list))) { (x) ->
+            // As the store compares it, as the list is: Postgres's jsonb of its json, SQLite's canonical text of it.
+            val items = shared(inflight?.let { comparable(json(list).copy(sql = it, inflight = null, inflightItems = null)) } ?: comparable(json(list))) { (x) ->
                 "CASE WHEN ${typeOf(x)} = 'array' THEN $x WHEN NOT ${isJsonNull(x)} THEN ${comparable(Value.Json(jsonArray(listOf(x)), ordered = true))} END"
             }
             select.source(elementsOf(list, items, name))
