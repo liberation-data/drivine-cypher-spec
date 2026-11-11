@@ -2952,10 +2952,7 @@ abstract class SqlCypherCompiler(
             }
             rowOrder = orderOf(select)
             val compiled = items.map { item -> item.name to aggregating(item.expression) { item(item.expression, select) } }
-            // One that is DISTINCT and orders by an aggregate groups by its items, so the aggregate is worked out over each row's group, as
-            // Neo4j works it out; not grouped, the query aggregated all its rows into one (drivine4j#439).
-            val aggregating = items.any { contains(it.expression, ::isAggregate) } ||
-                projection.distinct && projection.orderBy.any { contains(it.expression, ::isAggregate) }
+            val aggregating = groupsRows(projection, items)
             // Where rows are compared (DISTINCT, GROUP BY), each item is compared as [compared] has it.
             val compared = projection.distinct || aggregating
             val columns = compiled.mapIndexed { i, (_, value) -> "c${i + 1}" to (if (compared) compared(value) else value) }
@@ -3424,14 +3421,22 @@ abstract class SqlCypherCompiler(
         }
 
         /**
-         * Where a projection that aggregates would group by an item whose SQL holds a subquery, which Oracle
+         * Whether a projection of [items] groups its rows, by the items that don't aggregate: where an item aggregates, or where it
+         * is DISTINCT and orders by an aggregate, so the aggregate is worked out over each row's group, as Neo4j works it out; not
+         * grouped, the query aggregated all its rows into one (drivine4j#439).
+         */
+        private fun groupsRows(projection: Projection, items: List<Projection.Item>) = items.any { contains(it.expression, ::isAggregate) } ||
+            projection.distinct && projection.orderBy.any { contains(it.expression, ::isAggregate) }
+
+        /**
+         * Where a projection that groups ([groupsRows]) would group by an item whose SQL holds a subquery, which Oracle
          * groups by no subquery, or a parameter, each mention of which the driver binds as a marker of its own,
          * so the item in the select list is not the one grouped by, the rows [select] reads with each such item
          * worked out first, in a `WITH *` of its own, and the projection with those items read from there, as
          * variables a group is keyed by; null where there is none.
          */
         private fun heldFirst(select: Select, projection: Projection, items: List<Projection.Item>): Pair<Select, Projection>? {
-            if (items.none { contains(it.expression, ::isAggregate) }) return null
+            if (!groupsRows(projection, items)) return null
             val held = items.filter { item ->
                 !contains(item.expression, ::isAggregate) && (
                     contains(item.expression) { it is Expression.Parameter } ||

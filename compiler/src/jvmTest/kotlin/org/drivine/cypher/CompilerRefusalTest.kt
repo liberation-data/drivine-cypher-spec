@@ -596,6 +596,15 @@ class CompilerRefusalTest {
             ).forEach { cypher ->
                 assertTrue("GROUP BY" in compiler.compile(cypher).sql, "${compiler::class.simpleName}: $cypher")
             }
+            // An item holding a parameter or a subquery is worked out first, as where an item aggregates: no store groups by a
+            // parameter it binds once for each mention, nor Oracle by a subquery.
+            listOf(
+                "MATCH (n) RETURN DISTINCT n.num1 + \$p AS a ORDER BY max(n.num2)",
+                "MATCH (n) RETURN DISTINCT COUNT { (n)--() } AS a ORDER BY max(n.num2)",
+            ).forEach { cypher ->
+                val groupBy = compiler.compile(cypher, mapOf("p" to 1L)).sql.substringAfter("GROUP BY ").lineSequence().first()
+                assertTrue("\$_cy_p" !in groupBy && "SELECT" !in groupBy, "${compiler::class.simpleName}: $cypher groups by $groupBy")
+            }
             // So it names no variable outside its aggregates and the items, as one that aggregates names none: grouped by n, the
             // DISTINCT gave a row for each n.num2 beside the same a.
             val outside = "MATCH (n) RETURN DISTINCT n.num1 AS a ORDER BY n.num2 + max(n.num2)"
