@@ -919,6 +919,9 @@ internal class SchemaProgram(
     /** `ConstraintManager.drop`, a constraint whose build failed too. */
     private fun dropConstraint(spec: ConstraintSpec): Boolean {
         val existing = findConstraint(spec) ?: return dropCutOff(spec)
+        // On a SQL store, what a recreate left under the name it builds under first goes too: it would go on refusing keys
+        // for a constraint no one declares.
+        (store.ddl as? SqlStoreDdl)?.let { sql -> ddl(sql.recreation(spec.made()).leftover) }
         ddl(store.ddl.dropConstraint(existing.catalogItem))
         log(LogLevel.INFO, CONSTRAINT_MANAGER, "Dropped $engine ${spec.kind} on ${spec.label}${spec.properties}")
         return true
@@ -1012,7 +1015,13 @@ internal class SchemaProgram(
         }
 
         // A recreate cut off after the old index was dropped left only the one built first: put in its place, not dropped.
-        if (finishCutOff(made, recreation, rows)) return remake(made, recreation, found, violationSampleSize)
+        // The record's own index, where the record lists the properties in another order: one standing means the recreate was
+        // cut off before its swap, and the one built first is a leftover beside it, not the constraint's index.
+        val recorded = reordered?.let { ddl.recreation(UniquenessConstraintSpec(made.label, it.properties)).name }
+        if (finishCutOff(made, recreation, rows, recorded)) {
+            if (reordered != null) dropReordered(ddl, made, reordered)
+            return remake(made, recreation, found, violationSampleSize, aliases)
+        }
 
         ddl(recreation.leftover)
         // The copies are filled in again too, where a write that bypassed Drivine left one out of step. One the old index
@@ -1052,15 +1061,18 @@ internal class SchemaProgram(
         ddl(recreation.swap)
         replaced?.let { log(LogLevel.INFO, CONSTRAINT_MANAGER, droppedMismatch(made, it)) }
         unrecorded.filter { inPlace(it.name) }.forEach { log(LogLevel.INFO, CONSTRAINT_MANAGER, droppedUnrecorded(made, it, kept)) }
-        if (reordered != null) {
-            ddl(ddl.dropConstraint(reordered.catalogItem))
-            log(
-                LogLevel.INFO, CONSTRAINT_MANAGER,
-                "Dropped $engine ${made.kind} on ${made.label}${reordered.properties}, recorded over its properties in another order than declared, " +
-                    "and forgot its record: it is made again over ${made.label}${made.properties}",
-            )
-        }
+        if (reordered != null) dropReordered(ddl, made, reordered)
         return remake(made, recreation, found, violationSampleSize, aliases)
+    }
+
+    /** Drops the index of [reordered], the record of [spec] over its properties in another order, by the record, and forgets it, once [spec]'s is in place. */
+    private fun dropReordered(ddl: SqlStoreDdl, spec: ConstraintSpec, reordered: SchemaItemInfo) {
+        ddl(ddl.dropConstraint(reordered.catalogItem))
+        log(
+            LogLevel.INFO, CONSTRAINT_MANAGER,
+            "Dropped $engine ${spec.kind} on ${spec.label}${reordered.properties}, recorded over its properties in another order than declared, " +
+                "and forgot its record: it is made again over ${spec.label}${spec.properties}",
+        )
     }
 
     /** What [form], or [replaced] where it is one, says the index under the constraint's name was, for the line that says it was dropped. */
@@ -1077,9 +1089,9 @@ internal class SchemaProgram(
      * standing, of the constraint's shape ([SqlStoreSchema.cutOff]): it is put in its place ([UniqueRecreation.finish]),
      * said at `INFO`, and true is given; false where they don't.
      */
-    private fun finishCutOff(spec: ConstraintSpec, recreation: UniqueRecreation, rows: List<Any?>): Boolean {
+    private fun finishCutOff(spec: ConstraintSpec, recreation: UniqueRecreation, rows: List<Any?>, recorded: String? = null): Boolean {
         val schema = store as? SqlStoreSchema ?: return false
-        if (!schema.cutOff(spec, rows, recreation.name, recreation.temporary)) return false
+        if (!schema.cutOff(spec, rows, recreation.name, recreation.temporary, recorded)) return false
         ddl(recreation.finish)
         log(
             LogLevel.INFO, CONSTRAINT_MANAGER,

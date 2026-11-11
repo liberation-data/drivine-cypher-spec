@@ -117,11 +117,14 @@ abstract class SqlStoreSchema internal constructor() : StoreSchema {
     /**
      * Whether [rows] show a recreate of the uniqueness constraint [spec] cut off after its old index was dropped
      * ([org.drivine.cypher.store.ddl.UniqueRecreation.finish]): no index under [name], and under [temporary] a unique index
-     * of the constraint's shape, as [name]'s would be.
+     * of the constraint's shape, as [name]'s would be; and no index under [recorded], the name the record found names its
+     * own index by where it lists the properties in another order than [spec] (whose index then still stands, the
+     * recreate cut off before its swap).
      */
-    fun cutOff(spec: SchemaItemSpec, rows: List<Any?>, name: String, temporary: String): Boolean {
+    fun cutOff(spec: SchemaItemSpec, rows: List<Any?>, name: String, temporary: String, recorded: String? = null): Boolean {
         val objects = StoreObject.read(rows)
         objects[name]?.let { standing -> if (standing.isIndex || !indexesNamedApart) return false }
+        if (recorded != null && objects[recorded]?.isIndex == true) return false
         val there = objects[temporary]?.takeIf { it.isIndex && it.unique == true } ?: return false
         val made = madeAs(spec).firstOrNull { it.name.equals(name, ignoreCase = true) } ?: return false
         return mismatchOf(made.copy(name = temporary), there, structureOnly = false) == null
