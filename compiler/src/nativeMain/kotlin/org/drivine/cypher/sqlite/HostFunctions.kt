@@ -47,9 +47,8 @@ import org.drivine.sqlite.ext.sqlite3_api_routines
 
 /*
  * The registration of host functions (org.drivine.cypher.host), which every host function of the extension goes through:
- * its arity and flags, a
- * callback that no Throwable escapes, and its arguments and result read and written through the loading SQLite's
- * routines. An exception escaping a staticCFunction into SQLite terminates the host process, so each call catches every
+ * its arity and flags, a callback that no Throwable escapes, and its arguments and result read and written through the
+ * loading SQLite's routines. An exception escaping a staticCFunction into SQLite terminates the host process, so each call catches every
  * Throwable and fails the statement with its message instead.
  */
 
@@ -76,10 +75,9 @@ internal object Sqlite {
     val api: sqlite3_api_routines get() = bound.value!!
 }
 
-
 /**
  * A call's arguments, read in place through SQLite's routines: valid only within the call. Each text or blob read gives
- * a copy (the only allocation a read makes); the numeric reads allocate nothing.
+ * a copy; the numeric reads allocate nothing. Passed to a body as [HostArgs], it is boxed, once a call, as [SqlResult] is.
  */
 internal value class SqlArgs(private val argv: CPointer<CPointerVar<sqlite3_value>>?) : HostArgs {
     private fun value(i: Int): CPointer<sqlite3_value>? = argv!![i]

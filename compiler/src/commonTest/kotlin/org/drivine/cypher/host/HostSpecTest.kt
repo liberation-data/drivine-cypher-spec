@@ -3,6 +3,7 @@ package org.drivine.cypher.host
 import org.drivine.cypher.json.CypherJson
 import org.drivine.cypher.json.JsonNode
 import org.drivine.cypher.json.ObjectNode
+import org.drivine.cypher.json.parseDouble
 import org.drivine.cypher.number.oracleFile
 import org.drivine.cypher.number.target
 import kotlin.test.Test
@@ -80,6 +81,21 @@ class HostSpecTest {
         assertContains(assertFails { check(arity, "arity") }.message!!, "takes 1 argument")
         val one = CypherJson.readTree("""{"function": "drivine_float_text", "ascending": [1.0]}""")
         assertContains(assertFails { check(one, "one") }.message!!, "two values or more")
+        val nulls = CypherJson.readTree("""{"function": "drivine_float_text", "ascending": [null, 1.0]}""")
+        assertContains(assertFails { check(nulls, "nulls") }.message!!, "before")
+        val descending = CypherJson.readTree("""{"function": "drivine_float_text", "ascending": [2.0, 1.0]}""")
+        assertContains(assertFails { check(descending, "descending") }.message!!, "before")
+        val foreign = CypherJson.readTree("""{"function": "abs", "args": [1], "result": 1}""")
+        assertContains(assertFails { check(foreign, "foreign") }.message!!, "no function of Drivine's")
+        // SQLite reads a text as a float otherwise than Kotlin does ('Infinity' is 0.0 to it), so the step fails, not passes.
+        val text = CypherJson.readTree("""{"function": "drivine_float_text", "args": ["Infinity"], "result": "Infinity"}""")
+        assertContains(assertFails { check(text, "text") }.message!!, "No step reads the float of the text")
+        val pending = CypherJson.readTree("""{"function": "drivine_equal", "args": ["1", "1"], "result": 1}""")
+        assertEquals(Outcome.PENDING, check(pending, "pending"))
+        val read = CypherJson.readTree("""{"read": {"store": "sqlite", "nonFinite": false, "column": "1"}, "value": 1, "note": "n"}""")
+        assertEquals(Outcome.READ, check(read, "read"))
+        val failing = HostFunction("drivine_failing", 1, deterministic = true) { _, _, result -> result.error("no") }
+        assertContains(assertFails { call(listOf(failing), listOf(1L), "failing") }.message!!, "failing: drivine_failing failed: no")
     }
 
     @Test
@@ -112,8 +128,10 @@ class HostSpecTest {
             val values = ascending.map(::expanded)
             require(values.size >= 2) { "$where: ascending has two values or more, each before the next" }
             values.zipWithNext().forEach { (a, b) ->
-                val order = sqliteOrder(call(functions, listOf(a), where), call(functions, listOf(b), where))
-                assertTrue(order < 0, "$where: $name($a) before $name($b)")
+                val x = call(functions, listOf(a), where)
+                val y = call(functions, listOf(b), where)
+                // As SQL's `<` reads them (check/extension-native.py): a null on either side is no order.
+                assertTrue(x != null && y != null && sqliteOrder(x, y) < 0, "$where: $name($a) before $name($b), not $x and $y")
             }
         } else {
             val args = step["args"]!!.map(::expanded)
@@ -138,12 +156,7 @@ class HostSpecTest {
         node.isTextual -> node.textValue()
         node.isIntegralNumber -> node.longValue()
         node.isNumber -> node.doubleValue()
-        node.isObject && node.fieldNames() == setOf("\$float") -> when (val text = node["\$float"]!!.textValue()) {
-            "NaN" -> Double.NaN
-            "Infinity" -> Double.POSITIVE_INFINITY
-            "-Infinity" -> Double.NEGATIVE_INFINITY
-            else -> error("No float $text")
-        }
+        node.isObject && node.fieldNames() == setOf("\$float") -> parseDouble(node["\$float"]!!.textValue() ?: error("No float $node"))
         else -> error("No SQL value of $node")
     }
 
@@ -186,7 +199,8 @@ class HostSpecTest {
             null -> 0L
             is Long -> v
             is Double -> v.toLong()
-            is String -> v.trim().toLongOrNull() ?: v.trim().toDoubleOrNull()?.toLong() ?: 0L
+            // SQLite reads a text's leading number, as Kotlin does not ('12abc' is 12): no step reads one so.
+            is String -> error("No step reads the whole number of the text $v")
             else -> error("No whole number of $v")
         }
 
@@ -196,7 +210,8 @@ class HostSpecTest {
             null -> 0.0
             is Long -> v.toDouble()
             is Double -> v
-            is String -> v.trim().toDoubleOrNull() ?: 0.0
+            // SQLite reads a text's leading number, and no infinity ('Infinity' is 0.0), as Kotlin does not: no step reads one so.
+            is String -> error("No step reads the float of the text $v")
             else -> error("No float of $v")
         }
 

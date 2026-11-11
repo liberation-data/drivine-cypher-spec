@@ -382,6 +382,7 @@ val hostSpecJson = tasks.register<Exec>("hostSpecJson") {
     dependsOn(compilation.compileTaskProvider)
     val classpath = files(compilation.output.allOutputs, compilation.runtimeDependencyFiles)
     inputs.file(layout.projectDirectory.file("../host.yaml"))
+    inputs.files(classpath)
     outputs.dir(hostSpecDir)
     doFirst {
         executable(pinnedJava().absolutePath)
