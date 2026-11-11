@@ -156,7 +156,14 @@ class SqliteDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
      * the label a statement makes, both of the table's own columns.
      */
     private fun over(label: String, properties: List<String>): String =
-        "$nodes (${properties.joinToString(", ") { "${SqliteSql.indexClass("props", SqliteSql.path(it))}, ${SqliteSql.indexKey("props", SqliteSql.path(it))}" }}) WHERE ${hasLabel("", label)}"
+        "$nodes (${indexColumns(properties).joinToString(", ")}) WHERE ${hasLabel("", label)}"
+
+    /**
+     * The columns of a range index's or a uniqueness constraint's index over the stored [keys], in order, each key's class
+     * and then its key, as the module writes them: what the store's schema compares the columns it finds with.
+     */
+    fun indexColumns(keys: List<String>): List<String> =
+        keys.flatMap { listOf(SqliteSql.indexClass("props", SqliteSql.path(it)), SqliteSql.indexKey("props", SqliteSql.path(it))) }
 
     override fun createIndex(spec: IndexSpec, existing: CatalogItem?): List<DdlStatement> = when (spec) {
         is RangeIndexSpec -> {

@@ -127,9 +127,23 @@ abstract class SqlStoreSchema internal constructor() : StoreSchema {
         if (structureOnly) return null
         if (made.opclasses != null && there.opclasses.isNotEmpty() && there.opclasses != made.opclasses) return "an index with ${there.opclasses.joinToString(", ")}"
         val shape = shapeOf(there) ?: return null
-        made.properties?.let { properties ->
-            if (shape.columns.size != properties.size || shape.columns.zip(properties).any { (column, property) -> column != null && column != Read.Property(property) }) {
-                return "an index over ${shape.columns.joinToString(", ", "[", "]") { it?.toString() ?: "?" }}"
+        val expected = made.expected
+        if (expected != null) {
+            columnsOf(there)?.let { texts ->
+                val reads = texts.mapIndexed { i, text -> read(text, expected, shape.columns.getOrNull(i)) }
+                // A column this can't read is taken as the item's: a false mismatch would drop a good index.
+                if (reads.none { it == null }) {
+                    val keys = expected.columns.map { it.first }
+                    if (reads.size != keys.size || reads.zip(keys).any { (read, key) -> read != Read.Property(key) }) {
+                        return "an index over ${reads.filterIndexed { i, read -> i == 0 || read != reads[i - 1] }.joinToString(", ", "[", "]")}"
+                    }
+                }
+            }
+        } else {
+            made.properties?.let { properties ->
+                if (shape.columns.size != properties.size || shape.columns.zip(properties).any { (column, property) -> column != null && column != Read.Property(property) }) {
+                    return "an index over ${shape.columns.joinToString(", ", "[", "]") { it?.toString() ?: "?" }}"
+                }
             }
         }
         made.keys?.let { keys -> if (shape.keys != keys) return "an index over ${shape.keys}" }
@@ -146,6 +160,72 @@ abstract class SqlStoreSchema internal constructor() : StoreSchema {
     protected abstract fun shapeOf(there: StoreObject): Shape?
 
     /**
+     * The canonical text ([IndexText.canonical]) of each column the module makes each of [spec]'s indexes with, by the
+     * index's name: what a column the store gives back under that name is compared with. `store.yaml`'s `columns` pins it.
+     */
+    fun expectedColumns(spec: SchemaItemSpec): Map<String, List<String>> =
+        madeAs(spec).mapNotNull { made -> made.expected?.let { made.name to it.columns.map { column -> column.second } } }.toMap()
+
+    /** The canonical text of each column [rows] give for the index [name], null for one the store gives no text of; null where they give none. */
+    fun foundColumns(name: String, rows: List<Any?>): List<String?>? =
+        StoreObject.read(rows)[name]?.let { there -> columnsOf(there)?.map { text -> text?.let { IndexText.canonical(it, dialect) } } }
+
+    /** How the store prints an index's columns again ([IndexText.canonical]). */
+    protected abstract val dialect: IndexText.Dialect
+
+    /** The text of each of [there]'s columns, as the store gives it, null for one it gives none of; null where it gives none. */
+    protected open fun columnsOf(there: StoreObject): List<String?>? = there.columns
+
+    /** The stored key [written], as a template's column writes it where [IndexText.KEY] stands, names; null where it names none this reads. */
+    protected abstract fun keyOf(written: String): String?
+
+    /**
+     * What the module makes [label]'s index over the stored [keys] as, by [columns], the builder its DDL makes the index's
+     * columns with ([org.drivine.cypher.store.ddl.PostgresDdl.indexColumns] and its kin): each column's key and canonical
+     * text, and a template of each column, of it and of each of [others], the other indexes a name could hold one of the
+     * item's properties in (Oracle's index over every node, beside a labelled or unique index).
+     */
+    protected fun expected(
+        label: String?,
+        keys: List<String>,
+        columns: (String, List<String>) -> List<String>,
+        others: List<(String, List<String>) -> List<String>> = emptyList(),
+    ): Expected {
+        val written = columns(label ?: IndexText.LABEL, keys)
+        val each = written.size / keys.size
+        val texts = written.mapIndexed { i, text -> keys[i / each] to IndexText.canonical(text, dialect) }
+        val templates = (listOf(columns) + others).flatMap { builder -> builder(IndexText.LABEL, listOf(IndexText.KEY)).map { IndexText.Template(it, dialect) } }
+        return Expected(texts, templates)
+    }
+
+    /**
+     * What one column of an index under the item's name reads, from its [text]: the item's key where it is, canonically,
+     * a column the module writes for the item ([expected]); another key where it is of a column's template with another;
+     * where it is neither, what the store's own reading of it ([legacy]) says, where that is a property or a column of the
+     * table; and null, unknown, otherwise.
+     */
+    private fun read(text: String?, expected: Expected, legacy: Read?): Read? {
+        if (text == null) return null
+        val canonical = IndexText.canonical(text, dialect)
+        expected.columns.firstOrNull { it.second == canonical }?.let { return Read.Property(it.first) }
+        for (template in expected.templates) {
+            val (written, _) = template.match(canonical) ?: continue
+            keyOf(written)?.let { return Read.Property(it) }
+        }
+        return when (legacy) {
+            is Read.Property -> legacy
+            is Read.Other -> legacy.takeIf { PLAIN_COLUMN.matches(it.text) }
+            null -> null
+        }
+    }
+
+    /**
+     * What the module writes an index's columns as: each column's stored key and its canonical text ([IndexText.canonical]),
+     * in order, and the [templates] a column of another key, or another label, is read by.
+     */
+    protected class Expected(val columns: List<Pair<String, String>>, val templates: List<IndexText.Template>)
+
+    /**
      * An object the store makes an item as: an index under [name], [unique] or not, a column for each of [properties] in
      * order, or one expression that reads [keys] in order (a vector's embedding, a full-text index's text), of the nodes of
      * [label] alone, or of every node where it is null; by the access [method] with the operator classes [opclasses], and
@@ -160,6 +240,7 @@ abstract class SqlStoreSchema internal constructor() : StoreSchema {
         val method: String? = null,
         val opclasses: List<String>? = null,
         val dimensions: Int? = null,
+        val expected: Expected? = null,
     )
 
     /**
@@ -187,6 +268,9 @@ abstract class SqlStoreSchema internal constructor() : StoreSchema {
         const val OBJECT = "object"
 
         private fun article(type: String) = if (type.first() in "aeiou") "an $type" else "a $type"
+
+        /** A column of the table, read as itself. */
+        private val PLAIN_COLUMN = Regex("[A-Za-z_][A-Za-z0-9_]*")
     }
 }
 
@@ -277,8 +361,8 @@ class PostgresSchema(override val ddl: PostgresDdl) : SqlStoreSchema() {
     override fun madeAs(spec: SchemaItemSpec): List<MadeObject> {
         val parts = listOf(spec.label) + spec.properties
         return when (spec.kind) {
-            SchemaItemKind.RANGE_INDEX -> listOf(MadeObject(ddl.objectName(PostgresDdl.RANGE, parts), false, spec.properties, spec.label))
-            SchemaItemKind.UNIQUENESS_CONSTRAINT -> listOf(MadeObject(ddl.objectName(PostgresDdl.UNIQUE, parts), true, spec.properties, spec.label))
+            SchemaItemKind.RANGE_INDEX -> listOf(MadeObject(ddl.objectName(PostgresDdl.RANGE, parts), false, spec.properties, spec.label, expected = expected(spec)))
+            SchemaItemKind.UNIQUENESS_CONSTRAINT -> listOf(MadeObject(ddl.objectName(PostgresDdl.UNIQUE, parts), true, spec.properties, spec.label, expected = expected(spec)))
             SchemaItemKind.VECTOR_INDEX -> {
                 val vector = spec as VectorIndexSpec
                 listOf(
@@ -293,6 +377,14 @@ class PostgresSchema(override val ddl: PostgresDdl) : SqlStoreSchema() {
             SchemaItemKind.TEXT_INDEX -> emptyList()
         }
     }
+
+    private fun expected(spec: SchemaItemSpec) = expected(spec.label, SqlStoreDdl.storedKeys(spec.properties), { _, keys -> ddl.indexColumns(keys) })
+
+    override val dialect: IndexText.Dialect
+        get() = IndexText.Dialect.POSTGRES
+
+    /** A key as a literal: `props -> 'name'`. */
+    override fun keyOf(written: String): String = SqlText.unquoted(written)
 
     /**
      * Postgres writes each column as `pg_get_indexdef` gives it, `(props ->> 'name'::text)`, or a column of the table,
@@ -366,12 +458,37 @@ class OracleSchema(override val ddl: OracleDdl) : SqlStoreSchema() {
      * compared.
      */
     override fun madeAs(spec: SchemaItemSpec): List<MadeObject> {
-        val shared = MadeObject(ddl.objectName(OracleDdl.SHARED, spec.properties), false, spec.properties, null)
+        val keys = SqlStoreDdl.storedKeys(spec.properties)
+        val sharedColumns: (String, List<String>) -> List<String> = { _, k -> ddl.sharedColumns(k) }
+        val labelledColumns: (String, List<String>) -> List<String> = { label, k -> ddl.labelledColumns(label, k) }
+        val uniqueColumns: (String, List<String>) -> List<String> = { label, k -> ddl.uniqueColumns(label, k) }
+        val shared = MadeObject(ddl.objectName(OracleDdl.SHARED, spec.properties), false, spec.properties, null, expected = expected(null, keys, sharedColumns))
         return when (spec.kind) {
-            SchemaItemKind.RANGE_INDEX -> listOf(shared, MadeObject(ddl.objectName(OracleDdl.LABELLED, listOf(spec.label) + spec.properties), false, spec.properties, spec.label))
-            SchemaItemKind.UNIQUENESS_CONSTRAINT -> listOf(MadeObject(ddl.objectName(OracleDdl.UNIQUE, listOf(spec.label) + spec.properties), true, spec.properties, spec.label), shared)
+            SchemaItemKind.RANGE_INDEX -> listOf(
+                shared,
+                MadeObject(
+                    ddl.objectName(OracleDdl.LABELLED, listOf(spec.label) + spec.properties), false, spec.properties, spec.label,
+                    expected = expected(spec.label, keys, labelledColumns, listOf(sharedColumns)),
+                ),
+            )
+            SchemaItemKind.UNIQUENESS_CONSTRAINT -> listOf(
+                MadeObject(
+                    ddl.objectName(OracleDdl.UNIQUE, listOf(spec.label) + spec.properties), true, spec.properties, spec.label,
+                    expected = expected(spec.label, keys, uniqueColumns, listOf(sharedColumns, labelledColumns)),
+                ),
+                shared,
+            )
             else -> emptyList()
         }
+    }
+
+    override val dialect: IndexText.Dialect
+        get() = IndexText.Dialect.ORACLE
+
+    /** A key as a step of a path, bare or a JSON string: `'$.name'`, `'$."first name"'`. */
+    override fun keyOf(written: String): String? {
+        val step = SqlText.unquoted(written)
+        return if (step.startsWith("\"")) SqlText.jsonString(step) else step.takeIf { PLAIN_STEP.matches(it) }
     }
 
     /**
@@ -531,10 +648,26 @@ class SqliteSchema(override val ddl: SqliteDdl) : SqlStoreSchema() {
     override fun madeAs(spec: SchemaItemSpec): List<MadeObject> {
         val parts = listOf(spec.label) + spec.properties
         return when (spec.kind) {
-            SchemaItemKind.RANGE_INDEX -> listOf(MadeObject(ddl.objectName(SqliteDdl.RANGE, parts), false, spec.properties, spec.label))
-            SchemaItemKind.UNIQUENESS_CONSTRAINT -> listOf(MadeObject(ddl.objectName(SqliteDdl.UNIQUE, parts), true, spec.properties, spec.label))
+            SchemaItemKind.RANGE_INDEX -> listOf(MadeObject(ddl.objectName(SqliteDdl.RANGE, parts), false, spec.properties, spec.label, expected = expected(spec)))
+            SchemaItemKind.UNIQUENESS_CONSTRAINT -> listOf(MadeObject(ddl.objectName(SqliteDdl.UNIQUE, parts), true, spec.properties, spec.label, expected = expected(spec)))
             else -> emptyList()
         }
+    }
+
+    private fun expected(spec: SchemaItemSpec) = expected(spec.label, SqlStoreDdl.storedKeys(spec.properties), { _, keys -> ddl.indexColumns(keys) })
+
+    override val dialect: IndexText.Dialect
+        get() = IndexText.Dialect.SQLITE
+
+    /** A key within a path's JSON string: `'$."name"'`. */
+    override fun keyOf(written: String): String? = SqlText.jsonString("\"" + SqlText.unquoted(written) + "\"")
+
+    /** Each column of the statement that made [there], as it was written; null where there is none. */
+    override fun columnsOf(there: StoreObject): List<String?>? {
+        val statement = there.statement ?: return null
+        val on = ON.find(statement) ?: return null
+        val close = SqlText.closing(statement, on.range.last) ?: return null
+        return SqlText.split(statement.substring(on.range.last + 1, close))
     }
 
     /**

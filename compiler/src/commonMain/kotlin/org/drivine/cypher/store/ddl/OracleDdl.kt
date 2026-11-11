@@ -338,10 +338,23 @@ ${made.entries.joinToString("\n") { (function, making) ->
         is TextIndexSpec -> throw unsupportedTextIndex(spec, engine)
     }
 
+    /**
+     * The columns of the index over the property of every node, over the stored [keys], each key's class and then its key,
+     * as the module writes them; and of a range index's labelled index and a uniqueness constraint's unique index, of the
+     * nodes of [label]: what the store's schema compares the columns it finds under each name with.
+     */
+    fun sharedColumns(keys: List<String>): List<String> = keys.flatMap { listOf(OracleSql.indexClass("props", it), OracleSql.indexKey("props", it)) }
+
+    /** See [sharedColumns]. */
+    fun labelledColumns(label: String, keys: List<String>): List<String> = keys.flatMap { OracleSql.labelledIndex("n", label, it) }
+
+    /** See [sharedColumns]. */
+    fun uniqueColumns(label: String, keys: List<String>): List<String> = keys.flatMap { OracleSql.uniqueIndex("n", label, keys, it) }
+
     /** The index over the property of every node, whatever the label: what a save and a load by id find a node by. */
     private fun sharedIndex(spec: RangeIndexSpec): Pair<String, String> {
         val name = objectName(SHARED, spec.properties)
-        val expressions = spec.keys.joinToString(", ") { "${OracleSql.indexClass("props", it)}, ${OracleSql.indexKey("props", it)}" }
+        val expressions = sharedColumns(spec.keys).joinToString(", ")
         return name to busyWaiting("CREATE INDEX IF NOT EXISTS $name ON $nodes ($expressions)")
     }
 
@@ -354,7 +367,7 @@ ${made.entries.joinToString("\n") { (function, making) ->
     private fun rangeIndex(spec: RangeIndexSpec): List<String> {
         val (name, shared) = sharedIndex(spec)
         val labelled = objectName(LABELLED, listOf(spec.label) + spec.properties)
-        val scoped = spec.keys.flatMap { OracleSql.labelledIndex("n", spec.label, it) }.joinToString(", ")
+        val scoped = labelledColumns(spec.label, spec.keys).joinToString(", ")
         // Not where a uniqueness constraint's index over the one property stands for it, as when the
         // range index is made again under a constraint: the record then names an index that is not
         // there, and the unique index is read through.
@@ -477,7 +490,7 @@ ${made.entries.joinToString("\n") { (function, making) ->
         is UniquenessConstraintSpec -> {
             val name = objectName(UNIQUE, listOf(spec.label) + spec.properties)
             // A node that lacks any of the properties is not constrained, as on the graph engines.
-            val expressions = spec.keys.flatMap { OracleSql.uniqueIndex("n", spec.label, spec.keys, it) }.joinToString(", ")
+            val expressions = uniqueColumns(spec.label, spec.keys).joinToString(", ")
             val unique = busyWaiting("CREATE UNIQUE INDEX IF NOT EXISTS $name ON $nodes n ($expressions)")
             val range = RangeIndexSpec(spec.label, spec.properties)
             if (spec.properties.size > 1) {
