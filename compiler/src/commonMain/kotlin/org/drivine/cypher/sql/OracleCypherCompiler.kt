@@ -557,7 +557,11 @@ class OracleCypherCompiler(
     override fun jsonArray(items: List<String>) =
         if (items.isEmpty()) "JSON('[]')" else "JSON_ARRAY(${items.joinToString(", ")} NULL ON NULL RETURNING JSON)"
 
-    override fun tagKind(json: String) = "JSON_VALUE($json, '\$.\"\$t\"')"
+    /**
+     * Of an object alone: Oracle's path is lax, and reads the key `$t` of a list's items, so a list that holds a temporal value
+     * was taken for that value's tag, and a duration added to it as to the value (#161).
+     */
+    override fun tagKind(json: String) = shared(json) { (x) -> "CASE WHEN JSON_VALUE($x, '\$.type()') = 'object' THEN JSON_VALUE($x, '\$.\"\$t\"') END" }
 
     override fun tagText(json: String) = "JSON_VALUE($json, '\$.v')"
 

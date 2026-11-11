@@ -4612,7 +4612,7 @@ abstract class SqlCypherCompiler(
         private fun compareTagged(left: Value.Json, right: Value.Json, kind: Temporal, operator: String): String {
             val sides = listOf(left, right)
             val equality = operator == "=" || operator == "<>"
-            if (kind == Temporal.DURATION && !equality) return "NULL"
+            if (kind == Temporal.DURATION && !equality) return NO_TRUTH
             // A side in flight is read so, by the key of its text where it has none.
             fun key(value: Value.Json, json: String) = if (kind == Temporal.DURATION) (if (value.temporal == kind) tagTextOf(value) else tagText(json))
                 else if (value.temporal == kind) tagKeyOf(value) else if (value.inflight != null) keyOf(json) else tagKey(json)

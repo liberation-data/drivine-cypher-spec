@@ -10,7 +10,25 @@ class PostgresTemporalSql(
     /** The store's `PostgresDdl.temporalKey`: written inline, the key of a zoned moment is some 2,500 characters. */
     override fun storedKey(text: String, kind: Temporal): String? = storedKeyOf(text, "'${kind.function}'")
 
-    override fun storedKeyOf(text: String, kind: String): String? = graph?.let { "${org.drivine.cypher.store.ddl.PostgresDdl.temporalKeyName(it)}($kind, $text)" }
+    /**
+     * The store's function, or where the value is a date, a local date-time or a moment at UTC of a year from 1000 to 9999, as
+     * a value worked out as the statement runs mostly is, its key cut from its text as it stands: the year, the month and day,
+     * the clock and the fraction are the key's own digits there, and no UTC day is worked out. Called for each row a compared
+     * sum is made for, the function took that sum's time a tenth as long again (#161).
+     */
+    override fun storedKeyOf(text: String, kind: String): String? = graph?.let { graph ->
+        shared(listOf(text, kind)) { (t, k) ->
+            fun cut(from: Int, length: Int) = "SUBSTR($t, $from, $length)"
+            val day = "'100000' || ${cut(1, 4)} || ${cut(6, 2)} || ${cut(9, 2)}"
+            val clock = "${cut(12, 2)} || ${cut(15, 2)} || ${cut(18, 2)}"
+            fun fraction(zone: Int) = "CASE WHEN SUBSTR($t, 20, 1) = '.' THEN SUBSTR(SUBSTR($t, 21, LENGTH($t) - 20 - $zone) || '000000000', 1, 9) ELSE '000000000' END"
+            val ad = "SUBSTR($t, 1, 1) IN ('1', '2', '3', '4', '5', '6', '7', '8', '9') AND SUBSTR($t, 5, 1) = '-'"
+            "CASE WHEN $ad AND $k = 'date' THEN $day " +
+                "WHEN $ad AND $k = 'localdatetime' THEN $day || $clock || ${fraction(0)} " +
+                "WHEN $ad AND $k = 'datetime' AND RIGHT($t, 1) = 'Z' THEN $day || $clock || ${fraction(1)} || '$OFFSET_ZERO' " +
+                "ELSE ${org.drivine.cypher.store.ddl.PostgresDdl.temporalKeyName(graph)}($k, $t) END"
+        }
+    }
 
     override fun local(text: String, kind: Temporal) = when (kind) {
         Temporal.DATE -> "CAST(CAST(${eraOf(text)} AS date) AS timestamp)"
@@ -106,6 +124,9 @@ class PostgresTemporalSql(
     }
 
     private companion object {
+        /** The key's offset of UTC, 0 seconds plus [Temporals.OFFSET_BIAS], in its six digits. */
+        val OFFSET_ZERO = Temporals.OFFSET_BIAS.toString().padStart(6, '0')
+
         /** How many years [year] lifts a timestamp by: see it. */
         const val LIFT_YEARS = 4800
 

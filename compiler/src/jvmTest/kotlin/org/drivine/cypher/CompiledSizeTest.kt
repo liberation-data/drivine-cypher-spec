@@ -31,8 +31,9 @@ class CompiledSizeTest {
         compilers.forEach { compiler ->
             val (one, two, four) = listOf(1, 2, 4).map { compiler.compile(added(it)).sql.length }
             // A sum that may be a text writes each side as toString does, a float as Java writes it: on Oracle twice, the
-            // second time for a text past 4,000 bytes (#298).
-            assertTrue(one < 30_000, "${compiler::class.simpleName}: $one characters")
+            // second time for a text past 4,000 bytes (#298). On Postgres the sum's key is cut from its text where it can be,
+            // beside the store's function (#161).
+            assertTrue(one < 32_000, "${compiler::class.simpleName}: $one characters")
             assertTrue(four < 3 * two, "${compiler::class.simpleName}: $two, then $four characters")
         }
     }

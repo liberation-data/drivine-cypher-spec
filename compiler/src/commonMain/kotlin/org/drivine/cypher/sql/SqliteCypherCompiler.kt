@@ -109,6 +109,9 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
 
     override fun tagKind(json: String) = "($json ->> '\$.\"\$t\"')"
 
+    /** Its keys in the order SQLite's store writes an object's, by their text, so a tag worked out is the same text as one stored. */
+    override fun tagObject(entries: List<Pair<String, String>>) = jsonObject(entries.sortedBy { it.first })
+
     override fun tagText(json: String) = "($json ->> '\$.v')"
 
     override fun tagKey(json: String) = "($json ->> '\$.s')"
