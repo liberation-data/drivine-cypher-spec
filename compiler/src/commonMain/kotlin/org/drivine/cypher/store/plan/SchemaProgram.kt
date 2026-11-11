@@ -989,9 +989,11 @@ internal class SchemaProgram(
         mismatches.firstOrNull { !it.droppable }?.let { return mismatched(made, found, it) }
         val inPlace = { name: String -> name.equals(recreation.name, ignoreCase = true) }
         val replaced = mismatches.firstOrNull { inPlace(it.name) }
-        // Read before anything runs: the form of what the build may meet, without the other names' mismatches, dropped below.
+        // Read before anything runs: the form of what the build may meet, without the other names' mismatches, dropped below,
+        // as the lines of what is dropped read it.
         val others = mismatches.filterNot { inPlace(it.name) }.map { it.name.uppercase() }.toSet()
-        val form = store.formOf(made, rows.filterNot { ((it as? Map<*, *>)?.get(SqlStoreSchema.OBJECT) as? String)?.uppercase() in others })
+        val kept = rows.filterNot { ((it as? Map<*, *>)?.get(SqlStoreSchema.OBJECT) as? String)?.uppercase() in others }
+        val form = store.formOf(made, kept)
         val unrecorded = if (replaced == null) store.unrecordedDrops(made, rows) else emptyList()
         for (other in mismatches.filterNot { inPlace(it.name) }) {
             ddl(store.dropMismatched(other.name))
@@ -999,7 +1001,7 @@ internal class SchemaProgram(
         }
         for (drop in unrecorded.filterNot { inPlace(it.name) }) {
             ddl(drop.statements)
-            log(LogLevel.INFO, CONSTRAINT_MANAGER, droppedUnrecorded(made, drop, rows))
+            log(LogLevel.INFO, CONSTRAINT_MANAGER, droppedUnrecorded(made, drop, kept))
         }
 
         // A recreate cut off after the old index was dropped left only the one built first: put in its place, not dropped.
@@ -1040,7 +1042,7 @@ internal class SchemaProgram(
         }
         ddl(recreation.swap)
         replaced?.let { log(LogLevel.INFO, CONSTRAINT_MANAGER, droppedMismatch(made, it)) }
-        unrecorded.filter { inPlace(it.name) }.forEach { log(LogLevel.INFO, CONSTRAINT_MANAGER, droppedUnrecorded(made, it, rows)) }
+        unrecorded.filter { inPlace(it.name) }.forEach { log(LogLevel.INFO, CONSTRAINT_MANAGER, droppedUnrecorded(made, it, kept)) }
         return remake(made, recreation, found, violationSampleSize)
     }
 
@@ -1079,12 +1081,8 @@ internal class SchemaProgram(
     }
 
     /** The violation a refill the old index refused is, where the data, its keys lowercased, confirms one ([StoreSchema.sampleRefilledConflictsQuery]). */
-    private fun refilledViolation(spec: ConstraintSpec, limit: Int): EnsureResult.Violation? {
-        val outcome = io.ask(PlanAction.Query(store.sampleRefilledConflictsQuery(spec, maxOf(limit, 1)), purpose = Purpose.SAMPLE))
-        val rows = (outcome as? PlanOutcome.Rows)?.rows ?: return null
-        val repeated = rows.filterIsInstance<Map<*, *>>().map { row -> row.entries.associate { (key, value) -> key.toString() to value } }
-        return repeated.takeIf { it.isNotEmpty() }?.let { violation(spec.made(), it, limit) }
-    }
+    private fun refilledViolation(spec: ConstraintSpec, limit: Int): EnsureResult.Violation? =
+        repeatedKeys(spec, limit, store.sampleRefilledConflictsQuery(spec, maxOf(limit, 1)))?.takeIf { it.isNotEmpty() }?.let { violation(spec.made(), it, limit) }
 
     /**
      * The constraint's own `create` once its unique index is in place, which makes what goes with it and records it where
@@ -1150,9 +1148,9 @@ internal class SchemaProgram(
     private fun confirmedViolation(spec: ConstraintSpec, limit: Int): EnsureResult.Violation? =
         repeatedKeys(spec, limit)?.takeIf { it.isNotEmpty() }?.let { violation(spec, it, limit) }
 
-    /** The keys of [spec] that repeat in the data, [limit] of them at most and one at least; null where the data can't be read. */
-    private fun repeatedKeys(spec: ConstraintSpec, limit: Int): List<Map<String, Any?>>? {
-        val outcome = io.ask(PlanAction.Query(store.sampleConflictsQuery(spec, maxOf(limit, 1)), purpose = Purpose.SAMPLE))
+    /** The keys of [spec] that repeat in the data, [limit] of them at most and one at least, as [query] samples them; null where the data can't be read. */
+    private fun repeatedKeys(spec: ConstraintSpec, limit: Int, query: String = store.sampleConflictsQuery(spec, maxOf(limit, 1))): List<Map<String, Any?>>? {
+        val outcome = io.ask(PlanAction.Query(query, purpose = Purpose.SAMPLE))
         val rows = (outcome as? PlanOutcome.Rows)?.rows ?: return null
         return rows.filterIsInstance<Map<*, *>>().map { row -> row.entries.associate { (key, value) -> key.toString() to value } }
     }

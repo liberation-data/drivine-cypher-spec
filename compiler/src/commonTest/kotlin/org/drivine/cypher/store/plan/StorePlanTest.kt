@@ -154,7 +154,7 @@ class StorePlanTest {
 
     /**
      * The DDL [execute] names on [id]: a `store.yaml` case's create, drop or dropUnnamed, or a step of its `recreate`
-     * (`leftover`, `build`, `swap`, `remade`), the marker's, a statement given whole, or the record of the catalog's item
+     * (`leftover`, `build`, `swap`, `finish`, `remade`), the marker's, a statement given whole, or the record of the catalog's item
      * made in the current form (`formRecorded`).
      */
     private fun ddl(id: String, execute: JsonNode): List<PlanAction.Execute> {
