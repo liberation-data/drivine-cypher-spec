@@ -128,7 +128,7 @@ Flags and environment variables override the profile, key by key. So `DRIVINE_PA
 
 ## Files
 
-A file, stdin and the positional argument are read alike.
+A file, stdin and the positional argument are read alike, but for a byte-order mark, as below.
 
 **Statements.** The text is split into statements on `;`. A `;` doesn't split inside these:
 - a string in `'…'` or `"…"`, where `\` escapes the character after it;
