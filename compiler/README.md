@@ -369,7 +369,7 @@ SQLite derives the entry point's name from the file's (`libdrivinecypher` or `dr
 path alone. The host functions are ported from drivine4j's: each is common code
 (`org.drivine.cypher.host.HostFunctions`), which the extension registers and a host on the JVM can call from its own
 registrations, and each comes with the spec's `host.yaml` cases that pin it. A function of JSON values fails its statement
-on a text that is no JSON. So far it registers:
+on a text that is no JSON, and takes an empty one as no value, as drivine4j's do. So far it registers:
 
 | Function | What it gives |
 |---|---|

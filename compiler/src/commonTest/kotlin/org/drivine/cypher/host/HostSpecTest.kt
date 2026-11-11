@@ -112,6 +112,24 @@ class HostSpecTest {
     }
 
     @Test
+    fun `the functions of JSON values take an empty text and JSON's null as no value and fail on a text that is no JSON`() {
+        // As drivine4j's do: Jackson reads a text of nothing but JSON's whitespace as a missing node, which is no value.
+        for ((step, where) in listOf(
+            """{"function": "drivine_equal", "args": ["", "1"], "result": null}""" to "equal",
+            """{"function": "drivine_add", "args": [" ", "[1]"], "result": "[null,1]"}""" to "add",
+            """{"function": "drivine_canonical", "args": ["\n"], "result": "\n"}""" to "canonical",
+            """{"function": "drivine_sort_key", "args": ["\t"], "result": null}""" to "sortKey",
+            """{"function": "drivine_sort_key", "args": ["null"], "result": null}""" to "sortKeyNull",
+            """{"function": "drivine_list_order", "args": ["null", "[1]"], "result": null}""" to "listOrderNull",
+            """{"function": "drivine_list_order", "args": ["[1]", "\r"], "result": null}""" to "listOrderEmpty",
+        )) assertEquals(Outcome.RAN, check(CypherJson.readTree(step), where))
+        for (function in listOf("drivine_equal", "drivine_add", "drivine_canonical", "drivine_sort_key", "drivine_list_order")) {
+            val args = if (function == "drivine_canonical" || function == "drivine_sort_key") """["[1"]""" else """["[1", "[1]"]"""
+            assertFails { check(CypherJson.readTree("""{"function": "$function", "args": $args, "result": null}"""), function) }
+        }
+    }
+
+    @Test
     fun `values ascend as SQLite orders them`() {
         assertTrue(sqliteOrder(null, 1L) < 0)
         assertTrue(sqliteOrder(1L, 1.5) < 0)

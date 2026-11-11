@@ -11,7 +11,7 @@ import org.drivine.cypher.store.SqliteFunctions
  * the native library as a SQLite extension, a host on the JVM from its own registrations. They are ported from
  * drivine4j's (#108); the spec's host.yaml pins what each gives, and HostSpecTest checks each one here against its cases,
  * and lists those not yet ported. Those of JSON values read each argument as JSON text ([SqliteCypherValues.read]), and fail
- * the statement on a text that is no JSON.
+ * the statement on a text that is no JSON: an empty one is no value.
  */
 @DrivineInternalApi
 object HostFunctions {

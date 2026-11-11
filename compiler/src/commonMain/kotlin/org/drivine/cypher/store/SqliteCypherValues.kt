@@ -23,8 +23,12 @@ import kotlin.math.sign
  */
 @DrivineInternalApi
 object SqliteCypherValues {
-    /** The JSON text [text] read, or null where it is null or JSON's null. */
-    fun read(text: String?): JsonNode? = text?.let(CypherJson::readTree)?.takeUnless { it.isNull }
+    /**
+     * The JSON text [text] read, or null where it is null, JSON's null, or empty: nothing but JSON's whitespace, which
+     * Jackson, and so drivine4j, reads as a missing node.
+     */
+    fun read(text: String?): JsonNode? =
+        text?.takeUnless { it.all { c -> c == ' ' || c == '\t' || c == '\n' || c == '\r' } }?.let(CypherJson::readTree)?.takeUnless { it.isNull }
 
     /** [node] as JSON text: an infinity as SQLite writes one, and NaN as [NAN]. */
     fun write(node: JsonNode): String = CypherJson.writeValueAsString(nonFinite(node))

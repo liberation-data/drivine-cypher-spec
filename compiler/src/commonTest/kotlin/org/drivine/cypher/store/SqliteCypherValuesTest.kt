@@ -48,6 +48,30 @@ class SqliteCypherValuesTest {
     }
 
     @Test
+    fun `maps are ordered only where equal and values of two kinds not at all`() {
+        assertEquals(0, order("{\"a\":1,\"b\":[2]}", "{\"b\":[2.0],\"a\":1.0}"))
+        assertNull(order("{\"a\":1}", "{\"a\":2}"))
+        assertNull(order("{\"a\":null}", "{\"a\":null}"))
+        assertNull(order("1", "\"1\""))
+        assertNull(order("[1]", "[\"a\"]"))
+        assertNull(order("[true]", "[1]"))
+        assertEquals(1, order("true", "false"))
+        assertEquals(-1, order("[false,1]", "[true]"))
+    }
+
+    @Test
+    fun `a null decides an equality only where no pair is false`() {
+        fun compare(a: String, b: String) = SqliteCypherValues.compare(json(a), json(b))
+        assertEquals(false, compare("{\"a\":null}", "{\"b\":null}"))
+        assertEquals(false, compare("[null,1]", "[null]"))
+        assertNull(compare("{\"a\":null,\"b\":1}", "{\"b\":1,\"a\":2}"))
+        assertEquals(false, compare("{\"a\":null,\"b\":1}", "{\"b\":2,\"a\":2}"))
+        assertEquals(true, compare("\"a\"", "\"a\""))
+        assertEquals(false, compare("1", "\"1\""))
+        assertEquals(false, compare("true", "1"))
+    }
+
+    @Test
     fun `two whole numbers sum past a long's range to the whole number they make`() {
         assertEquals("9223372036854775808", SqliteCypherValues.write(SqliteCypherValues.add(json("9223372036854775807"), json("1"))!!))
         assertEquals("-9223372036854775809", SqliteCypherValues.write(SqliteCypherValues.add(json("-9223372036854775808"), json("-1"))!!))
