@@ -18,8 +18,9 @@ import kotlin.math.sign
  * functions SQL calls ([org.drivine.cypher.host.HostFunctions]) read them. A text a function is given that is SQL's null, or
  * JSON's, is no value.
  *
- * An infinity is the number SQLite writes for one, `9e999`, which reads as the double it is. NaN, which SQLite's JSON holds
- * as no number, is [NAN], as a statement given NaN writes it: a number equal to nothing and ordered with nothing.
+ * An infinity is the number SQLite's JSON writes for one, `9.0e+999`, or [INFINITY], each of which reads as the double it
+ * is. NaN, which SQLite's JSON holds as no number, is [NAN], as a statement given NaN writes it: a number equal to nothing
+ * and ordered with nothing.
  */
 @DrivineInternalApi
 object SqliteCypherValues {
@@ -141,7 +142,7 @@ object SqliteCypherValues {
      */
     fun sortKey(node: ArrayNode): String = StringBuilder().also { list(node, it) }.toString()
 
-    /** An infinity as SQLite reads it, as it reads `9e999`, which its JSON writes for one. */
+    /** An infinity as SQLite reads it, as it reads `9.0e+999`, which its JSON writes for one. */
     const val INFINITY = "9e999"
 
     /** Whether [node] is a number, NaN among them. */

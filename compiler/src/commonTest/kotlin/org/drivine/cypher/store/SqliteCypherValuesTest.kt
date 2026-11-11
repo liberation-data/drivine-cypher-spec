@@ -97,6 +97,13 @@ class SqliteCypherValuesTest {
     }
 
     @Test
+    fun `a canonical map's keys are in UTF-16 order on every target as drivine4j's are`() {
+        // U+1F600 is a surrogate pair from U+D83D, which comes before U+FFFF in UTF-16 though after it as a code point.
+        val map = json("{\"\\uffff\":1,\"\\ud83d\\ude00\":2,\"b\":3}")
+        assertEquals("{\"b\":3,\"\ud83d\ude00\":2,\"\uffff\":1}", SqliteCypherValues.write(SqliteCypherValues.canonical(map)))
+    }
+
+    @Test
     fun `a text that is no JSON fails and JSON's null is no value`() {
         assertFails { SqliteCypherValues.read("{") }
         assertNull(SqliteCypherValues.read("null"))
