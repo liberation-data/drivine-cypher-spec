@@ -51,8 +51,10 @@ def keys(readme):
 # stdout between them.
 OWN_OUTPUT = {"--explain", "-h", "--help", "-v", "--version", "--driver-version"}
 PRINTING_COMMAND = re.compile(r"^[ \t]*:(params|help)[ \t]*\r?$", re.MULTILINE)
-# A statement that starts with EXPLAIN, after any spaces and comments, prints its plan, not its result.
-EXPLAINED = re.compile(r"(?:^|;)(?:\s|//[^\n]*|/\*.*?\*/)*explain\b", re.IGNORECASE | re.DOTALL)
+# A statement that starts with EXPLAIN, after any spaces and comments, prints its plan, not its result. A statement
+# starts at the start of the text, after a `;`, or after a command's line, which needs no `;`.
+EXPLAINED = re.compile(r"(?:\A|;|(?:\A|\n)[ \t]*:[^\n]*\n)(?:\s|//[^\n]*|/\*.*?\*/)*explain\b",
+                       re.IGNORECASE | re.DOTALL)
 
 
 def json_lines(case, args):

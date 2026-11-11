@@ -231,7 +231,7 @@ Any other value is a bad value, and a bad invocation.
 
 | Store | The plan |
 |---|---|
-| Neo4j | The driver's plan: one operator a line, its name, then its details where it has them, after two spaces, indented by two spaces for each level below the first. |
+| Neo4j | The driver's plan: one operator a line, its name without the planner's `@neo4j`, then its details where it has them, after two spaces, indented by two spaces for each level below the first. |
 | Memgraph | The rows of its `EXPLAIN`. |
 | FalkorDB | The lines of its `GRAPH.EXPLAIN`. |
 | Postgres | The rows of its `EXPLAIN`. |
