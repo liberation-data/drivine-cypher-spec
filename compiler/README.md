@@ -369,8 +369,8 @@ Run `./gradlew clean` before a build you check: the wasm optimize step can leave
 `check/corpus-classify.sh [ref]` compiles this checkout's spec statements with the compiler at `ref` (`origin/main` by
 default, unpacked with `git archive` into a directory of its own, so the checkout is not touched) and with this checkout's,
 and puts each answer that differs, where the statement involves no temporal value and no key that begins with `$`, down to
-one named cause of the store layout 2 by a marker it leaves in the SQL (`check/corpus-classify.py`). It prints the counts
-for each cause and store, and fails on an answer it can put down to none.
+one named cause of the store layout 2 by a marker it leaves in the SQL where the answers differ, not beside it
+(`check/corpus-classify.py`). It prints the counts for each cause and store, and fails on an answer it can put down to none.
 
 What the build generates (`gen/Generate.java`, run on the pinned JDK): the zone ids that JDK's `ZoneId.of` takes, which
 the other targets check a zone name against, as their own zone databases (the OS's, Node's ICU) are other tzdb releases;

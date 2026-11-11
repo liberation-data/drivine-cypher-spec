@@ -182,18 +182,20 @@ class OracleCypherCompiler(
     override fun nullIfJsonNull(json: String) = shared(json) { (x) -> "CASE WHEN ${kind(x)} <> 'null' THEN $x END" }
 
     /**
-     * Where the kind comes, as [kindOrder] ranks them and null for null, then the value as `JSON` orders it, which is Cypher's
-     * order within a kind: `JSON` orders a number before a text, a truth value after both, and a map and a list last. A null
-     * is ranked null, so the value needs no [nullIfJsonNull], which would read it again: as fast as [sortKey] over 100,000 rows.
-     */
-    /**
-     * Where the kind comes, a text of digits, and then the value: a temporal value's tag has its sort key (a duration its text)
-     * in its rank, after its kind's, so that only a map reads a tag, and any other value is ordered by itself, as it was before
-     * there were tags: read in the value's term, the tag cost an ordering of stored texts or numbers a third as long again (#161).
+     * Where the kind comes ([sortRank]), null for null, then the value as `JSON` orders it, which is Cypher's order within a
+     * kind: `JSON` orders a number before a text, a truth value after both, and a map and a list last. A null is ranked null,
+     * so the value needs no [nullIfJsonNull], which would read it again: as fast as [sortKey] over 100,000 rows. A temporal
+     * value's tag has its sort key (a duration its text) in its rank, after its kind's, so only an object reads a tag, and any
+     * other value is ordered by itself, as before there were tags: read in the value's term, the tag cost an ordering of stored
+     * texts or numbers a third as long again (#161).
      */
     override fun openSortKey(json: String) = shared(json) { (x) -> sortRank(x) }.let { rank -> listOf(rank, json) }
 
-    /** [openSortKey]'s rank of the JSON [x]: its kind's, and a tag's sort key after it. */
+    /**
+     * [openSortKey]'s rank of the JSON [x], a text: `1` for a map, `2` for a list, `2` and the place of a temporal value's kind in
+     * [TAG_ORDER] then its sort key (a duration's text) for its tag, after every list and before every text, `3`; `4` for a truth
+     * value, `5` for a number, and null for null.
+     */
     private fun sortRank(x: String) =
         "DECODE(${kind(x)}, 'object', ${tagRank(x, "'1'") { "'2$it' || COALESCE(${tagKey(x)}, ${tagText(x)})" }}, 'array', '2', 'string', '3', 'boolean', '4', 'number', '5', 'double', '5', 'float', '5')"
 

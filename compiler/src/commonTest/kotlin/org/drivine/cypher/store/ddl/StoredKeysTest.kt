@@ -1,5 +1,7 @@
 package org.drivine.cypher.store.ddl
 
+import org.drivine.cypher.sql.OracleCypherCompiler
+import org.drivine.cypher.store.OracleSql
 import org.drivine.schema.FullTextIndexSpec
 import org.drivine.schema.RangeIndexSpec
 import org.drivine.schema.UniquenessConstraintSpec
@@ -57,6 +59,19 @@ class StoredKeysTest {
         for ((item, sql) in made(OracleDdl("g"))) {
             assertTrue("\$\$x" in sql, "$item:\n$sql")
             assertFalse(Regex("\\\$\\.\"?\\\$x").containsMatchIn(sql), "$item:\n$sql")
+            // Escaped once, not twice: `$$$x` is the key of another property.
+            assertFalse("\$\$\$x" in sql, "$item:\n$sql")
         }
+    }
+
+    @Test
+    fun oracleReadsANodeThroughTheIndexOverTheEscapedKey() {
+        // The catalog names the property as the user does, `$x`; the pattern reads it at `$$x`, as the index is over.
+        val cypher = "MATCH (n:L {`\$x`: 1}) RETURN n.id"
+        val sql = OracleCypherCompiler("g", indexedProperties = setOf("L" to "\$x")).compile(cypher, emptyMap()).sql
+        val alias = Regex("(n\\d+)\\.props").find(sql)!!.groupValues[1]
+        assertTrue(OracleSql.labelledIndex(alias, "L", "\$\$x").first() in sql, sql)
+        assertFalse(OracleSql.labelledIndex(alias, "L", "\$x").first() in sql, sql)
+        assertFalse(OracleSql.labelledIndex(alias, "L", "\$\$\$x").first() in sql, sql)
     }
 }

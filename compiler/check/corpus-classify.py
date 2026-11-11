@@ -7,7 +7,8 @@ Sorts each answer the store layout 2 changed (liberation-data/drivine-cypher-spe
 Both corpora are of the same requests: this branch's spec statements, compiled by main's compiler and by this branch's
 (see corpus-classify.sh, which makes main's). An answer that differs where the statement involves no temporal value and no
 key that begins with `$` is put down to exactly one of CAUSES, by a marker the cause leaves in the SQL, never by the
-statement: the first cause whose marker the changed SQL holds. Prints the counts for each cause and store, and exits 1
+statement: the first cause whose marker meets a difference, in the tokens it changes, on either side, so a marker the
+two answers hold alike beside the difference is no cause of it. Prints the counts for each cause and store, and exits 1
 where an answer is put down to none, printing it.
 """
 import difflib
@@ -17,15 +18,16 @@ import sys
 from collections import Counter
 
 # A statement that involves a temporal value or a key that begins with $ is the layout's own business, and is not sorted.
+# Such a key is written quoted, `$x`, or as a text, ['$x']: a $ bare is a parameter's, which the layout leaves as it is.
 TEMPORAL = re.compile(r"\b(date|datetime|localdatetime|time|localtime|duration)\s*[.(]|\btruncate\b|\$\w*`|`\$", re.I)
-DOLLAR_KEY = re.compile(r"[{,]\s*`?\$\w|\[\s*'\$|\.`\$")
+DOLLAR_KEY = re.compile(r"[{,]\s*`\$\w|\[\s*'\$|\.`\$")
 
 ALL = {"postgres", "oracle", "sqlite"}
 
 # Each cause, the stores it is on, and the marker it leaves in the SQL it changes, in the order a changed answer is tried against them.
 CAUSES = [
     ("full-text search reads a tag's v", ALL, re.compile(r"COALESCE\(\(?(JSON_VALUE\()?c\.props")),
-    ("Postgres equality reads (props -> 'k')", {"postgres"}, re.compile(r"->'[^']*'\)=|props->>'[^']*'\)=\(CAST")),
+    ("Postgres equality reads (props -> 'k')", {"postgres"}, re.compile(r"->'[^']*'\)=|props->>'[^']*'\)=\(")),
     ("SQLite and Oracle equality through the index's class and key", {"sqlite", "oracle"}, re.compile(r"\"\$t\"',CASEjson_type|RETURNINGVARCHAR2\(16\)")),
     ("runtime $-key escaping", ALL, re.compile(r"='\$'|''\$''|'\$'\|\|")),
     ("Oracle's handling of a given whole number from 2^53 on", {"oracle"}, re.compile(r"RETURNINGNUMBERNULLONERROR")),
@@ -78,14 +80,24 @@ def tokens(sql):
     return re.findall(r"\w+|[^\w\s]", ALIAS.sub(lambda m: m.group(1) + "#", HASHED.sub("drivine_cypher_#", sql)))
 
 
+def window(toks, start, end):
+    """The tokens [start, end) with 40 on each side, joined, and where in that text the tokens [start, end) are."""
+    head = "".join(toks[max(0, start - 40):start])
+    body = "".join(toks[start:end])
+    return head + body + "".join(toks[end:end + 40]), (len(head), len(head) + len(body))
+
+
 def changed(before, after):
+    """Each difference, as the text before and after it, each with where in it the tokens changed are."""
     a, b = tokens(before), tokens(after)
-    out = []
-    for op, i1, i2, j1, j2 in difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes():
-        if op != "equal":
-            out.append("".join(a[max(0, i1 - 40):i2 + 40]))
-            out.append("".join(b[max(0, j1 - 40):j2 + 40]))
-    return out
+    return [(window(a, i1, i2), window(b, j1, j2))
+            for op, i1, i2, j1, j2 in difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes() if op != "equal"]
+
+
+def touches(marker, side):
+    """Whether [marker] is in the text [side] where it meets the tokens changed: a marker in what is the same on both sides is no cause."""
+    text, (start, end) = side
+    return any(m.start() < max(end, start + 1) and m.end() > min(start, end - 1) for m in marker.finditer(text))
 
 
 def main():
@@ -109,10 +121,10 @@ def main():
         if not hunks:
             counts[(store, "aliases renumbered alone")] += 1
             continue
-        text = "\n".join(hunks)
-        cause = next((name for name, stores, marker in CAUSES if store in stores and marker.search(text)), None)
+        # By the first cause whose marker meets a difference, on one side of it or the other.
+        cause = next((name for name, stores, marker in CAUSES if store in stores and any(touches(marker, side) for hunk in hunks for side in hunk)), None)
         if cause is None:
-            unexplained.append((store, cypher, hunks[:2]))
+            unexplained.append((store, cypher, [side[0] for side in hunks[0]]))
         else:
             counts[(store, cause)] += 1
             if explain:
