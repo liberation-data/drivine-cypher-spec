@@ -214,6 +214,8 @@ The expression is Cypher. It's evaluated by running `RETURN expression` on the s
 
 **Stopping.** By default, the CLI stops at the first statement or command that fails. With `--continue`, it runs everything and reports each failure as it comes.
 
+**A failure inside a transaction**, with `--continue`: a statement that fails between `:begin` and `:commit`, or a `:param` whose expression fails there, rolls the transaction back and closes it, as a store's transaction may be unusable after a failed statement, as Postgres's is. The statements after it run on their own, each in its own transaction, so the `:commit` that would have ended it fails, as no transaction is open. A command that fails there without reaching the store, as `:nope` or `:params all` does, leaves the transaction open. Without `--continue`, the first failure stops the run, and the transaction is rolled back, as at an input's end. FalkorDB opens no transaction, so none of this applies there.
+
 | Exit code | When |
 |---|---|
 | 0 | Everything ran. |
