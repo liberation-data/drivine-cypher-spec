@@ -28,6 +28,18 @@ class OracleListSortKeyTest {
     }
 
     @Test
+    fun `a list kept distinct or grouped by is sorted by its key and then by its text`() {
+        for (cypher in listOf(
+            "UNWIND [[1], [2], [1]] AS xs RETURN DISTINCT xs ORDER BY xs",
+            "UNWIND [[1], [2], [1]] AS xs RETURN xs, count(*) AS n ORDER BY xs",
+        )) {
+            val sql = oracle(cypher)
+            assertEquals(1, declarations(sql), sql)
+            assertTrue(Regex("""ORDER BY cy_list_key\((\S+)\), JSON_SERIALIZE\(\1 RETURNING VARCHAR2\(4000\) TRUNCATE\)$""").containsMatchIn(sql), sql)
+        }
+    }
+
+    @Test
     fun `a value of a kind left open, as a property, sorts as before, by its kind and then as JSON, with no function declared`() {
         // A list such a value holds still sorts as JSON sorts it on Oracle: the key isn't read for every sort of a value left open.
         val sql = oracle("MATCH (n:A) RETURN n.l AS l ORDER BY l")
