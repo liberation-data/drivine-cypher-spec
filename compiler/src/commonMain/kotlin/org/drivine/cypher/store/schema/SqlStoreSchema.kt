@@ -63,7 +63,8 @@ abstract class SqlStoreSchema internal constructor() : StoreSchema {
      * What [rows] say of [spec]'s form. First, each object the store has under a name Drivine gives one of the item's
      * ([madeAs]) must be the object it would make: one of its kind, on the node table, as unique as it, over the item's
      * properties in order, and of its label's nodes alone where it is; otherwise the item is a [ItemForm.Mismatch], whatever
-     * its record says. An object that isn't there is no mismatch: a record whose object is gone isn't listed, and one
+     * its record says. Where the record says a later form, only the structure is compared ([mismatchOf]'s `structureOnly`),
+     * and nothing else under its names ([otherMismatch]). An object that isn't there is no mismatch: a record whose object is gone isn't listed, and one
      * that lacks part is made whole ([isIncomplete]).
      *
      * Then its record's `details.form`: [SqlStoreDdl.CURRENT_FORM] is current, a later one [ItemForm.Newer], and an earlier

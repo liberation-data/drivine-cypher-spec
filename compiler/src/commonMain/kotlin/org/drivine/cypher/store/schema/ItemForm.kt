@@ -30,7 +30,7 @@ sealed interface ItemForm {
 
     /**
      * The item's record says form [found], a later one than [current], the one this version makes: a newer version made it,
-     * as in a rolling deploy. It is kept and used as it is, and never made again here, which would make it in an older form.
+     * as in a rolling deploy. It is kept and used as it is, and no recreate is suggested, as one here would make it in an older form.
      */
     data class Newer(val found: Int, val current: Int) : ItemForm
 
