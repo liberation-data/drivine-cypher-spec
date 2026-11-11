@@ -9,8 +9,9 @@ Checks the drivine CLI's cases, cli/cli.yaml, against what cli/README.md says a 
 - `stdin`, `stdout`, `stderr`, `description` and `note` are texts, and `stdoutLines` a list of texts;
 - `files` maps each name to its text, or to a map of its `text` and an octal `mode`; `env` maps each name to a text or
   null; `store` is only ever false, `cypherShell` only ever true, and `mode` only ever cypher-shell;
-- where a case runs with `--format json`, and with no `--explain`, `--help`, `--version` or `--driver-version` and no
-  `:params` or `:help` in its args' Cypher, its stdin or its files, which print something else to stdout, each line of
+- where a case runs with `--format json`, and with no `--explain` in any of its forms, `--help`, `--version` or
+  `--driver-version`, and no `:params`, `:help` or statement that starts with `EXPLAIN` in its args' Cypher, its stdin
+  or its files, which print something else to stdout, each line of
   the `stdout` it expects is one JSON object of `columns` and `rows`, with no bare NaN or infinity, and its last line
   ends in a line break, as json writes one line per statement.
 
@@ -50,18 +51,23 @@ def keys(readme):
 # stdout between them.
 OWN_OUTPUT = {"--explain", "-h", "--help", "-v", "--version", "--driver-version"}
 PRINTING_COMMAND = re.compile(r"^[ \t]*:(params|help)[ \t]*\r?$", re.MULTILINE)
+# A statement that starts with EXPLAIN, after any spaces and comments, prints its plan, not its result. A statement
+# starts at the start of the text, after a `;`, or after a command's line, which needs no `;`.
+EXPLAINED = re.compile(r"(?:\A|;|(?:\A|\n)[ \t]*:[^\n]*\n)(?:\s|//[^\n]*|/\*.*?\*/)*explain\b",
+                       re.IGNORECASE | re.DOTALL)
 
 
 def json_lines(case, args):
     """Whether args ask for --format json, and nothing but the statements' results is written to stdout: no flag of
-    OWN_OUTPUT, and no `:params` or `:help` in an argument, as the positional Cypher or `-c`'s, stdin or a file."""
+    OWN_OUTPUT, in any of its forms, and no `:params`, `:help` or statement that starts with EXPLAIN in an argument, as
+    the positional Cypher or `-c`'s, stdin or a file."""
     if not (any(a == "--format" and b == "json" for a, b in zip(args, args[1:])) or "--format=json" in args):
         return False
-    if OWN_OUTPUT & set(args):
+    if OWN_OUTPUT & {a.split("=", 1)[0] for a in args}:
         return False
     files = case.get("files") if isinstance(case.get("files"), dict) else {}
     texts = args + [case.get("stdin")] + [f.get("text") if isinstance(f, dict) else f for f in files.values()]
-    return not any(isinstance(t, str) and PRINTING_COMMAND.search(t) for t in texts)
+    return not any(isinstance(t, str) and (PRINTING_COMMAND.search(t) or EXPLAINED.search(t)) for t in texts)
 
 
 def a_file(file):
