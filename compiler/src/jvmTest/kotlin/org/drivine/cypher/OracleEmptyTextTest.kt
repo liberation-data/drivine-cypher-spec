@@ -53,6 +53,15 @@ class OracleEmptyTextTest {
     }
 
     @Test
+    fun `beside a long value, a function that makes a text reads a stored text's bound length for the empty text`() {
+        val sql = sql("MATCH (a:N) RETURN replace(toUpper(trim(coalesce(\$p.q, 'ab'))), a.name, '')")
+        val bound = Regex("CASE WHEN JSON_VALUE\\(n1.props, '\\\$.name.type\\(\\)'\\) = 'string' THEN JSON_VALUE\\(n1.props, '\\\$.name.length\\(\\)' RETURNING NUMBER\\) END AS (v\\d+)")
+        val column = bound.find(sql)?.groupValues?.get(1)
+        assertTrue(column != null, sql)
+        assertTrue(Regex("AND sh\\d+\\.$column IS NOT NULL AND .{0,200}? IS NOT NULL THEN JSON\\('\"\"'\\) END\\)").containsMatchIn(sql), sql)
+    }
+
+    @Test
     fun `a text's size is 0 where its VARCHAR2 and its CLOB are both null`() {
         val sql = sql("MATCH (a:N) RETURN size(a.name)")
         assertTrue(sql.contains("WHEN 'string' THEN JSON_SCALAR(COALESCE(LENGTH(JSON_VALUE(n1.props, '\$.name')), LENGTH(JSON_VALUE(n1.props, '\$.name' RETURNING CLOB)), 0)) END"), sql)
