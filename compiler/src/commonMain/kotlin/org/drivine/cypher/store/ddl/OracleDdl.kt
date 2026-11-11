@@ -341,7 +341,7 @@ ${made.entries.joinToString("\n") { (function, making) ->
     /** The index over the property of every node, whatever the label: what a save and a load by id find a node by. */
     private fun sharedIndex(spec: RangeIndexSpec): Pair<String, String> {
         val name = objectName("ix", spec.properties)
-        val expressions = spec.properties.joinToString(", ") { "${OracleSql.indexClass("props", it)}, ${OracleSql.indexKey("props", it)}" }
+        val expressions = spec.keys.joinToString(", ") { "${OracleSql.indexClass("props", it)}, ${OracleSql.indexKey("props", it)}" }
         return name to busyWaiting("CREATE INDEX IF NOT EXISTS $name ON $nodes ($expressions)")
     }
 
@@ -354,7 +354,7 @@ ${made.entries.joinToString("\n") { (function, making) ->
     private fun rangeIndex(spec: RangeIndexSpec): List<String> {
         val (name, shared) = sharedIndex(spec)
         val labelled = objectName("lx", listOf(spec.label) + spec.properties)
-        val scoped = spec.properties.flatMap { OracleSql.labelledIndex("n", spec.label, it) }.joinToString(", ")
+        val scoped = spec.keys.flatMap { OracleSql.labelledIndex("n", spec.label, it) }.joinToString(", ")
         // Not where a uniqueness constraint's index over the one property stands for it, as when the
         // range index is made again under a constraint: the record then names an index that is not
         // there, and the unique index is read through.
@@ -387,9 +387,9 @@ ${made.entries.joinToString("\n") { (function, making) ->
      * the index is made, so the partitions are trained on the embeddings there are.
      */
     private fun vectorIndex(spec: VectorIndexSpec): List<DdlStatement> {
-        val property = spec.properties.single()
+        val property = spec.keys.single()
         val side = OracleSideTable(
-            name = vectors(spec.label, property),
+            name = vectors(spec.label, spec.properties.single()),
             nodes = nodes,
             column = "embedding",
             columnType = "VECTOR(${spec.dimensions}, FLOAT32)",
@@ -429,8 +429,9 @@ ${made.entries.joinToString("\n") { (function, making) ->
             column = "doc",
             columnType = "JSON",
             payload = { row ->
-                spec.properties.joinToString(", ", "JSON_OBJECT(", " ABSENT ON NULL RETURNING JSON)") {
-                    "${literal(it)} VALUE ${OracleSql.searchedText(row, it)}"
+                // Under each property's own name, as a search through the index reads it; of the key it is held at.
+                spec.properties.zip(spec.keys).joinToString(", ", "JSON_OBJECT(", " ABSENT ON NULL RETURNING JSON)") { (property, key) ->
+                    "${literal(property)} VALUE ${OracleSql.searchedText(row, key)}"
                 }
             },
             indexed = { row -> OracleSql.carriesLabel(row, spec.label) },
@@ -476,7 +477,7 @@ ${made.entries.joinToString("\n") { (function, making) ->
         is UniquenessConstraintSpec -> {
             val name = objectName("uq", listOf(spec.label) + spec.properties)
             // A node that lacks any of the properties is not constrained, as on the graph engines.
-            val expressions = spec.properties.flatMap { OracleSql.uniqueIndex("n", spec.label, spec.properties, it) }.joinToString(", ")
+            val expressions = spec.keys.flatMap { OracleSql.uniqueIndex("n", spec.label, spec.keys, it) }.joinToString(", ")
             val unique = busyWaiting("CREATE UNIQUE INDEX IF NOT EXISTS $name ON $nodes n ($expressions)")
             val range = RangeIndexSpec(spec.label, spec.properties)
             if (spec.properties.size > 1) {

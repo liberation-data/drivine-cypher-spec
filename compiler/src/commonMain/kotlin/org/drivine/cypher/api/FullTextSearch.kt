@@ -14,6 +14,7 @@ import org.drivine.cypher.store.SqliteSql
 import org.drivine.cypher.store.ddl.CypherNames
 import org.drivine.cypher.store.ddl.OracleDdl
 import org.drivine.cypher.store.ddl.PostgresDdl
+import org.drivine.cypher.store.ddl.SqlStoreDdl
 import org.drivine.cypher.store.ddl.SqliteDdl
 import org.drivine.schema.SchemaItemKind
 
@@ -186,7 +187,7 @@ object FullTextSearch {
      * are the same.
      */
     private fun postgres(ddl: PostgresDdl, request: SearchRequest, query: TextQuery, scope: SearchParameters): String {
-        val keys = request.properties
+        val keys = SqlStoreDdl.storedKeys(request.properties)
         val text = PostgresSql.searchedText("c", keys)
         val len = "length(${PostgresSql.joinedText("c", keys)})"
         val labelled = listOf(request.labels.joinToString(" AND ") { PostgresSql.hasLabel("c", it) })
@@ -219,7 +220,7 @@ object FullTextSearch {
      * subquery the statement names twice, gave wrong counts on Oracle 23.26: every position of the text.
      */
     private fun oracle(ddl: OracleDdl, request: SearchRequest, query: TextQuery, scope: SearchParameters): String {
-        val keys = request.properties
+        val keys = SqlStoreDdl.storedKeys(request.properties)
         val values = keys.map { OracleSql.searchedText("c", it) }
         val text = values.joinToString(" || ' ' || ") { "LOWER($it)" }
         val len = "NVL(LENGTH(${values.joinToString(" || ' ' || ")}), 0)"
@@ -251,6 +252,7 @@ object FullTextSearch {
      * what has been committed, so a search does not see what its own transaction has written.
      */
     private fun oracleText(ddl: OracleDdl, texts: String, request: SearchRequest, query: TextQuery, scope: SearchParameters): String {
+        // The side table holds each property under its own name.
         val keys = request.properties
         val text = scope.bound(query.oracleText)
         val contains = keys.mapIndexed { i, key -> "JSON_TEXTCONTAINS(s.doc, ${OracleSql.path(key)}, $text, ${i + 1})" }
@@ -278,7 +280,7 @@ object FullTextSearch {
 
     /** Each term is counted by the function [SqliteFunctions.REGEXP_COUNT] the library registers, as Postgres counts it. */
     private fun sqlite(ddl: SqliteDdl, request: SearchRequest, query: TextQuery, scope: SearchParameters): String {
-        val keys = request.properties
+        val keys = SqlStoreDdl.storedKeys(request.properties)
         val text = SqliteSql.searchedText("c", keys)
         val len = "length(${SqliteSql.joinedText("c", keys)})"
         val labelled = listOf(request.labels.joinToString(" AND ") { SqliteSql.hasLabel("c", it) })

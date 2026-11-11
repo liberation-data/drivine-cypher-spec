@@ -161,7 +161,7 @@ class SqliteDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
     override fun createIndex(spec: IndexSpec, existing: CatalogItem?): List<DdlStatement> = when (spec) {
         is RangeIndexSpec -> {
             val name = objectName(RANGE, listOf(spec.label) + spec.properties)
-            statements("CREATE INDEX IF NOT EXISTS $name ON ${over(spec.label, spec.properties)}", recorded(spec, name))
+            statements("CREATE INDEX IF NOT EXISTS $name ON ${over(spec.label, spec.keys)}", recorded(spec, name))
         }
         // Recorded and not made: SQLite has no vector index of its own.
         is VectorIndexSpec -> statements(recorded(spec, null, vectorDetails(spec)))
@@ -175,7 +175,7 @@ class SqliteDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
     override fun createConstraint(spec: ConstraintSpec): List<DdlStatement> = when (spec) {
         is UniquenessConstraintSpec -> {
             val name = objectName(UNIQUE, listOf(spec.label) + spec.properties)
-            statements("CREATE UNIQUE INDEX IF NOT EXISTS $name ON ${over(spec.label, spec.properties)}", recorded(spec, name))
+            statements("CREATE UNIQUE INDEX IF NOT EXISTS $name ON ${over(spec.label, spec.keys)}", recorded(spec, name))
         }
     }
 

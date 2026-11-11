@@ -296,16 +296,16 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
     override fun createIndex(spec: IndexSpec, existing: CatalogItem?): List<DdlStatement> = when (spec) {
         is RangeIndexSpec -> {
             val name = objectName("ix", listOf(spec.label) + spec.properties)
-            statements("CREATE INDEX IF NOT EXISTS $name ON ${over(spec.label, spec.properties)}", recorded(spec, name))
+            statements("CREATE INDEX IF NOT EXISTS $name ON ${over(spec.label, spec.keys)}", recorded(spec, name))
         }
         is VectorIndexSpec -> {
             // An HNSW index over the embeddings of the label's nodes that are of its size: one of another size is left out, not refused.
-            val property = spec.properties.single()
-            val name = objectName("v", listOf(spec.label, property))
+            val name = objectName("v", listOf(spec.label, spec.properties.single()))
+            val key = spec.keys.single()
             statements(
                 "CREATE EXTENSION IF NOT EXISTS vector",
-                "CREATE INDEX IF NOT EXISTS $name ON $nodes USING hnsw ((${PostgresSql.embedding("", property, spec.dimensions)}) ${PostgresSql.operators(spec.similarity)}) " +
-                    "WHERE ${hasLabel("", spec.label)} AND ${PostgresSql.holdsEmbedding("", property, spec.dimensions)}",
+                "CREATE INDEX IF NOT EXISTS $name ON $nodes USING hnsw ((${PostgresSql.embedding("", key, spec.dimensions)}) ${PostgresSql.operators(spec.similarity)}) " +
+                    "WHERE ${hasLabel("", spec.label)} AND ${PostgresSql.holdsEmbedding("", key, spec.dimensions)}",
                 recorded(spec, name, vectorDetails(spec)),
             )
         }
@@ -314,7 +314,7 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
             val name = objectName("t", listOf(spec.label) + spec.properties)
             statements(
                 "CREATE EXTENSION IF NOT EXISTS pg_trgm",
-                "CREATE INDEX IF NOT EXISTS $name ON $nodes USING gin ((${PostgresSql.searchedText("", spec.properties)}) gin_trgm_ops) WHERE ${hasLabel("", spec.label)}",
+                "CREATE INDEX IF NOT EXISTS $name ON $nodes USING gin ((${PostgresSql.searchedText("", spec.keys)}) gin_trgm_ops) WHERE ${hasLabel("", spec.label)}",
                 recorded(spec, name, analyzerDetails(spec.analyzer)),
             )
         }
@@ -326,7 +326,7 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
     override fun createConstraint(spec: ConstraintSpec): List<DdlStatement> = when (spec) {
         is UniquenessConstraintSpec -> {
             val name = objectName("uq", listOf(spec.label) + spec.properties)
-            statements("CREATE UNIQUE INDEX IF NOT EXISTS $name ON ${over(spec.label, spec.properties)}", recorded(spec, name))
+            statements("CREATE UNIQUE INDEX IF NOT EXISTS $name ON ${over(spec.label, spec.keys)}", recorded(spec, name))
         }
     }
 

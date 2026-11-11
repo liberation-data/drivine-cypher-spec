@@ -11,6 +11,7 @@ import org.drivine.cypher.ast.RelationshipPattern
 import org.drivine.cypher.json.CypherEncoder
 import org.drivine.cypher.json.CypherJson
 import org.drivine.cypher.store.Stamps
+import org.drivine.cypher.store.ddl.SqlStoreDdl
 
 /**
  * Compiles a Cypher statement to SQL over a graph's tables on Oracle: see [SqlCypherCompiler].
@@ -85,6 +86,9 @@ class OracleCypherCompiler(
         indexedProperties: Set<Pair<String, String>>,
         encoder: CypherEncoder?,
     ) : this(graph, nullsEqualStored, eraStored, indexedProperties, encoder, false, false)
+
+    /** [indexedProperties] by the keys a node's `props` holds them at ([SqlStoreDdl.storedKeys]), as a pattern's property is read. */
+    private val indexedKeys = indexedProperties.map { (label, property) -> label to SqlStoreDdl.storedKeys(listOf(property)).single() }.toSet()
 
     /** The function the store keeps that compares two values that may hold a null: see [nullsEqual]. */
     private val storedNullsEqual = nullsEqualName(graph)
@@ -656,7 +660,7 @@ class OracleCypherCompiler(
     private fun labelledHeld(of: IndexedProperty?, held: List<String>): String? {
         if (of == null || of.labels.isEmpty() || !of.props.endsWith(".props")) return null
         val alias = of.props.removeSuffix(".props")
-        val indexed = of.labels.filter { (it to of.key) in indexedProperties }.ifEmpty { return null }
+        val indexed = of.labels.filter { (it to of.key) in indexedKeys }.ifEmpty { return null }
         return indexed.joinToString(" AND ") { label ->
             (OracleSql.labelledIndex(alias, label, of.key) + OracleSql.uniqueIndex(alias, label, listOf(of.key), of.key)).zip(held + held).joinToString(" AND ") { (column, it) -> "$column = $it" }
         }

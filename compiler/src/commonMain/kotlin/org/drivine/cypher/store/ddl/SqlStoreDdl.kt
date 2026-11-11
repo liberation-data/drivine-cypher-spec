@@ -161,6 +161,13 @@ abstract class SqlStoreDdl(val name: String, final override val engine: String, 
     /** Puts [lockRow] in [lock], safe to run again: see each store's. */
     abstract val lockSeed: String
 
+    /**
+     * The keys [properties] of a schema item are held at in a node's `props`: each property's name escaped as a statement
+     * writes it ([storedKeys]), `$x` at `$$x`. Every expression a store indexes or reads the item's properties by reads these;
+     * the item's name, its record and its objects' names keep the properties' own.
+     */
+    protected val SchemaItemSpec.keys: List<String> get() = storedKeys(properties)
+
     /** The table that holds the text a full-text index on [label]'s [properties] is over. */
     fun texts(label: String, properties: List<String>): String = objectName("t", listOf(label) + properties)
 
@@ -226,6 +233,13 @@ abstract class SqlStoreDdl(val name: String, final override val engine: String, 
     companion object {
         /** The key in a record's details its aliases are kept under. */
         const val ALIASES = "aliases"
+
+        /**
+         * The keys a node's `props` holds [properties] at, the properties of a schema item or a search: each escaped as
+         * `CypherReader` escapes a property it reads ([ValueLayout.escape]), so an index over `$x` is over the key `$$x` a
+         * statement writes it at, and a search reads that key.
+         */
+        fun storedKeys(properties: List<String>): List<String> = properties.map(ValueLayout::escape)
 
         /** The one row of a graph's lock table: see [lock]. */
         const val LOCK_ROW = "schema"

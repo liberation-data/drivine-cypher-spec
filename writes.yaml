@@ -1813,3 +1813,22 @@ cases:
       - only: [neo4j, sql]
         cypher: "DROP CONSTRAINT cy_unique_at"
         rows: []
+
+  - name: "Unique over a property whose name begins with $"
+    description: "A uniqueness constraint over a property named `$x` constrains the key a statement holds it at, `$$x` on a SQL store (see README.md, Values in the store), so a second node of the same value is refused there as on Neo4j, and a node is found by it (#161)."
+    steps:
+      - only: [neo4j, sql]
+        cypher: "CREATE CONSTRAINT cy_unique_dollar IF NOT EXISTS FOR (n:CyUnique) REQUIRE n.`$x` IS UNIQUE"
+        rows: []
+      - {only: [neo4j, sql], cypher: "CREATE (:CyUnique {id: 'a', `$x`: 1})"}
+      - {only: [neo4j, sql], cypher: "CREATE (:CyUnique {id: 'b', `$x`: 1})", error: true}
+      - {only: [neo4j, sql], cypher: "CREATE (:CyUnique {id: 'c', `$x`: 2})"}
+      - only: [neo4j, sql]
+        cypher: "MATCH (n:CyUnique {`$x`: 1}) RETURN n.id"
+        rows: ["a"]
+      - only: [neo4j, sql]
+        cypher: "MATCH (n:CyUnique) RETURN count(n)"
+        rows: [2]
+      - only: [neo4j, sql]
+        cypher: "DROP CONSTRAINT cy_unique_dollar"
+        rows: []
