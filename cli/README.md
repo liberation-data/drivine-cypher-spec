@@ -249,7 +249,7 @@ The CLI reads cypher-shell's files and prints values as cypher-shell does, but i
 - **`--fail-fast` and `--fail-at-end`.** `drivine` stops at the first failure with no flag, as `--fail-fast` does, and `--continue` does what `--fail-at-end` does. `--fail-fast` and `--fail-at-end` are unknown flags.
 - **`verbose`.** `drivine`'s `table` is cypher-shell's `verbose`, and prints the same. `auto` picks `table` where cypher-shell picks `verbose`, so it prints the same too.
 - **Exit codes.** cypher-shell exits with 1 for every failure. `drivine` exits with 2 for a bad invocation and 3 for a store it can't connect to.
-- **A node's labels.** cypher-shell prints them in the order Neo4j gives them. `drivine` prints them sorted, so `(:Q:P)` there may be `(:P:Q)` here. No case compares a node of two labels whose order differs.
+- **A node's labels.** cypher-shell prints them in the order Neo4j gives them. `drivine` prints them sorted, so `(:Q:P)` there may be `(:P:Q)` here. No case marked `cypherShell: true` holds a node of two labels.
 - **`-d` and `--graph`.** cypher-shell's `-d` names a Neo4j database. `drivine`'s names the database or the service, and is refused on FalkorDB and SQLite. A graph is named with `--graph`, which cypher-shell doesn't have.
 
 The cases marked `mode: cypher-shell` are the mode's tests. Each also marked `cypherShell: true` keeps its expected output, its exit code among it, as cypher-shell gives it. The runner gives them the store's user and password in `DRIVINE_USER` and `DRIVINE_PASSWORD`, as it gives every case, so the mode reads those before `NEO4J_USERNAME` and `NEO4J_PASSWORD`. `record-cypher-shell.py` checks every case marked `cypherShell: true` against cypher-shell, in either mode.

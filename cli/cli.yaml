@@ -70,6 +70,12 @@ cases:
     stdout: "n, r, m\n(:P {name: \"x\"}), [:K {w: 1}], (:Q)\n"
     exit: 0
 
+  - name: "plain prints a node's labels sorted"
+    args: ["--format", "plain", "CREATE (n:Q:P) RETURN n"]
+    stdout: "n\n(:P:Q)\n"
+    exit: 0
+    note: "Not cypherShell: true, since cypher-shell prints the labels in the order Neo4j gives them."
+
   - name: "plain escapes a \" in a text, and not a \\"
     cypherShell: true
     args: ["--format", "plain", "RETURN 'a\"b\\\\c' AS s, 'it\\'s' AS q"]
