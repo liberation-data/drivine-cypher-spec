@@ -37,6 +37,7 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import org.drivine.cypher.host.HostFunction
 import org.drivine.cypher.host.HostFunctions
+import org.drivine.cypher.host.TextEncoding
 import org.drivine.sqlite.ext.SQLITE_BUSY
 import org.drivine.sqlite.ext.SQLITE_DETERMINISTIC
 import org.drivine.sqlite.ext.SQLITE_DIRECTONLY
@@ -44,6 +45,7 @@ import org.drivine.sqlite.ext.SQLITE_ERROR
 import org.drivine.sqlite.ext.SQLITE_INNOCUOUS
 import org.drivine.sqlite.ext.SQLITE_INTEGER
 import org.drivine.sqlite.ext.SQLITE_OK
+import org.drivine.sqlite.ext.SQLITE_UTF16
 import org.drivine.sqlite.ext.SQLITE_UTF8
 import org.drivine.sqlite.ext.sqlite3_api_routines
 import platform.posix.memset
@@ -158,6 +160,12 @@ class SqliteExtensionTest {
         assertEquals("null" to null, call("drivine_gc_collect", 0))
         // Each registration's reference to its function is released by its destructor, as SQLite calls it on close.
         registered.forEach { it.destroy!!(it.app) }
+    }
+
+    @Test
+    fun aFunctionThatPrefersUtf16IsRegisteredWithItsFlag() {
+        val function = HostFunction("drivine_utf16", 1, deterministic = true, encoding = TextEncoding.UTF16) { _, _, result -> result.nullValue() }
+        assertEquals(SQLITE_UTF16 or SQLITE_DETERMINISTIC or SQLITE_INNOCUOUS, function.flags)
     }
 
     @Test

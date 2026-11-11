@@ -90,6 +90,8 @@ class HostSpecTest {
         // SQLite reads a text as a float otherwise than Kotlin does ('Infinity' is 0.0 to it), so the step fails, not passes.
         val text = CypherJson.readTree("""{"function": "drivine_float_text", "args": ["Infinity"], "result": "Infinity"}""")
         assertContains(assertFails { check(text, "text") }.message!!, "No step reads the float of the text")
+        val nan = CypherJson.readTree("""{"function": "drivine_float_text", "args": [{"${'$'}float": "NaN"}], "result": "NaN"}""")
+        assertContains(assertFails { check(nan, "nan") }.message!!, "can't be given NaN")
         val pending = CypherJson.readTree("""{"function": "drivine_equal", "args": ["1", "1"], "result": 1}""")
         assertEquals(Outcome.PENDING, check(pending, "pending"))
         val read = CypherJson.readTree("""{"read": {"store": "sqlite", "nonFinite": false, "column": "1"}, "value": 1, "note": "n"}""")
@@ -135,6 +137,8 @@ class HostSpecTest {
             }
         } else {
             val args = step["args"]!!.map(::expanded)
+            // SQLite binds a NaN as NULL (check/extension-native.py refuses it too): the function would be given null.
+            require(args.none { it is Double && it.isNaN() }) { "$where: SQLite can't be given NaN as an argument" }
             assertEquals(expanded(step["result"]!!), call(functions, args, where), "$where: $name$args")
         }
         return Outcome.RAN

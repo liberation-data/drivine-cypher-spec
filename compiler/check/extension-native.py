@@ -81,17 +81,22 @@ def host_steps(connection, host):
             try:
                 if "ascending" in step:
                     values = [sql_value(v) for v in step["ascending"]]
+                    if len(values) < 2:
+                        raise ValueError("ascending has two values or more, each before the next")
                     for a, b in zip(values, values[1:]):
                         before = connection.execute(f"SELECT {name}(?) < {name}(?)", (a, b)).fetchall()[0][0]
                         if before != 1:
                             report(f"{where}: {name}({a!r}) before {name}({b!r})", False, f"got {before!r}")
                 else:
                     args = [sql_value(v) for v in step["args"]]
+                    if any(isinstance(a, float) and math.isnan(a) for a in args):
+                        # SQLite binds a NaN as NULL, so the function would be given null, not what the step says.
+                        raise ValueError("SQLite can't be given NaN as an argument")
                     got = connection.execute(f"SELECT {name}({', '.join('?' for _ in args)})", args).fetchall()[0][0]
                     expected = sql_value(step["result"])
                     if not same(got, expected):
                         report(f"{where}: {name}{tuple(args)!r}", False, f"got {got!r}, expected {expected!r}")
-            except apsw.Error as e:
+            except (apsw.Error, ValueError) as e:
                 report(f"{where}: {name}", False, f"failed: {type(e).__name__}: {e}")
             ran += 1
     report(f"host.yaml: {ran} function steps through SQL", ran > 0, "no function step ran")
