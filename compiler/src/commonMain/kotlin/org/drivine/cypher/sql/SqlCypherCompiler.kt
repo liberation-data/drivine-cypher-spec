@@ -2936,7 +2936,7 @@ abstract class SqlCypherCompiler(
                 },
             )
             // Before aggregatesFirst, which names each variable it groups by as an item of its own.
-            requireExplicitGrouping(items, projection.orderBy, select.scope.keys)
+            requireExplicitGrouping(items, projection.orderBy, select.scope.keys, projection.distinct)
             anewFirst(select, projection, items)?.let { (made, kept) -> return project(made, kept, final, statement) }
             casesFirst(select, projection, items)?.let { (cased, kept) -> return project(cased, kept, final, statement) }
             // After casesFirst, which refuses what it must of an aggregate's CASE before working it out first.
@@ -3627,10 +3627,11 @@ abstract class SqlCypherCompiler(
          * graph engine would have to group by without being told. A key is an item that does not aggregate, and Neo4j reads
          * one there only where it is a variable or a variable's property ([isPlainKey]): `x.a + count(*)` beside `x.a`, but
          * not `toUpper(p.name) + count(*)` beside `toUpper(p.name)`; in a pattern's parts, only where it is a variable. So too
-         * a term of [orderBy] that aggregates, beside items that aggregate, and names a variable of [scope] outside an item's
-         * name and an item that does not aggregate, whatever that item is, as Neo4j takes them.
+         * a term of [orderBy] that aggregates, beside items that aggregate or where the projection is [distinct], and names a
+         * variable of [scope] outside an item's name and an item that does not aggregate, whatever that item is, as Neo4j takes
+         * them.
          */
-        private fun requireExplicitGrouping(items: List<Projection.Item>, orderBy: List<Projection.SortItem>, scope: Set<String>) {
+        private fun requireExplicitGrouping(items: List<Projection.Item>, orderBy: List<Projection.SortItem>, scope: Set<String>, distinct: Boolean) {
             val grouping = items.filterNot { contains(it.expression, ::isAggregate) }
             val grouped = grouping.map { it.expression }.toSet()
             val keys = grouped.filter(::isPlainKey).toSet()
@@ -3644,7 +3645,8 @@ abstract class SqlCypherCompiler(
                     )
                 }
             }
-            if (grouping.size == items.size) return
+            // One that is DISTINCT groups by its items where it orders by an aggregate (drivine4j#439), as one that aggregates does.
+            if (grouping.size == items.size && !distinct) return
             val names = items.map { it.name }.toSet()
             orderBy.filter { contains(it.expression, ::isAggregate) }.forEach { sort ->
                 // Not less the variables an item is: one an item renames, named in an order term's pattern, is a new variable of the

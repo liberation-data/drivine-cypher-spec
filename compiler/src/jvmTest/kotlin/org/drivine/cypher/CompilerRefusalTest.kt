@@ -596,6 +596,14 @@ class CompilerRefusalTest {
             ).forEach { cypher ->
                 assertTrue("GROUP BY" in compiler.compile(cypher).sql, "${compiler::class.simpleName}: $cypher")
             }
+            // So it names no variable outside its aggregates and the items, as one that aggregates names none: grouped by n, the
+            // DISTINCT gave a row for each n.num2 beside the same a.
+            val outside = "MATCH (n) RETURN DISTINCT n.num1 AS a ORDER BY n.num2 + max(n.num2)"
+            assertEquals(
+                "A term of an ORDER BY aggregates, and names n outside its aggregates and the items: " +
+                    "Cypher would group by it without being told. Order by an item's name, or by an expression of the items and aggregates.",
+                assertThrows<CompilerException>(outside) { compiler.compile(outside) }.message,
+            )
         }
     }
 
