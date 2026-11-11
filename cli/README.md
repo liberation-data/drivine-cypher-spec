@@ -114,7 +114,7 @@ Flags and environment variables override the profile, key by key. So `DRIVINE_PA
 | `--sample-rows N` | For `table`, the number of rows sampled to size its columns. The default is 1000. |
 | `--wrap {true,false}` | For `table`, whether a value wider than its column wraps. The default is `true`. |
 | `--continue` | Keeps going past a failed statement or command: see [Failures and exit codes](#failures-and-exit-codes). |
-| `--explain` | On a SQL store, prints for each statement the SQL it compiles to, which may run over several lines, then one line, `-- parameters: ` and the Cypher parameters the statement uses, by their names, in the order it first uses them, as compact JSON, written as `json` writes values: a parameter set but not used isn't printed, nor one used but not set, which has no value, and a statement that uses none prints `{}`. These are the statement's own parameters, not the values the SQL binds. The SQL is what an application's query compiles to; the CLI's own output adds typed reads (#162). It runs no statement of the input, but it still connects to evaluate each `-P` and `:param` expression, as [Parameters](#parameters) says. The SQL is the compiler's, and cases don't compare it. On a graph engine, it's refused as a bad invocation: there, the store runs the Cypher itself. |
+| `--explain`, `--explain=sql`, `--explain=plan` | Prints what each statement would run, and runs none: see [Explaining](#explaining). |
 | `--non-interactive` | No REPL, even on a terminal: see [The REPL](#the-repl). |
 | `--history FILE` | The REPL's history file, or `in-memory` or `disable`. The default is `~/.drivine/history`. |
 | `--idle-timeout T` | Leaves the REPL after T without input, given as `<hours>h<minutes>m<seconds>s`, as in `1h30m`. |
@@ -212,6 +212,38 @@ The expression is Cypher. It's evaluated by running `RETURN expression` on the s
 
 **Errors** go to stderr. Each is the store's message, or Drivine's own: a refusal by the compiler, a failure to connect, a bad flag. A case compares Drivine's own messages, but not the store's.
 
+## Explaining
+
+`--explain` prints, for each statement, what the store would run, and runs none. It still connects, to evaluate each `-P` and `:param` expression, as [Parameters](#parameters) says. Each statement's explanation ends in one line, `-- parameters: ` and the Cypher parameters the statement uses, by their names, in the order it first uses them, as compact JSON, written as `json` writes values. A parameter that is set but not used isn't printed, nor one that is used but not set, which has no value, and a statement that uses none prints `{}`. These are the statement's own parameters, not the values the SQL binds.
+
+`--explain` takes a value after `=`, and only there, as `--explain plan` would read `plan` as the statement:
+
+| | On a SQL store | On a graph engine |
+|---|---|---|
+| `--explain`, `--explain=sql` | The SQL the statement compiles to, which may run over several lines, then the parameters' line. | The store's plan, then the parameters' line. |
+| `--explain=plan` | The SQL, then the store's plan of it, then the parameters' line. | As `--explain`: the plan is all there is. |
+
+Any other value is a bad value, and a bad invocation.
+
+**The SQL** is what an application's query compiles to; the CLI's own output adds typed reads (#162). The SQL is the compiler's, and cases don't compare it.
+
+**The plan** is one line, `-- plan:`, then each line of the plan as the store gives it, each after `-- `, so that a SQL store's whole explanation is still SQL a client can run:
+
+| Store | The plan |
+|---|---|
+| Neo4j | The driver's plan: one operator a line, its name, then its details where it has them, after two spaces, indented by two spaces for each level below the first. |
+| Memgraph | The rows of its `EXPLAIN`. |
+| FalkorDB | The lines of its `GRAPH.EXPLAIN`. |
+| Postgres | The rows of its `EXPLAIN`. |
+| Oracle | The lines `DBMS_XPLAN.DISPLAY` gives after `EXPLAIN PLAN`. |
+| SQLite | The `detail` of each row of its `EXPLAIN QUERY PLAN`, indented by two spaces for each level below the first. |
+
+A plan's text is the store's, and changes with its version and its data, so cases check only its shape. Where the SQL is more than one statement, each that the store plans has its plan, in turn. Where the store can't plan what a statement compiles to, as Oracle can't plan a PL/SQL block, the plan is one line, `-- plan: none (` and why `)`, and the run goes on.
+
+**A statement that starts with `EXPLAIN`**, after any comments, is explained as `--explain=plan` explains it, without the word, whatever the flags, and isn't run: the statements around it run as they would. On a graph engine, the CLI asks the store for the plan, as it does for `--explain`, and doesn't print the store's empty result.
+
+**`PROFILE`**, which runs a statement and gives its plan with what each step did, comes later. Until then a statement that starts with `PROFILE` runs as the store runs it, and prints what the store gives.
+
 ## Failures and exit codes
 
 **Stopping.** By default, the CLI stops at the first statement or command that fails. With `--continue`, it runs everything and reports each failure as it comes.
@@ -254,6 +286,7 @@ The CLI reads cypher-shell's files and prints values as cypher-shell does, but i
 - **`verbose`.** `drivine`'s `table` is cypher-shell's `verbose`, and prints the same. `auto` picks `table` where cypher-shell picks `verbose`, so it prints the same too.
 - **Exit codes.** cypher-shell exits with 1 for every failure. `drivine` exits with 2 for a bad invocation and 3 for a store it can't connect to.
 - **A node's labels.** cypher-shell prints them in the order Neo4j gives them. `drivine` prints them sorted, so `(:Q:P)` there may be `(:P:Q)` here. No case marked `cypherShell: true` holds a node of two labels.
+- **`EXPLAIN`.** cypher-shell prints an `EXPLAIN`'s plan as a table of operators, its estimated rows among them. `drivine` prints it as [Explaining](#explaining) says, on every store.
 - **`-d` and `--graph`.** cypher-shell's `-d` names a Neo4j database. `drivine`'s names the database or the service, and is refused on FalkorDB and SQLite. A graph is named with `--graph`, which cypher-shell doesn't have.
 
 The cases marked `mode: cypher-shell` are the mode's tests. Each also marked `cypherShell: true` keeps its expected output, its exit code among it, as cypher-shell gives it. The runner gives them the store's user and password in `DRIVINE_USER` and `DRIVINE_PASSWORD`, as it gives every case, so the mode reads those before `NEO4J_USERNAME` and `NEO4J_PASSWORD`. `record-cypher-shell.py` checks every case marked `cypherShell: true` against cypher-shell, in either mode.
