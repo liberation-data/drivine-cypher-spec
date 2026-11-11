@@ -43,6 +43,18 @@ passes "a json case that fails, with nothing on stdout" 'cases:
     stdout: ""
     exit: 1'
 
+passes "a json case whose flag prints something else" 'cases:
+  - name: "v"
+    args: ["--format", "json", "--version"]
+    stdout: "drivine 1.0.0\n"
+    exit: 0'
+passes "a json case whose stdin prints its parameters" 'cases:
+  - name: "q"
+    args: ["--format", "json"]
+    stdin: ":param a => 1\n:params\n"
+    stdout: "{\n  a: 1\n}\n"
+    exit: 0'
+
 refused "a file that isn't YAML" "cases: [" "isn't YAML"
 refused "a file of another shape" "- name: a" "whose one key is \`cases\`"
 refused "a key besides cases" "cases: []
@@ -137,6 +149,11 @@ printf '%s\n' "cases:
 $ok" > "$root/cases.yaml"
 if out="$(python3 -I "$check" "$root/cases.yaml" "$root/README.md" 2>&1)"; then fail "a README with no Cases section passed"; fi
 grep -qF 'no "## Cases" section' <<<"$out" || fail "a README with no Cases section: not its failure: $out"
+
+# A Cases section whose table is gone is refused, though a later section has a table of keys.
+printf '# A README\n\n## Cases\n\nNo table.\n\n## Later\n\n| Key | What it is |\n|---|---|\n| `name` | A name. |\n' > "$root/README.md"
+if out="$(python3 -I "$check" "$root/cases.yaml" "$root/README.md" 2>&1)"; then fail "a README with no table of keys passed"; fi
+grep -qF 'has no table of keys' <<<"$out" || fail "a README with no table of keys: not its failure: $out"
 
 out="$(python3 -I "$check" "$here/../../cli/cli.yaml" "$readme")" || fail "the spec's own cli.yaml was refused: $out"
 echo "cli-cases-check-test: passed. $out"
