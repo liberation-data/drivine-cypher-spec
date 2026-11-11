@@ -84,6 +84,53 @@ refused "json's stdout with no last line break" 'cases:
     stdout: "{\"columns\":[\"n\"],\"rows\":[[1]]}"
     exit: 0' "json's stdout ends in a line break"
 
+refused "a json line of NaN, which JSON hasn't" 'cases:
+  - name: "a"
+    args: ["--format", "json", "RETURN 0.0/0.0"]
+    stdout: "NaN\n"
+    exit: 0' "line 1 of its json stdout isn't JSON"
+refused "a json line that isn't a result" 'cases:
+  - name: "a"
+    args: ["--format=json", "RETURN 1 AS n"]
+    stdout: "[1]\n"
+    exit: 0' "line 1 of its json stdout isn't an object of \`columns\` and \`rows\`"
+refused "a case that isn't a map" "cases:
+  - a" "case 1 isn't a map"
+refused "a name that isn't a text" "cases:
+  - name: [a]
+    args: []
+    exit: 0" "has no name"
+refused "an only that names a list" "cases:
+$ok
+    only: [[neo4j]]" "\`only\` names ['neo4j']"
+refused "a stdin that isn't a text" "cases:
+$ok
+    stdin: 1" "\`stdin\` is a text"
+refused "stdoutLines that aren't a list of texts" "cases:
+$ok
+    stdoutLines: \"^n$\"" "\`stdoutLines\` is a list of texts"
+passes "files of each form the README allows" "cases:
+$ok
+    files: {a.cypher: \"RETURN 1;\", b.yml: {text: \"x\", mode: \"600\"}, c: {text: \"y\"}}"
+refused "a file whose mode isn't octal" "cases:
+$ok
+    files: {b.yml: {text: \"x\", mode: \"rw\"}}" "\`files\` maps each name to its text"
+refused "a file with no text" "cases:
+$ok
+    files: {b.yml: {mode: \"600\"}}" "\`files\` maps each name to its text"
+refused "a variable that isn't a text or null" "cases:
+$ok
+    env: {DRIVINE_USER: 1}" "\`env\` maps each name to a text or null"
+refused "store: true" "cases:
+$ok
+    store: true" "\`store\` is only ever false"
+refused "cypherShell: false" "cases:
+$ok
+    cypherShell: false" "\`cypherShell\` is only ever true"
+refused "a mode the README doesn't name" "cases:
+$ok
+    mode: default" "\`mode\` is only ever \"cypher-shell\""
+
 # The README's table is where the keys come from: one without the section is refused, not passed.
 printf '# No cases here\n' > "$root/README.md"
 printf '%s\n' "cases:

@@ -22,16 +22,18 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # PyYAML 6.0.2 as a wheel, by PyPI's SHA-256 of each of its Linux x86_64 wheels for Python 3.11 to 3.13, into a venv
-      # of the job's own. --only-binary, so pip never builds it, which would fetch build tools no hash covers.
+      # Python 3.12 set, not the image's own python3, which changes with ubuntu-latest and may be one PyYAML 6.0.2 has
+      # no wheel for, as 3.14.
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with: { python-version: '3.12' }
+      # PyYAML 6.0.2 as a wheel, by PyPI's SHA-256 of its Linux x86_64 wheel for Python 3.12, into a venv of the job's
+      # own. --only-binary, so pip never builds it, which would fetch build tools no hash covers.
       - name: PyYAML
         run: |
           python3 -m venv "$RUNNER_TEMP/venv"
           cat > "$RUNNER_TEMP/requirements.txt" <<'EOF'
           pyyaml==6.0.2 \
-              --hash=sha256:3ad2a3decf9aaba3d29c8f537ac4b243e36bef957511b4766cb0057d32b0be85 \
-              --hash=sha256:80bab7bfc629882493af4aa31a4cfa43a4c57c83813253626916b8c7ada83476 \
-              --hash=sha256:70b189594dbe54f75ab3a1acec5f1e3faa7e8cf2f1e08d9b561cb41b845f69d5
+              --hash=sha256:80bab7bfc629882493af4aa31a4cfa43a4c57c83813253626916b8c7ada83476
           EOF
           "$RUNNER_TEMP/venv/bin/pip" install --quiet --only-binary :all: --require-hashes -r "$RUNNER_TEMP/requirements.txt"
           echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
