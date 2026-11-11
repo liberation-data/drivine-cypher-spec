@@ -16,7 +16,8 @@ class ParserCachesTest {
 
     private val requests: List<String> by lazy {
         val spec = File(requireNotNull(javaClass.getResource("/cypher/queries.yaml")) { "No spec file cypher/queries.yaml" }.toURI()).parentFile
-        Oracle.corpusRequests(spec).filter { "\"cypher\"" in it }.shuffled(kotlin.random.Random(179)).take(2_000)
+        // A statement that embeds the clock, as SQLite's does, gives another answer each time: the corpus leaves it out too.
+        Oracle.corpusRequests(spec).filter { "\"cypher\"" in it }.shuffled(kotlin.random.Random(179)).take(2_000).filter { Oracle.answerUnlessClocked(it) != null }
     }
 
     @AfterTest
