@@ -530,7 +530,7 @@ cases:
         parameters: {s: "!"}
         rows: ["Keanu!", "Carrie!", "Laurence!"]
       - cypher: "MATCH (p:Person)-[:ACTED_IN]->(m) RETURN DISTINCT COUNT { (p)-[:ACTED_IN]->() } AS c ORDER BY min(m.released), c"
-        rows: [3, 2, 1]
+        rows: [3, 1, 2]
       - note: An order of an expression of an item, which is no item.
         cypher: "MATCH (p:Person)-[:ACTED_IN]->(m) RETURN {name: p.name} AS who, count(*) AS c ORDER BY who.name"
         rows: [[{name: "Carrie"}, 2], [{name: "Keanu"}, 3], [{name: "Laurence"}, 1]]
