@@ -269,14 +269,15 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
 
     /**
      * Where the kind comes, then the SQL value `->>` reads, which orders a number before a text, and a truth value, 1 or 0, among
-     * the numbers. The first term is a text: the kind's rank, a list's followed by itself as [SqliteFunctions.SORT_KEY] writes
-     * it, so a list is ordered by it, and a temporal value's tag's, `2~` and its kind's place followed by its sort key (a duration's
-     * text), so the value's term reads no tag; and null for null. The value is read once more, not twice, as [sortKey] reads
+     * the numbers. The first term is a text: the kind's rank, a list's `2!` followed by itself as [SqliteFunctions.SORT_KEY]
+     * writes it, so a list is ordered by it, and a temporal value's tag's, `2~` and its kind's place followed by its sort key (a
+     * duration's text), so the value's term reads no tag; the character after the `2` puts every list before every tag, whatever
+     * text a library's [SqliteFunctions.SORT_KEY] writes; and null for null. The value is read once more, not twice, as [sortKey] reads
      * it, and each term is a value JSON holds, as a `CALL { … }` carries it out. NaN, where the statement is given it, is a
      * number, whose text the value is, which comes after every number.
      */
     override fun openSortKey(json: String) = shared(json) { (x) ->
-        (if (nonFinite) "CASE WHEN ${isNaN(x)} THEN '5' ELSE " else "") + "CASE json_type($x) WHEN 'object' THEN ${tagRank(x, "'1'") { "'2~$it' || COALESCE(${tagKey(x)}, ${tagText(x)})" }} WHEN 'array' THEN '2' || ${SqliteFunctions.SORT_KEY}($x) WHEN 'text' THEN '3' " +
+        (if (nonFinite) "CASE WHEN ${isNaN(x)} THEN '5' ELSE " else "") + "CASE json_type($x) WHEN 'object' THEN ${tagRank(x, "'1'") { "'2~$it' || COALESCE(${tagKey(x)}, ${tagText(x)})" }} WHEN 'array' THEN '2!' || ${SqliteFunctions.SORT_KEY}($x) WHEN 'text' THEN '3' " +
             "WHEN 'true' THEN '4' WHEN 'false' THEN '4' WHEN 'integer' THEN '5' WHEN 'real' THEN '5' END" + if (nonFinite) " END" else ""
     }.let { rank -> listOf(rank, shared(json) { (x) -> "($x ->> '$')" }) }
 
