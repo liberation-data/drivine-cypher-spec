@@ -558,6 +558,8 @@ internal class SchemaProgram(
         val form = formOf(spec)
         // Another item under a name Drivine gives this one's objects: never taken as made, and never made over.
         if (form is ItemForm.Mismatch) return mismatched(spec, existing, form)
+        // Another library's objects with no record of them: kept as they are, and never made over or recorded as made.
+        if (existing == null && form is ItemForm.Stale) return keptUnrecorded(spec, form)
         if (existing == null) {
             // A related item (of the kind and label, not the spec's) lets a store with an index a label (FalkorDB) make
             // only the properties missing.
@@ -821,6 +823,7 @@ internal class SchemaProgram(
         val form = formOf(spec)
         // Another item under the name Drivine gives this one's index: never taken as made, and never made over.
         if (form is ItemForm.Mismatch) return mismatched(spec, existing, form)
+        if (existing == null && form is ItemForm.Stale) return keptUnrecorded(spec, form)
         if (existing != null && existing.buildFailed) {
             // FalkorDB keeps listing a constraint whose build failed, though it enforces nothing: dropped, and built again,
             // which gives a violation where the data still repeats a key.
@@ -1082,6 +1085,15 @@ internal class SchemaProgram(
             )
         }
         adoptForm(form)
+    }
+
+    /**
+     * An item of another form whose objects stand under its names with no record of it: kept and used as it is, and said
+     * so, as one recorded is; nothing is made, and no record is written, which would say it is this version's.
+     */
+    private fun keptUnrecorded(spec: SchemaItemSpec, form: ItemForm.Stale): EnsureResult {
+        keepForm(spec, form)
+        return EnsureResult.AlreadyMatching(SchemaItemInfo.fromSpec(spec))
     }
 
     /** Records the form of an item made in this version's form whose record says none ([ItemForm.Unrecorded]). */

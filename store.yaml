@@ -7109,3 +7109,36 @@ forms:
       - {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique"}
     items:
       - {spec: {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"]}, form: {"unrecorded": "UPDATE drivine_schema SET details = JSON_MERGEPATCH(details, '{\"form\": 1}') WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"email\"]'"}}
+  - name: "Oracle: TypeScript's range index whose labelled index is gone, its record saying no form"
+    description: "Listed INCOMPLETE. What is left, the index over the property of every node, is the same text whichever library made it (TypeScript's and Python's write drivine4j's path there), so nothing tells another form: it is current, and made whole in this version's form."
+    store: "oracle"
+    listing: "indexes.RANGE_INDEX"
+    rows:
+      - {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": "Person_name_range", "details": {"labelled": "drivine_lx_Personname_44ce5436"}, "status": "INCOMPLETE"}
+      - {"object": "DRIVINE_IX_NAME_337A8B", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.name' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"], "tableColumns": null, "source": null}
+    listed:
+      - {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": "Person_name_range", "status": "INCOMPLETE"}
+    items:
+      - {spec: {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"]}, form: "current"}
+  - name: "Oracle: TypeScript's range index with no record of it"
+    description: "Its labelled and shared indexes, as TypeScript's DDL makes them, and no record: read as a record that says no form is, so it is another form, kept, and never recorded as this version's."
+    store: "oracle"
+    listing: "indexes.RANGE_INDEX"
+    rows:
+      - {"object": "DRIVINE_IX_EMAIL_5C24B9C", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"], "tableColumns": null, "source": null}
+      - {"object": "DRIVINE_IX_NAME_337A8B", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.name' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"], "tableColumns": null, "source": null}
+      - {"object": "DRIVINE_LX_PERSONNAME_44CE5436", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["CASE JSON_EXISTS2(\"LABELS\" FORMAT OSON , '$?(@ == \"Person\")' /* json_path_str  $?(@.string() == \"Person\")  */  FALSE ON ERROR TYPE(LAX) ) WHEN 1 THEN JSON_VALUE(\"PROPS\" FORMAT OSON , '$.\"name\"' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) ) END "], "tableColumns": null, "source": null}
+    listed:
+    items:
+      - {spec: {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"]}, form: {"stale": "TS's or Python's Oracle form"}}
+  - name: "Oracle: TypeScript's uniqueness constraint with no record of it"
+    description: "Its unique index, as TypeScript's DDL makes it, and no record: another form, kept."
+    store: "oracle"
+    listing: "constraints"
+    rows:
+      - {"object": "DRIVINE_IX_EMAIL_5C24B9C", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"], "tableColumns": null, "source": null}
+      - {"object": "DRIVINE_IX_NAME_337A8B", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.name' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"], "tableColumns": null, "source": null}
+      - {"object": "DRIVINE_UQ_PERSONEMAIL_5482A751", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "UNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["CASE JSON_EXISTS2(\"LABELS\" FORMAT OSON , '$?(@ == \"Person\")' /* json_path_str  $?(@.string() == \"Person\")  */  FALSE ON ERROR TYPE(LAX) ) WHEN 1 THEN JSON_VALUE(\"PROPS\" FORMAT OSON , '$.\"email\"' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) ) END "], "tableColumns": null, "source": null}
+    listed:
+    items:
+      - {spec: {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"]}, form: {"stale": "TS's or Python's Oracle form"}}

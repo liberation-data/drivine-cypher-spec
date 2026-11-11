@@ -88,7 +88,10 @@ abstract class SqlStoreSchema internal constructor() : StoreSchema {
             mismatchOf(made, there, structureOnly = newer)?.let { return ItemForm.Mismatch(there.name, it, droppable = there.isIndex) }
         }
         otherMismatch(spec, objects, structureOnly = newer)?.let { return it }
-        if (record == null) return ItemForm.Current
+        // Objects under the item's names with no record of it: read as a record that says no form would be, so another
+        // library's are kept as they are, not made over and recorded as this version's. This version's, or what isn't
+        // told, is made and recorded as ever.
+        if (record == null) return unrecordedForm(spec, null, objects).takeIf { it is ItemForm.Stale } ?: ItemForm.Current
         return when (form) {
             SqlStoreDdl.CURRENT_FORM.toLong() -> ItemForm.Current
             null -> unrecordedForm(spec, record, objects)
@@ -102,7 +105,7 @@ abstract class SqlStoreSchema internal constructor() : StoreSchema {
      * The form of [spec]'s item whose [record] says none, from [objects]: the module's, here, as on Postgres and SQLite the
      * three libraries made every item byte for byte alike before records said their form.
      */
-    protected open fun unrecordedForm(spec: SchemaItemSpec, record: Map<*, *>, objects: StoreObjects): ItemForm = ItemForm.Current
+    protected open fun unrecordedForm(spec: SchemaItemSpec, record: Map<*, *>?, objects: StoreObjects): ItemForm = ItemForm.Current
 
     override fun dropMismatched(name: String): List<DdlStatement> = listOf(DdlStatement.Text(ddl.droppedIndex(name)))
 
@@ -403,8 +406,8 @@ class OracleSchema(override val ddl: OracleDdl) : SqlStoreSchema() {
      * drivine-python's, which test it as `'$?(@ == …)'` and read a property as `'$."p"'`, is another, kept as it is. What
      * neither is, or an item with neither index, is taken as this version's, and left as it is.
      */
-    override fun unrecordedForm(spec: SchemaItemSpec, record: Map<*, *>, objects: StoreObjects): ItemForm {
-        val properties = (record["properties"] as List<*>).map { it.toString() }
+    override fun unrecordedForm(spec: SchemaItemSpec, record: Map<*, *>?, objects: StoreObjects): ItemForm {
+        val properties = (record?.get("properties") as? List<*>)?.map { it.toString() } ?: spec.properties
         side(spec)?.let { side ->
             // A table beside the nodes is told by its trigger's text, which is as each library wrote it.
             val source = objects.of(side + TRIGGER, "TRIGGER")?.source ?: return ItemForm.Current
