@@ -74,11 +74,11 @@ class OracleEmptyTextTest {
     }
 
     @Test
-    fun `a function that makes a text gives the empty text last, where each text's length and each number's kind is read`() {
+    fun `a function that makes a text gives the empty text last, where each text's length and each count is read`() {
         val e = length("JSON(\$_cy_e)")
         val t = length("JSON(\$_cy_t)")
-        // A number is one only where it is no null, so left('', null) is still null.
-        val n = "DECODE(JSON_VALUE(JSON(\$_cy_n), '\$.type()'), 'double', 'number', 'float', 'number', JSON_VALUE(JSON(\$_cy_n), '\$.type()')) = 'number'"
+        // A count is read as the function reads it, so left('', null) is still null.
+        val n = "CAST(1 AS INTEGER) IS NOT NULL"
         for ((cypher, last) in listOf(
             "RETURN toUpper(\$e)" to "CASE WHEN $e IS NOT NULL THEN JSON('\"\"') END",
             "RETURN left(\$e, \$n)" to "CASE WHEN $e IS NOT NULL AND $n THEN JSON('\"\"') END",
@@ -91,6 +91,15 @@ class OracleEmptyTextTest {
         )) {
             val sql = sql(cypher)
             assertTrue(sql.contains(", $last) AS c1"), "$cypher: $sql")
+        }
+    }
+
+    @Test
+    fun `a count out of range beside the empty text still fails`() {
+        for (cypher in listOf("UNWIND [''] AS x RETURN left(x, -1)", "UNWIND [''] AS x UNWIND [-1] AS n RETURN substring(x, 0, n)")) {
+            val sql = sql(cypher)
+            // The empty text's fallback, read last and alone reading a length, reads the count beside it and fails as the function does.
+            assertTrue(sql.substringAfter("'\$.length()' RETURNING NUMBER)", "").contains("takes a length from 0 to 2147483647"), "$cypher: $sql")
         }
     }
 

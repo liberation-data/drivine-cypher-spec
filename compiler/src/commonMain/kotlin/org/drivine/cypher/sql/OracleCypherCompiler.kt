@@ -293,13 +293,14 @@ class OracleCypherCompiler(
 
     /**
      * Oracle's empty text is null as a `VARCHAR2` and as a CLOB, so a function that makes an empty text, as `toUpper('')`
-     * and `left('ab', 0)` do, gives null there: where each text is one, its length not null, and each number one, it gives
-     * [empty] instead (#416). A text whose function gives null for another reason, as `substring('ab', 1, null)`, is still null.
+     * and `left('ab', 0)` do, gives null there: where each text is one, its length not null, and each count not null, it gives
+     * [empty] instead (#416). A text whose function gives null for another reason, as `substring('ab', 1, null)`, is still null,
+     * and a count out of range, as in `left('', -1)`, still fails.
      */
-    override fun madeText(vararg jsons: String, numbers: List<String>, empty: Any, whereFirstEmpty: Boolean, body: (List<String>) -> String) =
+    override fun madeText(vararg jsons: String, counts: (String) -> List<String>, empty: Any, whereFirstEmpty: Boolean, body: (List<String>) -> String) =
         texts(*jsons, lengths = { lengths ->
             val given = (if (whereFirstEmpty) listOf("${lengths.first()} = 0") else emptyList()) +
-                lengths.map { "$it IS NOT NULL" } + numbers.map { "${typeOf(it)} = 'number'" }
+                lengths.map { "$it IS NOT NULL" } + counts(lengths.first()).map { "$it IS NOT NULL" }
             "CASE WHEN ${given.joinToString(" AND ")} THEN ${literalJson(empty)} END"
         }, body = body)
 

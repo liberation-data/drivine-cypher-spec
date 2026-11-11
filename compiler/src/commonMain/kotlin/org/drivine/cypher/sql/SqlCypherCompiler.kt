@@ -485,14 +485,15 @@ abstract class SqlCypherCompiler(
     protected open fun searchedTexts(a: String, b: String, search: (List<String>) -> String): String = texts(a, b, body = search)
 
     /**
-     * A function that makes a text, or [empty], of the texts of the JSON values [jsons] and the numbers [numbers]: [body] over
+     * A function that makes a text, or [empty], of the texts of the JSON values [jsons] and the counts [counts]: [body] over
      * the texts, as [texts] reads them. A store whose empty text reads as null, so [body] gives null where it makes an empty
-     * text, gives [empty] there instead, where each text is one and each number is one: where [whereFirstEmpty], only where the
-     * first text is empty. See Oracle's (#416).
+     * text, gives [empty] there instead, where each text is one and each count is not null: where [whereFirstEmpty], only where
+     * the first text is empty. [counts] reads them as [countOf] does beside the first text's length, which is not null there,
+     * so a count out of range still fails. See Oracle's (#416).
      */
     protected open fun madeText(
         vararg jsons: String,
-        numbers: List<String> = emptyList(),
+        counts: (String) -> List<String> = { emptyList() },
         empty: Any = "",
         whereFirstEmpty: Boolean = false,
         body: (List<String>) -> String,
@@ -5801,7 +5802,9 @@ abstract class SqlCypherCompiler(
                 // A position is counted from 0, as Cypher counts it, and SQL from 1.
                 "substring" -> {
                     if (arguments.size !in 2..3) throw CompilerException("substring() takes a text, a start and a length.")
-                    Value.Json(madeText(comparable(json(arguments[0])), numbers = arguments.drop(1).map { comparable(json(it)) }) { read ->
+                    Value.Json(madeText(comparable(json(arguments[0])), counts = { length ->
+                        listOfNotNull(countOf(function, 1, "start", arguments, length), if (arguments.size == 3) countOf(function, 2, "length", arguments, length) else null)
+                    }) { read ->
                         scalar(shared(read.single()) { (text) ->
                             val start = countOf(function, 1, "start", arguments, text)
                             val length = if (arguments.size == 3) ", ${countOf(function, 2, "length", arguments, text)}" else ""
@@ -5813,7 +5816,7 @@ abstract class SqlCypherCompiler(
                 }
                 "left", "right" -> {
                     if (arguments.size != 2) throw CompilerException("${function.name}() takes a text and a length.")
-                    Value.Json(madeText(comparable(json(arguments[0])), numbers = listOf(comparable(json(arguments[1])))) { read ->
+                    Value.Json(madeText(comparable(json(arguments[0])), counts = { listOf(countOf(function, 1, "length", arguments, it)) }) { read ->
                         scalar(shared(read.single()) { (text) ->
                             val count = countOf(function, 1, "length", arguments, text)
                             if (name == "left") "SUBSTR($text, 1, $count)" else rightText(text, count)
