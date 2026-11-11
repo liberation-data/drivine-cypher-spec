@@ -6,6 +6,13 @@ import org.drivine.cypher.sql.PostgresCypherCompiler
 import org.drivine.cypher.sql.SqliteCypherCompiler
 import org.drivine.cypher.sql.Temporal
 import org.junit.jupiter.api.Test
+import java.time.Duration
+import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.LocalTime
+import java.time.OffsetDateTime
+import java.time.OffsetTime
+import java.time.ZoneOffset
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -13,7 +20,8 @@ import kotlin.test.assertTrue
  * A temporal value the statement makes is equal to no text, though its ISO text is (drivine4j#379): the comparison is
  * false, or an `IN` reads the value as a map of its kind (`{"date": …}`). A parameter of a temporal kind is no text, and
  * is compared as the moment it is. What the stores give is the spec's, in `temporal.yaml` ("A temporal value beside a
- * text that spells it"); its parameters can't be of a temporal kind, so that is pinned here.
+ * text that spells it", and "A text parameter in a list or a map beside a temporal value"); its parameters can't be of a
+ * temporal kind, so that is pinned here.
  */
 class TemporalBesideTextTest {
 
@@ -48,6 +56,50 @@ class TemporalBesideTextTest {
             ).forEach { (cypher, parameters) -> sql(cypher, parameters).let { assertFalse("'date'" in it, "$store, $cypher: $it") } }
             val kinded = sql("RETURN date('2024-01-01') IN \$l", mapOf("l" to listOf("2024-01-01")))
             assertTrue("'date'" in kinded, "$store: $kinded")
+        }
+    }
+
+    /** A parameter of each temporal kind, tagged ([TemporalValue]) and as java.time gives it, and the ISO text that spells it. */
+    private val kinds = listOf(
+        Triple(TemporalValue(Temporal.DATE, "2024-01-01"), LocalDate.of(2024, 1, 1), "2024-01-01"),
+        Triple(TemporalValue(Temporal.LOCAL_DATE_TIME, "2024-01-01T10:00:00"), LocalDateTime.of(2024, 1, 1, 10, 0), "2024-01-01T10:00:00"),
+        Triple(TemporalValue(Temporal.DATE_TIME, "2024-01-01T10:00:00Z"), OffsetDateTime.of(2024, 1, 1, 10, 0, 0, 0, ZoneOffset.UTC), "2024-01-01T10:00:00Z"),
+        Triple(TemporalValue(Temporal.LOCAL_TIME, "10:00:00"), LocalTime.of(10, 0), "10:00:00"),
+        Triple(TemporalValue(Temporal.TIME, "10:00:00Z"), OffsetTime.of(10, 0, 0, 0, ZoneOffset.UTC), "10:00:00Z"),
+        Triple(TemporalValue(Temporal.DURATION, "P1D"), Duration.ofDays(1), "P1D"),
+    )
+
+    @Test
+    fun `a temporal parameter in a list or a map beside a text parameter that spells it is not equal to it`() {
+        // drivine4j#779: in a list, as a map of its kind; in a map, entry by entry, so the comparison is false.
+        val listed = listOf("RETURN \$v IN [\$s]", "RETURN \$s IN [\$v]", "RETURN [\$v] = [\$s]", "RETURN [\$s] <> [\$v]", "RETURN [[\$v]] = [[\$s]]", "RETURN [\$v] IN [[\$s]]")
+        val mapped = listOf("RETURN {k: \$v} = {k: \$s}", "RETURN {k: \$s} <> {k: \$v}", "RETURN {k: \$v, n: 1} = {k: \$s, n: 1}", "RETURN {n: 1, k: \$v} = {k: \$s, n: 1}")
+        each { store, sql ->
+            kinds.forEach { (tagged, platform, text) ->
+                listOf(tagged, platform).forEach { v ->
+                    val kind = (if (v is TemporalValue) v.kind else Temporal.ofValue(v)!!).name.lowercase()
+                    val parameters = mapOf("v" to v, "s" to text)
+                    listed.forEach { cypher -> sql(cypher, parameters).let { assertTrue("'$kind'" in it, "$store, $cypher, $v: $it") } }
+                    mapped.forEach { cypher -> sql(cypher, parameters).let { assertTrue("THEN FALSE END" in it, "$store, $cypher, $v: $it") } }
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `a temporal parameter in a list or a map beside a map that holds its text, or a temporal parameter, is compared whole`() {
+        each { store, sql ->
+            val map = mapOf("date" to "2024-01-01")
+            listOf(
+                "RETURN \$v IN [\$m]" to mapOf("v" to date, "m" to map),
+                "RETURN [\$v] = [\$m]" to mapOf("v" to date, "m" to map),
+                "RETURN [\$v] = [\$w]" to mapOf("v" to date, "w" to date),
+            ).forEach { (cypher, parameters) -> sql(cypher, parameters).let { assertFalse("'date'" in it, "$store, $cypher: $it") } }
+            listOf(
+                "RETURN {k: \$v} = {k: \$m}" to mapOf("v" to date, "m" to map),
+                "RETURN {k: \$v} = {k: \$w}" to mapOf("v" to date, "w" to date),
+                "RETURN {k: \$v} = {k: \$s, n: 1}" to mapOf("v" to date, "s" to "2024-01-01"),
+            ).forEach { (cypher, parameters) -> sql(cypher, parameters).let { assertFalse("THEN FALSE END" in it, "$store, $cypher: $it") } }
         }
     }
 }
