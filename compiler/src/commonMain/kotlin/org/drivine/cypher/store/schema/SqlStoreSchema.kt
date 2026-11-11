@@ -66,7 +66,8 @@ abstract class SqlStoreSchema internal constructor() : StoreSchema {
      * its record says. An object that isn't there is no mismatch: a record whose object is gone isn't listed, and one
      * that lacks part is made whole ([isIncomplete]).
      *
-     * Then its record's `details.form`: [SqlStoreDdl.CURRENT_FORM] is current, and another form is [ItemForm.Stale]. A
+     * Then its record's `details.form`: [SqlStoreDdl.CURRENT_FORM] is current, a later one [ItemForm.Newer], and an earlier
+     * one [ItemForm.Stale]. A
      * record that says none is as [unrecordedForm] reads its objects.
      */
     override fun formOf(spec: SchemaItemSpec, rows: List<Any?>): ItemForm {
@@ -84,6 +85,8 @@ abstract class SqlStoreSchema internal constructor() : StoreSchema {
         return when (val form = ((record["details"] as? Map<*, *>)?.get(SqlStoreDdl.FORM) as? Number)?.toLong()) {
             SqlStoreDdl.CURRENT_FORM.toLong() -> ItemForm.Current
             null -> unrecordedForm(spec, record, objects)
+            // A newer version's: what this version would make of it is older.
+            in (SqlStoreDdl.CURRENT_FORM.toLong() + 1)..Long.MAX_VALUE -> ItemForm.Newer(form.toInt(), SqlStoreDdl.CURRENT_FORM)
             else -> ItemForm.Stale("form $form", SqlStoreDdl.CURRENT_FORM)
         }
     }

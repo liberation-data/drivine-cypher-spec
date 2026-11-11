@@ -1060,6 +1060,14 @@ internal class SchemaProgram(
      * version's form whose record says none has its form recorded.
      */
     private fun keepForm(spec: SchemaItemSpec, form: ItemForm) {
+        if (form is ItemForm.Newer) {
+            // Nothing to make again: this version would make it in an older form.
+            log(
+                LogLevel.WARN, if (spec is ConstraintSpec) CONSTRAINT_MANAGER else INDEX_MANAGER,
+                "$engine ${spec.kind} on ${spec.label}${spec.properties} was made by a newer version of Drivine " +
+                    "(form ${form.found}; this version makes form ${form.current}): this version uses it as it is.",
+            )
+        }
         if (form is ItemForm.Stale) {
             log(
                 LogLevel.WARN, if (spec is ConstraintSpec) CONSTRAINT_MANAGER else INDEX_MANAGER,

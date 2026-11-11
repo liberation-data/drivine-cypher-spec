@@ -29,6 +29,12 @@ sealed interface ItemForm {
     data class Stale(val found: String, val expected: Int) : ItemForm
 
     /**
+     * The item's record says form [found], a later one than [current], the one this version makes: a newer version made it,
+     * as in a rolling deploy. It is kept and used as it is, and never made again here, which would make it in an older form.
+     */
+    data class Newer(val found: Int, val current: Int) : ItemForm
+
+    /**
      * The item is in this version's form and its record says none: drivine4j's on Oracle, made before records said their
      * form. [statement] records it as made in its form, and touches nothing else; it is safe to run again.
      */

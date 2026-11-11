@@ -233,6 +233,7 @@ class StoreSchemaTest {
     private fun form(node: JsonNode): ItemForm = when {
         node.isTextual && node.textValue() == "current" -> ItemForm.Current
         node["stale"] != null -> ItemForm.Stale(node["stale"]!!.textValue()!!, org.drivine.cypher.store.ddl.SqlStoreDdl.CURRENT_FORM)
+        node["newer"] != null -> ItemForm.Newer(node["newer"]!!.longValue().toInt(), org.drivine.cypher.store.ddl.SqlStoreDdl.CURRENT_FORM)
         node["unrecorded"] != null -> ItemForm.Unrecorded(node["unrecorded"]!!.textValue()!!)
         node["mismatch"] != null -> node["mismatch"]!!.let {
             ItemForm.Mismatch(it["name"]!!.textValue()!!, it["reason"]!!.textValue()!!, it["droppable"]!!.booleanValue())
