@@ -127,8 +127,6 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
 
     override fun keyed(json: String, key: String) = "($json -> ('$.' || json_quote($key ->> '$')))"
 
-    override fun containsAll(props: String, map: String) = "${SqliteFunctions.CONTAINS}($props, $map)"
-
     /** The test a partial index over the label's nodes is made with: see [SqliteSql.hasLabel]. */
     override fun hasLabel(labels: String, label: String) = SqliteSql.holdsLabel(labels, label)
 

@@ -1155,3 +1155,43 @@ cases:
     steps:
       - cypher: "UNWIND ['hello'] AS t RETURN localtime({time: t})"
         error: "localtime() takes a localtime, a time, a localdatetime or a datetime for time, not a text."
+
+  - name: "Parameter map in a matched pattern"
+    description: "A parameter's map as a pattern's properties is refused wherever the pattern is matched, in MATCH, OPTIONAL MATCH, MERGE (a node or a relationship), a variable-length relationship, a quantified path, a shortest path, EXISTS { } and a pattern in an expression, as Neo4j refuses it; the message says to match each property. CREATE takes one (see writes.yaml)."
+    steps:
+      - cypher: "MATCH (n:Person $props) RETURN n"
+        parameters: {props: {name: "Keanu"}}
+        error: "A parameter's map gives a pattern its properties only in CREATE, as in Cypher: match each one, as in MATCH (n) WHERE n.k = $props.k, or (n {k: $props.k})."
+      - cypher: "MATCH (a)-[r:KNOWS $p]->(b) RETURN r"
+        parameters: {p: {since: 1999}}
+        error: "A parameter's map gives a pattern its properties only in CREATE, as in Cypher: match each one, as in MATCH (n) WHERE n.k = $p.k, or (n {k: $p.k})."
+      - cypher: "OPTIONAL MATCH (n $props) RETURN n"
+        parameters: {props: {}}
+        error: "A parameter's map gives a pattern its properties only in CREATE, as in Cypher: match each one, as in MATCH (n) WHERE n.k = $props.k, or (n {k: $props.k})."
+      - cypher: "MERGE (n:Person $props) RETURN n"
+        parameters: {props: {name: "Keanu"}}
+        error: "A parameter's map gives a pattern its properties only in CREATE, as in Cypher: match each one, as in MATCH (n) WHERE n.k = $props.k, or (n {k: $props.k})."
+      - cypher: "MATCH (n) WHERE (n)-->($props) RETURN n"
+        parameters: {props: {name: "Keanu"}}
+        error: "A parameter's map gives a pattern its properties only in CREATE, as in Cypher: match each one, as in MATCH (n) WHERE n.k = $props.k, or (n {k: $props.k})."
+      - cypher: "MERGE (a:Person {name: 'Keanu'})-[r:KNOWS $p]->(b:Person {name: 'Carrie'}) RETURN r"
+        parameters: {p: {name: "Keanu"}}
+        error: "A parameter's map gives a pattern its properties only in CREATE, as in Cypher: match each one, as in MATCH (n) WHERE n.k = $p.k, or (n {k: $p.k})."
+      - cypher: "MATCH (a)-[r:KNOWS*1..2 $p]->(b) RETURN b"
+        parameters: {p: {name: "Keanu"}}
+        error: "A parameter's map gives a pattern its properties only in CREATE, as in Cypher: match each one, as in MATCH (n) WHERE n.k = $p.k, or (n {k: $p.k})."
+      - cypher: "MATCH (a {name: 'Keanu'})-[*1..2]->(b $p) RETURN b"
+        parameters: {p: {name: "Keanu"}}
+        error: "A parameter's map gives a pattern its properties only in CREATE, as in Cypher: match each one, as in MATCH (n) WHERE n.k = $p.k, or (n {k: $p.k})."
+      - cypher: "MATCH ((a $p)-[:KNOWS]->(b)){1,2} RETURN 1"
+        parameters: {p: {name: "Keanu"}}
+        error: "A parameter's map gives a pattern its properties only in CREATE, as in Cypher: match each one, as in MATCH (n) WHERE n.k = $p.k, or (n {k: $p.k})."
+      - cypher: "MATCH path = shortestPath((a {name: 'Keanu'})-[*]->(b $p)) RETURN path"
+        parameters: {p: {name: "Keanu"}}
+        error: "A parameter's map gives a pattern its properties only in CREATE, as in Cypher: match each one, as in MATCH (n) WHERE n.k = $p.k, or (n {k: $p.k})."
+      - cypher: "MATCH (n) WHERE EXISTS { (n)-->(m $p) } RETURN n"
+        parameters: {p: {name: "Keanu"}}
+        error: "A parameter's map gives a pattern its properties only in CREATE, as in Cypher: match each one, as in MATCH (n) WHERE n.k = $p.k, or (n {k: $p.k})."
+      - cypher: "MATCH (n) RETURN [(n)-->(m $p) | m]"
+        parameters: {p: {name: "Keanu"}}
+        error: "A parameter's map gives a pattern its properties only in CREATE, as in Cypher: match each one, as in MATCH (n) WHERE n.k = $p.k, or (n {k: $p.k})."

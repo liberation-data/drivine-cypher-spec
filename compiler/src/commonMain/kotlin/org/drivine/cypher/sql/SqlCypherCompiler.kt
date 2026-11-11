@@ -557,9 +557,6 @@ abstract class SqlCypherCompiler(
     /** The value of the JSON map [json] at the key the JSON [key] holds, a text an expression gives (`m[k]`). */
     protected abstract fun keyed(json: String, key: String): String
 
-    /** Whether the JSON map [props] holds every entry of the JSON map [map]. */
-    protected abstract fun containsAll(props: String, map: String): String
-
     /** Whether the labels [labels], a JSON list, hold [label]. */
     protected abstract fun hasLabel(labels: String, label: String): String
 
@@ -2294,7 +2291,10 @@ abstract class SqlCypherCompiler(
             }
         )
 
-        /** A pattern's properties: each key equal to its value, or every key of a parameter's map. [labels] are its node's, where it is a node. */
+        /**
+         * A pattern's properties: each key equal to its value. [labels] are its node's, where it is a node. A parameter's map is
+         * refused, as Neo4j refuses it in a pattern it matches: only CREATE takes one, and CREATE makes its pattern elsewhere.
+         */
         private fun propertiesMatch(props: String, properties: Expression, scope: Map<String, Value>, labels: List<String> = emptyList()): String = when (properties) {
             is Expression.MapLiteral -> properties.entries.joinToString(" AND ") { (key, value) ->
                 // A property holds no null, as a graph engine stores none in a list.
@@ -2305,7 +2305,11 @@ abstract class SqlCypherCompiler(
                     of = IndexedProperty(props, key, labels, givenRowsScalar(value, scope)),
                 )
             }
-            else -> containsAll(props, comparable(json(expression(properties, scope))))
+            is Expression.Parameter -> throw CompilerException(
+                "A parameter's map gives a pattern its properties only in CREATE, as in Cypher: match each one, as in " +
+                    "MATCH (n) WHERE n.k = \$${properties.name}.k, or (n {k: \$${properties.name}.k}).",
+            )
+            else -> error("A pattern's properties are a map or a parameter, not $properties.")
         }
 
         // ----- A statement that writes -----
