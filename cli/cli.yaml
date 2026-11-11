@@ -326,6 +326,14 @@ cases:
     stderr: "Could not find command :nope, use :help to see available commands"
     exit: 1
 
+  - name: "With --continue, a :source file that can't be read inside a transaction leaves it open"
+    except: [falkordb]
+    files: {"t.cypher": ":begin\nCREATE (:Kept);\n:source missing.cypher\n:commit\nMATCH (n:Kept) RETURN count(n) AS c;\n"}
+    args: ["--format", "plain", "--continue", "-f", "t.cypher"]
+    stdout: "c\n1\n"
+    exit: 1
+    note: "Reading the file doesn't reach the store, so the transaction is still open, and :commit keeps :Kept."
+
   - name: "Statements piped to stdin run"
     cypherShell: true
     stdin: "RETURN 3 AS three;\n"
