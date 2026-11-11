@@ -203,7 +203,7 @@ class OracleCypherCompiler(
     }
 
     /** JSON's null is ranked null, as SQL's is, but `JSON` orders it apart from SQL's: so the value is read as [groupedNull] has it (#500). */
-    override fun jsonNullSortKey(json: String) = openSortKey(json).let { (rank) -> listOf(rank, groupedNull(json)) }
+    override fun jsonNullSortKey(json: String) = openSortKey(json).let { keys -> keys.dropLast(1) + groupedNull(json) }
 
     /** Oracle groups by no subquery, so the value is not bound in one, as [nullIfJsonNull] binds a long one: it is read twice. */
     override fun comparedNull(json: String) = "CASE WHEN ${kind(json)} <> 'null' THEN $json END"
