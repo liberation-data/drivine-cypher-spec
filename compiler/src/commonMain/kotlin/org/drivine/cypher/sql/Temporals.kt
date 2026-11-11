@@ -64,7 +64,10 @@ class Temporals(
             val (plain, read) = if (ad == null) body(kind) to false else sql.knownAd(texts) { body(kind) }
             // A tag's text is of its kind: the year's test alone tells it is from 1000 on.
             val tag = tagged?.let { "${it(kind)} AND " }.orEmpty()
-            if (read && ad != null && (binding() || plain.length <= TemporalSql.GUARDED_UP_TO)) first += "WHEN " + tag + whens({ sql.matches(it, literal(sql.regex(ad))) }, plain).removePrefix("WHEN ")
+            // A tag's canonical text is of its year from 1000 on where it opens with four digits, the first not 0: no pattern is read.
+            val isAd: (String) -> String = if (tagged != null) { t -> "SUBSTR($t, 1, 1) IN ('1', '2', '3', '4', '5', '6', '7', '8', '9') AND SUBSTR($t, 5, 1) = '-'" }
+                else { t -> sql.matches(t, literal(sql.regex(ad ?: ""))) }
+            if (read && ad != null && (binding() || plain.length <= TemporalSql.GUARDED_UP_TO)) first += "WHEN " + tag + whens(isAd, plain).removePrefix("WHEN ")
             own += if (tagged != null) "WHEN ${tagged(kind)} THEN ${if (read) body(kind) else plain}" else whens({ isKind(it, kind) }, if (read) body(kind) else plain)
         }
         return "CASE ${(first + own).joinToString(" ")} END"
