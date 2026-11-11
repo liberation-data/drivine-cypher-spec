@@ -275,9 +275,9 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
      * text the value is, which comes after every number.
      */
     override fun openSortKey(json: String) = shared(json) { (x) ->
-        (if (nonFinite) "CASE WHEN ${isNaN(x)} THEN '5' ELSE " else "") + "CASE json_type($x) WHEN 'object' THEN ${tagRank(x, "'1'") { "'2~$it'" }} WHEN 'array' THEN '2' || ${SqliteFunctions.SORT_KEY}($x) WHEN 'text' THEN '3' " +
+        (if (nonFinite) "CASE WHEN ${isNaN(x)} THEN '5' ELSE " else "") + "CASE json_type($x) WHEN 'object' THEN ${tagRank(x, "'1'") { "'2~$it' || COALESCE(${tagKey(x)}, ${tagText(x)})" }} WHEN 'array' THEN '2' || ${SqliteFunctions.SORT_KEY}($x) WHEN 'text' THEN '3' " +
             "WHEN 'true' THEN '4' WHEN 'false' THEN '4' WHEN 'integer' THEN '5' WHEN 'real' THEN '5' END" + if (nonFinite) " END" else ""
-    }.let { rank -> listOf(rank, shared(json) { (x) -> sortValue(x) }) }
+    }.let { rank -> listOf(rank, shared(json) { (x) -> "($x ->> '$')" }) }
 
     /** SQLite puts null first when ascending, and Cypher last. */
     override fun orderTerm(term: String, descending: Boolean) = if (descending) "$term DESC NULLS FIRST" else "$term NULLS LAST"
@@ -310,7 +310,11 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
     /** The first of the values in order, the nulls left out: SQLite's `min` and `max` order no JSON. */
     override fun extreme(value: String, min: Boolean, key: String?): String {
         val direction = if (min) "ASC" else "DESC"
-        return "(json_group_array(json($value) ORDER BY ${kindOrder(value)} $direction, ${key ?: sortValue(value)} $direction) FILTER (WHERE NOT ${isJsonNull(value)}) -> 0)"
+        // A tag's sort key in its kind's rank, so a value of any other kind reads no tag (see [openSortKey]).
+        val order = if (key != null) "${kindOrder(value)} $direction, $key $direction" else
+            "CASE ${typeOf(value)} WHEN 'object' THEN ${tagRank(value, "'1'") { "'2~$it' || COALESCE(${tagKey(value)}, ${tagText(value)})" }} WHEN 'array' THEN '2' WHEN 'string' THEN '3' " +
+                "WHEN 'boolean' THEN '4' WHEN 'number' THEN '5' END $direction, ($value ->> '$') $direction"
+        return "(json_group_array(json($value) ORDER BY $order) FILTER (WHERE NOT ${isJsonNull(value)}) -> 0)"
     }
 
     override fun idTokens(ids: String, key: String) = shared(ids) { (x) ->

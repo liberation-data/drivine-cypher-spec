@@ -186,12 +186,16 @@ class OracleCypherCompiler(
      * order within a kind: `JSON` orders a number before a text, a truth value after both, and a map and a list last. A null
      * is ranked null, so the value needs no [nullIfJsonNull], which would read it again: as fast as [sortKey] over 100,000 rows.
      */
-    override fun openSortKey(json: String) = shared(json) { (x) ->
-        "DECODE(${kind(x)}, 'object', ${tagRank(x, "1")}, 'array', 2, 'string', 3, 'boolean', 4, 'number', 5, 'double', 5, 'float', 5)"
-    }.let { rank -> listOf(rank, shared(json) { (x) -> sortValue(x) }) }
+    /**
+     * Where the kind comes, a text of digits, and then the value: a temporal value's tag has its sort key (a duration its text)
+     * in its rank, after its kind's, so that only a map reads a tag, and any other value is ordered by itself, as it was before
+     * there were tags: read in the value's term, the tag cost an ordering of stored texts or numbers a third as long again (#161).
+     */
+    override fun openSortKey(json: String) = shared(json) { (x) -> sortRank(x) }.let { rank -> listOf(rank, json) }
 
-    /** The JSON [x] as it sorts among values of its kind: a temporal value's tag by its sort key, a duration by its text; any other as it is. */
-    private fun sortValue(x: String) = "CASE WHEN ${tagKind(x)} IS NOT NULL THEN JSON_SCALAR(COALESCE(${tagKey(x)}, ${tagText(x)})) ELSE $x END"
+    /** [openSortKey]'s rank of the JSON [x]: its kind's, and a tag's sort key after it. */
+    private fun sortRank(x: String) =
+        "DECODE(${kind(x)}, 'object', ${tagRank(x, "'1'") { "'2$it' || COALESCE(${tagKey(x)}, ${tagText(x)})" }}, 'array', '2', 'string', '3', 'boolean', '4', 'number', '5', 'double', '5', 'float', '5')"
 
     /** JSON's null is ranked null, as SQL's is, but `JSON` orders it apart from SQL's: so the value is read as [groupedNull] has it (#500). */
     override fun jsonNullSortKey(json: String) = openSortKey(json).let { (rank) -> listOf(rank, groupedNull(json)) }
@@ -1040,9 +1044,10 @@ class OracleCypherCompiler(
     /** Of the values of the kind that comes first, or last, as [kindOrder] orders them; by [key] first where there is one. */
     override fun extreme(value: String, min: Boolean, key: String?): String {
         val direction = if (min) "ASC" else "DESC"
-        // A temporal value's tag of a kind the statement does not know, by its sort key, as MIN reads no tag's order.
-        val ordered = key ?: "CASE WHEN ${tagKind(value)} IS NOT NULL THEN COALESCE(${tagKey(value)}, ${tagText(value)}) END"
-        return "${if (min) "MIN" else "MAX"}(${nullIfJsonNull(value)}) KEEP (DENSE_RANK FIRST ORDER BY ${kindOrder(value)} $direction NULLS LAST, $ordered $direction NULLS LAST)"
+        // A temporal value's tag of a kind the statement does not know by its sort key, which its rank holds ([sortRank]), as MIN
+        // reads no tag's order; any other value by its kind, and then as MIN orders it.
+        val order = if (key == null) "${sortRank(value)} $direction NULLS LAST" else "${kindOrder(value)} $direction NULLS LAST, $key $direction NULLS LAST"
+        return "${if (min) "MIN" else "MAX"}(${nullIfJsonNull(value)}) KEEP (DENSE_RANK FIRST ORDER BY $order)"
     }
 
     /**
