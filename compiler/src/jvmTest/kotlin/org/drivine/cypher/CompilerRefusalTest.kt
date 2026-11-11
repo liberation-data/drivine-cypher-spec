@@ -588,6 +588,14 @@ class CompilerRefusalTest {
                 "MATCH (n) RETURN reduce(s = 0, x IN collect(n.num1) | s + x) AS t ORDER BY max(n.num2)",
                 "MATCH (n) RETURN 1 IN collect(n.num1) AS t ORDER BY max(n.num2)",
             ).forEach { compiler.compile(it) }
+            // One that is DISTINCT groups by its items, so the aggregate is worked out over each group, not over all the rows as one.
+            listOf(
+                "MATCH (n) RETURN DISTINCT n.num1 AS a ORDER BY max(n.num2)",
+                "MATCH (n) RETURN DISTINCT * ORDER BY count(*)",
+                "MATCH (n) WITH DISTINCT n.num1 AS a ORDER BY count(*) RETURN a",
+            ).forEach { cypher ->
+                assertTrue("GROUP BY" in compiler.compile(cypher).sql, "${compiler::class.simpleName}: $cypher")
+            }
         }
     }
 

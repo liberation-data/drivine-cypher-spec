@@ -245,7 +245,7 @@ abstract class SqlCypherCompiler(
     private fun compiled(query: Query, parameters: Map<String, Any?>): CompiledCypher {
         // A variable used as two kinds, or made where it is bound already, is refused for that, before what is not compiled yet.
         VariableKinds.check(query)
-        // An aggregate in a WHERE too.
+        // An aggregate in a WHERE, or in the ORDER BY of a projection that neither aggregates nor is DISTINCT, too.
         Aggregates(::isAggregate, ::children).check(query)
         val given = parameters.values.any { holdsNonFinite(it) }
         val writes = query.unions.isEmpty() && query.clauses.any(::writes)
@@ -2952,7 +2952,10 @@ abstract class SqlCypherCompiler(
             }
             rowOrder = orderOf(select)
             val compiled = items.map { item -> item.name to aggregating(item.expression) { item(item.expression, select) } }
-            val aggregating = items.any { contains(it.expression, ::isAggregate) }
+            // One that is DISTINCT and orders by an aggregate groups by its items, so the aggregate is worked out over each row's group, as
+            // Neo4j works it out; not grouped, the query aggregated all its rows into one (drivine4j#439).
+            val aggregating = items.any { contains(it.expression, ::isAggregate) } ||
+                projection.distinct && projection.orderBy.any { contains(it.expression, ::isAggregate) }
             // Where rows are compared (DISTINCT, GROUP BY), each item is compared as [compared] has it.
             val compared = projection.distinct || aggregating
             val columns = compiled.mapIndexed { i, (_, value) -> "c${i + 1}" to (if (compared) compared(value) else value) }

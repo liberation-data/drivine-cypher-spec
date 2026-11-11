@@ -520,6 +520,11 @@ cases:
         rows: [["CARRIE", 1], ["HUGO", 1], ["KEANU", 1], ["LAURENCE", 1]]
       - cypher: "MATCH (p:Person)-[:ACTED_IN]->(m) RETURN p.name AS n, count(*) AS c ORDER BY min(m.released), n"
         rows: [["Keanu", 3], ["Carrie", 2], ["Laurence", 1]]
+      - note: "One that is DISTINCT orders by an aggregate over each of its rows' groups, not over all the rows (liberation-data/drivine4j#439)."
+        cypher: "MATCH (p:Person)-[:ACTED_IN]->(m) RETURN DISTINCT p.name AS n ORDER BY min(m.released), n"
+        rows: ["Keanu", "Carrie", "Laurence"]
+      - cypher: "UNWIND [2, 3, 3, 3, 1, 1] AS i WITH DISTINCT i ORDER BY count(*) DESC RETURN collect(i)"
+        rows: [[3, 1, 2]]
       - note: An order of an expression of an item, which is no item.
         cypher: "MATCH (p:Person)-[:ACTED_IN]->(m) RETURN {name: p.name} AS who, count(*) AS c ORDER BY who.name"
         rows: [[{name: "Carrie"}, 2], [{name: "Keanu"}, 3], [{name: "Laurence"}, 1]]

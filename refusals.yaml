@@ -872,7 +872,7 @@ cases:
         error: "a is not defined: a pattern used as an expression binds no new variable, as in Neo4j. Bind it in a MATCH, or test the pattern with EXISTS { … }."
 
   - name: "Aggregate in the ORDER BY of a projection that doesn't aggregate"
-    description: "An aggregate in the ORDER BY of a WITH or a RETURN whose items don't aggregate, and that isn't DISTINCT, is refused, as Neo4j refuses it (\"Illegal aggregation expression(s) in order by\"): there are no groups for it to aggregate over. Compiled, it made the query aggregate with no GROUP BY, so SQLite gave one row of an arbitrary value (liberation-data/drivine4j#439). A WITH or a RETURN that aggregates, or is DISTINCT, orders by an aggregate, as Neo4j does."
+    description: "An aggregate in the ORDER BY of a WITH or a RETURN whose items don't aggregate, and that isn't DISTINCT, is refused, as Neo4j refuses it (\"Illegal aggregation expression(s) in order by\"): there are no groups for it to aggregate over. Compiled, it made the query aggregate with no GROUP BY, so SQLite gave one row of an arbitrary value (liberation-data/drivine4j#439). A WITH or a RETURN that aggregates, or is DISTINCT, orders by an aggregate, as Neo4j does (see queries.yaml, \"Grouping by maps and lists\")."
     steps:
       - cypher: "MATCH (n) WITH n.num1 AS foo ORDER BY max(n.num2) RETURN foo AS foo"
         error: "max() aggregates, and an ORDER BY holds no aggregate unless its WITH or RETURN aggregates or is DISTINCT, as in Neo4j: give the aggregate as an item, and order by its name, as in RETURN x, count(*) AS c ORDER BY c."
