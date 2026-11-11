@@ -171,7 +171,7 @@ refused "a mode the README doesn't name" "cases:
 $ok
     mode: default" "\`mode\` is only ever \"cypher-shell\""
 
-# Whatever the check can't read is a finding about the file, not a traceback: a README with no text is one such input.
+# Whatever the check can't read is a finding about the file, not a traceback: a README that isn't UTF-8 is one such input.
 printf '%s\n' "cases:
 $ok" > "$root/cases.yaml"
 printf '\xff\xfe' > "$root/odd.md"
