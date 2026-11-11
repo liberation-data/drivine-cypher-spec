@@ -190,11 +190,13 @@ class OracleCypherCompiler(
 
     /**
      * A list sorts as Cypher sorts lists, item by item, where `JSON` sorts a null item first and a number before a text
-     * (drivine4j#205): by [LIST_KEY]'s key, then, where a key cut short at 2,000 bytes may tie, the list as `JSON` sorts it.
+     * (drivine4j#205): by [LIST_KEY]'s key, then, where a key cut short at 2,000 bytes may tie, by the list's text, its first
+     * 4,000 bytes: `JSON` sorts no value past 32 KB (ORA-40180), and its text's bytes are a text's code points in order.
      * A statement that writes is a block, whose queries call no function it declares, so there a list sorts as `JSON` sorts
      * it, as before. Oracle's [listSortKey] is [sortKey]'s, which only `min` and `max` would read, and don't ([extremesByListKey]).
      */
-    override fun listSortKeys(json: String) = if (procedural) listOf(sortKey(json)) else listOf(listKey(json), json)
+    override fun listSortKeys(json: String) =
+        if (procedural) listOf(sortKey(json)) else listOf(listKey(json), "JSON_SERIALIZE($json RETURNING VARCHAR2(4000) TRUNCATE)")
 
     /** [LIST_KEY]'s key of the JSON [json], its function declared: see [listSortKeys]. */
     private fun listKey(json: String): String {

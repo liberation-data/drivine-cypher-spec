@@ -19,11 +19,12 @@ class OracleListSortKeyTest {
     private fun declarations(sql: String) = Regex(Regex.escape("FUNCTION cy_list_key(")).findAll(sql).count()
 
     @Test
-    fun `a list is sorted by its key and then as JSON, the key's function declared once before the statement`() {
+    fun `a list is sorted by its key and then by its text, the key's function declared once before the statement`() {
         val sql = oracle("UNWIND [[1], [2]] AS xs UNWIND [[3]] AS ys RETURN xs, ys ORDER BY xs, ys DESC")
         assertTrue(sql.startsWith("WITH\nFUNCTION cy_list_key(cy_x JSON) RETURN RAW IS\n"), sql)
         assertEquals(1, declarations(sql), sql)
-        assertTrue(Regex("""ORDER BY cy_list_key\((\S+)\), \1, cy_list_key\((\S+)\) DESC, \2 DESC$""").containsMatchIn(sql), sql)
+        // Then, where the key is cut short, the list's text: JSON sorts no value past 32 KB.
+        assertTrue(Regex("""ORDER BY cy_list_key\((\S+)\), JSON_SERIALIZE\(\1 RETURNING VARCHAR2\(4000\) TRUNCATE\), cy_list_key\((\S+)\) DESC, JSON_SERIALIZE\(\2 RETURNING VARCHAR2\(4000\) TRUNCATE\) DESC$""").containsMatchIn(sql), sql)
     }
 
     @Test
