@@ -99,7 +99,8 @@ class OracleEmptyTextTest {
             "RETURN toString(\$e)" to "CASE WHEN JSON_VALUE(JSON(\$_cy_e), '\$.type()') = 'string' THEN JSON('\"\"') END",
         )) {
             val sql = sql(cypher)
-            assertTrue(sql.contains(", $last) AS c1"), "$cypher: $sql")
+            // The fallback is the COALESCE's last value, inside the guard that each text is one.
+            assertTrue(sql.contains(", $last) END AS c1"), "$cypher: $sql")
         }
     }
 
