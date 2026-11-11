@@ -7142,3 +7142,112 @@ forms:
     listed:
     items:
       - {spec: {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"]}, form: {"stale": "TS's or Python's Oracle form"}}
+  - name: "Oracle: an index under a range index's name, on another table"
+    description: "An index Drivine didn't make, on the relationships' table, under the name Drivine gives the range index's: another item, and an index, so a recreate drops it by that name."
+    store: "oracle"
+    listing: "indexes.RANGE_INDEX"
+    rows:
+      - {"object": "DRIVINE_IX_NAME_337A8B", "type": "INDEX", "table": "DRIVINE_EDGE", "uniqueness": "NONUNIQUE", "indexType": "NORMAL", "columns": ["TYPE"], "tableColumns": null, "source": null}
+    listed:
+    items:
+      - {spec: {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"]}, form: {"mismatch": {"name": "DRIVINE_IX_NAME_337A8B", "reason": "an index on DRIVINE_EDGE", "droppable": true}}}
+  - name: "Postgres: an index under a range index's name, on another table"
+    description: "An index Drivine didn't make, on the relationships' table, under the name Drivine gives the range index's: another item, and an index, so a recreate drops it by that name."
+    store: "postgres"
+    listing: "indexes.RANGE_INDEX"
+    rows:
+      - {"type": "i", "table": "drivine_edge", "where": null, "method": "btree", "object": "drivine_ix_personname_44ce5436", "unique": false, "columns": ["type"], "opclasses": ["text_ops"]}
+    listed:
+    items:
+      - {spec: {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"]}, form: {"mismatch": {"name": "drivine_ix_personname_44ce5436", "reason": "an index on drivine_edge", "droppable": true}}}
+  - name: "SQLite: an index under a range index's name, on another table"
+    description: "An index Drivine didn't make, on the relationships' table, under the name Drivine gives the range index's: another item, and an index, so a recreate drops it by that name."
+    store: "sqlite"
+    listing: "indexes.RANGE_INDEX"
+    rows:
+      - {"object": "drivine_ix_Personname_44ce5436", "type": "index", "table": "drivine_edge", "sql": "CREATE INDEX drivine_ix_Personname_44ce5436 ON drivine_edge (type)", "unique": 0}
+    listed:
+    items:
+      - {spec: {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"]}, form: {"mismatch": {"name": "drivine_ix_Personname_44ce5436", "reason": "an index on drivine_edge", "droppable": true}}}
+  - name: "Oracle: a unique index over every node under a constraint's name"
+    description: "Unique, over the property, and testing no label: not the constraint, which is of its label's nodes alone."
+    store: "oracle"
+    listing: "constraints"
+    rows:
+      - {"object": "DRIVINE_UQ_PERSONEMAIL_5482A751", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "UNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"], "tableColumns": null, "source": null}
+    listed:
+    items:
+      - {spec: {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"]}, form: {"mismatch": {"name": "DRIVINE_UQ_PERSONEMAIL_5482A751", "reason": "an index over every node", "droppable": true}}}
+  - name: "Postgres: a unique index over every node under a constraint's name"
+    description: "Unique, over the property, and testing no label: not the constraint, which is of its label's nodes alone."
+    store: "postgres"
+    listing: "constraints"
+    rows:
+      - {"type": "i", "table": "drivine_node", "where": null, "method": "btree", "object": "drivine_uq_personemail_5482a751", "unique": true, "columns": ["(props ->> 'email'::text)"], "opclasses": ["text_ops"]}
+    listed:
+    items:
+      - {spec: {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"]}, form: {"mismatch": {"name": "drivine_uq_personemail_5482a751", "reason": "an index over every node", "droppable": true}}}
+  - name: "SQLite: a unique index over every node under a constraint's name"
+    description: "Unique, over the property, and testing no label: not the constraint, which is of its label's nodes alone."
+    store: "sqlite"
+    listing: "constraints"
+    rows:
+      - {"object": "drivine_uq_Personemail_5482a751", "type": "index", "table": "drivine_node", "sql": "CREATE UNIQUE INDEX drivine_uq_Personemail_5482a751 ON drivine_node ((CASE json_type(props, '$.\"email\"') WHEN 'text' THEN props ->> '$.\"email\"' WHEN 'null' THEN NULL ELSE props -> '$.\"email\"' END))", "unique": 1}
+    listed:
+    items:
+      - {spec: {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"]}, form: {"mismatch": {"name": "drivine_uq_Personemail_5482a751", "reason": "an index over every node", "droppable": true}}}
+  - name: "Oracle: a vector index under the name of a vector index's index, on another table"
+    description: "A vector index Drivine didn't make, of its type, over another table's column, under the name of the index over the table beside the nodes."
+    store: "oracle"
+    listing: "indexes.VECTOR_INDEX"
+    rows:
+      - {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "name": "Chunk_embedding_vector", "details": {"dimensions": 384, "similarity": "COSINE"}, "status": null}
+      - {"object": "DRIVINE_V_CHUNKEMBEDDING_7E60BD64", "type": "TABLE", "table": null, "uniqueness": null, "indexType": null, "columns": null, "tableColumns": ["NID NUMBER", "EMBEDDING VECTOR"], "source": null}
+      - {"object": "DRIVINE_V_CHUNKEMBEDDING_7E60BD64_I", "type": "INDEX", "table": "CAP135_VEC", "uniqueness": "NONUNIQUE", "indexType": "VECTOR", "columns": ["EMBEDDING"], "tableColumns": null, "source": null}
+      - {"object": "DRIVINE_V_CHUNKEMBEDDING_7E60BD64_T", "type": "TRIGGER", "table": "DRIVINE_NODE", "uniqueness": null, "indexType": null, "columns": null, "tableColumns": null, "source": ["TRIGGER drivine_v_Chunkembedding_7e60bd64_t AFTER INSERT OR UPDATE OF labels, props ON drivine_node FOR EACH ROW\n", "BEGIN\n", "    IF INSTR(',' || LTRIM(RTRIM(JSON_SERIALIZE(:NEW.labels), ']'), '[') || ',\"', ',\"Chunk\",\"') > 0 AND JSON_EXISTS(:NEW.props, '$.embedding') THEN\n", "                BEGIN\n", "            MERGE INTO drivine_v_Chunkembedding_7e60bd64 s USING (SELECT :NEW.nid AS nid, TO_VECTOR(JSON_QUERY(:NEW.props, '$.embedding' RETURNING CLOB)) AS embedding FROM dual) n ON (s.nid = n.nid)\n", "WHEN MATCHED THEN UPDATE SET s.embedding = n.embedding\n", "WHEN NOT MATCHED THEN INSERT (nid, embedding) VALUES (n.nid, n.embedding);\n", "        EXCEPTION WHEN OTHERS THEN\n", "            -- Not a payload the column takes: the node is kept, and left out of the table, as the graph engines leave it out of the index.\n", "            DELETE FROM drivine_v_Chunkembedding_7e60bd64 WHERE nid = :NEW.nid;\n", "        END;\n", "    ELSE\n", "        DELETE FROM drivine_v_Chunkembedding_7e60bd64 WHERE nid = :NEW.nid;\n", "    END IF;\n", "END;"]}
+    listed:
+      - {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "name": "Chunk_embedding_vector", "dimensions": 384, "similarity": "COSINE"}
+    items:
+      - {spec: {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "options": {"dimensions": 384, "similarity": "COSINE"}}, form: {"mismatch": {"name": "DRIVINE_V_CHUNKEMBEDDING_7E60BD64_I", "reason": "an index on CAP135_VEC", "droppable": true}}}
+  - name: "Oracle: a vector index's trigger that tests neither library's label"
+    description: "drivine4j's vector index, its record saying no form, its trigger made again testing no label at all: nothing tells another form, so it is current."
+    store: "oracle"
+    listing: "indexes.VECTOR_INDEX"
+    rows:
+      - {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "name": "Chunk_embedding_vector", "details": {"dimensions": 384, "similarity": "COSINE"}, "status": null}
+      - {"object": "DRIVINE_V_CHUNKEMBEDDING_7E60BD64", "type": "TABLE", "table": null, "uniqueness": null, "indexType": null, "columns": null, "tableColumns": ["NID NUMBER", "EMBEDDING VECTOR"], "source": null}
+      - {"object": "DRIVINE_V_CHUNKEMBEDDING_7E60BD64_I", "type": "INDEX", "table": "DRIVINE_V_CHUNKEMBEDDING_7E60BD64", "uniqueness": "NONUNIQUE", "indexType": "VECTOR", "columns": ["EMBEDDING"], "tableColumns": null, "source": null}
+      - {"object": "DRIVINE_V_CHUNKEMBEDDING_7E60BD64_T", "type": "TRIGGER", "table": "DRIVINE_NODE", "uniqueness": null, "indexType": null, "columns": null, "tableColumns": null, "source": ["TRIGGER drivine_v_Chunkembedding_7e60bd64_t AFTER INSERT OR UPDATE OF labels, props ON drivine_node FOR EACH ROW BEGIN IF JSON_EXISTS(:NEW.props, '$.embedding') THEN NULL; END IF; END;"]}
+    listed:
+      - {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "name": "Chunk_embedding_vector", "dimensions": 384, "similarity": "COSINE"}
+    items:
+      - {spec: {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "options": {"dimensions": 384, "similarity": "COSINE"}}, form: "current"}
+  - name: "Oracle: a constraint's unique index whose columns test the label each library's way"
+    description: "Its record says no form, and one column tests the label TypeScript's way and the other drivine4j's: neither form, so it is current."
+    store: "oracle"
+    listing: "constraints"
+    rows:
+      - {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["first", "last"], "name": "Person_first_last_unique", "details": {}, "status": null}
+      - {"object": "DRIVINE_UQ_PERSONFIRSTLAST_58499B51", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "UNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["CASE JSON_EXISTS2(\"LABELS\" FORMAT OSON , '$?(@ == \"Person\")' /* json_path_str  $?(@.string() == \"Person\")  */  FALSE ON ERROR TYPE(LAX) ) WHEN 1 THEN JSON_VALUE(\"PROPS\" FORMAT OSON , '$.\"first\"' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) ) END ", "CASE  WHEN (JSON_EXISTS2(\"LABELS\" FORMAT OSON , '$[*]?(@ == \"Person\")' /* json_path_str  $[*]?(@.string() == \"Person\")  */  FALSE ON ERROR TYPE(LAX) )=1 AND JSON_EXISTS2(\"PROPS\" FORMAT OSON , '$.first' FALSE ON ERROR TYPE(LAX) )=1 AND JSON_EXISTS2(\"PROPS\" FORMAT OSON , '$.last' FALSE ON ERROR TYPE(LAX) )=1) THEN JSON_VALUE(\"PROPS\" FORMAT OSON , '$.last' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) ) END "], "tableColumns": null, "source": null}
+    listed:
+      - {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["first", "last"], "name": "Person_first_last_unique"}
+    items:
+      - {spec: {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["first", "last"]}, form: "current"}
+  - name: "Postgres: a partitioned table under a constraint's name"
+    description: "A relation Postgres names as it names an index, and no index."
+    store: "postgres"
+    listing: "constraints"
+    rows:
+      - {"type": "p", "table": null, "where": null, "method": null, "object": "drivine_uq_personemail_5482a751", "unique": null, "columns": null, "opclasses": null}
+    listed:
+    items:
+      - {spec: {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"]}, form: {"mismatch": {"name": "drivine_uq_personemail_5482a751", "reason": "a partitioned table, not an index", "droppable": false}}}
+  - name: "Postgres: a composite type under a range index's name"
+    description: "A type, which Postgres keeps among its relations, and no index."
+    store: "postgres"
+    listing: "indexes.RANGE_INDEX"
+    rows:
+      - {"type": "c", "table": null, "where": null, "method": null, "object": "drivine_ix_personname_44ce5436", "unique": null, "columns": null, "opclasses": null}
+    listed:
+    items:
+      - {spec: {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"]}, form: {"mismatch": {"name": "drivine_ix_personname_44ce5436", "reason": "a composite type, not an index", "droppable": false}}}

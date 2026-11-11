@@ -6041,6 +6041,100 @@ cases:
               log:
                 - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=null)"]
                 - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 1 already matching, 0 recreated, 0 needing attention"]
+  - case: "30z"
+    name: "An index on another table under a range index's name, with recreateOnDrift"
+    description: "An index Drivine didn't make, on the relationships' table, stands under the range index's name: drift, and as it is an index under a name Drivine generates, recreateOnDrift drops it by that name, the line naming the table it was on, and makes the range index."
+    stores: ["postgres", "oracle", "sqlite"]
+    catalogs:
+      - {owner: null, version: null, items: ["Range index"]}
+    policy: {recreateOnDrift: true}
+    steps:
+      - operation: {enforce: "all"}
+        runs:
+          - stores: ["postgres"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, rows: [{"type": "i", "table": "drivine_edge", "where": null, "method": "btree", "object": "drivine_ix_personname_44ce5436", "unique": false, "columns": ["type"], "opclasses": ["text_ops"]}]}
+              - now: 1000000
+                actions:
+                  - {execute: {statement: "DROP INDEX IF EXISTS drivine_ix_personname_44ce5436"}}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, rows: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Range index"}}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, rows: [{"kind": "RANGE_INDEX", "name": "Person_name_range", "label": "Person", "details": {"form": 1}, "properties": ["name"]}, {"type": "i", "table": "drivine_node", "where": "labels @> '[\"Person\"]'::jsonb", "method": "btree", "object": "drivine_ix_personname_44ce5436", "unique": false, "columns": ["(props ->> 'name'::text)"], "opclasses": ["text_ops"]}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: "RANGE_INDEX:Person:name:Person_name_range"}}
+            done: 1000000
+            report:
+              owners:
+                - {"owner": null, "results": [{"spec": "Range index", "recreated": {"previous": null, "current": {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": "Person_name_range"}}}], "marker": {"version": null, "items": "RANGE_INDEX:Person:name:Person_name_range"}}
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["WARN", "IndexManager", "Index drift on Person[name]: drivine_ix_personname_44ce5436, an index Drivine didn't make, stands under its name for the RANGE_INDEX: it is an index on drivine_edge, so it is not taken as made. Call recreate() to replace it (destructive)."]
+                - ["INFO", "IndexManager", "Dropped {engine} index drivine_ix_personname_44ce5436, an index Drivine didn't make under its name for RANGE_INDEX on Person[name]: it was an index on drivine_edge"]
+                - ["WARN", "IndexManager", "Recreated {engine} RANGE_INDEX on Person[name] — previously indexed data may be stale (vector indexes: stored embeddings need re-embedding)"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 0 already matching, 1 recreated, 0 needing attention"]
+          - stores: ["oracle"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, rows: [{"object": "DRIVINE_IX_NAME_337A8B", "type": "INDEX", "table": "DRIVINE_EDGE", "uniqueness": "NONUNIQUE", "indexType": "NORMAL", "columns": ["TYPE"], "tableColumns": null, "source": null}]}
+              - now: 1000000
+                actions:
+                  - {execute: {statement: "DROP INDEX IF EXISTS DRIVINE_IX_NAME_337A8B"}}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, rows: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Range index"}}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, rows: [{"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": "Person_name_range", "details": {"form": 1, "labelled": "drivine_lx_Personname_44ce5436"}, "status": null}, {"object": "DRIVINE_IX_NAME_337A8B", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.name' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"], "tableColumns": null, "source": null}, {"object": "DRIVINE_LX_PERSONNAME_44CE5436", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["CASE JSON_EXISTS2(\"LABELS\" FORMAT OSON , '$[*]?(@ == \"Person\")' /* json_path_str  $[*]?(@.string() == \"Person\")  */  FALSE ON ERROR TYPE(LAX) ) WHEN 1 THEN JSON_VALUE(\"PROPS\" FORMAT OSON , '$.name' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) ) END "], "tableColumns": null, "source": null}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: "RANGE_INDEX:Person:name:Person_name_range"}}
+            done: 1000000
+            report:
+              owners:
+                - {"owner": null, "results": [{"spec": "Range index", "recreated": {"previous": null, "current": {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": "Person_name_range"}}}], "marker": {"version": null, "items": "RANGE_INDEX:Person:name:Person_name_range"}}
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["WARN", "IndexManager", "Index drift on Person[name]: DRIVINE_IX_NAME_337A8B, an index Drivine didn't make, stands under its name for the RANGE_INDEX: it is an index on DRIVINE_EDGE, so it is not taken as made. Call recreate() to replace it (destructive)."]
+                - ["INFO", "IndexManager", "Dropped {engine} index DRIVINE_IX_NAME_337A8B, an index Drivine didn't make under its name for RANGE_INDEX on Person[name]: it was an index on DRIVINE_EDGE"]
+                - ["WARN", "IndexManager", "Recreated {engine} RANGE_INDEX on Person[name] — previously indexed data may be stale (vector indexes: stored embeddings need re-embedding)"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 0 already matching, 1 recreated, 0 needing attention"]
+          - stores: ["sqlite"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, rows: [{"object": "drivine_ix_Personname_44ce5436", "type": "index", "table": "drivine_edge", "sql": "CREATE INDEX drivine_ix_Personname_44ce5436 ON drivine_edge (type)", "unique": 0}]}
+              - now: 1000000
+                actions:
+                  - {execute: {statement: "DROP INDEX IF EXISTS drivine_ix_Personname_44ce5436"}}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, rows: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Range index"}}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, rows: [{"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": "Person_name_range", "details": {"form": 1}}, {"object": "drivine_ix_Personname_44ce5436", "type": "index", "table": "drivine_node", "sql": "CREATE INDEX drivine_ix_Personname_44ce5436 ON drivine_node ((CASE json_type(props, '$.\"name\"') WHEN 'text' THEN props ->> '$.\"name\"' WHEN 'null' THEN NULL ELSE props -> '$.\"name\"' END)) WHERE instr(labels, '\"Person\"') > 0", "unique": 0}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: "RANGE_INDEX:Person:name:Person_name_range"}}
+            done: 1000000
+            report:
+              owners:
+                - {"owner": null, "results": [{"spec": "Range index", "recreated": {"previous": null, "current": {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": "Person_name_range"}}}], "marker": {"version": null, "items": "RANGE_INDEX:Person:name:Person_name_range"}}
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["WARN", "IndexManager", "Index drift on Person[name]: drivine_ix_Personname_44ce5436, an index Drivine didn't make, stands under its name for the RANGE_INDEX: it is an index on drivine_edge, so it is not taken as made. Call recreate() to replace it (destructive)."]
+                - ["INFO", "IndexManager", "Dropped {engine} index drivine_ix_Personname_44ce5436, an index Drivine didn't make under its name for RANGE_INDEX on Person[name]: it was an index on drivine_edge"]
+                - ["WARN", "IndexManager", "Recreated {engine} RANGE_INDEX on Person[name] — previously indexed data may be stale (vector indexes: stored embeddings need re-embedding)"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 0 already matching, 1 recreated, 0 needing attention"]
   - case: "item"
     name: "The public IndexManager and ConstraintManager calls"
     description: "Each on one item, with no marker: a constraint ensured and recreated, an index recreated where there is none, and dropped, where it is there and where it is not."

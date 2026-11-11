@@ -246,10 +246,15 @@ data class StoreObject(
                 val name = map[SqlStoreSchema.OBJECT] as? String ?: continue
                 val type = when (val t = map["type"] as? String) {
                     "i", "I" -> INDEX
+                    // Postgres's relkinds, as words.
                     "r" -> "TABLE"
+                    "p" -> "PARTITIONED TABLE"
+                    "f" -> "FOREIGN TABLE"
+                    "t" -> "TOAST TABLE"
                     "v" -> "VIEW"
                     "m" -> "MATERIALIZED VIEW"
                     "S" -> "SEQUENCE"
+                    "c" -> "COMPOSITE TYPE"
                     else -> t?.uppercase() ?: "OBJECT"
                 }
                 val unique = (map["unique"] as? Boolean) ?: (map["unique"] as? Number)?.let { it.toLong() != 0L }
