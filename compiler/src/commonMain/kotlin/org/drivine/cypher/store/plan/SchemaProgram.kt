@@ -957,13 +957,14 @@ internal class SchemaProgram(
         val recreation = ddl.recreation(made)
         val found = findConstraint(spec)
         val rows = listings[ddl.listConstraintsQuery()].orEmpty()
-        // Read before anything runs: the form of what the build may meet.
-        val form = formOf(made)
         val mismatches = (store as? SqlStoreSchema)?.mismatchesOf(made, rows).orEmpty()
         // What isn't an index can't be dropped by its name, nor made over: the constraint stays drift.
         mismatches.firstOrNull { !it.droppable }?.let { return mismatched(made, found, it) }
         val inPlace = { name: String -> name.equals(recreation.name, ignoreCase = true) }
         val replaced = mismatches.firstOrNull { inPlace(it.name) }
+        // Read before anything runs: the form of what the build may meet, without the other names' mismatches, dropped below.
+        val others = mismatches.filterNot { inPlace(it.name) }.map { it.name.uppercase() }.toSet()
+        val form = store.formOf(made, rows.filterNot { ((it as? Map<*, *>)?.get(SqlStoreSchema.OBJECT) as? String)?.uppercase() in others })
         val unrecorded = if (replaced == null) store.unrecordedDrops(made, rows) else emptyList()
         for (other in mismatches.filterNot { inPlace(it.name) }) {
             ddl(store.dropMismatched(other.name))
