@@ -1,5 +1,7 @@
 package org.drivine.cypher.api
 
+import org.drivine.cypher.ParserCaches
+
 import org.drivine.cypher.sql.ColumnKind
 import org.drivine.cypher.sql.OracleCypherCompiler
 import org.drivine.cypher.sql.ResultColumn
@@ -106,6 +108,28 @@ data class Refusal(val message: String) : CompileResult, SearchResult
  * and on the JVM java.time's types too. A host that has no such types gives its parameters as JSON: see [CompileJson].
  */
 object CypherCompiler {
+
+    /**
+     * The most DFA states the parser's prediction caches hold, for the whole process, before they are made anew: 5,000 where
+     * it is not set, about 15 MB at their most (#179). A server that compiles many more distinct statements than about 300
+     * may raise it, trading memory for the few tens of microseconds a statement pays after the caches are made anew; see
+     * [parserCacheRenewals] for how often they are.
+     */
+    var parserCacheStates: Int
+        get() = ParserCaches.cap
+        set(value) {
+            require(value >= 1) { "The parser's caches hold at least one DFA state: $value." }
+            ParserCaches.cap = value
+        }
+
+    /**
+     * How many times the parser's caches have been made anew since the process began: a library logs it, at debug, where it
+     * has grown since it last looked, so a statement set too large for [parserCacheStates] shows in the log.
+     */
+    val parserCacheRenewals: Int get() = ParserCaches.renewals
+
+    /** The DFA states the parser's caches hold now. */
+    val parserCacheHeld: Int get() = ParserCaches.states()
 
     fun compile(store: Store, graph: GraphOptions, cypher: String, parameters: Map<String, Any?> = emptyMap()): CompileResult =
         compile(store, graph, cypher, parameters, typed = false)
