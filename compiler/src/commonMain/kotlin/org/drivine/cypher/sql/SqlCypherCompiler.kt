@@ -747,7 +747,8 @@ abstract class SqlCypherCompiler(
      * several kinds as Cypher orders their kinds ([kindOrder]), null last, and those of one kind among themselves. As [sortKey]
      * where a store does not override it: Postgres's takes `jsonb`'s order of kinds, a number before a truth value, which is
      * not yet Cypher's (#307). Oracle's and SQLite's JSON orders put a number before a text, so their terms are where the kind
-     * comes, then the value. A value the statement makes of one kind sorts by [sortKey] alone.
+     * comes, then the value: on Oracle, a list by its own key between them (drivine4j#205). A value the statement makes of one
+     * kind sorts by [sortKey] alone.
      */
     protected open fun openSortKey(json: String): List<String> = listOf(sortKey(json))
 
@@ -6105,7 +6106,8 @@ abstract class SqlCypherCompiler(
          * What [sortable] sorts [value] by, in two: the value as a column carries it, and the terms that sort it, of that column.
          * A value whose kind the statement leaves open sorts as [openSortKey] has it, where its kind comes first; one it makes a
          * truth value, a temporal value, a text, a list or a node is of one kind, and sorts by one term alone: a zoned value or a
-         * list of them by its moments, another list by [listSortKey], any other by [sortKey].
+         * list of them by its moments, another list by [listSortKeys] (on Oracle a key, and the list where the key may tie), any
+         * other by [sortKey].
          */
         private fun sortTerm(value: Value): Pair<String, (String) -> List<String>> = when {
             value is Value.Bool -> value.sql to { listOf(it) }

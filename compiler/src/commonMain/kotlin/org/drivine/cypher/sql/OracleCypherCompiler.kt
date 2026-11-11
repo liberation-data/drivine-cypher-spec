@@ -175,9 +175,11 @@ class OracleCypherCompiler(
     override fun nullIfJsonNull(json: String) = shared(json) { (x) -> "CASE WHEN ${kind(x)} <> 'null' THEN $x END" }
 
     /**
-     * Where the kind comes, as [kindOrder] ranks them and null for null, then the value as `JSON` orders it, which is Cypher's
-     * order within a kind: `JSON` orders a number before a text, a truth value after both, and a map and a list last. A null
-     * is ranked null, so the value needs no [nullIfJsonNull], which would read it again: as fast as [sortKey] over 100,000 rows.
+     * Where the kind comes, as [kindOrder] ranks them and null for null, then a list by [listSortKeys]' key, then the value as
+     * `JSON` orders it, which is Cypher's order within a kind but a list's: `JSON` orders a number before a text, a truth value
+     * after both, and a map and a list last. A null is ranked null, so the value needs no [nullIfJsonNull], which would read
+     * it again: as fast as [sortKey] over 100,000 rows. In a statement that writes, a list is sorted as `JSON` sorts it, as
+     * [listSortKeys] has it there.
      */
     override fun openSortKey(json: String) = shared(json) { (x) ->
         "DECODE(${kind(x)}, 'object', 1, 'array', 2, 'string', 3, 'boolean', 4, 'number', 5, 'double', 5, 'float', 5)"
@@ -188,15 +190,13 @@ class OracleCypherCompiler(
 
     /**
      * A list sorts as Cypher sorts lists, item by item, where `JSON` sorts a null item first and a number before a text
-     * (drivine4j#205): by [LIST_KEY]'s key. A statement that writes is a block, whose queries call no function it declares,
-     * so there a list sorts as `JSON` sorts it, as before.
+     * (drivine4j#205): by [LIST_KEY]'s key, then, where a key cut short at 2,000 bytes may tie, the list as `JSON` sorts it.
+     * A statement that writes is a block, whose queries call no function it declares, so there a list sorts as `JSON` sorts
+     * it, as before. Oracle's [listSortKey] is [sortKey]'s, which only `min` and `max` would read, and don't ([extremesByListKey]).
      */
-    override fun listSortKey(json: String) = if (procedural) sortKey(json) else listKey(json)
-
-    /** [listSortKey], then where it may tie, a key cut short at 2,000 bytes, the list as `JSON` sorts it. */
     override fun listSortKeys(json: String) = if (procedural) listOf(sortKey(json)) else listOf(listKey(json), json)
 
-    /** [LIST_KEY]'s key of the JSON [json], its function declared: see [listSortKey]. */
+    /** [LIST_KEY]'s key of the JSON [json], its function declared: see [listSortKeys]. */
     private fun listKey(json: String): String {
         declare(LIST_KEY)
         return "cy_list_key($json)"
@@ -2224,19 +2224,35 @@ class OracleCypherCompiler(
          * byte by byte, as `RAW` is ordered. Each item is where its kind comes ([kindOrder]'s ranks, null last), then the
          * item: a list its items' keys and a byte 0, so a list that another starts with comes first; a text its UTF-8 bytes,
          * which are in its code points' order, and a byte 0 (a 0 in the text is read as 1); a truth value false before true;
-         * a number its `NUMBER` bytes, which Oracle keeps in the number's order, and a byte 0, below any of them, so `1` comes before `1.04` whatever follows it; NaN or an infinity, which no `NUMBER`
-         * holds, after them. A map is where maps come, and no store orders two maps here yet. JSON's null, and SQL's, is no
-         * key, so it sorts where null does. Past 2,000 bytes, as long a `RAW` as SQL takes, a key is cut short, so lists
-         * that differ only after that are sorted as `JSON` sorts them, by the term after it ([listSortKeys]). It is the query's own, declared with `WITH FUNCTION`, not the store's.
+         * a number its `NUMBER` bytes, which Oracle keeps in the number's order, and a byte 0, below any of them, so `1` comes before `1.04` whatever follows it.
+         * The list is read as extended JSON, so a double is one, not a map: -Infinity comes before any `NUMBER`, and a double
+         * past one's range before or after them all, Infinity after that and NaN last, as Cypher orders them. A text is cut at
+         * 2,000 characters, more than the key holds, so one too long for a `VARCHAR2` is read. A map is where maps come, and
+         * no store orders two maps here yet. JSON's null, and SQL's, is no key, so it sorts where null does. Past 2,000 bytes,
+         * as long a `RAW` as SQL takes, a key is cut short, so lists that differ only after that are sorted as `JSON` sorts
+         * them, by the term after it ([listSortKeys]). It is the query's own, declared with `WITH FUNCTION`, not the store's.
          */
         private val LIST_KEY = listOf(
             "FUNCTION cy_list_key(cy_x JSON) RETURN RAW IS",
             "    r RAW(32767);",
             "    e JSON_ELEMENT_T;",
+            "    too_long EXCEPTION;",
+            "    PRAGMA EXCEPTION_INIT(too_long, -40478);",
             "    PROCEDURE add(b RAW) IS BEGIN IF UTL_RAW.LENGTH(NVL(r, HEXTORAW('00'))) < 2000 THEN r := UTL_RAW.CONCAT(r, b); END IF; END;",
+            // The double extended JSON writes as `{"${'$'}numberDouble": 1.5}`, NaN as "Nan" and the infinities as "Inf" and "-Inf", as text; null for any other value.
+            "    FUNCTION dbl(v JSON_ELEMENT_T) RETURN VARCHAR2 IS",
+            "        o JSON_OBJECT_T;",
+            "    BEGIN",
+            "        IF NOT v.is_Object THEN RETURN NULL; END IF;",
+            "        o := TREAT(v AS JSON_OBJECT_T);",
+            "        IF o.get_Size <> 1 OR NOT o.has('\$numberDouble') THEN RETURN NULL; END IF;",
+            "        RETURN o.get_String('\$numberDouble');",
+            "    END;",
             "    PROCEDURE k(v JSON_ELEMENT_T) IS",
             "        a JSON_ARRAY_T;",
-            "        n NUMBER;",
+            "        d VARCHAR2(64) := dbl(v);",
+            "        f BINARY_DOUBLE;",
+            "        s VARCHAR2(32767);",
             "    BEGIN",
             "        IF v.is_Null THEN add(HEXTORAW('06'));",
             "        ELSIF v.is_Array THEN",
@@ -2244,22 +2260,28 @@ class OracleCypherCompiler(
             "            add(HEXTORAW('02'));",
             "            FOR i IN 0 .. a.get_Size - 1 LOOP k(a.get(i)); END LOOP;",
             "            add(HEXTORAW('00'));",
-            "        ELSIF v.is_Object THEN add(HEXTORAW('01'));",
+            "        ELSIF v.is_Object AND d IS NULL THEN add(HEXTORAW('01'));",
             "        ELSIF v.is_String THEN",
-            "            add(UTL_RAW.CONCAT(HEXTORAW('03'), UTL_RAW.CAST_TO_RAW(REPLACE(TREAT(v AS JSON_SCALAR_T).to_String, CHR(0), CHR(1))), HEXTORAW('00')));",
+            "            BEGIN",
+            "                s := TREAT(v AS JSON_SCALAR_T).to_String;",
+            "            EXCEPTION WHEN too_long THEN",
+            "                s := DBMS_LOB.SUBSTR(TREAT(v AS JSON_SCALAR_T).to_Clob, 2000, 1);",
+            "            END;",
+            "            add(UTL_RAW.CONCAT(HEXTORAW('03'), UTL_RAW.CAST_TO_RAW(REPLACE(SUBSTR(s, 1, 2000), CHR(0), CHR(1))), HEXTORAW('00')));",
             "        ELSIF v.is_Boolean THEN",
             "            add(CASE WHEN TREAT(v AS JSON_SCALAR_T).to_Boolean THEN HEXTORAW('0401') ELSE HEXTORAW('0400') END);",
+            "        ELSIF d IS NOT NULL THEN",
+            "            f := TO_BINARY_DOUBLE(CASE WHEN d = 'Nan' THEN 'NaN' ELSE d END DEFAULT NULL ON CONVERSION ERROR);",
+            "            add(CASE WHEN f IS NAN THEN HEXTORAW('05FFFF01') WHEN f = BINARY_DOUBLE_INFINITY THEN HEXTORAW('05FFFF00')",
+            "                WHEN f = -BINARY_DOUBLE_INFINITY THEN HEXTORAW('050000') WHEN f >= 1E126D THEN HEXTORAW('05FFFE')",
+            "                WHEN f <= -1E126D THEN HEXTORAW('050001') ELSE UTL_RAW.CONCAT(HEXTORAW('05'), UTL_RAW.CAST_FROM_NUMBER(TO_NUMBER(f)), HEXTORAW('00')) END);",
             "        ELSE",
-            "            BEGIN",
-            "                n := TREAT(v AS JSON_SCALAR_T).to_Number;",
-            "                add(UTL_RAW.CONCAT(HEXTORAW('05'), UTL_RAW.CAST_FROM_NUMBER(n), HEXTORAW('00')));",
-            "            EXCEPTION WHEN OTHERS THEN add(HEXTORAW('05FF'));",
-            "            END;",
+            "            add(UTL_RAW.CONCAT(HEXTORAW('05'), UTL_RAW.CAST_FROM_NUMBER(TREAT(v AS JSON_SCALAR_T).to_Number), HEXTORAW('00')));",
             "        END IF;",
             "    END;",
             "BEGIN",
             "    IF cy_x IS NULL THEN RETURN NULL; END IF;",
-            "    e := JSON_ELEMENT_T.parse(JSON_SERIALIZE(cy_x RETURNING CLOB));",
+            "    e := JSON_ELEMENT_T.parse(JSON_SERIALIZE(cy_x RETURNING CLOB EXTENDED));",
             "    IF e.is_Null THEN RETURN NULL; END IF;",
             "    k(e);",
             "    RETURN UTL_RAW.SUBSTR(r, 1, LEAST(UTL_RAW.LENGTH(r), 2000));",

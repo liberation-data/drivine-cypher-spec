@@ -3149,9 +3149,21 @@ cases:
       - note: "A number that another begins, as 1 begins 1.04 in Oracle's NUMBER, comes first whatever follows it."
         cypher: "UNWIND [[1.04], [1, 5], [1]] AS xs RETURN xs ORDER BY xs"
         rows: [[1], [1, 5], [1.04]]
+      - note: "-Infinity comes before every other number, and Infinity after them, then NaN."
+        only: [neo4j, sql]
+        cypher: "UNWIND [[$p], [$i], [3.0], [$n], ['a']] AS xs RETURN xs ORDER BY xs"
+        parameters: {p: {$float: "NaN"}, i: {$float: "Infinity"}, n: {$float: "-Infinity"}}
+        rows: [["a"], [{$float: "-Infinity"}], [3.0], [{$float: "Infinity"}], [{$float: "NaN"}]]
+      - note: "A text too long for Oracle's VARCHAR2 sorts so too."
+        cypher: "UNWIND [[$t, 2], ['a' + $t, 1], [1, 0]] AS xs RETURN xs[1] ORDER BY xs"
+        parameters: {t: {$repeat: "x", times: 40000}}
+        rows: [1, 2, 0]
       - note: "A list collected, and a list read from a map, whose kind the statement leaves open, sort so too."
         cypher: "UNWIND [1, 2] AS g UNWIND (CASE g WHEN 1 THEN [5] ELSE ['a'] END) AS v WITH g, collect(v) AS c RETURN g ORDER BY c"
         rows: [2, 1]
+      - note: "So does a list a CALL sorts and limits."
+        cypher: "CALL { UNWIND [[1, null], [1, 2], ['a']] AS xs RETURN xs ORDER BY xs LIMIT 2 } RETURN xs ORDER BY xs DESC"
+        rows: [[1, 2], ["a"]]
       - note: "Postgres sorts a value whose kind is left open as jsonb sorts it (drivine4j#307)."
         except: [postgres]
         cypher: "UNWIND [{l: [1, 'a']}, {l: ['a']}, {l: [1, null]}] AS m RETURN m.l ORDER BY m.l"
