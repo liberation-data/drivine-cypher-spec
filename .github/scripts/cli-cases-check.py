@@ -10,9 +10,9 @@ Checks the drivine CLI's cases, cli/cli.yaml, against what cli/README.md says a 
 - `files` maps each name to its text, or to a map of its `text` and an octal `mode`; `env` maps each name to a text or
   null; `store` is only ever false, `cypherShell` only ever true, and `mode` only ever cypher-shell;
 - where a case runs with `--format json`, and with no `--explain`, `--help`, `--version` or `--driver-version` and no
-  `:params` or `:help` in its stdin or files, which print something else to stdout, each line of the `stdout` it
-  expects is one JSON object of `columns` and `rows`, with no bare NaN or infinity, and its last line ends in a line
-  break, as json writes one line per statement.
+  `:params` or `:help` in its args' Cypher, its stdin or its files, which print something else to stdout, each line of
+  the `stdout` it expects is one JSON object of `columns` and `rows`, with no bare NaN or infinity, and its last line
+  ends in a line break, as json writes one line per statement.
 
     .github/scripts/cli-cases-check.py [cli.yaml [README.md]]
 """
@@ -54,13 +54,13 @@ PRINTING_COMMAND = re.compile(r"^[ \t]*:(params|help)[ \t]*\r?$", re.MULTILINE)
 
 def json_lines(case, args):
     """Whether args ask for --format json, and nothing but the statements' results is written to stdout: no flag of
-    OWN_OUTPUT, and no `:params` or `:help` in stdin or a file."""
+    OWN_OUTPUT, and no `:params` or `:help` in an argument, as the positional Cypher or `-c`'s, stdin or a file."""
     if not (any(a == "--format" and b == "json" for a, b in zip(args, args[1:])) or "--format=json" in args):
         return False
     if OWN_OUTPUT & set(args):
         return False
     files = case.get("files") if isinstance(case.get("files"), dict) else {}
-    texts = [case.get("stdin")] + [f.get("text") if isinstance(f, dict) else f for f in files.values()]
+    texts = args + [case.get("stdin")] + [f.get("text") if isinstance(f, dict) else f for f in files.values()]
     return not any(isinstance(t, str) and PRINTING_COMMAND.search(t) for t in texts)
 
 

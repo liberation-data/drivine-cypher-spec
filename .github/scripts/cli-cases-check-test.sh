@@ -54,6 +54,11 @@ passes "a json case whose stdin prints its parameters" 'cases:
     stdin: ":param a => 1\n:params\n"
     stdout: "{\n  a: 1\n}\n"
     exit: 0'
+passes "a json case whose -c prints its parameters" 'cases:
+  - name: "c"
+    args: ["--format", "json", "-c", ":params"]
+    stdout: "{\n}\n"
+    exit: 0'
 
 refused "a file that isn't YAML" "cases: [" "isn't YAML"
 refused "a file of another shape" "- name: a" "whose one key is \`cases\`"
