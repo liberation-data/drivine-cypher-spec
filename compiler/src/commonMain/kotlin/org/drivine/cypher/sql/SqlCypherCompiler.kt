@@ -484,6 +484,20 @@ abstract class SqlCypherCompiler(
      */
     protected open fun searchedTexts(a: String, b: String, search: (List<String>) -> String): String = texts(a, b, body = search)
 
+    /**
+     * A function that makes a text, or [empty], of the texts of the JSON values [jsons] and the numbers [numbers]: [body] over
+     * the texts, as [texts] reads them. A store whose empty text reads as null, so [body] gives null where it makes an empty
+     * text, gives [empty] there instead, where each text is one and each number is one: where [whereFirstEmpty], only where the
+     * first text is empty. See Oracle's (#416).
+     */
+    protected open fun madeText(
+        vararg jsons: String,
+        numbers: List<String> = emptyList(),
+        empty: Any = "",
+        whereFirstEmpty: Boolean = false,
+        body: (List<String>) -> String,
+    ): String = texts(*jsons, body = body)
+
     /** The JSON [json] as a condition, where it is `true` or `false`. */
     protected abstract fun boolOf(json: String): String
 
@@ -5737,11 +5751,12 @@ abstract class SqlCypherCompiler(
                 }
                 "split" -> {
                     if (arguments.size != 2) throw CompilerException("split() takes a text and a separator.")
-                    Value.Json(texts(*arguments.map { comparable(json(it)) }.toTypedArray()) { (text, separator) -> split(text, separator) }, list = true, texts = true)
+                    // An empty text is one empty text, as in Cypher; split by an empty separator, it isn't (#416).
+                    Value.Json(madeText(*arguments.map { comparable(json(it)) }.toTypedArray(), empty = listOf(""), whereFirstEmpty = true) { (text, separator) -> split(text, separator) }, list = true, texts = true)
                 }
                 "reverse" -> Value.Json(shared(comparable(json(one()))) { (x) ->
                     val e = alias("e")
-                    "CASE ${reversedKind(x)} WHEN 'string' THEN ${texts(x) { (t) -> reversedText(t) }} " +
+                    "CASE ${reversedKind(x)} WHEN 'string' THEN ${madeText(x) { (t) -> reversedText(t) }} " +
                         "WHEN 'array' THEN (SELECT ${comparable(Value.Json(aggregateList(item(e), "${itemNo(e)} DESC"), ordered = true))} FROM ${elementsOf(one(), x, e)}) END"
                 }, items = itemsOf(one()), itemItems = itemItemsOf(one()), list = isList(one()), itemLists = holdsLists(one()), text = isText(one()), texts = holdsTexts(one()),
                     temporals = holdsTemporals(one()))
@@ -5781,12 +5796,12 @@ abstract class SqlCypherCompiler(
                 "e", "pi" -> if (arguments.isEmpty()) Value.Json(literalJson(if (name == "e") kotlin.math.E else kotlin.math.PI))
                     else throw CompilerException("${function.name}() takes no argument.")
                 "sign" -> Value.Json(scalar(signOf(number(comparable(json(one()))))))
-                "ltrim", "rtrim" -> Value.Json(texts(comparable(json(one()))) { (t) -> scalar("${name.uppercase()}($t)") }, text = true)
+                "ltrim", "rtrim" -> Value.Json(madeText(comparable(json(one()))) { (t) -> scalar("${name.uppercase()}($t)") }, text = true)
                 "randomuuid" -> if (arguments.isEmpty()) Value.Json(scalar(uuid())) else throw CompilerException("randomUUID() takes no argument.")
                 // A position is counted from 0, as Cypher counts it, and SQL from 1.
                 "substring" -> {
                     if (arguments.size !in 2..3) throw CompilerException("substring() takes a text, a start and a length.")
-                    Value.Json(texts(comparable(json(arguments[0]))) { read ->
+                    Value.Json(madeText(comparable(json(arguments[0])), numbers = arguments.drop(1).map { comparable(json(it)) }) { read ->
                         scalar(shared(read.single()) { (text) ->
                             val start = countOf(function, 1, "start", arguments, text)
                             val length = if (arguments.size == 3) ", ${countOf(function, 2, "length", arguments, text)}" else ""
@@ -5798,7 +5813,7 @@ abstract class SqlCypherCompiler(
                 }
                 "left", "right" -> {
                     if (arguments.size != 2) throw CompilerException("${function.name}() takes a text and a length.")
-                    Value.Json(texts(comparable(json(arguments[0]))) { read ->
+                    Value.Json(madeText(comparable(json(arguments[0])), numbers = listOf(comparable(json(arguments[1])))) { read ->
                         scalar(shared(read.single()) { (text) ->
                             val count = countOf(function, 1, "length", arguments, text)
                             if (name == "left") "SUBSTR($text, 1, $count)" else rightText(text, count)
@@ -5809,7 +5824,7 @@ abstract class SqlCypherCompiler(
                     if (arguments.size != 3) throw CompilerException("replace() takes a text, what to replace, and what with.")
                     // How long what to replace, and what with, are, in bytes, where the statement gives them.
                     val (searchBytes, replacementBytes) = function.arguments.drop(1).map { (given(it) as? String)?.let(org.drivine.cypher.text.JavaText::utf8)?.size }
-                    Value.Json(texts(*arguments.map { comparable(json(it)) }.toTypedArray()) { (text, search, replacement) ->
+                    Value.Json(madeText(*arguments.map { comparable(json(it)) }.toTypedArray()) { (text, search, replacement) ->
                         scalar(replaceText(text, search, replacement, searchBytes, replacementBytes))
                     }, text = true)
                 }

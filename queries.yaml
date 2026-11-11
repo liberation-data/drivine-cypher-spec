@@ -980,6 +980,36 @@ cases:
         cypher: "RETURN ['  ' STARTS WITH '', '' CONTAINS ' ', '  ' ENDS WITH ' ', size('  '), isEmpty(' ')]"
         rows: [[true, false, true, 2, false]]
 
+  - name: "The empty text made"
+    description: "A function that makes a text makes the empty text where Cypher does: of empty texts, or of a count of 0. Oracle's empty text is null as SQL text, so its functions gave null there (drivine4j#416). An argument that is null still makes null."
+    steps:
+      - only: [neo4j, sql]
+        cypher: "RETURN ['' + '', toUpper(''), toLower(''), trim(''), ltrim(''), rtrim(''), reverse(''), toString('')]"
+        rows: [[["", "", "", "", "", "", "", ""]]]
+      - only: [neo4j, sql]
+        cypher: "RETURN [replace('a', 'a', ''), replace('', 'a', 'b'), substring('abc', 1, 0), substring('abc', 3), left('abc', 0), right('abc', 0), trim('   ')]"
+        rows: [[["", "", "", "", "", "", ""]]]
+      - only: [neo4j, sql]
+        cypher: "RETURN [$e + $e, toUpper($e), reverse($e), substring($e, 0), left($e, 2)]"
+        parameters: {e: ""}
+        rows: [[["", "", "", "", ""]]]
+      - only: [neo4j, sql]
+        cypher: "RETURN split('', ','), split($e, ',')"
+        parameters: {e: ""}
+        rows: [[[""], [""]]]
+      - only: [neo4j, sql]
+        cypher: "UNWIND ['', 'ab'] AS x RETURN x, toUpper(x), x + '', reverse(x), left(x, 1) ORDER BY x"
+        rows: [["", "", "", "", ""], ["ab", "AB", "ab", "ba", "a"]]
+      - note: "A text past 32 KB beside the empty text."
+        only: [neo4j, sql]
+        cypher: "RETURN size($e + $long), size(replace($long, 'x', '')), size(left($long, 0))"
+        parameters: {e: "", long: {$repeat: "x", times: 40000}}
+        rows: [[40000, 0, 0]]
+      - note: "A null argument, or a missing property, still makes null."
+        only: [neo4j, sql]
+        cypher: "MATCH (p:Person {name: 'Keanu'}) RETURN [toUpper(p.nope), '' + null, substring('abc', 1, null), left('', null), replace('', null, 'x'), reverse(p.nope), split(null, ','), toString(p.nope)]"
+        rows: [[[null, null, null, null, null, null, null, null]]]
+
   - name: "Round to a fractional or negative precision"
     description: "round() reads its precision as a whole number toward zero, as Neo4j does, and fails on a row it rounds a number on by one below 0 or past 2147483647."
     steps:

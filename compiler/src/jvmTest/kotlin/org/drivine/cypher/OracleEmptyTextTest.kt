@@ -57,9 +57,12 @@ class OracleEmptyTextTest {
     }
 
     @Test
-    fun `=~, the text functions and Postgres and SQLite's searches read no length`() {
-        for (cypher in listOf("RETURN \$e =~ '.*'", "RETURN toUpper(\$e)", "RETURN \$e + \$e", "RETURN split(\$t, \$e)")) {
-            assertTrue(!sql(cypher).contains(".length()' RETURNING NUMBER"), cypher)
+    fun `=~ and Postgres and SQLite's searches read no length, and a text function reads its texts' lengths last`() {
+        assertTrue(!sql("RETURN \$e =~ '.*'").contains(".length()' RETURNING NUMBER"))
+        // A function that makes a text gives the empty text where its texts are all texts and its SQL gives null (stage 2).
+        for (cypher in listOf("RETURN toUpper(\$e)", "RETURN left(\$e, 1)", "RETURN split(\$e, \$t)")) {
+            val sql = sql(cypher)
+            assertTrue(sql.contains(".length()' RETURNING NUMBER") && sql.contains("THEN JSON('"), "$cypher: $sql")
         }
         for (compiler in listOf(PostgresCypherCompiler("g"), SqliteCypherCompiler("g"))) {
             assertTrue(!compiler.compile("RETURN \$t STARTS WITH \$e", mapOf("t" to "ab", "e" to "")).sql.contains("length()"))
