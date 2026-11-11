@@ -30,11 +30,8 @@ class HostSpecTest {
         /** Drivine's functions, and `regexp`, which SQLite calls, as `regexp(pattern, text)`, for `text REGEXP pattern`. */
         val FUNCTION = Regex("drivine_[a-z_]+|regexp")
 
-        /** The functions host.yaml calls that are not yet ported from drivine4j (#108): each batch takes its own out. */
-        val PENDING = setOf(
-            "drivine_equal", "drivine_add", "drivine_list_order", "drivine_sort_key", "drivine_round",
-            "regexp", "drivine_regex_group", "drivine_regexp_replace",
-        )
+        /** The functions host.yaml calls that are not yet ported from drivine4j (#108): a port takes its own out. */
+        val PENDING = setOf("drivine_round", "regexp", "drivine_regex_group", "drivine_regexp_replace")
     }
 
     private val cases: List<JsonNode> = CypherJson.readTree(oracleFile("host.json"))["cases"]!!.toList()
@@ -96,7 +93,7 @@ class HostSpecTest {
         assertContains(assertFails { check(nanAscending, "nanAscending") }.message!!, "can't be given NaN")
         val truth = CypherJson.readTree("""{"function": "drivine_float_text", "args": [true], "result": "1.0"}""")
         assertContains(assertFails { check(truth, "truth") }.message!!, "No SQL value of")
-        val pending = CypherJson.readTree("""{"function": "drivine_equal", "args": ["1", "1"], "result": 1}""")
+        val pending = CypherJson.readTree("""{"function": "drivine_round", "args": [1.5, 0, "UP"], "result": 2.0}""")
         assertEquals(Outcome.PENDING, check(pending, "pending"))
         val read = CypherJson.readTree("""{"read": {"store": "sqlite", "nonFinite": false, "column": "1"}, "value": 1, "note": "n"}""")
         assertEquals(Outcome.READ, check(read, "read"))
