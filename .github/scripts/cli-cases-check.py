@@ -101,7 +101,7 @@ def problems(cases_text, readme_text):
     """Each way the cases break the README's rules, as a line naming the case; none where they keep them."""
     try:
         document = yaml.load(cases_text, Loader=Loader)
-    except yaml.YAMLError as e:
+    except (yaml.YAMLError, RecursionError) as e:
         return [f"cli.yaml isn't YAML: {e}"]
     if not isinstance(document, dict) or set(document) != {"cases"} or not isinstance(document["cases"], list):
         return ["cli.yaml is a map whose one key is `cases`, a list of cases"]
@@ -175,11 +175,16 @@ def problems(cases_text, readme_text):
 def main(argv):
     cases = argv[1] if len(argv) > 1 else "cli/cli.yaml"
     readme = argv[2] if len(argv) > 2 else "cli/README.md"
-    with open(cases, encoding="utf-8") as f:
-        cases_text = f.read()
-    with open(readme, encoding="utf-8") as f:
-        readme_text = f.read()
-    found = problems(cases_text, readme_text)
+    # Whatever the files get wrong, it is a finding about them, never the check's own traceback: a file that can't be
+    # read as UTF-8, or an input odd enough to break a rule's reading of it, still fails as the file's.
+    try:
+        with open(cases, encoding="utf-8") as f:
+            cases_text = f.read()
+        with open(readme, encoding="utf-8") as f:
+            readme_text = f.read()
+        found = problems(cases_text, readme_text)
+    except Exception as e:  # noqa: BLE001, a finding of its own
+        found = [f"can't be checked: {type(e).__name__}: {e}"]
     for line in found:
         print(f"{cases}: {line}", file=sys.stderr)
     if found:

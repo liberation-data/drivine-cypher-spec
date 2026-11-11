@@ -67,6 +67,7 @@ passes "a json case whose file prints the commands" 'cases:
     exit: 0'
 
 refused "a file that isn't YAML" "cases: [" "isn't YAML"
+refused "YAML nested too deep to read" "cases: $(python3 -c 'print("[" * 100000 + "]" * 100000, end="")')" "isn't YAML: maximum recursion depth"
 refused "a file of another shape" "- name: a" "whose one key is \`cases\`"
 refused "a key besides cases" "cases: []
 other: 1" "whose one key is \`cases\`"
@@ -169,6 +170,14 @@ $ok
 refused "a mode the README doesn't name" "cases:
 $ok
     mode: default" "\`mode\` is only ever \"cypher-shell\""
+
+# Whatever the check can't read is a finding about the file, not a traceback: a README with no text is one such input.
+printf '%s\n' "cases:
+$ok" > "$root/cases.yaml"
+printf '\xff\xfe' > "$root/odd.md"
+if out="$(python3 -I "$check" "$root/cases.yaml" "$root/odd.md" 2>&1)"; then fail "a README that isn't UTF-8 passed"; fi
+grep -qF "can't be checked" <<<"$out" || grep -qF 'no "## Cases" section' <<<"$out" || fail "a README that isn't UTF-8: not a finding: $out"
+! grep -qF "Traceback" <<<"$out" || fail "a README that isn't UTF-8 gave a traceback: $out"
 
 # The README's table is where the keys come from: one without the section is refused, not passed.
 printf '# No cases here\n' > "$root/README.md"
