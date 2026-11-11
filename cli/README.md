@@ -128,7 +128,7 @@ Flags and environment variables override the profile, key by key. So `DRIVINE_PA
 
 ## Files
 
-A file, stdin and the positional argument are read alike.
+A file, stdin and the positional argument are read alike, but for a byte-order mark, as below.
 
 **Statements.** The text is split into statements on `;`. A `;` doesn't split inside these:
 - a string in `'…'` or `"…"`, where `\` escapes the character after it;
@@ -136,7 +136,7 @@ A file, stdin and the positional argument are read alike.
 - a `//` comment, to the end of its line;
 - a `/* … */` comment.
 
-A line may end in `\r\n` as well as `\n`: the `\r` is not part of a command. A statement that is only spaces and comments isn't run. The text after the last `;` is run too, as long as it is more than spaces and comments.
+A line may end in `\r\n` as well as `\n`: the `\r` is not part of a command. One UTF-8 byte-order mark (U+FEFF) at the very start of a `-f` file, stdin or a `:source` file is not part of the text, as an editor on Windows may write one: so a command on the first line is still a command. A U+FEFF anywhere else, at the start of the positional argument or `-c` too, is a character of the text, as any other is. A statement that is only spaces and comments isn't run. The text after the last `;` is run too, as long as it is more than spaces and comments.
 
 **Commands.** A line whose first character after any spaces is `:` is a command, where a statement would start: not inside a string, a comment, or a statement that no `;` has ended yet. It runs on its own, and needs no `;`:
 
@@ -179,7 +179,7 @@ The expression is Cypher. It's evaluated by running `RETURN expression` on the s
 | `auto` | `table` when stdout is a terminal, `plain` when it isn't. This is the default. |
 | `table` | Each result as a table, then its count of rows and how long it took, then the store's counts of what it wrote, as cypher-shell's `verbose` prints them. A result with no columns, such as a write with no `RETURN`, prints no table. |
 | `plain` | Each result's columns, `, ` between them, then a line per row, with the values printed as cypher-shell prints them. A result with no rows prints nothing. |
-| `json` | One line per statement, compact: `{"columns":[...],"rows":[[...],...]}`. Values are written as the spec's files write them, with NaN and the infinities as `{"$float":"NaN"}` and the others, and a float as `plain` prints it: `2.0`, not `2`, and `1.0E10`. A whole number is written exactly, past 2^53 too. A text's characters are written as they are, escaped only where JSON requires it: `\"`, `\\`, `\b`, `\f`, `\n`, `\r` and `\t` in their short forms, and any other control character as `\u00XX`. A temporal value is its ISO 8601 text, as a JSON string. |
+| `json` | One line per statement, compact: `{"columns":[...],"rows":[[...],...]}`. Values are written as the spec's files write them, with NaN and the infinities as `{"$float":"NaN"}` and the others, and a float as `plain` prints it: `2.0`, not `2`, and `1.0E10`. A whole number is written exactly, past 2^53 too. A text's characters are written as they are, escaped only where JSON requires it: `\"`, `\\`, `\b`, `\f`, `\n`, `\r` and `\t` in their short forms, and any other control character as `\u00XX`. A temporal value is its ISO 8601 text, as a JSON string. A node is `{"$t":"node","labels":[…],"properties":{…}}`, with its labels sorted, a relationship `{"$t":"relationship","type":…,"properties":{…}}`, and a path `{"$t":"path","nodes":[…],"relationships":[…],"forward":[…]}`, its nodes and relationships in the order it walks them, and `forward[i]` true where `relationships[i]` goes from `nodes[i]` to `nodes[i + 1]`, false where it goes the other way, one for each relationship. None holds the store's ids. `$t` is the kind, in the words of the spec's typed output (liberation-data/drivine-cypher-spec#161), so a program tells a node from a map without guessing: a map of the user's own that has a `$t` key is written inside one, `{"$t":"map","v":{…}}`, in a list or a map too, and so are a node's or a relationship's `properties` that have one; any other map is written as it is. That is the output's own form: `results.yaml` writes the same map as `{$map: {…}}`, the spec's notation for its cases. |
 | `csv` | Each result as RFC 4180 CSV, with a header row, and lines that end in `\n`. A text and a temporal value are their own characters, null is an empty field, and any other value is its compact JSON, as `json` writes it, so `2.0` is `2.0`. A field is in `"…"` only when it holds a `,`, a `"` or a line break. Results are separated by one empty line. A result with no columns, such as a write with no `RETURN`, prints nothing, not even its separator. |
 
 **How `plain` and `table` print a value**, as cypher-shell does:
@@ -202,7 +202,7 @@ The expression is Cypher. It's evaluated by running `RETURN expression` on the s
 
 **Text and lines.** Every format writes UTF-8 and ends each line with `\n`, on Windows too.
 
-On a SQL store, the CLI reads a node's labels and a relationship's type along with their properties, though `PersistenceManager.query` gives only the properties, and prints them as it would on Neo4j.
+**Labels.** A node's labels print sorted, in every format, as `results.yaml` writes them, so a node reads the same on every store. On a SQL store, the CLI reads a node's labels and a relationship's type along with their properties, through a library's call that gives a result's typed values (see `results.yaml`) rather than `PersistenceManager.query`, which gives only the properties, and prints them as it would on Neo4j. A SQL store refuses a path (liberation-data/drivine-cypher-spec#163).
 
 **`table`'s timing line**, `ready to start consuming query after N ms, results consumed after another M ms`, varies from run to run. Cases don't compare it.
 
@@ -249,6 +249,7 @@ The CLI reads cypher-shell's files and prints values as cypher-shell does, but i
 - **`--fail-fast` and `--fail-at-end`.** `drivine` stops at the first failure with no flag, as `--fail-fast` does, and `--continue` does what `--fail-at-end` does. `--fail-fast` and `--fail-at-end` are unknown flags.
 - **`verbose`.** `drivine`'s `table` is cypher-shell's `verbose`, and prints the same. `auto` picks `table` where cypher-shell picks `verbose`, so it prints the same too.
 - **Exit codes.** cypher-shell exits with 1 for every failure. `drivine` exits with 2 for a bad invocation and 3 for a store it can't connect to.
+- **A node's labels.** cypher-shell prints them in the order Neo4j gives them. `drivine` prints them sorted, so `(:Q:P)` there may be `(:P:Q)` here. No case marked `cypherShell: true` holds a node of two labels.
 - **`-d` and `--graph`.** cypher-shell's `-d` names a Neo4j database. `drivine`'s names the database or the service, and is refused on FalkorDB and SQLite. A graph is named with `--graph`, which cypher-shell doesn't have.
 
 The cases marked `mode: cypher-shell` are the mode's tests. Each also marked `cypherShell: true` keeps its expected output, its exit code among it, as cypher-shell gives it. The runner gives them the store's user and password in `DRIVINE_USER` and `DRIVINE_PASSWORD`, as it gives every case, so the mode reads those before `NEO4J_USERNAME` and `NEO4J_PASSWORD`. `record-cypher-shell.py` checks every case marked `cypherShell: true` against cypher-shell, in either mode.
@@ -287,3 +288,5 @@ A store in `only` and `except` is `neo4j`, `memgraph`, `falkordb`, `postgres`, `
 | `note` | Why the case is there. It is not read. |
 
 Lines of `table`'s timing line are taken out of stdout before it is compared.
+
+`.github/scripts/cli-cases-check.py`, which CI runs on every change to `cli/`, checks the cases against this section without a CLI or a store. The file must be YAML, with no key twice in one map, whose `cases` each have a unique `name`, their `args` and an `exit`, and only the keys the table above names. `only`, `except` and `os` must name what they're allowed to. `stdin`, `stdout`, `stderr`, `description` and `note` must be texts, and `stdoutLines` a list of texts. The keys whose values the table gives exactly, as `files`, `env`, `store`, `cypherShell` and `mode`, must have them. Where a case runs with `--format json`, and with no `--explain`, `--help`, `--version` or `--driver-version` and no `:params` or `:help` in its Cypher, stdin or files, which print something else to stdout, each line of its `stdout` must be one JSON object of `columns` and `rows`, and its `stdout` must end in a line break.

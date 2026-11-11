@@ -4419,14 +4419,16 @@ abstract class SqlCypherCompiler(
 
         /**
          * Whether each item of the list [value], written as [written], is known to be no temporal value and no map, or null: a list the
-         * statement makes of texts, one it writes of literals, or a list given as a parameter whose items are such. Not a map, which a
-         * temporal value as a map of its kind ([kinded]) might be equal to. At [depth] 2, so are the items of each item that is a list.
+         * statement makes of texts, one it writes of literals and of parameters given such values (`[$s]`, drivine4j#779), or a list
+         * given as a parameter whose items are such. Not a map, which a temporal value as a map of its kind ([kinded]) might be equal
+         * to. At [depth] 2, so are the items of each item that is a list.
          */
         private fun untemporalItems(value: Value, written: Expression?, depth: Int = 1): Boolean {
-            fun writtenOf(item: Expression, depth: Int): Boolean =
-                item is Expression.Literal || depth > 1 && item is Expression.ListLiteral && item.items.all { writtenOf(it, depth - 1) }
             fun givenOf(item: Any?, depth: Int): Boolean =
                 item == null || untemporalGiven(item) && item !is Map<*, *> && (depth == 1 || item !is List<*> || item.all { givenOf(it, depth - 1) })
+            fun writtenOf(item: Expression, depth: Int): Boolean =
+                item is Expression.Literal || item is Expression.Parameter && givenOf(given(item), depth) ||
+                    depth > 1 && item is Expression.ListLiteral && item.items.all { writtenOf(it, depth - 1) }
             return depth == 1 && holdsTexts(value) || (written as? Expression.ListLiteral)?.items?.all { writtenOf(it, depth) } == true ||
                 (written?.let(::given) as? List<*>)?.all { givenOf(it, depth) } == true
         }
@@ -5035,6 +5037,7 @@ abstract class SqlCypherCompiler(
             val b = comparable(json(right))
             return when (binary.operator) {
                 Operator.EQUALS, Operator.NOT_EQUALS -> {
+                    entrywise(binary, left, right, scope)?.let { equal -> return Value.Bool(if (binary.operator == Operator.NOT_EQUALS) "(NOT $equal)" else equal) }
                     val plain = plain(binary.left, binary.right, left, right, scope)
                     val equal = (if (plain) null else givenItemwise(binary.left, left, binary.right, right))
                         ?: equality(left, right, binary.right, plain, stored(binary.left, scope), scalarRows = givenRowsScalar(binary.right, scope), leftWritten = binary.left)
@@ -5508,6 +5511,28 @@ abstract class SqlCypherCompiler(
                 }
                 else -> null
             }
+        }
+
+        /**
+         * An equality of [left] and [right], the sides of [binary], maps the statement writes out with the same keys, where at a key one
+         * side's entry is of a temporal kind ([Value.Json.entries]: a constructor's, or a parameter given one) and the other's is known to
+         * be no temporal value and no map, a value written or given as a parameter (a text, a number, a truth value or a list): each pair of entries compared, as [itemwise]
+         * compares them, so a temporal entry is equal to no text that spells it, as in Cypher (drivine4j#779). Not beside a map, which a
+         * temporal value as a map of its kind might be equal to. Null where the sides are no such maps, and compare whole, as JSON.
+         */
+        private fun entrywise(binary: Expression.Binary, left: Value, right: Value, scope: Map<String, Value>): String? {
+            val l = (binary.left as? Expression.MapLiteral)?.entries?.toMap() ?: return null
+            val r = (binary.right as? Expression.MapLiteral)?.entries?.toMap() ?: return null
+            if (l.keys != r.keys) return null
+            val (kindsOfL, kindsOfR) = (left as? Value.Json)?.entries.orEmpty() to (right as? Value.Json)?.entries.orEmpty()
+            fun untemporalEntry(entry: Expression) =
+                entry is Expression.Literal && entry.value != null || entry is Expression.Parameter && given(entry).let { untemporalGiven(it) && it !is Map<*, *> }
+            val apart = l.keys.any { key ->
+                kindsOfL[key] != null && kindsOfR[key] == null && untemporalEntry(r.getValue(key)) ||
+                    kindsOfR[key] != null && kindsOfL[key] == null && untemporalEntry(l.getValue(key))
+            }
+            if (!apart) return null
+            return grouped(l.map { (key, value) -> bool(binary(Expression.Binary(Operator.EQUALS, value, r.getValue(key)), scope)) }, "AND")
         }
 
         /**
