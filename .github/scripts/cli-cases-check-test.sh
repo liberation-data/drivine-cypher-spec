@@ -88,6 +88,16 @@ refused "an exit that isn't a whole number" 'cases:
   - name: "a"
     args: []
     exit: "0"' "\`exit\` is a whole number"
+refused "an exit of true, which Python counts as 1" 'cases:
+  - name: "a"
+    args: []
+    exit: true' "\`exit\` is a whole number"
+refused "a case with no exit" 'cases:
+  - name: "a"
+    args: []' "\`exit\` is a whole number"
+refused "a case with no args" 'cases:
+  - name: "a"
+    exit: 0' "\`args\` is a list of texts"
 refused "a store the README doesn't name" "cases:
 $ok
     only: [neptune]" "\`only\` names 'neptune'"
@@ -164,6 +174,15 @@ $ok
 refused "store: true" "cases:
 $ok
     store: true" "\`store\` is only ever false"
+refused "store: 0, which Python counts as false" "cases:
+$ok
+    store: 0" "\`store\` is only ever false"
+refused "a json case whose stdin clears its parameters, which prints nothing" 'cases:
+  - name: "a"
+    args: ["--format", "json"]
+    stdin: ":params clear\nRETURN 1 AS n;\n"
+    stdout: "n\n1\n"
+    exit: 0' "line 1 of its json stdout isn't JSON"
 refused "cypherShell: false" "cases:
 $ok
     cypherShell: false" "\`cypherShell\` is only ever true"
