@@ -7022,3 +7022,77 @@ forms:
       - {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique"}
     items:
       - {spec: {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"]}, form: {"mismatch": {"name": "drivine_uq_Personemail_5482a751", "reason": "an index that is not unique", "droppable": true}}}
+  - name: "Oracle: a newer version's vector index"
+    description: "Its record says form 2, and its index over the table beside the nodes is of its type, on that table: the record is trusted, and the table's columns and the trigger's text aren't read."
+    store: "oracle"
+    listing: "indexes.VECTOR_INDEX"
+    rows:
+      - {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "name": "Chunk_embedding_vector", "details": {"dimensions": 384, "similarity": "COSINE", "form": 2}, "status": null}
+      - {"object": "DRIVINE_V_CHUNKEMBEDDING_7E60BD64", "type": "TABLE", "table": null, "uniqueness": null, "indexType": null, "columns": null, "tableColumns": ["NID NUMBER", "EMBEDDING VECTOR"], "source": null}
+      - {"object": "DRIVINE_V_CHUNKEMBEDDING_7E60BD64_I", "type": "INDEX", "table": "DRIVINE_V_CHUNKEMBEDDING_7E60BD64", "uniqueness": "NONUNIQUE", "indexType": "VECTOR", "columns": ["EMBEDDING"], "tableColumns": null, "source": null}
+      - {"object": "DRIVINE_V_CHUNKEMBEDDING_7E60BD64_T", "type": "TRIGGER", "table": "DRIVINE_NODE", "uniqueness": null, "indexType": null, "columns": null, "tableColumns": null, "source": ["TRIGGER drivine_v_Chunkembedding_7e60bd64_t AFTER INSERT OR UPDATE OF labels, props ON drivine_node FOR EACH ROW\n", "BEGIN\n", "    IF INSTR(',' || LTRIM(RTRIM(JSON_SERIALIZE(:NEW.labels), ']'), '[') || ',\"', ',\"Chunk\",\"') > 0 AND JSON_EXISTS(:NEW.props, '$.embedding') THEN\n", "                BEGIN\n", "            MERGE INTO drivine_v_Chunkembedding_7e60bd64 s USING (SELECT :NEW.nid AS nid, TO_VECTOR(JSON_QUERY(:NEW.props, '$.embedding' RETURNING CLOB)) AS embedding FROM dual) n ON (s.nid = n.nid)\n", "WHEN MATCHED THEN UPDATE SET s.embedding = n.embedding\n", "WHEN NOT MATCHED THEN INSERT (nid, embedding) VALUES (n.nid, n.embedding);\n", "        EXCEPTION WHEN OTHERS THEN\n", "            -- Not a payload the column takes: the node is kept, and left out of the table, as the graph engines leave it out of the index.\n", "            DELETE FROM drivine_v_Chunkembedding_7e60bd64 WHERE nid = :NEW.nid;\n", "        END;\n", "    ELSE\n", "        DELETE FROM drivine_v_Chunkembedding_7e60bd64 WHERE nid = :NEW.nid;\n", "    END IF;\n", "END;"]}
+    listed:
+      - {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "name": "Chunk_embedding_vector", "dimensions": 384, "similarity": "COSINE"}
+    items:
+      - {spec: {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "options": {"dimensions": 384, "similarity": "COSINE"}}, form: {"newer": 2}}
+  - name: "Oracle: a newer version's vector index whose index is of another type"
+    description: "Its record says form 2, and a B-tree index Drivine didn't make stands under the name of its index over the table beside the nodes: whatever the form, that is another item."
+    store: "oracle"
+    listing: "indexes.VECTOR_INDEX"
+    rows:
+      - {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "name": "Chunk_embedding_vector", "details": {"dimensions": 384, "similarity": "COSINE", "form": 2}, "status": null}
+      - {"object": "DRIVINE_V_CHUNKEMBEDDING_7E60BD64", "type": "TABLE", "table": null, "uniqueness": null, "indexType": null, "columns": null, "tableColumns": ["NID NUMBER", "EMBEDDING VECTOR"], "source": null}
+      - {"object": "DRIVINE_V_CHUNKEMBEDDING_7E60BD64_I", "type": "INDEX", "table": "DRIVINE_V_CHUNKEMBEDDING_7E60BD64", "uniqueness": "NONUNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["\"NID\""], "tableColumns": null, "source": null}
+      - {"object": "DRIVINE_V_CHUNKEMBEDDING_7E60BD64_T", "type": "TRIGGER", "table": "DRIVINE_NODE", "uniqueness": null, "indexType": null, "columns": null, "tableColumns": null, "source": ["TRIGGER drivine_v_Chunkembedding_7e60bd64_t AFTER INSERT OR UPDATE OF labels, props ON drivine_node FOR EACH ROW\n", "BEGIN\n", "    IF INSTR(',' || LTRIM(RTRIM(JSON_SERIALIZE(:NEW.labels), ']'), '[') || ',\"', ',\"Chunk\",\"') > 0 AND JSON_EXISTS(:NEW.props, '$.embedding') THEN\n", "                BEGIN\n", "            MERGE INTO drivine_v_Chunkembedding_7e60bd64 s USING (SELECT :NEW.nid AS nid, TO_VECTOR(JSON_QUERY(:NEW.props, '$.embedding' RETURNING CLOB)) AS embedding FROM dual) n ON (s.nid = n.nid)\n", "WHEN MATCHED THEN UPDATE SET s.embedding = n.embedding\n", "WHEN NOT MATCHED THEN INSERT (nid, embedding) VALUES (n.nid, n.embedding);\n", "        EXCEPTION WHEN OTHERS THEN\n", "            -- Not a payload the column takes: the node is kept, and left out of the table, as the graph engines leave it out of the index.\n", "            DELETE FROM drivine_v_Chunkembedding_7e60bd64 WHERE nid = :NEW.nid;\n", "        END;\n", "    ELSE\n", "        DELETE FROM drivine_v_Chunkembedding_7e60bd64 WHERE nid = :NEW.nid;\n", "    END IF;\n", "END;"]}
+    listed:
+      - {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "name": "Chunk_embedding_vector", "dimensions": 384, "similarity": "COSINE"}
+    items:
+      - {spec: {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "options": {"dimensions": 384, "similarity": "COSINE"}}, form: {"mismatch": {"name": "DRIVINE_V_CHUNKEMBEDDING_7E60BD64_I", "reason": "an index of the type FUNCTION-BASED NORMAL", "droppable": true}}}
+  - name: "Postgres: a newer version's vector index by another access method"
+    description: "Its record says form 2, and a B-tree index Drivine didn't make stands under its name: the access method is structure, and compared whatever the form."
+    store: "postgres"
+    listing: "indexes.VECTOR_INDEX"
+    rows:
+      - {"kind": "VECTOR_INDEX", "name": "Chunk_embedding_vector", "label": "Chunk", "details": {"form": 2, "dimensions": 384, "similarity": "COSINE"}, "properties": ["embedding"]}
+      - {"type": "i", "table": "drivine_node", "where": "labels @> '[\"Chunk\"]'::jsonb", "method": "btree", "object": "drivine_v_chunkembedding_7e60bd64", "unique": false, "columns": ["(props ->> 'embedding'::text)"], "opclasses": ["text_ops"]}
+    listed:
+      - {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "name": "Chunk_embedding_vector", "dimensions": 384, "similarity": "COSINE"}
+    items:
+      - {spec: {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "options": {"dimensions": 384, "similarity": "COSINE"}}, form: {"mismatch": {"name": "drivine_v_chunkembedding_7e60bd64", "reason": "an index by btree", "droppable": true}}}
+  - name: "Oracle: a newer version's full-text index"
+    description: "Its record says form 2, and its index over the table beside the nodes is of its type, on that table: the record is trusted, and the table's columns and the trigger's text aren't read."
+    store: "oracle"
+    listing: "indexes.FULLTEXT_INDEX"
+    rows:
+      - {"kind": "FULLTEXT_INDEX", "label": "Doc", "properties": ["title", "body"], "name": "Doc_title_body_fulltext", "details": {"form": 2}, "status": null}
+      - {"object": "DRIVINE_T_DOCTITLEBODY_F4762232", "type": "TABLE", "table": null, "uniqueness": null, "indexType": null, "columns": null, "tableColumns": ["NID NUMBER", "DOC JSON"], "source": null}
+      - {"object": "DRIVINE_T_DOCTITLEBODY_F4762232_I", "type": "INDEX", "table": "DRIVINE_T_DOCTITLEBODY_F4762232", "uniqueness": "NONUNIQUE", "indexType": "DOMAIN", "columns": ["DOC"], "tableColumns": null, "source": null}
+      - {"object": "DRIVINE_T_DOCTITLEBODY_F4762232_T", "type": "TRIGGER", "table": "DRIVINE_NODE", "uniqueness": null, "indexType": null, "columns": null, "tableColumns": null, "source": ["TRIGGER drivine_t_Doctitlebody_f4762232_t AFTER INSERT OR UPDATE OF labels, props ON drivine_node FOR EACH ROW\n", "BEGIN\n", "    IF INSTR(',' || LTRIM(RTRIM(JSON_SERIALIZE(:NEW.labels), ']'), '[') || ',\"', ',\"Doc\",\"') > 0 THEN\n", "        MERGE INTO drivine_t_Doctitlebody_f4762232 s USING (SELECT :NEW.nid AS nid, JSON_OBJECT('title' VALUE JSON_VALUE(:NEW.props, '$.title' RETURNING CLOB), 'body' VALUE JSON_VALUE(:NEW.props, '$.body' RETURNING CLOB) ABSENT ON NULL RETURNING JSON) AS doc FROM dual) n ON (s.nid = n.nid)\n", "WHEN MATCHED THEN UPDATE SET s.doc = n.doc\n", "WHEN NOT MATCHED THEN INSERT (nid, doc) VALUES (n.nid, n.doc);\n", "    ELSE\n", "        DELETE FROM drivine_t_Doctitlebody_f4762232 WHERE nid = :NEW.nid;\n", "    END IF;\n", "END;"]}
+    listed:
+      - {"kind": "FULLTEXT_INDEX", "label": "Doc", "properties": ["title", "body"], "name": "Doc_title_body_fulltext"}
+    items:
+      - {spec: {"kind": "FULLTEXT_INDEX", "label": "Doc", "properties": ["title", "body"]}, form: {"newer": 2}}
+  - name: "Oracle: a newer version's full-text index whose index is of another type"
+    description: "Its record says form 2, and a B-tree index Drivine didn't make stands under the name of its index over the table beside the nodes: whatever the form, that is another item."
+    store: "oracle"
+    listing: "indexes.FULLTEXT_INDEX"
+    rows:
+      - {"kind": "FULLTEXT_INDEX", "label": "Doc", "properties": ["title", "body"], "name": "Doc_title_body_fulltext", "details": {"form": 2}, "status": null}
+      - {"object": "DRIVINE_T_DOCTITLEBODY_F4762232", "type": "TABLE", "table": null, "uniqueness": null, "indexType": null, "columns": null, "tableColumns": ["NID NUMBER", "DOC JSON"], "source": null}
+      - {"object": "DRIVINE_T_DOCTITLEBODY_F4762232_I", "type": "INDEX", "table": "DRIVINE_T_DOCTITLEBODY_F4762232", "uniqueness": "NONUNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["\"NID\""], "tableColumns": null, "source": null}
+      - {"object": "DRIVINE_T_DOCTITLEBODY_F4762232_T", "type": "TRIGGER", "table": "DRIVINE_NODE", "uniqueness": null, "indexType": null, "columns": null, "tableColumns": null, "source": ["TRIGGER drivine_t_Doctitlebody_f4762232_t AFTER INSERT OR UPDATE OF labels, props ON drivine_node FOR EACH ROW\n", "BEGIN\n", "    IF INSTR(',' || LTRIM(RTRIM(JSON_SERIALIZE(:NEW.labels), ']'), '[') || ',\"', ',\"Doc\",\"') > 0 THEN\n", "        MERGE INTO drivine_t_Doctitlebody_f4762232 s USING (SELECT :NEW.nid AS nid, JSON_OBJECT('title' VALUE JSON_VALUE(:NEW.props, '$.title' RETURNING CLOB), 'body' VALUE JSON_VALUE(:NEW.props, '$.body' RETURNING CLOB) ABSENT ON NULL RETURNING JSON) AS doc FROM dual) n ON (s.nid = n.nid)\n", "WHEN MATCHED THEN UPDATE SET s.doc = n.doc\n", "WHEN NOT MATCHED THEN INSERT (nid, doc) VALUES (n.nid, n.doc);\n", "    ELSE\n", "        DELETE FROM drivine_t_Doctitlebody_f4762232 WHERE nid = :NEW.nid;\n", "    END IF;\n", "END;"]}
+    listed:
+      - {"kind": "FULLTEXT_INDEX", "label": "Doc", "properties": ["title", "body"], "name": "Doc_title_body_fulltext"}
+    items:
+      - {spec: {"kind": "FULLTEXT_INDEX", "label": "Doc", "properties": ["title", "body"]}, form: {"mismatch": {"name": "DRIVINE_T_DOCTITLEBODY_F4762232_I", "reason": "an index of the type FUNCTION-BASED NORMAL", "droppable": true}}}
+  - name: "Postgres: a newer version's full-text index by another access method"
+    description: "Its record says form 2, and a B-tree index Drivine didn't make stands under its name: the access method is structure, and compared whatever the form."
+    store: "postgres"
+    listing: "indexes.FULLTEXT_INDEX"
+    rows:
+      - {"kind": "FULLTEXT_INDEX", "name": "Doc_title_body_fulltext", "label": "Doc", "details": {"form": 2}, "properties": ["title", "body"]}
+      - {"type": "i", "table": "drivine_node", "where": "labels @> '[\"Doc\"]'::jsonb", "method": "btree", "object": "drivine_t_doctitlebody_f4762232", "unique": false, "columns": ["lower(props ->> 'title'::text)"], "opclasses": ["text_ops"]}
+    listed:
+      - {"kind": "FULLTEXT_INDEX", "label": "Doc", "properties": ["title", "body"], "name": "Doc_title_body_fulltext"}
+    items:
+      - {spec: {"kind": "FULLTEXT_INDEX", "label": "Doc", "properties": ["title", "body"]}, form: {"mismatch": {"name": "drivine_t_doctitlebody_f4762232", "reason": "an index by btree", "droppable": true}}}
