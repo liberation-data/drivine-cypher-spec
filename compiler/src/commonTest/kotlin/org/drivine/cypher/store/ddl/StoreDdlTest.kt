@@ -222,7 +222,11 @@ class StoreDdlTest {
                 else -> fail("No SQL store $id")
             }
             val parts = texts(entry["parts"]!!)
-            assertEquals(entry["name"]!!.textValue(), ddl.objectName(entry["kind"]!!.textValue()!!, parts), "on $target: ${entry["store"]!!.textValue()} $graph $parts")
+            val name = ddl.objectName(entry["kind"]!!.textValue()!!, parts)
+            assertEquals(entry["name"]!!.textValue(), name, "on $target: ${entry["store"]!!.textValue()} $graph $parts")
+            // What is made beside it, a trigger's `_t`, an index's `_i`, a unique index built anew's `_r`, fits too.
+            val longest = when (ddl) { is OracleDdl -> OracleDdl.MAX_OBJECT_NAME; is PostgresDdl -> PostgresDdl.MAX_OBJECT_NAME; else -> SqliteDdl.MAX_OBJECT_NAME }
+            assertTrue(name.length + 2 <= longest, "${entry["store"]!!.textValue()} $graph $parts: $name and a suffix fit in $longest")
         }
         assertTrue(names.size() > 0)
     }

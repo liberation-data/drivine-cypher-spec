@@ -33,6 +33,7 @@ CAUSES = [
     ("Oracle's handling of a given whole number from 2^53 on", {"oracle"}, re.compile(r"RETURNINGNUMBERNULLONERROR")),
     ("Oracle floats as binary doubles (#146)", {"oracle"}, re.compile(r"BINARY_DOUBLE|\$numberDouble|EXTENDED")),
     ("a value of unknown kind that may be a tag at run time", ALL, re.compile(r"\$t|'2\.[1-6]'|THEN2\.[1-6]|'2~|drivine_list_order|drivine_sort_key")),
+    ("a graph's name at most the longest name less layout 2's longest part (16)", ALL, re.compile(r"cannotnameagraphon\w+:.*isatmost(47|112)long")),
 ]
 
 # Aliases the compiler numbers as it writes: a binding more or fewer renumbers those after it, which is no change of its own.

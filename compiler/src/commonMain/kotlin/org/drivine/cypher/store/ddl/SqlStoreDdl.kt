@@ -301,8 +301,9 @@ abstract class SqlStoreDdl(val name: String, final override val engine: String, 
          * name that cannot is refused by the graph, and by a Cypher statement compiled over its tables.
          */
         fun refusal(name: String, engine: String, maxObjectName: Int): String? {
-            // The longest a name adds is a table beside the nodes, `_v__` and a hash with nothing readable, and that table's trigger.
-            val longest = maxObjectName - ("_v__".length + 8 + BESIDE.length)
+            // The longest a name adds is a two-letter kind and the layout, `_uq2__`, a hash of 8 with nothing readable, and the
+            // `_t` or `_i` of an object made beside it: so every name [objectName] gives, and what is made beside it, fits.
+            val longest = maxObjectName - ("_uq${ValueLayout.LAYOUT}__".length + 8 + BESIDE.length)
             if (Regex("[A-Za-z][A-Za-z0-9_]{0,${longest - 1}}").matches(name)) return null
             return "'$name' cannot name a graph on $engine: it names tables, so it is letters, digits and underscores, begins with a letter, and is at most $longest long, so that what it names fits in $engine's $maxObjectName."
         }
