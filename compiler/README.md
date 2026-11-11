@@ -270,6 +270,29 @@ sets both. A statement that returns nothing, and every statement on the other st
 option is temporary: a host sets it until its thin driver reads OSON version 2 (oracle/python-oracledb#622,
 oracle/node-oracledb#1796), then drops it, and it goes from the module with them.
 
+### The parser's caches
+
+ANTLR keeps what it learns of the grammar as it parses, its DFA states and the prediction contexts they share, for the
+life of the process. Unbounded, they grew to 42 MB over the spec's corpus of 9,136 distinct statements, and ran an
+Android app out of a 48 MB heap (#179). The module bounds them: once they hold more than 5,000 DFA states, about 15 MB at
+their most, a fresh set takes their place, and a parse under way keeps the one it began with. 5,000 states hold about
+the first 300 distinct statements of the corpus, a varied mix; an application's statements are fewer and more alike,
+and pay nothing. Past the cap, the corpus's median compile went from 135 to 167 µs.
+
+A server that compiles many more distinct statements may raise the cap for the whole process: in Kotlin,
+`CypherCompiler.parserCacheStates`; through the JSON entry, a request of settings in place of a statement:
+
+```json
+{"settings": {"parserCacheStates": 20000}}
+```
+
+The answer gives each setting as it now is, how many times the caches have been made anew since the process began, and
+the states they hold: `{"settings":{"parserCacheStates":20000,"parserCacheRenewals":3,"parserCacheHeld":4211}}`.
+`{"settings": {}}` asks and sets nothing. A library logs the renewals at debug where they have grown since it last
+asked, so a statement set too large for the cap shows in the log. The answer to a statement is as it was: when the caches
+are made anew depends on what the process compiled before, which the corpus check's byte-for-byte comparison can't
+hold to.
+
 ### npm
 
 ```js
