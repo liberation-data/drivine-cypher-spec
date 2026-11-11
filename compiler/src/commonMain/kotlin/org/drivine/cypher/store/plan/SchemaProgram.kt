@@ -1046,18 +1046,18 @@ internal class SchemaProgram(
             // One dropped already, and still there, can't be dropped.
             if (!form.droppable || !dropped.add(form.name.uppercase())) return Cleared(existing, mismatched(spec, existing, form))
             ddl(store.dropMismatched(form.name))
-            val dropped = "Dropped $engine index ${form.name}, an index Drivine didn't make under its name for ${spec.kind} on ${spec.label}${spec.properties}: it was ${form.reason}"
+            val line = "Dropped $engine index ${form.name}, an index Drivine didn't make under its name for ${spec.kind} on ${spec.label}${spec.properties}: it was ${form.reason}"
             if (spec is ConstraintSpec) {
                 // The old index goes before the constraint is built, so a build the data refuses leaves no index at all:
                 // drivine-cypher-spec#135 §4 (PR E) builds the new unique index under a name of its own first, and then
                 // drops this one, and this line goes back to INFO.
                 log(
                     LogLevel.WARN, CONSTRAINT_MANAGER,
-                    "$dropped. The old index is gone, and the constraint is made again in its place: where the data repeats a key, " +
+                    "$line. The old index is gone, and the constraint is made again in its place: where the data repeats a key, " +
                         "${spec.label}${spec.properties} is left with no index until the constraint is made",
                 )
             } else {
-                log(LogLevel.INFO, INDEX_MANAGER, dropped)
+                log(LogLevel.INFO, INDEX_MANAGER, line)
             }
             existing = find()
         }
