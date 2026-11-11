@@ -3149,6 +3149,10 @@ cases:
       - note: "A number that another begins, as 1 begins 1.04 in Oracle's NUMBER, comes first whatever follows it."
         cypher: "UNWIND [[1.04], [1, 5], [1]] AS xs RETURN xs ORDER BY xs"
         rows: [[1], [1, 5], [1.04]]
+      - note: "An empty text, which Oracle's VARCHAR2 holds as null, comes before any other, and a text that another begins before it, whatever follows."
+        only: [neo4j, sql]
+        cypher: "UNWIND [['a!'], ['a', 1], [''], ['b'], ['a'], []] AS xs RETURN xs ORDER BY xs"
+        rows: [[], [""], ["a"], ["a", 1], ["a!"], ["b"]]
       - note: "A map comes before a text, a text before a truth value, false before true, and a truth value before a number, a negative one among them."
         only: [neo4j, sql]
         cypher: "UNWIND [[-1, 0], [true], [-1], ['a'], [-1.04], [false], [{a: 1}], [-2, 5]] AS xs RETURN xs ORDER BY xs"
