@@ -9,8 +9,8 @@ import org.drivine.cypher.ast.Query
 import org.drivine.cypher.ast.SetItem
 
 /**
- * Where a statement aggregates, as Neo4j refuses it when it plans the statement: an aggregate in a `WHERE` (its
- * InvalidAggregation), of a `MATCH`, a `WITH`, a comprehension, a quantifier, a pattern's or `EXISTS { … }`'s, in a
+ * Where a statement aggregates, as Neo4j refuses it when it plans the statement: an aggregate in the `ORDER BY` of a
+ * `WITH` or a `RETURN` that neither aggregates nor is `DISTINCT`, and one in a `WHERE` (its InvalidAggregation), of a `MATCH`, a `WITH`, a comprehension, a quantifier, a pattern's or `EXISTS { … }`'s, in a
  * `CALL { … }` or a subquery too. Read from the statement alone, before it is compiled, so a statement that compiles is
  * compiled as it was. A subquery's own query, `COUNT { MATCH … RETURN count(*) }`, aggregates in its own projections. The
  * `WHERE` of a `WITH` that aggregates, or is `DISTINCT`, filters its groups, and holds an aggregate as Neo4j has it (#497).
@@ -60,6 +60,11 @@ internal class Aggregates(
 
     private fun projection(projection: Projection) {
         projection.items.forEach { expression(it.expression) }
+        // One that neither aggregates nor is DISTINCT has no groups for its ORDER BY to aggregate over (Neo4j's
+        // InvalidAggregation, #439): compiled, the aggregate would make the query aggregate with no GROUP BY.
+        if (!projection.distinct && projection.items.none { grouped(it.expression) != null }) {
+            projection.orderBy.firstNotNullOfOrNull { grouped(it.expression) }?.let(::refuseInOrder)
+        }
         projection.orderBy.forEach { expression(it.expression) }
         expression(projection.skip)
         expression(projection.limit)
@@ -89,6 +94,11 @@ internal class Aggregates(
         beyondGroups(where)?.let(::refuse)
         expression(where)
     }
+
+    private fun refuseInOrder(aggregate: Expression): Nothing = throw CompilerException(
+        "${named(aggregate)} aggregates, and an ORDER BY holds no aggregate unless its WITH or RETURN aggregates or is DISTINCT, " +
+            "as in Neo4j: give the aggregate as an item, and order by its name, as in RETURN x, count(*) AS c ORDER BY c."
+    )
 
     private fun refuse(aggregate: Expression): Nothing = throw CompilerException(
         "${named(aggregate)} aggregates, and a WHERE holds no aggregate unless its WITH aggregates, as in Neo4j: aggregate in a WITH first, " +
