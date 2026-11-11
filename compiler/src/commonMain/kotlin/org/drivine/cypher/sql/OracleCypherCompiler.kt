@@ -408,6 +408,12 @@ class OracleCypherCompiler(
      */
     override fun givenEquals(x: String, y: String, given: Any): String {
         if (holdsNonFinite(given, Double::isNaN)) return jsonEquals(x, y)
+        // A whole number from 2^53 on, a float or an integer, by the exact key an index holds a number by: Oracle compares a NUMBER
+        // with a binary double as a double, so 2^53 + 1 was equal to the float 2^53 (#161). Below it, every integer is a double's.
+        val past = (given as? Double)?.let { it == kotlin.math.floor(it) && kotlin.math.abs(it) >= EXACT_DOUBLES } ?: (given is Long && (given >= EXACT_DOUBLES || given <= -EXACT_DOUBLES))
+        if (!asJson && past) {
+            return sharedCompared(x, y) { (a, b) -> "(${OracleSql.valueClass(a)} = ${OracleSql.valueClass(b)} AND ${OracleSql.valueKey(a)} = ${OracleSql.valueKey(b)})" }
+        }
         if (asJson) return "$x = $y"
         if (!readShort(given)) return jsonEquals(x, y)
         if (written(x)) return "$x = $y"
@@ -2154,6 +2160,9 @@ class OracleCypherCompiler(
 
         /** The function a query declares that compares two values that may hold a null, where the store keeps none: see [nullsEqual]. */
         private const val NULLS_EQUAL = "cy_nulls_equal"
+
+        /** 2^53: an integer past it may be no double's, and is compared with one exactly. */
+        private const val EXACT_DOUBLES = 9_007_199_254_740_992L
 
         /** The name a query that works out a temporal value's sort key, on a store that keeps no function for it, declares its own by. */
         private const val TEMPORAL_KEY = "cy_temporal_key"
