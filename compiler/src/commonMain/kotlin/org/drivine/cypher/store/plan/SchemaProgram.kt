@@ -76,6 +76,9 @@ internal class SchemaProgram(
      */
     private var remake = "Call recreate() to make it again."
 
+    /** What finishes a recreate of an item cut off, or still running, for the line that says it is kept as it is: as [remake]. */
+    private var finish = "Call recreate() to finish it."
+
     /** The names a mismatch has been said of: each once a plan, though a recreate after it reads it again. */
     private val mismatchesSaid = mutableSetOf<String>()
 
@@ -248,6 +251,7 @@ internal class SchemaProgram(
 
         val build = Build(request.buildTimeoutMillis, run.unbuilt)
         remake = "SchemaManager.recreateAll(${owner?.let { "\"$it\"" } ?: "null"}) makes it again."
+        finish = "SchemaManager.recreateAll(${owner?.let { "\"$it\"" } ?: "null"}) finishes it."
         for (spec in toApply) {
             // A co-owned item is never dropped by one owner's version change, only by an explicit recreate. A runtime item
             // marked stale missed its owner's recreate, and is recreated now.
@@ -843,17 +847,19 @@ internal class SchemaProgram(
             }
         }
 
-        // A recreate cut off after the old index was dropped left only the one built first, which holds the data unique:
-        // it is put in its place, and the constraint's create and record finished, rather than made over it.
+        // Only the index a recreate builds first stands, of the constraint's shape, which holds the data unique: the recreate
+        // was cut off after it dropped the old one, or, in another session, is between its drop and its rename. Kept and
+        // used as it is: finishing it here would race that session's rename, which would then find nothing to rename.
         val sql = store.ddl as? SqlStoreDdl
-        if (existing == null && sql != null) {
+        if (existing == null && sql != null && store is SqlStoreSchema) {
             val recreation = sql.recreation(spec)
-            if (finishCutOff(spec, recreation, listings[sql.listConstraintsQuery()].orEmpty())) {
-                ddl(sql.createConstraint(spec))
-                updateRecord(recreation.remade)
-                val created = findConstraint(spec) ?: SchemaItemInfo.fromSpec(spec)
-                log(LogLevel.INFO, CONSTRAINT_MANAGER, "Created $engine ${spec.kind} on ${spec.label}${spec.properties}")
-                return EnsureResult.Created(created)
+            if (store.cutOff(spec, listings[sql.listConstraintsQuery()].orEmpty(), recreation.name, recreation.temporary)) {
+                log(
+                    LogLevel.WARN, CONSTRAINT_MANAGER,
+                    "$engine ${spec.kind} on ${spec.label}${spec.properties} is held by ${recreation.temporary}, the index a recreate of it builds first, and nothing stands " +
+                        "under ${recreation.name}: that recreate was cut off, or is still running. It is kept and used as it is. $finish",
+                )
+                return EnsureResult.AlreadyMatching(SchemaItemInfo.fromSpec(spec))
             }
         }
 
