@@ -86,7 +86,13 @@ class SqliteDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
         )
         """,
         "CREATE INDEX IF NOT EXISTS $countDeltasIndex ON $countDeltas (kind, name)",
+        lockTable,
+        lockSeed,
     ).map { it.trimIndent() }
+
+    override val lockTable: String get() = "CREATE TABLE IF NOT EXISTS $lock (name TEXT PRIMARY KEY)"
+
+    override val lockSeed: String get() = "INSERT OR IGNORE INTO $lock (name) VALUES ('$lockRow')"
 
     /**
      * Counts what of the [ddl] makes is there: each table and index, by its name in any case. A user who may only read the
@@ -98,10 +104,13 @@ class SqliteDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
      * whose name holds the word is not taken for one made with it. Such a store is refused, naming its file ([FILE]).
      */
     val made: String = run {
-        val names = ddl.map { Regex("IF NOT EXISTS (\\w+)").find(it)!!.groupValues[1].lowercase() }.joinToString(", ") { "'$it'" }
+        // A statement that makes nothing, the lock table's row, is there where the rest are: the [ddl] made them together.
+        val making = ddl.mapNotNull { Regex("IF NOT EXISTS (\\w+)").find(it)?.groupValues?.get(1)?.lowercase() }
+        val names = making.joinToString(", ") { "'$it'" }
+        val rows = ddl.size - making.size
         val keyed = listOf(nodes, edges).joinToString(", ") { "'${it.lowercase()}'" }
         "SELECT CASE WHEN EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND lower(name) IN ($keyed) AND sql NOT LIKE '%KEY AUTOINCREMENT%')" +
-            " THEN $REUSES_IDS ELSE COUNT(*) END FROM sqlite_master WHERE lower(name) IN ($names)"
+            " THEN $REUSES_IDS ELSE COUNT(*)${if (rows > 0) " + $rows" else ""} END FROM sqlite_master WHERE lower(name) IN ($names)"
     }
 
     /** [text] as a schema statement, as drivine4j's grammar gave it. */

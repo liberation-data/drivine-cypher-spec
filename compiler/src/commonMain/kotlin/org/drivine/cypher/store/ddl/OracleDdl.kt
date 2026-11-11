@@ -39,7 +39,12 @@ import org.drivine.schema.VectorIndexSpec
 @DrivineInternalApi
 class OracleDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
 
-    /** The count store's tables and index (see [counts]), made empty with the rest, and on a store an earlier version made. */
+    override val lockTable: String get() = "CREATE TABLE IF NOT EXISTS $lock (name VARCHAR2(128) PRIMARY KEY)"
+
+    override val lockSeed: String get() =
+        "MERGE INTO $lock l USING (SELECT '$lockRow' AS name FROM dual) s ON (l.name = s.name) WHEN NOT MATCHED THEN INSERT (name) VALUES (s.name)"
+
+    /** The count store's tables and index (see [counts]) and the lock table (see [lock]), made with the rest, and on a store an earlier version made. */
     private val countStore: List<String> = listOf(
         """
         CREATE TABLE IF NOT EXISTS $counts (
@@ -58,6 +63,8 @@ class OracleDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
         )
         """,
         "CREATE INDEX IF NOT EXISTS $countDeltasIndex ON $countDeltas (kind, name)",
+        lockTable,
+        lockSeed,
     ).map { it.trimIndent() }
 
     /** What makes the store, when it is not there. Each statement is safe to run again. */

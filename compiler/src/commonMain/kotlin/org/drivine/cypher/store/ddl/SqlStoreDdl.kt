@@ -143,6 +143,24 @@ abstract class SqlStoreDdl(val name: String, final override val engine: String, 
     /** The index over [countDeltas]' `(kind, name)`, by which a count reads its deltas. */
     val countDeltasIndex = "${name}_count${ValueLayout.LAYOUT}_dk"
 
+    /**
+     * The lock table: one column, `name`, its primary key, and one row, `name = 'schema'`, made with the graph ([lockSeed]).
+     * No schema block or compiled statement writes it: an executor that runs a schema change takes a row lock on that row
+     * first, from a connection of its own, so two processes' schema changes to one graph run one after the other (on
+     * Oracle, `SELECT name FROM <lock> WHERE name = 'schema' FOR UPDATE WAIT 10`, where concurrent DDL on one table
+     * deadlocked on the library cache lock, drivine4j#777). Its name carries the store layout ([ValueLayout.LAYOUT]).
+     */
+    val lock = "${name}_lock${ValueLayout.LAYOUT}"
+
+    /** The row of [lock] an executor locks to make a schema change. */
+    val lockRow = LOCK_ROW
+
+    /** Makes [lock], safe to run again: see each store's. */
+    abstract val lockTable: String
+
+    /** Puts [lockRow] in [lock], safe to run again: see each store's. */
+    abstract val lockSeed: String
+
     /** The table that holds the text a full-text index on [label]'s [properties] is over. */
     fun texts(label: String, properties: List<String>): String = objectName("t", listOf(label) + properties)
 
@@ -208,6 +226,9 @@ abstract class SqlStoreDdl(val name: String, final override val engine: String, 
     companion object {
         /** The key in a record's details its aliases are kept under. */
         const val ALIASES = "aliases"
+
+        /** The one row of a graph's lock table: see [lock]. */
+        const val LOCK_ROW = "schema"
 
         /** The longest an object made beside another adds to its name: a trigger's `_t`, an index's `_i`. */
         private const val BESIDE = "_t"

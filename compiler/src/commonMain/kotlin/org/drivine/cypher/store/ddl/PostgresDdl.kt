@@ -99,7 +99,13 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
         )
         """,
         "CREATE INDEX IF NOT EXISTS $countDeltasIndex ON $countDeltas (kind, name)",
+        lockTable,
+        lockSeed,
     ).map { it.trimIndent() } + writes.ddl + temporalKeyFunction() + "COMMENT ON TABLE $nodes IS '$VERSION'"
+
+    override val lockTable: String get() = "CREATE TABLE IF NOT EXISTS $lock (name text PRIMARY KEY)"
+
+    override val lockSeed: String get() = "INSERT INTO $lock (name) VALUES ('$lockRow') ON CONFLICT DO NOTHING"
 
     /** The function compiled Cypher works out a temporal value's sort key by: see [temporalKeyFunction]. */
     val temporalKey: String = temporalKeyName(name)
