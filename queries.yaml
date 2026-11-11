@@ -994,6 +994,17 @@ cases:
         cypher: "RETURN size($e + $long), size(replace($long, 'x', '')), size(left($long, 0))"
         parameters: {e: "", long: {$repeat: "x", times: 40000}}
         rows: [[40000, 0, 0]]
+      - note: "A count out of range beside the empty text still fails, as it does beside any text."
+        only: [neo4j, sql]
+        cypher: "UNWIND [''] AS x RETURN left(x, -1)"
+        error: true
+      - only: [neo4j, sql]
+        cypher: "UNWIND [''] AS x RETURN substring(x, 0, $n)"
+        parameters: {n: -1}
+        error: true
+      - only: [neo4j, sql]
+        cypher: "RETURN split('', '')"
+        rows: [[""]]
       - note: "A null argument, or a missing property, still makes null."
         only: [neo4j, sql]
         cypher: "MATCH (p:Person {name: 'Keanu'}) RETURN [toUpper(p.nope), '' + null, substring('abc', 1, null), left('', null), replace('', null, 'x'), reverse(p.nope), split(null, ','), toString(p.nope)]"
