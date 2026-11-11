@@ -1007,8 +1007,8 @@ cases:
         rows: [[""]]
       - note: "A null argument, or a missing property, still makes null."
         only: [neo4j, sql]
-        cypher: "MATCH (p:Person {name: 'Keanu'}) RETURN [toUpper(p.nope), '' + null, substring('abc', 1, null), left('', null), replace('', null, 'x'), reverse(p.nope), split(null, ','), toString(p.nope)]"
-        rows: [[null, null, null, null, null, null, null, null]]
+        cypher: "MATCH (p:Person {name: 'Keanu'}) RETURN [toUpper(p.nope), '' + null, substring('abc', 1, null), left('', null), replace('', null, 'x'), reverse(p.nope), split(null, ','), toString(p.nope), replace('ab', 'a', null)]"
+        rows: [[null, null, null, null, null, null, null, null, null]]
 
   - name: "Round to a fractional or negative precision"
     description: "round() reads its precision as a whole number toward zero, as Neo4j does, and fails on a row it rounds a number on by one below 0 or past 2147483647."
