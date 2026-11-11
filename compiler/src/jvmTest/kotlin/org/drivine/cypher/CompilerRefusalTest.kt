@@ -289,6 +289,8 @@ class CompilerRefusalTest {
                 "RETURN toBoolean(1), toBoolean('true'), toBoolean(true), toBoolean(null), toBoolean(\$i)" to mapOf("i" to 1),
                 "UNWIND [1, 2, 3] AS x RETURN x SKIP \$s LIMIT \$l" to mapOf("s" to 0, "l" to 2L),
                 "UNWIND [1, 2, 3] AS x RETURN x SKIP \$s LIMIT \$l" to mapOf("s" to 1.toShort(), "l" to 2.toByte()),
+                // -0 is 0, which Neo4j 2026.10.1 takes.
+                "UNWIND [1, 2, 3] AS x RETURN x SKIP -0 LIMIT -0" to emptyMap(),
             ).forEach { (cypher, parameters) -> compiler().compile(cypher, parameters) }
             // The least whole number is read as one literal, not a negated one, and is refused as -1 is.
             val cypher = "UNWIND [1, 2, 3] AS x RETURN x SKIP -9223372036854775808"

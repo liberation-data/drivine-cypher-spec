@@ -3705,7 +3705,9 @@ abstract class SqlCypherCompiler(
             // `-1` is a negated number.
             is Expression.Unary -> {
                 val negated = known(expression)?.takeIf { it is Number } ?: unsupported("SKIP or LIMIT of an expression")
-                throw CompilerException("SKIP and LIMIT take a whole number of 0 or more, not -${org.drivine.cypher.text.JavaText.of(negated)}, as in Neo4j.")
+                // `-0` is 0, which Neo4j takes.
+                if (negated == 0L) "0"
+                else throw CompilerException("SKIP and LIMIT take a whole number of 0 or more, not -${org.drivine.cypher.text.JavaText.of(negated)}, as in Neo4j.")
             }
             is Expression.Parameter -> {
                 val value = parameters.value(expression.name)
