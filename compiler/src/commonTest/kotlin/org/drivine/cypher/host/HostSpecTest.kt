@@ -102,6 +102,8 @@ class HostSpecTest {
         assertEquals(Outcome.READ, check(read, "read"))
         val failing = HostFunction("drivine_failing", 1, deterministic = true) { _, _, result -> result.error("no") }
         assertContains(assertFails { call(listOf(failing), listOf(1L), "failing") }.message!!, "failing: drivine_failing failed: no")
+        val nanResult = HostFunction("drivine_nan", 0, deterministic = true) { _, _, result -> result.double(Double.NaN) }
+        assertEquals(null, call(listOf(nanResult), emptyList(), "nanResult"), "SQLite gives NULL of a NaN result")
     }
 
     @Test
@@ -256,7 +258,8 @@ class HostSpecTest {
         override fun nullValue() { value = null }
         override fun long(value: Long) { this.value = value }
         override fun int(value: Int) { this.value = value.toLong() }
-        override fun double(value: Double) { this.value = value }
+        // SQLite's sqlite3_result_double writes NaN as NULL, so the function gives null.
+        override fun double(value: Double) { this.value = if (value.isNaN()) null else value }
         override fun text(value: String) { this.value = value }
         override fun text16(value: String) { this.value = value }
         override fun blob(value: ByteArray) { this.value = value }
