@@ -131,6 +131,9 @@ def main(library, version, host=None):
     refused("A function that throws on a text fails its statement", connection, "SELECT drivine_gc_heap('x')",
             "drivine_gc_heap: the floor is a whole number of bytes.")
     check("The connection still answers", one("SELECT drivine_extension_version()"), version)
+    # A finite float, which host.yaml's steps don't give it: Java's shortest text, not SQLite's 17 digits.
+    check("drivine_float_text(1.0 / 3) writes it as Java does", one("SELECT drivine_float_text(1.0 / 3)"),
+          "0.3333333333333333")
     if host is not None:
         with open(host, encoding="utf-8") as f:
             host_steps(connection, json.load(f))

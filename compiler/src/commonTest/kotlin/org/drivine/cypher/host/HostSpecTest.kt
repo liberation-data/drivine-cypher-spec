@@ -105,6 +105,14 @@ class HostSpecTest {
     }
 
     @Test
+    fun `drivine_float_text writes a finite float as Java does where host_yaml pins only the infinities`() {
+        for ((arg, text) in listOf("2.0" to "2.0", "1.0E7" to "1.0E7", "1.2E-4" to "1.2E-4", "0.3333333333333333" to "0.3333333333333333", "2" to "2.0")) {
+            val step = CypherJson.readTree("""{"function": "drivine_float_text", "args": [$arg], "result": "$text"}""")
+            assertEquals(Outcome.RAN, check(step, arg))
+        }
+    }
+
+    @Test
     fun `values ascend as SQLite orders them`() {
         assertTrue(sqliteOrder(null, 1L) < 0)
         assertTrue(sqliteOrder(1L, 1.5) < 0)
