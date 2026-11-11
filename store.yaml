@@ -2848,6 +2848,241 @@ cases:
           - "(CASE json_type(props, '$.\"first\"') WHEN 'text' THEN props ->> '$.\"first\"' WHEN 'null' THEN NULL ELSE props -> '$.\"first\"' END)"
           - "(CASE json_type(props, '$.\"last\"') WHEN 'text' THEN props ->> '$.\"last\"' WHEN 'null' THEN NULL ELSE props -> '$.\"last\"' END)"
           - "instr(labels, '\"Person\"') > 0"
+  - name: "Uniqueness constraint over two properties, declared in the other order"
+    description: "The constraint over two properties, declared as [last, first]: found by a record over [first, last], as identity is a set, it is made under the name this order gives (drivine-cypher-spec#135 §4)."
+    spec: {kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["last", "first"]}
+    stores:
+      postgres:
+        form: 1
+        digest: "3f7e4d1eea89882b0aa34c70ca78ae9148a377749938645b42a3aa7f5cca5190"
+        create:
+          - "CREATE UNIQUE INDEX IF NOT EXISTS drivine_uq_Personlastfirst_4c504a31 ON drivine_node (((props ->> 'last')), ((props ->> 'first'))) WHERE labels @> '[\"Person\"]'"
+          - |-
+            INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
+            VALUES ('UNIQUENESS_CONSTRAINT', 'Person', '["last","first"]', 'Person_last_first_unique', 'drivine_uq_Personlastfirst_4c504a31', '{"form": 1}')
+            ON CONFLICT (kind, label, properties) DO NOTHING
+        drop:
+          - |-
+            DO $forget$
+            DECLARE
+                v_object text;
+                v_others int;
+            BEGIN
+                SELECT max(object_name) INTO v_object FROM drivine_schema WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '["last","first"]';
+                SELECT count(*) INTO v_others FROM drivine_schema WHERE object_name = v_object AND NOT (kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '["last","first"]');
+                IF v_object IS NOT NULL AND v_others = 0 THEN
+                    -- Written bare, as it was made: Postgres folds the name to lower case either way.
+                    EXECUTE 'DROP INDEX IF EXISTS ' || v_object;
+                END IF;
+                DELETE FROM drivine_schema WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '["last","first"]';
+            END
+            $forget$
+        recreate:
+          form: 1
+          digest: "29575e5e134def5b8a25f82b73fa34b300e7868f4d2ca3ac834b8801d1a63bdd"
+          leftover:
+            - "DROP INDEX IF EXISTS drivine_uq_Personlastfirst_4c504a31_r"
+          build:
+            - "CREATE UNIQUE INDEX drivine_uq_Personlastfirst_4c504a31_r ON drivine_node (((props ->> 'last')), ((props ->> 'first'))) WHERE labels @> '[\"Person\"]'"
+          swap:
+            - |-
+              DO $swap$
+              BEGIN
+                  DROP INDEX IF EXISTS drivine_uq_Personlastfirst_4c504a31;
+                  ALTER INDEX drivine_uq_Personlastfirst_4c504a31_r RENAME TO drivine_uq_Personlastfirst_4c504a31;
+              END
+              $swap$
+          finish:
+            - "ALTER INDEX drivine_uq_Personlastfirst_4c504a31_r RENAME TO drivine_uq_Personlastfirst_4c504a31"
+          remade: "UPDATE drivine_schema SET name = 'Person_last_first_unique', object_name = 'drivine_uq_Personlastfirst_4c504a31', details = jsonb_set(details, '{form}', '1') WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"last\",\"first\"]'"
+      oracle:
+        form: 1
+        digest: "4d4389dcd0a16bb43361f478b6b388ef0f6fdf8393a1a81523ef4746bb98fead"
+        create:
+          - |-
+            DECLARE
+                e_exists EXCEPTION; PRAGMA EXCEPTION_INIT(e_exists, -955);
+                e_busy EXCEPTION; PRAGMA EXCEPTION_INIT(e_busy, -54);
+            BEGIN
+                FOR attempt IN 1 .. 300 LOOP
+                    BEGIN
+                        EXECUTE IMMEDIATE 'CREATE INDEX IF NOT EXISTS drivine_ix_lastfirst_e5329cc6 ON drivine_node (JSON_VALUE(props, ''$.last''), JSON_VALUE(props, ''$.first''))';
+                        EXIT;
+                    EXCEPTION
+                        WHEN e_exists THEN EXIT;
+                        WHEN e_busy THEN
+                            IF attempt = 300 THEN RAISE; END IF;
+                            DBMS_SESSION.SLEEP(0.1);
+                    END;
+                END LOOP;
+            END;
+          - |-
+            DECLARE
+                v_unique NUMBER;
+                e_exists EXCEPTION; PRAGMA EXCEPTION_INIT(e_exists, -955);
+                e_busy EXCEPTION; PRAGMA EXCEPTION_INIT(e_busy, -54);
+            BEGIN
+                SELECT COUNT(*) INTO v_unique FROM drivine_schema u WHERE u.label = 'Person' AND u.properties = '["last","first"]' AND u.kind = 'UNIQUENESS_CONSTRAINT' AND JSON_VALUE(u.properties, '$.size()' RETURNING NUMBER) = 1 AND EXISTS (SELECT 1 FROM user_indexes q WHERE q.index_name = UPPER(u.object_name));
+                IF v_unique = 0 THEN
+                    FOR attempt IN 1 .. 300 LOOP
+                        BEGIN
+                            EXECUTE IMMEDIATE 'CREATE INDEX IF NOT EXISTS drivine_lx_Personlastfirst_4c504a31 ON drivine_node n (CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') THEN JSON_VALUE(n.props, ''$.last'') END, CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') THEN JSON_VALUE(n.props, ''$.first'') END)';
+                            EXIT;
+                        EXCEPTION
+                            WHEN e_exists THEN EXIT;
+                            WHEN e_busy THEN
+                                IF attempt = 300 THEN RAISE; END IF;
+                                DBMS_SESSION.SLEEP(0.1);
+                        END;
+                    END LOOP;
+                END IF;
+            END;
+          - |-
+            BEGIN
+                MERGE INTO drivine_schema c
+                USING (SELECT 'RANGE_INDEX' AS kind, 'Person' AS label, '["last","first"]' AS properties FROM dual) k
+                ON (c.kind = k.kind AND c.label = k.label AND c.properties = k.properties)
+                WHEN MATCHED THEN UPDATE SET c.details = JSON_MERGEPATCH(c.details, '{"form": 1, "labelled": "drivine_lx_Personlastfirst_4c504a31", "unique": null}')
+                WHEN NOT MATCHED THEN INSERT (kind, label, properties, name, object_name, details)
+                    VALUES (k.kind, k.label, k.properties, 'Person_last_first_range', 'drivine_ix_lastfirst_e5329cc6', '{"form": 1, "labelled": "drivine_lx_Personlastfirst_4c504a31"}');
+            EXCEPTION WHEN DUP_VAL_ON_INDEX THEN
+                -- Another process recorded it between the MERGE's read and its insert: it is recorded.
+                NULL;
+            END;
+          - |-
+            DECLARE
+                e_exists EXCEPTION; PRAGMA EXCEPTION_INIT(e_exists, -955);
+                e_busy EXCEPTION; PRAGMA EXCEPTION_INIT(e_busy, -54);
+            BEGIN
+                FOR attempt IN 1 .. 300 LOOP
+                    BEGIN
+                        EXECUTE IMMEDIATE 'CREATE UNIQUE INDEX IF NOT EXISTS drivine_uq_Personlastfirst_4c504a31 ON drivine_node n (CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') AND JSON_EXISTS(n.props, ''$.last'') AND JSON_EXISTS(n.props, ''$.first'') THEN JSON_VALUE(n.props, ''$.last'') END, CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') AND JSON_EXISTS(n.props, ''$.last'') AND JSON_EXISTS(n.props, ''$.first'') THEN JSON_VALUE(n.props, ''$.first'') END)';
+                        EXIT;
+                    EXCEPTION
+                        WHEN e_exists THEN EXIT;
+                        WHEN e_busy THEN
+                            IF attempt = 300 THEN RAISE; END IF;
+                            DBMS_SESSION.SLEEP(0.1);
+                    END;
+                END LOOP;
+            END;
+          - |-
+            BEGIN
+                MERGE INTO drivine_schema c
+                USING (SELECT 'UNIQUENESS_CONSTRAINT' AS kind, 'Person' AS label, '["last","first"]' AS properties FROM dual) k
+                ON (c.kind = k.kind AND c.label = k.label AND c.properties = k.properties)
+                WHEN NOT MATCHED THEN INSERT (kind, label, properties, name, object_name, details)
+                    VALUES (k.kind, k.label, k.properties, 'Person_last_first_unique', 'drivine_uq_Personlastfirst_4c504a31', '{"form": 1}');
+            EXCEPTION WHEN DUP_VAL_ON_INDEX THEN
+                -- Another process recorded it between the MERGE's read and its insert: it is recorded.
+                NULL;
+            END;
+        drop:
+          - |-
+            DECLARE
+                v_object VARCHAR2(128);
+                v_labelled VARCHAR2(128);
+                v_others NUMBER;
+            BEGIN
+                SELECT MAX(object_name), MAX(JSON_VALUE(details, '$.labelled')) INTO v_object, v_labelled
+                FROM drivine_schema WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '["last","first"]';
+                SELECT COUNT(*) INTO v_others FROM drivine_schema WHERE object_name = v_object AND NOT (kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '["last","first"]');
+                IF v_object IS NOT NULL AND v_others = 0 THEN
+                    EXECUTE IMMEDIATE 'DROP INDEX IF EXISTS ' || v_object;
+                END IF;
+                DELETE FROM drivine_schema WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '["last","first"]';
+                COMMIT;
+            END;
+        recreate:
+          form: 1
+          digest: "de01eb144a74685f5ff96b9bf364493fb22b7facc2df23c98bb60f21420b08c7"
+          leftover:
+            - "DROP INDEX IF EXISTS drivine_uq_Personlastfirst_4c504a31_r"
+          build:
+            - |-
+              DECLARE
+                  e_exists EXCEPTION; PRAGMA EXCEPTION_INIT(e_exists, -955);
+                  e_busy EXCEPTION; PRAGMA EXCEPTION_INIT(e_busy, -54);
+              BEGIN
+                  FOR attempt IN 1 .. 300 LOOP
+                      BEGIN
+                          EXECUTE IMMEDIATE 'CREATE UNIQUE INDEX drivine_uq_Personlastfirst_4c504a31_r ON drivine_node n (CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') AND JSON_EXISTS(n.props, ''$.last'') AND JSON_EXISTS(n.props, ''$.first'') THEN JSON_VALUE(n.props, ''$.last'') END, CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') AND JSON_EXISTS(n.props, ''$.last'') AND JSON_EXISTS(n.props, ''$.first'') THEN JSON_VALUE(n.props, ''$.first'') END)';
+                          EXIT;
+                      EXCEPTION
+                          WHEN e_exists THEN EXIT;
+                          WHEN e_busy THEN
+                              IF attempt = 300 THEN RAISE; END IF;
+                              DBMS_SESSION.SLEEP(0.1);
+                      END;
+                  END LOOP;
+              END;
+          swap:
+            - "DROP INDEX IF EXISTS drivine_uq_Personlastfirst_4c504a31"
+            - "ALTER INDEX drivine_uq_Personlastfirst_4c504a31_r RENAME TO drivine_uq_Personlastfirst_4c504a31"
+          finish:
+            - "ALTER INDEX drivine_uq_Personlastfirst_4c504a31_r RENAME TO drivine_uq_Personlastfirst_4c504a31"
+          remade: "UPDATE drivine_schema SET name = 'Person_last_first_unique', object_name = 'drivine_uq_Personlastfirst_4c504a31', details = JSON_MERGEPATCH(details, '{\"form\": 1}') WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"last\",\"first\"]'"
+      sqlite:
+        form: 1
+        digest: "1516302613cc1332e851a2a7fcab2c3819c2a1b5bb890ff0169d2ae5bf52af24"
+        create:
+          - "CREATE UNIQUE INDEX IF NOT EXISTS drivine_uq_Personlastfirst_4c504a31 ON drivine_node ((CASE json_type(props, '$.\"last\"') WHEN 'text' THEN props ->> '$.\"last\"' WHEN 'null' THEN NULL ELSE props -> '$.\"last\"' END), (CASE json_type(props, '$.\"first\"') WHEN 'text' THEN props ->> '$.\"first\"' WHEN 'null' THEN NULL ELSE props -> '$.\"first\"' END)) WHERE instr(labels, '\"Person\"') > 0"
+          - |-
+            INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
+            VALUES ('UNIQUENESS_CONSTRAINT', 'Person', '["last","first"]', 'Person_last_first_unique', 'drivine_uq_Personlastfirst_4c504a31', '{"form": 1}')
+            ON CONFLICT (kind, label, properties) DO NOTHING
+        drop:
+          - "DROP INDEX IF EXISTS drivine_uq_Personlastfirst_4c504a31"
+          - "DELETE FROM drivine_schema WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"last\",\"first\"]'"
+        recreate:
+          form: 1
+          digest: "17ce525895d3359d5f28485a5ab59168338b5e8d4044bc02c9fc9ccde259b341"
+          leftover:
+            - "DROP INDEX IF EXISTS drivine_uq_Personlastfirst_4c504a31_r"
+          build:
+            - "CREATE UNIQUE INDEX drivine_uq_Personlastfirst_4c504a31_r ON drivine_node ((CASE json_type(props, '$.\"last\"') WHEN 'text' THEN props ->> '$.\"last\"' WHEN 'null' THEN NULL ELSE props -> '$.\"last\"' END), (CASE json_type(props, '$.\"first\"') WHEN 'text' THEN props ->> '$.\"first\"' WHEN 'null' THEN NULL ELSE props -> '$.\"first\"' END)) WHERE instr(labels, '\"Person\"') > 0"
+          swap:
+            - "DROP INDEX IF EXISTS drivine_uq_Personlastfirst_4c504a31"
+            - "CREATE UNIQUE INDEX drivine_uq_Personlastfirst_4c504a31 ON drivine_node ((CASE json_type(props, '$.\"last\"') WHEN 'text' THEN props ->> '$.\"last\"' WHEN 'null' THEN NULL ELSE props -> '$.\"last\"' END), (CASE json_type(props, '$.\"first\"') WHEN 'text' THEN props ->> '$.\"first\"' WHEN 'null' THEN NULL ELSE props -> '$.\"first\"' END)) WHERE instr(labels, '\"Person\"') > 0"
+            - "DROP INDEX IF EXISTS drivine_uq_Personlastfirst_4c504a31_r"
+          finish:
+            - "CREATE UNIQUE INDEX drivine_uq_Personlastfirst_4c504a31 ON drivine_node ((CASE json_type(props, '$.\"last\"') WHEN 'text' THEN props ->> '$.\"last\"' WHEN 'null' THEN NULL ELSE props -> '$.\"last\"' END), (CASE json_type(props, '$.\"first\"') WHEN 'text' THEN props ->> '$.\"first\"' WHEN 'null' THEN NULL ELSE props -> '$.\"first\"' END)) WHERE instr(labels, '\"Person\"') > 0"
+            - "DROP INDEX IF EXISTS drivine_uq_Personlastfirst_4c504a31_r"
+          remade: "UPDATE drivine_schema SET name = 'Person_last_first_unique', object_name = 'drivine_uq_Personlastfirst_4c504a31', details = json_set(details, '$.form', 1) WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"last\",\"first\"]'"
+      neo4j:
+        create:
+          - "CREATE CONSTRAINT `Person_last_first_unique` IF NOT EXISTS FOR (n:`Person`) REQUIRE (n.`last`, n.`first`) IS UNIQUE"
+        drop: ["DROP CONSTRAINT `Person_last_first_unique` IF EXISTS"]
+        dropUnnamed:
+          error: "Cannot drop constraint on Person[last, first]: Neo4j drops constraints by name, but no name is known for this constraint"
+      memgraph:
+        create: ["CREATE CONSTRAINT ON (n:Person) ASSERT n.last, n.first IS UNIQUE"]
+        drop: ["DROP CONSTRAINT ON (n:Person) ASSERT n.last, n.first IS UNIQUE"]
+      falkordb:
+        create:
+          - native:
+              - "GRAPH.CONSTRAINT"
+              - "CREATE"
+              - "{graphName}"
+              - "UNIQUE"
+              - "NODE"
+              - "Person"
+              - "PROPERTIES"
+              - "2"
+              - "last"
+              - "first"
+        drop:
+          - native:
+              - "GRAPH.CONSTRAINT"
+              - "DROP"
+              - "{graphName}"
+              - "UNIQUE"
+              - "NODE"
+              - "Person"
+              - "PROPERTIES"
+              - "2"
+              - "last"
+              - "first"
   - name: "Uniqueness constraint that ignores case"
     description: "Made over the lowercased copy of the property, under a name of its own. FalkorDB refuses it: GRAPH.CONSTRAINT takes no name with a dot."
     spec: {kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], ignoreCase: true}

@@ -189,7 +189,7 @@ class StoreDdlTest {
                 checked++
             }
         }
-        assertEquals(15, checked, "five constraints on three SQL stores")
+        assertEquals(18, checked, "six constraints on three SQL stores")
     }
 
     /**

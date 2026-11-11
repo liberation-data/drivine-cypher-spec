@@ -25,6 +25,7 @@ import org.drivine.schema.SchemaItemKind
 import org.drivine.schema.SchemaItemSpec
 import org.drivine.schema.SchemaMode
 import org.drivine.schema.TextIndexSpec
+import org.drivine.schema.UniquenessConstraintSpec
 import org.drivine.schema.VectorIndexSpec
 import org.drivine.schema.lowercased
 import org.drivine.schema.made
@@ -984,6 +985,12 @@ internal class SchemaProgram(
         val recreation = ddl.recreation(made)
         val found = findConstraint(spec)
         val rows = listings[ddl.listConstraintsQuery()].orEmpty()
+        // A record over the properties in another order than declared names its own index, under the name that order
+        // gives: it is dropped by its record, and forgotten, once the new one is in place, and its aliases carried over.
+        val reordered = found?.takeIf { it.properties != made.properties }
+        val aliases = if (reordered == null) emptyList() else rows.firstNotNullOfOrNull { row ->
+            store.parseConstraintRows(listOf(row)).firstOrNull { store.matchesIdentity(it, made) }?.let { store.aliasesOf(row) }
+        }.orEmpty()
         val mismatches = (store as? SqlStoreSchema)?.mismatchesOf(made, rows).orEmpty()
         // What isn't an index can't be dropped by its name, nor made over: the constraint stays drift.
         mismatches.firstOrNull { !it.droppable }?.let { return mismatched(made, found, it) }
@@ -1020,9 +1027,11 @@ internal class SchemaProgram(
             if (store.isViolation(refused.error)) return confirmedViolation(made, violationSampleSize) ?: throw refused
             if (!store.isAlreadyIndexed(refused.error)) throw refused
             // Over the expressions of the index there (Oracle builds a unique index beside one that isn't, over the same
-            // expressions, and refuses it only for the data): dropped first, and made again.
-            ddl(store.dropMismatched(recreation.name))
-            val what = "Dropped $engine index ${recreation.name} of ${made.kind} on ${made.label}${made.properties} before making it again: " +
+            // expressions, and refuses it only for the data): dropped first, and made again; by its record where that
+            // names it under the properties in another order.
+            val dropped = if (reordered == null) recreation.name else ddl.recreation(UniquenessConstraintSpec(made.label, reordered.properties)).name
+            ddl(if (reordered == null) store.dropMismatched(recreation.name) else ddl.dropConstraint(reordered.catalogItem))
+            val what = "Dropped $engine index $dropped of ${made.kind} on ${made.label}${made.properties} before making it again: " +
                 "Oracle builds no second index over the same expressions (ORA-01408), so the new one can't be built beside it."
             val ours = replaced == null && (form is ItemForm.Current || form is ItemForm.Unrecorded)
             if (ours) {
@@ -1038,12 +1047,20 @@ internal class SchemaProgram(
                         "${made.label}${made.properties} is left with no index until the constraint is made",
                 )
             }
-            return remake(made, recreation, found, violationSampleSize)
+            return remake(made, recreation, found, violationSampleSize, aliases)
         }
         ddl(recreation.swap)
         replaced?.let { log(LogLevel.INFO, CONSTRAINT_MANAGER, droppedMismatch(made, it)) }
         unrecorded.filter { inPlace(it.name) }.forEach { log(LogLevel.INFO, CONSTRAINT_MANAGER, droppedUnrecorded(made, it, kept)) }
-        return remake(made, recreation, found, violationSampleSize)
+        if (reordered != null) {
+            ddl(ddl.dropConstraint(reordered.catalogItem))
+            log(
+                LogLevel.INFO, CONSTRAINT_MANAGER,
+                "Dropped $engine ${made.kind} on ${made.label}${reordered.properties}, recorded over its properties in another order than declared, " +
+                    "and forgot its record: it is made again over ${made.label}${made.properties}",
+            )
+        }
+        return remake(made, recreation, found, violationSampleSize, aliases)
     }
 
     /** What [form], or [replaced] where it is one, says the index under the constraint's name was, for the line that says it was dropped. */
@@ -1089,7 +1106,7 @@ internal class SchemaProgram(
      * no record is, and then its record made this version's form's as [recreation]'s index, its aliases kept. Data that
      * refuses the `create`, where the old index was dropped first, is a violation where the data confirms it.
      */
-    private fun remake(spec: ConstraintSpec, recreation: UniqueRecreation, previous: SchemaItemInfo?, violationSampleSize: Int): EnsureResult {
+    private fun remake(spec: ConstraintSpec, recreation: UniqueRecreation, previous: SchemaItemInfo?, violationSampleSize: Int, aliases: List<String> = emptyList()): EnsureResult {
         try {
             ddl(store.ddl.createConstraint(spec))
         } catch (refused: RawFailure) {
@@ -1097,6 +1114,9 @@ internal class SchemaProgram(
             throw refused
         }
         updateRecord(recreation.remade)
+        // The aliases of a record forgotten, as it was over the properties in another order, kept on the one made.
+        val sql = store.ddl as? SqlStoreDdl
+        if (aliases.isNotEmpty() && sql != null) updateRecord(sql.aliased(CatalogItem(spec.kind, spec.label, spec.properties, spec.effectiveName), aliases))
         val created = findConstraint(spec) ?: SchemaItemInfo.fromSpec(spec)
         log(LogLevel.INFO, CONSTRAINT_MANAGER, "Created $engine ${spec.kind} on ${spec.label}${spec.properties}")
         return EnsureResult.Recreated(previous, created)
