@@ -2248,13 +2248,14 @@ class OracleCypherCompiler(
             "        IF o.get_Size <> 1 OR NOT o.has('\$numberDouble') THEN RETURN NULL; END IF;",
             "        RETURN o.get_String('\$numberDouble');",
             "    END;",
-            // A text, read from its list as itself: `to_String` writes it as JSON, with its quotes and escapes.
+            // A text, read from its list as itself: `to_String` writes it as JSON, with its quotes and escapes. One past
+            // 32,767 bytes, which `get_String` refuses (ORA-06502), is read from its CLOB, as far as the key keeps it.
             "    PROCEDURE txt(a JSON_ARRAY_T, i PLS_INTEGER) IS",
             "        s VARCHAR2(32767);",
             "    BEGIN",
             "        BEGIN",
             "            s := a.get_String(i);",
-            "        EXCEPTION WHEN too_long THEN",
+            "        EXCEPTION WHEN too_long OR VALUE_ERROR THEN",
             "            s := DBMS_LOB.SUBSTR(a.get_Clob(i), 2000, 1);",
             "        END;",
             "        add(UTL_RAW.CONCAT(HEXTORAW('03'), UTL_RAW.CAST_TO_RAW(REPLACE(SUBSTR(s, 1, 2000), CHR(0), CHR(1))), HEXTORAW('00')));",
