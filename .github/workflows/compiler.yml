@@ -101,14 +101,24 @@ jobs:
           key: konan-${{ runner.os }}-${{ hashFiles('compiler/build.gradle.kts') }}
       - name: The Python wheels' check, over made-up libraries
         run: python python/check_wheel_test.py
-      - run: ./gradlew --no-daemon clean linuxX64Test nativeCorpusCheck -Ppython="$(command -v python)" | tee corpus.log
-      # The version script (native/exports.map) leaves the C API the library's only exports.
-      - name: The shared library exports the C API alone
+      # apsw, a SQLite that loads extensions, for the extension's check: by hash (check/extension-requirements.txt).
+      - name: apsw, for the SQLite extension's check
+        run: python -m pip install --require-hashes --no-deps --only-binary :all: -r check/extension-requirements.txt
+      - run: ./gradlew --no-daemon clean linuxX64Test nativeCorpusCheck nativeExtensionCheck -Ppython="$(command -v python)" | tee corpus.log
+      # The version script (native/exports.map) leaves the C API and the SQLite extension's entry the library's only
+      # exports, and no SQLite symbol is linked: the extension calls the loading SQLite's routines alone.
+      - name: The shared library exports the C API alone, and imports no SQLite
         run: |
-          nm -D --defined-only build/bin/linuxX64/drivinecypherReleaseShared/libdrivinecypher.so | awk '{ print $NF }' | sort > exports.txt
-          diff <(printf 'drivine_compile\ndrivine_free\n') exports.txt || { echo "::error::libdrivinecypher.so exports more than drivine_compile and drivine_free."; exit 1; }
+          library=build/bin/linuxX64/drivinecypherReleaseShared/libdrivinecypher.so
+          nm -D --defined-only "$library" | awk '{ print $NF }' | sort > exports.txt
+          diff <(printf 'drivine_compile\ndrivine_free\ndrivine_gc_collect\nsqlite3_drivinecypher_init\n') exports.txt || { echo "::error::libdrivinecypher.so exports other than native/exports.map's."; exit 1; }
+          if nm -D --undefined-only "$library" | grep sqlite3; then echo "::error::libdrivinecypher.so links SQLite symbols."; exit 1; fi
       - name: The shared library for linuxArm64 and mingwX64, cross-compiled
         run: ./gradlew --no-daemon linkDrivinecypherReleaseSharedLinuxArm64 linkDrivinecypherReleaseSharedMingwX64
+      # Windows exports what Kotlin/Native's .def names: the C API, the SQLite extension's entry, and drivinecypher_symbols.
+      - name: The Windows library's .def names the C API alone
+        run: |
+          diff <(printf 'drivine_compile\ndrivine_free\ndrivine_gc_collect\ndrivinecypher_symbols\nsqlite3_drivinecypher_init\n') <(tr -d '\r' < build/bin/mingwX64/drivinecypherReleaseShared/drivinecypher.def | grep -v '^EXPORTS$' | LC_ALL=C sort) || { echo "::error::drivinecypher.def names other exports."; exit 1; }
       - name: Summary
         if: always()
         run: ../.github/scripts/compiler-summary.sh build/test-results/linuxX64Test corpus.log >> "$GITHUB_STEP_SUMMARY"
@@ -134,11 +144,16 @@ jobs:
         with:
           path: ~/.konan
           key: konan-${{ runner.os }}-${{ hashFiles('compiler/build.gradle.kts') }}
-      - run: ./gradlew --no-daemon clean macosArm64Test nativeCorpusCheck -Ppython="$(command -v python)" | tee corpus.log
-      # The symbol list (native/exports.txt) leaves the C API the library's only exports.
-      - name: The shared library exports the C API alone
+      - name: apsw, for the SQLite extension's check
+        run: python -m pip install --require-hashes --no-deps --only-binary :all: -r check/extension-requirements.txt
+      - run: ./gradlew --no-daemon clean macosArm64Test nativeCorpusCheck nativeExtensionCheck -Ppython="$(command -v python)" | tee corpus.log
+      # The symbol list (native/exports.txt) leaves the C API and the SQLite extension's entry the library's only
+      # exports, and no SQLite symbol is linked.
+      - name: The shared library exports the C API alone, and imports no SQLite
         run: |
-          diff native/exports.txt <(nm -gU build/bin/macosArm64/drivinecypherReleaseShared/libdrivinecypher.dylib | awk '{ print $NF }' | sort) || { echo "::error::libdrivinecypher.dylib exports more than native/exports.txt."; exit 1; }
+          library=build/bin/macosArm64/drivinecypherReleaseShared/libdrivinecypher.dylib
+          diff native/exports.txt <(nm -gU "$library" | awk '{ print $NF }' | sort) || { echo "::error::libdrivinecypher.dylib exports other than native/exports.txt's."; exit 1; }
+          if nm -u "$library" | grep sqlite3; then echo "::error::libdrivinecypher.dylib links SQLite symbols."; exit 1; fi
       - name: Summary
         if: always()
         run: ../.github/scripts/compiler-summary.sh build/test-results/macosArm64Test corpus.log >> "$GITHUB_STEP_SUMMARY"

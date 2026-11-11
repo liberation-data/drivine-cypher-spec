@@ -1,9 +1,12 @@
-/* The shared library's exports on Linux: the C API alone (see Exports.native.kt), so the Kotlin/Native runtime's own
-   symbols stay inside it and can't clash with another library a host loads. */
+/* The shared library's exports on Linux: the C API alone (see Exports.native.kt, and SqliteExtension.kt for the SQLite
+   extension's entry and drivine_gc_collect), so the Kotlin/Native runtime's own symbols stay inside it and can't clash
+   with another library a host loads. native/exports.txt is macOS's, the same names. */
 {
   global:
     drivine_compile;
     drivine_free;
+    drivine_gc_collect;
+    sqlite3_drivinecypher_init;
   local:
     *;
 };
