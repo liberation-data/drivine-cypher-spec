@@ -17,7 +17,7 @@ the spec's files at the top of the repository and nothing here.
 |---|---|---|
 | `jvm` | a jar | drivine4j, and Android |
 | `wasmJs` | `@liberation-data/drivine-cypher-compiler`, an npm package (`./gradlew npmPackage`, in `build/npm`) | Drivine for TypeScript |
-| `macosArm64`, `linuxX64`, `linuxArm64`, `mingwX64` | `libdrivinecypher`, a shared library with a C ABI, packed for PyPI as `drivine-cypher-compiler` wheels (`./gradlew pythonWheels`, in `build/wheels`) | drivine-python, over ctypes |
+| `macosArm64`, `linuxX64`, `linuxArm64`, `mingwX64` | `libdrivinecypher`, a shared library with a C ABI and a SQLite extension, packed for PyPI as `drivine-cypher-compiler` wheels (`./gradlew pythonWheels`, in `build/wheels`) | drivine-python, over ctypes |
 
 macosArm64 builds on macOS only. The others build anywhere Kotlin/Native runs.
 
@@ -327,10 +327,13 @@ one wheel a platform, `py3-none-<platform>`, as the library is the same for ever
 | `mingwX64` | `win_amd64` | |
 
 There's none for Intel Macs (Kotlin/Native deprecates `macosX64`) or musl Linux (Kotlin/Native has no musl target): pip
-finds no wheel there, and drivine-python names the platform where it would load the compiler. The library exports the C
-API alone (a version script on Linux and a symbol list on macOS, in `native/`, which CI checks the library's exports
-against, and Kotlin/Native's `.def` on Windows, which adds only its `drivinecypher_symbols`), so the Kotlin/Native
-runtime's symbols can't clash with another library in the host's process; on Linux it is linked `--as-needed`, which
+finds no wheel there, and drivine-python names the platform where it would load the compiler. On Linux and macOS the
+library exports the C API alone (a version script on Linux and a symbol list on macOS, in `native/`, which CI checks the
+library's exports against), so the Kotlin/Native runtime's symbols can't clash with another library in the host's
+process. On Windows, Kotlin/Native's `.def` names the C API and its own `drivinecypher_symbols`, which CI checks, but the
+DLL also exports the C runtime it links statically, about 170 symbols of libgcc's unwinder and winpthreads
+(`_Unwind_*`, `pthread_*`, `sem_*`); none of the Kotlin/Native runtime's, and a Windows DLL's exports bind only to a
+caller that imports them by this DLL's name, so they can't clash either. On Linux it is linked `--as-needed`, which
 leaves out `libcrypt.so.1` and the other system libraries it doesn't call. The binding loads the library on the first
 compile, once, and frees each answer with `drivine_free`. `python/build_wheels.py` packs the wheels with the standard
 library alone, the same bytes from the same libraries; `python/check_wheel.py` checks each, and
@@ -348,6 +351,91 @@ the answer. The answer is the host's to free, with `drivine_free` and nothing el
 
 Each call stands alone, so a host may call it from several threads at once.
 
+### The SQLite extension
+
+`libdrivinecypher` is also a SQLite loadable extension: the host functions that compiled SQL calls on SQLite, written once
+in the module, in place of a copy in each library (#108). It is the same library as `drivine_compile`, so a process that
+compiles and runs SQLite has one Kotlin/Native runtime. It links against no SQLite: every call into SQLite goes through
+the routines the loading SQLite passes to its entry point, so it binds to whatever SQLite loads it (CI checks, on Linux
+and macOS, that the library imports no `sqlite3_` symbol and exports only the C API and these, and on Windows that the
+`.def` names them; see [Python](#python) for what else the DLL exports):
+
+```c
+int sqlite3_drivinecypher_init(sqlite3 *db, char **errorMessage, const sqlite3_api_routines *routines);
+void drivine_gc_collect(void);   /* collects now: see below */
+```
+
+SQLite derives the entry point's name from the file's (`libdrivinecypher` or `drivinecypher`), so a host loads it by
+path alone. The host functions come in batches, ported from drivine4j's: each is common code
+(`org.drivine.cypher.host.HostFunctions`), which the extension registers and a host on the JVM can call from its own
+registrations, and each comes with the spec's `host.yaml` cases that pin it. So far it registers:
+
+| Function | What it gives |
+|---|---|
+| `drivine_float_text(real)` | the float as Java writes a double, as Cypher's `toString` gives it (`2.0`, `1.0E7`, `Infinity`), where SQLite's own text has 17 digits; null of null. Deterministic. |
+| `drivine_extension_version()` | the module's version, as it was built (`-Pcompiler.version`, the Maven form: `0.36.0`, `0.36.0-rc.1`), so a host can check it loaded the library it meant to. Deterministic. |
+| `drivine_gc_collect()` | NULL, having collected: see below. Direct-only. |
+| `drivine_gc_heap()`, `drivine_gc_heap(bytes)` | the GC's floor, in bytes; given bytes, it sets the floor first, and 0 restores the runtime's own. Direct-only. |
+
+A direct-only function changes the process's state, so SQLite lets only the host's own statements call it, never a
+trigger or view of the database's. A function that throws fails its statement with its message (`drivine_gc_heap: the
+floor is 0 bytes or more, not -1.`), as an exception escaping into SQLite would end the host's process.
+
+It takes SQLite 3.31.0 or later (the init refuses an older one), and serves one SQLite a process: a second SQLite (a copy
+of another version, linked into another library) that loads it is refused, as its functions would call the first one's
+routines. The headers it is compiled against are SQLite 3.54.1's, pinned in `native/sqlite/sqlite.properties` with the
+amalgamation's URL and SHA3-256 and each header's SHA-256; to move them, take both headers from a newer amalgamation,
+unchanged, and record it there. The routines struct only grows, so headers newer than the loading SQLite are fine as long
+as the extension calls nothing that SQLite lacks.
+
+Loading it, with the library's path (`drivine_cypher_compiler.library_path()` in the Python package):
+
+```python
+connection = apsw.Connection(path_to_db)                       # Python: apsw
+connection.enable_load_extension(True)
+connection.load_extension(drivine_cypher_compiler.library_path())
+```
+
+```js
+new Database(file).loadExtension(path)                          // Node: better-sqlite3
+new DatabaseSync(file, { allowExtension: true }).loadExtension(path)   // Node: node:sqlite
+```
+
+On the JVM, sqlite-jdbc loads it with `SQLiteConfig.enableLoadExtension(true)` and `SELECT load_extension(?)`; drivine4j
+doesn't need it, as it calls the module's Kotlin itself. A host that links SQLite statically (iOS, Android) registers the
+entry point for every connection with `sqlite3_auto_extension((void (*)(void)) sqlite3_drivinecypher_init)`. That SQLite
+must be built without `SQLITE_OMIT_LOAD_EXTENSION`: built with it, SQLite gives an auto-extension no routines, and the
+init refuses.
+
+**One image.** The C API and the extension must come from the same file, loaded by the same path: `dlopen` (and
+`LoadLibrary`) gives the image already loaded for a path it has loaded, so the compiler and the extension share one
+runtime. Two copies of the library at two paths are two Kotlin/Native runtimes in one process, each with its own heap and
+collector.
+
+**The GC, deferred.** Kotlin/Native schedules a collection when its heap reaches a target, which it tunes after each
+collection from the heap still live, but never below a floor, 5 MiB by default. With little live, that is a collection
+every few MiB allocated: 60 to 65 stop-the-world collections in a 1M-row `regexp` statement in #108's prototype, whose
+`regexp` made about 300 bytes of garbage a row. Raising the target alone doesn't hold, as the tuning lowers it again;
+raising the floor does. So the extension's first init in a process raises the floor (`minHeapBytes`, and the target with
+it) to 64 MiB, about 200,000 rows of that garbage: few statements set off a collection, and a long one far fewer. The
+floor stays the backstop: past it, a collection runs as before, so garbage holds at most about the floor even where a
+host never collects. A host collects between statements, where a pause costs nothing, with `drivine_gc_collect()`, in
+SQL or C. A host that wants another floor sets it in SQL, `SELECT drivine_gc_heap(268435456)`, which every host of the
+extension can run (Node's better-sqlite3 can call no C function), and `drivine_gc_heap(0)` gives the runtime's own back. A
+later connection's init leaves the floor as the host set it. A host that loads only the C API, and never the extension,
+keeps Kotlin/Native's defaults.
+
+`./gradlew nativeExtensionCheck` loads the host's release library into apsw's SQLite (`check/extension-native.py`; a
+Python with apsw, installed by hash from `check/extension-requirements.txt`, as `-Ppython=<path>`), calls each function
+through SQL, the throwing ones too, and then the C API by ctypes from the same path. It also calls, through SQL, each
+`function` step of the spec's `host.yaml` whose function the extension registers (`./gradlew hostSpecJson` writes the
+file as JSON, in `build/host`), and names those it doesn't register yet. CI runs it on Linux x64 and macOS, and the
+release runs it on each platform's installed wheel, Windows and Linux arm64 too, without `host.yaml`.
+
+`HostSpecTest`, in the common tests, runs the same steps on every target (the JVM, native and wasm), calling the module's
+code as SQLite would. A function `host.yaml` calls that the module doesn't implement yet is on its `PENDING` list, which
+must hold exactly those, and each function the module implements must have a step.
+
 ## Building
 
 JDK 21 runs Gradle. The build compiles with Temurin 21, provisioned where it isn't installed, and writes the zone ids
@@ -359,6 +447,7 @@ and the JVM's answers on the exact JDK it pins (see [The pinned JDK](#the-pinned
 ./gradlew macosArm64Test           # the double and stand-in fuzz on native (linuxX64Test on Linux)
 ./gradlew wasmJsCorpusCheck        # the corpus on wasmJs (node on the PATH, or -Pnode=<path>)
 ./gradlew nativeCorpusCheck        # the corpus on the host's native target (python3, or -Ppython=<path>)
+./gradlew nativeExtensionCheck     # the SQLite extension, loaded by apsw (a python with apsw, -Ppython=<path>)
 ./gradlew metadataCompile          # common code compiled alone
 ./gradlew npmPackage               # the npm package, in build/npm
 ./gradlew pythonWheels             # the Python wheels, one a native target, in build/wheels (python3, or -Ppython=<path>)
@@ -460,13 +549,18 @@ The JVM is the oracle. `./gradlew jvmOracle` writes, into `build/oracle`:
   stdlib's exceptions and texts reach a refusal off those paths: 10,000 of them (`-Pmutants.count=<n>`), from the seed.
   Where fewer are of interest, `jvmOracle` fails.
 - `store.json`: the spec's `store.yaml` as JSON, which `StoreDdlTest` reads on every target: the store layout's DDL
-  each generator in `org.drivine.cypher.store.ddl` must give, the object names Java's `String.hashCode` gives, and the
-  reads the compiler must answer from each index.
+  each generator in `org.drivine.cypher.store.ddl` must give, with the form each SQL store's create is pinned to by its
+  digest, the object names Java's `String.hashCode` gives, and the reads the compiler must answer from each index; and,
+  which `StoreSchemaTest` reads, the form `org.drivine.cypher.store.schema` must read each item as from listing rows
+  captured from each SQL store.
 - `marker.json`: the spec's `marker.yaml` as JSON, which `StoreMarkerTest` reads on every target: each store's
   statements for the schema marker and the store's stamp that `org.drivine.cypher.store.marker` must give, the
   inventories it must write and read back, the version tokens, and the node stamps `Stamps` must read and write.
 - `plans.json`: the spec's `plans.yaml` as JSON, which `StorePlanTest` reads on every target: each case's rounds that
   `org.drivine.cypher.store.plan`'s planner must give on each store, the answers it is given back, and its report.
+- `host.json`: the spec's `host.yaml` as JSON, which `HostSpecTest` reads on every target: the `function` steps the
+  module's host functions (`org.drivine.cypher.host.HostFunctions`) must give. `./gradlew hostSpecJson` writes it alone,
+  into `build/host`, for `nativeExtensionCheck`.
 - `search-golden.json`: drivine4j's full-text search statements (see [Full-text search](#full-text-search)), which
   `FullTextSearchGoldenTest` reads on every target. Its requests are in `corpus.jsonl` too.
 - `standins-<name>.txt`: what Java gives where the module stands in for it, worked out by Java's own API on the pinned
@@ -560,7 +654,8 @@ number.
 1. It checks the tag (`vX.Y.Z`, on `main`), and runs the compiler's CI, `compiler.yml`.
 2. On macOS, which builds every target, it builds every publication, unsigned, into one bundle, and checks it
    (`.github/scripts/compiler-release-check.sh`): exactly the artifacts above, each with its jar or klib, sources,
-   javadoc, POM and module at the tag's version. The bundle is kept as the run's artifact.
+   javadoc, POM and module at the tag's version (and each native target's klib of the SQLite extension's cinterop,
+   `-cinterop-sqlite3ext.klib`, which Kotlin publishes beside its klib). The bundle is kept as the run's artifact.
 3. The upload waits in the `release` environment for its reviewer. It signs that bundle with the release key
    (`.github/scripts/compiler-release-sign.sh`) and uploads it to the Central Portal
    (`.github/scripts/compiler-release-upload.sh`), as one deployment, which releases every target or none. It then
@@ -622,7 +717,9 @@ name and version, one platform's library, the binding and the `.dist-info`, and 
 artifact, with their SHA-256s, a list as a job output, and the JVM's answers to the corpus and its mutants, with a SHA-256
 each file. `wheels-smoke` then takes each wheel to its own platform (Linux x86_64 and
 aarch64, macOS and Windows), checks it is step 2's, installs it alone into a fresh venv, and compiles the corpus and the
-mutants through the installed package, every answer byte for byte the JVM's (`check/corpus-native.py --installed`). On
+mutants through the installed package, every answer byte for byte the JVM's (`check/corpus-native.py --installed`). It
+loads the installed library into apsw's SQLite, installed by hash into the same venv, as the SQLite extension
+(`check/extension-native.py --installed`, see [The SQLite extension](#the-sqlite-extension)). On
 Linux it checks the wheel holds to its manylinux tag with auditwheel, installed by hash
 (`python/check-requirements.txt`); on macOS, that every library it loads (its `LC_LOAD_DYLIB`s) is the system's, under `/usr/lib/` or
 `/System/Library/`. The publish is a job of its own,

@@ -3,6 +3,7 @@ package org.drivine.cypher.store.schema
 import org.drivine.DrivineInternalApi
 import org.drivine.cypher.store.ddl.CatalogItem
 import org.drivine.cypher.store.ddl.CypherNames
+import org.drivine.cypher.store.ddl.DdlStatement
 import org.drivine.cypher.store.ddl.FalkorDbDdl
 import org.drivine.cypher.store.ddl.MemgraphDdl
 import org.drivine.cypher.store.ddl.Neo4jDdl
@@ -160,6 +161,22 @@ interface StoreSchema {
      * (Oracle's range index listed `INCOMPLETE`). Never, on a store whose items are made whole.
      */
     fun isIncomplete(existing: SchemaItemInfo): Boolean = false
+
+    /**
+     * What [rows], the rows of the listing [spec] is found in ([StoreDdl.listIndexesQuery] of its kind, or
+     * [StoreDdl.listConstraintsQuery]), say of the form of the item [spec] declares ([ItemForm]): on a SQL store, from its
+     * record's `details.form` and what the store has under the names Drivine gives the item's objects, which the listing
+     * gives beside the records; [ItemForm.Current] on a graph engine, whose items Drivine makes in no form of its own. A
+     * [spec] is handed as it is made, as to every rule.
+     */
+    fun formOf(spec: SchemaItemSpec, rows: List<Any?>): ItemForm = ItemForm.Current
+
+    /**
+     * What drops the index [name], one that stands under a name Drivine gives and isn't the item that name is for
+     * ([ItemForm.Mismatch], [ItemForm.Mismatch.droppable]), before the item is made in its place. None on a store whose
+     * items have no such name.
+     */
+    fun dropMismatched(name: String): List<DdlStatement> = emptyList()
 
     /**
      * The statement that samples the keys [spec] would refuse: each row a map of the `properties` that repeat, the

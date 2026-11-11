@@ -1,0 +1,8 @@
+# What the SQLite extension's check (check/extension-native.py) installs: apsw, a SQLite of its own that loads
+# extensions, by the SHA-256 of each wheel CI installs (CPython 3.12, as CI's setup-python gives it), as PyPI gives it:
+# pip installs nothing whose hash differs, and nothing not named here. apsw has no dependencies.
+apsw==3.54.1.0 \
+    --hash=sha256:570081228af352e8a91fa5c5a76f9cbf6ba7f2551acbc429d04a4b90ad7f3503 \
+    --hash=sha256:91b7cbc275ce425e0d542bf6b5ea820432d40521502bbd3a36749f1bbd62a610 \
+    --hash=sha256:b0b85ac5da16155cd5e1598d1a17cfd69d603af4033ededa4a06fe098c55fd8a \
+    --hash=sha256:c145762714b42b352a746c2677c2dc2efb627990ca1c30218bc049ed0cbb8775

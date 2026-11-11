@@ -246,7 +246,7 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
      */
     private fun recorded(spec: SchemaItemSpec, objectName: String?, details: String = "{}"): String = """
         INSERT INTO $catalog (kind, label, properties, name, object_name, details)
-        VALUES (${literal(spec.kind.name)}, ${literal(spec.label)}, ${literal(json(spec.properties))}, ${literal(spec.effectiveName)}, ${objectName?.let(::literal) ?: "NULL"}, ${literal(details)})
+        VALUES (${literal(spec.kind.name)}, ${literal(spec.label)}, ${literal(json(spec.properties))}, ${literal(spec.effectiveName)}, ${objectName?.let(::literal) ?: "NULL"}, ${literal(formed(details))})
         ON CONFLICT (kind, label, properties) DO NOTHING
     """
 
@@ -295,12 +295,12 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
 
     override fun createIndex(spec: IndexSpec, existing: CatalogItem?): List<DdlStatement> = when (spec) {
         is RangeIndexSpec -> {
-            val name = objectName("ix", listOf(spec.label) + spec.properties)
+            val name = objectName(RANGE, listOf(spec.label) + spec.properties)
             statements("CREATE INDEX IF NOT EXISTS $name ON ${over(spec.label, spec.keys)}", recorded(spec, name))
         }
         is VectorIndexSpec -> {
             // An HNSW index over the embeddings of the label's nodes that are of its size: one of another size is left out, not refused.
-            val name = objectName("v", listOf(spec.label, spec.properties.single()))
+            val name = objectName(VECTOR, listOf(spec.label, spec.properties.single()))
             val key = spec.keys.single()
             statements(
                 "CREATE EXTENSION IF NOT EXISTS vector",
@@ -311,7 +311,7 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
         }
         is FullTextIndexSpec -> {
             // Trigrams of the text a search reads, which answer whether it holds a term's words.
-            val name = objectName("t", listOf(spec.label) + spec.properties)
+            val name = objectName(FULLTEXT, listOf(spec.label) + spec.properties)
             statements(
                 "CREATE EXTENSION IF NOT EXISTS pg_trgm",
                 "CREATE INDEX IF NOT EXISTS $name ON $nodes USING gin ((${PostgresSql.searchedText("", spec.keys)}) gin_trgm_ops) WHERE ${hasLabel("", spec.label)}",
@@ -325,25 +325,58 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
 
     override fun createConstraint(spec: ConstraintSpec): List<DdlStatement> = when (spec) {
         is UniquenessConstraintSpec -> {
-            val name = objectName("uq", listOf(spec.label) + spec.properties)
+            val name = objectName(UNIQUE, listOf(spec.label) + spec.properties)
             statements("CREATE UNIQUE INDEX IF NOT EXISTS $name ON ${over(spec.label, spec.keys)}", recorded(spec, name))
         }
     }
 
     override fun dropConstraint(item: CatalogItem): List<DdlStatement> = forgotten(item)
 
-    /** What is recorded of [kinds], and still there: an index dropped by hand is not listed, so that it is made again when asked for. */
-    private fun listed(kinds: String): String = """
+    /**
+     * What is recorded of [kinds], and still there: an index dropped by hand is not listed, so that it is made again when
+     * asked for. After the records, a row for each relation of the schema the store reads under a name Drivine gives an
+     * object of [objects], recorded or not, with what it is: its `type` (`relkind`), and of an index its `table`, whether
+     * it is `unique`, its access `method`, the text of each of its `columns`, its predicate (`where`), as Postgres
+     * writes them, and its operator classes (`opclasses`), which `store.schema` reads to tell another item under the name ([org.drivine.cypher.store.schema.ItemForm]).
+     */
+    private fun listed(kinds: String, objects: List<String>): String = if (objects.isEmpty()) """
         SELECT jsonb_build_object('kind', kind, 'label', label, 'properties', properties::jsonb, 'name', name, 'details', details)
         FROM $catalog c
         WHERE kind IN ($kinds)
           AND (object_name IS NULL OR to_regclass(object_name) IS NOT NULL)
         ORDER BY label, properties
+    """.trimIndent() else """
+        SELECT listed FROM (
+            SELECT 0 AS part, label, properties, jsonb_build_object('kind', kind, 'label', label, 'properties', properties::jsonb, 'name', name, 'details', details) AS listed
+            FROM $catalog c
+            WHERE kind IN ($kinds)
+              AND (object_name IS NULL OR to_regclass(object_name) IS NOT NULL)
+            UNION ALL
+            SELECT 1, o.relname::varchar, NULL,
+                   jsonb_build_object('object', o.relname, 'type', o.relkind, 'table', t.relname, 'unique', i.indisunique, 'method', a.amname,
+                                      'columns', (SELECT jsonb_agg(pg_get_indexdef(i.indexrelid, k, true) ORDER BY k) FROM generate_series(1, i.indnatts) k),
+                                      'where', pg_get_expr(i.indpred, i.indrelid, true),
+                                      'opclasses', (SELECT jsonb_agg(oc.opcname ORDER BY k.n) FROM unnest(i.indclass::oid[]) WITH ORDINALITY AS k(oid, n) JOIN pg_opclass oc ON oc.oid = k.oid))
+            FROM pg_class o
+            LEFT JOIN pg_index i ON i.indexrelid = o.oid
+            LEFT JOIN pg_class t ON t.oid = i.indrelid
+            LEFT JOIN pg_am a ON a.oid = o.relam
+            WHERE (${namedAs("o.relname", objects, upper = false)}) AND pg_table_is_visible(o.oid)
+        ) l
+        ORDER BY part, label, properties
     """.trimIndent()
 
-    override fun listIndexesQuery(kind: SchemaItemKind): String = listed(literal(kind.name))
+    override fun listIndexesQuery(kind: SchemaItemKind): String = listed(literal(kind.name), objectKinds(kind))
 
-    override fun listConstraintsQuery(): String = listed(literal(SchemaItemKind.UNIQUENESS_CONSTRAINT.name))
+    override fun listConstraintsQuery(): String = listed(literal(SchemaItemKind.UNIQUENESS_CONSTRAINT.name), listOf(UNIQUE))
+
+    /** What Drivine names the objects of an index of [kind]: its own index's kind. */
+    private fun objectKinds(kind: SchemaItemKind): List<String> = when (kind) {
+        SchemaItemKind.RANGE_INDEX -> listOf(RANGE)
+        SchemaItemKind.VECTOR_INDEX -> listOf(VECTOR)
+        SchemaItemKind.FULLTEXT_INDEX -> listOf(FULLTEXT)
+        SchemaItemKind.UNIQUENESS_CONSTRAINT, SchemaItemKind.TEXT_INDEX -> emptyList()
+    }
 
     companion object {
         /** The store's name, for what is said of a graph name it cannot take. */
@@ -351,6 +384,12 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
 
         /** Postgres names are at most 63 characters: past that, it cuts them short without a word. */
         const val MAX_OBJECT_NAME = 63
+
+        /** What the names of a range index, a uniqueness constraint's index, a vector index and a full-text index say they are. */
+        const val RANGE = "ix"
+        const val UNIQUE = "uq"
+        const val VECTOR = "v"
+        const val FULLTEXT = "t"
 
         /** What the node table's comment says of a store this version made. */
         const val VERSION = "drivine:8"

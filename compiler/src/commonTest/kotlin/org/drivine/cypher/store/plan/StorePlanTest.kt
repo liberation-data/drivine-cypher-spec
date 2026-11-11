@@ -64,10 +64,10 @@ class StorePlanTest {
     private val cases: List<JsonNode> = plans["cases"]!!.toList()
 
     @Test
-    fun theCasesAreTheDesignsCasesOneToTwentyNineAndTheItemCalls() {
+    fun theCasesAreTheDesignsCasesOneToThirtyAndTheItemCalls() {
         val names = cases.map { it["case"]!!.textValue()!! }
         val numbers = names.filter { it.first().isDigit() }.map { it.takeWhile(Char::isDigit).toInt() }.distinct().sorted()
-        assertEquals((1..29).toList(), numbers)
+        assertEquals((1..30).toList(), numbers)
         assertEquals(listOf("item"), names.filterNot { it.first().isDigit() })
         assertEquals(names.distinct(), names, "each case once")
     }
@@ -152,13 +152,19 @@ class StorePlanTest {
 
     private fun storeCase(name: String): JsonNode = store["cases"]!!.firstOrNull { it["name"]!!.textValue() == name } ?: fail("store.yaml has no case $name")
 
-    /** The DDL [execute] names on [id]: a `store.yaml` case's create, drop or dropUnnamed, the marker's, or a statement given whole. */
+    /**
+     * The DDL [execute] names on [id]: a `store.yaml` case's create, drop or dropUnnamed, the marker's, or a statement given
+     * whole.
+     */
     private fun ddl(id: String, execute: JsonNode): List<PlanAction.Execute> {
         fun ddl(statements: List<DdlStatement>) = statements.map { PlanAction.Execute(it, purpose = Purpose.DDL) }
         execute["create"]?.let { return ddl(prefix(id) + storeCase(it.textValue()!!)["stores"]!![id]!!["create"]!!.map(::statement)) }
         execute["drop"]?.let { return ddl(storeCase(it.textValue()!!)["stores"]!![id]!!["drop"]!!.map(::statement)) }
         execute["dropUnnamed"]?.let { return ddl(storeCase(it.textValue()!!)["stores"]!![id]!!["dropUnnamed"]!!.map(::statement)) }
-        execute["statement"]?.let { return ddl(listOf(DdlStatement.Text(it.textValue()!!))) }
+        execute["statement"]?.let { statement ->
+            val purpose = execute["purpose"]?.textValue()?.let(Purpose::valueOf) ?: return ddl(listOf(DdlStatement.Text(statement.textValue()!!)))
+            return listOf(PlanAction.Execute(DdlStatement.Text(statement.textValue()!!), purpose = purpose))
+        }
         execute["native"]?.let { return ddl(listOf(DdlStatement.Native(texts(it)))) }
         return when (val name = execute["marker"]!!.textValue()) {
             "prepare" -> {

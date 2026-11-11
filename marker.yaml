@@ -90,7 +90,7 @@ marker:
         - "CREATE UNIQUE INDEX IF NOT EXISTS drivine_uq2_DrivineSchemascope_4cab9cbb ON drivine_node (((props -> 'scope'))) WHERE labels @> '[\"_DrivineSchema\"]'"
         - |-
           INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
-          VALUES ('UNIQUENESS_CONSTRAINT', '_DrivineSchema', '["scope"]', '_DrivineSchema_scope_unique', 'drivine_uq2_DrivineSchemascope_4cab9cbb', '{}')
+          VALUES ('UNIQUENESS_CONSTRAINT', '_DrivineSchema', '["scope"]', '_DrivineSchema_scope_unique', 'drivine_uq2_DrivineSchemascope_4cab9cbb', '{"form": 2}')
           ON CONFLICT (kind, label, properties) DO NOTHING
     oracle:
       prepare: "ensuring"
@@ -137,7 +137,7 @@ marker:
               USING (SELECT 'RANGE_INDEX' AS kind, '_DrivineSchema' AS label, '["scope"]' AS properties FROM dual) k
               ON (c.kind = k.kind AND c.label = k.label AND c.properties = k.properties)
               WHEN NOT MATCHED THEN INSERT (kind, label, properties, name, object_name, details)
-                  VALUES (k.kind, k.label, k.properties, '_DrivineSchema_scope_range', 'drivine_ix2_scope_6833e54', '{"unique": "drivine_uq2_DrivineSchemascope_4cab9cbb"}');
+                  VALUES (k.kind, k.label, k.properties, '_DrivineSchema_scope_range', 'drivine_ix2_scope_6833e54', '{"form": 2, "unique": "drivine_uq2_DrivineSchemascope_4cab9cbb"}');
           EXCEPTION WHEN DUP_VAL_ON_INDEX THEN
               -- Another process recorded it between the MERGE's read and its insert: it is recorded.
               NULL;
@@ -167,7 +167,7 @@ marker:
               IF v_labelled IS NOT NULL THEN
                   EXECUTE IMMEDIATE 'DROP INDEX IF EXISTS ' || v_labelled;
               END IF;
-              UPDATE drivine_schema SET details = JSON_MERGEPATCH(details, '{"unique": "drivine_uq2_DrivineSchemascope_4cab9cbb", "labelled": null}') WHERE kind = 'RANGE_INDEX' AND label = '_DrivineSchema' AND properties = '["scope"]';
+              UPDATE drivine_schema SET details = JSON_MERGEPATCH(details, '{"form": 2, "unique": "drivine_uq2_DrivineSchemascope_4cab9cbb", "labelled": null}') WHERE kind = 'RANGE_INDEX' AND label = '_DrivineSchema' AND properties = '["scope"]';
               COMMIT;
           END;
         - |-
@@ -176,7 +176,7 @@ marker:
               USING (SELECT 'UNIQUENESS_CONSTRAINT' AS kind, '_DrivineSchema' AS label, '["scope"]' AS properties FROM dual) k
               ON (c.kind = k.kind AND c.label = k.label AND c.properties = k.properties)
               WHEN NOT MATCHED THEN INSERT (kind, label, properties, name, object_name, details)
-                  VALUES (k.kind, k.label, k.properties, '_DrivineSchema_scope_unique', 'drivine_uq2_DrivineSchemascope_4cab9cbb', '{}');
+                  VALUES (k.kind, k.label, k.properties, '_DrivineSchema_scope_unique', 'drivine_uq2_DrivineSchemascope_4cab9cbb', '{"form": 2}');
           EXCEPTION WHEN DUP_VAL_ON_INDEX THEN
               -- Another process recorded it between the MERGE's read and its insert: it is recorded.
               NULL;
@@ -206,7 +206,7 @@ marker:
         - "CREATE UNIQUE INDEX IF NOT EXISTS drivine_uq2_DrivineSchemascope_4cab9cbb ON drivine_node (COALESCE(props ->> '$.\"scope\".\"$t\"', CASE json_type(props, '$.\"scope\"') WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'null' THEN NULL ELSE json_type(props, '$.\"scope\"') END), COALESCE(props ->> '$.\"scope\".s', props ->> '$.\"scope\".v', props ->> '$.\"scope\"')) WHERE instr(labels, '\"_DrivineSchema\"') > 0"
         - |-
           INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
-          VALUES ('UNIQUENESS_CONSTRAINT', '_DrivineSchema', '["scope"]', '_DrivineSchema_scope_unique', 'drivine_uq2_DrivineSchemascope_4cab9cbb', '{}')
+          VALUES ('UNIQUENESS_CONSTRAINT', '_DrivineSchema', '["scope"]', '_DrivineSchema_scope_unique', 'drivine_uq2_DrivineSchemascope_4cab9cbb', '{"form": 2}')
           ON CONFLICT (kind, label, properties) DO NOTHING
 keys:
   - {spec: {kind: "RANGE_INDEX", label: "Person", properties: ["name"]}, key: "RANGE_INDEX:Person:name:Person_name_range"}
@@ -405,7 +405,7 @@ storeStamp:
         - "CREATE UNIQUE INDEX IF NOT EXISTS drivine_uq2_DrivineStorekey_e211949b ON drivine_node (((props -> 'key'))) WHERE labels @> '[\"DrivineStore\"]'"
         - |-
           INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
-          VALUES ('UNIQUENESS_CONSTRAINT', 'DrivineStore', '["key"]', 'DrivineStore_key_unique', 'drivine_uq2_DrivineStorekey_e211949b', '{}')
+          VALUES ('UNIQUENESS_CONSTRAINT', 'DrivineStore', '["key"]', 'DrivineStore_key_unique', 'drivine_uq2_DrivineStorekey_e211949b', '{"form": 2}')
           ON CONFLICT (kind, label, properties) DO NOTHING
     oracle:
       engine: "ORACLE"
@@ -453,7 +453,7 @@ storeStamp:
               USING (SELECT 'RANGE_INDEX' AS kind, 'DrivineStore' AS label, '["key"]' AS properties FROM dual) k
               ON (c.kind = k.kind AND c.label = k.label AND c.properties = k.properties)
               WHEN NOT MATCHED THEN INSERT (kind, label, properties, name, object_name, details)
-                  VALUES (k.kind, k.label, k.properties, 'DrivineStore_key_range', 'drivine_ix2_key_19e5f', '{"unique": "drivine_uq2_DrivineStorekey_e211949b"}');
+                  VALUES (k.kind, k.label, k.properties, 'DrivineStore_key_range', 'drivine_ix2_key_19e5f', '{"form": 2, "unique": "drivine_uq2_DrivineStorekey_e211949b"}');
           EXCEPTION WHEN DUP_VAL_ON_INDEX THEN
               -- Another process recorded it between the MERGE's read and its insert: it is recorded.
               NULL;
@@ -483,7 +483,7 @@ storeStamp:
               IF v_labelled IS NOT NULL THEN
                   EXECUTE IMMEDIATE 'DROP INDEX IF EXISTS ' || v_labelled;
               END IF;
-              UPDATE drivine_schema SET details = JSON_MERGEPATCH(details, '{"unique": "drivine_uq2_DrivineStorekey_e211949b", "labelled": null}') WHERE kind = 'RANGE_INDEX' AND label = 'DrivineStore' AND properties = '["key"]';
+              UPDATE drivine_schema SET details = JSON_MERGEPATCH(details, '{"form": 2, "unique": "drivine_uq2_DrivineStorekey_e211949b", "labelled": null}') WHERE kind = 'RANGE_INDEX' AND label = 'DrivineStore' AND properties = '["key"]';
               COMMIT;
           END;
         - |-
@@ -492,7 +492,7 @@ storeStamp:
               USING (SELECT 'UNIQUENESS_CONSTRAINT' AS kind, 'DrivineStore' AS label, '["key"]' AS properties FROM dual) k
               ON (c.kind = k.kind AND c.label = k.label AND c.properties = k.properties)
               WHEN NOT MATCHED THEN INSERT (kind, label, properties, name, object_name, details)
-                  VALUES (k.kind, k.label, k.properties, 'DrivineStore_key_unique', 'drivine_uq2_DrivineStorekey_e211949b', '{}');
+                  VALUES (k.kind, k.label, k.properties, 'DrivineStore_key_unique', 'drivine_uq2_DrivineStorekey_e211949b', '{"form": 2}');
           EXCEPTION WHEN DUP_VAL_ON_INDEX THEN
               -- Another process recorded it between the MERGE's read and its insert: it is recorded.
               NULL;
@@ -525,7 +525,7 @@ storeStamp:
         - "CREATE UNIQUE INDEX IF NOT EXISTS drivine_uq2_DrivineStorekey_e211949b ON drivine_node (COALESCE(props ->> '$.\"key\".\"$t\"', CASE json_type(props, '$.\"key\"') WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'null' THEN NULL ELSE json_type(props, '$.\"key\"') END), COALESCE(props ->> '$.\"key\".s', props ->> '$.\"key\".v', props ->> '$.\"key\"')) WHERE instr(labels, '\"DrivineStore\"') > 0"
         - |-
           INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
-          VALUES ('UNIQUENESS_CONSTRAINT', 'DrivineStore', '["key"]', 'DrivineStore_key_unique', 'drivine_uq2_DrivineStorekey_e211949b', '{}')
+          VALUES ('UNIQUENESS_CONSTRAINT', 'DrivineStore', '["key"]', 'DrivineStore_key_unique', 'drivine_uq2_DrivineStorekey_e211949b', '{"form": 2}')
           ON CONFLICT (kind, label, properties) DO NOTHING
 storeLayout:
   # The verdict on a graph by its store layout (#161), StoreLayout.verdict: the stamps' layouts as readStamps gives them, whether

@@ -217,6 +217,26 @@ abstract class SqlStoreDdl(val name: String, final override val engine: String, 
             }.joinToString("", "\"", "\"")
         }
 
+    /**
+     * [details], a record's, with the form this version makes its item in ([CURRENT_FORM]) first among them: every record
+     * the module writes says the form it was made in, so a later version, or another library, tells an item made in
+     * another form from one made as it makes it (see `org.drivine.cypher.store.schema.ItemForm`).
+     */
+    protected fun formed(details: String): String {
+        val body = details.trim().removePrefix("{").removeSuffix("}").trim()
+        return if (body.isEmpty()) "{\"$FORM\": $CURRENT_FORM}" else "{\"$FORM\": $CURRENT_FORM, $body}"
+    }
+
+    /**
+     * The test that a name [column] holds is one Drivine gives an object of one of [kinds] (`ix`, `uq`, …), for this graph:
+     * `<graph>_<kind><layout>_…`, as [objectName] writes it, matched in any case on SQLite, and in the case the store folds
+     * an unquoted name to elsewhere ([upper]).
+     */
+    protected fun namedAs(column: String, kinds: List<String>, upper: Boolean): String = kinds.joinToString(" OR ") { kind ->
+        val prefix = "${name}_${kind}${ValueLayout.LAYOUT}_".let { if (upper) it.uppercase() else it.lowercase() }
+        "$column LIKE ${literal(prefix.replace("_", "\\_") + "%")} ESCAPE '\\'"
+    }
+
     /** The SQL literal of [text]: every SQL store reads a quote doubled, and a backslash as itself. */
     protected fun literal(text: String): String = "'${text.replace("'", "''")}'"
 
@@ -229,6 +249,12 @@ abstract class SqlStoreDdl(val name: String, final override val engine: String, 
      * takes them away): Neo4j's schema DDL names an item as it likes, and a SQL store makes it under the schema API's name.
      */
     abstract fun aliased(item: CatalogItem, aliases: List<String>): String
+
+    /**
+     * What drops the index [name], by its name: one that stands under a name Drivine gives and isn't the item the name is
+     * for, which a recreate drops before it makes the item, as it was never recorded as one.
+     */
+    fun droppedIndex(name: String): String = "DROP INDEX IF EXISTS $name"
 
     companion object {
         /** The key in a record's details its aliases are kept under. */
@@ -243,6 +269,17 @@ abstract class SqlStoreDdl(val name: String, final override val engine: String, 
 
         /** The one row of a graph's lock table: see [lock]. */
         const val LOCK_ROW = "schema"
+
+        /** The key in a record's details the form its item was made in is kept under. */
+        const val FORM = "form"
+
+        /**
+         * The form this version makes every item in, on Postgres, Oracle and SQLite, as its record says. A change to what
+         * an item's create makes is a new form, and its record says so: `store.yaml` pins each case's form, and a digest
+         * of its create statements, so a change of the DDL that keeps the form fails its tests. It is a counter of its own,
+         * apart from the store layout (`ValueLayout`): layout 2's DDL made it form 2.
+         */
+        const val CURRENT_FORM = 2
 
         /** The longest an object made beside another adds to its name: a trigger's `_t`, an index's `_i`. */
         private const val BESIDE = "_t"

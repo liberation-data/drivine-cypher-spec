@@ -9,6 +9,7 @@ import org.drivine.cypher.api.Store
 import org.drivine.cypher.json.CypherJson
 import org.drivine.cypher.json.JsonNode
 import org.drivine.cypher.json.ObjectNode
+import org.drivine.cypher.json.Sha256
 import org.drivine.cypher.number.oracleFile
 import org.drivine.cypher.number.target
 import org.drivine.schema.ConstraintSpec
@@ -107,6 +108,40 @@ class StoreDdlTest {
         }
         assertTrue(checked > 0, "store.yaml has no cases")
     }
+
+    /**
+     * Each SQL store's create is pinned to the form its record says ([SqlStoreDdl.CURRENT_FORM]), with a digest of its
+     * statements: SHA-256 of their UTF-8, each after the first behind U+0000. A change to what a create makes changes its
+     * digest, and is a new form: [SqlStoreDdl.CURRENT_FORM] goes up, and each case's `form` with it, so a store made in
+     * the form before is told apart from one made now (`store.schema`'s `ItemForm`).
+     */
+    @Test
+    fun eachSqlStoresCreateIsPinnedToItsFormByItsDigest() {
+        var checked = 0
+        for (case in store["cases"]!!) {
+            val name = case["name"]!!.textValue()!!
+            val made = spec(case["spec"]!!).made()
+            val existing = case["existing"]?.let { CatalogItem(made.kind, made.label, texts(it)) }
+            for (id in listOf("postgres", "oracle", "sqlite")) {
+                val expected = case["stores"]!![id]!!
+                if (!expected["create"]!!.isArray) {
+                    assertTrue(expected["form"] == null && expected["digest"] == null, "$name on $id: a refusal makes no form")
+                    continue
+                }
+                assertEquals(SqlStoreDdl.CURRENT_FORM.toLong(), expected["form"]?.longValue(), "$name on $id: the form it is pinned to")
+                val statements = stores.getValue(id).create(made, existing).drop(tables.getValue(id).size).map { (it as DdlStatement.Text).statement }
+                assertEquals(
+                    expected["digest"]?.textValue(), digest(statements),
+                    "$name on $id: its create is not the form ${SqlStoreDdl.CURRENT_FORM} it is pinned to. A change to what a create makes is a new form",
+                )
+                checked++
+            }
+        }
+        assertTrue(checked > 0, "store.yaml pins no form")
+    }
+
+    private fun digest(statements: List<String>): String =
+        Sha256.digest(statements.joinToString("\u0000").encodeToByteArray()).joinToString("") { (it.toInt() and 0xff).toString(16).padStart(2, '0') }
 
     /**
      * liberation-data/drivine4j#517: Oracle's DDL doesn't wait for a lock, so a manager making the store's key constraint
