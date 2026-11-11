@@ -91,14 +91,16 @@ object OracleSql {
 
     /** [indexClass] of the value at the JSON path [at], written bare, of [json]. */
     private fun classAt(json: String, at: String): String =
-        "CASE WHEN ${keyAt(json, at)} IS NOT NULL THEN COALESCE(JSON_VALUE($json, ${literal("$at.\"${ValueLayout.KIND}\"")} RETURNING VARCHAR2(16)), " +
-            "CASE ${type(json, at)} WHEN 'double' THEN 'number' ELSE ${type(json, at)} END) END"
+        "CASE WHEN ${keyAt(json, at)} IS NOT NULL THEN CASE ${type(json, at)} WHEN 'object' THEN JSON_VALUE($json, ${literal("$at.\"${ValueLayout.KIND}\"")} RETURNING VARCHAR2(16)) " +
+            "WHEN 'double' THEN 'number' ELSE ${type(json, at)} END END"
 
     /**
      * The key of the property [key] of the JSON [props], beside its [indexClass]: a temporal value's tag's sort key `s`, or its
      * text `v` where it has none, a duration's; a number's exact digits, `TO_CHAR(…, 'TM9')`, so that a `NUMBER` and a binary
      * double of the same whole value are one key, and integers past 2^53 stay apart; any other double as `d` and its 17
-     * significant digits, which tell any two doubles apart; any other value as `JSON_VALUE` reads it.
+     * significant digits, which tell any two doubles apart; any other value as `JSON_VALUE` reads it. A tag's key and text are
+     * read only where the value is an object: Oracle's path is lax, and reads `s` of a list's one item, so a list that holds
+     * one temporal value would be keyed as that value, and a unique index refuse the two side by side.
      *
      * A binary double is read whole to its digits by halves at 2^32: Oracle makes no `NUMBER` of a double exactly, `CAST` and
      * `TO_NUMBER` rounding to 17 digits, and `JSON_SERIALIZE` and `RETURNING NUMBER` write the double 2^53 as
@@ -114,10 +116,11 @@ object OracleSql {
     private fun keyAt(json: String, at: String): String {
         val d = "JSON_VALUE($json, ${literal(at)} RETURNING BINARY_DOUBLE)"
         val whole = "TO_CHAR(CAST(FLOOR($d / 4294967296) AS NUMBER) * 4294967296 + CAST($d - FLOOR($d / 4294967296) * 4294967296 AS NUMBER), 'TM9')"
-        return "COALESCE(JSON_VALUE($json, ${literal("$at.${ValueLayout.KEY}")}), JSON_VALUE($json, ${literal("$at.${ValueLayout.TEXT}")}), " +
-            "CASE ${type(json, at)} WHEN 'number' THEN TO_CHAR(JSON_VALUE($json, ${literal(at)} RETURNING NUMBER), 'TM9') " +
+        // A tag's key and text are read of an object alone: Oracle's path is lax, and `$.k.s` of a list of one tag is its item's.
+        return "CASE ${type(json, at)} WHEN 'object' THEN COALESCE(JSON_VALUE($json, ${literal("$at.${ValueLayout.KEY}")}), JSON_VALUE($json, ${literal("$at.${ValueLayout.TEXT}")})) " +
+            "WHEN 'number' THEN TO_CHAR(JSON_VALUE($json, ${literal(at)} RETURNING NUMBER), 'TM9') " +
             "WHEN 'double' THEN CASE WHEN $d = FLOOR($d) AND $d >= -9223372036854775808 AND $d < 9223372036854775808 THEN $whole ELSE 'd' || TO_CHAR($d) END " +
-            "ELSE JSON_VALUE($json, ${literal(at)}) END)"
+            "ELSE JSON_VALUE($json, ${literal(at)}) END"
     }
 
     /** The JSON kind of the value at [at] of [json], by the `type()` item method: `string`, `number`, `double`, `boolean` … */

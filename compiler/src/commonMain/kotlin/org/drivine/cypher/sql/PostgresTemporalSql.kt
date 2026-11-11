@@ -91,7 +91,7 @@ class PostgresTemporalSql(
 
     override fun div(a: String, b: String) = "div($a, $b)"
 
-        override fun matches(text: String, pattern: String) = "($text ~ $pattern)"
+    override fun matches(text: String, pattern: String) = "($text ~ $pattern)"
 
     override fun group(text: String, pattern: String, group: Int) = "(regexp_match($text, $pattern))[$group]"
 

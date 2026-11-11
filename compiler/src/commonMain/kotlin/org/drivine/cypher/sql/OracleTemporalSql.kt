@@ -112,7 +112,7 @@ class OracleTemporalSql(
 
     override fun div(a: String, b: String) = "TRUNC($a / $b)"
 
-        override fun matches(text: String, pattern: String) = "REGEXP_LIKE($text, $pattern)"
+    override fun matches(text: String, pattern: String) = "REGEXP_LIKE($text, $pattern)"
 
     override fun group(text: String, pattern: String, group: Int) = "REGEXP_SUBSTR($text, $pattern, 1, 1, NULL, $group)"
 

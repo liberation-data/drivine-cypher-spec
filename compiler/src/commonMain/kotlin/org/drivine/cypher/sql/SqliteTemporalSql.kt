@@ -29,7 +29,7 @@ class SqliteTemporalSql(shared: (List<String>, (List<String>) -> String) -> Stri
 
     override fun div(a: String, b: String) = "($a / $b)"
 
-        override fun matches(text: String, pattern: String) = "($text REGEXP $pattern)"
+    override fun matches(text: String, pattern: String) = "($text REGEXP $pattern)"
 
     /**
      * [pattern] ending at `\z`, the text's end, in place of the `$` it ends with, where no backslash escapes it: `REGEXP` and the functions Drivine registers read it with

@@ -72,6 +72,22 @@ class ValueLayoutTest {
         )
     }
 
+    @Test
+    fun aHostsOwnMapsAndListsReadBackAsTheTreeDoes() {
+        // tagMap is tag as a host's map, and readValue reads a host's maps of the row's JSON as read reads its tree.
+        val tag = ValueLayout.tag(Temporal.DATE_TIME, "2024-03-15T10:30:00.500+02:00")
+        assertEquals(tag.properties().map { (key, value) -> key to value.textValue() }, ValueLayout.tagMap(Temporal.DATE_TIME, "2024-03-15T10:30:00.500+02:00").toList())
+        assertEquals(setOf("\$t", "v"), ValueLayout.tagMap(Temporal.DURATION, "PT36H").keys, "a duration has no key")
+        val held = mapOf(
+            "\$\$t" to 1, "\$\$\$x" to 2, "a" to listOf(ValueLayout.tagMap(Temporal.DATE, "2024-01-01"), mapOf("\$\$t" to "date", "v" to "x")),
+            "d" to ValueLayout.tagMap(Temporal.DURATION, "PT36H"),
+        )
+        assertEquals(
+            mapOf("\$t" to 1, "\$\$x" to 2, "a" to listOf("2024-01-01", mapOf("\$t" to "date", "v" to "x")), "d" to "PT36H"),
+            ValueLayout.readValue(held),
+        )
+    }
+
     /** [node] with each whole number a long, each other number a double, for the YAML's and the JSON's to compare. */
     private fun plain(node: JsonNode): Any? = when {
         node is ObjectNode -> node.properties().associate { (k, v) -> k to plain(v) }

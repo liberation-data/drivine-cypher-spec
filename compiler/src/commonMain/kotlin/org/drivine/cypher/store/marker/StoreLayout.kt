@@ -100,10 +100,12 @@ object StoreLayout {
 
     /**
      * Of [objects], as the store [ddl] lists them, those an earlier layout made: each generated name whose kind carries no
-     * layout or an older one (`g_ix_…`, where this layout makes `g_ix2_…`), its index, table or trigger.
+     * layout or an older one (`g_ix_…`, where this layout makes `g_ix2_…`), its index, table or trigger. The whole name is
+     * matched, its readable part and its hash and what is made beside it ([SqlStoreDdl.objectName]): Oracle lists every object
+     * whose name begins with the graph's, and another graph's, `g_t`'s table `g_t_node` among them, is never dropped.
      */
     fun oldObjects(ddl: SqlStoreDdl, objects: List<Map<String, Any?>>): List<Pair<String, String>> {
-        val generated = Regex("^${Regex.escape(ddl.name)}_(ix|lx|uq|t|v)([0-9]*)_", RegexOption.IGNORE_CASE)
+        val generated = Regex("^${Regex.escape(ddl.name)}_(ix|lx|uq|t|v)([0-9]*)_[a-z0-9]*_[0-9a-f]{1,8}(_t|_i)?$", RegexOption.IGNORE_CASE)
         return objects.mapNotNull { row ->
             val name = row["name"] as? String ?: return@mapNotNull null
             val type = (row["type"] as? String)?.uppercase() ?: "INDEX"

@@ -512,12 +512,6 @@ class OracleCypherCompiler(
     }
 
     /**
-     * Two texts, as [textOrder] orders them; any other two of one kind as JSON. JSON ordered a text past 32 KB, read from the
-     * store on two rows or more, and closed the session on the first run or a later one (ORA-03113, #389). Its sides are
-     * bound, and a property read by its own path, by [sharedCompared]. NaN, which JSON orders after every number, and which
-     * Cypher orders with nothing, is false (#409).
-     */
-    /**
      * Oracle compares a `NUMBER` with a binary double as a double, so 2^53 + 1 was not greater than the float 2^53 (#161): beside a
      * whole number from 2^53 on, written or given, the other number is read as a `NUMBER` and the two compared so, the given one
      * as its exact digits. Null beside anything else, as [ordered] compares it.
@@ -537,6 +531,12 @@ class OracleCypherCompiler(
         }
     }
 
+    /**
+     * Two texts, as [textOrder] orders them; any other two of one kind as JSON. JSON ordered a text past 32 KB, read from the
+     * store on two rows or more, and closed the session on the first run or a later one (ORA-03113, #389). Its sides are
+     * bound, and a property read by its own path, by [sharedCompared]. NaN, which JSON orders after every number, and which
+     * Cypher orders with nothing, is false (#409).
+     */
     override fun ordered(x: String, operator: String, y: String): String {
         val numbers = shared(x, y) { (a, b) -> "(NOT (${isNaN(a)} OR ${isNaN(b)}) AND $a $operator $b)" }
         return if (asJson) numbers else "CASE WHEN ${kind(x)} = 'string' THEN ${textOrder(x, operator, y)} ELSE $numbers END"
@@ -619,8 +619,10 @@ class OracleCypherCompiler(
      */
     override fun indexedEquality(property: String, value: String, of: IndexedProperty?): String? = labelledEquals(of, value)
 
-    /** An empty text, and one past [SHORT_TEXT] bytes, which the index's `JSON_VALUE` reads as null: see [readShort]. */
-    /** A temporal value too, whose tag the index holds by its kind and key; and a float, bound as a binary double as one is stored. */
+    /**
+     * Not an empty text, nor one past [SHORT_TEXT] bytes, which the index's `JSON_VALUE` reads as null: see [readShort]. A
+     * temporal value is held, by its tag's kind and key.
+     */
     override fun indexHolds(given: Any) = Temporal.ofValue(given) != null || readShort(given)
 
     /**
@@ -635,32 +637,28 @@ class OracleCypherCompiler(
         return shared(value) { (x) -> "(${labelledEquals(of, x)} OR ${OracleSql.valueKey(x)} IS NULL)" }
     }
 
-    /**
-     * [text] equal to the property [of] names, as each index a label of its node may have over it holds it: a range index's
-     * labelled one, and a uniqueness constraint's over the one property, which stands for it and has it dropped. Both are
-     * written, for each label [indexedProperties] says has an index over the property: on a node with the label and the
-     * property they are the same value, and Oracle reads through whichever index is there. Null where it names no such label.
-     */
     /** A temporal value the statement works out: the labelled indexes' class and key columns beside its kind's word and its key. */
-    override fun indexedTagEquality(property: String, kind: Temporal, key: String, of: IndexedProperty?): String? {
+    override fun indexedTagEquality(property: String, kind: Temporal, key: String, of: IndexedProperty?): String? =
+        labelledHeld(of, listOf("'${kind.function}'", if (binds(key)) "(SELECT $key FROM dual)" else key))
+
+    /** The [value]'s class and key ([OracleSql.valueClass], [OracleSql.valueKey]) equal to the property's, as [labelledHeld] reads it. */
+    private fun labelledEquals(of: IndexedProperty?, value: String): String? =
+        if (labelledHeld(of, emptyList()) == null) null
+        else shared(value) { (x) -> labelledHeld(of, listOf(OracleSql.valueClass(x), OracleSql.valueKey(x)))!! }
+
+    /**
+     * The class and the key [held] equal to the property [of] names, as each index a label of its node may have over it holds
+     * them: a range index's labelled one, and a uniqueness constraint's over the one property, which stands for it and has it
+     * dropped. Both are written, for each label [indexedProperties] says has an index over the property: on a node with the
+     * label and the property they are the same value, and Oracle reads through whichever index is there. Null where it names
+     * no such label.
+     */
+    private fun labelledHeld(of: IndexedProperty?, held: List<String>): String? {
         if (of == null || of.labels.isEmpty() || !of.props.endsWith(".props")) return null
         val alias = of.props.removeSuffix(".props")
         val indexed = of.labels.filter { (it to of.key) in indexedProperties }.ifEmpty { return null }
-        val held = listOf("'${kind.function}'", if (binds(key)) "(SELECT $key FROM dual)" else key)
         return indexed.joinToString(" AND ") { label ->
             (OracleSql.labelledIndex(alias, label, of.key) + OracleSql.uniqueIndex(alias, label, listOf(of.key), of.key)).zip(held + held).joinToString(" AND ") { (column, it) -> "$column = $it" }
-        }
-    }
-
-    private fun labelledEquals(of: IndexedProperty?, value: String): String? {
-        if (of == null || of.labels.isEmpty() || !of.props.endsWith(".props")) return null
-        val alias = of.props.removeSuffix(".props")
-        val indexed = of.labels.filter { (it to of.key) in indexedProperties }.ifEmpty { return null }
-        return shared(value) { (x) ->
-            val held = listOf(OracleSql.valueClass(x), OracleSql.valueKey(x))
-            indexed.joinToString(" AND ") { label ->
-                (OracleSql.labelledIndex(alias, label, of.key) + OracleSql.uniqueIndex(alias, label, listOf(of.key), of.key)).zip(held + held).joinToString(" AND ") { (column, it) -> "$column = $it" }
-            }
         }
     }
 

@@ -899,6 +899,9 @@ abstract class SqlCypherCompiler(
     /** The key [key], a SQL text, as a map holds it, as the user wrote it: one `$` fewer where it begins with two (see ValueLayout.unescape). */
     protected fun unescapedKey(key: String) = "CASE WHEN SUBSTR($key, 1, 2) = '$$' THEN SUBSTR($key, 2) ELSE $key END"
 
+    /** What an order sorts the JSON value [json] by where the statement makes it a text: as [sortKey], where that reads no tag apart. */
+    protected open fun textSortKey(json: String) = sortKey(json)
+
     /** What an order sorts the JSON value [json] by where the statement makes it a list ([Value.Json.list]): as [sortKey] where the store orders lists as Cypher does. */
     protected open fun listSortKey(json: String) = sortKey(json)
 
@@ -5065,9 +5068,11 @@ abstract class SqlCypherCompiler(
                         listOf(binary.left, binary.right).map { given(it) }.let { (gl, gr) -> orderedPast(a, operator, b, gl, gr) }?.let { return Value.Bool(it) }
                         val flights = listOf(left, right).map { json(it) }
                         fun key(json: String, side: Int) = if (flights[side].inflight != null) keyOf(json) else tagKey(json)
+                        // Where a side is known to be no temporal value, a text or a number written or given, no pair of tags is compared.
+                        val tags = !untemporal(left, binary.left) && !untemporal(right, binary.right)
                         Value.Bool(sharedCompared(comparable(inFlight(flights[0])), comparable(inFlight(flights[1]))) { (x, y) ->
                             "CASE WHEN ${typeOf(x)} = ${typeOf(y)} AND ${typeOf(x)} IN ('number', 'string', 'boolean') THEN ${ordered(x, operator, y)} " +
-                                "WHEN ${tagKind(x)} = ${tagKind(y)} AND ${tagKind(x)} <> '${Temporal.DURATION.function}' THEN ${key(x, 0)} $operator ${key(y, 1)} END"
+                                (if (tags) "WHEN ${tagKind(x)} = ${tagKind(y)} AND ${tagKind(x)} <> '${Temporal.DURATION.function}' THEN ${key(x, 0)} $operator ${key(y, 1)} " else "") + "END"
                         })
                     }
                 }
@@ -6070,8 +6075,10 @@ abstract class SqlCypherCompiler(
                     val argument = comparable(json(one()).let { if (name in READS_IN_FLIGHT) inFlight(it) else it })
                     // An item taken from a list is of the kind its items are.
                     val taken = name == "head" || name == "last"
+                    // A value known to be no temporal value, written or given, has no tag to read.
+                    val readsTag = name == "tostring" && !untemporal(one(), function.arguments.singleOrNull())
                     val result = shared(argument) { (x) ->
-                        if (name == "tostring") "CASE WHEN ${tagKind(x)} IS NOT NULL THEN ${scalar(tagText(x))} ELSE ${function(name, x)!!} END" else function(name, x)!!
+                        if (readsTag) "CASE WHEN ${tagKind(x)} IS NOT NULL THEN ${scalar(tagText(x))} ELSE ${function(name, x)!!} END" else function(name, x)!!
                     }
                     Value.Json(
                         result,
@@ -6340,7 +6347,9 @@ abstract class SqlCypherCompiler(
                 comparable(value) to { listOf(momentsKey(it, value.itemItems, depth = 2)) }
             // A list the statement makes sorts as Cypher sorts lists, item by item; any other value as the store sorts its JSON.
             isList(value) -> comparable(json(value)) to { listOf(listSortKey(it)) }
-            value !is Value.Json || value.temporal != null || isText(value) -> comparable(json(value)) to { listOf(sortKey(it)) }
+            // A text has no tag whose key it is sorted by.
+            isText(value) -> comparable(json(value)) to { listOf(textSortKey(it)) }
+            value !is Value.Json || value.temporal != null -> comparable(json(value)) to { listOf(sortKey(it)) }
             mayBeJsonNull(value) -> comparable(json(value)) to { jsonNullSortKey(it) }
             else -> comparable(json(value)) to { openSortKey(it) }
         }

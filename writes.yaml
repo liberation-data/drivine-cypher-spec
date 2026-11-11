@@ -1705,7 +1705,7 @@ cases:
         rows: []
 
   - name: "Unique over a date and the text that spells it"
-    description: "A uniqueness constraint keeps a date and the text that spells it apart, as Neo4j's does (#161); the same date twice is refused."
+    description: "A uniqueness constraint keeps a date and the text that spells it apart, as Neo4j's does (#161), and a date and a list that holds it; the same date twice is refused."
     steps:
       - only: [neo4j, sql]
         cypher: "CREATE CONSTRAINT cy_unique_d IF NOT EXISTS FOR (n:CyUnique) REQUIRE n.d IS UNIQUE"
@@ -1714,12 +1714,15 @@ cases:
         cypher: "CREATE (:CyUnique {d: date('2024-01-01')})"
       - only: [neo4j, sql]
         cypher: "CREATE (:CyUnique {d: '2024-01-01'})"
+      - note: "Nor a list that holds the date, whose item's key Oracle's lax path would read as the list's."
+        only: [neo4j, sql]
+        cypher: "CREATE (:CyUnique {d: [date('2024-01-01')]})"
       - only: [neo4j, sql]
         cypher: "CREATE (:CyUnique {d: date({year: 2024, month: 1, day: 1})})"
         error: true
       - only: [neo4j, sql]
         cypher: "MATCH (n:CyUnique) RETURN count(n)"
-        rows: [2]
+        rows: [3]
       - only: [neo4j, sql]
         cypher: "DROP CONSTRAINT cy_unique_d"
         rows: []

@@ -258,6 +258,9 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
     /** A list as [SqliteFunctions.SORT_KEY] writes it, which orders as Cypher orders lists; any other value as the SQL value `->>` reads. */
     override fun sortKey(json: String) = shared(json) { (x) -> "CASE WHEN json_type($x) = 'array' THEN ${SqliteFunctions.SORT_KEY}($x) ELSE ${sortValue(x)} END" }
 
+    /** A text by the SQL value `->>` reads, as [sortKey] reads any value but a temporal value's tag. */
+    override fun textSortKey(json: String) = shared(json) { (x) -> "CASE WHEN json_type($x) = 'array' THEN ${SqliteFunctions.SORT_KEY}($x) ELSE ($x ->> '$') END" }
+
     /**
      * The SQL value the JSON [x] sorts by among values of its kind: a temporal value's tag by its sort key, a duration, which has
      * none, by its text; any other as `->>` reads it.
