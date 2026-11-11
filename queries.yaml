@@ -3158,14 +3158,14 @@ cases:
         cypher: "UNWIND [[$t, 2], ['a' + $t, 1], [1, 0]] AS xs RETURN xs[1] ORDER BY xs"
         parameters: {t: {$repeat: "x", times: 40000}}
         rows: [1, 2, 0]
-      - note: "A list collected, and a list read from a map, whose kind the statement leaves open, sort so too."
+      - note: "A list collected sorts so too."
         cypher: "UNWIND [1, 2] AS g UNWIND (CASE g WHEN 1 THEN [5] ELSE ['a'] END) AS v WITH g, collect(v) AS c RETURN g ORDER BY c"
         rows: [2, 1]
       - note: "So does a list a CALL sorts and limits."
         cypher: "CALL { UNWIND [[1, null], [1, 2], ['a']] AS xs RETURN xs ORDER BY xs LIMIT 2 } RETURN xs ORDER BY xs DESC"
         rows: [[1, 2], ["a"]]
-      - note: "Postgres sorts a value whose kind is left open as jsonb sorts it (drivine4j#307)."
-        except: [postgres]
+      - note: "A list read from a map, whose kind the statement leaves open. Postgres sorts such a value as jsonb sorts it (drivine4j#307), and Oracle as its JSON sorts it."
+        except: [postgres, oracle]
         cypher: "UNWIND [{l: [1, 'a']}, {l: ['a']}, {l: [1, null]}] AS m RETURN m.l ORDER BY m.l"
         rows: [["a"], [1, "a"], [1, null]]
       - note: "A list of lists compares each inner list item by item too."

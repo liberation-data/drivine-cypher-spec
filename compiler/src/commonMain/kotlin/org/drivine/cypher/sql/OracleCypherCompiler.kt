@@ -175,18 +175,15 @@ class OracleCypherCompiler(
     override fun nullIfJsonNull(json: String) = shared(json) { (x) -> "CASE WHEN ${kind(x)} <> 'null' THEN $x END" }
 
     /**
-     * Where the kind comes, as [kindOrder] ranks them and null for null, then a list by [listSortKeys]' key, then the value as
-     * `JSON` orders it, which is Cypher's order within a kind but a list's: `JSON` orders a number before a text, a truth value
-     * after both, and a map and a list last. A null is ranked null, so the value needs no [nullIfJsonNull], which would read
-     * it again: as fast as [sortKey] over 100,000 rows. In a statement that writes, a list is sorted as `JSON` sorts it, as
-     * [listSortKeys] has it there.
+     * Where the kind comes, as [kindOrder] ranks them and null for null, then the value as `JSON` orders it, which is Cypher's
+     * order within a kind: `JSON` orders a number before a text, a truth value after both, and a map and a list last. A null
+     * is ranked null, so the value needs no [nullIfJsonNull], which would read it again: as fast as [sortKey] over 100,000 rows.
+     * A list of a kind left open, as a property may hold, is sorted as `JSON` sorts it, not by [listSortKeys]' key: that key
+     * would declare its function and read each row's kind again in every sort of a value left open.
      */
     override fun openSortKey(json: String) = shared(json) { (x) ->
         "DECODE(${kind(x)}, 'object', 1, 'array', 2, 'string', 3, 'boolean', 4, 'number', 5, 'double', 5, 'float', 5)"
-    }.let { rank ->
-        // A list among them sorts as Cypher sorts lists, by its key, where the statement may declare the key's function.
-        if (procedural) listOf(rank, json) else listOf(rank, shared(json) { (x) -> "CASE WHEN ${kind(x)} = 'array' THEN ${listKey(x)} END" }, json)
-    }
+    }.let { rank -> listOf(rank, json) }
 
     /**
      * A list sorts as Cypher sorts lists, item by item, where `JSON` sorts a null item first and a number before a text
@@ -205,7 +202,7 @@ class OracleCypherCompiler(
     }
 
     /** JSON's null is ranked null, as SQL's is, but `JSON` orders it apart from SQL's: so the value is read as [groupedNull] has it (#500). */
-    override fun jsonNullSortKey(json: String) = openSortKey(json).let { keys -> keys.dropLast(1) + groupedNull(json) }
+    override fun jsonNullSortKey(json: String) = openSortKey(json).let { (rank) -> listOf(rank, groupedNull(json)) }
 
     /** Oracle groups by no subquery, so the value is not bound in one, as [nullIfJsonNull] binds a long one: it is read twice. */
     override fun comparedNull(json: String) = "CASE WHEN ${kind(json)} <> 'null' THEN $json END"
@@ -2232,7 +2229,7 @@ class OracleCypherCompiler(
          * 2,000 characters, more than the key holds, so one too long for a `VARCHAR2` is read. A map is where maps come, and
          * no store orders two maps here yet. JSON's null, and SQL's, is no key, so it sorts where null does. Past 2,000 bytes,
          * as long a `RAW` as SQL takes, a key is cut short, so lists that differ only after that are sorted by the term after
-         * it: their text ([listSortKeys]), or, of a kind left open, as `JSON` sorts them ([openSortKey]). It is the query's own,
+         * it: by their text ([listSortKeys]). It is the query's own,
          * declared with `WITH FUNCTION`, not the store's.
          */
         private val LIST_KEY = listOf(

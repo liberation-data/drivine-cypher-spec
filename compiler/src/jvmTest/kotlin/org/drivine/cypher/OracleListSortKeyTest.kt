@@ -28,25 +28,14 @@ class OracleListSortKeyTest {
     }
 
     @Test
-    fun `a value of a kind left open is sorted by the key between its kind and itself, where it is a list`() {
+    fun `a value of a kind left open, as a property, sorts as before, by its kind and then as JSON, with no function declared`() {
+        // A list such a value holds still sorts as JSON sorts it on Oracle: the key isn't read for every sort of a value left open.
         val sql = oracle("MATCH (n:A) RETURN n.l AS l ORDER BY l")
-        assertEquals(1, declarations(sql), sql)
-        assertTrue(
-            Regex("""ORDER BY DECODE\(JSON_VALUE\((\S+), '\$\.type\(\)'\), [^)]*\), CASE WHEN JSON_VALUE\(\1, '\$\.type\(\)'\) = 'array' THEN cy_list_key\(\1\) END, \1$""")
-                .containsMatchIn(sql),
-            sql,
-        )
-    }
-
-    @Test
-    fun `a parameter's entry that may be JSON's null is sorted by the key between its kind and itself as grouped`() {
-        val sql = OracleCypherCompiler("g").compile("UNWIND \$ms AS m RETURN m.l AS l ORDER BY l", mapOf("ms" to listOf(mapOf("l" to listOf(1)), mapOf("l" to null)))).sql
-        assertEquals(1, declarations(sql), sql)
-        assertTrue(
-            Regex("""ORDER BY DECODE\(JSON_VALUE\((\S+), '\$\.type\(\)'\), [^)]*\), CASE WHEN JSON_VALUE\(\1, '\$\.type\(\)'\) = 'array' THEN cy_list_key\(\1\) END, NVL\(\1, JSON\('null'\)\)$""")
-                .containsMatchIn(sql),
-            sql,
-        )
+        assertEquals(0, declarations(sql), sql)
+        assertTrue(Regex("""ORDER BY DECODE\(JSON_VALUE\((\S+), '\$\.type\(\)'\), [^)]*\), \1$""").containsMatchIn(sql), sql)
+        val nullable = OracleCypherCompiler("g").compile("UNWIND \$ms AS m RETURN m.l AS l ORDER BY l", mapOf("ms" to listOf(mapOf("l" to listOf(1)), mapOf("l" to null)))).sql
+        assertEquals(0, declarations(nullable), nullable)
+        assertTrue(Regex("""ORDER BY DECODE\(JSON_VALUE\((\S+), '\$\.type\(\)'\), [^)]*\), NVL\(\1, JSON\('null'\)\)$""").containsMatchIn(nullable), nullable)
     }
 
     @Test
