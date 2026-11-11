@@ -550,6 +550,9 @@ The JVM is the oracle. `./gradlew jvmOracle` writes, into `build/oracle`:
   inventories it must write and read back, the version tokens, and the node stamps `Stamps` must read and write.
 - `plans.json`: the spec's `plans.yaml` as JSON, which `StorePlanTest` reads on every target: each case's rounds that
   `org.drivine.cypher.store.plan`'s planner must give on each store, the answers it is given back, and its report.
+- `host.json`: the spec's `host.yaml` as JSON, which `HostSpecTest` reads on every target: the `function` steps the
+  module's host functions (`org.drivine.cypher.host.HostFunctions`) must give. `./gradlew hostSpecJson` writes it alone,
+  into `build/host`, for `nativeExtensionCheck`.
 - `search-golden.json`: drivine4j's full-text search statements (see [Full-text search](#full-text-search)), which
   `FullTextSearchGoldenTest` reads on every target. Its requests are in `corpus.jsonl` too.
 - `standins-<name>.txt`: what Java gives where the module stands in for it, worked out by Java's own API on the pinned

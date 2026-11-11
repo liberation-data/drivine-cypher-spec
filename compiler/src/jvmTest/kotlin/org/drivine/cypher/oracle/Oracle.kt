@@ -26,6 +26,7 @@ import java.time.format.DateTimeFormatter
  *   other targets have no YAML reader. See `StoreDdlTest`.
  * - `marker.json`: the spec's `marker.yaml`, the schema marker and the stamps, as JSON likewise. See `StoreMarkerTest`.
  * - `plans.json`: the spec's `plans.yaml`, the schema plan's cases, as JSON likewise. See `StorePlanTest`.
+ * - `host.json`: the spec's `host.yaml`, the host functions' cases, as JSON likewise. See [HostSpecJson] and `HostSpecTest`.
  * - `search-golden.json`: drivine4j's full-text search statements, the module's golden (`src/commonTest/resources`), for
  *   each target's `FullTextSearchGoldenTest`. Its requests are in `corpus.jsonl` too, as [CompileJson] answers them.
  *
