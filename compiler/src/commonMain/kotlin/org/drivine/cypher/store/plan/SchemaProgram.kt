@@ -570,6 +570,12 @@ internal class SchemaProgram(
             return EnsureResult.Created(created)
         }
         if (store.isIncomplete(existing)) {
+            // Made whole only in this version's form: one of another form would be completed in this version's, which is
+            // never reported made. It is kept as it is, and said so, as any of another form is.
+            if (form is ItemForm.Stale || form is ItemForm.Newer) {
+                keepForm(spec, form)
+                return EnsureResult.AlreadyMatching(existing)
+            }
             ddl(store.ddl.createIndex(spec, existing.catalogItem))
             val completed = awaitBuilt(spec, findIndex(spec), build) ?: SchemaItemInfo.fromSpec(spec)
             log(LogLevel.INFO, INDEX_MANAGER, "Completed $engine ${spec.kind} on ${spec.label}${spec.properties}: it lacked part of what is made for it")

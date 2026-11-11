@@ -87,7 +87,7 @@ abstract class SqlStoreSchema internal constructor() : StoreSchema {
             if (!there.isIndex && indexesNamedApart) continue
             mismatchOf(made, there, structureOnly = newer)?.let { return ItemForm.Mismatch(there.name, it, droppable = there.isIndex) }
         }
-        if (!newer) otherMismatch(spec, objects)?.let { return it }
+        otherMismatch(spec, objects, structureOnly = newer)?.let { return it }
         if (record == null) return ItemForm.Current
         return when (form) {
             SqlStoreDdl.CURRENT_FORM.toLong() -> ItemForm.Current
@@ -117,7 +117,7 @@ abstract class SqlStoreSchema internal constructor() : StoreSchema {
      * What else the store has under a name Drivine gives one of [spec]'s objects that isn't the item, where an item is made
      * as more than indexes (Oracle's tables beside the nodes); null where nothing is.
      */
-    protected open fun otherMismatch(spec: SchemaItemSpec, objects: StoreObjects): ItemForm.Mismatch? = null
+    protected open fun otherMismatch(spec: SchemaItemSpec, objects: StoreObjects, structureOnly: Boolean): ItemForm.Mismatch? = null
 
     /** The objects the store makes [spec]'s item as, under the names Drivine gives them, and what each holds. */
     protected abstract fun madeAs(spec: SchemaItemSpec): List<MadeObject>
@@ -441,10 +441,13 @@ class OracleSchema(override val ddl: OracleDdl) : SqlStoreSchema() {
      * or by a path (`JSON_EXISTS(:NEW.labels, '$?(@ == "Chunk")')`, TypeScript's and Python's), and each property by the
      * path it reads (`'$.p'` or `'$."p"'`). Only an index can be dropped by its name.
      */
-    override fun otherMismatch(spec: SchemaItemSpec, objects: StoreObjects): ItemForm.Mismatch? {
+    override fun otherMismatch(spec: SchemaItemSpec, objects: StoreObjects, structureOnly: Boolean): ItemForm.Mismatch? {
         val side = side(spec) ?: return null
         val keys = spec.properties
         val (column, type) = if (spec.kind == SchemaItemKind.VECTOR_INDEX) "EMBEDDING" to "VECTOR" else "DOC" to "JSON"
+        // A newer form's: only the index over the table, whose type and table Oracle says without anything being read of
+        // its text; the table's columns and the trigger's text are what a newer form may write otherwise.
+        if (structureOnly) return sideIndexMismatch(spec, side, objects)
         objects.of(side, "TABLE")?.let { table ->
             if ("$column $type" !in table.tableColumns) return ItemForm.Mismatch(table.name, "a table without the $type column $column", droppable = false)
         }
@@ -464,11 +467,15 @@ class OracleSchema(override val ddl: OracleDdl) : SqlStoreSchema() {
             }
             if (reason != null) return ItemForm.Mismatch(trigger.name, reason, droppable = false)
         }
-        objects.of(side + INDEX, StoreObject.INDEX)?.let { index ->
-            val made = if (spec.kind == SchemaItemKind.VECTOR_INDEX) "VECTOR" else "DOMAIN"
-            if (index.indexType != null && !index.indexType.equals(made, ignoreCase = true)) return ItemForm.Mismatch(index.name, "an index of the type ${index.indexType}", droppable = true)
-            if (index.table != null && !index.table.equals(side, ignoreCase = true)) return ItemForm.Mismatch(index.name, "an index on ${index.table}", droppable = true)
-        }
+        return sideIndexMismatch(spec, side, objects)
+    }
+
+    /** What stands under the name of the index over the table beside the nodes [side], where it isn't that index: one of another type, or on another table. */
+    private fun sideIndexMismatch(spec: SchemaItemSpec, side: String, objects: StoreObjects): ItemForm.Mismatch? {
+        val index = objects.of(side + INDEX, StoreObject.INDEX) ?: return null
+        val made = if (spec.kind == SchemaItemKind.VECTOR_INDEX) "VECTOR" else "DOMAIN"
+        if (index.indexType != null && !index.indexType.equals(made, ignoreCase = true)) return ItemForm.Mismatch(index.name, "an index of the type ${index.indexType}", droppable = true)
+        if (index.table != null && !index.table.equals(side, ignoreCase = true)) return ItemForm.Mismatch(index.name, "an index on ${index.table}", droppable = true)
         return null
     }
 
