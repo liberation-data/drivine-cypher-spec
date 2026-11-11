@@ -227,7 +227,7 @@ Any other value is a bad value, and a bad invocation.
 
 **The SQL** is what an application's query compiles to; the CLI's own output adds typed reads (#162). The SQL is the compiler's, and cases don't compare it.
 
-**The plan** is one line, `-- plan:`, then each line of the plan as the store gives it, each after `-- `, so that a SQL store's whole explanation is still SQL a client can run:
+**The plan** is one line, `-- plan:`, then each line of the plan as the store gives it, each after `-- ` and with no space at its end, so a blank line of the plan is `--`, so that a SQL store's whole explanation is still SQL a client can run:
 
 | Store | The plan |
 |---|---|
