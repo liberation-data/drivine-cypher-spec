@@ -136,7 +136,7 @@ A file, stdin and the positional argument are read alike.
 - a `//` comment, to the end of its line;
 - a `/* … */` comment.
 
-A line may end in `\r\n` as well as `\n`: the `\r` is not part of a command. A statement that is only spaces and comments isn't run. The text after the last `;` is run too, as long as it is more than spaces and comments.
+A line may end in `\r\n` as well as `\n`: the `\r` is not part of a command. One UTF-8 byte-order mark (U+FEFF) at the very start of a `-f` file, stdin or a `:source` file is not part of the text, as an editor on Windows may write one: so a command on the first line is still a command. A U+FEFF anywhere else is a character of the text, as any other is. A statement that is only spaces and comments isn't run. The text after the last `;` is run too, as long as it is more than spaces and comments.
 
 **Commands.** A line whose first character after any spaces is `:` is a command, where a statement would start: not inside a string, a comment, or a statement that no `;` has ended yet. It runs on its own, and needs no `;`:
 
