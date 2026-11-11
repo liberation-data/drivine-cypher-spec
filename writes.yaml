@@ -1727,7 +1727,7 @@ cases:
         rows: []
 
   - name: "Unique over numbers"
-    description: "A uniqueness constraint keys a number by its value, exactly, as Neo4j's does (#161): 1 and 1.0 collide, 0 and 0.0, 2^53 and 2^53.0, 2^62 and its float, -2^63 and its float, and a float written and one given; 2^53 + 1 and 2^53.0 do not, nor 2^63 - 1 and the float 2^63, 1.5 and -1.5, or '1' and 1."
+    description: "A uniqueness constraint keys a number by its value, as Neo4j's does (#161): 1 and 1.0 collide, 0 and 0.0, 2^53 and 2^53.0, and a float written and one given; 2^53 + 1 and 2^53.0 do not, nor 2^63 - 1 and the float 2^63, 1.5 and -1.5, or '1' and 1. Neo4j, probed (2026.10 and 5.26), keeps 2^62 and -2^63 apart from their floats, though = says they are equal and its index finds each by the other; 2^53, 2^53 + 2, 2^54 and -2^53 collide with theirs."
     steps:
       - only: [neo4j, sql]
         cypher: "CREATE CONSTRAINT cy_unique_n IF NOT EXISTS FOR (n:CyUnique) REQUIRE n.n IS UNIQUE"
@@ -1741,15 +1741,22 @@ cases:
       - {only: [neo4j, sql], cypher: "CREATE (:CyUnique {n: 9007199254740992.0})", error: true}
       - {only: [neo4j, sql], cypher: "CREATE (:CyUnique {n: 9007199254740993})"}
       - {only: [neo4j, sql], cypher: "CREATE (:CyUnique {n: 4611686018427387904})"}
-      - {only: [neo4j, sql], cypher: "CREATE (:CyUnique {n: 4611686018427387904.0})", error: true}
+      - note: "Postgres holds a float as its shortest text, 4.611686018427388E18, which is another number than 2^62; Oracle and SQLite key it exactly, and it collides there, where Neo4j's doesn't."
+        only: [neo4j, postgres]
+        cypher: "CREATE (:CyUnique {n: 4611686018427387904.0})"
+      - {only: [oracle, sqlite], cypher: "CREATE (:CyUnique {n: 4611686018427387904.0})", error: true}
       - {only: [neo4j, sql], cypher: "CREATE (:CyUnique {n: $n})", parameters: {n: -9223372036854775808}}
-      - {only: [neo4j, sql], cypher: "CREATE (:CyUnique {n: $n})", parameters: {n: -9223372036854775808.0}, error: true}
+      - {only: [neo4j, postgres], cypher: "CREATE (:CyUnique {n: $n})", parameters: {n: -9223372036854775808.0}}
+      - {only: [oracle, sqlite], cypher: "CREATE (:CyUnique {n: $n})", parameters: {n: -9223372036854775808.0}, error: true}
       - {only: [neo4j, sql], cypher: "CREATE (:CyUnique {n: 9223372036854775807})"}
       - {only: [neo4j, sql], cypher: "CREATE (:CyUnique {n: 9223372036854775808.0})"}
       - {only: [neo4j, sql], cypher: "CREATE (:CyUnique {n: 1.5})"}
       - {only: [neo4j, sql], cypher: "CREATE (:CyUnique {n: -1.5})"}
       - {only: [neo4j, sql], cypher: "CREATE (:CyUnique {n: $n})", parameters: {n: 1.5}, error: true}
-      - only: [neo4j, sql]
+      - only: [neo4j, postgres]
+        cypher: "MATCH (n:CyUnique) RETURN count(n)"
+        rows: [13]
+      - only: [oracle, sqlite]
         cypher: "MATCH (n:CyUnique) RETURN count(n)"
         rows: [11]
       - note: "Neo4j's constraint keeps -0.0 apart from 0, though 0 = -0.0 is true, and its index finds neither by the other. A SQL store keeps no negative zero (drivine4j#552, see queries.yaml): -0.0 is written as 0, and collides."

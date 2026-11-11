@@ -1049,12 +1049,9 @@ cases:
         cypher: "RETURN [date('2024-01-01') < '2024-01-02', '2024-01-02' > date('2024-01-01'), localdatetime('2024-01-01T10:00') <= '2024-01-01T10:00:00']"
         rows: [[null, null, null]]
       - cypher: "CREATE (:CyTemporal {id: 'a', day: date('2024-01-01')})"
-      - note: "A temporal value read from the store is its ISO text on a SQL store, which can't tell it from a text that spells it."
+      - note: "Read from the store too: a SQL store holds it as its tag, which a text that spells it is not (#161)."
         cypher: "MATCH (n:CyTemporal) RETURN n.day = '2024-01-01'"
-        only: [sql]
-        rows: [true]
-      - cypher: "MATCH (n:CyTemporal) RETURN n.day = '2024-01-01'"
-        only: [neo4j]
+        only: [neo4j, sql]
         rows: [false]
 
   - name: "A text parameter in a list or a map beside a temporal value"
@@ -1337,7 +1334,7 @@ cases:
                   [time({hour: 1, timezone: '+02:00'})] = [time('01:00:00+02:00')],
                   [time({hour: 0, timezone: '+18:00'})] = [time('00:00:00+18:00')],
                   [time({hour: 23, minute: 59, second: 59, timezone: '-18:00'})] = [time('23:59:59-18:00')],
-                  [localdatetime({year: 2024, month: 3, day: 15, hour: 10, minute: 30, millisecond: 500})] = [localdatetime('2024-03-15T10:30:00.500')],
+                  [localdatetime({year: 2024, month: 3, day: 15, hour: 10, minute: 30, second: 0, millisecond: 500})] = [localdatetime('2024-03-15T10:30:00.500')],
                   [date({year: -44, month: 3, day: 15})] = [date('-0044-03-15')],
                   [date('2024-02-28') + duration('P1D')] = [date('2024-02-29')]]
         only: [neo4j, sql]
