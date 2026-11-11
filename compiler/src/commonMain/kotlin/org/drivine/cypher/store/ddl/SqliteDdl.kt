@@ -158,6 +158,31 @@ class SqliteDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
     override fun dropConstraint(item: CatalogItem): List<DdlStatement> = forgotten(item)
 
     /**
+     * The unique index built under [temporaryName] while the old one stands. SQLite renames no index, so the old one is
+     * then dropped, the index made again under its name, which the data, held unique by the one just built, can't refuse,
+     * and the one built first dropped.
+     */
+    override fun recreation(spec: ConstraintSpec): UniqueRecreation = when (spec) {
+        is UniquenessConstraintSpec -> {
+            val name = objectName(UNIQUE, listOf(spec.label) + spec.properties)
+            val temporary = temporaryName(name)
+            val over = over(spec.label, spec.properties)
+            UniqueRecreation(
+                name = name,
+                temporary = temporary,
+                leftover = listOf(DdlStatement.Text(droppedIndex(temporary))),
+                build = listOf(DdlStatement.Text("CREATE UNIQUE INDEX $temporary ON $over")),
+                swap = listOf(droppedIndex(name), "CREATE UNIQUE INDEX $name ON $over", droppedIndex(temporary)).map { DdlStatement.Text(it) },
+                finish = listOf("CREATE UNIQUE INDEX $name ON $over", droppedIndex(temporary)).map { DdlStatement.Text(it) },
+                remade = remade(CatalogItem(spec.kind, spec.label, spec.properties, spec.effectiveName), name),
+            )
+        }
+    }
+
+    override fun remade(item: CatalogItem, objectName: String): String =
+        statement("UPDATE $catalog SET name = ${item.name?.let(::literal) ?: "name"}, object_name = ${literal(objectName)}, details = json_set(details, '$.$FORM', $CURRENT_FORM) WHERE ${recordOf(item)}")
+
+    /**
      * What is recorded of [kinds], and still there: an index dropped by hand is not listed, so that it is made again when
      * asked for. After the records, where [objects] names any, a row for each object of `sqlite_master` under a name
      * Drivine gives an object of [objects], recorded or not: its `type`, its `table`, the statement that made it (`sql`),

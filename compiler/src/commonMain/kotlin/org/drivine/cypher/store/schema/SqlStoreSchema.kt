@@ -3,6 +3,7 @@ package org.drivine.cypher.store.schema
 import org.drivine.DrivineInternalApi
 import org.drivine.cypher.store.OracleSql
 import org.drivine.cypher.store.PostgresSql
+import org.drivine.cypher.store.SqliteFunctions
 import org.drivine.cypher.store.SqliteSql
 import org.drivine.cypher.store.Stamps
 import org.drivine.cypher.store.ddl.CatalogItem
@@ -17,6 +18,7 @@ import org.drivine.schema.SchemaItemKind
 import org.drivine.schema.SchemaItemSpec
 import org.drivine.schema.SimilarityFunction
 import org.drivine.schema.VectorIndexSpec
+import org.drivine.schema.made
 
 /**
  * The schema of a SQL store: what Drivine made is read back from the graph's catalog, a record a row, as a map of its
@@ -73,20 +75,13 @@ abstract class SqlStoreSchema internal constructor() : StoreSchema {
      */
     override fun formOf(spec: SchemaItemSpec, rows: List<Any?>): ItemForm {
         val objects = StoreObject.read(rows)
-        val record = rows.filterIsInstance<Map<*, *>>().firstOrNull { row ->
-            OBJECT !in row && parseIndexRows(listOf(row)).singleOrNull()?.let { matchesIdentity(it, spec) } == true
-        }
-        val form = ((record?.get("details") as? Map<*, *>)?.get(SqlStoreDdl.FORM) as? Number)?.toLong()
+        val record = recordOf(spec, rows)
+        val form = formRecorded(record)
         // A newer version's item is made in a form this version may not read: the record is trusted so long as what stands
         // under each name is of its structure, and its expressions aren't compared, so an older version in a rolling deploy
         // never drops a newer one's index, nor reports it drift, for what it can't read.
         val newer = form != null && form > SqlStoreDdl.CURRENT_FORM
-        for (made in madeAs(spec)) {
-            val there = objects[made.name] ?: continue
-            // Where indexes are named apart from other objects, a name another object has is no index's.
-            if (!there.isIndex && indexesNamedApart) continue
-            mismatchOf(made, there, structureOnly = newer)?.let { return ItemForm.Mismatch(there.name, it, droppable = there.isIndex) }
-        }
+        objectMismatches(spec, objects, newer).firstOrNull()?.let { return it }
         otherMismatch(spec, objects, structureOnly = newer)?.let { return it }
         // Objects under the item's names with no record of it: read as a record that says no form would be, so another
         // library's are kept as they are, not made over and recorded as this version's. This version's, or what isn't
@@ -100,6 +95,48 @@ abstract class SqlStoreSchema internal constructor() : StoreSchema {
             else -> ItemForm.Stale("form $form", SqlStoreDdl.CURRENT_FORM)
         }
     }
+
+    /**
+     * Each index the store has under a name Drivine gives one of [spec]'s objects ([madeAs]) that isn't the object it is
+     * made as, in [madeAs]'s order: what [formOf] reads first of all, and gives the first of. A uniqueness constraint made
+     * again drops each but its unique index's, which it builds anew before it drops (#135 §4).
+     */
+    fun mismatchesOf(spec: SchemaItemSpec, rows: List<Any?>): List<ItemForm.Mismatch> {
+        val form = formRecorded(recordOf(spec, rows))
+        return objectMismatches(spec, StoreObject.read(rows), newer = form != null && form > SqlStoreDdl.CURRENT_FORM)
+    }
+
+    private fun objectMismatches(spec: SchemaItemSpec, objects: StoreObjects, newer: Boolean): List<ItemForm.Mismatch> =
+        madeAs(spec).mapNotNull { made ->
+            val there = objects[made.name] ?: return@mapNotNull null
+            // Where indexes are named apart from other objects, a name another object has is no index's.
+            if (!there.isIndex && indexesNamedApart) return@mapNotNull null
+            mismatchOf(made, there, structureOnly = newer)?.let { ItemForm.Mismatch(there.name, it, droppable = there.isIndex) }
+        }
+
+    /**
+     * Whether [rows] show a recreate of the uniqueness constraint [spec] cut off after its old index was dropped
+     * ([org.drivine.cypher.store.ddl.UniqueRecreation.finish]): no index under [name], and under [temporary] a unique index
+     * of the constraint's shape, as [name]'s would be; and no index under [recorded], the name the record found names its
+     * own index by where it lists the properties in another order than [spec] (whose index then still stands, the
+     * recreate cut off before its swap).
+     */
+    fun cutOff(spec: SchemaItemSpec, rows: List<Any?>, name: String, temporary: String, recorded: String? = null): Boolean {
+        val objects = StoreObject.read(rows)
+        objects[name]?.let { standing -> if (standing.isIndex || !indexesNamedApart) return false }
+        if (recorded != null && objects[recorded]?.isIndex == true) return false
+        val there = objects[temporary]?.takeIf { it.isIndex && it.unique == true } ?: return false
+        val made = madeAs(spec).firstOrNull { it.name.equals(name, ignoreCase = true) } ?: return false
+        return mismatchOf(made.copy(name = temporary), there, structureOnly = false) == null
+    }
+
+    /** The record [rows] list of [spec]'s item; null where they list none. */
+    private fun recordOf(spec: SchemaItemSpec, rows: List<Any?>): Map<*, *>? = rows.filterIsInstance<Map<*, *>>().firstOrNull { row ->
+        OBJECT !in row && parseIndexRows(listOf(row)).singleOrNull()?.let { matchesIdentity(it, spec) } == true
+    }
+
+    /** The form [record] says its item was made in; null where it says none. */
+    private fun formRecorded(record: Map<*, *>?): Long? = ((record?.get("details") as? Map<*, *>)?.get(SqlStoreDdl.FORM) as? Number)?.toLong()
 
     /**
      * The form of [spec]'s item whose [record] says none, from [objects]: the module's, here, as on Postgres and SQLite the
@@ -341,8 +378,13 @@ class PostgresSchema(override val ddl: PostgresDdl) : SqlStoreSchema() {
     override fun isViolation(error: StoreError): Boolean = error.causes.any { it.isSqlError && it.sqlState == "23505" }
 
     /** A node's element id is its `nid`; [limit] of a key's nodes at most are named, the first made first. */
-    override fun sampleConflictsQuery(spec: ConstraintSpec, limit: Int): String {
-        val keys = spec.properties.map { PostgresSql.property("n", it) }
+    override fun sampleConflictsQuery(spec: ConstraintSpec, limit: Int): String = sample(spec, spec.properties.map { PostgresSql.property("n", it) }, limit)
+
+    /** Each key lowercased as the copies are filled in, with `lower`. */
+    override fun sampleRefilledConflictsQuery(spec: ConstraintSpec, limit: Int): String =
+        sample(spec.made(), spec.properties.map { "lower(${PostgresSql.property("n", it)})" }, limit)
+
+    private fun sample(spec: ConstraintSpec, keys: List<String>, limit: Int): String {
         val entries = spec.properties.zip(keys).joinToString(", ") { (property, key) -> "${PostgresSql.literal(property)}, $key" }
         val node = listOfNotNull(
             "'elementId', n.nid",
@@ -543,6 +585,9 @@ class OracleSchema(override val ddl: OracleDdl) : SqlStoreSchema() {
 
         val VIOLATIONS = setOf(1, 1452)
 
+        /** `ORA-01408: such column list already indexed`. */
+        const val ALREADY_INDEXED = 1408
+
         /** What follows a table beside the nodes' name in its trigger's, and in its index's. */
         const val TRIGGER = "_t"
         const val INDEX = "_i"
@@ -566,12 +611,21 @@ class OracleSchema(override val ddl: OracleDdl) : SqlStoreSchema() {
     /** `ORA-00001`, a second row for a unique key; `ORA-01452`, a unique index over rows that already repeat one. */
     override fun isViolation(error: StoreError): Boolean = error.causes.any { it.isSqlError && it.vendorCode in VIOLATIONS }
 
+    /** `ORA-01408`: an index over the same expressions is there already, which Oracle allows only one of. */
+    override fun isAlreadyIndexed(error: StoreError): Boolean = error.causes.any { it.isSqlError && it.vendorCode == ALREADY_INDEXED }
+
     /**
      * Each node of a key that repeats is numbered within its key, and counted with it, so that a row names [limit] of its
      * nodes at most however many hold the key. A node's element id is its `nid`.
      */
-    override fun sampleConflictsQuery(spec: ConstraintSpec, limit: Int): String {
-        val keys = spec.properties.map { "JSON_VALUE(n.props, ${OracleSql.path(it)})" }
+    override fun sampleConflictsQuery(spec: ConstraintSpec, limit: Int): String =
+        sample(spec, spec.properties.map { "JSON_VALUE(n.props, ${OracleSql.path(it)})" }, limit)
+
+    /** Each key lowercased as the copies are filled in, with `LOWER`. */
+    override fun sampleRefilledConflictsQuery(spec: ConstraintSpec, limit: Int): String =
+        sample(spec.made(), spec.properties.map { "LOWER(JSON_VALUE(n.props, ${OracleSql.path(it)}))" }, limit)
+
+    private fun sample(spec: ConstraintSpec, keys: List<String>, limit: Int): String {
         val aliases = keys.indices.map { "k$it" }
         val entries = spec.properties.zip(aliases).joinToString(", ") { (property, key) -> "${OracleSql.literal(property)} VALUE $key" }
         val nodeId = StoreSchema.sampledNodeId(spec)
@@ -643,8 +697,13 @@ class SqliteSchema(override val ddl: SqliteDdl) : SqlStoreSchema() {
         error.causes.any { it.isSqlError && it.message.orEmpty().contains("UNIQUE constraint failed") }
 
     /** A node's element id is its `nid`; [limit] of a key's nodes at most are named, the first made first. Its rows are JSON ([SqliteDdl.JSON_ROWS]). */
-    override fun sampleConflictsQuery(spec: ConstraintSpec, limit: Int): String {
-        val keys = spec.properties.map { SqliteSql.property("n", it) }
+    override fun sampleConflictsQuery(spec: ConstraintSpec, limit: Int): String = sample(spec, spec.properties.map { SqliteSql.property("n", it) }, limit)
+
+    /** Each key lowercased as the copies are filled in, with the library's own [SqliteFunctions.LOWER]. */
+    override fun sampleRefilledConflictsQuery(spec: ConstraintSpec, limit: Int): String =
+        sample(spec.made(), spec.properties.map { "${SqliteFunctions.LOWER}(${SqliteSql.property("n", it)})" }, limit)
+
+    private fun sample(spec: ConstraintSpec, keys: List<String>, limit: Int): String {
         val columns = keys.mapIndexed { i, key -> "$key AS k$i" }.joinToString(", ")
         val grouping = keys.indices.joinToString(", ") { "k$it" }
         val entries = spec.properties.mapIndexed { i, property -> "${SqliteSql.literal(property)}, k.k$i" }.joinToString(", ")
