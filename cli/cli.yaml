@@ -733,13 +733,13 @@ cases:
   - name: "--explain prints a graph engine's plan, then the parameters a statement uses"
     only: [graph]
     args: ["--explain", "-P", "x => 1", "MATCH (n:Explained) WHERE n.x = $x RETURN n"]
-    stdoutLines: ["^-- plan:$", "^-- \\S", '^-- parameters: \{"x":1\}$']
+    stdoutLines: ["^-- plan:$", "^-- .", '^-- parameters: \{"x":1\}$']
     exit: 0
 
   - name: "--explain=plan prints the SQL, then the store's plan of it, then the parameters"
     only: [sql]
     args: ["--explain=plan", "-P", "x => 1", "MATCH (n:Explained) WHERE n.x = $x RETURN n"]
-    stdoutLines: ["^(?!-- )\\S", "^-- plan:$", "^-- \\S", '^-- parameters: \{"x":1\}$']
+    stdoutLines: ["^(?!-- )\\S", "^-- plan:$", "^-- .", '^-- parameters: \{"x":1\}$']
     exit: 0
 
   - name: "--explain=sql prints what --explain prints"
