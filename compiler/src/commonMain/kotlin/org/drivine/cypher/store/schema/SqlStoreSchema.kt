@@ -65,7 +65,7 @@ abstract class SqlStoreSchema internal constructor() : StoreSchema {
      * properties in order, and of its label's nodes alone where it is; otherwise the item is a [ItemForm.Mismatch], whatever
      * its record says. Where the record says a later form, only the structure is compared ([mismatchOf]'s `structureOnly`),
      * and of the side objects only a side table's index ([otherMismatch]'s `structureOnly`). An object that isn't there is no mismatch: a record whose object is gone isn't listed, and one
-     * that lacks part is made whole ([isIncomplete]).
+     * that lacks part ([isIncomplete]) is made whole where it is of this version's form, and kept as it is where it is of another.
      *
      * Then its record's `details.form`: [SqlStoreDdl.CURRENT_FORM] is current, a later one [ItemForm.Newer], and an earlier
      * one [ItemForm.Stale]. A
@@ -235,7 +235,7 @@ data class StoreObject(
 
         /**
          * The objects [rows] give, by their names in upper case, as each store's listing gives them: `object`, the name;
-         * `type`, the type; `table`; `unique`, a boolean, or Oracle's `uniqueness`, `UNIQUE` or `NONUNIQUE`; `columns`;
+         * `type`, the type; `table`; `unique`, a boolean (SQLite's `0` or `1`), or Oracle's `uniqueness`, `UNIQUE` or `NONUNIQUE`; `columns`;
          * `where`; `method`; `opclasses`; `indexType`; `sql`; `tableColumns`; `source`, a list of lines or one text. The rows
          * of a name are one object.
          */
@@ -409,7 +409,10 @@ class OracleSchema(override val ddl: OracleDdl) : SqlStoreSchema() {
      * The form of an item whose record says none, from its labelled or unique index's expressions: drivine4j's, which
      * tests a label as `'$[*]?(@ == …)'`, is this version's, and its form is recorded; Drivine for TypeScript's and
      * drivine-python's, which test it as `'$?(@ == …)'` and read a property as `'$."p"'`, is another, kept as it is. What
-     * neither is, or an item with neither index, is taken as this version's, and left as it is.
+     * neither is, or an item with neither index, is taken as this version's, and left as it is. A vector's or a full-text
+     * index's is read alike from its trigger's text: a label tested by its text (`INSTR(…, ',"Chunk","')`) is drivine4j's,
+     * by a path (`JSON_EXISTS(:NEW.labels, '$?(@ == "Chunk")')`) TypeScript's or Python's, and one tested neither way, or
+     * none, or no trigger, is taken as this version's.
      */
     override fun unrecordedForm(spec: SchemaItemSpec, record: Map<*, *>?, objects: StoreObjects): ItemForm {
         val properties = (record?.get("properties") as? List<*>)?.map { it.toString() } ?: spec.properties
