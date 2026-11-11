@@ -206,7 +206,9 @@ The expression is Cypher. It's evaluated by running `RETURN expression` on the s
 
 **`table`'s timing line**, `ready to start consuming query after N ms, results consumed after another M ms`, varies from run to run. Cases don't compare it.
 
-**Counts.** `table` prints the store's counts of what a statement wrote (`Created 1 node, deleted 1 node, added 1 label`) where the store gives them. A SQL store that gives none prints none.
+**`table`'s tables.** A column is as wide as the widest of its name and its values, in the rows `--sample-rows` samples, and each cell has a space either side and `|` between it and the next. The lines above and below the header and below the last row are one `+`, then `-` across the whole row, then one `+`, with no `+` between columns: `+-----------+` over `| x   | s   |`. An empty line follows the table, then its count of rows, `1 row` or `3 rows`.
+
+**Counts.** `table` prints the store's counts of what a statement wrote where the store gives them, on one line after its count of rows: each kind that isn't zero, `, ` between them and the line's first letter in upper case, nodes created, nodes deleted, relationships created, relationships deleted, properties set, labels added and labels removed in that order, as in `Created 2 nodes, deleted 2 nodes, created 1 relationship, deleted 1 relationship, set 1 property, added 2 labels` and `Created 1 node, set 2 properties, added 2 labels, removed 1 label`. An index or a constraint is one per statement: `Added 1 index`, `Removed 1 index`, `Added 1 constraint`, `Removed 1 constraint`. These are the wordings cypher-shell was recorded giving; its plurals of relationships, labels removed, indexes and constraints, and its order for indexes and constraints beside the other kinds, aren't recorded. A SQL store that gives none prints none.
 
 **Errors** go to stderr. Each is the store's message, or Drivine's own: a refusal by the compiler, a failure to connect, a bad flag. A case compares Drivine's own messages, but not the store's.
 
