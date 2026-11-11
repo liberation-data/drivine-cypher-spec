@@ -205,6 +205,7 @@ class StoreDdlTest {
             if (ddl is SqlStoreDdl) {
                 assertEquals(expected["aliased"]!!.textValue(), ddl.aliased(item, aliases), "$id: aliased")
                 assertEquals(expected["unaliased"]!!.textValue(), ddl.aliased(item, emptyList()), "$id: unaliased")
+                assertEquals(expected["formRecorded"]!!.textValue(), ddl.formRecorded(item), "$id: formRecorded")
             }
         }
         assertEquals(catalog["stores"]!!["oracle"]!!["labelled"]!!.textValue(), oracle.labelledIndexesQuery(), "oracle: labelled indexes")

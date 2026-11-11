@@ -948,6 +948,7 @@ catalog:
         ORDER BY part, label, properties
       aliased: "UPDATE drivine_schema SET details = jsonb_set(details, '{aliases}', '[\"a\",\"b\\\"c\"]'::jsonb) WHERE kind = 'RANGE_INDEX' AND label = 'Person' AND properties = '[\"name\"]'"
       unaliased: "UPDATE drivine_schema SET details = details - 'aliases' WHERE kind = 'RANGE_INDEX' AND label = 'Person' AND properties = '[\"name\"]'"
+      formRecorded: "UPDATE drivine_schema SET details = jsonb_set(details, '{form}', '1') WHERE kind = 'RANGE_INDEX' AND label = 'Person' AND properties = '[\"name\"]'"
     oracle:
       indexes:
         VECTOR_INDEX: |-
@@ -977,7 +978,7 @@ catalog:
               UNION ALL
               SELECT 1, o.object_name, NULL,
                      JSON_OBJECT('object' VALUE o.object_name, 'type' VALUE o.object_type, 'table' VALUE i.table_name, 'uniqueness' VALUE i.uniqueness,
-                                 'columns' VALUE (SELECT JSON_ARRAYAGG(NVL(v.data_default_vc, ic.column_name) ORDER BY ic.column_position RETURNING JSON)
+                                 'columns' VALUE (SELECT JSON_ARRAYAGG(CASE WHEN v.column_name IS NULL THEN ic.column_name ELSE v.data_default_vc END ORDER BY ic.column_position NULL ON NULL RETURNING JSON)
                                                   FROM user_ind_columns ic
                                                   LEFT JOIN user_tab_cols v ON v.table_name = ic.table_name AND v.column_name = ic.column_name AND v.virtual_column = 'YES'
                                                   WHERE ic.index_name = i.index_name)
@@ -1038,7 +1039,7 @@ catalog:
             UNION ALL
             SELECT 1, o.object_name, NULL,
                    JSON_OBJECT('object' VALUE o.object_name, 'type' VALUE o.object_type, 'table' VALUE i.table_name, 'uniqueness' VALUE i.uniqueness,
-                               'columns' VALUE (SELECT JSON_ARRAYAGG(NVL(v.data_default_vc, ic.column_name) ORDER BY ic.column_position RETURNING JSON)
+                               'columns' VALUE (SELECT JSON_ARRAYAGG(CASE WHEN v.column_name IS NULL THEN ic.column_name ELSE v.data_default_vc END ORDER BY ic.column_position NULL ON NULL RETURNING JSON)
                                                 FROM user_ind_columns ic
                                                 LEFT JOIN user_tab_cols v ON v.table_name = ic.table_name AND v.column_name = ic.column_name AND v.virtual_column = 'YES'
                                                 WHERE ic.index_name = i.index_name)
@@ -1050,6 +1051,7 @@ catalog:
         ORDER BY part, label, properties
       aliased: "UPDATE drivine_schema SET details = JSON_MERGEPATCH(details, '{\"aliases\": [\"a\",\"b\\\"c\"]}') WHERE kind = 'RANGE_INDEX' AND label = 'Person' AND properties = '[\"name\"]'"
       unaliased: "UPDATE drivine_schema SET details = JSON_MERGEPATCH(details, '{\"aliases\": null}') WHERE kind = 'RANGE_INDEX' AND label = 'Person' AND properties = '[\"name\"]'"
+      formRecorded: "UPDATE drivine_schema SET details = JSON_MERGEPATCH(details, '{\"form\": 1}') WHERE kind = 'RANGE_INDEX' AND label = 'Person' AND properties = '[\"name\"]'"
       labelled: |-
         SELECT JSON_OBJECT('kind' VALUE kind, 'label' VALUE label, 'properties' VALUE JSON(properties) RETURNING JSON)
         FROM drivine_schema u
@@ -1117,6 +1119,7 @@ catalog:
         ORDER BY part, label, properties
       aliased: "UPDATE drivine_schema SET details = json_set(details, '$.aliases', json('[\"a\",\"b\\\"c\"]')) WHERE kind = 'RANGE_INDEX' AND label = 'Person' AND properties = '[\"name\"]'"
       unaliased: "UPDATE drivine_schema SET details = json_remove(details, '$.aliases') WHERE kind = 'RANGE_INDEX' AND label = 'Person' AND properties = '[\"name\"]'"
+      formRecorded: "UPDATE drivine_schema SET details = json_set(details, '$.form', 1) WHERE kind = 'RANGE_INDEX' AND label = 'Person' AND properties = '[\"name\"]'"
     neo4j:
       indexes:
         VECTOR_INDEX: |-
@@ -6318,3 +6321,137 @@ declarations:
       - {kind: "RANGE_INDEX", label: "Person", properties: ["email"], ignoreCase: true}
       - {kind: "RANGE_INDEX", label: "Person", properties: ["email"], name: "Person_email_ci_range", ignoreCase: true}
     conflict: "Conflicting schema declarations for RANGE_INDEX on Person[__drivine.lower.email] (they disagree on portable parameters): RangeIndexSpec(label=Person, properties=[email], name=null, ignoreCase=true); RangeIndexSpec(label=Person, properties=[email], name=Person_email_ci_range, ignoreCase=true)"
+
+forms:
+  - name: "Oracle: range indexes of drivine4j's form, TypeScript's form, form 0, and others under their names"
+    description: "drivine4j's range index whose record says no form, made by drivine4j's managers; TypeScript's, made by its Oracle DDL (Python's is the same text); one whose record says form 0; an index over another property under the shared index's name; an index over the stamp column under a labelled index's name."
+    store: "oracle"
+    listing: "indexes.RANGE_INDEX"
+    rows:
+      - {"kind": "RANGE_INDEX", "label": "Account", "properties": ["email"], "name": "Account_email_range", "details": {"unique": "drivine_uq_Accountemail_6d5defe9"}, "status": null}
+      - {"kind": "RANGE_INDEX", "label": "Badge", "properties": ["code"], "name": "Badge_code_range", "details": {"unique": "drivine_uq_Badgecode_b1fcbc4a"}, "status": null}
+      - {"kind": "RANGE_INDEX", "label": "Old", "properties": ["name"], "name": "Old_name_range", "details": {"labelled": "drivine_lx_Oldname_a75f0e4", "form": 0}, "status": null}
+      - {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": "Person_name_range", "details": {"labelled": "drivine_lx_Personname_44ce5436"}, "status": null}
+      - {"kind": "RANGE_INDEX", "label": "TsAccount", "properties": ["email"], "name": "TsAccount_email_range", "details": {"unique": "drivine_uq_TsAccountemail_5ffe5faa"}, "status": null}
+      - {"kind": "RANGE_INDEX", "label": "TsPerson", "properties": ["name"], "name": "TsPerson_name_range", "details": {"labelled": "drivine_lx_TsPersonname_fc99c037"}, "status": null}
+      - {"object": "DRIVINE_IX_CODE_2EADED", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.code' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"]}
+      - {"object": "DRIVINE_IX_EMAIL_5C24B9C", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"]}
+      - {"object": "DRIVINE_IX_NAME_337A8B", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.name' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"]}
+      - {"object": "DRIVINE_IX_SERIAL_CA01FDF4", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.\"couponRef\"' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"]}
+      - {"object": "DRIVINE_LX_OLDNAME_A75F0E4", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "columns": ["CASE JSON_EXISTS2(\"LABELS\" FORMAT OSON , '$[*]?(@ == \"Old\")' /* json_path_str  $[*]?(@.string() == \"Old\")  */  FALSE ON ERROR TYPE(LAX) ) WHEN 1 THEN JSON_VALUE(\"PROPS\" FORMAT OSON , '$.name' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) ) END "]}
+      - {"object": "DRIVINE_LX_PERSONNAME_44CE5436", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "columns": ["CASE JSON_EXISTS2(\"LABELS\" FORMAT OSON , '$[*]?(@ == \"Person\")' /* json_path_str  $[*]?(@.string() == \"Person\")  */  FALSE ON ERROR TYPE(LAX) ) WHEN 1 THEN JSON_VALUE(\"PROPS\" FORMAT OSON , '$.name' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) ) END "]}
+      - {"object": "DRIVINE_LX_STAMPEDSKU_36D1AF9F", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "columns": ["STAMP"]}
+      - {"object": "DRIVINE_LX_TSPERSONNAME_FC99C037", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "columns": ["CASE JSON_EXISTS2(\"LABELS\" FORMAT OSON , '$?(@ == \"TsPerson\")' /* json_path_str  $?(@.string() == \"TsPerson\")  */  FALSE ON ERROR TYPE(LAX) ) WHEN 1 THEN JSON_VALUE(\"PROPS\" FORMAT OSON , '$.\"name\"' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) ) END "]}
+    listed:
+      - {"kind": "RANGE_INDEX", "label": "Account", "properties": ["email"], "name": "Account_email_range"}
+      - {"kind": "RANGE_INDEX", "label": "Badge", "properties": ["code"], "name": "Badge_code_range"}
+      - {"kind": "RANGE_INDEX", "label": "Old", "properties": ["name"], "name": "Old_name_range"}
+      - {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": "Person_name_range"}
+      - {"kind": "RANGE_INDEX", "label": "TsAccount", "properties": ["email"], "name": "TsAccount_email_range"}
+      - {"kind": "RANGE_INDEX", "label": "TsPerson", "properties": ["name"], "name": "TsPerson_name_range"}
+    items:
+      - {spec: {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"]}, form: {"unrecorded": "UPDATE drivine_schema SET details = JSON_MERGEPATCH(details, '{\"form\": 1}') WHERE kind = 'RANGE_INDEX' AND label = 'Person' AND properties = '[\"name\"]'"}}
+      - {spec: {"kind": "RANGE_INDEX", "label": "TsPerson", "properties": ["name"]}, form: {"stale": "TS's or Python's Oracle form"}}
+      - {spec: {"kind": "RANGE_INDEX", "label": "Old", "properties": ["name"]}, form: {"stale": "form 0"}}
+      - {spec: {"kind": "RANGE_INDEX", "label": "Coupon", "properties": ["serial"]}, form: {"mismatch": {"name": "DRIVINE_IX_SERIAL_CA01FDF4", "reason": "an index over [couponRef]", "droppable": true}}}
+      - {spec: {"kind": "RANGE_INDEX", "label": "Stamped", "properties": ["sku"]}, form: {"mismatch": {"name": "DRIVINE_LX_STAMPEDSKU_36D1AF9F", "reason": "an index over [__drivine.stamp]", "droppable": true}}}
+      - {spec: {"kind": "RANGE_INDEX", "label": "Account", "properties": ["email"]}, form: "current"}
+  - name: "Oracle: uniqueness constraints of the current form, TypeScript's form, and others under their names"
+    description: "A constraint whose record says form 1; TypeScript's, made by its Oracle DDL; a plain index under a constraint's name (drivine4j#770); a recorded constraint whose index was made again not unique; a table under a constraint's name, which Oracle names apart from indexes."
+    store: "oracle"
+    listing: "constraints"
+    rows:
+      - {"kind": "UNIQUENESS_CONSTRAINT", "label": "Account", "properties": ["email"], "name": "Account_email_unique", "details": {"form": 1}, "status": null}
+      - {"kind": "UNIQUENESS_CONSTRAINT", "label": "Badge", "properties": ["code"], "name": "Badge_code_unique", "details": {}, "status": null}
+      - {"kind": "UNIQUENESS_CONSTRAINT", "label": "TsAccount", "properties": ["email"], "name": "TsAccount_email_unique", "details": {}, "status": null}
+      - {"object": "DRIVINE_IX_CODE_2EADED", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.code' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"]}
+      - {"object": "DRIVINE_IX_EMAIL_5C24B9C", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"]}
+      - {"object": "DRIVINE_IX_NAME_337A8B", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.name' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"]}
+      - {"object": "DRIVINE_IX_SERIAL_CA01FDF4", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.\"couponRef\"' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"]}
+      - {"object": "DRIVINE_UQ_ACCOUNTEMAIL_6D5DEFE9", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "UNIQUE", "columns": ["CASE  WHEN (JSON_EXISTS2(\"LABELS\" FORMAT OSON , '$[*]?(@ == \"Account\")' /* json_path_str  $[*]?(@.string() == \"Account\")  */  FALSE ON ERROR TYPE(LAX) )=1 AND JSON_EXISTS2(\"PROPS\" FORMAT OSON , '$.email' FALSE ON ERROR TYPE(LAX) )=1) THEN JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) ) END "]}
+      - {"object": "DRIVINE_UQ_BADGECODE_B1FCBC4A", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "columns": ["CASE  WHEN (JSON_EXISTS2(\"LABELS\" FORMAT OSON , '$[*]?(@ == \"Badge\")' /* json_path_str  $[*]?(@.string() == \"Badge\")  */  FALSE ON ERROR TYPE(LAX) )=1 AND JSON_EXISTS2(\"PROPS\" FORMAT OSON , '$.code' FALSE ON ERROR TYPE(LAX) )=1) THEN JSON_VALUE(\"PROPS\" FORMAT OSON , '$.code' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) ) END "]}
+      - {"object": "DRIVINE_UQ_TICKETCODE_73B4F241", "type": "TABLE", "table": null, "uniqueness": null, "columns": null}
+      - {"object": "DRIVINE_UQ_TSACCOUNTEMAIL_5FFE5FAA", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "UNIQUE", "columns": ["CASE JSON_EXISTS2(\"LABELS\" FORMAT OSON , '$?(@ == \"TsAccount\")' /* json_path_str  $?(@.string() == \"TsAccount\")  */  FALSE ON ERROR TYPE(LAX) ) WHEN 1 THEN JSON_VALUE(\"PROPS\" FORMAT OSON , '$.\"email\"' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) ) END "]}
+      - {"object": "DRIVINE_UQ_VOUCHERCODE_F5E5701F", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.\"voucherRef\"' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"]}
+    listed:
+      - {"kind": "UNIQUENESS_CONSTRAINT", "label": "Account", "properties": ["email"], "name": "Account_email_unique"}
+      - {"kind": "UNIQUENESS_CONSTRAINT", "label": "Badge", "properties": ["code"], "name": "Badge_code_unique"}
+      - {"kind": "UNIQUENESS_CONSTRAINT", "label": "TsAccount", "properties": ["email"], "name": "TsAccount_email_unique"}
+    items:
+      - {spec: {"kind": "UNIQUENESS_CONSTRAINT", "label": "Account", "properties": ["email"]}, form: "current"}
+      - {spec: {"kind": "UNIQUENESS_CONSTRAINT", "label": "TsAccount", "properties": ["email"]}, form: {"stale": "TS's or Python's Oracle form"}}
+      - {spec: {"kind": "UNIQUENESS_CONSTRAINT", "label": "Voucher", "properties": ["code"]}, form: {"mismatch": {"name": "DRIVINE_UQ_VOUCHERCODE_F5E5701F", "reason": "an index that is not unique", "droppable": true}}}
+      - {spec: {"kind": "UNIQUENESS_CONSTRAINT", "label": "Badge", "properties": ["code"]}, form: {"mismatch": {"name": "DRIVINE_UQ_BADGECODE_B1FCBC4A", "reason": "an index that is not unique", "droppable": true}}}
+      - {spec: {"kind": "UNIQUENESS_CONSTRAINT", "label": "Ticket", "properties": ["code"]}, form: "current"}
+  - name: "Postgres: range indexes of no form recorded, form 0, and another index under one's name"
+    description: "A range index whose record says no form, which the three libraries made alike here; one whose record says form 0; an index over another property under a range index's name."
+    store: "postgres"
+    listing: "indexes.RANGE_INDEX"
+    rows:
+      - {"kind": "RANGE_INDEX", "name": "Old_name_range", "label": "Old", "details": {"form": 0}, "properties": ["name"]}
+      - {"kind": "RANGE_INDEX", "name": "Person_name_range", "label": "Person", "details": {}, "properties": ["name"]}
+      - {"type": "i", "table": "drivine_node", "where": "labels @> '[\"Coupon\"]'::jsonb", "method": "btree", "object": "drivine_ix_couponserial_6567feee", "unique": false, "columns": ["(props ->> 'couponRef'::text)"]}
+      - {"type": "i", "table": "drivine_node", "where": "labels @> '[\"Old\"]'::jsonb", "method": "btree", "object": "drivine_ix_oldname_a75f0e4", "unique": false, "columns": ["(props ->> 'name'::text)"]}
+      - {"type": "i", "table": "drivine_node", "where": "labels @> '[\"Person\"]'::jsonb", "method": "btree", "object": "drivine_ix_personname_44ce5436", "unique": false, "columns": ["(props ->> 'name'::text)"]}
+    listed:
+      - {"kind": "RANGE_INDEX", "label": "Old", "properties": ["name"], "name": "Old_name_range"}
+      - {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": "Person_name_range"}
+    items:
+      - {spec: {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"]}, form: "current"}
+      - {spec: {"kind": "RANGE_INDEX", "label": "Old", "properties": ["name"]}, form: {"stale": "form 0"}}
+      - {spec: {"kind": "RANGE_INDEX", "label": "Coupon", "properties": ["serial"]}, form: {"mismatch": {"name": "drivine_ix_couponserial_6567feee", "reason": "an index over [couponRef]", "droppable": true}}}
+  - name: "Postgres: uniqueness constraints, and others under their names"
+    description: "A constraint whose record says form 1; a plain index over another property under a constraint's name (drivine4j#770); a recorded constraint whose index was made again not unique; a table under a constraint's name."
+    store: "postgres"
+    listing: "constraints"
+    rows:
+      - {"kind": "UNIQUENESS_CONSTRAINT", "name": "Account_email_unique", "label": "Account", "details": {"form": 1}, "properties": ["email"]}
+      - {"kind": "UNIQUENESS_CONSTRAINT", "name": "Badge_code_unique", "label": "Badge", "details": {}, "properties": ["code"]}
+      - {"type": "i", "table": "drivine_node", "where": "labels @> '[\"Account\"]'::jsonb", "method": "btree", "object": "drivine_uq_accountemail_6d5defe9", "unique": true, "columns": ["(props ->> 'email'::text)"]}
+      - {"type": "i", "table": "drivine_node", "where": "labels @> '[\"Badge\"]'::jsonb", "method": "btree", "object": "drivine_uq_badgecode_b1fcbc4a", "unique": false, "columns": ["(props ->> 'code'::text)"]}
+      - {"type": "r", "table": null, "where": null, "method": "heap", "object": "drivine_uq_ticketcode_73b4f241", "unique": null, "columns": null}
+      - {"type": "i", "table": "drivine_node", "where": null, "method": "btree", "object": "drivine_uq_vouchercode_f5e5701f", "unique": false, "columns": ["(props ->> 'voucherRef'::text)"]}
+    listed:
+      - {"kind": "UNIQUENESS_CONSTRAINT", "label": "Account", "properties": ["email"], "name": "Account_email_unique"}
+      - {"kind": "UNIQUENESS_CONSTRAINT", "label": "Badge", "properties": ["code"], "name": "Badge_code_unique"}
+    items:
+      - {spec: {"kind": "UNIQUENESS_CONSTRAINT", "label": "Account", "properties": ["email"]}, form: "current"}
+      - {spec: {"kind": "UNIQUENESS_CONSTRAINT", "label": "Voucher", "properties": ["code"]}, form: {"mismatch": {"name": "drivine_uq_vouchercode_f5e5701f", "reason": "an index that is not unique", "droppable": true}}}
+      - {spec: {"kind": "UNIQUENESS_CONSTRAINT", "label": "Badge", "properties": ["code"]}, form: {"mismatch": {"name": "drivine_uq_badgecode_b1fcbc4a", "reason": "an index that is not unique", "droppable": true}}}
+      - {spec: {"kind": "UNIQUENESS_CONSTRAINT", "label": "Ticket", "properties": ["code"]}, form: {"mismatch": {"name": "drivine_uq_ticketcode_73b4f241", "reason": "a table, not an index", "droppable": false}}}
+  - name: "SQLite: range indexes of no form recorded, form 0, and another index under one's name"
+    description: "A range index whose record says no form, which the three libraries made alike here; one whose record says form 0; an index over another property under a range index's name."
+    store: "sqlite"
+    listing: "indexes.RANGE_INDEX"
+    rows:
+      - {"kind": "RANGE_INDEX", "label": "Old", "properties": ["name"], "name": "Old_name_range", "details": {"form": 0}}
+      - {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": "Person_name_range", "details": {}}
+      - {"object": "drivine_ix_Couponserial_6567feee", "type": "index", "table": "drivine_node", "sql": "CREATE INDEX drivine_ix_Couponserial_6567feee ON drivine_node ((CASE json_type(props, '$.\"couponRef\"') WHEN 'text' THEN props ->> '$.\"couponRef\"' WHEN 'null' THEN NULL ELSE props -> '$.\"couponRef\"' END)) WHERE instr(labels, '\"Coupon\"') > 0", "unique": 0}
+      - {"object": "drivine_ix_Oldname_a75f0e4", "type": "index", "table": "drivine_node", "sql": "CREATE INDEX drivine_ix_Oldname_a75f0e4 ON drivine_node ((CASE json_type(props, '$.\"name\"') WHEN 'text' THEN props ->> '$.\"name\"' WHEN 'null' THEN NULL ELSE props -> '$.\"name\"' END)) WHERE instr(labels, '\"Old\"') > 0", "unique": 0}
+      - {"object": "drivine_ix_Personname_44ce5436", "type": "index", "table": "drivine_node", "sql": "CREATE INDEX drivine_ix_Personname_44ce5436 ON drivine_node ((CASE json_type(props, '$.\"name\"') WHEN 'text' THEN props ->> '$.\"name\"' WHEN 'null' THEN NULL ELSE props -> '$.\"name\"' END)) WHERE instr(labels, '\"Person\"') > 0", "unique": 0}
+    listed:
+      - {"kind": "RANGE_INDEX", "label": "Old", "properties": ["name"], "name": "Old_name_range"}
+      - {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": "Person_name_range"}
+    items:
+      - {spec: {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"]}, form: "current"}
+      - {spec: {"kind": "RANGE_INDEX", "label": "Old", "properties": ["name"]}, form: {"stale": "form 0"}}
+      - {spec: {"kind": "RANGE_INDEX", "label": "Coupon", "properties": ["serial"]}, form: {"mismatch": {"name": "drivine_ix_Couponserial_6567feee", "reason": "an index over [couponRef]", "droppable": true}}}
+  - name: "SQLite: uniqueness constraints, and others under their names"
+    description: "A constraint whose record says form 1; a plain index over another property under a constraint's name (drivine4j#770); a recorded constraint whose index was made again not unique; a table under a constraint's name."
+    store: "sqlite"
+    listing: "constraints"
+    rows:
+      - {"kind": "UNIQUENESS_CONSTRAINT", "label": "Account", "properties": ["email"], "name": "Account_email_unique", "details": {"form": 1}}
+      - {"kind": "UNIQUENESS_CONSTRAINT", "label": "Badge", "properties": ["code"], "name": "Badge_code_unique", "details": {}}
+      - {"object": "drivine_uq_Accountemail_6d5defe9", "type": "index", "table": "drivine_node", "sql": "CREATE UNIQUE INDEX drivine_uq_Accountemail_6d5defe9 ON drivine_node ((CASE json_type(props, '$.\"email\"') WHEN 'text' THEN props ->> '$.\"email\"' WHEN 'null' THEN NULL ELSE props -> '$.\"email\"' END)) WHERE instr(labels, '\"Account\"') > 0", "unique": 1}
+      - {"object": "drivine_uq_Badgecode_b1fcbc4a", "type": "index", "table": "drivine_node", "sql": "CREATE INDEX drivine_uq_Badgecode_b1fcbc4a ON drivine_node ((CASE json_type(props, '$.\"code\"') WHEN 'text' THEN props ->> '$.\"code\"' WHEN 'null' THEN NULL ELSE props -> '$.\"code\"' END)) WHERE instr(labels, '\"Badge\"') > 0", "unique": 0}
+      - {"object": "drivine_uq_Ticketcode_73b4f241", "type": "table", "table": "drivine_uq_Ticketcode_73b4f241", "sql": "CREATE TABLE drivine_uq_Ticketcode_73b4f241 (x INTEGER)", "unique": null}
+      - {"object": "drivine_uq_Vouchercode_f5e5701f", "type": "index", "table": "drivine_node", "sql": "CREATE INDEX drivine_uq_Vouchercode_f5e5701f ON drivine_node ((CASE json_type(props, '$.\"voucherRef\"') WHEN 'text' THEN props ->> '$.\"voucherRef\"' WHEN 'null' THEN NULL ELSE props -> '$.\"voucherRef\"' END))", "unique": 0}
+    listed:
+      - {"kind": "UNIQUENESS_CONSTRAINT", "label": "Account", "properties": ["email"], "name": "Account_email_unique"}
+      - {"kind": "UNIQUENESS_CONSTRAINT", "label": "Badge", "properties": ["code"], "name": "Badge_code_unique"}
+    items:
+      - {spec: {"kind": "UNIQUENESS_CONSTRAINT", "label": "Account", "properties": ["email"]}, form: "current"}
+      - {spec: {"kind": "UNIQUENESS_CONSTRAINT", "label": "Voucher", "properties": ["code"]}, form: {"mismatch": {"name": "drivine_uq_Vouchercode_f5e5701f", "reason": "an index that is not unique", "droppable": true}}}
+      - {spec: {"kind": "UNIQUENESS_CONSTRAINT", "label": "Badge", "properties": ["code"]}, form: {"mismatch": {"name": "drivine_uq_Badgecode_b1fcbc4a", "reason": "an index that is not unique", "droppable": true}}}
+      - {spec: {"kind": "UNIQUENESS_CONSTRAINT", "label": "Ticket", "properties": ["code"]}, form: {"mismatch": {"name": "drivine_uq_Ticketcode_73b4f241", "reason": "a table, not an index", "droppable": false}}}

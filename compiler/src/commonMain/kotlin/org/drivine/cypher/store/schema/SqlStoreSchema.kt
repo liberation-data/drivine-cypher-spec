@@ -72,6 +72,8 @@ abstract class SqlStoreSchema internal constructor() : StoreSchema {
         val objects = StoreObject.read(rows)
         for (made in madeAs(spec)) {
             val there = objects[made.name.uppercase()] ?: continue
+            // Where indexes are named apart from other objects, a name another object has is no index's.
+            if (!there.isIndex && indexesNamedApart) continue
             mismatchOf(made, there)?.let { return ItemForm.Mismatch(there.name, it, droppable = there.isIndex) }
         }
         val record = rows.filterIsInstance<Map<*, *>>().firstOrNull { row ->
@@ -92,6 +94,13 @@ abstract class SqlStoreSchema internal constructor() : StoreSchema {
 
     override fun dropMismatched(name: String): List<DdlStatement> = listOf(DdlStatement.Text(ddl.droppedIndex(name)))
 
+    /**
+     * Whether the store names indexes apart from its other objects, as Oracle does: a table there of an index's name
+     * doesn't keep the index from being made, and isn't taken for it.
+     */
+    protected open val indexesNamedApart: Boolean
+        get() = false
+
     /** The objects the store makes [spec]'s item as, under the names Drivine gives them, and what each holds. */
     protected abstract fun madeAs(spec: SchemaItemSpec): List<MadeObject>
 
@@ -105,12 +114,12 @@ abstract class SqlStoreSchema internal constructor() : StoreSchema {
         if (shape.columns.size != properties.size || shape.columns.zip(properties).any { (column, property) -> column != null && column != Read.Property(property) }) {
             return "an index over ${shape.columns.joinToString(", ", "[", "]") { it?.toString() ?: "?" }}"
         }
-        // Where the store says no label, or a label of each column, every one is the one it is made for.
-        if (shape.labels.any { it != made.label }) {
-            return made.label?.let { "an index over ${shape.labels.firstOrNull { label -> label != it }?.let { other -> "the nodes of $other" } ?: "every node"}" }
-                ?: "an index over the nodes of ${shape.labels.filterNotNull().first()}"
+        // Each label it tests (none, for an index over every node) is the one it is made for.
+        if (shape.labels.all { it == made.label }) return null
+        return when (val other = shape.labels.first { it != made.label }) {
+            null -> "an index over every node"
+            else -> "an index over the nodes of $other"
         }
-        return null
     }
 
     /** What [there]'s columns read, and the labels it is over; null where the store's text of it isn't read here. */
@@ -162,7 +171,7 @@ data class StoreObject(
     val types: List<String>,
     val table: String? = null,
     val unique: Boolean? = null,
-    val columns: List<String> = emptyList(),
+    val columns: List<String?> = emptyList(),
     val predicate: String? = null,
     val method: String? = null,
     val statement: String? = null,
@@ -200,7 +209,7 @@ data class StoreObject(
                     types = listOf(type),
                     table = map["table"] as? String,
                     unique = unique,
-                    columns = (map["columns"] as? List<*>).orEmpty().map { it.toString() },
+                    columns = (map["columns"] as? List<*>).orEmpty().map { it?.toString() },
                     predicate = map["where"] as? String,
                     method = map["method"] as? String,
                     statement = map["sql"] as? String,
@@ -241,10 +250,11 @@ class PostgresSchema(override val ddl: PostgresDdl) : SqlStoreSchema() {
      */
     override fun shapeOf(there: StoreObject): Shape {
         val columns = there.columns.map { column ->
-            val text = SqlText.unwrapped(column)
+            val text = column?.let(SqlText::unwrapped)
             when {
+                text == null -> null
                 text == "stamp" -> Read.Property(Stamps.PROPERTY)
-                else -> PROPERTY.matchEntire(text)?.let { Read.Property(SqlText.unquoted(it.groupValues[1])) } ?: Read.Other(column)
+                else -> PROPERTY.matchEntire(text)?.let { Read.Property(SqlText.unquoted(it.groupValues[1])) } ?: Read.Other(text)
             }
         }
         val label = there.predicate?.let { LABEL.find(it) }?.let { SqlText.jsonLabel(SqlText.unquoted(it.groupValues[1])) }
@@ -286,6 +296,9 @@ class OracleSchema(override val ddl: OracleDdl) : SqlStoreSchema() {
     override val readsStatus: Boolean
         get() = true
 
+    override val indexesNamedApart: Boolean
+        get() = true
+
     /**
      * A range index is the index over the property of every node (`ix`, of no label, which labels with a property of the
      * name share) and its labelled index (`lx`); a uniqueness constraint is its unique index (`uq`) and the range index's
@@ -303,19 +316,21 @@ class OracleSchema(override val ddl: OracleDdl) : SqlStoreSchema() {
 
     /**
      * Oracle gives each column of an index over an expression as the text of the hidden column it makes for it, as it
-     * writes it again: the property is the path of the `JSON_VALUE` of `props` in it, `'$.name'` or `'$."name"'`, and the
-     * label the one the `JSON_EXISTS` of `labels` in it tests, `'$[*]?(@ == "Person")'` or `'$?(@ == "Person")'`. A column
-     * of the table is its name, `STAMP`.
+     * writes it again (`JSON_VALUE("PROPS" FORMAT OSON , '$.name' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )`):
+     * the property is the path of the `JSON_VALUE` of `PROPS` in it, `'$.name'` or `'$."name"'`, and the label the one the
+     * `JSON_EXISTS2` of `LABELS` in it tests, `'$[*]?(@ == "Person")'` or `'$?(@ == "Person")'`. A column of the table is
+     * its name, `STAMP`. Oracle keeps at most 4,000 characters of a column's text, and none of a longer one: a column it
+     * gives none of, or whose property isn't read here, isn't compared.
      */
     override fun shapeOf(there: StoreObject): Shape {
         val columns = there.columns.map { column ->
-            val text = SqlText.unwrapped(column).removeSurrounding("\"")
             when {
-                text.equals("stamp", ignoreCase = true) -> Read.Property(Stamps.PROPERTY)
-                else -> VALUE.find(column)?.let { pathKey(SqlText.unquoted(it.groupValues[1]))?.let { key -> Read.Property(key) } } ?: Read.Other(column)
+                column == null -> null
+                PLAIN_STEP.matches(column) -> if (column.equals("stamp", ignoreCase = true)) Read.Property(Stamps.PROPERTY) else Read.Other(column)
+                else -> VALUE.find(column)?.let { pathKey(SqlText.unquoted(it.groupValues[1])) }?.let { Read.Property(it) }
             }
         }
-        val labels = there.columns.map { column -> LABEL_TEST.find(column)?.let { labelOf(SqlText.unquoted(it.groupValues[1])) } }
+        val labels = there.columns.filterNotNull().map { column -> LABEL_TEST.find(column)?.let { labelOf(SqlText.unquoted(it.groupValues[1])) } }
         return Shape(columns, labels)
     }
 
@@ -328,7 +343,7 @@ class OracleSchema(override val ddl: OracleDdl) : SqlStoreSchema() {
     override fun unrecordedForm(spec: SchemaItemSpec, record: Map<*, *>, objects: Map<String, StoreObject>): ItemForm {
         val kind = if (spec.kind == SchemaItemKind.UNIQUENESS_CONSTRAINT) OracleDdl.UNIQUE else OracleDdl.LABELLED
         val there = objects[ddl.objectName(kind, listOf(spec.label) + spec.properties).uppercase()]?.takeIf { it.isIndex } ?: return ItemForm.Current
-        val paths = there.columns.mapNotNull { column -> LABEL_TEST.find(column)?.let { SqlText.unquoted(it.groupValues[1]) } }
+        val paths = there.columns.filterNotNull().mapNotNull { column -> LABEL_TEST.find(column)?.let { SqlText.unquoted(it.groupValues[1]) } }
         if (paths.isEmpty()) return ItemForm.Current
         return when {
             paths.all { it.startsWith(LIBRARIES_LABEL_TEST) } -> ItemForm.Stale(LIBRARIES_FORM, SqlStoreDdl.CURRENT_FORM)
@@ -350,7 +365,7 @@ class OracleSchema(override val ddl: OracleDdl) : SqlStoreSchema() {
 
     private companion object {
         val VALUE = Regex("""JSON_VALUE\(\s*"?PROPS"?[^']*'${SqlText.LITERAL}'""", RegexOption.IGNORE_CASE)
-        val LABEL_TEST = Regex("""JSON_EXISTS\(\s*"?LABELS"?[^']*'${SqlText.LITERAL}'""", RegexOption.IGNORE_CASE)
+        val LABEL_TEST = Regex("""JSON_EXISTS2?\(\s*"?LABELS"?[^']*'${SqlText.LITERAL}'""", RegexOption.IGNORE_CASE)
         val LABEL_PATH = Regex("""\$(?:\[\*])?\?\(@ == ("(?:[^"\\]|\\.)*")\)""")
         val PLAIN_STEP = Regex("[A-Za-z_][A-Za-z0-9_]*")
 

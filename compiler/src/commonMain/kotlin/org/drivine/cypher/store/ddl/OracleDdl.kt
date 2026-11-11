@@ -506,7 +506,7 @@ ${made.entries.joinToString("\n") { (function, making) ->
                 UNION ALL
                 SELECT 1, o.object_name, NULL,
                        JSON_OBJECT('object' VALUE o.object_name, 'type' VALUE o.object_type, 'table' VALUE i.table_name, 'uniqueness' VALUE i.uniqueness,
-                                   'columns' VALUE (SELECT JSON_ARRAYAGG(NVL(v.data_default_vc, ic.column_name) ORDER BY ic.column_position RETURNING JSON)
+                                   'columns' VALUE (SELECT JSON_ARRAYAGG(CASE WHEN v.column_name IS NULL THEN ic.column_name ELSE v.data_default_vc END ORDER BY ic.column_position NULL ON NULL RETURNING JSON)
                                                     FROM user_ind_columns ic
                                                     LEFT JOIN user_tab_cols v ON v.table_name = ic.table_name AND v.column_name = ic.column_name AND v.virtual_column = 'YES'
                                                     WHERE ic.index_name = i.index_name)

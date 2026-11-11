@@ -25,6 +25,7 @@ import org.drivine.schema.SimilarityFunction
 import org.drivine.schema.TextIndexSpec
 import org.drivine.schema.UniquenessConstraintSpec
 import org.drivine.schema.VectorIndexSpec
+import org.drivine.schema.made
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -204,6 +205,42 @@ class StoreSchemaTest {
     }
 
     /** The value [node] holds, as a driver gives a row's: a map, a list, text, a whole number as a Long, a boolean or null. */
+    /**
+     * Each SQL store's listing, its rows captured from the store, says the form of each item it lists, and tells another
+     * item under a name Drivine gives from the item: [StoreSchema.formOf], over the spec as it is made.
+     */
+    @Test
+    fun eachListingSaysTheFormOfEachItemAsTheStoreGaveIt() {
+        var checked = 0
+        for (case in store["forms"]!!) {
+            val name = case["name"]!!.textValue()
+            val id = case["store"]!!.textValue()!!
+            val schema = schemas.getValue(id)
+            val rows = case["rows"]!!.map(::plain)
+            for (entry in case["items"]!!) {
+                val spec = spec(entry["spec"]!!).made()
+                assertEquals(form(entry["form"]!!), schema.formOf(spec, rows), "$id, $name: the form of $spec")
+                checked++
+            }
+            // The records read back as items, the store's objects beside them left out.
+            case["listed"]?.let { listed ->
+                val parsed = if (case["listing"]!!.textValue() == "constraints") schema.parseConstraintRows(rows) else schema.parseIndexRows(rows)
+                assertEquals(listed.map(::item), parsed, "$id, $name: the items listed")
+            }
+        }
+        assertTrue(checked > 0, "store.yaml pins no form")
+    }
+
+    private fun form(node: JsonNode): ItemForm = when {
+        node.isTextual && node.textValue() == "current" -> ItemForm.Current
+        node["stale"] != null -> ItemForm.Stale(node["stale"]!!.textValue()!!, org.drivine.cypher.store.ddl.SqlStoreDdl.CURRENT_FORM)
+        node["unrecorded"] != null -> ItemForm.Unrecorded(node["unrecorded"]!!.textValue()!!)
+        node["mismatch"] != null -> node["mismatch"]!!.let {
+            ItemForm.Mismatch(it["name"]!!.textValue()!!, it["reason"]!!.textValue()!!, it["droppable"]!!.booleanValue())
+        }
+        else -> fail("no form $node")
+    }
+
     private fun plain(node: JsonNode): Any? = when {
         node.isNull -> null
         node.isTextual -> node.textValue()

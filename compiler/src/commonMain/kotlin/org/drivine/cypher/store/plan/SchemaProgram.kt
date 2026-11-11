@@ -608,10 +608,9 @@ internal class SchemaProgram(
     }
 
     private fun recreateMadeIndex(spec: IndexSpec, build: Build): EnsureResult {
-        val existing = when (val cleared = clearMismatched(spec, findIndex(spec)) { findIndex(spec) }) {
-            is EnsureResult.Drift -> return cleared
-            else -> cleared as SchemaItemInfo?
-        }
+        val cleared = clearMismatched(spec, findIndex(spec)) { findIndex(spec) }
+        cleared.drift?.let { return it }
+        val existing = cleared.existing
         val aliases = if (existing != null) aliasesOfIndex(spec) else emptyList()
         if (existing != null) dropExisting(existing, spec)
         // Read again after the drop: on a store with an index a label, the label may still have one over other
@@ -881,10 +880,9 @@ internal class SchemaProgram(
     /** `ConstraintManager.recreate`: the constraint made again keeps the aliases its record kept. */
     private fun recreateConstraint(spec: ConstraintSpec, violationSampleSize: Int, replaceBlockingIndex: Boolean): EnsureResult {
         requireConstrainable(spec.made())
-        val existing = when (val cleared = clearMismatched(spec.made(), findConstraint(spec)) { findConstraint(spec) }) {
-            is EnsureResult.Drift -> return cleared
-            else -> cleared as SchemaItemInfo?
-        }
+        val cleared = clearMismatched(spec.made(), findConstraint(spec)) { findConstraint(spec) }
+        cleared.drift?.let { return it }
+        val existing = cleared.existing
         val aliases = if (existing != null && store.ddl is SqlStoreDdl) {
             val rows = listingRows(store.ddl.listConstraintsQuery()).orEmpty()
             rows.firstNotNullOfOrNull { row ->
@@ -1002,7 +1000,7 @@ internal class SchemaProgram(
         val then = if (form.droppable) "Call recreate() to replace it (destructive)." else "Drop or rename it: Drivine makes the item under that name, and recreate() leaves it."
         log(
             LogLevel.WARN, logger,
-            "$what drift on ${spec.label}${spec.properties}: ${form.name}, under the name $engine gives the ${spec.kind}, is ${form.reason}, so it is not taken as made. $then",
+            "$what drift on ${spec.label}${spec.properties}: ${form.name}, under a name Drivine gives the ${spec.kind}, is ${form.reason}, so it is not taken as made. $then",
         )
         return EnsureResult.Drift(existing ?: SchemaItemInfo(spec.kind, spec.label, spec.properties, form.name), spec)
     }
@@ -1012,18 +1010,24 @@ internal class SchemaProgram(
      * it is dropped, by its name, and the item found again by [find], till none is left, which is given; drift, with
      * nothing more dropped, where what stands there isn't an index, and so can't be made over.
      */
-    private fun clearMismatched(spec: SchemaItemSpec, found: SchemaItemInfo?, find: () -> SchemaItemInfo?): Any? {
+    private fun clearMismatched(spec: SchemaItemSpec, found: SchemaItemInfo?, find: () -> SchemaItemInfo?): Cleared {
         val dropped = mutableSetOf<String>()
         var existing = found
         while (true) {
-            val form = formOf(spec) as? ItemForm.Mismatch ?: return existing
+            val form = formOf(spec) as? ItemForm.Mismatch ?: return Cleared(existing, null)
             // One dropped already, and still there, can't be dropped.
-            if (!form.droppable || !dropped.add(form.name.uppercase())) return mismatched(spec, existing, form.copy(droppable = false))
+            if (!form.droppable || !dropped.add(form.name.uppercase())) return Cleared(existing, mismatched(spec, existing, form.copy(droppable = false)))
             ddl(store.dropMismatched(form.name))
-            log(LogLevel.INFO, if (spec is ConstraintSpec) CONSTRAINT_MANAGER else INDEX_MANAGER, "Dropped ${form.name}, which stood under the name $engine gives ${spec.kind} on ${spec.label}${spec.properties}: it was ${form.reason}")
+            log(
+                LogLevel.INFO, if (spec is ConstraintSpec) CONSTRAINT_MANAGER else INDEX_MANAGER,
+                "Dropped $engine index ${form.name}, under a name Drivine gives ${spec.kind} on ${spec.label}${spec.properties}: it was ${form.reason}",
+            )
             existing = find()
         }
     }
+
+    /** What [clearMismatched] left: the item found once nothing else stands under its names, or the [drift] where something can't be dropped. */
+    private class Cleared(val existing: SchemaItemInfo?, val drift: EnsureResult.Drift?)
 
     /**
      * An item found in its shape, in [form]: one of another form is kept and used as it is, and said so, once; one in this
