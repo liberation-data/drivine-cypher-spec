@@ -76,6 +76,7 @@ fun interface ScalarBody {
  * it gives the same result for the same arguments within a statement, so SQLite may use it in an index or factor it out;
  * [innocuous] where it has no side effects and reads nothing outside its arguments, so a trigger or view of an
  * untrusted schema may call it; [directOnly] where it changes state, so only a statement of the host's own may call it.
+ * [encoding] is the encoding SQLite converts its text arguments to. It can't be both innocuous and direct-only.
  */
 @DrivineInternalApi
 class HostFunction(
