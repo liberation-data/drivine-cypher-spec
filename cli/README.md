@@ -288,3 +288,5 @@ A store in `only` and `except` is `neo4j`, `memgraph`, `falkordb`, `postgres`, `
 | `note` | Why the case is there. It is not read. |
 
 Lines of `table`'s timing line are taken out of stdout before it is compared.
+
+`.github/scripts/cli-cases-check.py`, which CI runs on every change to `cli/`, checks the cases against this section without a CLI or a store. The file must be YAML whose `cases` each have a unique `name`, their `args` and an `exit`, and only the keys the table above names. `only`, `except` and `os` must name what they're allowed to. Where a case runs with `--format json`, each line of its `stdout` must be one JSON value.
