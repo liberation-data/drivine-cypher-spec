@@ -143,9 +143,12 @@ internal object GcFloor {
 
     private fun deferOnceLocked() {
         if (runtimeFloor == -1L) {
-            runtimeFloor = GC.minHeapBytes
-            runtimeTarget = GC.targetHeapBytes
+            // Recorded after the raise, so a setter that throws leaves the process as it was, for the next init to try again.
+            val floor = GC.minHeapBytes
+            val target = GC.targetHeapBytes
             raise(DEFAULT_BYTES)
+            runtimeFloor = floor
+            runtimeTarget = target
         }
     }
 
