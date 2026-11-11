@@ -25,7 +25,7 @@ drivine [flags] [cypher]
 | stdin, when it isn't a terminal or `--non-interactive` is given | Its statements, then exit. |
 | none of these, stdin a terminal | The [REPL](#the-repl). |
 
-Each statement runs in its own transaction, unless it falls between `:begin` and `:commit`.
+Each statement runs in its own transaction, unless one that `:begin` opened is open: `:commit` or `:rollback` closes it, and so may a failure (see [Failures and exit codes](#failures-and-exit-codes)).
 
 Only one of `cypher`, `-c` and `-f` may be given, and only one positional argument. Given two, the CLI refuses them as a bad invocation (see [Failures and exit codes](#failures-and-exit-codes)). Given one, stdin isn't read.
 
@@ -214,7 +214,7 @@ The expression is Cypher. It's evaluated by running `RETURN expression` on the s
 
 **Stopping.** By default, the CLI stops at the first statement or command that fails. With `--continue`, it runs everything and reports each failure as it comes.
 
-**A failure inside a transaction**, with `--continue`: a statement that fails between `:begin` and `:commit`, or a `:param` whose expression fails there, rolls the transaction back and closes it, since a store's transaction may be unusable after a failed statement, as Postgres's is. The statements after it run on their own, each in its own transaction, so the `:commit` that would have ended it fails, as no transaction is open. A command that fails there without reaching the store, as `:nope`, `:params all` or a `:source` of a file that can't be read does, leaves the transaction open: an unknown command and such a `:source`, which [Files](#files) says fail as a statement does, fail so in what they print and in their exit code, not in this. Without `--continue`, the first failure stops the run, and the transaction is rolled back, as at an input's end. FalkorDB opens no transaction, so none of this applies there.
+**A failure inside a transaction**, with `--continue`: a statement that fails between `:begin` and `:commit`, or a `:param` whose expression fails there, rolls the transaction back and closes it, since a store's transaction may be unusable after a failed statement, as Postgres's is. The statements after it run on their own, each in its own transaction, so the `:commit` that would have ended it fails, as no transaction is open. A command that fails there without reaching the store, as `:nope`, a second `:begin` or a `:source` of a file that can't be read does, leaves the transaction open: an unknown command and such a `:source`, which [Files](#files) says fail as a statement does, fail so in what they print and in their exit code, not in this. Without `--continue`, the first failure stops the run, and the transaction is rolled back, as at an input's end. FalkorDB opens no transaction, so none of this applies there.
 
 | Exit code | When |
 |---|---|
