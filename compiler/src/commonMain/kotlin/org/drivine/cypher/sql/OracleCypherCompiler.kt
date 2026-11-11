@@ -347,6 +347,17 @@ class OracleCypherCompiler(
     private var readsCompared = false
 
     /**
+     * Whether an item of a list is read by its place, a path's `$i` passed in (see [element]): the statement is then not
+     * rewritten by Oracle's JSON table transformation (see [planned]), which read the item, its kind and the list's size
+     * from a stored column by one `JSON_TABLE` and lost the value passed in: `MATCH (n:Kept) RETURN labels(n)[0]` was
+     * null, and so was `WITH labels(n) AS ls RETURN ls[0]` and `labels(n)[$i]`, where `head(labels(n))`, of a path with
+     * no variable, and `labels(n)[-1]`, whose index was bound apart, gave the label (drivine4j#784). Seen on Oracle 23.26
+     * (gvenzl/oracle-free 23); the hint, or the column taken out as JSON first, gave the label. Only a query that reads the
+     * graph's tables is hinted so: one that reads none has no stored column to lose it from.
+     */
+    private var readsByPlace = false
+
+    /**
      * Whether two values are compared as JSON, as [jsonEquals] and [ordered] compared them before #389: in a statement that
      * writes and in the step of a `reduce()`, which run as PL/SQL. There a CLOB read from an unwound row's JSON closed the
      * session (ORA-03113), where the JSON was refused (ORA-40180) and the session stayed open: `UNWIND $items AS t MERGE (n {a:
@@ -784,8 +795,12 @@ class OracleCypherCompiler(
         return doubled
     }
 
-    /** Counted from the end where negative: a JSON path counts from the start. Read as [listItem] reads an item. */
+    /**
+     * Counted from the end where negative: a JSON path counts from the start. Read as [listItem] reads an item. The
+     * statement is then not rewritten by Oracle's JSON table transformation (see [readsByPlace]).
+     */
     override fun element(json: String, index: String) = shared(json, index) { (list, i) ->
+        readsByPlace = true
         val at = "JSON_VALUE($i, '$' RETURNING NUMBER)"
         listItem(list, "'\$[\$i]'", " PASSING CASE WHEN $at < 0 THEN JSON_VALUE($list, '\$.size()' RETURNING NUMBER) + $at ELSE $at END AS \"i\"")
     }
@@ -1579,7 +1594,8 @@ class OracleCypherCompiler(
      * `MATCH (a:N1), (b:N2) RETURN a.n + b.n` gave a row for each two nodes, and so did `a.n - a.m`, `toUpper(a.s),
      * size(a.s)` and `a.l + b.l`. Seen on Oracle 23.26.3 (gvenzl/oracle-free 23). The hint is the statement's, whichever
      * query of it holds it, so the outermost one holds it. A query of one table reads as it did, none lost a test, but where
-     * a comparison reads a property by its own path (see [readsCompared]).
+     * a comparison reads a property by its own path (see [readsCompared]), or an item of a list is read by its place (see
+     * [readsByPlace]).
      *
      * A query that tests a node's labels as [keyedLabels] writes them, to read it by its key, is planned without statistics
      * feedback (`OPT_PARAM('_optimizer_use_feedback' 'false')`, [NO_FEEDBACK]). Oracle (23.26) estimates one row from the
@@ -1595,7 +1611,7 @@ class OracleCypherCompiler(
     override fun planned(query: String): String {
         val estimated = oneRowPlanned(query)
         val hints = listOfNotNull(
-            NO_JSON_TABLE_TRANSFORM.takeIf { readsCompared || graphTable.findAll(estimated).count() >= 2 },
+            NO_JSON_TABLE_TRANSFORM.takeIf { readsCompared || graphTable.findAll(estimated).count().let { it >= 2 || readsByPlace && it == 1 } },
             NO_FEEDBACK.takeIf { keyed.any { it in estimated } },
         ).joinToString(" ")
         if (hints.isEmpty()) return estimated
