@@ -298,7 +298,16 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
      */
     override fun extreme(value: String, min: Boolean, key: String?): String {
         val direction = if (min) "ASC" else "DESC"
-        val order = listOfNotNull(kindOrder(value), codePointText(value).takeIf { key == null }, key ?: value).joinToString(", ") { "$it $direction" }
+        // Where the kind comes ([kindOrder], `2.1` … for a tag) and, in one text, a text by its code points and a temporal value's tag by
+        // its sort key's bytes, a text of fixed width for each kind: so a value is ordered by one text compared, and a tag not as `jsonb`
+        // compares objects of three keys, which took a third as long again over every moment of a label (#161). A duration, a number,
+        // a truth value, a list and a map are ordered then as `jsonb` orders them.
+        val ranked = if (key != null) null else shared(value) { (x) ->
+            val tag = "CASE ${tagKind(x)} ${TAG_ORDER.withIndex().joinToString(" ") { (i, kind) -> "WHEN '${kind.function}' THEN '2.${i + 1}'" }} END"
+            "(CASE jsonb_typeof($x) WHEN 'object' THEN COALESCE($tag || COALESCE(${tagKey(x)}, ''), '1') WHEN 'array' THEN '2' WHEN 'string' THEN '3' || ${textOf(x)} " +
+                "WHEN 'boolean' THEN '4' WHEN 'number' THEN '5' END) COLLATE \"C\""
+        }
+        val order = (if (ranked != null) listOf(ranked, value) else listOfNotNull(kindOrder(value), key)).joinToString(", ") { "$it $direction" }
         return "(array_agg($value ORDER BY $order) FILTER (WHERE COALESCE(jsonb_typeof($value), 'null') <> 'null'))[1]"
     }
 

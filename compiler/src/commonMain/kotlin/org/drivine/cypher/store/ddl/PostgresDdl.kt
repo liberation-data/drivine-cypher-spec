@@ -1,6 +1,10 @@
 package org.drivine.cypher.store.ddl
 
 import org.drivine.DrivineInternalApi
+import org.drivine.cypher.sql.Temporals.Companion.NANOS
+import org.drivine.cypher.sql.Temporals.Companion.OFFSET_BIAS
+import org.drivine.cypher.sql.Temporals.Companion.TIME_BIAS
+import org.drivine.cypher.sql.Temporals.Companion.YEAR_BIAS
 import org.drivine.cypher.store.PostgresSql
 import org.drivine.cypher.store.PostgresSql.hasLabel
 import org.drivine.schema.ConstraintSpec
@@ -102,16 +106,97 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
 
     /**
      * Makes [temporalKey]: the sort key `s` of the canonical text `t` of a temporal value of the kind `k`, its word, as
-     * `Temporals.key` works it out in Kotlin, by the text and integer arithmetic of `Temporals.sortKey`; null for a duration
-     * and for null. A SQL function, immutable, which Postgres writes out where it is called, so it costs nothing to run;
-     * compiled Cypher calls it where it makes a temporal value as it runs. Never in an index's expression.
+     * `Temporals.key` works it out in Kotlin, by text and integer arithmetic on the text alone; null for a duration and for
+     * null. PL/pgSQL, which reads each part of the text once into a variable: a SQL function written out where it is called
+     * reads each part again wherever it is used, and a zoned moment's key, its UTC day and clock, cost some ten times as much
+     * (#161). Compiled Cypher calls it where a temporal value it makes as it runs is compared, sorted or leaves the expression
+     * it is made in. Never in an index's expression. Its body is a text in quotes, not dollars, so the block [ensuring] makes
+     * the store in reads it as one statement.
      */
-    private fun temporalKeyFunction(): String {
-        val inline: (List<String>, (List<String>) -> String) -> String = { values, body -> body(values) }
-        val temporals = org.drivine.cypher.sql.Temporals(org.drivine.cypher.sql.PostgresTemporalSql(inline), inline)
-        val kinds = org.drivine.cypher.sql.Temporal.instants.joinToString("\n") { "        WHEN '${it.function}' THEN ${temporals.sortKey("t", it)}" }
-        return "CREATE OR REPLACE FUNCTION ${temporalKeyName(name)}(k text, t text) RETURNS text LANGUAGE sql IMMUTABLE PARALLEL SAFE AS ${'$'}fn${'$'}\n" +
-            "    SELECT CASE k\n$kinds\n    END\n${'$'}fn${'$'}"
+    private fun temporalKeyFunction(): String = """
+        CREATE OR REPLACE FUNCTION ${temporalKeyName(name)}(k text, t text) RETURNS text LANGUAGE plpgsql IMMUTABLE PARALLEL SAFE AS '
+        DECLARE
+            n int := length(t);
+            zone int := 0;
+            o int := 0;
+            p int := 0;
+            y bigint;
+            m int;
+            d int;
+            u bigint;
+            f text;
+            days int;
+        BEGIN
+            IF k IS NULL OR t IS NULL OR k NOT IN ('date', 'localtime', 'time', 'localdatetime', 'datetime') THEN
+                RETURN NULL;
+            END IF;
+            -- A zoned text, its offset, in seconds, and how long its text is: Z, or +hh:mm.
+            IF k IN ('time', 'datetime') THEN
+                IF substr(t, n, 1) = 'Z' THEN
+                    zone := 1;
+                ELSE
+                    zone := 6;
+                    o := CASE WHEN substr(t, n - 5, 1) = '-' THEN -1 ELSE 1 END * (CAST(substr(t, n - 4, 2) AS int) * 3600 + CAST(substr(t, n - 1, 2) AS int) * 60);
+                END IF;
+            END IF;
+            -- The day, where the kind has one: the year is all before the month, signed past 9999 and before 0.
+            IF k IN ('date', 'localdatetime', 'datetime') THEN
+                p := CASE WHEN k = 'date' THEN n + 1 ELSE strpos(t, 'T') END;
+                y := CAST(substr(t, 1, p - 7) AS bigint);
+                m := CAST(substr(t, p - 5, 2) AS int);
+                d := CAST(substr(t, p - 2, 2) AS int);
+                IF k = 'date' THEN
+                    RETURN lpad(CAST(y + $YEAR_BIAS AS text), 10, '0') || lpad(CAST(m AS text), 2, '0') || lpad(CAST(d AS text), 2, '0');
+                END IF;
+            END IF;
+            -- The clock from the character after the day's T, in seconds, and the nine digits of its fraction.
+            u := CAST(substr(t, p + 1, 2) AS int) * 3600 + CAST(substr(t, p + 4, 2) AS int) * 60 + CAST(substr(t, p + 7, 2) AS int);
+            f := substr(CASE WHEN n - zone - p > 9 THEN substr(t, p + 10, n - zone - p - 9) ELSE '' END || '000000000', 1, 9);
+            IF k = 'localtime' THEN
+                RETURN lpad(CAST(u * $NANOS + CAST(f AS bigint) AS text), 14, '0');
+            ELSIF k = 'time' THEN
+                RETURN lpad(CAST((u - o) * $NANOS + CAST(f AS bigint) + $TIME_BIAS AS text), 15, '0') || lpad(CAST(o + $OFFSET_BIAS AS text), 6, '0');
+            ELSIF k = 'localdatetime' THEN
+                RETURN lpad(CAST(y + $YEAR_BIAS AS text), 10, '0') || lpad(CAST(m AS text), 2, '0') || lpad(CAST(d AS text), 2, '0') ||
+                    substr(t, p + 1, 2) || substr(t, p + 4, 2) || substr(t, p + 7, 2) || f;
+            END IF;
+            -- A moment by its UTC day and clock, a day before or after its own where the offset carries it past midnight.
+            u := u - o;
+            IF u < 0 THEN
+                u := u + 86400;
+                IF d > 1 THEN
+                    d := d - 1;
+                ELSIF m > 1 THEN
+                    m := m - 1;
+                    d := CASE WHEN m IN (4, 6, 9, 11) THEN 30 WHEN m = 2 THEN CASE WHEN y % 4 = 0 AND (y % 100 <> 0 OR y % 400 = 0) THEN 29 ELSE 28 END ELSE 31 END;
+                ELSE
+                    y := y - 1;
+                    m := 12;
+                    d := 31;
+                END IF;
+            ELSIF u >= 86400 THEN
+                u := u - 86400;
+                -- The days of its month, worked out before the test: an IF reads its condition up to the first THEN.
+                days := CASE WHEN m IN (4, 6, 9, 11) THEN 30 WHEN m = 2 THEN CASE WHEN y % 4 = 0 AND (y % 100 <> 0 OR y % 400 = 0) THEN 29 ELSE 28 END ELSE 31 END;
+                IF d < days THEN
+                    d := d + 1;
+                ELSIF m < 12 THEN
+                    m := m + 1;
+                    d := 1;
+                ELSE
+                    y := y + 1;
+                    m := 1;
+                    d := 1;
+                END IF;
+            END IF;
+            RETURN lpad(CAST(y + $YEAR_BIAS AS text), 10, '0') || lpad(CAST(m AS text), 2, '0') || lpad(CAST(d AS text), 2, '0') ||
+                lpad(CAST(u / 3600 AS text), 2, '0') || lpad(CAST(u % 3600 / 60 AS text), 2, '0') || lpad(CAST(u % 60 AS text), 2, '0') || f ||
+                lpad(CAST(o + $OFFSET_BIAS AS text), 6, '0');
+        END
+        '
+    """.trimIndent().let { function ->
+        val (start, end) = function.indexOf("AS '\n") + 5 to function.lastIndexOf("\n'")
+        function.substring(0, start) + function.substring(start, end).replace("'", "''") + function.substring(end)
     }
 
     /**

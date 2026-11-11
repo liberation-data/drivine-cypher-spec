@@ -600,6 +600,17 @@ class OracleCypherCompiler(
      * written, for each label [indexedProperties] says has an index over the property: on a node with the label and the
      * property they are the same value, and Oracle reads through whichever index is there. Null where it names no such label.
      */
+    /** A temporal value the statement works out: the labelled indexes' class and key columns beside its kind's word and its key. */
+    override fun indexedTagEquality(property: String, kind: Temporal, key: String, of: IndexedProperty?): String? {
+        if (of == null || of.labels.isEmpty() || !of.props.endsWith(".props")) return null
+        val alias = of.props.removeSuffix(".props")
+        val indexed = of.labels.filter { (it to of.key) in indexedProperties }.ifEmpty { return null }
+        val held = listOf("'${kind.function}'", if (binds(key)) "(SELECT $key FROM dual)" else key)
+        return indexed.joinToString(" AND ") { label ->
+            (OracleSql.labelledIndex(alias, label, of.key) + OracleSql.uniqueIndex(alias, label, listOf(of.key), of.key)).zip(held + held).joinToString(" AND ") { (column, it) -> "$column = $it" }
+        }
+    }
+
     private fun labelledEquals(of: IndexedProperty?, value: String): String? {
         if (of == null || of.labels.isEmpty() || !of.props.endsWith(".props")) return null
         val alias = of.props.removeSuffix(".props")
@@ -1558,7 +1569,12 @@ class OracleCypherCompiler(
             "FROM (SELECT LEVEL n FROM DUAL CONNECT BY LEVEL <= GREATEST($count, 1)) r WHERE r.n <= $count)"
     }
 
-    override val temporalSql = OracleTemporalSql(sharedList, { procedural }, if (eraStored) graph else null) { callsStoredEra = true }
+    override val temporalSql = OracleTemporalSql(sharedList, { procedural }, if (eraStored) graph else null, { callsStoredEra = true }) {
+        if (procedural || folding) null else TEMPORAL_KEY
+    }
+
+    /** The query's own [TEMPORAL_KEY], where it calls it: see [OracleTemporalSql.storedKeyOf]. */
+    override fun calledFunctions(sql: String) = if (sql.contains("$TEMPORAL_KEY(")) listOf(temporalKeyFunction(TEMPORAL_KEY)) else emptyList()
 
     /**
      * Oracle merges a view of no table into the subquery that reads it, and where that subquery is bound in
@@ -2134,6 +2150,9 @@ class OracleCypherCompiler(
 
         /** The function a query declares that compares two values that may hold a null, where the store keeps none: see [nullsEqual]. */
         private const val NULLS_EQUAL = "cy_nulls_equal"
+
+        /** The name a query that works out a temporal value's sort key, on a store that keeps no function for it, declares its own by. */
+        private const val TEMPORAL_KEY = "cy_temporal_key"
 
         /** The function a query declares that compares two lists as Cypher orders them: see [listOrder]. */
         private const val LIST_ORDER = "cy_list_order"

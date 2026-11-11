@@ -10,12 +10,15 @@ package org.drivine.cypher.sql
  * @param storedEra the graph whose store keeps the functions [era] and [date] call (see `OracleCypherCompiler.eraFunction`),
  * or null where it may keep none: then each renumbers a year BC inline
  * @param callsStored called where [era] or [date] calls one of the store's functions
+ * @param declaredKey where the store keeps no [storedKey] function, the name of one the query declares for itself, declared
+ * by the call; null where it may declare none, in a block or a reduce()'s step, and the key is written inline
  */
 class OracleTemporalSql(
     shared: (List<String>, (List<String>) -> String) -> String,
     private val procedural: () -> Boolean,
     storedEra: String? = null,
     private val callsStored: () -> Unit = {},
+    private val declaredKey: () -> String? = { null },
 ) : TemporalSql(shared) {
 
     /** The store's function [era] calls, where it keeps one. */
@@ -95,7 +98,13 @@ class OracleTemporalSql(
     /** The store's [OracleCypherCompiler.temporalKeyFunction], where it keeps the era's functions: the inline SQL is long. */
     override fun storedKey(text: String, kind: Temporal): String? = storedKeyOf(text, "'${kind.function}'")
 
-    override fun storedKeyOf(text: String, kind: String): String? = storedTemporalKey?.let { callsStored(); "$it($kind, $text)" }
+    /**
+     * Where the store keeps none, the query's own copy of it, declared before the query as `WITH FUNCTION`, which takes no
+     * privilege to make: written inline, Oracle took minutes to plan a statement that worked out a key of a sum of a kind it
+     * reads from the store (#161).
+     */
+    override fun storedKeyOf(text: String, kind: String): String? =
+        storedTemporalKey?.let { callsStored(); "$it($kind, $text)" } ?: declaredKey()?.let { "$it($kind, $text)" }
 
     override fun integer(text: String) = "TO_NUMBER($text)"
 

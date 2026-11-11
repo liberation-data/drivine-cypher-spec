@@ -87,6 +87,14 @@ sealed interface Value {
         val tagText: String? = null,
         /** As [tagText], the SQL of the tag's sort key `s`: null where it has none, a duration's. */
         val tagKey: String? = null,
+        /**
+         * Where the statement works it out as it runs, a temporal value or one that may be, the SQL of it in flight: its tags with
+         * their kind and text alone, `{"$t", "v"}`, no sort key. [sql] is the same value with each such tag's key added, as it
+         * leaves the scalar expression it is made in, so a value written, put in a list or a map, compared as JSON, grouped or
+         * returned is whole; an expression that only reads its kind and text, a sum, a field or a conversion, reads this, and a
+         * comparison or an order reads the key worked out of the text where it has none (see `SqlCypherCompiler.keyOf`).
+         */
+        val inflight: String? = null,
     ) : Value
 
     /** A kind of value the statement writes: see [Json.known]. [noun] names a value of it, as a message does. */

@@ -91,9 +91,17 @@ abstract class SqlCypherCompiler(
         if (function !in functions) functions += function
     }
 
+    /**
+     * The functions the query [sql] calls by name that it declares only where it calls them: written into SQL that may be left
+     * out, they are declared once the query is whole. None here.
+     */
+    protected open fun calledFunctions(sql: String): List<String> = emptyList()
+
     /** [compiled] with the functions it calls declared before it. */
-    private fun withFunctions(compiled: CompiledCypher): CompiledCypher =
-        if (functions.isEmpty()) compiled else compiled.copy(sql = "WITH\n${functions.joinToString("\n")}\n${compiled.sql}")
+    private fun withFunctions(compiled: CompiledCypher): CompiledCypher {
+        val all = functions + calledFunctions(compiled.sql).filter { it !in functions }
+        return if (all.isEmpty()) compiled else compiled.copy(sql = "WITH\n${all.joinToString("\n")}\n${compiled.sql}")
+    }
 
     /** The query [query], a statement of its own that opens with `SELECT`, with what the store's planner is told of it: nothing here. */
     protected open fun planned(query: String): String = query
@@ -516,8 +524,32 @@ abstract class SqlCypherCompiler(
                 listOfNotNull(temporals.sortKey(t, kind)?.let { ValueLayout.KEY to scalar(it) })
             "CASE WHEN $t IS NOT NULL THEN ${tagObject(entries)} END"
         }
-        return Value.Json(sql, temporal = kind, tagText = text, tagKey = key)
+        val inflight = shared(text) { (t) ->
+            "CASE WHEN $t IS NOT NULL THEN ${tagObject(listOf(ValueLayout.KIND to literalJson(ValueLayout.word(kind)), ValueLayout.TEXT to scalar(t)))} END"
+        }
+        return Value.Json(sql, temporal = kind, tagText = text, tagKey = key, inflight = inflight)
     }
+
+    /** As [taggedOf], in flight: the tag's kind and text alone, its key left to be worked out where it leaves (see [Value.Json.inflight]). */
+    protected fun inflightOf(kind: String, text: String): String = shared(kind, text) { (k, t) ->
+        "CASE WHEN $t IS NOT NULL THEN ${tagObject(listOf(ValueLayout.KIND to scalar(k), ValueLayout.TEXT to scalar(t)))} END"
+    }
+
+    /**
+     * The JSON [json], a value in flight, whole: where it is a temporal value's tag with no sort key, not a duration's, the same
+     * tag with its key, worked out of its text; else [json] as it is. A tag in flight is never inside a list or a map, which
+     * take each item whole, so this looks at [json] alone.
+     */
+    protected fun completed(json: String): String = shared(json) { (j) ->
+        "CASE WHEN ${tagKind(j)} IS NOT NULL AND ${tagKind(j)} <> '${Temporal.DURATION.function}' AND ${tagKey(j)} IS NULL " +
+            "THEN ${taggedOf(tagKind(j), tagText(j))} ELSE $j END"
+    }
+
+    /** The sort key of the JSON [json], a tag that may be in flight: its key `s`, or where it has none, the key of its text. */
+    protected fun keyOf(json: String): String = "COALESCE(${tagKey(json)}, ${temporals.sortKeyOf(tagText(json), tagKind(json))})"
+
+    /** [value] in flight, where the statement works it out as it runs (see [Value.Json.inflight]); else [value]. */
+    protected fun inFlight(value: Value.Json): Value.Json = value.inflight?.let { value.copy(sql = it, inflight = null) } ?: value
 
     /**
      * The tag of the temporal value whose kind's word the SQL [kind] gives and whose canonical text the SQL [text] gives, as the
@@ -532,11 +564,13 @@ abstract class SqlCypherCompiler(
     protected fun taggedLiteral(kind: Temporal, canonical: String): Value.Json =
         Value.Json(literalJson(ValueLayout.tag(kind, canonical)), temporal = kind, tagText = textLiteralOf(canonical), tagKey = Temporals.key(kind, canonical)?.let(::textLiteralOf))
 
-    /** The text `v` of [value], a temporal value of a kind the statement makes it. */
-    protected fun tagTextOf(value: Value.Json): String = value.tagText ?: tagText(comparable(value))
+    /** The text `v` of [value], a temporal value of a kind the statement makes it: read in flight, where it is carried so. */
+    protected fun tagTextOf(value: Value.Json): String = value.tagText ?: tagText(comparable(inFlight(value)))
 
-    /** The sort key `s` of [value], a temporal value of a kind the statement makes it, not a duration. */
-    protected fun tagKeyOf(value: Value.Json): String = value.tagKey ?: tagKey(comparable(value))
+    /** The sort key `s` of [value], a temporal value of a kind the statement makes it, not a duration: of its text, in flight. */
+    protected fun tagKeyOf(value: Value.Json): String =
+        value.tagKey ?: if (value.inflight == null) tagKey(comparable(value))
+        else value.temporal?.let { kind -> temporals.sortKey(tagText(comparable(inFlight(value))), kind) } ?: keyOf(comparable(inFlight(value)))
 
     /** The SQL number [sql] as a floating-point number. */
     protected abstract fun float(sql: String): String
@@ -622,6 +656,13 @@ abstract class SqlCypherCompiler(
      * differs where its JSON doesn't (`1` and `1.0`). Null where the store has none (#617).
      */
     protected open fun indexedEqualityOfAny(property: String, value: String, of: IndexedProperty? = null, scalar: Boolean = false): String? = null
+
+    /**
+     * As [indexedEquality], for a temporal value of [kind] the statement works out, whose sort key the SQL [key] gives: the
+     * index's class of the property is the kind's word and its key that key, each tested on its own, so a value worked out of
+     * values written and given alone is worked out once and the index read for it (#161). Null where the store has none.
+     */
+    protected open fun indexedTagEquality(property: String, kind: Temporal, key: String, of: IndexedProperty? = null): String? = null
 
     /**
      * Whether the store's index holds the value [given], a text or a truth value, as a text a test of [indexedEquality] finds:
@@ -1692,7 +1733,7 @@ abstract class SqlCypherCompiler(
             projected.scope.forEach { (variable, value) ->
                 val returned = value.laterally(name, projected.columns)
                 // A value taken from a write's row is null where an OPTIONAL CALL finds nothing: it is read as the call returns it (#336).
-                select.bind(variable, if (call.optional && returned is Value.Json) returned.copy(rowKeys = null, tagText = null, tagKey = null) else returned)
+                select.bind(variable, if (call.optional && returned is Value.Json) returned.copy(rowKeys = null, tagText = null, tagKey = null, inflight = null) else returned)
             }
             projected.order.forEach { (column, descending) -> select.order += lateralColumn(name, column, json = false) to descending }
         }
@@ -1838,9 +1879,12 @@ abstract class SqlCypherCompiler(
                         PENDING_COLUMN.find(value.sql)?.groupValues?.get(1)?.let { column -> "${column}_identity" to (column to value) }
                     }
                 }.toMap()
+                // A value a query carries in flight is made whole as it leaves it, so the parts' rows compare and read alike.
+                val inflight = part.scope.values.mapNotNull { value -> (value as? Value.Json)?.inflight?.let { PENDING_COLUMN.find(it)?.groupValues?.get(1) } }.toSet()
                 val columns = returned(part).flatMap { (column, _) ->
                     val valuedAs = valued[column]?.let { (named, value) -> "${comparable(Value.Json("$q.$named", ordered = value.ordered))} AS $column" }
-                    listOf(valuedAs ?: if (column in unordered) "${orderedJson("$q.$column")} AS $column" else "$q.$column") +
+                    val whole = if (column in inflight) "${completed("$q.$column")} AS $column" else null
+                    listOf(valuedAs ?: whole ?: if (column in unordered) "${orderedJson("$q.$column")} AS $column" else "$q.$column") +
                         listOfNotNull(plain[column]?.let { "${comparable(Value.Json("$q.$column", ordered = it.ordered))} AS ${column}_identity" })
                 }.joinToString(", ")
                 "SELECT $columns FROM (\n${indent(part.sql)}\n) $q"
@@ -3187,8 +3231,8 @@ abstract class SqlCypherCompiler(
          */
         private fun compared(value: Value): Value = when {
             value !is Value.Json -> value
-            value.jsonNull -> comparable(value).let { value.copy(sql = if (distinctParts) comparedNull(it) else groupedNull(it), ordered = false) }
-            value.ordered -> value.copy(sql = comparable(value), ordered = false)
+            value.jsonNull -> comparable(value).let { value.copy(sql = if (distinctParts) comparedNull(it) else groupedNull(it), ordered = false, inflight = null) }
+            value.ordered -> value.copy(sql = comparable(value), ordered = false, inflight = null)
             else -> value
         }
 
@@ -3495,8 +3539,9 @@ abstract class SqlCypherCompiler(
          */
         private fun heldFirst(select: Select, projection: Projection, items: List<Projection.Item>): Pair<Select, Projection>? {
             if (items.none { contains(it.expression, ::isAggregate) }) return null
+            // A variable is held already: one a WITH carries in flight is grouped by its column, though it is read whole.
             val held = items.filter { item ->
-                !contains(item.expression, ::isAggregate) && (
+                item.expression !is Expression.Variable && !contains(item.expression, ::isAggregate) && (
                     contains(item.expression) { it is Expression.Parameter } ||
                         compared(expression(item.expression, select.scope)).groupKeys().any { it.contains("SELECT", ignoreCase = true) }
                     )
@@ -4453,7 +4498,7 @@ abstract class SqlCypherCompiler(
                 return Value.Json(scalar(field.sql))
             }
             // A temporal value's tag by the kind it names; any other map by its entry.
-            return Value.Json(shared(comparable(subject)) { (x) ->
+            return Value.Json(shared(comparable(inFlight(subject))) { (x) ->
                 val kinds = Temporal.entries.filter { temporals.field("NULL", it, key) != null }
                 val read = temporals.byTag(tagKind(x), tagText(x), kinds) { kind, t -> scalar(temporals.field(t, kind, key)!!.sql) }
                 "CASE WHEN ${tagKind(x)} IS NOT NULL THEN $read ELSE ${mapProperty(subject, x, key)} END"
@@ -4492,34 +4537,46 @@ abstract class SqlCypherCompiler(
             return when (operator) {
                 Operator.ADD, Operator.SUBTRACT -> {
                     val sign = if (operator == Operator.ADD) 1 else -1
+                    // Each side in flight, where the statement works it out: a sum reads only its kind and text.
+                    val (flightA, flightB) = listOf(left, right).map { comparable(inFlight(json(it))) }
+                    fun whole(json: String, side: Value) = if ((side as? Value.Json)?.inflight != null) completed(json) else json
                     // A side read from the store: [temporal] of the two, the tag of the kind it names, null where neither is a tag of
                     // a kind it reads; then, in an addition, the two added as any two values are, as Cypher adds a temporal value to a
-                    // list. Bound as a sum's sides are, so a stored text past 32 KB beside a long duration leaves Oracle's session
-                    // open (#370).
-                    fun read(kind: Temporal?, temporal: (String, String) -> String) = Value.Json(sharedSum(jsonA, jsonB) { (x, y) ->
-                        val value = temporal(x, y)
-                        if (sign > 0) "COALESCE($value, ${addTagged(x, left, y, right, false, false) { p, q -> add(p, q) }})" else value
-                    }, temporal = kind)
+                    // list, each whole, for the sum may be a list that holds it. Where the other side is a duration, a side that
+                    // reaches that sum is no tag, which [temporal] would have added the duration to, and is taken as it is. Bound as a
+                    // sum's sides are, so a stored text past 32 KB beside a long duration leaves Oracle's session open (#370). The
+                    // sum is in flight: whole, its key is worked out once, where it leaves the expression.
+                    // Whole, the sum is the same SQL with its tag's key worked out where it is made, not of a value worked out
+                    // before it and bound in a subquery of its own, which Oracle took minutes to plan.
+                    fun read(kind: Temporal?, byDuration: Boolean = false, temporal: (String, String, Boolean) -> String): Value.Json {
+                        fun sum(whole: Boolean) = sharedSum(flightA, flightB) { (x, y) ->
+                            val value = temporal(x, y, whole)
+                            val (p, q) = if (byDuration) x to y else whole(x, left) to whole(y, right)
+                            if (sign > 0) "COALESCE($value, ${addTagged(p, left, q, right, false, false) { m, n -> add(m, n) }})" else value
+                        }
+                        return Value.Json(sum(whole = true), temporal = kind, inflight = sum(whole = false))
+                    }
                     fun v(json: String, side: Int) = known[side]?.let(::tagTextOf) ?: tagText(json)
                     fun isDuration(json: String) = "${tagKind(json)} = '${duration.function}'"
                     // The value of the kind a stored tag names [x], with the duration [d], a tag's text, added or taken away.
-                    fun addTo(x: String, d: String, sign: Int) = taggedOf(tagKind(x), temporals.byTag(tagKind(x), tagText(x), Temporal.instants + duration) { kind, t ->
+                    fun addTo(x: String, d: String, sign: Int, whole: Boolean) = temporals.byTag(tagKind(x), tagText(x), Temporal.instants + duration) { kind, t ->
                         if (kind == duration) temporals.sum(t, d, sign) else temporals.add(t, kind, d, sign)
-                    })
+                    }.let { text -> if (whole) taggedOf(tagKind(x), text) else inflightOf(tagKind(x), text) }
+                    fun Value.Json.of(whole: Boolean) = if (whole) sql else inflight!!
                     when {
                         l == duration && r == duration -> tagged(duration, temporals.sum(a, b, sign))
                         l != null && l.instant && r == duration -> tagged(l, temporals.add(a, l, b, sign))
                         l == duration && r != null && r.instant && sign > 0 -> tagged(r, temporals.add(b, r, a, 1))
                         // A value read from the store, its kind named by its tag, and a duration the statement gives.
-                        l == null && r == duration -> read(null) { x, y -> addTo(x, v(y, 1), sign) }
-                        l == duration && r == null && sign > 0 -> read(null) { x, y -> addTo(y, v(x, 0), 1) }
+                        l == null && r == duration -> read(null, byDuration = true) { x, y, whole -> addTo(x, v(y, 1), sign, whole) }
+                        l == duration && r == null && sign > 0 -> read(null, byDuration = true) { x, y, whole -> addTo(y, v(x, 0), 1, whole) }
                         // A duration read from the store, taken from a duration or added to a moment the statement gives. A sum is of
                         // no kind, for what is read may be a list, which the moment is added to as any value is.
-                        l == duration && r == null -> read(duration) { x, y -> "CASE WHEN ${isDuration(y)} THEN ${tagged(duration, temporals.sum(v(x, 0), tagText(y), sign)).sql} END" }
+                        l == duration && r == null -> read(duration) { x, y, whole -> "CASE WHEN ${isDuration(y)} THEN ${tagged(duration, temporals.sum(v(x, 0), tagText(y), sign)).of(whole)} END" }
                         l != null && l.instant && r == null ->
-                            read(l.takeIf { sign < 0 }) { x, y -> "CASE WHEN ${isDuration(y)} THEN ${tagged(l, temporals.add(v(x, 0), l, tagText(y), sign)).sql} END" }
+                            read(l.takeIf { sign < 0 }) { x, y, whole -> "CASE WHEN ${isDuration(y)} THEN ${tagged(l, temporals.add(v(x, 0), l, tagText(y), sign)).of(whole)} END" }
                         l == null && r != null && r.instant && sign > 0 ->
-                            read(null) { x, y -> "CASE WHEN ${isDuration(x)} THEN ${tagged(r, temporals.add(v(y, 1), r, tagText(x), 1)).sql} END" }
+                            read(null) { x, y, whole -> "CASE WHEN ${isDuration(x)} THEN ${tagged(r, temporals.add(v(y, 1), r, tagText(x), 1)).of(whole)} END" }
                         else -> null
                     }
                 }
@@ -4554,11 +4611,12 @@ abstract class SqlCypherCompiler(
             val sides = listOf(left, right)
             val equality = operator == "=" || operator == "<>"
             if (kind == Temporal.DURATION && !equality) return "NULL"
+            // A side in flight is read so, by the key of its text where it has none.
             fun key(value: Value.Json, json: String) = if (kind == Temporal.DURATION) (if (value.temporal == kind) tagTextOf(value) else tagText(json))
-                else if (value.temporal == kind) tagKeyOf(value) else tagKey(json)
+                else if (value.temporal == kind) tagKeyOf(value) else if (value.inflight != null) keyOf(json) else tagKey(json)
             // Two sides the statement makes of the kind need no test of it.
             if (sides.all { it.temporal == kind }) return "${key(left, comparable(left))} $operator ${key(right, comparable(right))}"
-            return sharedCompared(comparable(left), comparable(right)) { (x, y) ->
+            return sharedCompared(comparable(inFlight(left)), comparable(inFlight(right))) { (x, y) ->
                 val open = sides.zip(listOf(x, y)).filter { (value, _) -> value.temporal != kind }
                 val ofKind = open.joinToString(" AND ") { (_, json) -> "${tagKind(json)} = '${kind.function}'" }
                 val compared = "${key(left, x)} $operator ${key(right, y)}"
@@ -4634,7 +4692,7 @@ abstract class SqlCypherCompiler(
                 given.temporal != null && (kind == Temporal.DURATION || given.temporal == Temporal.DURATION) -> Value.Json(literalJson(null))
                 given.temporal != null -> of(temporals.convert(tagTextOf(given), given.temporal, kind))
                 // A value of a kind not known here: a text read as its shape tells, or a temporal value's tag by the kind it names.
-                else -> of(shared(comparable(given)) { (x) ->
+                else -> of(shared(comparable(inFlight(given))) { (x) ->
                     val fromText = if (kind == Temporal.DURATION) temporals.duration(text(x)) else temporals.convert(text(x), kind)
                     val fromTag = if (kind == Temporal.DURATION) "CASE WHEN ${tagKind(x)} = '${kind.function}' THEN ${tagText(x)} END"
                         else temporals.byTag(tagKind(x), tagText(x)) { from, t -> temporals.convert(t, from, kind) }
@@ -4753,7 +4811,7 @@ abstract class SqlCypherCompiler(
                 if (given !is Value.Json) refused(if (given is Value.Bool) "a truth value" else "a node, a relationship or a path")
                 given.known?.let { refused(it.noun) }
                 given.temporal?.let { if (it !in kinds) refused("a ${it.function}") }
-                return Temporals.Base(if (given.temporal != null) tagTextOf(given) else tagText(comparable(given)), given.temporal?.let { listOf(it) } ?: kinds)
+                return Temporals.Base(if (given.temporal != null) tagTextOf(given) else tagText(comparable(inFlight(given))), given.temporal?.let { listOf(it) } ?: kinds)
             }
             val datetime = base("datetime", listOf(Temporal.DATE_TIME, Temporal.LOCAL_DATE_TIME))
             val date = datetime ?: base("date", listOf(Temporal.DATE_TIME, Temporal.LOCAL_DATE_TIME, Temporal.DATE))
@@ -4991,11 +5049,16 @@ abstract class SqlCypherCompiler(
                         Operator.LESS_THAN to "<", Operator.GREATER_THAN to ">", Operator.LESS_THAN_OR_EQUAL to "<=", Operator.GREATER_THAN_OR_EQUAL to ">=",
                     ).getValue(binary.operator)
                     if (listed(left, right)) Value.Bool(listCompared(left, a, right, b, operator))
-                    // Two temporal values' tags of one kind, not durations, by their sort keys, as Cypher orders them.
-                    else Value.Bool(sharedCompared(a, b) { (x, y) ->
-                        "CASE WHEN ${typeOf(x)} = ${typeOf(y)} AND ${typeOf(x)} IN ('number', 'string', 'boolean') THEN ${ordered(x, operator, y)} " +
-                            "WHEN ${tagKind(x)} = ${tagKind(y)} AND ${tagKind(x)} <> '${Temporal.DURATION.function}' THEN ${tagKey(x)} $operator ${tagKey(y)} END"
-                    })
+                    // Two temporal values' tags of one kind, not durations, by their sort keys, as Cypher orders them: a side in flight
+                    // by the key of its text, where it has none.
+                    else {
+                        val flights = listOf(left, right).map { json(it) }
+                        fun key(json: String, side: Int) = if (flights[side].inflight != null) keyOf(json) else tagKey(json)
+                        Value.Bool(sharedCompared(comparable(inFlight(flights[0])), comparable(inFlight(flights[1]))) { (x, y) ->
+                            "CASE WHEN ${typeOf(x)} = ${typeOf(y)} AND ${typeOf(x)} IN ('number', 'string', 'boolean') THEN ${ordered(x, operator, y)} " +
+                                "WHEN ${tagKind(x)} = ${tagKind(y)} AND ${tagKind(x)} <> '${Temporal.DURATION.function}' THEN ${key(x, 0)} $operator ${key(y, 1)} END"
+                        })
+                    }
                 }
                 // Two lists of nodes, or of relationships, are together a list of them.
                 Operator.ADD -> if (left is Value.Entities && right is Value.Entities && left.relationships == right.relationships) {
@@ -5106,7 +5169,7 @@ abstract class SqlCypherCompiler(
             val items = itemKind(left)
             val r = itemKind(right)
             return when {
-                l != null && untemporalItems(right, binary.right) -> (left as Value.Json).copy(sql = kinded(comparable(left), l), ordered = false, temporal = null) to right
+                l != null && untemporalItems(right, binary.right) -> (left as Value.Json).copy(sql = kinded(comparable(left), l), ordered = false, temporal = null, inflight = null) to right
                 // A list of temporal values in a list of lists of none.
                 items?.second == 1 && untemporalItems(right, binary.right, 2) -> kindedList(left as Value.Json, items) to right
                 l == null && r?.second == 1 && left is Value.Json && left.known != Value.Known.MAP && given(binary.left) !is Map<*, *> && untemporal(left, binary.left) ->
@@ -5252,6 +5315,10 @@ abstract class SqlCypherCompiler(
             val indexed = when {
                 // A number and a temporal value too, where the index holds a value's class and key (see ValueLayout).
                 given != null && (given is String || given is Boolean || given is Number || Temporal.ofValue(given) != null) && indexHolds(given) -> indexedEquality(a, b, of)
+                // A temporal value the statement works out, by its kind and its key.
+                given == null && (right as? Value.Json)?.temporal?.takeIf { it != Temporal.DURATION } != null ->
+                    (right as Value.Json).let { tag -> indexedTagEquality(a, tag.temporal!!, tagKeyOf(tag), of) }
+                        ?: if (written != null && !givenAsWritten(written)) indexedEqualityOfAny(a, b, of, true) else null
                 given == null && written != null && !givenAsWritten(written) -> indexedEqualityOfAny(a, b, of, of?.scalar == true || scalarRows)
                 else -> null
             }
@@ -5941,7 +6008,7 @@ abstract class SqlCypherCompiler(
                         ?: throw CompilerException("${function.name}() truncates to ${TemporalSql.UNITS.dropLast(1).joinToString(", ")} or ${TemporalSql.UNITS.last()}, not $unit.")
                     val known = given.temporal?.takeIf { it.instant }
                     if (known != null) tagged(to, cut(tagTextOf(given), known))
-                    else tagged(to, shared(comparable(given)) { (x) -> temporals.byTag(tagKind(x), tagText(x)) { from, t -> cut(t, from) } })
+                    else tagged(to, shared(comparable(inFlight(given))) { (x) -> temporals.byTag(tagKind(x), tagText(x)) { from, t -> cut(t, from) } })
                 }
                 "duration.between", "duration.inmonths", "duration.indays", "duration.inseconds" -> {
                     if (arguments.size != 2) throw CompilerException("${function.name}() takes two temporal values.")
@@ -5950,13 +6017,13 @@ abstract class SqlCypherCompiler(
                     // A value whose kind the statement does not make is read as the kind its tag names, and is taken to be of the other's
                     // where neither's is known: so a stored date and a stored moment are read as the first is.
                     val (fromKind, toKind) = listOf(from, to).map { side -> side.temporal?.takeIf { it.instant } }
-                    fun v(side: Value.Json, kind: Temporal?) = if (kind != null) tagTextOf(side) else tagText(comparable(side))
+                    fun v(side: Value.Json, kind: Temporal?) = if (kind != null) tagTextOf(side) else tagText(comparable(inFlight(side)))
                     val (a, b) = v(from, fromKind) to v(to, toKind)
                     val between = when {
                         fromKind != null && toKind != null -> temporals.between(a, b, fromKind, unit, toKind)
-                        fromKind != null -> shared(comparable(to)) { (y) -> temporals.byTag(tagKind(y), tagText(y)) { k, t -> temporals.between(a, t, fromKind, unit, k) } }
-                        toKind != null -> shared(comparable(from)) { (x) -> temporals.byTag(tagKind(x), tagText(x)) { k, t -> temporals.between(t, b, k, unit, toKind) } }
-                        else -> shared(b) { (y) -> shared(comparable(from)) { (x) -> temporals.byTag(tagKind(x), tagText(x)) { k, t -> temporals.between(t, y, k, unit) } } }
+                        fromKind != null -> shared(comparable(inFlight(to))) { (y) -> temporals.byTag(tagKind(y), tagText(y)) { k, t -> temporals.between(a, t, fromKind, unit, k) } }
+                        toKind != null -> shared(comparable(inFlight(from))) { (x) -> temporals.byTag(tagKind(x), tagText(x)) { k, t -> temporals.between(t, b, k, unit, toKind) } }
+                        else -> shared(b) { (y) -> shared(comparable(inFlight(from))) { (x) -> temporals.byTag(tagKind(x), tagText(x)) { k, t -> temporals.between(t, y, k, unit) } } }
                     }
                     tagged(Temporal.DURATION, between)
                 }
@@ -5966,7 +6033,8 @@ abstract class SqlCypherCompiler(
                     if (name == "tostring") textOfKind(function, one())
                     // A temporal value's text is its tag's.
                     if (name == "tostring") (one() as? Value.Json)?.takeIf { it.temporal != null }?.let { return Value.Json(scalar(tagTextOf(it)), text = true) }
-                    val argument = comparable(json(one()))
+                    // A function that gives a number, a text or a truth value of its argument, never the argument, reads it in flight.
+                    val argument = comparable(json(one()).let { if (name in READS_IN_FLIGHT) inFlight(it) else it })
                     // An item taken from a list is of the kind its items are.
                     val taken = name == "head" || name == "last"
                     val result = shared(argument) { (x) ->
@@ -6341,6 +6409,9 @@ abstract class SqlCypherCompiler(
 
         /** Stands for the name of the query a `WITH` is read from, before it is named. */
         const val PENDING = "__with__"
+
+        /** The functions that read a value without giving it on, so read it as it is in flight (see [Value.Json.inflight]). */
+        val READS_IN_FLIGHT = setOf("size", "length", "tostring", "tointeger", "tofloat", "toboolean")
 
         /** A column of the query [PENDING] stands for. */
         val PENDING_COLUMN = Regex("${PENDING}\\.(\\w+)")
@@ -7162,7 +7233,8 @@ abstract class SqlCypherCompiler(
 
     /** The select-list entries that carry this value out of a query, under [name]. */
     private fun Value.columns(name: String): List<String> = when (this) {
-        is Value.Json -> listOf("$sql AS $name") + listOfNotNull(identity?.let { "$it AS ${name}_identity" })
+        // A value in flight is carried so, and made whole where it is read whole (see [columnsOf]).
+        is Value.Json -> listOf("${inflight ?: sql} AS $name") + listOfNotNull(identity?.let { "$it AS ${name}_identity" })
         is Value.Entities -> listOf("$ids AS $name")
         is Value.Bool -> listOf("$sql AS $name")
         is Value.Node -> listOf("$nid AS ${name}_nid", "$labels AS ${name}_labels", "$props AS ${name}_props", "$stamp AS ${name}_stamp")
@@ -7179,8 +7251,13 @@ abstract class SqlCypherCompiler(
         val prefix = "$alias."
         val base = name
         return when (this) {
-            // Read from its column: the SQL a tag was made by is the query's before it, not this one's.
-            is Value.Json -> copy(sql = "$prefix$base", identity = identity?.let { "$prefix${base}_identity" }, tagText = null, tagKey = null)
+            // Read from its column: the SQL a tag was made by is the query's before it, not this one's. A value in flight is still in
+            // flight there, and whole where it is read whole: so a sum carried on and only summed again, or read for a field, is
+            // never given its key (see [Value.Json.inflight]).
+            is Value.Json -> "$prefix$base".let { column ->
+                copy(sql = if (inflight != null) completed(column) else column, identity = identity?.let { "$prefix${base}_identity" }, tagText = null, tagKey = null,
+                    inflight = inflight?.let { column })
+            }
             is Value.Entities -> Value.Entities("$prefix$base", relationships, flat = flat)
             is Value.Bool -> Value.Bool("$prefix$base")
             is Value.Node -> Value.Node("$prefix${base}_nid", "$prefix${base}_labels", "$prefix${base}_props", "$prefix${base}_stamp")
@@ -7203,7 +7280,7 @@ abstract class SqlCypherCompiler(
 
     /** This value with each piece of its SQL [transform]ed. */
     private fun Value.mapSql(transform: (String) -> String): Value = when (this) {
-        is Value.Json -> copy(sql = transform(sql), identity = identity?.let(transform), tagText = tagText?.let(transform), tagKey = tagKey?.let(transform))
+        is Value.Json -> copy(sql = transform(sql), identity = identity?.let(transform), tagText = tagText?.let(transform), tagKey = tagKey?.let(transform), inflight = inflight?.let(transform))
         is Value.Entities -> copy(ids = transform(ids), gathered = gathered?.let(transform))
         is Value.Bool -> copy(sql = transform(sql))
         is Value.Node -> Value.Node(transform(nid), transform(labels), transform(props), transform(stamp))
@@ -7221,9 +7298,12 @@ abstract class SqlCypherCompiler(
         is Value.Path -> listOf("${name}_nids" to false, "${name}_eids" to false)
     }
 
-    /** What a projection that aggregates is grouped by, to keep this value: a node by its columns. */
+    /**
+     * What a projection that aggregates is grouped by, to keep this value: a node by its columns; a value in flight as it is
+     * carried ([columns]), which keeps the groups of a whole one.
+     */
     private fun Value.groupKeys(): List<String> = when (this) {
-        is Value.Json -> listOf(sql) + listOfNotNull(identity)
+        is Value.Json -> listOf(inflight ?: sql) + listOfNotNull(identity)
         is Value.Entities -> listOf(ids)
         is Value.Bool -> listOf(sql)
         is Value.Node -> listOf(nid, labels, props, stamp)
