@@ -830,8 +830,6 @@ class OracleCypherCompiler(
         return "CASE WHEN ${kind(json)} = 'object' THEN $entry END"
     }
 
-    /** A merge of [map] over [props] that changes nothing: each of its entries is there, with an equal value. */
-
     override fun hasLabel(labels: String, label: String) = "JSON_EXISTS($labels, ${literal("\$[*]?(@ == ${OracleSql.quoted(label)})")})"
 
     /**
