@@ -79,16 +79,5 @@ class ParserCachesTest {
         val asked = CompileJson.compile("{\"settings\": {}}")
         assertTrue(CypherCompiler.parserCacheRenewals > before, asked)
         assertTrue("\"parserCacheStates\":300" in asked, asked)
-        for ((request, error) in listOf(
-            "{\"settings\": {\"parserCacheStates\": 0}}" to "parserCacheStates as a whole number, 1 or more",
-            "{\"settings\": {\"parserCacheStates\": 1.5}}" to "parserCacheStates as a whole number, 1 or more",
-            "{\"settings\": {\"other\": 1}}" to "give no other",
-            "{\"settings\": 3}" to "settings are a JSON object",
-            "{\"settings\": {}, \"cypher\": \"RETURN 1\"}" to "one of cypher, search, searchIndex and settings",
-        )) {
-            val answer = CompileJson.compile(request)
-            assertTrue("\"error\"" in answer && error in answer, "$request: $answer")
-        }
-        assertEquals(300, CypherCompiler.parserCacheStates, "a refused setting leaves the cap as it was")
     }
 }

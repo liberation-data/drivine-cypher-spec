@@ -7,6 +7,7 @@ import org.antlr.v4.kotlinruntime.atn.LexerATNSimulator
 import org.antlr.v4.kotlinruntime.atn.ParserATNSimulator
 import org.antlr.v4.kotlinruntime.atn.PredictionContextCache
 import org.antlr.v4.kotlinruntime.dfa.DFA
+import kotlin.concurrent.Volatile
 import kotlin.concurrent.atomics.AtomicInt
 import kotlin.concurrent.atomics.AtomicReference
 import kotlin.concurrent.atomics.ExperimentalAtomicApi
@@ -14,8 +15,8 @@ import kotlin.concurrent.atomics.ExperimentalAtomicApi
 /**
  * The lexer's and the parser's prediction caches, bounded (#179). ANTLR keeps what it learns of the grammar while it parses,
  * its DFA states and the prediction contexts they share, in a cache for the life of the process, which the generated
- * classes hold statically and nothing trims: it grew from 3 to 47 MB over the spec's corpus, and ran an Android app out of
- * a 48 MB heap after some 4,100 distinct statements. Here each parse is given the caches of [current], and once their DFA
+ * classes hold statically and nothing trims: it grew to 42 MB over the spec's corpus, and ran an Android app out of a 48 MB
+ * heap after some 4,100 of its requests. Here each parse is given the caches of [current], and once their DFA
  * states pass [cap] a fresh set takes their place: a parse under way keeps the set it began with, so one thread's swap is
  * no other's concern, and the set left behind is freed once its last parse ends. A fresh set costs the first statements
  * after it the predictions they learn again, as the first statements of a process pay them.
@@ -24,6 +25,8 @@ import kotlin.concurrent.atomics.ExperimentalAtomicApi
 internal object ParserCaches {
 
     /** The most DFA states the caches hold before they are made anew: [org.drivine.cypher.api.CypherCompiler.parserCacheStates]. */
+    // Volatile: set by one thread, read after every parse by any other.
+    @Volatile
     internal var cap: Int = DEFAULT_CAP
 
     /** A set of caches, the lexer's and the parser's, for the ATNs of [CypherLexer] and [CypherParser]. */
