@@ -1001,10 +1001,11 @@ internal class SchemaProgram(
     private fun mismatched(spec: SchemaItemSpec, existing: SchemaItemInfo?, form: ItemForm.Mismatch): EnsureResult.Drift {
         val (logger, what) = if (spec is ConstraintSpec) CONSTRAINT_MANAGER to "Constraint" else INDEX_MANAGER to "Index"
         val then = if (form.droppable) "Call recreate() to replace it (destructive)." else "Drop or rename it: Drivine makes the item under that name, and recreate() leaves it."
+        val stranger = if (form.droppable) "an index Drivine didn't make" else "an object Drivine didn't make"
         if (mismatchesSaid.add(form.name.uppercase())) {
             log(
                 LogLevel.WARN, logger,
-                "$what drift on ${spec.label}${spec.properties}: ${form.name}, under a name Drivine gives the ${spec.kind}, is ${form.reason}, so it is not taken as made. $then",
+                "$what drift on ${spec.label}${spec.properties}: ${form.name}, $stranger, stands under its name for the ${spec.kind}: it is ${form.reason}, so it is not taken as made. $then",
             )
         }
         return EnsureResult.Drift(existing ?: SchemaItemInfo(spec.kind, spec.label, spec.properties, form.name), spec)
@@ -1023,10 +1024,19 @@ internal class SchemaProgram(
             // One dropped already, and still there, can't be dropped.
             if (!form.droppable || !dropped.add(form.name.uppercase())) return Cleared(existing, mismatched(spec, existing, form))
             ddl(store.dropMismatched(form.name))
-            log(
-                LogLevel.INFO, if (spec is ConstraintSpec) CONSTRAINT_MANAGER else INDEX_MANAGER,
-                "Dropped $engine index ${form.name}, under a name Drivine gives ${spec.kind} on ${spec.label}${spec.properties}: it was ${form.reason}",
-            )
+            val dropped = "Dropped $engine index ${form.name}, an index Drivine didn't make under its name for ${spec.kind} on ${spec.label}${spec.properties}: it was ${form.reason}"
+            if (spec is ConstraintSpec) {
+                // The old index goes before the constraint is built, so a build the data refuses leaves no index at all:
+                // drivine-cypher-spec#135 §4 (PR E) builds the new unique index under a name of its own first, and then
+                // drops this one, and this line goes back to INFO.
+                log(
+                    LogLevel.WARN, CONSTRAINT_MANAGER,
+                    "$dropped. The old index is gone, and the constraint is made again in its place: where the data repeats a key, " +
+                        "${spec.label}${spec.properties} is left with no index until the constraint is made",
+                )
+            } else {
+                log(LogLevel.INFO, INDEX_MANAGER, dropped)
+            }
             existing = find()
         }
     }
