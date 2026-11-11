@@ -16,7 +16,9 @@ class ParserCachesTest {
 
     private val requests: List<String> by lazy {
         val spec = File(requireNotNull(javaClass.getResource("/cypher/queries.yaml")) { "No spec file cypher/queries.yaml" }.toURI()).parentFile
-        Oracle.corpusRequests(spec).filter { "\"cypher\"" in it }.shuffled(kotlin.random.Random(179)).take(2_000)
+        // Not a request whose answer embeds the moment it was compiled, which two compiles never share.
+        Oracle.corpusRequests(spec).filter { "\"cypher\"" in it && Oracle.answerUnlessClocked(it) != null }
+            .shuffled(kotlin.random.Random(179)).take(2_000)
     }
 
     @AfterTest
