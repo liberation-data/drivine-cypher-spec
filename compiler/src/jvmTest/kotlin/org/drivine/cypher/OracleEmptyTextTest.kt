@@ -10,11 +10,13 @@ import kotlin.test.assertTrue
 /**
  * On Oracle, an empty text is null as a `VARCHAR2` and as a CLOB, so `STARTS WITH`, `ENDS WITH` and `CONTAINS` gave null
  * where either text was empty, and `size('')` null (drivine4j#416). Where both reads give null, the texts' lengths, read as
- * JSON, answer as Cypher does; a text's size is 0 where both its reads are null.
+ * JSON, answer as Cypher does; a text's size is 0 where both its reads are null. A function that makes a text, and `+`,
+ * gave null where it made the empty text: where both its reads are null, it gives the empty text where each text's length
+ * is read and each number is one.
  */
 class OracleEmptyTextTest {
 
-    private fun sql(cypher: String) = OracleCypherCompiler("g").compile(cypher, mapOf("t" to "ab", "e" to "", "p" to mapOf("q" to null))).sql
+    private fun sql(cypher: String) = OracleCypherCompiler("g").compile(cypher, mapOf("t" to "ab", "e" to "", "n" to 1, "p" to mapOf("q" to null))).sql
 
     private fun length(json: String) = "CASE WHEN JSON_VALUE($json, '\$.type()') = 'string' THEN JSON_VALUE($json, '\$.length()' RETURNING NUMBER) END"
 
@@ -65,7 +67,38 @@ class OracleEmptyTextTest {
             assertTrue(sql.contains(".length()' RETURNING NUMBER") && sql.contains("THEN JSON('"), "$cypher: $sql")
         }
         for (compiler in listOf(PostgresCypherCompiler("g"), SqliteCypherCompiler("g"))) {
-            assertTrue(!compiler.compile("RETURN \$t STARTS WITH \$e", mapOf("t" to "ab", "e" to "")).sql.contains("length()"))
+            for (cypher in listOf("RETURN \$t STARTS WITH \$e", "RETURN toUpper(\$e)", "RETURN left(\$e, \$n)", "RETURN split(\$e, \$t)", "RETURN \$e + \$e")) {
+                assertTrue(!compiler.compile(cypher, mapOf("t" to "ab", "e" to "", "n" to 1)).sql.contains("length()"), cypher)
+            }
         }
+    }
+
+    @Test
+    fun `a function that makes a text gives the empty text last, where each text's length and each number's kind is read`() {
+        val e = length("JSON(\$_cy_e)")
+        val t = length("JSON(\$_cy_t)")
+        // A number is one only where it is no null, so left('', null) is still null.
+        val n = "DECODE(JSON_VALUE(JSON(\$_cy_n), '\$.type()'), 'double', 'number', 'float', 'number', JSON_VALUE(JSON(\$_cy_n), '\$.type()')) = 'number'"
+        for ((cypher, last) in listOf(
+            "RETURN toUpper(\$e)" to "CASE WHEN $e IS NOT NULL THEN JSON('\"\"') END",
+            "RETURN left(\$e, \$n)" to "CASE WHEN $e IS NOT NULL AND $n THEN JSON('\"\"') END",
+            "RETURN substring(\$e, \$n, \$n)" to "CASE WHEN $e IS NOT NULL AND $n AND $n THEN JSON('\"\"') END",
+            "RETURN replace(\$e, \$t, \$e)" to "CASE WHEN $e IS NOT NULL AND $t IS NOT NULL AND $e IS NOT NULL THEN JSON('\"\"') END",
+            // split() makes a list of the empty text, and only of an empty text.
+            "RETURN split(\$e, \$t)" to "CASE WHEN $e = 0 AND $e IS NOT NULL AND $t IS NOT NULL THEN JSON('[\"\"]') END",
+            // toString() of the empty text, and of no other kind.
+            "RETURN toString(\$e)" to "CASE WHEN JSON_VALUE(JSON(\$_cy_e), '\$.type()') = 'string' THEN JSON('\"\"') END",
+        )) {
+            val sql = sql(cypher)
+            assertTrue(sql.contains(", $last) AS c1"), "$cypher: $sql")
+        }
+    }
+
+    @Test
+    fun `two empty texts added are the empty text, tested first, and a list reversed reads no length`() {
+        assertTrue(sql("RETURN \$e + \$e").contains(
+            "CASE WHEN JSON_VALUE(JSON(\$_cy_e), '\$.length()') = 0 AND JSON_VALUE(JSON(\$_cy_e), '\$.length()') = 0 THEN JSON('\"\"') WHEN "))
+        val reversed = sql("WITH [\$t] AS l RETURN reverse(l)")
+        assertTrue(reversed.substringAfter("WHEN 'array' THEN").let { it != reversed && !it.contains("length()") }, reversed)
     }
 }
