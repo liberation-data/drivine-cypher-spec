@@ -95,6 +95,12 @@ sealed interface Value {
          * comparison or an order reads the key worked out of the text where it has none (see `SqlCypherCompiler.keyOf`).
          */
         val inflight: String? = null,
+        /**
+         * Of a list the statement writes that holds a value in flight, the same list with each such item still in flight: an
+         * `UNWIND` of it reads these, so an item only unwound and read, as `toString(x)` reads it, never has its key worked out;
+         * one compared, sorted or stored is made whole there (see [inflight]). Nothing else reads it, and it is not carried on.
+         */
+        val inflightItems: String? = null,
     ) : Value
 
     /** A kind of value the statement writes: see [Json.known]. [noun] names a value of it, as a message does. */

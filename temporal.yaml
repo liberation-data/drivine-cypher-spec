@@ -1366,6 +1366,13 @@ cases:
       - cypher: "MATCH (n:CyTemporal) UNWIND [n.next, n.d + duration('P1D')] AS x RETURN toString(x), count(*) ORDER BY toString(x)"
         only: [neo4j, sql]
         rows: [["2024-03-15", 2], ["2024-03-16", 2]]
+      - note: "Unwound and then sorted or compared, an item worked out is ordered by its key, as one stored is."
+        cypher: "MATCH (n:CyTemporal) UNWIND [n.next, n.d + duration('P1D')] AS x RETURN toString(x) ORDER BY x"
+        only: [neo4j, sql]
+        rows: ["2024-03-15", "2024-03-15", "2024-03-16", "2024-03-16"]
+      - cypher: "MATCH (n:CyTemporal) UNWIND [n.next, n.d + duration('P1D')] AS x WITH x WHERE x > date('2024-03-15') RETURN count(x)"
+        only: [neo4j, sql]
+        rows: [2]
       - cypher: "MATCH (n:CyTemporal) WITH n.id AS id, n.list AS l, [n.d + duration('P1D')] AS w, collect(n.d + duration('P1D')) AS c RETURN [id, w = l, c = l] ORDER BY id"
         only: [neo4j, sql]
         rows: [["a", true, true], ["b", true, true]]

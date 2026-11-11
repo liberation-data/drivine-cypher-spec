@@ -1742,7 +1742,7 @@ abstract class SqlCypherCompiler(
             projected.scope.forEach { (variable, value) ->
                 val returned = value.laterally(name, projected.columns)
                 // A value taken from a write's row is null where an OPTIONAL CALL finds nothing: it is read as the call returns it (#336).
-                select.bind(variable, if (call.optional && returned is Value.Json) returned.copy(rowKeys = null, tagText = null, tagKey = null, inflight = null) else returned)
+                select.bind(variable, if (call.optional && returned is Value.Json) returned.copy(rowKeys = null, tagText = null, tagKey = null, inflight = null, inflightItems = null) else returned)
             }
             projected.order.forEach { (column, descending) -> select.order += lateralColumn(name, column, json = false) to descending }
         }
@@ -1911,7 +1911,7 @@ abstract class SqlCypherCompiler(
                 val all = projected.map { it.scope.getValue(variable) as? Value.Json }
                 if (value !is Value.Json) value
                 else value.copy(
-                    ordered = all.any { it?.ordered == true },
+                    ordered = all.any { it?.ordered == true }, inflightItems = null,
                     temporal = all.map { it?.temporal }.distinct().singleOrNull(), items = all.map { it?.items }.distinct().singleOrNull(),
                     rowKeys = all.map { it?.rowKeys }.distinct().singleOrNull(), fromList = all.all { it?.fromList == true },
                     itemItems = all.map { it?.itemItems }.distinct().singleOrNull(), temporals = all.any { it?.temporals == true },
@@ -1953,8 +1953,9 @@ abstract class SqlCypherCompiler(
                 select.order += itemNo(name) to false
                 return
             }
-            // A value that is no list is one row, and null no rows, as in Cypher.
-            val items = shared(comparable(json(list))) { (x) ->
+            // A value that is no list is one row, and null no rows, as in Cypher. A list written with items in flight is unwound so.
+            val inflight = (list as? Value.Json)?.inflightItems
+            val items = shared(inflight ?: comparable(json(list))) { (x) ->
                 "CASE WHEN ${typeOf(x)} = 'array' THEN $x WHEN NOT ${isJsonNull(x)} THEN ${comparable(Value.Json(jsonArray(listOf(x)), ordered = true))} END"
             }
             select.source(elementsOf(list, items, name))
@@ -1965,7 +1966,8 @@ abstract class SqlCypherCompiler(
             select.bind(
                 unwind.variable,
                 Value.Json(
-                    item(name), temporal = itemsOf(list), items = itemItemsOf(list), entries = itemEntriesOf(list), temporals = itemTemporalsOf(list),
+                    if (inflight != null) completed(item(name)) else item(name), inflight = inflight?.let { item(name) },
+                    temporal = itemsOf(list), items = itemItemsOf(list), entries = itemEntriesOf(list), temporals = itemTemporalsOf(list),
                     list = holdsLists(list), flat = isFlat(list),
                     text = holdsTexts(list) || isText(list), fromList = true, jsonNull = !isFlat(list),
                     known = (unwind.list as? Expression.ListLiteral)?.items?.map { knownKind(it, select.scope) }?.distinct()?.singleOrNull(),
@@ -3240,8 +3242,8 @@ abstract class SqlCypherCompiler(
          */
         private fun compared(value: Value): Value = when {
             value !is Value.Json -> value
-            value.jsonNull -> comparable(value).let { value.copy(sql = if (distinctParts) comparedNull(it) else groupedNull(it), ordered = false, inflight = null) }
-            value.ordered -> value.copy(sql = comparable(value), ordered = false, inflight = null)
+            value.jsonNull -> comparable(value).let { value.copy(sql = if (distinctParts) comparedNull(it) else groupedNull(it), ordered = false, inflight = null, inflightItems = null) }
+            value.ordered -> value.copy(sql = comparable(value), ordered = false, inflight = null, inflightItems = null)
             else -> value
         }
 
@@ -3939,6 +3941,8 @@ abstract class SqlCypherCompiler(
                     else -> Value.Json(
                         jsonArray(items.map { json(it).sql }),
                         ordered = true,
+                        inflightItems = items.takeIf { all -> all.any { (it as? Value.Json)?.inflight != null } }
+                            ?.let { all -> jsonArray(all.map { json(it).let { item -> item.inflight ?: item.sql } }) },
                         items = kindOf(expression.items.zip(items)),
                         identity = identityHolding(items) { jsonArray(it) },
                         itemItems = itemKindOf(expression.items.zip(items)),
@@ -5185,7 +5189,7 @@ abstract class SqlCypherCompiler(
             val items = itemKind(left)
             val r = itemKind(right)
             return when {
-                l != null && untemporalItems(right, binary.right) -> (left as Value.Json).copy(sql = kinded(comparable(left), l), ordered = false, temporal = null, inflight = null) to right
+                l != null && untemporalItems(right, binary.right) -> (left as Value.Json).copy(sql = kinded(comparable(left), l), ordered = false, temporal = null, inflight = null, inflightItems = null) to right
                 // A list of temporal values in a list of lists of none.
                 items?.second == 1 && untemporalItems(right, binary.right, 2) -> kindedList(left as Value.Json, items) to right
                 l == null && r?.second == 1 && left is Value.Json && left.known != Value.Known.MAP && given(binary.left) !is Map<*, *> && untemporal(left, binary.left) ->
@@ -5203,6 +5207,7 @@ abstract class SqlCypherCompiler(
         /** [list], whose items, or their items, are of [kind] ([itemKind]), with each such item as a map of its kind ([ofKind]). */
         private fun kindedList(list: Value.Json, kind: Pair<Temporal, Int>): Value.Json = list.copy(
             sql = mappedItems(comparable(list), kind.second) { ofKind(it, kind.first) }, ordered = false, items = null, itemItems = null, temporals = false,
+            inflight = null, inflightItems = null,
         )
 
         /** The JSON [json], a value of [kind], as a map of its kind, `{"date": …}`: as [comparedItems] has an item beside one of another kind. */
@@ -7298,7 +7303,7 @@ abstract class SqlCypherCompiler(
             // never given its key (see [Value.Json.inflight]).
             is Value.Json -> "$prefix$base".let { column ->
                 copy(sql = if (inflight != null) completed(column) else column, identity = identity?.let { "$prefix${base}_identity" }, tagText = null, tagKey = null,
-                    inflight = inflight?.let { column })
+                    inflight = inflight?.let { column }, inflightItems = null)
             }
             is Value.Entities -> Value.Entities("$prefix$base", relationships, flat = flat)
             is Value.Bool -> Value.Bool("$prefix$base")
@@ -7322,7 +7327,7 @@ abstract class SqlCypherCompiler(
 
     /** This value with each piece of its SQL [transform]ed. */
     private fun Value.mapSql(transform: (String) -> String): Value = when (this) {
-        is Value.Json -> copy(sql = transform(sql), identity = identity?.let(transform), tagText = tagText?.let(transform), tagKey = tagKey?.let(transform), inflight = inflight?.let(transform))
+        is Value.Json -> copy(sql = transform(sql), identity = identity?.let(transform), tagText = tagText?.let(transform), tagKey = tagKey?.let(transform), inflight = inflight?.let(transform), inflightItems = inflightItems?.let(transform))
         is Value.Entities -> copy(ids = transform(ids), gathered = gathered?.let(transform))
         is Value.Bool -> copy(sql = transform(sql))
         is Value.Node -> Value.Node(transform(nid), transform(labels), transform(props), transform(stamp))
