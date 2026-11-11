@@ -642,6 +642,11 @@ cases:
     stdout: "n,t,s,q,z,l\n1,a,\"a,b\",\"say \"\"hi\"\"\",,\"[1,2]\"\n"
     exit: 0
 
+  - name: "csv writes a node and a relationship as their compact JSON, in \"…\""
+    args: ["--format", "csv", "CREATE (n:P {name: 'x'})-[r:K {w: 1}]->(:Q) RETURN n, r"]
+    stdout: "n,r\n\"{\"\"labels\"\":[\"\"P\"\"],\"\"properties\"\":{\"\"name\"\":\"\"x\"\"}}\",\"{\"\"type\"\":\"\"K\"\",\"\"properties\"\":{\"\"w\"\":1}}\"\n"
+    exit: 0
+
   - name: "csv separates results with one empty line"
     stdin: "RETURN 1 AS a;\nRETURN 2 AS b;\n"
     args: ["--format", "csv"]

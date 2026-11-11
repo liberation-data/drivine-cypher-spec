@@ -202,7 +202,7 @@ The expression is Cypher. It's evaluated by running `RETURN expression` on the s
 
 **Text and lines.** Every format writes UTF-8 and ends each line with `\n`, on Windows too.
 
-**Labels.** A node's labels print sorted, in every format, as a library's call that gives a result's typed values gives them (see `results.yaml`), so a node reads the same on every store. On a SQL store, the CLI reads a node's labels and a relationship's type along with their properties, through that call rather than `PersistenceManager.query`, which gives only the properties, and prints them as it would on Neo4j. A SQL store refuses a path (liberation-data/drivine-cypher-spec#163).
+**Labels.** A node's labels print sorted, in every format, as `results.yaml` writes them, so a node reads the same on every store. On a SQL store, the CLI reads a node's labels and a relationship's type along with their properties, through a library's call that gives a result's typed values (see `results.yaml`) rather than `PersistenceManager.query`, which gives only the properties, and prints them as it would on Neo4j. A SQL store refuses a path (liberation-data/drivine-cypher-spec#163).
 
 **`table`'s timing line**, `ready to start consuming query after N ms, results consumed after another M ms`, varies from run to run. Cases don't compare it.
 
