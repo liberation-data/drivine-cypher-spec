@@ -8,8 +8,8 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * On Oracle, a sort by a list is by a key the query's own function, `cy_list_key`, gives, then by the list as `JSON` sorts it
- * (drivine4j#205): declared once with `WITH FUNCTION`, before the statement, and not in a statement that writes, whose block
+ * On Oracle, a sort by a list is by a key the query's own function, `cy_list_key`, gives, then by the list's text, or as `JSON`
+ * sorts it where its kind is left open (drivine4j#205): the function declared once with `WITH FUNCTION`, before the statement, and not in a statement that writes, whose block
  * calls no function it declares. Postgres and SQLite sort as before.
  */
 class OracleListSortKeyTest {
@@ -33,6 +33,17 @@ class OracleListSortKeyTest {
         assertEquals(1, declarations(sql), sql)
         assertTrue(
             Regex("""ORDER BY DECODE\(JSON_VALUE\((\S+), '\$\.type\(\)'\), [^)]*\), CASE WHEN JSON_VALUE\(\1, '\$\.type\(\)'\) = 'array' THEN cy_list_key\(\1\) END, \1$""")
+                .containsMatchIn(sql),
+            sql,
+        )
+    }
+
+    @Test
+    fun `a parameter's entry that may be JSON's null is sorted by the key between its kind and itself as grouped`() {
+        val sql = OracleCypherCompiler("g").compile("UNWIND \$ms AS m RETURN m.l AS l ORDER BY l", mapOf("ms" to listOf(mapOf("l" to listOf(1)), mapOf("l" to null)))).sql
+        assertEquals(1, declarations(sql), sql)
+        assertTrue(
+            Regex("""ORDER BY DECODE\(JSON_VALUE\((\S+), '\$\.type\(\)'\), [^)]*\), CASE WHEN JSON_VALUE\(\1, '\$\.type\(\)'\) = 'array' THEN cy_list_key\(\1\) END, NVL\(\1, JSON\('null'\)\)$""")
                 .containsMatchIn(sql),
             sql,
         )

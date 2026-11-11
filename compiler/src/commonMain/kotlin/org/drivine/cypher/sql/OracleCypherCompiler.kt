@@ -2231,8 +2231,9 @@ class OracleCypherCompiler(
          * past one's range before or after them all, Infinity after that and NaN last, as Cypher orders them. A text is cut at
          * 2,000 characters, more than the key holds, so one too long for a `VARCHAR2` is read. A map is where maps come, and
          * no store orders two maps here yet. JSON's null, and SQL's, is no key, so it sorts where null does. Past 2,000 bytes,
-         * as long a `RAW` as SQL takes, a key is cut short, so lists that differ only after that are sorted as `JSON` sorts
-         * them, by the term after it ([listSortKeys]). It is the query's own, declared with `WITH FUNCTION`, not the store's.
+         * as long a `RAW` as SQL takes, a key is cut short, so lists that differ only after that are sorted by the term after
+         * it: their text ([listSortKeys]), or, of a kind left open, as `JSON` sorts them ([openSortKey]). It is the query's own,
+         * declared with `WITH FUNCTION`, not the store's.
          */
         private val LIST_KEY = listOf(
             "FUNCTION cy_list_key(cy_x JSON) RETURN RAW IS",
