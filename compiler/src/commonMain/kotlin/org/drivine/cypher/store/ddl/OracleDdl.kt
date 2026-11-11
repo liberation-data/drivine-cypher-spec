@@ -243,6 +243,9 @@ ${made.entries.joinToString("\n") { (function, making) ->
         return statement("UPDATE $catalog SET details = JSON_MERGEPATCH(details, ${literal(patch)}) WHERE ${recordOf(item)}")
     }
 
+    override fun formRecorded(item: CatalogItem): String =
+        statement("UPDATE $catalog SET details = JSON_MERGEPATCH(details, '{\"$FORM\": $CURRENT_FORM}') WHERE ${recordOf(item)}")
+
     /**
      * Forgets [item], and drops what it was made as when nothing else recorded uses it: an index, or
      * for a vector or a full-text index the table beside the nodes with its trigger, which takes the
@@ -480,19 +483,41 @@ ${made.entries.joinToString("\n") { (function, making) ->
      * labelled index nor a uniqueness constraint's to stand for it, dropped by hand or made before
      * there were any, is listed as it is, [INCOMPLETE], so that `ensure` makes the rest.
      */
-    private fun listed(kinds: String): String = """
-        SELECT JSON_OBJECT('kind' VALUE kind, 'label' VALUE label, 'properties' VALUE JSON(properties), 'name' VALUE name, 'details' VALUE details,
-                           'status' VALUE CASE WHEN kind = ${literal(SchemaItemKind.RANGE_INDEX.name)} AND NOT $labelledThere
-                                                AND NOT EXISTS (SELECT 1 FROM $catalog u WHERE u.label = c.label AND u.properties = c.properties AND $uniqueThere)
-                                          THEN '$INCOMPLETE' END
-                           RETURNING JSON)
-        FROM $catalog c
-        WHERE kind IN ($kinds)
-          AND (object_name IS NULL
-               OR EXISTS (SELECT 1 FROM user_indexes i WHERE i.index_name = UPPER(c.object_name))
-               OR EXISTS (SELECT 1 FROM user_tables t WHERE t.table_name = UPPER(c.object_name)))
-        ORDER BY label, properties
-    """.trimIndent()
+    private fun listed(kinds: String, objects: List<String>): String {
+        val record = """
+            JSON_OBJECT('kind' VALUE kind, 'label' VALUE label, 'properties' VALUE JSON(properties), 'name' VALUE name, 'details' VALUE details,
+                               'status' VALUE CASE WHEN kind = ${literal(SchemaItemKind.RANGE_INDEX.name)} AND NOT $labelledThere
+                                                    AND NOT EXISTS (SELECT 1 FROM $catalog u WHERE u.label = c.label AND u.properties = c.properties AND $uniqueThere)
+                                              THEN '$INCOMPLETE' END
+                               RETURNING JSON)
+        """.trimIndent()
+        val recorded = """
+            FROM $catalog c
+            WHERE kind IN ($kinds)
+              AND (object_name IS NULL
+                   OR EXISTS (SELECT 1 FROM user_indexes i WHERE i.index_name = UPPER(c.object_name))
+                   OR EXISTS (SELECT 1 FROM user_tables t WHERE t.table_name = UPPER(c.object_name)))
+        """.trimIndent()
+        if (objects.isEmpty()) return "SELECT $record\n$recorded\nORDER BY label, properties"
+        return """
+            SELECT listed FROM (
+                SELECT 0 AS part, label, properties, ${record.replace("\n", "\n                ")} AS listed
+                ${recorded.replace("\n", "\n                ")}
+                UNION ALL
+                SELECT 1, o.object_name, NULL,
+                       JSON_OBJECT('object' VALUE o.object_name, 'type' VALUE o.object_type, 'table' VALUE i.table_name, 'uniqueness' VALUE i.uniqueness,
+                                   'columns' VALUE (SELECT JSON_ARRAYAGG(NVL(v.data_default_vc, ic.column_name) ORDER BY ic.column_position RETURNING JSON)
+                                                    FROM user_ind_columns ic
+                                                    LEFT JOIN user_tab_cols v ON v.table_name = ic.table_name AND v.column_name = ic.column_name AND v.virtual_column = 'YES'
+                                                    WHERE ic.index_name = i.index_name)
+                                   RETURNING JSON)
+                FROM user_objects o
+                LEFT JOIN user_indexes i ON i.index_name = o.object_name AND o.object_type = 'INDEX'
+                WHERE ${namedAs("o.object_name", objects, upper = true)}
+            )
+            ORDER BY part, label, properties
+        """.trimIndent()
+    }
 
     /**
      * The indexes over the nodes of one label a filter can be read through, as rows of `kind`,
@@ -506,9 +531,10 @@ ${made.entries.joinToString("\n") { (function, making) ->
            OR (kind = ${literal(SchemaItemKind.RANGE_INDEX.name)} AND ${labelledThere.replace("c.details", "u.details")})
     """.trimIndent()
 
-    override fun listIndexesQuery(kind: SchemaItemKind): String = listed(literal(kind.name))
+    override fun listIndexesQuery(kind: SchemaItemKind): String =
+        listed(literal(kind.name), if (kind == SchemaItemKind.RANGE_INDEX) listOf(SHARED, LABELLED) else emptyList())
 
-    override fun listConstraintsQuery(): String = listed(literal(SchemaItemKind.UNIQUENESS_CONSTRAINT.name))
+    override fun listConstraintsQuery(): String = listed(literal(SchemaItemKind.UNIQUENESS_CONSTRAINT.name), listOf(UNIQUE, SHARED))
     companion object {
         /** The store's name, for what is said of a graph name it cannot take. */
         const val ENGINE = "Oracle"
@@ -530,6 +556,14 @@ ${made.entries.joinToString("\n") { (function, making) ->
 
         /** The keys of a range index's details: the name of its labelled index, or of the uniqueness constraint's index that stands for it. */
         private val RANGE_DETAILS = listOf("labelled", "unique")
+
+        /**
+         * What the names of a range index's index over every node, its labelled index, and a uniqueness constraint's index
+         * say they are.
+         */
+        const val SHARED = "ix"
+        const val LABELLED = "lx"
+        const val UNIQUE = "uq"
 
         /** The status a range index is listed with when it lacks what this version makes for it. */
         const val INCOMPLETE = "INCOMPLETE"

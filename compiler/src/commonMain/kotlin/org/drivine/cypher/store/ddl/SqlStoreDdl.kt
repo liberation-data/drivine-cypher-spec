@@ -185,6 +185,16 @@ abstract class SqlStoreDdl(val name: String, final override val engine: String, 
         return if (body.isEmpty()) "{\"$FORM\": $CURRENT_FORM}" else "{\"$FORM\": $CURRENT_FORM, $body}"
     }
 
+    /**
+     * The test that a name [column] holds is one Drivine gives an object of one of [kinds] (`ix`, `uq`, …), for this graph:
+     * `<graph>_<kind>_…`, matched in any case on SQLite, and in the case the store folds an unquoted name to elsewhere
+     * ([upper]).
+     */
+    protected fun namedAs(column: String, kinds: List<String>, upper: Boolean): String = kinds.joinToString(" OR ") { kind ->
+        val prefix = "${name}_${kind}_".let { if (upper) it.uppercase() else it.lowercase() }
+        "$column LIKE ${literal(prefix.replace("_", "\\_") + "%")} ESCAPE '\\'"
+    }
+
     /** The SQL literal of [text]: every SQL store reads a quote doubled, and a backslash as itself. */
     protected fun literal(text: String): String = "'${text.replace("'", "''")}'"
 
@@ -197,6 +207,18 @@ abstract class SqlStoreDdl(val name: String, final override val engine: String, 
      * takes them away): Neo4j's schema DDL names an item as it likes, and a SQL store makes it under the schema API's name.
      */
     abstract fun aliased(item: CatalogItem, aliases: List<String>): String
+
+    /**
+     * What records [item]'s record as made in [CURRENT_FORM], and changes nothing else: for an item whose record says no
+     * form, made in this version's form before records said one. Safe to run again.
+     */
+    abstract fun formRecorded(item: CatalogItem): String
+
+    /**
+     * What drops the index [name], by its name: one that stands under a name Drivine gives and isn't the item the name is
+     * for, which a recreate drops before it makes the item, as it was never recorded as one.
+     */
+    fun droppedIndex(name: String): String = "DROP INDEX IF EXISTS $name"
 
     companion object {
         /** The key in a record's details its aliases are kept under. */

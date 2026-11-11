@@ -863,23 +863,59 @@ catalog:
     postgres:
       indexes:
         VECTOR_INDEX: |-
-          SELECT jsonb_build_object('kind', kind, 'label', label, 'properties', properties::jsonb, 'name', name, 'details', details)
-          FROM drivine_schema c
-          WHERE kind IN ('VECTOR_INDEX')
-            AND (object_name IS NULL OR to_regclass(object_name) IS NOT NULL)
-          ORDER BY label, properties
+          SELECT listed FROM (
+              SELECT 0 AS part, label, properties, jsonb_build_object('kind', kind, 'label', label, 'properties', properties::jsonb, 'name', name, 'details', details) AS listed
+              FROM drivine_schema c
+              WHERE kind IN ('VECTOR_INDEX')
+                AND (object_name IS NULL OR to_regclass(object_name) IS NOT NULL)
+              UNION ALL
+              SELECT 1, o.relname::varchar, NULL,
+                     jsonb_build_object('object', o.relname, 'type', o.relkind, 'table', t.relname, 'unique', i.indisunique, 'method', a.amname,
+                                        'columns', (SELECT jsonb_agg(pg_get_indexdef(i.indexrelid, k, true) ORDER BY k) FROM generate_series(1, i.indnatts) k),
+                                        'where', pg_get_expr(i.indpred, i.indrelid, true))
+              FROM pg_class o
+              LEFT JOIN pg_index i ON i.indexrelid = o.oid
+              LEFT JOIN pg_class t ON t.oid = i.indrelid
+              LEFT JOIN pg_am a ON a.oid = o.relam
+              WHERE (o.relname LIKE 'drivine\_v\_%' ESCAPE '\') AND pg_table_is_visible(o.oid)
+          ) l
+          ORDER BY part, label, properties
         RANGE_INDEX: |-
-          SELECT jsonb_build_object('kind', kind, 'label', label, 'properties', properties::jsonb, 'name', name, 'details', details)
-          FROM drivine_schema c
-          WHERE kind IN ('RANGE_INDEX')
-            AND (object_name IS NULL OR to_regclass(object_name) IS NOT NULL)
-          ORDER BY label, properties
+          SELECT listed FROM (
+              SELECT 0 AS part, label, properties, jsonb_build_object('kind', kind, 'label', label, 'properties', properties::jsonb, 'name', name, 'details', details) AS listed
+              FROM drivine_schema c
+              WHERE kind IN ('RANGE_INDEX')
+                AND (object_name IS NULL OR to_regclass(object_name) IS NOT NULL)
+              UNION ALL
+              SELECT 1, o.relname::varchar, NULL,
+                     jsonb_build_object('object', o.relname, 'type', o.relkind, 'table', t.relname, 'unique', i.indisunique, 'method', a.amname,
+                                        'columns', (SELECT jsonb_agg(pg_get_indexdef(i.indexrelid, k, true) ORDER BY k) FROM generate_series(1, i.indnatts) k),
+                                        'where', pg_get_expr(i.indpred, i.indrelid, true))
+              FROM pg_class o
+              LEFT JOIN pg_index i ON i.indexrelid = o.oid
+              LEFT JOIN pg_class t ON t.oid = i.indrelid
+              LEFT JOIN pg_am a ON a.oid = o.relam
+              WHERE (o.relname LIKE 'drivine\_ix\_%' ESCAPE '\') AND pg_table_is_visible(o.oid)
+          ) l
+          ORDER BY part, label, properties
         FULLTEXT_INDEX: |-
-          SELECT jsonb_build_object('kind', kind, 'label', label, 'properties', properties::jsonb, 'name', name, 'details', details)
-          FROM drivine_schema c
-          WHERE kind IN ('FULLTEXT_INDEX')
-            AND (object_name IS NULL OR to_regclass(object_name) IS NOT NULL)
-          ORDER BY label, properties
+          SELECT listed FROM (
+              SELECT 0 AS part, label, properties, jsonb_build_object('kind', kind, 'label', label, 'properties', properties::jsonb, 'name', name, 'details', details) AS listed
+              FROM drivine_schema c
+              WHERE kind IN ('FULLTEXT_INDEX')
+                AND (object_name IS NULL OR to_regclass(object_name) IS NOT NULL)
+              UNION ALL
+              SELECT 1, o.relname::varchar, NULL,
+                     jsonb_build_object('object', o.relname, 'type', o.relkind, 'table', t.relname, 'unique', i.indisunique, 'method', a.amname,
+                                        'columns', (SELECT jsonb_agg(pg_get_indexdef(i.indexrelid, k, true) ORDER BY k) FROM generate_series(1, i.indnatts) k),
+                                        'where', pg_get_expr(i.indpred, i.indrelid, true))
+              FROM pg_class o
+              LEFT JOIN pg_index i ON i.indexrelid = o.oid
+              LEFT JOIN pg_class t ON t.oid = i.indrelid
+              LEFT JOIN pg_am a ON a.oid = o.relam
+              WHERE (o.relname LIKE 'drivine\_t\_%' ESCAPE '\') AND pg_table_is_visible(o.oid)
+          ) l
+          ORDER BY part, label, properties
         UNIQUENESS_CONSTRAINT: |-
           SELECT jsonb_build_object('kind', kind, 'label', label, 'properties', properties::jsonb, 'name', name, 'details', details)
           FROM drivine_schema c
@@ -893,11 +929,23 @@ catalog:
             AND (object_name IS NULL OR to_regclass(object_name) IS NOT NULL)
           ORDER BY label, properties
       constraints: |-
-        SELECT jsonb_build_object('kind', kind, 'label', label, 'properties', properties::jsonb, 'name', name, 'details', details)
-        FROM drivine_schema c
-        WHERE kind IN ('UNIQUENESS_CONSTRAINT')
-          AND (object_name IS NULL OR to_regclass(object_name) IS NOT NULL)
-        ORDER BY label, properties
+        SELECT listed FROM (
+            SELECT 0 AS part, label, properties, jsonb_build_object('kind', kind, 'label', label, 'properties', properties::jsonb, 'name', name, 'details', details) AS listed
+            FROM drivine_schema c
+            WHERE kind IN ('UNIQUENESS_CONSTRAINT')
+              AND (object_name IS NULL OR to_regclass(object_name) IS NOT NULL)
+            UNION ALL
+            SELECT 1, o.relname::varchar, NULL,
+                   jsonb_build_object('object', o.relname, 'type', o.relkind, 'table', t.relname, 'unique', i.indisunique, 'method', a.amname,
+                                      'columns', (SELECT jsonb_agg(pg_get_indexdef(i.indexrelid, k, true) ORDER BY k) FROM generate_series(1, i.indnatts) k),
+                                      'where', pg_get_expr(i.indpred, i.indrelid, true))
+            FROM pg_class o
+            LEFT JOIN pg_index i ON i.indexrelid = o.oid
+            LEFT JOIN pg_class t ON t.oid = i.indrelid
+            LEFT JOIN pg_am a ON a.oid = o.relam
+            WHERE (o.relname LIKE 'drivine\_uq\_%' ESCAPE '\') AND pg_table_is_visible(o.oid)
+        ) l
+        ORDER BY part, label, properties
       aliased: "UPDATE drivine_schema SET details = jsonb_set(details, '{aliases}', '[\"a\",\"b\\\"c\"]'::jsonb) WHERE kind = 'RANGE_INDEX' AND label = 'Person' AND properties = '[\"name\"]'"
       unaliased: "UPDATE drivine_schema SET details = details - 'aliases' WHERE kind = 'RANGE_INDEX' AND label = 'Person' AND properties = '[\"name\"]'"
     oracle:
@@ -915,17 +963,30 @@ catalog:
                  OR EXISTS (SELECT 1 FROM user_tables t WHERE t.table_name = UPPER(c.object_name)))
           ORDER BY label, properties
         RANGE_INDEX: |-
-          SELECT JSON_OBJECT('kind' VALUE kind, 'label' VALUE label, 'properties' VALUE JSON(properties), 'name' VALUE name, 'details' VALUE details,
-                             'status' VALUE CASE WHEN kind = 'RANGE_INDEX' AND NOT EXISTS (SELECT 1 FROM user_indexes l WHERE l.index_name = UPPER(JSON_VALUE(c.details, '$.labelled')))
-                                                  AND NOT EXISTS (SELECT 1 FROM drivine_schema u WHERE u.label = c.label AND u.properties = c.properties AND u.kind = 'UNIQUENESS_CONSTRAINT' AND JSON_VALUE(u.properties, '$.size()' RETURNING NUMBER) = 1 AND EXISTS (SELECT 1 FROM user_indexes q WHERE q.index_name = UPPER(u.object_name)))
-                                            THEN 'INCOMPLETE' END
-                             RETURNING JSON)
-          FROM drivine_schema c
-          WHERE kind IN ('RANGE_INDEX')
-            AND (object_name IS NULL
-                 OR EXISTS (SELECT 1 FROM user_indexes i WHERE i.index_name = UPPER(c.object_name))
-                 OR EXISTS (SELECT 1 FROM user_tables t WHERE t.table_name = UPPER(c.object_name)))
-          ORDER BY label, properties
+          SELECT listed FROM (
+              SELECT 0 AS part, label, properties, JSON_OBJECT('kind' VALUE kind, 'label' VALUE label, 'properties' VALUE JSON(properties), 'name' VALUE name, 'details' VALUE details,
+                                 'status' VALUE CASE WHEN kind = 'RANGE_INDEX' AND NOT EXISTS (SELECT 1 FROM user_indexes l WHERE l.index_name = UPPER(JSON_VALUE(c.details, '$.labelled')))
+                                                      AND NOT EXISTS (SELECT 1 FROM drivine_schema u WHERE u.label = c.label AND u.properties = c.properties AND u.kind = 'UNIQUENESS_CONSTRAINT' AND JSON_VALUE(u.properties, '$.size()' RETURNING NUMBER) = 1 AND EXISTS (SELECT 1 FROM user_indexes q WHERE q.index_name = UPPER(u.object_name)))
+                                                THEN 'INCOMPLETE' END
+                                 RETURNING JSON) AS listed
+              FROM drivine_schema c
+              WHERE kind IN ('RANGE_INDEX')
+                AND (object_name IS NULL
+                     OR EXISTS (SELECT 1 FROM user_indexes i WHERE i.index_name = UPPER(c.object_name))
+                     OR EXISTS (SELECT 1 FROM user_tables t WHERE t.table_name = UPPER(c.object_name)))
+              UNION ALL
+              SELECT 1, o.object_name, NULL,
+                     JSON_OBJECT('object' VALUE o.object_name, 'type' VALUE o.object_type, 'table' VALUE i.table_name, 'uniqueness' VALUE i.uniqueness,
+                                 'columns' VALUE (SELECT JSON_ARRAYAGG(NVL(v.data_default_vc, ic.column_name) ORDER BY ic.column_position RETURNING JSON)
+                                                  FROM user_ind_columns ic
+                                                  LEFT JOIN user_tab_cols v ON v.table_name = ic.table_name AND v.column_name = ic.column_name AND v.virtual_column = 'YES'
+                                                  WHERE ic.index_name = i.index_name)
+                                 RETURNING JSON)
+              FROM user_objects o
+              LEFT JOIN user_indexes i ON i.index_name = o.object_name AND o.object_type = 'INDEX'
+              WHERE o.object_name LIKE 'DRIVINE\_IX\_%' ESCAPE '\' OR o.object_name LIKE 'DRIVINE\_LX\_%' ESCAPE '\'
+          )
+          ORDER BY part, label, properties
         FULLTEXT_INDEX: |-
           SELECT JSON_OBJECT('kind' VALUE kind, 'label' VALUE label, 'properties' VALUE JSON(properties), 'name' VALUE name, 'details' VALUE details,
                              'status' VALUE CASE WHEN kind = 'RANGE_INDEX' AND NOT EXISTS (SELECT 1 FROM user_indexes l WHERE l.index_name = UPPER(JSON_VALUE(c.details, '$.labelled')))
@@ -963,17 +1024,30 @@ catalog:
                  OR EXISTS (SELECT 1 FROM user_tables t WHERE t.table_name = UPPER(c.object_name)))
           ORDER BY label, properties
       constraints: |-
-        SELECT JSON_OBJECT('kind' VALUE kind, 'label' VALUE label, 'properties' VALUE JSON(properties), 'name' VALUE name, 'details' VALUE details,
-                           'status' VALUE CASE WHEN kind = 'RANGE_INDEX' AND NOT EXISTS (SELECT 1 FROM user_indexes l WHERE l.index_name = UPPER(JSON_VALUE(c.details, '$.labelled')))
-                                                AND NOT EXISTS (SELECT 1 FROM drivine_schema u WHERE u.label = c.label AND u.properties = c.properties AND u.kind = 'UNIQUENESS_CONSTRAINT' AND JSON_VALUE(u.properties, '$.size()' RETURNING NUMBER) = 1 AND EXISTS (SELECT 1 FROM user_indexes q WHERE q.index_name = UPPER(u.object_name)))
-                                          THEN 'INCOMPLETE' END
-                           RETURNING JSON)
-        FROM drivine_schema c
-        WHERE kind IN ('UNIQUENESS_CONSTRAINT')
-          AND (object_name IS NULL
-               OR EXISTS (SELECT 1 FROM user_indexes i WHERE i.index_name = UPPER(c.object_name))
-               OR EXISTS (SELECT 1 FROM user_tables t WHERE t.table_name = UPPER(c.object_name)))
-        ORDER BY label, properties
+        SELECT listed FROM (
+            SELECT 0 AS part, label, properties, JSON_OBJECT('kind' VALUE kind, 'label' VALUE label, 'properties' VALUE JSON(properties), 'name' VALUE name, 'details' VALUE details,
+                               'status' VALUE CASE WHEN kind = 'RANGE_INDEX' AND NOT EXISTS (SELECT 1 FROM user_indexes l WHERE l.index_name = UPPER(JSON_VALUE(c.details, '$.labelled')))
+                                                    AND NOT EXISTS (SELECT 1 FROM drivine_schema u WHERE u.label = c.label AND u.properties = c.properties AND u.kind = 'UNIQUENESS_CONSTRAINT' AND JSON_VALUE(u.properties, '$.size()' RETURNING NUMBER) = 1 AND EXISTS (SELECT 1 FROM user_indexes q WHERE q.index_name = UPPER(u.object_name)))
+                                              THEN 'INCOMPLETE' END
+                               RETURNING JSON) AS listed
+            FROM drivine_schema c
+            WHERE kind IN ('UNIQUENESS_CONSTRAINT')
+              AND (object_name IS NULL
+                   OR EXISTS (SELECT 1 FROM user_indexes i WHERE i.index_name = UPPER(c.object_name))
+                   OR EXISTS (SELECT 1 FROM user_tables t WHERE t.table_name = UPPER(c.object_name)))
+            UNION ALL
+            SELECT 1, o.object_name, NULL,
+                   JSON_OBJECT('object' VALUE o.object_name, 'type' VALUE o.object_type, 'table' VALUE i.table_name, 'uniqueness' VALUE i.uniqueness,
+                               'columns' VALUE (SELECT JSON_ARRAYAGG(NVL(v.data_default_vc, ic.column_name) ORDER BY ic.column_position RETURNING JSON)
+                                                FROM user_ind_columns ic
+                                                LEFT JOIN user_tab_cols v ON v.table_name = ic.table_name AND v.column_name = ic.column_name AND v.virtual_column = 'YES'
+                                                WHERE ic.index_name = i.index_name)
+                               RETURNING JSON)
+            FROM user_objects o
+            LEFT JOIN user_indexes i ON i.index_name = o.object_name AND o.object_type = 'INDEX'
+            WHERE o.object_name LIKE 'DRIVINE\_UQ\_%' ESCAPE '\' OR o.object_name LIKE 'DRIVINE\_IX\_%' ESCAPE '\'
+        )
+        ORDER BY part, label, properties
       aliased: "UPDATE drivine_schema SET details = JSON_MERGEPATCH(details, '{\"aliases\": [\"a\",\"b\\\"c\"]}') WHERE kind = 'RANGE_INDEX' AND label = 'Person' AND properties = '[\"name\"]'"
       unaliased: "UPDATE drivine_schema SET details = JSON_MERGEPATCH(details, '{\"aliases\": null}') WHERE kind = 'RANGE_INDEX' AND label = 'Person' AND properties = '[\"name\"]'"
       labelled: |-
@@ -992,11 +1066,19 @@ catalog:
           ORDER BY label, properties
         RANGE_INDEX: |-
           /* drivine:json */
-          SELECT json_object('kind', kind, 'label', label, 'properties', json(properties), 'name', name, 'details', json(details))
-          FROM drivine_schema c
-          WHERE kind IN ('RANGE_INDEX')
-            AND (object_name IS NULL OR EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = c.object_name))
-          ORDER BY label, properties
+          SELECT listed FROM (
+              SELECT 0 AS part, label, properties, json_object('kind', kind, 'label', label, 'properties', json(properties), 'name', name, 'details', json(details)) AS listed
+              FROM drivine_schema c
+              WHERE kind IN ('RANGE_INDEX')
+                AND (object_name IS NULL OR EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = c.object_name))
+              UNION ALL
+              SELECT 1, m.name, NULL,
+                     json_object('object', m.name, 'type', m.type, 'table', m.tbl_name, 'sql', m.sql,
+                                 'unique', (SELECT l."unique" FROM pragma_index_list(m.tbl_name) l WHERE l.name = m.name))
+              FROM sqlite_master m
+              WHERE m.name LIKE 'drivine\_ix\_%' ESCAPE '\'
+          )
+          ORDER BY part, label, properties
         FULLTEXT_INDEX: |-
           /* drivine:json */
           SELECT json_object('kind', kind, 'label', label, 'properties', json(properties), 'name', name, 'details', json(details))
@@ -1020,11 +1102,19 @@ catalog:
           ORDER BY label, properties
       constraints: |-
         /* drivine:json */
-        SELECT json_object('kind', kind, 'label', label, 'properties', json(properties), 'name', name, 'details', json(details))
-        FROM drivine_schema c
-        WHERE kind IN ('UNIQUENESS_CONSTRAINT')
-          AND (object_name IS NULL OR EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = c.object_name))
-        ORDER BY label, properties
+        SELECT listed FROM (
+            SELECT 0 AS part, label, properties, json_object('kind', kind, 'label', label, 'properties', json(properties), 'name', name, 'details', json(details)) AS listed
+            FROM drivine_schema c
+            WHERE kind IN ('UNIQUENESS_CONSTRAINT')
+              AND (object_name IS NULL OR EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = c.object_name))
+            UNION ALL
+            SELECT 1, m.name, NULL,
+                   json_object('object', m.name, 'type', m.type, 'table', m.tbl_name, 'sql', m.sql,
+                               'unique', (SELECT l."unique" FROM pragma_index_list(m.tbl_name) l WHERE l.name = m.name))
+            FROM sqlite_master m
+            WHERE m.name LIKE 'drivine\_uq\_%' ESCAPE '\'
+        )
+        ORDER BY part, label, properties
       aliased: "UPDATE drivine_schema SET details = json_set(details, '$.aliases', json('[\"a\",\"b\\\"c\"]')) WHERE kind = 'RANGE_INDEX' AND label = 'Person' AND properties = '[\"name\"]'"
       unaliased: "UPDATE drivine_schema SET details = json_remove(details, '$.aliases') WHERE kind = 'RANGE_INDEX' AND label = 'Person' AND properties = '[\"name\"]'"
     neo4j:

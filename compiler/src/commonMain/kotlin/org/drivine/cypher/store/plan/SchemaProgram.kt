@@ -8,6 +8,7 @@ import org.drivine.cypher.store.ddl.unsupportedTextIndex
 import org.drivine.cypher.store.marker.MarkerInventory
 import org.drivine.cypher.store.marker.MarkerStatements
 import org.drivine.cypher.store.marker.SchemaMarker
+import org.drivine.cypher.store.schema.ItemForm
 import org.drivine.cypher.store.schema.StoreError
 import org.drivine.cypher.store.schema.StoreSchema
 import org.drivine.cypher.store.schema.catalogItem
@@ -65,6 +66,12 @@ internal class SchemaProgram(
 
     /** The markers' properties read in the first round, by scope and property. */
     private val prefetched = mutableSetOf<Pair<String, String>>()
+
+    /**
+     * What makes an item of another form again, for the line that says it is kept: the owner's recreate, where an owner is
+     * applied; the item's own, for one of the public calls.
+     */
+    private var remake = "Call recreate() to make it again."
 
     fun run(): DatabaseReport = when (val operation = request.operation) {
         is Operation.Enforce -> apply(forceRecreate = false, operation.owners, only = null)
@@ -234,6 +241,7 @@ internal class SchemaProgram(
         }
 
         val build = Build(request.buildTimeoutMillis, run.unbuilt)
+        remake = "SchemaManager.recreateAll(${owner?.let { "\"$it\"" } ?: "null"}) makes it again."
         for (spec in toApply) {
             // A co-owned item is never dropped by one owner's version change, only by an explicit recreate. A runtime item
             // marked stale missed its owner's recreate, and is recreated now.
@@ -544,6 +552,9 @@ internal class SchemaProgram(
     private fun ensureMadeIndex(spec: IndexSpec, build: Build): EnsureResult {
         val items = indexes(spec.kind)
         val existing = items.firstOrNull { store.matchesIdentity(it, spec) }
+        val form = formOf(spec)
+        // Another item under a name Drivine gives this one's objects: never taken as made, and never made over.
+        if (form is ItemForm.Mismatch) return mismatched(spec, existing, form)
         if (existing == null) {
             // A related item (of the kind and label, not the spec's) lets a store with an index a label (FalkorDB) make
             // only the properties missing.
@@ -562,6 +573,7 @@ internal class SchemaProgram(
             return EnsureResult.Created(completed)
         }
         return if (store.matchesShape(existing, spec)) {
+            keepForm(spec, form)
             // Made by another process, or an earlier run: it may still be being built, or its build may have failed.
             EnsureResult.AlreadyMatching(awaitBuilt(spec, existing, build) ?: existing)
         } else {
@@ -596,7 +608,10 @@ internal class SchemaProgram(
     }
 
     private fun recreateMadeIndex(spec: IndexSpec, build: Build): EnsureResult {
-        val existing = findIndex(spec)
+        val existing = when (val cleared = clearMismatched(spec, findIndex(spec)) { findIndex(spec) }) {
+            is EnsureResult.Drift -> return cleared
+            else -> cleared as SchemaItemInfo?
+        }
         val aliases = if (existing != null) aliasesOfIndex(spec) else emptyList()
         if (existing != null) dropExisting(existing, spec)
         // Read again after the drop: on a store with an index a label, the label may still have one over other
@@ -786,6 +801,9 @@ internal class SchemaProgram(
         // A constraint still being built, by another process or an earlier run, may yet fail: its build is waited for, as
         // one made here. One dropped meanwhile is made again below.
         val existing = findConstraint(spec)?.let { if (it.buildInProgress) awaitBuild(spec, untilListed = false) else it }
+        val form = formOf(spec)
+        // Another item under the name Drivine gives this one's index: never taken as made, and never made over.
+        if (form is ItemForm.Mismatch) return mismatched(spec, existing, form)
         if (existing != null && existing.buildFailed) {
             // FalkorDB keeps listing a constraint whose build failed, though it enforces nothing: dropped, and built again,
             // which gives a violation where the data still repeats a key.
@@ -793,6 +811,7 @@ internal class SchemaProgram(
             log(LogLevel.WARN, CONSTRAINT_MANAGER, "Dropped $engine ${spec.kind} on ${spec.label}${spec.properties}, whose build had failed, to build it again")
         } else if (existing != null) {
             return if (store.matchesShape(existing, spec)) {
+                if (spec != SchemaMarker.CONSTRAINT) keepForm(spec, form) else adoptForm(form)
                 EnsureResult.AlreadyMatching(existing)
             } else {
                 log(LogLevel.WARN, CONSTRAINT_MANAGER, "Constraint drift on ${spec.label}${spec.properties}: existing $existing does not match requested $spec")
@@ -862,7 +881,10 @@ internal class SchemaProgram(
     /** `ConstraintManager.recreate`: the constraint made again keeps the aliases its record kept. */
     private fun recreateConstraint(spec: ConstraintSpec, violationSampleSize: Int, replaceBlockingIndex: Boolean): EnsureResult {
         requireConstrainable(spec.made())
-        val existing = findConstraint(spec)
+        val existing = when (val cleared = clearMismatched(spec.made(), findConstraint(spec)) { findConstraint(spec) }) {
+            is EnsureResult.Drift -> return cleared
+            else -> cleared as SchemaItemInfo?
+        }
         val aliases = if (existing != null && store.ddl is SqlStoreDdl) {
             val rows = listingRows(store.ddl.listConstraintsQuery()).orEmpty()
             rows.firstNotNullOfOrNull { row ->
@@ -953,6 +975,79 @@ internal class SchemaProgram(
             .flatMap { statement -> listingRows(statement)?.let { store.parseIndexRows(it) }.orEmpty() }
             .distinct()
             .firstOrNull { it.kind == SchemaItemKind.RANGE_INDEX && it.label == spec.label && it.properties == spec.properties }
+    }
+
+    // ----- Forms -----
+
+    /**
+     * What the listing [spec] was last found in says of its form ([StoreSchema.formOf]): read from the rows a find has just
+     * read, and never read again for it; [ItemForm.Current] where that read failed.
+     */
+    private fun formOf(spec: SchemaItemSpec): ItemForm {
+        val statement = when (spec) {
+            is IndexSpec -> store.ddl.listIndexesQuery(spec.kind)
+            is ConstraintSpec -> store.ddl.listConstraintsQuery()
+        }
+        return listings[statement]?.let { store.formOf(spec, it) } ?: ItemForm.Current
+    }
+
+    /**
+     * [spec]'s item, found under one of its names, isn't it ([ItemForm.Mismatch]): drift, as an item of another shape is
+     * on any store, which fails the owner under `FAIL_FAST`, is logged under `WARN`, and is recreated with
+     * `recreateOnDrift` where what stands under the name is an index. [existing] is the record found for it, where there is
+     * one; the item reported is the name's otherwise.
+     */
+    private fun mismatched(spec: SchemaItemSpec, existing: SchemaItemInfo?, form: ItemForm.Mismatch): EnsureResult.Drift {
+        val (logger, what) = if (spec is ConstraintSpec) CONSTRAINT_MANAGER to "Constraint" else INDEX_MANAGER to "Index"
+        val then = if (form.droppable) "Call recreate() to replace it (destructive)." else "Drop or rename it: Drivine makes the item under that name, and recreate() leaves it."
+        log(
+            LogLevel.WARN, logger,
+            "$what drift on ${spec.label}${spec.properties}: ${form.name}, under the name $engine gives the ${spec.kind}, is ${form.reason}, so it is not taken as made. $then",
+        )
+        return EnsureResult.Drift(existing ?: SchemaItemInfo(spec.kind, spec.label, spec.properties, form.name), spec)
+    }
+
+    /**
+     * Before [spec] is made again, [found] as its find found it: each index that stands under one of its names and isn't
+     * it is dropped, by its name, and the item found again by [find], till none is left, which is given; drift, with
+     * nothing more dropped, where what stands there isn't an index, and so can't be made over.
+     */
+    private fun clearMismatched(spec: SchemaItemSpec, found: SchemaItemInfo?, find: () -> SchemaItemInfo?): Any? {
+        val dropped = mutableSetOf<String>()
+        var existing = found
+        while (true) {
+            val form = formOf(spec) as? ItemForm.Mismatch ?: return existing
+            // One dropped already, and still there, can't be dropped.
+            if (!form.droppable || !dropped.add(form.name.uppercase())) return mismatched(spec, existing, form.copy(droppable = false))
+            ddl(store.dropMismatched(form.name))
+            log(LogLevel.INFO, if (spec is ConstraintSpec) CONSTRAINT_MANAGER else INDEX_MANAGER, "Dropped ${form.name}, which stood under the name $engine gives ${spec.kind} on ${spec.label}${spec.properties}: it was ${form.reason}")
+            existing = find()
+        }
+    }
+
+    /**
+     * An item found in its shape, in [form]: one of another form is kept and used as it is, and said so, once; one in this
+     * version's form whose record says none has its form recorded.
+     */
+    private fun keepForm(spec: SchemaItemSpec, form: ItemForm) {
+        if (form is ItemForm.Stale) {
+            log(
+                LogLevel.WARN, if (spec is ConstraintSpec) CONSTRAINT_MANAGER else INDEX_MANAGER,
+                "$engine ${spec.kind} on ${spec.label}${spec.properties} is of another form than this version makes " +
+                    "(form ${form.expected} expected, found ${form.found}): it is kept and used as it is. $remake",
+            )
+        }
+        adoptForm(form)
+    }
+
+    /** Records the form of an item made in this version's form whose record says none ([ItemForm.Unrecorded]). */
+    private fun adoptForm(form: ItemForm) {
+        if (form !is ItemForm.Unrecorded) return
+        val action = PlanAction.Execute(DdlStatement.Text(form.statement), purpose = Purpose.ALIASES)
+        val outcome = io.run(action)
+        // What a later read lists has changed.
+        listings.clear()
+        if (outcome is PlanOutcome.Failed) throw RawFailure(outcome.error, action, io.lastRound)
     }
 
     // ----- Reads and DDL -----
