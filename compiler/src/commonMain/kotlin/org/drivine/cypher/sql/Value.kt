@@ -25,6 +25,13 @@ sealed interface Value {
         /** Where the statement makes it a list whose every item is a list of [items] of one kind, that kind: an item taken from it has it as its [items]. */
         val itemItems: Temporal? = null,
         /**
+         * Where the statement makes it a map that holds, at a key, a value it makes of a temporal kind, that kind by the key: an entry
+         * read from it is of it, so a zoned one sorts and compares as the moment it is (drivine4j#199). [itemEntries] is the same of
+         * each item of a list whose every item is such a map, a null written aside: an item taken from it has them as its [entries].
+         */
+        val entries: Map<String, Temporal>? = null,
+        val itemEntries: Map<String, Temporal>? = null,
+        /**
          * Whether the statement makes it a list or a map that holds, at any depth, a value it makes temporal: deeper than [items]
          * and [itemItems] tell, or beside values of other kinds, as in `[l, l]` of a list `l` of them. Of an item taken from such a
          * list, of an entry read from such a map, and of a `CASE`, a `coalesce` or a `reduce` that may give one, that it may be or hold

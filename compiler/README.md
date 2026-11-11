@@ -38,6 +38,28 @@ The compiler throws `org.drivine.cypher.CompilerException` where it refuses a st
 refusal as `Refusal`. drivine4j turns it into its own `DrivineException`, which names the query run, at each of its
 calls into the compiler.
 
+### Columns and typed rows
+
+A compiled statement gives its columns (`CompiledCypher.columns`, `Compiled.columns`): each one's name, as a graph engine
+names it (an item's alias, or its text as written, `RETURN *`'s variables in the order of their names, a `UNION`'s first
+query's names), and the kind the compiler knows it holds (`ColumnKind`). That's `node`, `relationship`, `nodes` or
+`relationships` (a list of them), a temporal kind (`date`, `localtime`, `time`, `localdatetime`, `datetime`,
+`duration`), or `value`. A `UNION`'s column is of the kind each of its queries gives there, and `value` where they
+differ. A result with no rows still has them, and a statement that returns nothing has none.
+
+Compiled typed (`compile(cypher, parameters, typed = true)`, or the request's `"typed": true`), the columns of a node,
+a relationship or a list of them hold each one tagged:
+
+- a node as `{"$t": "node", "labels": [...], "properties": {...}}`;
+- a relationship as `{"$t": "relationship", "type": "...", "properties": {...}}`.
+
+A host reads tags only in those columns. Every other column holds what compiling untyped gives, so a map there with a
+`$t` key of its own is a map, and a node one query of a `UNION` gives in a `value` column is its properties. A temporal value is its ISO text until liberation-data/drivine-cypher-spec#161. After that it's
+`{"$t": "datetime", "v": "..."}` and the like: the tag scheme is agreed with #161's, and output stays a contract apart
+from how the store keeps a value. A path is still refused (#163). A node held in a map or a list the statement builds
+comes back as its properties (#164). Each library decodes the rows itself. Untyped, a statement compiles byte for byte
+as it did before, and the corpus checks that.
+
 ### drivine4j's own calls
 
 drivine4j calls more of the module than the API above: the compiler classes themselves, the parts of its own SQL
@@ -63,6 +85,10 @@ always written it. An encoder is the compiler's own, for as long as it compiles:
 so it leaves it false; it is for a host whose Oracle driver can't, node-oracledb's thin mode
 (oracle/node-oracledb#1795), until a fixed driver release.
 
+It takes `reencodeJson` too, false where left out, the Kotlin form of the request's `oracleReencodeJson` (see
+[Oracle's documents encoded again](#oracles-documents-encoded-again)). JDBC reads every OSON version, so drivine4j leaves it
+false; the hosts on thin drivers, python-oracledb's and node-oracledb's, set it.
+
 A host with no Kotlin types calls `CompileJson.compile(request)`, JSON text in and out. The wasm build exports it as
 `compile`, and the shared library as `drivine_compile`:
 
@@ -74,14 +100,17 @@ A host with no Kotlin types calls `CompileJson.compile(request)`, JSON text in a
 ```
 
 `store` is `postgres`, `oracle` or `sqlite`. `graph` has the graph's `name`; the rest of it is Oracle's, and may be left
-out: `nullsEqualStored` and `eraStored` (true where left out), `indexedProperties`, and `oracleRowsAsText` (false where
-left out, see [Oracle's rows as text](#oracles-rows-as-text)). The answer is one of:
+out: `nullsEqualStored` and `eraStored` (true where left out), `indexedProperties`, `oracleRowsAsText` and `oracleReencodeJson` (false
+where left out, see [Oracle's rows as text](#oracles-rows-as-text) and
+[Oracle's documents encoded again](#oracles-documents-encoded-again)). `typed`, false where left out, asks for the rows' nodes and
+relationships tagged and for the columns: see [Columns and typed rows](#columns-and-typed-rows). The answer is one of:
 
 - `{"sql": …, "parameters": {…}, "setup": […], "warnings": […], "nonFinite": false}`, and on Oracle
   `"storedFunctions": {"nullsEqual": …, "era": …}`. Run `setup` first (on Postgres, the function a statement that
   writes is), then `sql`, binding `parameters`. `nonFinite` says NaN or an infinity may come back in the rows as
   `{"$numberDouble": "NaN"}`. `storedFunctions` says which of the graph's stored functions the statement calls: a store
   without them is compiled for again with `nullsEqualStored` or `eraStored` false.
+  With `typed`, it has `"columns"` too: `[{"name": "p", "kind": "node"}, …]`.
 - `{"refusal": "<message>"}`: the compiler refuses the statement, with the message the spec's refusals pin.
 - `{"error": "<message>"}`: the request is no request.
 
@@ -92,7 +121,7 @@ Values are plain JSON, tagged only where JSON, or a host's reading of it, loses 
 | a whole number (Long, or past a Long a big integer) | a JSON integer: `2` |
 | a float | `{"$float": "2.0"}` (or `{"$float": 2}`), or in a request a JSON number with a fraction or an exponent (`2.5`, `1e-7`). A host whose JSON writer drops a whole float's fraction (JavaScript writes `2.0` as `2`) tags its floats |
 | NaN, the infinities | `{"$float": "NaN"}`, `{"$float": "Infinity"}`, `{"$float": "-Infinity"}` |
-| a temporal value | `{"$temporal": "DATE", "text": "2026-11-07"}`: `DATE`, `LOCAL_TIME`, `TIME`, `LOCAL_DATE_TIME`, `DATE_TIME` or `DURATION`, and its ISO 8601 text |
+| a temporal value | `{"$temporal": "DATE", "text": "2026-11-07"}`: `DATE`, `LOCAL_TIME`, `TIME`, `LOCAL_DATE_TIME`, `DATE_TIME` or `DURATION`, and its ISO 8601 text. Untagged, its ISO text is a text: as in Neo4j, it is equal to no temporal value the statement makes and is not ordered beside one (`date('2026-11-07') = $d` is false for `"2026-11-07"`) |
 | bytes | `{"$bytes": "<base64>"}` |
 | a map with a key that starts with `$` | `{"$map": {"$key": …}}` |
 
@@ -143,7 +172,8 @@ FullTextSearch.plan(store, graph, SearchRequest(labels, properties, query, index
      alone.
    - On a graph engine, `cypher` is the search's head: the index's `CALL` given the query as it is, the hits that have every
      root label, the best of them, and each node and its score against the best, as `alias` and `scoreAlias` (`n` and
-     `_score` where left out), best first. The index is asked for `topK` hits, or with `filtered` (a caller's filter or a
+     `_score` where left out), best first. The index's name (FalkorDB's label) is a Cypher string, its quotes and
+     backslashes escaped, and each label a backtick-quoted name, whatever they hold. The index is asked for `topK` hits, or with `filtered` (a caller's filter or a
      required relationship prunes them after the index; a threshold, which keeps a prefix of the ranking, does not) or a
      root label beyond the first ten times as many (`indexLimit`), and Memgraph's no more than 1,000,000.
    - `parameters` are named with the compiler's reserved prefix, `_cy_ft1`, `_cy_ft2`, …, which no library binds, so they
@@ -168,7 +198,9 @@ drivine4j's statements are the module's byte for byte. `src/commonTest/resources
 drivine4j's own code (`matching` and `matchingThrough` of its Postgres, Oracle and SQLite selects, and its grammars'
 `fullTextSearchHead`) at the commit it names, for every query of drivine4j's `TextQueryTest` and `OracleSelectTest`, the 22 of
 its ranking test over `docs-corpus.json`, and labels and properties of other shapes, on each store and in each state of its
-index: only the parameters' names were changed, drivine4j's `$_pN` to `$_cy_ft<N+1>`. `FullTextSearchGoldenTest` checks
+index: only the parameters' names were changed, drivine4j's `$_pN` to `$_cy_ft<N+1>`, and on the graph engines an index
+name or label with a quote or a backslash, which drivine4j wrote raw, is written escaped (liberation-data/drivine4j#767).
+`FullTextSearchGoldenTest` checks
 `plan`, and the JSON request, against each on every target. On a SQL store drivine4j's statement goes on to its projection of
 each node's row, which the module leaves to the library, so the test puts that back before it compares: the rest is
 byte for byte.
@@ -216,6 +248,27 @@ other stores. The option is temporary: Drivine for TypeScript sets it until a no
 oracle/node-oracledb#1795's fix ships, and drivine-python until python-oracledb's thin mode, another driver, is known to
 read every row (liberation-data/drivine-python#468); then they drop it, and it goes from the module with them.
 drivine4j's JDBC reads the `JSON` rows, and leaves it false.
+
+### Oracle's documents encoded again
+
+Oracle keeps a `JSON` column updated in place, as a write updates a node's properties, as OSON version 2, and gives it back
+so where the statement doesn't make the document anew: as a node with no stamp, which every node Cypher writes is, is
+returned. The thin drivers read only versions 1 and 3: python-oracledb's thin mode fails with `DPY-3021: OSON version 2
+is not supported` (oracle/python-oracledb#622), node-oracledb's with `NJS-126` (oracle/node-oracledb#1796). JDBC reads it.
+Oracle's x86-64 build sends it; the arm64 build of the same image (`gvenzl/oracle-free:23-faststart`, 23.26) has not been
+seen to.
+
+So a host on a thin driver sets `"oracleReencodeJson": true` in `graph` (`GraphOptions.oracleReencodeJson` in Kotlin),
+reading or writing. Each value a statement returns, its rows' `result`, is then encoded again, as a new document:
+
+```sql
+SELECT JSON_TRANSFORM(<the value>, KEEP '$') AS result
+```
+
+With `oracleRowsAsText` too, a write's rows are serialized to text already; its reads still return `JSON`, so the host
+sets both. A statement that returns nothing, and every statement on the other stores, is compiled alike either way. The
+option is temporary: a host sets it until its thin driver reads OSON version 2 (oracle/python-oracledb#622,
+oracle/node-oracledb#1796), then drops it, and it goes from the module with them.
 
 ### npm
 
@@ -365,7 +418,10 @@ The JVM is the oracle. `./gradlew jvmOracle` writes, into `build/oracle`:
   `schema.yaml`), compiled for Postgres, Oracle and SQLite, and some with parameters the spec has no form for (whole
   floats, temporal values, bytes, `$` keys) and Oracle's graph options, and on Oracle with `oracleRowsAsText` each of
   those statements whose SQL it changes (every write that returns rows), and two writes of its own, of a long text and of
-  many rows: each request and the JVM's answer. A statement whose SQL embeds the moment it was compiled, as SQLite's
+  many rows, and with `oracleReencodeJson` each of those statements whose SQL it changes (every one that returns rows).
+  Last, compiled typed: `results.yaml`'s statements, and each other statement whose SQL typed changes (one
+  that returns a node or a relationship), on Oracle with `oracleRowsAsText` too where that changes it, and with
+  `oracleReencodeJson`. Each request and the JVM's answer. A statement whose SQL embeds the moment it was compiled, as SQLite's
   does for `datetime()` and the like, is left out, found by its SQL holding that moment.
 - `doubles.txt`: random doubles (subnormals included) and Java's text of each, and random decimal and hexadecimal texts,
   halfway points between doubles and texts a digit either side, and Java's reading of each.
