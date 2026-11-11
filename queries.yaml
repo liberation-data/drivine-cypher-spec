@@ -3149,6 +3149,10 @@ cases:
       - note: "A number that another begins, as 1 begins 1.04 in Oracle's NUMBER, comes first whatever follows it."
         cypher: "UNWIND [[1.04], [1, 5], [1]] AS xs RETURN xs ORDER BY xs"
         rows: [[1], [1, 5], [1.04]]
+      - note: "A map comes before a text, a text before a truth value, false before true, and a truth value before a number, a negative one among them."
+        only: [neo4j, sql]
+        cypher: "UNWIND [[-1, 0], [true], [-1], ['a'], [-1.04], [false], [{a: 1}], [-2, 5]] AS xs RETURN xs ORDER BY xs"
+        rows: [[{a: 1}], ["a"], [false], [true], [-2, 5], [-1.04], [-1], [-1, 0]]
       - note: "-Infinity comes before every other number, and Infinity after them, then NaN."
         only: [neo4j, sql]
         cypher: "UNWIND [[$p], [$i], [3.0], [$n], ['a']] AS xs RETURN xs ORDER BY xs"

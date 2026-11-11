@@ -3066,7 +3066,7 @@ abstract class SqlCypherCompiler(
             }.joinToString("\n")
             // What sorts a term in the query that reads this one: worked out there, of the column carried out, or that column.
             // Each is named for the query after it, which sorts by them in turn: the last by the term's column, any before it,
-            // where its kind comes ([openSortKey]), by that column with a number after it.
+            // where its kind comes ([openSortKey]) or a list's key ([listSortKeys]), by that column with a number after it.
             fun sortedBy(column: String): List<Pair<String, String>> =
                 (after[column] ?: sorted[column]?.invoke("$name.$column") ?: listOf("$name.$column")).let { terms ->
                     terms.mapIndexed { i, term -> (if (i == terms.lastIndex) column else "${column}_${i + 1}") to term }
