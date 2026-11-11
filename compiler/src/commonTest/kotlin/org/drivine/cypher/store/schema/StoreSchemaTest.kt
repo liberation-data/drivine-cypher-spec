@@ -99,7 +99,9 @@ class StoreSchemaTest {
             val limit = case["limit"]!!.longValue().toInt()
             for ((id, expected) in stores(case["stores"]!!)) {
                 val schema = if (id == "neo4j4") Neo4jSchema("id") else schemas.getValue(id)
-                assertEquals(expected.textValue(), schema.sampleConflictsQuery(spec, limit), "$id: the sample of $spec")
+                // A refill's sample is of the spec as declared, its keys lowercased as its copies are filled in.
+                val sampled = if (case["refilled"]?.booleanValue() == true) schema.sampleRefilledConflictsQuery(spec, limit) else schema.sampleConflictsQuery(spec, limit)
+                assertEquals(expected.textValue(), sampled, "$id: the sample of $spec")
             }
         }
     }

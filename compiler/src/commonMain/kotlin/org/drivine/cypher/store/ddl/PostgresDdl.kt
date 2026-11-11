@@ -233,13 +233,14 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
                         )
                     )
                 ),
-                remade = remade(CatalogItem(spec.kind, spec.label, spec.properties), name),
+                finish = listOf(DdlStatement.Text("ALTER INDEX $temporary RENAME TO $name")),
+                remade = remade(CatalogItem(spec.kind, spec.label, spec.properties, spec.effectiveName), name),
             )
         }
     }
 
     override fun remade(item: CatalogItem, objectName: String): String =
-        statement("UPDATE $catalog SET object_name = ${literal(objectName)}, details = jsonb_set(details, '{$FORM}', '$CURRENT_FORM') WHERE ${recordOf(item)}")
+        statement("UPDATE $catalog SET name = ${item.name?.let(::literal) ?: "name"}, object_name = ${literal(objectName)}, details = jsonb_set(details, '{$FORM}', '$CURRENT_FORM') WHERE ${recordOf(item)}")
 
     /**
      * What is recorded of [kinds], and still there: an index dropped by hand is not listed, so that it is made again when

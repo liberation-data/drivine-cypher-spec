@@ -2404,7 +2404,7 @@ cases:
             $forget$
         recreate:
           form: 1
-          digest: "56893d53ec6d5ec8db9d50f859972f9ec7ef2c9208625490969f8f8d20cdbb28"
+          digest: "34b7b8ec2a2c124714825b90b93f9d5d7405e94169b4dbeb31591fff9bb61ac2"
           leftover:
             - "DROP INDEX IF EXISTS drivine_uq_Personemail_5482a751_r"
           build:
@@ -2417,7 +2417,9 @@ cases:
                   ALTER INDEX drivine_uq_Personemail_5482a751_r RENAME TO drivine_uq_Personemail_5482a751;
               END
               $swap$
-          remade: "UPDATE drivine_schema SET object_name = 'drivine_uq_Personemail_5482a751', details = jsonb_set(details, '{form}', '1') WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"email\"]'"
+          finish:
+            - "ALTER INDEX drivine_uq_Personemail_5482a751_r RENAME TO drivine_uq_Personemail_5482a751"
+          remade: "UPDATE drivine_schema SET name = 'Person_email_unique', object_name = 'drivine_uq_Personemail_5482a751', details = jsonb_set(details, '{form}', '1') WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"email\"]'"
       oracle:
         form: 1
         digest: "e2ecdc0f109d80d8ff257dd2f2e9eab619941aed479e07cbfc8392d534af0797"
@@ -2507,7 +2509,7 @@ cases:
             END;
         recreate:
           form: 1
-          digest: "12c0f2e784a418dbc09d7c2ecd4b9817d752e958c849d164e0fbe3ba80f84ce5"
+          digest: "8de5e60a19284fb254cfe9555d71ddae54a63a2033e8ba3056311de151f5d261"
           leftover:
             - "DROP INDEX IF EXISTS drivine_uq_Personemail_5482a751_r"
           build:
@@ -2531,7 +2533,9 @@ cases:
           swap:
             - "DROP INDEX IF EXISTS drivine_uq_Personemail_5482a751"
             - "ALTER INDEX drivine_uq_Personemail_5482a751_r RENAME TO drivine_uq_Personemail_5482a751"
-          remade: "UPDATE drivine_schema SET object_name = 'drivine_uq_Personemail_5482a751', details = JSON_MERGEPATCH(details, '{\"form\": 1}') WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"email\"]'"
+          finish:
+            - "ALTER INDEX drivine_uq_Personemail_5482a751_r RENAME TO drivine_uq_Personemail_5482a751"
+          remade: "UPDATE drivine_schema SET name = 'Person_email_unique', object_name = 'drivine_uq_Personemail_5482a751', details = JSON_MERGEPATCH(details, '{\"form\": 1}') WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"email\"]'"
       sqlite:
         form: 1
         digest: "8b3ea3a99b267cd97289cb0b2669a643d1bba8985df143842b45fb43e1a44d75"
@@ -2546,7 +2550,7 @@ cases:
           - "DELETE FROM drivine_schema WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"email\"]'"
         recreate:
           form: 1
-          digest: "5b6968a722da059a72bde23d7ef3f54f9a285e9a6256c2c5c5f30e8dce34207b"
+          digest: "d1568ef0e38dca70c1c7e7a31c217c6276a06322dd4443617465d63889c29147"
           leftover:
             - "DROP INDEX IF EXISTS drivine_uq_Personemail_5482a751_r"
           build:
@@ -2555,7 +2559,10 @@ cases:
             - "DROP INDEX IF EXISTS drivine_uq_Personemail_5482a751"
             - "CREATE UNIQUE INDEX drivine_uq_Personemail_5482a751 ON drivine_node ((CASE json_type(props, '$.\"email\"') WHEN 'text' THEN props ->> '$.\"email\"' WHEN 'null' THEN NULL ELSE props -> '$.\"email\"' END)) WHERE instr(labels, '\"Person\"') > 0"
             - "DROP INDEX IF EXISTS drivine_uq_Personemail_5482a751_r"
-          remade: "UPDATE drivine_schema SET object_name = 'drivine_uq_Personemail_5482a751', details = json_set(details, '$.form', 1) WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"email\"]'"
+          finish:
+            - "CREATE UNIQUE INDEX drivine_uq_Personemail_5482a751 ON drivine_node ((CASE json_type(props, '$.\"email\"') WHEN 'text' THEN props ->> '$.\"email\"' WHEN 'null' THEN NULL ELSE props -> '$.\"email\"' END)) WHERE instr(labels, '\"Person\"') > 0"
+            - "DROP INDEX IF EXISTS drivine_uq_Personemail_5482a751_r"
+          remade: "UPDATE drivine_schema SET name = 'Person_email_unique', object_name = 'drivine_uq_Personemail_5482a751', details = json_set(details, '$.form', 1) WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"email\"]'"
       neo4j:
         create:
           - "CREATE CONSTRAINT `Person_email_unique` IF NOT EXISTS FOR (n:`Person`) REQUIRE (n.`email`) IS UNIQUE"
@@ -2622,7 +2629,7 @@ cases:
             $forget$
         recreate:
           form: 1
-          digest: "964d7c9028ff9b7e12868cfa1a2672a95277ae6e956c0332f9639cda0178fe57"
+          digest: "d6e7619bc84335070bee5caabf77f77daac4fc2d3fb78121cc98eac9c95dfc9d"
           leftover:
             - "DROP INDEX IF EXISTS drivine_uq_Personfirstlast_58499b51_r"
           build:
@@ -2635,7 +2642,9 @@ cases:
                   ALTER INDEX drivine_uq_Personfirstlast_58499b51_r RENAME TO drivine_uq_Personfirstlast_58499b51;
               END
               $swap$
-          remade: "UPDATE drivine_schema SET object_name = 'drivine_uq_Personfirstlast_58499b51', details = jsonb_set(details, '{form}', '1') WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"first\",\"last\"]'"
+          finish:
+            - "ALTER INDEX drivine_uq_Personfirstlast_58499b51_r RENAME TO drivine_uq_Personfirstlast_58499b51"
+          remade: "UPDATE drivine_schema SET name = 'Person_first_last_unique', object_name = 'drivine_uq_Personfirstlast_58499b51', details = jsonb_set(details, '{form}', '1') WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"first\",\"last\"]'"
       oracle:
         form: 1
         digest: "a1546960731f51383f8c22da8218f677e144a82110eb11712471aac17a088896"
@@ -2736,7 +2745,7 @@ cases:
             END;
         recreate:
           form: 1
-          digest: "65c59ecdbd4419250360c84f9330f29a9a7b24abee48b41db8479d516d88d2e4"
+          digest: "594a709c3448e5549cb4fb587b5df2f9e606f39d83ee8fba0d1e843048bf1a55"
           leftover:
             - "DROP INDEX IF EXISTS drivine_uq_Personfirstlast_58499b51_r"
           build:
@@ -2760,7 +2769,9 @@ cases:
           swap:
             - "DROP INDEX IF EXISTS drivine_uq_Personfirstlast_58499b51"
             - "ALTER INDEX drivine_uq_Personfirstlast_58499b51_r RENAME TO drivine_uq_Personfirstlast_58499b51"
-          remade: "UPDATE drivine_schema SET object_name = 'drivine_uq_Personfirstlast_58499b51', details = JSON_MERGEPATCH(details, '{\"form\": 1}') WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"first\",\"last\"]'"
+          finish:
+            - "ALTER INDEX drivine_uq_Personfirstlast_58499b51_r RENAME TO drivine_uq_Personfirstlast_58499b51"
+          remade: "UPDATE drivine_schema SET name = 'Person_first_last_unique', object_name = 'drivine_uq_Personfirstlast_58499b51', details = JSON_MERGEPATCH(details, '{\"form\": 1}') WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"first\",\"last\"]'"
       sqlite:
         form: 1
         digest: "63ac3801ca7bc8c7d1b17a10cc475249cad719b2f2610895d4d174387e8fa069"
@@ -2775,7 +2786,7 @@ cases:
           - "DELETE FROM drivine_schema WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"first\",\"last\"]'"
         recreate:
           form: 1
-          digest: "73129723800c0cbeda7e7d496f4f2fe993628de31b97bb0676e58025ac4bfca9"
+          digest: "3bd2086f1230b85d5bcc14a59494cbe386ff4002040ee6154290e9f707079fe8"
           leftover:
             - "DROP INDEX IF EXISTS drivine_uq_Personfirstlast_58499b51_r"
           build:
@@ -2784,7 +2795,10 @@ cases:
             - "DROP INDEX IF EXISTS drivine_uq_Personfirstlast_58499b51"
             - "CREATE UNIQUE INDEX drivine_uq_Personfirstlast_58499b51 ON drivine_node ((CASE json_type(props, '$.\"first\"') WHEN 'text' THEN props ->> '$.\"first\"' WHEN 'null' THEN NULL ELSE props -> '$.\"first\"' END), (CASE json_type(props, '$.\"last\"') WHEN 'text' THEN props ->> '$.\"last\"' WHEN 'null' THEN NULL ELSE props -> '$.\"last\"' END)) WHERE instr(labels, '\"Person\"') > 0"
             - "DROP INDEX IF EXISTS drivine_uq_Personfirstlast_58499b51_r"
-          remade: "UPDATE drivine_schema SET object_name = 'drivine_uq_Personfirstlast_58499b51', details = json_set(details, '$.form', 1) WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"first\",\"last\"]'"
+          finish:
+            - "CREATE UNIQUE INDEX drivine_uq_Personfirstlast_58499b51 ON drivine_node ((CASE json_type(props, '$.\"first\"') WHEN 'text' THEN props ->> '$.\"first\"' WHEN 'null' THEN NULL ELSE props -> '$.\"first\"' END), (CASE json_type(props, '$.\"last\"') WHEN 'text' THEN props ->> '$.\"last\"' WHEN 'null' THEN NULL ELSE props -> '$.\"last\"' END)) WHERE instr(labels, '\"Person\"') > 0"
+            - "DROP INDEX IF EXISTS drivine_uq_Personfirstlast_58499b51_r"
+          remade: "UPDATE drivine_schema SET name = 'Person_first_last_unique', object_name = 'drivine_uq_Personfirstlast_58499b51', details = json_set(details, '$.form', 1) WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"first\",\"last\"]'"
       neo4j:
         create:
           - "CREATE CONSTRAINT `Person_first_last_unique` IF NOT EXISTS FOR (n:`Person`) REQUIRE (n.`first`, n.`last`) IS UNIQUE"
@@ -2865,7 +2879,7 @@ cases:
             $forget$
         recreate:
           form: 1
-          digest: "06e08fdd3397c9e09f0fc580223df16d38a1d278bbb4dd5e1c691344c51e0c2e"
+          digest: "9726b924b7653b7009998e3e9a62706e69e424b6674723c099c8df3f71f9d043"
           leftover:
             - "DROP INDEX IF EXISTS drivine_uq_Persondrivineloweremail_b3ad0b9b_r"
           build:
@@ -2878,7 +2892,9 @@ cases:
                   ALTER INDEX drivine_uq_Persondrivineloweremail_b3ad0b9b_r RENAME TO drivine_uq_Persondrivineloweremail_b3ad0b9b;
               END
               $swap$
-          remade: "UPDATE drivine_schema SET object_name = 'drivine_uq_Persondrivineloweremail_b3ad0b9b', details = jsonb_set(details, '{form}', '1') WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"__drivine.lower.email\"]'"
+          finish:
+            - "ALTER INDEX drivine_uq_Persondrivineloweremail_b3ad0b9b_r RENAME TO drivine_uq_Persondrivineloweremail_b3ad0b9b"
+          remade: "UPDATE drivine_schema SET name = 'Person_email_ci_unique', object_name = 'drivine_uq_Persondrivineloweremail_b3ad0b9b', details = jsonb_set(details, '{form}', '1') WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"__drivine.lower.email\"]'"
       oracle:
         form: 1
         digest: "8537ea69a6576a30ac279f36dcbf0b03e8fbfdf481861521a0b84358a94c93a7"
@@ -2968,7 +2984,7 @@ cases:
             END;
         recreate:
           form: 1
-          digest: "98fcdbd97b28c30ddf330ab413ad85f3d456ed35a2a9c16e074f660eb8ed33f3"
+          digest: "55f94396c57a73e896b1f18f131f5d719a78678f4366ee7d71c3990ebbb2308c"
           leftover:
             - "DROP INDEX IF EXISTS drivine_uq_Persondrivineloweremail_b3ad0b9b_r"
           build:
@@ -2992,7 +3008,9 @@ cases:
           swap:
             - "DROP INDEX IF EXISTS drivine_uq_Persondrivineloweremail_b3ad0b9b"
             - "ALTER INDEX drivine_uq_Persondrivineloweremail_b3ad0b9b_r RENAME TO drivine_uq_Persondrivineloweremail_b3ad0b9b"
-          remade: "UPDATE drivine_schema SET object_name = 'drivine_uq_Persondrivineloweremail_b3ad0b9b', details = JSON_MERGEPATCH(details, '{\"form\": 1}') WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"__drivine.lower.email\"]'"
+          finish:
+            - "ALTER INDEX drivine_uq_Persondrivineloweremail_b3ad0b9b_r RENAME TO drivine_uq_Persondrivineloweremail_b3ad0b9b"
+          remade: "UPDATE drivine_schema SET name = 'Person_email_ci_unique', object_name = 'drivine_uq_Persondrivineloweremail_b3ad0b9b', details = JSON_MERGEPATCH(details, '{\"form\": 1}') WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"__drivine.lower.email\"]'"
       sqlite:
         form: 1
         digest: "cd73aaf9338b4f1ef078d1e70d84de1c9b9d55fdbf624ff6f1b7a5978ce94fe4"
@@ -3007,7 +3025,7 @@ cases:
           - "DELETE FROM drivine_schema WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"__drivine.lower.email\"]'"
         recreate:
           form: 1
-          digest: "5f95b136cbdacb10e57364b64c7bc4ea59812f60c43cb2f7fcb6bef36aa86db7"
+          digest: "0423cbe09c4f285a3ae4e7d9ac3700bfff998ea51f2c7f5924e681533217fe25"
           leftover:
             - "DROP INDEX IF EXISTS drivine_uq_Persondrivineloweremail_b3ad0b9b_r"
           build:
@@ -3016,7 +3034,10 @@ cases:
             - "DROP INDEX IF EXISTS drivine_uq_Persondrivineloweremail_b3ad0b9b"
             - "CREATE UNIQUE INDEX drivine_uq_Persondrivineloweremail_b3ad0b9b ON drivine_node ((CASE json_type(props, '$.\"__drivine.lower.email\"') WHEN 'text' THEN props ->> '$.\"__drivine.lower.email\"' WHEN 'null' THEN NULL ELSE props -> '$.\"__drivine.lower.email\"' END)) WHERE instr(labels, '\"Person\"') > 0"
             - "DROP INDEX IF EXISTS drivine_uq_Persondrivineloweremail_b3ad0b9b_r"
-          remade: "UPDATE drivine_schema SET object_name = 'drivine_uq_Persondrivineloweremail_b3ad0b9b', details = json_set(details, '$.form', 1) WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"__drivine.lower.email\"]'"
+          finish:
+            - "CREATE UNIQUE INDEX drivine_uq_Persondrivineloweremail_b3ad0b9b ON drivine_node ((CASE json_type(props, '$.\"__drivine.lower.email\"') WHEN 'text' THEN props ->> '$.\"__drivine.lower.email\"' WHEN 'null' THEN NULL ELSE props -> '$.\"__drivine.lower.email\"' END)) WHERE instr(labels, '\"Person\"') > 0"
+            - "DROP INDEX IF EXISTS drivine_uq_Persondrivineloweremail_b3ad0b9b_r"
+          remade: "UPDATE drivine_schema SET name = 'Person_email_ci_unique', object_name = 'drivine_uq_Persondrivineloweremail_b3ad0b9b', details = json_set(details, '$.form', 1) WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"__drivine.lower.email\"]'"
       neo4j:
         create:
           - "CREATE CONSTRAINT `Person_email_ci_unique` IF NOT EXISTS FOR (n:`Person`) REQUIRE (n.`__drivine.lower.email`) IS UNIQUE"
@@ -4165,7 +4186,7 @@ cases:
             $forget$
         recreate:
           form: 1
-          digest: "da0a6fe9107bb0c50f7f1a37337b92164083c67e5d1c34b5034c296008404541"
+          digest: "b21bc69c4ccd689eefc886fd3093fab1d35030c9f037f126725019bd8dc22fe0"
           leftover:
             - "DROP INDEX IF EXISTS drivine_uq_Personname_f56cb9fe_r"
           build:
@@ -4178,7 +4199,9 @@ cases:
                   ALTER INDEX drivine_uq_Personname_f56cb9fe_r RENAME TO drivine_uq_Personname_f56cb9fe;
               END
               $swap$
-          remade: "UPDATE drivine_schema SET object_name = 'drivine_uq_Personname_f56cb9fe', details = jsonb_set(details, '{form}', '1') WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Per\"son' AND properties = '[\"name\"]'"
+          finish:
+            - "ALTER INDEX drivine_uq_Personname_f56cb9fe_r RENAME TO drivine_uq_Personname_f56cb9fe"
+          remade: "UPDATE drivine_schema SET name = 'Per\"son_name_unique', object_name = 'drivine_uq_Personname_f56cb9fe', details = jsonb_set(details, '{form}', '1') WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Per\"son' AND properties = '[\"name\"]'"
       oracle:
         form: 1
         digest: "d6450e96b56f0ccb7c63cb693a92b8c0b4d20f83192620783b0431cfc663d974"
@@ -4268,7 +4291,7 @@ cases:
             END;
         recreate:
           form: 1
-          digest: "6c753a5bd50f90e8d3936d32597dacde6ef14abe8921d070a0385a9cb99bc0ce"
+          digest: "496baf7ecb3255988346515e69166eb6c82f0b87501f89e1dbac6d560f2ec48a"
           leftover:
             - "DROP INDEX IF EXISTS drivine_uq_Personname_f56cb9fe_r"
           build:
@@ -4292,7 +4315,9 @@ cases:
           swap:
             - "DROP INDEX IF EXISTS drivine_uq_Personname_f56cb9fe"
             - "ALTER INDEX drivine_uq_Personname_f56cb9fe_r RENAME TO drivine_uq_Personname_f56cb9fe"
-          remade: "UPDATE drivine_schema SET object_name = 'drivine_uq_Personname_f56cb9fe', details = JSON_MERGEPATCH(details, '{\"form\": 1}') WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Per\"son' AND properties = '[\"name\"]'"
+          finish:
+            - "ALTER INDEX drivine_uq_Personname_f56cb9fe_r RENAME TO drivine_uq_Personname_f56cb9fe"
+          remade: "UPDATE drivine_schema SET name = 'Per\"son_name_unique', object_name = 'drivine_uq_Personname_f56cb9fe', details = JSON_MERGEPATCH(details, '{\"form\": 1}') WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Per\"son' AND properties = '[\"name\"]'"
       sqlite:
         form: 1
         digest: "1565c8aabe5aa53288e06f8f6d2bc8cd2c441537ddfb43ff155435b271d794ee"
@@ -4307,7 +4332,7 @@ cases:
           - "DELETE FROM drivine_schema WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Per\"son' AND properties = '[\"name\"]'"
         recreate:
           form: 1
-          digest: "14c5fe8aa9f5879c6c6e4df24bce3646365047cd886bb0b390008c3e1ca61763"
+          digest: "5104838fb259c0eb3ce8c123cba841fbdb6cc0a982fd955752ee4ed79d6d3b73"
           leftover:
             - "DROP INDEX IF EXISTS drivine_uq_Personname_f56cb9fe_r"
           build:
@@ -4316,7 +4341,10 @@ cases:
             - "DROP INDEX IF EXISTS drivine_uq_Personname_f56cb9fe"
             - "CREATE UNIQUE INDEX drivine_uq_Personname_f56cb9fe ON drivine_node ((CASE json_type(props, '$.\"name\"') WHEN 'text' THEN props ->> '$.\"name\"' WHEN 'null' THEN NULL ELSE props -> '$.\"name\"' END)) WHERE instr(labels, '\"Per\\\"son\"') > 0"
             - "DROP INDEX IF EXISTS drivine_uq_Personname_f56cb9fe_r"
-          remade: "UPDATE drivine_schema SET object_name = 'drivine_uq_Personname_f56cb9fe', details = json_set(details, '$.form', 1) WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Per\"son' AND properties = '[\"name\"]'"
+          finish:
+            - "CREATE UNIQUE INDEX drivine_uq_Personname_f56cb9fe ON drivine_node ((CASE json_type(props, '$.\"name\"') WHEN 'text' THEN props ->> '$.\"name\"' WHEN 'null' THEN NULL ELSE props -> '$.\"name\"' END)) WHERE instr(labels, '\"Per\\\"son\"') > 0"
+            - "DROP INDEX IF EXISTS drivine_uq_Personname_f56cb9fe_r"
+          remade: "UPDATE drivine_schema SET name = 'Per\"son_name_unique', object_name = 'drivine_uq_Personname_f56cb9fe', details = json_set(details, '$.form', 1) WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Per\"son' AND properties = '[\"name\"]'"
       neo4j:
         create:
           - "CREATE CONSTRAINT `Per\"son_name_unique` IF NOT EXISTS FOR (n:`Per\"son`) REQUIRE (n.`name`) IS UNIQUE"
@@ -4662,7 +4690,7 @@ cases:
             $forget$
         recreate:
           form: 1
-          digest: "c598ed23113047aed308bfd948d4ac5422030731190bdadf68d437f5895ab296"
+          digest: "3fe4fc90cafb8c6d686f763e69cb0e9fb6d165dcb16bd2d42752a9769e48367b"
           leftover:
             - "DROP INDEX IF EXISTS drivine_uq_Personsayhi_5316dfc3_r"
           build:
@@ -4675,7 +4703,9 @@ cases:
                   ALTER INDEX drivine_uq_Personsayhi_5316dfc3_r RENAME TO drivine_uq_Personsayhi_5316dfc3;
               END
               $swap$
-          remade: "UPDATE drivine_schema SET object_name = 'drivine_uq_Personsayhi_5316dfc3', details = jsonb_set(details, '{form}', '1') WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"say\\\"hi\"]'"
+          finish:
+            - "ALTER INDEX drivine_uq_Personsayhi_5316dfc3_r RENAME TO drivine_uq_Personsayhi_5316dfc3"
+          remade: "UPDATE drivine_schema SET name = 'Person_say\"hi_unique', object_name = 'drivine_uq_Personsayhi_5316dfc3', details = jsonb_set(details, '{form}', '1') WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"say\\\"hi\"]'"
       oracle:
         form: 1
         digest: "7bf6d9fdc3e18c513ed0f0d7dcd092dfbdc7d063818816e7ff4b4b2492e159bd"
@@ -4765,7 +4795,7 @@ cases:
             END;
         recreate:
           form: 1
-          digest: "c5688a6afdee2c10262876d363eeaa24ea5ce00e95c26b8fcf26c01ac64c3847"
+          digest: "0a3a2bac4a407ffeca0e1733f32bc5f8e7ea87bb001bc31968c02ed78e909a73"
           leftover:
             - "DROP INDEX IF EXISTS drivine_uq_Personsayhi_5316dfc3_r"
           build:
@@ -4789,7 +4819,9 @@ cases:
           swap:
             - "DROP INDEX IF EXISTS drivine_uq_Personsayhi_5316dfc3"
             - "ALTER INDEX drivine_uq_Personsayhi_5316dfc3_r RENAME TO drivine_uq_Personsayhi_5316dfc3"
-          remade: "UPDATE drivine_schema SET object_name = 'drivine_uq_Personsayhi_5316dfc3', details = JSON_MERGEPATCH(details, '{\"form\": 1}') WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"say\\\"hi\"]'"
+          finish:
+            - "ALTER INDEX drivine_uq_Personsayhi_5316dfc3_r RENAME TO drivine_uq_Personsayhi_5316dfc3"
+          remade: "UPDATE drivine_schema SET name = 'Person_say\"hi_unique', object_name = 'drivine_uq_Personsayhi_5316dfc3', details = JSON_MERGEPATCH(details, '{\"form\": 1}') WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"say\\\"hi\"]'"
       sqlite:
         form: 1
         digest: "52cf31964aec9c3432d5e9bb3efb071d57759a9780d1fb7be34c683b04708e43"
@@ -4804,7 +4836,7 @@ cases:
           - "DELETE FROM drivine_schema WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"say\\\"hi\"]'"
         recreate:
           form: 1
-          digest: "03d1643d88bf17770ae5c0466e7299983ff949565a45e8dbb66cef33395681c3"
+          digest: "5c65d45707f2819d808038baa3a3683af6f65db9cb8becfaa1530b4bf9936cb5"
           leftover:
             - "DROP INDEX IF EXISTS drivine_uq_Personsayhi_5316dfc3_r"
           build:
@@ -4813,7 +4845,10 @@ cases:
             - "DROP INDEX IF EXISTS drivine_uq_Personsayhi_5316dfc3"
             - "CREATE UNIQUE INDEX drivine_uq_Personsayhi_5316dfc3 ON drivine_node ((CASE json_type(props, '$.\"say\\\"hi\"') WHEN 'text' THEN props ->> '$.\"say\\\"hi\"' WHEN 'null' THEN NULL ELSE props -> '$.\"say\\\"hi\"' END)) WHERE instr(labels, '\"Person\"') > 0"
             - "DROP INDEX IF EXISTS drivine_uq_Personsayhi_5316dfc3_r"
-          remade: "UPDATE drivine_schema SET object_name = 'drivine_uq_Personsayhi_5316dfc3', details = json_set(details, '$.form', 1) WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"say\\\"hi\"]'"
+          finish:
+            - "CREATE UNIQUE INDEX drivine_uq_Personsayhi_5316dfc3 ON drivine_node ((CASE json_type(props, '$.\"say\\\"hi\"') WHEN 'text' THEN props ->> '$.\"say\\\"hi\"' WHEN 'null' THEN NULL ELSE props -> '$.\"say\\\"hi\"' END)) WHERE instr(labels, '\"Person\"') > 0"
+            - "DROP INDEX IF EXISTS drivine_uq_Personsayhi_5316dfc3_r"
+          remade: "UPDATE drivine_schema SET name = 'Person_say\"hi_unique', object_name = 'drivine_uq_Personsayhi_5316dfc3', details = json_set(details, '$.form', 1) WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"say\\\"hi\"]'"
       neo4j:
         create:
           - "CREATE CONSTRAINT `Person_say\"hi_unique` IF NOT EXISTS FOR (n:`Person`) REQUIRE (n.`say\"hi`) IS UNIQUE"
@@ -5297,6 +5332,69 @@ schema:
           WHERE k.total > 1
           GROUP BY k0, k1
           LIMIT 5
+    - spec: {kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], ignoreCase: true}
+      limit: 10
+      refilled: true
+      stores:
+        neo4j: |-
+          MATCH (n:Person)
+          WHERE n.`__drivine.lower.email` IS NOT NULL
+          WITH n.`__drivine.lower.email` AS _k0, count(*) AS _count, collect({elementId: elementId(n)}) AS _nodes
+          WHERE _count > 1
+          RETURN {properties: {`__drivine.lower.email`: _k0}, count: _count, nodes: _nodes[0..10]}
+          LIMIT 10
+        neo4j4: |-
+          MATCH (n:Person)
+          WHERE n.`__drivine.lower.email` IS NOT NULL
+          WITH n.`__drivine.lower.email` AS _k0, count(*) AS _count, collect({elementId: id(n)}) AS _nodes
+          WHERE _count > 1
+          RETURN {properties: {`__drivine.lower.email`: _k0}, count: _count, nodes: _nodes[0..10]}
+          LIMIT 10
+        memgraph: |-
+          MATCH (n:Person)
+          WHERE n.`__drivine.lower.email` IS NOT NULL
+          WITH n.`__drivine.lower.email` AS _k0, count(*) AS _count, collect({elementId: id(n)}) AS _nodes
+          WHERE _count > 1
+          RETURN {properties: {`__drivine.lower.email`: _k0}, count: _count, nodes: _nodes[0..10]}
+          LIMIT 10
+        falkordb: |-
+          MATCH (n:Person)
+          WHERE n.`__drivine.lower.email` IS NOT NULL
+          WITH n.`__drivine.lower.email` AS _k0, count(*) AS _count, collect({elementId: id(n)}) AS _nodes
+          WHERE _count > 1
+          RETURN {properties: {`__drivine.lower.email`: _k0}, count: _count, nodes: _nodes[0..10]}
+          LIMIT 10
+        postgres: |-
+          SELECT jsonb_build_object('properties', jsonb_build_object('__drivine.lower.email', lower((n.props ->> 'email'))), 'count', COUNT(*),
+                                    'nodes', to_jsonb((array_agg(jsonb_build_object('elementId', n.nid) ORDER BY n.nid))[1:10]))
+          FROM drivine_node n
+          WHERE n.labels @> '["Person"]' AND lower((n.props ->> 'email')) IS NOT NULL
+          GROUP BY lower((n.props ->> 'email'))
+          HAVING COUNT(*) > 1
+          LIMIT 10
+        oracle: |-
+          SELECT JSON_OBJECT('properties' VALUE JSON_OBJECT('__drivine.lower.email' VALUE k0), 'count' VALUE MAX(c),
+                             'nodes' VALUE JSON_ARRAYAGG(JSON_OBJECT('elementId' VALUE nid) ORDER BY nid RETURNING JSON) RETURNING JSON)
+          FROM (SELECT n.nid, LOWER(JSON_VALUE(n.props, '$.email')) AS k0, COUNT(*) OVER (PARTITION BY LOWER(JSON_VALUE(n.props, '$.email'))) AS c, ROW_NUMBER() OVER (PARTITION BY LOWER(JSON_VALUE(n.props, '$.email')) ORDER BY n.nid) AS r
+                FROM drivine_node n
+                WHERE JSON_EXISTS(n.labels, '$[*]?(@ == "Person")') AND LOWER(JSON_VALUE(n.props, '$.email')) IS NOT NULL)
+          WHERE c > 1 AND r <= 10
+          GROUP BY k0
+          FETCH FIRST 10 ROWS ONLY
+        sqlite: |-
+          /* drivine:json */
+          SELECT json_object('properties', json_object('__drivine.lower.email', k.k0), 'count', MAX(k.total),
+                             'nodes', json_group_array(json_object('elementId', k.nid) ORDER BY k.nid) FILTER (WHERE k.position <= 10))
+          FROM (
+              SELECT n.nid, drivine_lower((CASE json_type(n.props, '$."email"') WHEN 'text' THEN n.props ->> '$."email"' WHEN 'null' THEN NULL ELSE n.props -> '$."email"' END)) AS k0,
+                     row_number() OVER (PARTITION BY drivine_lower((CASE json_type(n.props, '$."email"') WHEN 'text' THEN n.props ->> '$."email"' WHEN 'null' THEN NULL ELSE n.props -> '$."email"' END)) ORDER BY n.nid) AS position,
+                     COUNT(*) OVER (PARTITION BY drivine_lower((CASE json_type(n.props, '$."email"') WHEN 'text' THEN n.props ->> '$."email"' WHEN 'null' THEN NULL ELSE n.props -> '$."email"' END))) AS total
+              FROM drivine_node n
+              WHERE instr(n.labels, '"Person"') > 0 AND drivine_lower((CASE json_type(n.props, '$."email"') WHEN 'text' THEN n.props ->> '$."email"' WHEN 'null' THEN NULL ELSE n.props -> '$."email"' END)) IS NOT NULL
+          ) k
+          WHERE k.total > 1
+          GROUP BY k0
+          LIMIT 10
 listings:
   - name: "A vector index, as Neo4j 5 reports it"
     listing: "indexes"
@@ -6564,6 +6662,37 @@ errors:
       falkordb: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
       postgres: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
       oracle: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      sqlite: {violation: true, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+  - name: "Postgres: 23505 from a refill of the lowercased copies the old unique index refuses"
+    causes:
+      - {sqlState: "23505", vendorCode: 0, message: "ERROR: duplicate key value violates unique constraint \"drivine_uq_persondrivineloweremail_b3ad0b9b\"\n  Detail: Key ((props ->> '__drivine.lower.email'::text))=(ann@x) already exists."}
+    stores:
+      neo4j: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      memgraph: {violation: true, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      falkordb: {violation: true, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      postgres: {violation: true, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      oracle: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      sqlite: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+  - name: "Oracle: ORA-00001 from a refill of the lowercased copies the old unique index refuses"
+    causes:
+      - {sqlState: "23000", vendorCode: 1, message: "ORA-00001: unique constraint (DRIVINE.DRIVINE_UQ_PERSONDRIVINELOWEREMAIL_B3AD0B9B) violated on table DRIVINE.DRIVINE_NODE columns (SYS_NC00009$)\nORA-03301: (ORA-00001 details) row with column values (SYS_NC00009$:'ann@x') already exists\nORA-06512: at line 5\n\nhttps://docs.oracle.com/error-help/db/ora-00001/"}
+      - {message: "ORA-00001: unique constraint (DRIVINE.DRIVINE_UQ_PERSONDRIVINELOWEREMAIL_B3AD0B9B) violated on table DRIVINE.DRIVINE_NODE columns (SYS_NC00009$)\nORA-03301: (ORA-00001 details) row with column values (SYS_NC00009$:'ann@x') already exists\nORA-06512: at line 5\n"}
+    stores:
+      neo4j: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      memgraph: {violation: true, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      falkordb: {violation: true, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      postgres: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      oracle: {violation: true, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      sqlite: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+  - name: "SQLite: UNIQUE constraint failed within the error of a refill of the lowercased copies the old unique index refuses"
+    causes:
+      - {sqlState: null, vendorCode: 1, message: "[SQLITE_ERROR] SQL error or missing database (org.sqlite.SQLiteException: [SQLITE_CONSTRAINT_UNIQUE] A UNIQUE constraint failed (UNIQUE constraint failed: index 'drivine_uq_Persondrivineloweremail_b3ad0b9b'))"}
+    stores:
+      neo4j: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      memgraph: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      falkordb: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      postgres: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      oracle: {violation: true, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
       sqlite: {violation: true, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
 declarations:
   - name: "Identical declarations are one"

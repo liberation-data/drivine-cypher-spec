@@ -3,6 +3,7 @@ package org.drivine.cypher.store.schema
 import org.drivine.DrivineInternalApi
 import org.drivine.cypher.store.OracleSql
 import org.drivine.cypher.store.PostgresSql
+import org.drivine.cypher.store.SqliteFunctions
 import org.drivine.cypher.store.SqliteSql
 import org.drivine.cypher.store.Stamps
 import org.drivine.cypher.store.ddl.CatalogItem
@@ -17,6 +18,7 @@ import org.drivine.schema.SchemaItemKind
 import org.drivine.schema.SchemaItemSpec
 import org.drivine.schema.SimilarityFunction
 import org.drivine.schema.VectorIndexSpec
+import org.drivine.schema.made
 
 /**
  * The schema of a SQL store: what Drivine made is read back from the graph's catalog, a record a row, as a map of its
@@ -111,6 +113,19 @@ abstract class SqlStoreSchema internal constructor() : StoreSchema {
             if (!there.isIndex && indexesNamedApart) return@mapNotNull null
             mismatchOf(made, there, structureOnly = newer)?.let { ItemForm.Mismatch(there.name, it, droppable = there.isIndex) }
         }
+
+    /**
+     * Whether [rows] show a recreate of the uniqueness constraint [spec] cut off after its old index was dropped
+     * ([org.drivine.cypher.store.ddl.UniqueRecreation.finish]): no index under [name], and under [temporary] a unique index
+     * of the constraint's shape, as [name]'s would be.
+     */
+    fun cutOff(spec: SchemaItemSpec, rows: List<Any?>, name: String, temporary: String): Boolean {
+        val objects = StoreObject.read(rows)
+        objects[name]?.let { standing -> if (standing.isIndex || !indexesNamedApart) return false }
+        val there = objects[temporary]?.takeIf { it.isIndex && it.unique == true } ?: return false
+        val made = madeAs(spec).firstOrNull { it.name.equals(name, ignoreCase = true) } ?: return false
+        return mismatchOf(made.copy(name = temporary), there, structureOnly = false) == null
+    }
 
     /** The record [rows] list of [spec]'s item; null where they list none. */
     private fun recordOf(spec: SchemaItemSpec, rows: List<Any?>): Map<*, *>? = rows.filterIsInstance<Map<*, *>>().firstOrNull { row ->
@@ -360,8 +375,13 @@ class PostgresSchema(override val ddl: PostgresDdl) : SqlStoreSchema() {
     override fun isViolation(error: StoreError): Boolean = error.causes.any { it.isSqlError && it.sqlState == "23505" }
 
     /** A node's element id is its `nid`; [limit] of a key's nodes at most are named, the first made first. */
-    override fun sampleConflictsQuery(spec: ConstraintSpec, limit: Int): String {
-        val keys = spec.properties.map { PostgresSql.property("n", it) }
+    override fun sampleConflictsQuery(spec: ConstraintSpec, limit: Int): String = sample(spec, spec.properties.map { PostgresSql.property("n", it) }, limit)
+
+    /** Each key lowercased as the copies are filled in, with `lower`. */
+    override fun sampleRefilledConflictsQuery(spec: ConstraintSpec, limit: Int): String =
+        sample(spec.made(), spec.properties.map { "lower(${PostgresSql.property("n", it)})" }, limit)
+
+    private fun sample(spec: ConstraintSpec, keys: List<String>, limit: Int): String {
         val entries = spec.properties.zip(keys).joinToString(", ") { (property, key) -> "${PostgresSql.literal(property)}, $key" }
         val node = listOfNotNull(
             "'elementId', n.nid",
@@ -595,8 +615,14 @@ class OracleSchema(override val ddl: OracleDdl) : SqlStoreSchema() {
      * Each node of a key that repeats is numbered within its key, and counted with it, so that a row names [limit] of its
      * nodes at most however many hold the key. A node's element id is its `nid`.
      */
-    override fun sampleConflictsQuery(spec: ConstraintSpec, limit: Int): String {
-        val keys = spec.properties.map { "JSON_VALUE(n.props, ${OracleSql.path(it)})" }
+    override fun sampleConflictsQuery(spec: ConstraintSpec, limit: Int): String =
+        sample(spec, spec.properties.map { "JSON_VALUE(n.props, ${OracleSql.path(it)})" }, limit)
+
+    /** Each key lowercased as the copies are filled in, with `LOWER`. */
+    override fun sampleRefilledConflictsQuery(spec: ConstraintSpec, limit: Int): String =
+        sample(spec.made(), spec.properties.map { "LOWER(JSON_VALUE(n.props, ${OracleSql.path(it)}))" }, limit)
+
+    private fun sample(spec: ConstraintSpec, keys: List<String>, limit: Int): String {
         val aliases = keys.indices.map { "k$it" }
         val entries = spec.properties.zip(aliases).joinToString(", ") { (property, key) -> "${OracleSql.literal(property)} VALUE $key" }
         val nodeId = StoreSchema.sampledNodeId(spec)
@@ -668,8 +694,13 @@ class SqliteSchema(override val ddl: SqliteDdl) : SqlStoreSchema() {
         error.causes.any { it.isSqlError && it.message.orEmpty().contains("UNIQUE constraint failed") }
 
     /** A node's element id is its `nid`; [limit] of a key's nodes at most are named, the first made first. Its rows are JSON ([SqliteDdl.JSON_ROWS]). */
-    override fun sampleConflictsQuery(spec: ConstraintSpec, limit: Int): String {
-        val keys = spec.properties.map { SqliteSql.property("n", it) }
+    override fun sampleConflictsQuery(spec: ConstraintSpec, limit: Int): String = sample(spec, spec.properties.map { SqliteSql.property("n", it) }, limit)
+
+    /** Each key lowercased as the copies are filled in, with the library's own [SqliteFunctions.LOWER]. */
+    override fun sampleRefilledConflictsQuery(spec: ConstraintSpec, limit: Int): String =
+        sample(spec.made(), spec.properties.map { "${SqliteFunctions.LOWER}(${SqliteSql.property("n", it)})" }, limit)
+
+    private fun sample(spec: ConstraintSpec, keys: List<String>, limit: Int): String {
         val columns = keys.mapIndexed { i, key -> "$key AS k$i" }.joinToString(", ")
         val grouping = keys.indices.joinToString(", ") { "k$it" }
         val entries = spec.properties.mapIndexed { i, property -> "${SqliteSql.literal(property)}, k.k$i" }.joinToString(", ")

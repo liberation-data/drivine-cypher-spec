@@ -163,7 +163,7 @@ class StorePlanTest {
         execute["drop"]?.let { return ddl(storeCase(it.textValue()!!)["stores"]!![id]!!["drop"]!!.map(::statement)) }
         execute["dropUnnamed"]?.let { return ddl(storeCase(it.textValue()!!)["stores"]!![id]!!["dropUnnamed"]!!.map(::statement)) }
         // A uniqueness constraint made again in its place (drivine-cypher-spec#135 §4), as its case's `recreate` pins it.
-        for (step in listOf("leftover", "build", "swap")) {
+        for (step in listOf("leftover", "build", "swap", "finish")) {
             execute[step]?.let { return ddl(storeCase(it.textValue()!!)["stores"]!![id]!!["recreate"]!![step]!!.map(::statement)) }
         }
         execute["remade"]?.let {
@@ -208,7 +208,10 @@ class StorePlanTest {
         query["sample"]?.let { sample ->
             val spec = spec(sample["spec"]!!)
             val limit = sample["limit"]!!.longValue()
-            val pinned = store["schema"]!!["samples"]!!.firstOrNull { spec(it["spec"]!!) == spec && it["limit"]!!.longValue() == limit }
+            val refilled = sample["refilled"]?.booleanValue() ?: false
+            val pinned = store["schema"]!!["samples"]!!.firstOrNull {
+                spec(it["spec"]!!) == spec && it["limit"]!!.longValue() == limit && (it["refilled"]?.booleanValue() ?: false) == refilled
+            }
                 ?: fail("store.yaml samples no $spec with the limit $limit")
             return PlanAction.Query(pinned["stores"]!![id]!!.textValue()!!, purpose = Purpose.SAMPLE, delayMillis = delay)
         }

@@ -53,8 +53,11 @@ data class CatalogItem(
  * - [swap] puts it in the old index's place, under [name]: on Postgres one block that drops the old and renames it, on
  *   Oracle the drop and then the rename, and on SQLite, which renames no index, the drop, the index made again under
  *   [name] (which the data, held unique by [temporary], can't refuse), and [temporary] dropped;
- * - [remade] records the record as made in this version's form as [name], keeping its aliases, after the constraint's
- *   `create`, which finds the index there and records the item where no record is.
+ * - [finish] puts [temporary] in its place where a recreate was cut off after the old index was dropped, and only
+ *   [temporary] stands, of the constraint's shape: the rename the swap ends with (on SQLite, the index made again under
+ *   [name], and [temporary] dropped). A library runs it in place of the rest, and does not drop [temporary] first;
+ * - [remade] records the record as made in this version's form as [name], under the item's name, keeping its
+ *   aliases, after the constraint's `create`, which finds the index there and records the item where no record is.
  */
 @DrivineInternalApi
 data class UniqueRecreation(
@@ -63,6 +66,7 @@ data class UniqueRecreation(
     val leftover: List<DdlStatement>,
     val build: List<DdlStatement>,
     val swap: List<DdlStatement>,
+    val finish: List<DdlStatement>,
     val remade: String,
 )
 
@@ -261,8 +265,9 @@ abstract class SqlStoreDdl(val name: String, final override val engine: String, 
     abstract fun recreation(spec: ConstraintSpec): UniqueRecreation
 
     /**
-     * What records [item]'s record as made in [CURRENT_FORM] as the object [objectName], and changes nothing else (its
-     * aliases are kept): for a uniqueness constraint made again in its place ([recreation]). Safe to run again.
+     * What records [item]'s record as made in [CURRENT_FORM] as the object [objectName], under [item]'s name, and changes
+     * nothing else (its aliases are kept): for a uniqueness constraint made again in its place ([recreation]), whose
+     * record is left as one made anew would be. Safe to run again.
      */
     abstract fun remade(item: CatalogItem, objectName: String): String
 

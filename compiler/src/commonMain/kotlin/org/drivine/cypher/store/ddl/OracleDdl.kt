@@ -493,13 +493,14 @@ ${made.entries.joinToString("\n") { (function, making) ->
                 leftover = listOf(DdlStatement.Text(droppedIndex(temporary))),
                 build = listOf(DdlStatement.Text(statement(busyWaiting("CREATE UNIQUE INDEX $temporary ON $nodes n ($expressions)")))),
                 swap = listOf(droppedIndex(name), "ALTER INDEX $temporary RENAME TO $name").map { DdlStatement.Text(it) },
-                remade = remade(CatalogItem(spec.kind, spec.label, spec.properties), name),
+                finish = listOf(DdlStatement.Text("ALTER INDEX $temporary RENAME TO $name")),
+                remade = remade(CatalogItem(spec.kind, spec.label, spec.properties, spec.effectiveName), name),
             )
         }
     }
 
     override fun remade(item: CatalogItem, objectName: String): String =
-        statement("UPDATE $catalog SET object_name = ${literal(objectName)}, details = JSON_MERGEPATCH(details, '{\"$FORM\": $CURRENT_FORM}') WHERE ${recordOf(item)}")
+        statement("UPDATE $catalog SET name = ${item.name?.let(::literal) ?: "name"}, object_name = ${literal(objectName)}, details = JSON_MERGEPATCH(details, '{\"$FORM\": $CURRENT_FORM}') WHERE ${recordOf(item)}")
 
     /** Whether the labelled index the record `c` names is there. */
     private val labelledThere = "EXISTS (SELECT 1 FROM user_indexes l WHERE l.index_name = UPPER(JSON_VALUE(c.details, '$.labelled')))"

@@ -142,7 +142,7 @@ class StoreDdlTest {
 
     /**
      * drivine-cypher-spec#135 §4: each SQL store's safe recreate of a uniqueness constraint is pinned, with the form its
-     * record then says and a digest of its statements (`leftover`, `build`, `swap`, then `remade`), as a create is. The
+     * record then says and a digest of its statements (`leftover`, `build`, `swap`, `finish`, then `remade`), as a create is. The
      * index it leaves is the one the create makes, built under another name first and put in its place: the build is the
      * create's unique index under [SqlStoreDdl.temporaryName], without its `IF NOT EXISTS`, and SQLite's swap makes the
      * create's index under its own name, so the form stays the create's.
@@ -165,9 +165,10 @@ class StoreDdlTest {
                 assertEquals(texts(expected["leftover"]!!), texts(recreation.leftover), "$name on $id: leftover")
                 assertEquals(texts(expected["build"]!!), texts(recreation.build), "$name on $id: build")
                 assertEquals(texts(expected["swap"]!!), texts(recreation.swap), "$name on $id: swap")
+                assertEquals(texts(expected["finish"]!!), texts(recreation.finish), "$name on $id: finish")
                 assertEquals(expected["remade"]!!.textValue(), recreation.remade, "$name on $id: remade")
                 assertEquals(SqlStoreDdl.CURRENT_FORM.toLong(), expected["form"]?.longValue(), "$name on $id: the form its record says")
-                val statements = texts(recreation.leftover + recreation.build + recreation.swap) + recreation.remade
+                val statements = texts(recreation.leftover + recreation.build + recreation.swap + recreation.finish) + recreation.remade
                 assertEquals(expected["digest"]?.textValue(), digest(statements), "$name on $id: its recreate is not the form ${SqlStoreDdl.CURRENT_FORM} it is pinned to")
 
                 // What it leaves is what the create makes.
@@ -175,7 +176,16 @@ class StoreDdlTest {
                 val unique = create.single { "CREATE UNIQUE INDEX IF NOT EXISTS ${recreation.name} " in it }
                 assertEquals(unique.replace("IF NOT EXISTS ${recreation.name} ", "${recreation.temporary} "), texts(recreation.build).single(), "$name on $id: the build is the create's index")
                 assertEquals(recreation.name + SqlStoreDdl.TEMPORARY, recreation.temporary, "$name on $id: the name built under first")
-                if (ddl is SqliteDdl) assertEquals(unique.replace("IF NOT EXISTS ", ""), texts(recreation.swap)[1], "$name on $id: the index made again under its name")
+                if (ddl is SqliteDdl) {
+                    assertEquals(unique.replace("IF NOT EXISTS ", ""), texts(recreation.swap)[1], "$name on $id: the index made again under its name")
+                    assertEquals(texts(recreation.swap).drop(1), texts(recreation.finish), "$name on $id: the swap's end, which finishes one cut off")
+                } else {
+                    // Oracle's swap ends with it; Postgres's block does.
+                    val rename = texts(recreation.finish).single()
+                    assertTrue(texts(recreation.swap).last().let { it == rename || "    $rename;\nEND" in it }, "$name on $id: the rename, which finishes one cut off")
+                }
+                // The record is left as one made anew: under the item's name, as the index under its own.
+                assertTrue("name = ${ddl.recreation(made).name.let { "'${made.effectiveName.replace("'", "''")}'" }}" in recreation.remade, "$name on $id: remade names the record as the item")
                 checked++
             }
         }

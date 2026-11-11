@@ -6133,7 +6133,7 @@ cases:
                 - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 0 already matching, 1 recreated, 0 needing attention"]
   - case: "31a"
     name: "A uniqueness constraint made again in its place"
-    description: "recreateAll of a constraint this version made. Its unique index is built anew under a name of its own while the old one stands, then swapped into its place, and its record made this version's form's: on Postgres one block that drops the old and renames the new, on SQLite the old dropped, the index made again under its name and the new one dropped. Oracle refuses a second index over the same expressions (ORA-01408): the old one, which held the data unique, is dropped first and made again, said at WARN."
+    description: "recreateAll of a constraint this version made. Its unique index is built anew under a name of its own while the old one stands, then swapped into its place, and its record made this version's form's: on Postgres one block that drops the old and renames the new, on SQLite the old dropped, the index made again under its name and the new one dropped. Oracle refuses a second index over the same expressions (ORA-01408): the old one, made as this version makes it, held the data unique, so it is dropped first and made again, said at INFO."
     stores: ["postgres", "oracle", "sqlite"]
     catalogs:
       - {owner: null, version: null, items: ["Uniqueness constraint"]}
@@ -6196,7 +6196,7 @@ cases:
                 - {"owner": null, "results": [{"spec": "Uniqueness constraint", "recreated": {"previous": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique"}, "current": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique"}}}], "marker": {"version": null, "items": "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
               log:
                 - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=true, versionChanged=false, version=null)"]
-                - ["WARN", "ConstraintManager", "Dropped {engine} index drivine_uq_Personemail_5482a751 of UNIQUENESS_CONSTRAINT on Person[email] before making it again: Oracle builds no second index over the same expressions (ORA-01408), so the new one can't be built beside it. Where a write in between repeats a key, Person[email] is left with no index until the constraint is made"]
+                - ["INFO", "ConstraintManager", "Dropped {engine} index drivine_uq_Personemail_5482a751 of UNIQUENESS_CONSTRAINT on Person[email] before making it again: Oracle builds no second index over the same expressions (ORA-01408), so the new one can't be built beside it. It was made as this version makes it, so the data it held unique is unique still, but for a write in between"]
                 - ["INFO", "ConstraintManager", "Created {engine} UNIQUENESS_CONSTRAINT on Person[email]"]
                 - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 0 already matching, 1 recreated, 0 needing attention"]
           - stores: ["sqlite"]
@@ -6324,8 +6324,8 @@ cases:
                 - ["ERROR", "SchemaManager", "Schema application for owner 'schema' on 'default' failed: Schema application for owner 'schema' on database 'default' found problems:\n  - VIOLATION: UNIQUENESS_CONSTRAINT on Person[email] cannot be created — existing data violates it. Conflicting sample: [{properties={email=a@x}, count=2, nodes=[{elementId=1}, {elementId=2}]}]\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."]
   - case: "31c"
     name: "A unique index a recreate that stopped short left"
-    description: "The index a recreate builds first stands beside the constraint's on Postgres and SQLite, as a swap that never ran leaves it; on Oracle, alone, its old index dropped, as a rename that failed leaves it, and the record not listed, as it names an index that is gone. recreateAll drops it first, and makes the constraint again in its place, so it is built anew and never in the way: on Oracle it would refuse the build (ORA-01408)."
-    stores: ["postgres", "oracle", "sqlite"]
+    description: "The index a recreate builds first stands beside the constraint's, as a swap that never ran leaves it on Postgres and SQLite. The constraint's own index still standing, recreateAll drops the leftover first, and makes the constraint again in its place, so it is built anew and never in the way. Where only the leftover stands, the recreate was cut off after its drop, and is finished instead (31l)."
+    stores: ["postgres", "sqlite"]
     catalogs:
       - {owner: null, version: null, items: ["Uniqueness constraint"]}
     steps:
@@ -6353,32 +6353,6 @@ cases:
             report:
               owners:
                 - {"owner": null, "results": [{"spec": "Uniqueness constraint", "recreated": {"previous": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique"}, "current": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique"}}}], "marker": {"version": null, "items": "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
-              log:
-                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=true, versionChanged=false, version=null)"]
-                - ["INFO", "ConstraintManager", "Created {engine} UNIQUENESS_CONSTRAINT on Person[email]"]
-                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 0 already matching, 1 recreated, 0 needing attention"]
-          - stores: ["oracle"]
-            rounds:
-              - now: 1000000
-                actions:
-                  - {execute: {marker: "prepare"}}
-                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
-                  - {query: {listing: "constraints"}, rows: [{"object": "DRIVINE_IX_EMAIL_5C24B9C", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"], "tableColumns": null, "source": null}, {"object": "DRIVINE_UQ_PERSONEMAIL_5482A751_R", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "UNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["CASE  WHEN (JSON_EXISTS2(\"LABELS\" FORMAT OSON , '$[*]?(@ == \"Person\")' /* json_path_str  $[*]?(@.string() == \"Person\")  */  FALSE ON ERROR TYPE(LAX) )=1 AND JSON_EXISTS2(\"PROPS\" FORMAT OSON , '$.email' FALSE ON ERROR TYPE(LAX) )=1) THEN JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) ) END "], "tableColumns": null, "source": null}]}
-              - now: 1000000
-                actions:
-                  - {execute: {leftover: "Uniqueness constraint"}}
-                  - {execute: {build: "Uniqueness constraint"}}
-                  - {execute: {swap: "Uniqueness constraint"}}
-                  - {execute: {create: "Uniqueness constraint"}}
-                  - {execute: {remade: "Uniqueness constraint"}}
-                  - {query: {listing: "constraints"}, rows: [{"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique", "details": {"form": 1}, "status": null}, {"object": "DRIVINE_IX_EMAIL_5C24B9C", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"], "tableColumns": null, "source": null}, {"object": "DRIVINE_UQ_PERSONEMAIL_5482A751", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "UNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["CASE  WHEN (JSON_EXISTS2(\"LABELS\" FORMAT OSON , '$[*]?(@ == \"Person\")' /* json_path_str  $[*]?(@.string() == \"Person\")  */  FALSE ON ERROR TYPE(LAX) )=1 AND JSON_EXISTS2(\"PROPS\" FORMAT OSON , '$.email' FALSE ON ERROR TYPE(LAX) )=1) THEN JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) ) END "], "tableColumns": null, "source": null}]}
-              - now: 1000000
-                actions:
-                  - {writeMarker: {scope: "schema", version: null, items: "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
-            done: 1000000
-            report:
-              owners:
-                - {"owner": null, "results": [{"spec": "Uniqueness constraint", "recreated": {"previous": null, "current": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique"}}}], "marker": {"version": null, "items": "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
               log:
                 - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=true, versionChanged=false, version=null)"]
                 - ["INFO", "ConstraintManager", "Created {engine} UNIQUENESS_CONSTRAINT on Person[email]"]
@@ -6476,7 +6450,7 @@ cases:
                 - {"owner": null, "results": [{"spec": "Uniqueness constraint that ignores case", "recreated": {"previous": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["__drivine.lower.email"], "name": "Person_email_ci_unique"}, "current": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["__drivine.lower.email"], "name": "Person_email_ci_unique"}}}], "marker": {"version": null, "items": "UNIQUENESS_CONSTRAINT:Person:__drivine.lower.email:Person_email_ci_unique"}}
               log:
                 - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=true, versionChanged=false, version=null)"]
-                - ["WARN", "ConstraintManager", "Dropped {engine} index drivine_uq_Persondrivineloweremail_b3ad0b9b of UNIQUENESS_CONSTRAINT on Person[__drivine.lower.email] before making it again: Oracle builds no second index over the same expressions (ORA-01408), so the new one can't be built beside it. Where a write in between repeats a key, Person[__drivine.lower.email] is left with no index until the constraint is made"]
+                - ["INFO", "ConstraintManager", "Dropped {engine} index drivine_uq_Persondrivineloweremail_b3ad0b9b of UNIQUENESS_CONSTRAINT on Person[__drivine.lower.email] before making it again: Oracle builds no second index over the same expressions (ORA-01408), so the new one can't be built beside it. It was made as this version makes it, so the data it held unique is unique still, but for a write in between"]
                 - ["INFO", "ConstraintManager", "Created {engine} UNIQUENESS_CONSTRAINT on Person[__drivine.lower.email]"]
                 - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 0 already matching, 1 recreated, 0 needing attention"]
           - stores: ["sqlite"]
@@ -6508,7 +6482,7 @@ cases:
                 - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 0 already matching, 1 recreated, 0 needing attention"]
   - case: "31e"
     name: "A step after the build that fails"
-    description: "The store's error, thrown as any DDL's, the plan ended there. What each store is left with, as it listed it after: Postgres's swap, one block, refused at the rename (another session dropped the index built first), leaves the old index and its record; Postgres's record, its connection ended before it (a lost connection), leaves the new index in place and the record of form 0. SQLite's swap, refused at the index made again under its name (another connection writing), leaves only the index built first, which holds the data unique, under its own name, and the record not listed; its record, refused for the same, leaves the new index and the record of form 0. Oracle's swap refused at the drop (another session's open write, ORA-00054) leaves the old index and the new one beside it; at the rename, the new one alone under the name it was built under, and no record listed; its record (the catalog made read-only, ORA-12081) leaves the new index and TypeScript's record, of no form. The next recreate drops what was built first (31c)."
+    description: "The store's error, thrown as any DDL's, the plan ended there. What each store is left with, as it listed it after: Postgres's swap, one block, refused at the rename (another session dropped the index built first), leaves the old index and its record; Postgres's record, its connection ended before it (a lost connection), leaves the new index in place and the record of form 0. SQLite's swap, refused at the index made again under its name (another connection writing), leaves only the index built first, which holds the data unique, under its own name, and the record not listed; its record, refused for the same, leaves the new index and the record of form 0. Oracle's swap refused at the drop (another session's open write, ORA-00054) leaves the old index and the new one beside it; at the rename, the new one alone under the name it was built under, and no record listed; its record (the catalog made read-only, ORA-12081) leaves the new index and TypeScript's record, of no form. Where the old index still stands, the next recreate drops what was built first (31c); where only what was built first stands, the next enforce or recreate finishes the swap (31l)."
     stores: ["postgres", "oracle", "sqlite"]
     catalogs:
       - {owner: null, version: null, items: ["Uniqueness constraint"]}
@@ -6719,7 +6693,7 @@ cases:
             report:
               item: {"result": {"recreated": {"previous": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique"}, "current": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique"}}}, "dropped": null}
               log:
-                - ["WARN", "ConstraintManager", "Dropped {engine} index drivine_uq_Personemail_5482a751 of UNIQUENESS_CONSTRAINT on Person[email] before making it again: Oracle builds no second index over the same expressions (ORA-01408), so the new one can't be built beside it. Where a write in between repeats a key, Person[email] is left with no index until the constraint is made"]
+                - ["INFO", "ConstraintManager", "Dropped {engine} index drivine_uq_Personemail_5482a751 of UNIQUENESS_CONSTRAINT on Person[email] before making it again: Oracle builds no second index over the same expressions (ORA-01408), so the new one can't be built beside it. It was made as this version makes it, so the data it held unique is unique still, but for a write in between"]
                 - ["INFO", "ConstraintManager", "Created {engine} UNIQUENESS_CONSTRAINT on Person[email]"]
           - stores: ["sqlite"]
             rounds:
@@ -6808,7 +6782,7 @@ cases:
                 - {"owner": null, "results": [{"spec": "Uniqueness constraint", "recreated": {"previous": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique"}, "current": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique"}}}], "marker": {"version": "v2", "items": "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
               log:
                 - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=false, versionChanged=true, version=v2)"]
-                - ["WARN", "ConstraintManager", "Dropped {engine} index drivine_uq_Personemail_5482a751 of UNIQUENESS_CONSTRAINT on Person[email] before making it again: Oracle builds no second index over the same expressions (ORA-01408), so the new one can't be built beside it. Where a write in between repeats a key, Person[email] is left with no index until the constraint is made"]
+                - ["INFO", "ConstraintManager", "Dropped {engine} index drivine_uq_Personemail_5482a751 of UNIQUENESS_CONSTRAINT on Person[email] before making it again: Oracle builds no second index over the same expressions (ORA-01408), so the new one can't be built beside it. It was made as this version makes it, so the data it held unique is unique still, but for a write in between"]
                 - ["INFO", "ConstraintManager", "Created {engine} UNIQUENESS_CONSTRAINT on Person[email]"]
                 - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 0 already matching, 1 recreated, 0 needing attention"]
           - stores: ["sqlite"]
@@ -6935,7 +6909,7 @@ cases:
                 - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 0 already matching, 1 recreated, 0 needing attention"]
   - case: "31i"
     name: "An item of another form made again in its place"
-    description: "recreateAll of a constraint of another form: a record of form 0 on Postgres and SQLite; on Oracle TypeScript's unique index, of its expressions, recorded with no form. Each is built anew beside the old, swapped in, and recorded as form 1, its record kept: Oracle builds the new beside TypeScript's, whose expressions differ."
+    description: "recreateAll of a constraint of another form, its record under an older name: a record of form 0 on Postgres and SQLite; on Oracle TypeScript's unique index, of its expressions, recorded with no form. Each is built anew beside the old, swapped in, and its record, kept with its aliases, given the item's name, the index's and form 1, as one made anew: Oracle builds the new beside TypeScript's, whose expressions differ."
     stores: ["postgres", "oracle", "sqlite"]
     catalogs:
       - {owner: null, version: null, items: ["Uniqueness constraint"]}
@@ -6948,7 +6922,7 @@ cases:
                 actions:
                   - {execute: {marker: "prepare"}}
                   - {query: {marker: "read.items", scope: "schema"}, rows: []}
-                  - {query: {listing: "constraints"}, rows: [{"kind": "UNIQUENESS_CONSTRAINT", "name": "Person_email_unique", "label": "Person", "details": {"form": 0}, "properties": ["email"]}, {"type": "i", "table": "drivine_node", "where": "labels @> '[\"Person\"]'::jsonb", "method": "btree", "object": "drivine_uq_personemail_5482a751", "unique": true, "columns": ["(props ->> 'email'::text)"], "opclasses": ["text_ops"]}]}
+                  - {query: {listing: "constraints"}, rows: [{"kind": "UNIQUENESS_CONSTRAINT", "name": "Person_email_old", "label": "Person", "details": {"form": 0}, "properties": ["email"]}, {"type": "i", "table": "drivine_node", "where": "labels @> '[\"Person\"]'::jsonb", "method": "btree", "object": "drivine_uq_personemail_5482a751", "unique": true, "columns": ["(props ->> 'email'::text)"], "opclasses": ["text_ops"]}]}
               - now: 1000000
                 actions:
                   - {execute: {leftover: "Uniqueness constraint"}}
@@ -6963,7 +6937,7 @@ cases:
             done: 1000000
             report:
               owners:
-                - {"owner": null, "results": [{"spec": "Uniqueness constraint", "recreated": {"previous": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique"}, "current": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique"}}}], "marker": {"version": null, "items": "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+                - {"owner": null, "results": [{"spec": "Uniqueness constraint", "recreated": {"previous": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_old"}, "current": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique"}}}], "marker": {"version": null, "items": "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
               log:
                 - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=true, versionChanged=false, version=null)"]
                 - ["INFO", "ConstraintManager", "Created {engine} UNIQUENESS_CONSTRAINT on Person[email]"]
@@ -6974,7 +6948,7 @@ cases:
                 actions:
                   - {execute: {marker: "prepare"}}
                   - {query: {marker: "read.items", scope: "schema"}, rows: []}
-                  - {query: {listing: "constraints"}, rows: [{"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique", "details": {}, "status": null}, {"object": "DRIVINE_IX_EMAIL_5C24B9C", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"], "tableColumns": null, "source": null}, {"object": "DRIVINE_UQ_PERSONEMAIL_5482A751", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "UNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["CASE JSON_EXISTS2(\"LABELS\" FORMAT OSON , '$?(@ == \"Person\")' /* json_path_str  $?(@.string() == \"Person\")  */  FALSE ON ERROR TYPE(LAX) ) WHEN 1 THEN JSON_VALUE(\"PROPS\" FORMAT OSON , '$.\"email\"' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) ) END "], "tableColumns": null, "source": null}]}
+                  - {query: {listing: "constraints"}, rows: [{"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_old", "details": {}, "status": null}, {"object": "DRIVINE_IX_EMAIL_5C24B9C", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"], "tableColumns": null, "source": null}, {"object": "DRIVINE_UQ_PERSONEMAIL_5482A751", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "UNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["CASE JSON_EXISTS2(\"LABELS\" FORMAT OSON , '$?(@ == \"Person\")' /* json_path_str  $?(@.string() == \"Person\")  */  FALSE ON ERROR TYPE(LAX) ) WHEN 1 THEN JSON_VALUE(\"PROPS\" FORMAT OSON , '$.\"email\"' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) ) END "], "tableColumns": null, "source": null}]}
               - now: 1000000
                 actions:
                   - {execute: {leftover: "Uniqueness constraint"}}
@@ -6989,7 +6963,7 @@ cases:
             done: 1000000
             report:
               owners:
-                - {"owner": null, "results": [{"spec": "Uniqueness constraint", "recreated": {"previous": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique"}, "current": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique"}}}], "marker": {"version": null, "items": "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+                - {"owner": null, "results": [{"spec": "Uniqueness constraint", "recreated": {"previous": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_old"}, "current": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique"}}}], "marker": {"version": null, "items": "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
               log:
                 - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=true, versionChanged=false, version=null)"]
                 - ["INFO", "ConstraintManager", "Created {engine} UNIQUENESS_CONSTRAINT on Person[email]"]
@@ -7000,7 +6974,7 @@ cases:
                 actions:
                   - {execute: {marker: "prepare"}}
                   - {query: {marker: "read.items", scope: "schema"}, rows: []}
-                  - {query: {listing: "constraints"}, rows: [{"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique", "details": {"form": 0}}, {"object": "drivine_uq_Personemail_5482a751", "type": "index", "table": "drivine_node", "sql": "CREATE UNIQUE INDEX drivine_uq_Personemail_5482a751 ON drivine_node ((CASE json_type(props, '$.\"email\"') WHEN 'text' THEN props ->> '$.\"email\"' WHEN 'null' THEN NULL ELSE props -> '$.\"email\"' END)) WHERE instr(labels, '\"Person\"') > 0", "unique": 1}]}
+                  - {query: {listing: "constraints"}, rows: [{"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_old", "details": {"form": 0}}, {"object": "drivine_uq_Personemail_5482a751", "type": "index", "table": "drivine_node", "sql": "CREATE UNIQUE INDEX drivine_uq_Personemail_5482a751 ON drivine_node ((CASE json_type(props, '$.\"email\"') WHEN 'text' THEN props ->> '$.\"email\"' WHEN 'null' THEN NULL ELSE props -> '$.\"email\"' END)) WHERE instr(labels, '\"Person\"') > 0", "unique": 1}]}
               - now: 1000000
                 actions:
                   - {execute: {leftover: "Uniqueness constraint"}}
@@ -7015,7 +6989,7 @@ cases:
             done: 1000000
             report:
               owners:
-                - {"owner": null, "results": [{"spec": "Uniqueness constraint", "recreated": {"previous": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique"}, "current": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique"}}}], "marker": {"version": null, "items": "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+                - {"owner": null, "results": [{"spec": "Uniqueness constraint", "recreated": {"previous": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_old"}, "current": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique"}}}], "marker": {"version": null, "items": "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
               log:
                 - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=true, versionChanged=false, version=null)"]
                 - ["INFO", "ConstraintManager", "Created {engine} UNIQUENESS_CONSTRAINT on Person[email]"]
@@ -7056,6 +7030,305 @@ cases:
                 - ["INFO", "ConstraintManager", "Dropped {engine} index DRIVINE_UQ_PERSONEMAIL_5482A751, of TS's or Python's Oracle form under its name for UNIQUENESS_CONSTRAINT on Person[email], which no record named, to make it in this version's form"]
                 - ["INFO", "ConstraintManager", "Created {engine} UNIQUENESS_CONSTRAINT on Person[email]"]
                 - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 0 already matching, 1 recreated, 0 needing attention"]
+  - case: "31k"
+    name: "Oracle: the same expressions indexed already by an index of another form"
+    description: "The record says form 0 over an index of this version's expressions, so Oracle refuses the build (ORA-01408) as for 31a; the index wasn't of this version's form, so its drop before the make is said at WARN, and the record made form 1."
+    stores: ["oracle"]
+    catalogs:
+      - {owner: null, version: null, items: ["Uniqueness constraint"]}
+    steps:
+      - operation: {recreateAll: "all"}
+        runs:
+          - stores: ["oracle"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "constraints"}, rows: [{"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique", "details": {"form": 0}, "status": null}, {"object": "DRIVINE_IX_EMAIL_5C24B9C", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"], "tableColumns": null, "source": null}, {"object": "DRIVINE_UQ_PERSONEMAIL_5482A751", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "UNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["CASE  WHEN (JSON_EXISTS2(\"LABELS\" FORMAT OSON , '$[*]?(@ == \"Person\")' /* json_path_str  $[*]?(@.string() == \"Person\")  */  FALSE ON ERROR TYPE(LAX) )=1 AND JSON_EXISTS2(\"PROPS\" FORMAT OSON , '$.email' FALSE ON ERROR TYPE(LAX) )=1) THEN JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) ) END "], "tableColumns": null, "source": null}]}
+              - now: 1000000
+                actions:
+                  - {execute: {leftover: "Uniqueness constraint"}}
+                  - {execute: {build: "Uniqueness constraint"}, failed: {at: 0, causes: [{sqlState: "72000", vendorCode: 1408, message: "ORA-01408: such column list already indexed\nORA-06512: at line 7\n\nhttps://docs.oracle.com/error-help/db/ora-01408/"}, {message: "ORA-01408: such column list already indexed\nORA-06512: at line 7\n"}]}}
+                  - {execute: {swap: "Uniqueness constraint"}}
+                  - {execute: {create: "Uniqueness constraint"}}
+                  - {execute: {remade: "Uniqueness constraint"}}
+                  - {query: {listing: "constraints"}}
+              - now: 1000000
+                actions:
+                  - {execute: {statement: "DROP INDEX IF EXISTS drivine_uq_Personemail_5482a751"}}
+                  - {execute: {create: "Uniqueness constraint"}}
+                  - {execute: {remade: "Uniqueness constraint"}}
+                  - {query: {listing: "constraints"}, rows: [{"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique", "details": {"form": 1}, "status": null}, {"object": "DRIVINE_IX_EMAIL_5C24B9C", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"], "tableColumns": null, "source": null}, {"object": "DRIVINE_UQ_PERSONEMAIL_5482A751", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "UNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["CASE  WHEN (JSON_EXISTS2(\"LABELS\" FORMAT OSON , '$[*]?(@ == \"Person\")' /* json_path_str  $[*]?(@.string() == \"Person\")  */  FALSE ON ERROR TYPE(LAX) )=1 AND JSON_EXISTS2(\"PROPS\" FORMAT OSON , '$.email' FALSE ON ERROR TYPE(LAX) )=1) THEN JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) ) END "], "tableColumns": null, "source": null}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+            done: 1000000
+            report:
+              owners:
+                - {"owner": null, "results": [{"spec": "Uniqueness constraint", "recreated": {"previous": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique"}, "current": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique"}}}], "marker": {"version": null, "items": "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=true, versionChanged=false, version=null)"]
+                - ["WARN", "ConstraintManager", "Dropped {engine} index drivine_uq_Personemail_5482a751 of UNIQUENESS_CONSTRAINT on Person[email] before making it again: Oracle builds no second index over the same expressions (ORA-01408), so the new one can't be built beside it. It was of form 0, not made as this version makes it: where the data repeats a key, Person[email] is left with no index until the constraint is made"]
+                - ["INFO", "ConstraintManager", "Created {engine} UNIQUENESS_CONSTRAINT on Person[email]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 0 already matching, 1 recreated, 0 needing attention"]
+  - case: "31l"
+    name: "A recreate cut off after its old index was dropped, finished"
+    description: "Only the unique index a recreate built first stands, of the constraint's shape, and nothing under the constraint's own name: as Oracle's rename refused leaves it (31e), as SQLite's swap refused after its drop does, and on Postgres, whose swap is one block, as another session dropping the old index would. The next enforce, and the next recreate alike, put it in its place, said at INFO (Oracle and Postgres: the rename; SQLite: the index made again under its name, and the one built first dropped), never dropping it first, and finish the constraint's create and record. On Oracle the record is TypeScript's, of no form, which the record step makes form 1's."
+    stores: ["postgres", "oracle", "sqlite"]
+    catalogs:
+      - {owner: null, version: null, items: ["Uniqueness constraint"]}
+    steps:
+      - operation: {enforce: "all"}
+        runs:
+          - stores: ["postgres"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "constraints"}, rows: [{"type": "i", "table": "drivine_node", "where": "labels @> '[\"Person\"]'::jsonb", "method": "btree", "object": "drivine_uq_personemail_5482a751_r", "unique": true, "columns": ["(props ->> 'email'::text)"], "opclasses": ["text_ops"]}]}
+              - now: 1000000
+                actions:
+                  - {execute: {finish: "Uniqueness constraint"}}
+                  - {execute: {create: "Uniqueness constraint"}}
+                  - {execute: {remade: "Uniqueness constraint"}}
+                  - {query: {listing: "constraints"}, rows: [{"kind": "UNIQUENESS_CONSTRAINT", "name": "Person_email_unique", "label": "Person", "details": {"form": 1}, "properties": ["email"]}, {"type": "i", "table": "drivine_node", "where": "labels @> '[\"Person\"]'::jsonb", "method": "btree", "object": "drivine_uq_personemail_5482a751", "unique": true, "columns": ["(props ->> 'email'::text)"], "opclasses": ["text_ops"]}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+            done: 1000000
+            report:
+              owners:
+                - {"owner": null, "results": [{"spec": "Uniqueness constraint", "created": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique"}}], "marker": {"version": null, "items": "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["INFO", "ConstraintManager", "Put {engine} index drivine_uq_Personemail_5482a751_r in the place of drivine_uq_Personemail_5482a751 for UNIQUENESS_CONSTRAINT on Person[email], finishing a recreate that was cut off"]
+                - ["INFO", "ConstraintManager", "Created {engine} UNIQUENESS_CONSTRAINT on Person[email]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 1 created, 0 already matching, 0 recreated, 0 needing attention"]
+          - stores: ["oracle"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "constraints"}, rows: [{"object": "DRIVINE_IX_EMAIL_5C24B9C", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"], "tableColumns": null, "source": null}, {"object": "DRIVINE_UQ_PERSONEMAIL_5482A751_R", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "UNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["CASE  WHEN (JSON_EXISTS2(\"LABELS\" FORMAT OSON , '$[*]?(@ == \"Person\")' /* json_path_str  $[*]?(@.string() == \"Person\")  */  FALSE ON ERROR TYPE(LAX) )=1 AND JSON_EXISTS2(\"PROPS\" FORMAT OSON , '$.email' FALSE ON ERROR TYPE(LAX) )=1) THEN JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) ) END "], "tableColumns": null, "source": null}]}
+              - now: 1000000
+                actions:
+                  - {execute: {finish: "Uniqueness constraint"}}
+                  - {execute: {create: "Uniqueness constraint"}}
+                  - {execute: {remade: "Uniqueness constraint"}}
+                  - {query: {listing: "constraints"}, rows: [{"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique", "details": {"form": 1}, "status": null}, {"object": "DRIVINE_IX_EMAIL_5C24B9C", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"], "tableColumns": null, "source": null}, {"object": "DRIVINE_UQ_PERSONEMAIL_5482A751", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "UNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["CASE  WHEN (JSON_EXISTS2(\"LABELS\" FORMAT OSON , '$[*]?(@ == \"Person\")' /* json_path_str  $[*]?(@.string() == \"Person\")  */  FALSE ON ERROR TYPE(LAX) )=1 AND JSON_EXISTS2(\"PROPS\" FORMAT OSON , '$.email' FALSE ON ERROR TYPE(LAX) )=1) THEN JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) ) END "], "tableColumns": null, "source": null}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+            done: 1000000
+            report:
+              owners:
+                - {"owner": null, "results": [{"spec": "Uniqueness constraint", "created": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique"}}], "marker": {"version": null, "items": "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["INFO", "ConstraintManager", "Put {engine} index drivine_uq_Personemail_5482a751_r in the place of drivine_uq_Personemail_5482a751 for UNIQUENESS_CONSTRAINT on Person[email], finishing a recreate that was cut off"]
+                - ["INFO", "ConstraintManager", "Created {engine} UNIQUENESS_CONSTRAINT on Person[email]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 1 created, 0 already matching, 0 recreated, 0 needing attention"]
+          - stores: ["sqlite"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "constraints"}, rows: [{"object": "drivine_uq_Personemail_5482a751_r", "type": "index", "table": "drivine_node", "sql": "CREATE UNIQUE INDEX drivine_uq_Personemail_5482a751_r ON drivine_node ((CASE json_type(props, '$.\"email\"') WHEN 'text' THEN props ->> '$.\"email\"' WHEN 'null' THEN NULL ELSE props -> '$.\"email\"' END)) WHERE instr(labels, '\"Person\"') > 0", "unique": 1}]}
+              - now: 1000000
+                actions:
+                  - {execute: {finish: "Uniqueness constraint"}}
+                  - {execute: {create: "Uniqueness constraint"}}
+                  - {execute: {remade: "Uniqueness constraint"}}
+                  - {query: {listing: "constraints"}, rows: [{"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique", "details": {"form": 1}}, {"object": "drivine_uq_Personemail_5482a751", "type": "index", "table": "drivine_node", "sql": "CREATE UNIQUE INDEX drivine_uq_Personemail_5482a751 ON drivine_node ((CASE json_type(props, '$.\"email\"') WHEN 'text' THEN props ->> '$.\"email\"' WHEN 'null' THEN NULL ELSE props -> '$.\"email\"' END)) WHERE instr(labels, '\"Person\"') > 0", "unique": 1}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+            done: 1000000
+            report:
+              owners:
+                - {"owner": null, "results": [{"spec": "Uniqueness constraint", "created": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique"}}], "marker": {"version": null, "items": "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["INFO", "ConstraintManager", "Put {engine} index drivine_uq_Personemail_5482a751_r in the place of drivine_uq_Personemail_5482a751 for UNIQUENESS_CONSTRAINT on Person[email], finishing a recreate that was cut off"]
+                - ["INFO", "ConstraintManager", "Created {engine} UNIQUENESS_CONSTRAINT on Person[email]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 1 created, 0 already matching, 0 recreated, 0 needing attention"]
+      - operation: {recreateAll: "all"}
+        runs:
+          - stores: ["postgres"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "constraints"}, rows: [{"type": "i", "table": "drivine_node", "where": "labels @> '[\"Person\"]'::jsonb", "method": "btree", "object": "drivine_uq_personemail_5482a751_r", "unique": true, "columns": ["(props ->> 'email'::text)"], "opclasses": ["text_ops"]}]}
+              - now: 1000000
+                actions:
+                  - {execute: {finish: "Uniqueness constraint"}}
+                  - {execute: {create: "Uniqueness constraint"}}
+                  - {execute: {remade: "Uniqueness constraint"}}
+                  - {query: {listing: "constraints"}, rows: [{"kind": "UNIQUENESS_CONSTRAINT", "name": "Person_email_unique", "label": "Person", "details": {"form": 1}, "properties": ["email"]}, {"type": "i", "table": "drivine_node", "where": "labels @> '[\"Person\"]'::jsonb", "method": "btree", "object": "drivine_uq_personemail_5482a751", "unique": true, "columns": ["(props ->> 'email'::text)"], "opclasses": ["text_ops"]}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+            done: 1000000
+            report:
+              owners:
+                - {"owner": null, "results": [{"spec": "Uniqueness constraint", "recreated": {"previous": null, "current": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique"}}}], "marker": {"version": null, "items": "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=true, versionChanged=false, version=null)"]
+                - ["INFO", "ConstraintManager", "Put {engine} index drivine_uq_Personemail_5482a751_r in the place of drivine_uq_Personemail_5482a751 for UNIQUENESS_CONSTRAINT on Person[email], finishing a recreate that was cut off"]
+                - ["INFO", "ConstraintManager", "Created {engine} UNIQUENESS_CONSTRAINT on Person[email]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 0 already matching, 1 recreated, 0 needing attention"]
+          - stores: ["oracle"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "constraints"}, rows: [{"object": "DRIVINE_IX_EMAIL_5C24B9C", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"], "tableColumns": null, "source": null}, {"object": "DRIVINE_UQ_PERSONEMAIL_5482A751_R", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "UNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["CASE  WHEN (JSON_EXISTS2(\"LABELS\" FORMAT OSON , '$[*]?(@ == \"Person\")' /* json_path_str  $[*]?(@.string() == \"Person\")  */  FALSE ON ERROR TYPE(LAX) )=1 AND JSON_EXISTS2(\"PROPS\" FORMAT OSON , '$.email' FALSE ON ERROR TYPE(LAX) )=1) THEN JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) ) END "], "tableColumns": null, "source": null}]}
+              - now: 1000000
+                actions:
+                  - {execute: {finish: "Uniqueness constraint"}}
+                  - {execute: {create: "Uniqueness constraint"}}
+                  - {execute: {remade: "Uniqueness constraint"}}
+                  - {query: {listing: "constraints"}, rows: [{"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique", "details": {"form": 1}, "status": null}, {"object": "DRIVINE_IX_EMAIL_5C24B9C", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"], "tableColumns": null, "source": null}, {"object": "DRIVINE_UQ_PERSONEMAIL_5482A751", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "UNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["CASE  WHEN (JSON_EXISTS2(\"LABELS\" FORMAT OSON , '$[*]?(@ == \"Person\")' /* json_path_str  $[*]?(@.string() == \"Person\")  */  FALSE ON ERROR TYPE(LAX) )=1 AND JSON_EXISTS2(\"PROPS\" FORMAT OSON , '$.email' FALSE ON ERROR TYPE(LAX) )=1) THEN JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) ) END "], "tableColumns": null, "source": null}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+            done: 1000000
+            report:
+              owners:
+                - {"owner": null, "results": [{"spec": "Uniqueness constraint", "recreated": {"previous": null, "current": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique"}}}], "marker": {"version": null, "items": "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=true, versionChanged=false, version=null)"]
+                - ["INFO", "ConstraintManager", "Put {engine} index drivine_uq_Personemail_5482a751_r in the place of drivine_uq_Personemail_5482a751 for UNIQUENESS_CONSTRAINT on Person[email], finishing a recreate that was cut off"]
+                - ["INFO", "ConstraintManager", "Created {engine} UNIQUENESS_CONSTRAINT on Person[email]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 0 already matching, 1 recreated, 0 needing attention"]
+          - stores: ["sqlite"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "constraints"}, rows: [{"object": "drivine_uq_Personemail_5482a751_r", "type": "index", "table": "drivine_node", "sql": "CREATE UNIQUE INDEX drivine_uq_Personemail_5482a751_r ON drivine_node ((CASE json_type(props, '$.\"email\"') WHEN 'text' THEN props ->> '$.\"email\"' WHEN 'null' THEN NULL ELSE props -> '$.\"email\"' END)) WHERE instr(labels, '\"Person\"') > 0", "unique": 1}]}
+              - now: 1000000
+                actions:
+                  - {execute: {finish: "Uniqueness constraint"}}
+                  - {execute: {create: "Uniqueness constraint"}}
+                  - {execute: {remade: "Uniqueness constraint"}}
+                  - {query: {listing: "constraints"}, rows: [{"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique", "details": {"form": 1}}, {"object": "drivine_uq_Personemail_5482a751", "type": "index", "table": "drivine_node", "sql": "CREATE UNIQUE INDEX drivine_uq_Personemail_5482a751 ON drivine_node ((CASE json_type(props, '$.\"email\"') WHEN 'text' THEN props ->> '$.\"email\"' WHEN 'null' THEN NULL ELSE props -> '$.\"email\"' END)) WHERE instr(labels, '\"Person\"') > 0", "unique": 1}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+            done: 1000000
+            report:
+              owners:
+                - {"owner": null, "results": [{"spec": "Uniqueness constraint", "recreated": {"previous": null, "current": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique"}}}], "marker": {"version": null, "items": "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=true, versionChanged=false, version=null)"]
+                - ["INFO", "ConstraintManager", "Put {engine} index drivine_uq_Personemail_5482a751_r in the place of drivine_uq_Personemail_5482a751 for UNIQUENESS_CONSTRAINT on Person[email], finishing a recreate that was cut off"]
+                - ["INFO", "ConstraintManager", "Created {engine} UNIQUENESS_CONSTRAINT on Person[email]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 0 already matching, 1 recreated, 0 needing attention"]
+  - case: "31m"
+    name: "A refill the old index refuses, sampled as a violation"
+    description: "A constraint that ignores case, over copies a write that bypassed Drivine left out of step: one node's copy missing, its property lowercased the same as another's copy. recreateAll fills the copies in again with the old index standing, which refuses the copy that repeats a key (Postgres's 23505, Oracle's ORA-00001, SQLite's UNIQUE constraint failed within the fill's own error). That is the data repeating a key: it is sampled with the keys lowercased as the fill lowercases them, as the copies hold none that repeats, and reported as a violation, as a drop-first recreate's build reported it. Nothing is built: the old index and its record are as they were."
+    stores: ["postgres", "oracle", "sqlite"]
+    catalogs:
+      - {owner: null, version: null, items: ["Uniqueness constraint that ignores case"]}
+    steps:
+      - operation: {recreateAll: "all"}
+        runs:
+          - stores: ["postgres"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "constraints"}, rows: [{"kind": "UNIQUENESS_CONSTRAINT", "name": "Person_email_ci_unique", "label": "Person", "details": {"form": 1}, "properties": ["__drivine.lower.email"]}, {"type": "i", "table": "drivine_node", "where": "labels @> '[\"Person\"]'::jsonb", "method": "btree", "object": "drivine_uq_persondrivineloweremail_b3ad0b9b", "unique": true, "columns": ["(props ->> '__drivine.lower.email'::text)"], "opclasses": ["text_ops"]}]}
+              - now: 1000000
+                actions:
+                  - {execute: {leftover: "Uniqueness constraint that ignores case"}}
+                  - {fillLowerCopies: {label: "Person", properties: ["email"]}, failed: [{sqlState: "23505", vendorCode: 0, message: "ERROR: duplicate key value violates unique constraint \"drivine_uq_persondrivineloweremail_b3ad0b9b\"\n  Detail: Key ((props ->> '__drivine.lower.email'::text))=(ann@x) already exists."}]}
+                  - {execute: {build: "Uniqueness constraint that ignores case"}}
+                  - {execute: {swap: "Uniqueness constraint that ignores case"}}
+                  - {execute: {create: "Uniqueness constraint that ignores case"}}
+                  - {execute: {remade: "Uniqueness constraint that ignores case"}}
+                  - {query: {listing: "constraints"}}
+              - now: 1000000
+                actions:
+                  - {query: {sample: {spec: "Uniqueness constraint that ignores case", limit: 10, refilled: true}}, rows: [{"count": 2, "nodes": [{"elementId": 1}, {"elementId": 2}], "properties": {"__drivine.lower.email": "ann@x"}}]}
+            done: 1000000
+            report:
+              owners:
+                - {"owner": null, "results": [{"spec": "Uniqueness constraint that ignores case", "violation": {"requested": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["__drivine.lower.email"], "name": "Person_email_ci_unique"}, "sample": [{"count": 2, "nodes": [{"elementId": 1}, {"elementId": 2}], "properties": {"__drivine.lower.email": "ann@x"}}]}}], "marker": null, "failure": "Schema application for owner 'schema' on database 'default' found problems:\n  - VIOLATION: UNIQUENESS_CONSTRAINT on Person[email] cannot be created — existing data violates it. Conflicting sample: [{count=2, nodes=[{elementId=1}, {elementId=2}], properties={__drivine.lower.email=ann@x}}]\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."}
+              failure: "Schema application on database 'default' failed for 1 owner(s):\nSchema application for owner 'schema' on database 'default' found problems:\n  - VIOLATION: UNIQUENESS_CONSTRAINT on Person[email] cannot be created — existing data violates it. Conflicting sample: [{count=2, nodes=[{elementId=1}, {elementId=2}], properties={__drivine.lower.email=ann@x}}]\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=true, versionChanged=false, version=null)"]
+                - ["WARN", "ConstraintManager", "Could not create constraint on Person[__drivine.lower.email]: existing data violates it"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 0 already matching, 0 recreated, 1 needing attention"]
+                - ["ERROR", "SchemaManager", "Schema application for owner 'schema' on 'default' failed: Schema application for owner 'schema' on database 'default' found problems:\n  - VIOLATION: UNIQUENESS_CONSTRAINT on Person[email] cannot be created — existing data violates it. Conflicting sample: [{count=2, nodes=[{elementId=1}, {elementId=2}], properties={__drivine.lower.email=ann@x}}]\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."]
+          - stores: ["oracle"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "constraints"}, rows: [{"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["__drivine.lower.email"], "name": "Person_email_ci_unique", "details": {"form": 1}, "status": null}, {"object": "DRIVINE_IX_DRIVINELOWEREMAIL_7AE8B9E6", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.\"__drivine.lower.email\"' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"], "tableColumns": null, "source": null}, {"object": "DRIVINE_UQ_PERSONDRIVINELOWEREMAIL_B3AD0B9B", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "UNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["CASE  WHEN (JSON_EXISTS2(\"LABELS\" FORMAT OSON , '$[*]?(@ == \"Person\")' /* json_path_str  $[*]?(@.string() == \"Person\")  */  FALSE ON ERROR TYPE(LAX) )=1 AND JSON_EXISTS2(\"PROPS\" FORMAT OSON , '$.\"__drivine.lower.email\"' FALSE ON ERROR TYPE(LAX) )=1) THEN JSON_VALUE(\"PROPS\" FORMAT OSON , '$.\"__drivine.lower.email\"' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) ) END "], "tableColumns": null, "source": null}]}
+              - now: 1000000
+                actions:
+                  - {execute: {leftover: "Uniqueness constraint that ignores case"}}
+                  - {fillLowerCopies: {label: "Person", properties: ["email"]}, failed: [{sqlState: "23000", vendorCode: 1, message: "ORA-00001: unique constraint (DRIVINE.DRIVINE_UQ_PERSONDRIVINELOWEREMAIL_B3AD0B9B) violated on table DRIVINE.DRIVINE_NODE columns (SYS_NC00009$)\nORA-03301: (ORA-00001 details) row with column values (SYS_NC00009$:'ann@x') already exists\nORA-06512: at line 5\n\nhttps://docs.oracle.com/error-help/db/ora-00001/"}, {message: "ORA-00001: unique constraint (DRIVINE.DRIVINE_UQ_PERSONDRIVINELOWEREMAIL_B3AD0B9B) violated on table DRIVINE.DRIVINE_NODE columns (SYS_NC00009$)\nORA-03301: (ORA-00001 details) row with column values (SYS_NC00009$:'ann@x') already exists\nORA-06512: at line 5\n"}]}
+                  - {execute: {build: "Uniqueness constraint that ignores case"}}
+                  - {execute: {swap: "Uniqueness constraint that ignores case"}}
+                  - {execute: {create: "Uniqueness constraint that ignores case"}}
+                  - {execute: {remade: "Uniqueness constraint that ignores case"}}
+                  - {query: {listing: "constraints"}}
+              - now: 1000000
+                actions:
+                  - {query: {sample: {spec: "Uniqueness constraint that ignores case", limit: 10, refilled: true}}, rows: [{"properties": {"__drivine.lower.email": "ann@x"}, "count": 2, "nodes": [{"elementId": 1}, {"elementId": 2}]}]}
+            done: 1000000
+            report:
+              owners:
+                - {"owner": null, "results": [{"spec": "Uniqueness constraint that ignores case", "violation": {"requested": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["__drivine.lower.email"], "name": "Person_email_ci_unique"}, "sample": [{"properties": {"__drivine.lower.email": "ann@x"}, "count": 2, "nodes": [{"elementId": 1}, {"elementId": 2}]}]}}], "marker": null, "failure": "Schema application for owner 'schema' on database 'default' found problems:\n  - VIOLATION: UNIQUENESS_CONSTRAINT on Person[email] cannot be created — existing data violates it. Conflicting sample: [{properties={__drivine.lower.email=ann@x}, count=2, nodes=[{elementId=1}, {elementId=2}]}]\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."}
+              failure: "Schema application on database 'default' failed for 1 owner(s):\nSchema application for owner 'schema' on database 'default' found problems:\n  - VIOLATION: UNIQUENESS_CONSTRAINT on Person[email] cannot be created — existing data violates it. Conflicting sample: [{properties={__drivine.lower.email=ann@x}, count=2, nodes=[{elementId=1}, {elementId=2}]}]\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=true, versionChanged=false, version=null)"]
+                - ["WARN", "ConstraintManager", "Could not create constraint on Person[__drivine.lower.email]: existing data violates it"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 0 already matching, 0 recreated, 1 needing attention"]
+                - ["ERROR", "SchemaManager", "Schema application for owner 'schema' on 'default' failed: Schema application for owner 'schema' on database 'default' found problems:\n  - VIOLATION: UNIQUENESS_CONSTRAINT on Person[email] cannot be created — existing data violates it. Conflicting sample: [{properties={__drivine.lower.email=ann@x}, count=2, nodes=[{elementId=1}, {elementId=2}]}]\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."]
+          - stores: ["sqlite"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "constraints"}, rows: [{"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["__drivine.lower.email"], "name": "Person_email_ci_unique", "details": {"form": 1}}, {"object": "drivine_uq_Persondrivineloweremail_b3ad0b9b", "type": "index", "table": "drivine_node", "sql": "CREATE UNIQUE INDEX drivine_uq_Persondrivineloweremail_b3ad0b9b ON drivine_node ((CASE json_type(props, '$.\"__drivine.lower.email\"') WHEN 'text' THEN props ->> '$.\"__drivine.lower.email\"' WHEN 'null' THEN NULL ELSE props -> '$.\"__drivine.lower.email\"' END)) WHERE instr(labels, '\"Person\"') > 0", "unique": 1}]}
+              - now: 1000000
+                actions:
+                  - {execute: {leftover: "Uniqueness constraint that ignores case"}}
+                  - {fillLowerCopies: {label: "Person", properties: ["email"]}, failed: [{sqlState: null, vendorCode: 1, message: "[SQLITE_ERROR] SQL error or missing database (org.sqlite.SQLiteException: [SQLITE_CONSTRAINT_UNIQUE] A UNIQUE constraint failed (UNIQUE constraint failed: index 'drivine_uq_Persondrivineloweremail_b3ad0b9b'))"}]}
+                  - {execute: {build: "Uniqueness constraint that ignores case"}}
+                  - {execute: {swap: "Uniqueness constraint that ignores case"}}
+                  - {execute: {create: "Uniqueness constraint that ignores case"}}
+                  - {execute: {remade: "Uniqueness constraint that ignores case"}}
+                  - {query: {listing: "constraints"}}
+              - now: 1000000
+                actions:
+                  - {query: {sample: {spec: "Uniqueness constraint that ignores case", limit: 10, refilled: true}}, rows: [{"properties": {"__drivine.lower.email": "ann@x"}, "count": 2, "nodes": [{"elementId": 1}, {"elementId": 2}]}]}
+            done: 1000000
+            report:
+              owners:
+                - {"owner": null, "results": [{"spec": "Uniqueness constraint that ignores case", "violation": {"requested": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["__drivine.lower.email"], "name": "Person_email_ci_unique"}, "sample": [{"properties": {"__drivine.lower.email": "ann@x"}, "count": 2, "nodes": [{"elementId": 1}, {"elementId": 2}]}]}}], "marker": null, "failure": "Schema application for owner 'schema' on database 'default' found problems:\n  - VIOLATION: UNIQUENESS_CONSTRAINT on Person[email] cannot be created — existing data violates it. Conflicting sample: [{properties={__drivine.lower.email=ann@x}, count=2, nodes=[{elementId=1}, {elementId=2}]}]\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."}
+              failure: "Schema application on database 'default' failed for 1 owner(s):\nSchema application for owner 'schema' on database 'default' found problems:\n  - VIOLATION: UNIQUENESS_CONSTRAINT on Person[email] cannot be created — existing data violates it. Conflicting sample: [{properties={__drivine.lower.email=ann@x}, count=2, nodes=[{elementId=1}, {elementId=2}]}]\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=true, versionChanged=false, version=null)"]
+                - ["WARN", "ConstraintManager", "Could not create constraint on Person[__drivine.lower.email]: existing data violates it"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 0 already matching, 0 recreated, 1 needing attention"]
+                - ["ERROR", "SchemaManager", "Schema application for owner 'schema' on 'default' failed: Schema application for owner 'schema' on database 'default' found problems:\n  - VIOLATION: UNIQUENESS_CONSTRAINT on Person[email] cannot be created — existing data violates it. Conflicting sample: [{properties={__drivine.lower.email=ann@x}, count=2, nodes=[{elementId=1}, {elementId=2}]}]\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."]
   - case: "item"
     name: "The public IndexManager and ConstraintManager calls"
     description: "Each on one item, with no marker: a constraint ensured and recreated, an index recreated where there is none, and dropped, where it is there and where it is not."
