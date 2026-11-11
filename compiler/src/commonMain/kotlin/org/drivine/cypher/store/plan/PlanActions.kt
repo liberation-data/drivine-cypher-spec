@@ -88,7 +88,7 @@ enum class Purpose {
     /** DDL that makes or drops an index or a constraint, on a schema connection. */
     DDL,
 
-    /** What sets the aliases a SQL store's record keeps, on a schema connection. */
+    /** What sets the aliases a SQL store's record keeps, or records the form its item was made in, on a schema connection. */
     ALIASES,
 
     /** Neo4j's state of an index, read when its wait fails for another reason than its timeout. A read that fails reads as no state. */

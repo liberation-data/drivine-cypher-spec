@@ -218,9 +218,9 @@ ${made.entries.joinToString("\n") { (function, making) ->
         BEGIN
             MERGE INTO $catalog c
             USING (SELECT ${literal(spec.kind.name)} AS kind, ${literal(spec.label)} AS label, ${literal(json(spec.properties))} AS properties FROM dual) k
-            ON (c.kind = k.kind AND c.label = k.label AND c.properties = k.properties)${if (updated) "\n            WHEN MATCHED THEN UPDATE SET c.details = JSON_MERGEPATCH(c.details, ${literal(rangeDetails(details))})" else ""}
+            ON (c.kind = k.kind AND c.label = k.label AND c.properties = k.properties)${if (updated) "\n            WHEN MATCHED THEN UPDATE SET c.details = JSON_MERGEPATCH(c.details, ${literal(rangeDetails(formed(details)))})" else ""}
             WHEN NOT MATCHED THEN INSERT (kind, label, properties, name, object_name, details)
-                VALUES (k.kind, k.label, k.properties, ${literal(spec.effectiveName)}, ${objectName?.let(::literal) ?: "NULL"}, ${literal(details)});
+                VALUES (k.kind, k.label, k.properties, ${literal(spec.effectiveName)}, ${objectName?.let(::literal) ?: "NULL"}, ${literal(formed(details))});
         EXCEPTION WHEN DUP_VAL_ON_INDEX THEN
             -- Another process recorded it between the MERGE's read and its insert: it is recorded.
             NULL;
@@ -242,6 +242,15 @@ ${made.entries.joinToString("\n") { (function, making) ->
         val patch = "{\"$ALIASES\": ${if (aliases.isEmpty()) "null" else aliasesJson(aliases)}}"
         return statement("UPDATE $catalog SET details = JSON_MERGEPATCH(details, ${literal(patch)}) WHERE ${recordOf(item)}")
     }
+
+    /** What drops the trigger [name], by its name: one of a table beside the nodes that another library made. */
+    fun droppedTrigger(name: String): String = "DROP TRIGGER IF EXISTS $name"
+
+    /** What drops the table [name] beside the nodes, by its name, and the index over it with it. */
+    fun droppedTable(name: String): String = "DROP TABLE IF EXISTS $name PURGE"
+
+    override fun formRecorded(item: CatalogItem): String =
+        statement("UPDATE $catalog SET details = JSON_MERGEPATCH(details, '{\"$FORM\": $CURRENT_FORM}') WHERE ${recordOf(item)}")
 
     /**
      * Forgets [item], and drops what it was made as when nothing else recorded uses it: an index, or
@@ -294,7 +303,7 @@ ${made.entries.joinToString("\n") { (function, making) ->
 
     /** The index over the property of every node, whatever the label: what a save and a load by id find a node by. */
     private fun sharedIndex(spec: RangeIndexSpec): Pair<String, String> {
-        val name = objectName("ix", spec.properties)
+        val name = objectName(SHARED, spec.properties)
         val expressions = spec.properties.joinToString(", ") { "JSON_VALUE(props, ${path(it)})" }
         return name to busyWaiting("CREATE INDEX IF NOT EXISTS $name ON $nodes ($expressions)")
     }
@@ -307,7 +316,7 @@ ${made.entries.joinToString("\n") { (function, making) ->
      */
     private fun rangeIndex(spec: RangeIndexSpec): List<String> {
         val (name, shared) = sharedIndex(spec)
-        val labelled = objectName("lx", listOf(spec.label) + spec.properties)
+        val labelled = objectName(LABELLED, listOf(spec.label) + spec.properties)
         val scoped = spec.properties.joinToString(", ") { OracleSql.labelled("n", spec.label, it) }
         // Not where a uniqueness constraint's index over the one property stands for it, as when the
         // range index is made again under a constraint: the record then names an index that is not
@@ -428,7 +437,7 @@ ${made.entries.joinToString("\n") { (function, making) ->
      */
     override fun createConstraint(spec: ConstraintSpec): List<DdlStatement> = when (spec) {
         is UniquenessConstraintSpec -> {
-            val name = objectName("uq", listOf(spec.label) + spec.properties)
+            val name = objectName(UNIQUE, listOf(spec.label) + spec.properties)
             // A node that lacks any of the properties is not constrained, as on the graph engines.
             val expressions = spec.properties.joinToString(", ") { OracleSql.unique("n", spec.label, spec.properties, it) }
             val unique = busyWaiting("CREATE UNIQUE INDEX IF NOT EXISTS $name ON $nodes n ($expressions)")
@@ -459,7 +468,7 @@ ${made.entries.joinToString("\n") { (function, making) ->
                 IF v_labelled IS NOT NULL THEN
                     EXECUTE IMMEDIATE 'DROP INDEX IF EXISTS ' || v_labelled;
                 END IF;
-                UPDATE $catalog SET details = JSON_MERGEPATCH(details, ${literal(rangeDetails(details))}) WHERE $record;
+                UPDATE $catalog SET details = JSON_MERGEPATCH(details, ${literal(rangeDetails(formed(details)))}) WHERE $record;
                 COMMIT;
             END;
         """
@@ -479,20 +488,55 @@ ${made.entries.joinToString("\n") { (function, making) ->
      * hand is not listed, so that it is made again when asked for. A range index with neither its
      * labelled index nor a uniqueness constraint's to stand for it, dropped by hand or made before
      * there were any, is listed as it is, [INCOMPLETE], so that `ensure` makes the rest.
+     *
+     * After the records, where [objects] names any, a row for each of `user_objects` under a name Drivine gives an object
+     * of [objects], recorded or not: its `type`; of an index its `table`, its `uniqueness`, its `indexType`, and its
+     * `columns` in order, each the text Oracle keeps of the hidden column it made for an expression
+     * (`user_tab_cols.data_default_vc`, null where it keeps none), or a plain column's name; of a table its `tableColumns`,
+     * each its name and type; and of a trigger its `table` and its `source`, line by line (`user_source`). `store.schema`
+     * reads them to tell another item under the name, and the form of the item's ([org.drivine.cypher.store.schema.ItemForm]).
      */
-    private fun listed(kinds: String): String = """
-        SELECT JSON_OBJECT('kind' VALUE kind, 'label' VALUE label, 'properties' VALUE JSON(properties), 'name' VALUE name, 'details' VALUE details,
-                           'status' VALUE CASE WHEN kind = ${literal(SchemaItemKind.RANGE_INDEX.name)} AND NOT $labelledThere
-                                                AND NOT EXISTS (SELECT 1 FROM $catalog u WHERE u.label = c.label AND u.properties = c.properties AND $uniqueThere)
-                                          THEN '$INCOMPLETE' END
-                           RETURNING JSON)
-        FROM $catalog c
-        WHERE kind IN ($kinds)
-          AND (object_name IS NULL
-               OR EXISTS (SELECT 1 FROM user_indexes i WHERE i.index_name = UPPER(c.object_name))
-               OR EXISTS (SELECT 1 FROM user_tables t WHERE t.table_name = UPPER(c.object_name)))
-        ORDER BY label, properties
-    """.trimIndent()
+    private fun listed(kinds: String, objects: List<String>): String {
+        val record = """
+            JSON_OBJECT('kind' VALUE kind, 'label' VALUE label, 'properties' VALUE JSON(properties), 'name' VALUE name, 'details' VALUE details,
+                               'status' VALUE CASE WHEN kind = ${literal(SchemaItemKind.RANGE_INDEX.name)} AND NOT $labelledThere
+                                                    AND NOT EXISTS (SELECT 1 FROM $catalog u WHERE u.label = c.label AND u.properties = c.properties AND $uniqueThere)
+                                              THEN '$INCOMPLETE' END
+                               RETURNING JSON)
+        """.trimIndent()
+        val recorded = """
+            FROM $catalog c
+            WHERE kind IN ($kinds)
+              AND (object_name IS NULL
+                   OR EXISTS (SELECT 1 FROM user_indexes i WHERE i.index_name = UPPER(c.object_name))
+                   OR EXISTS (SELECT 1 FROM user_tables t WHERE t.table_name = UPPER(c.object_name)))
+        """.trimIndent()
+        if (objects.isEmpty()) return "SELECT $record\n$recorded\nORDER BY label, properties"
+        return """
+            SELECT listed FROM (
+                SELECT 0 AS part, label, properties, ${record.replace("\n", "\n                ")} AS listed
+                ${recorded.replace("\n", "\n                ")}
+                UNION ALL
+                SELECT 1, o.object_name, NULL,
+                       JSON_OBJECT('object' VALUE o.object_name, 'type' VALUE o.object_type, 'table' VALUE NVL(i.table_name, g.table_name),
+                                   'uniqueness' VALUE i.uniqueness, 'indexType' VALUE i.index_type,
+                                   'columns' VALUE (SELECT JSON_ARRAYAGG(CASE WHEN v.column_name IS NULL THEN ic.column_name ELSE v.data_default_vc END ORDER BY ic.column_position NULL ON NULL RETURNING JSON)
+                                                    FROM user_ind_columns ic
+                                                    LEFT JOIN user_tab_cols v ON v.table_name = ic.table_name AND v.column_name = ic.column_name AND v.virtual_column = 'YES'
+                                                    WHERE ic.index_name = i.index_name),
+                                   'tableColumns' VALUE (SELECT JSON_ARRAYAGG(tc.column_name || ' ' || tc.data_type ORDER BY tc.column_id RETURNING JSON)
+                                                         FROM user_tab_columns tc WHERE o.object_type = 'TABLE' AND tc.table_name = o.object_name),
+                                   'source' VALUE (SELECT JSON_ARRAYAGG(s.text ORDER BY s.line RETURNING JSON)
+                                                   FROM user_source s WHERE o.object_type = 'TRIGGER' AND s.type = 'TRIGGER' AND s.name = o.object_name)
+                                   RETURNING JSON)
+                FROM user_objects o
+                LEFT JOIN user_indexes i ON i.index_name = o.object_name AND o.object_type = 'INDEX'
+                LEFT JOIN user_triggers g ON g.trigger_name = o.object_name AND o.object_type = 'TRIGGER'
+                WHERE ${namedAs("o.object_name", objects, upper = true)}
+            )
+            ORDER BY part, label, properties
+        """.trimIndent()
+    }
 
     /**
      * The indexes over the nodes of one label a filter can be read through, as rows of `kind`,
@@ -506,9 +550,18 @@ ${made.entries.joinToString("\n") { (function, making) ->
            OR (kind = ${literal(SchemaItemKind.RANGE_INDEX.name)} AND ${labelledThere.replace("c.details", "u.details")})
     """.trimIndent()
 
-    override fun listIndexesQuery(kind: SchemaItemKind): String = listed(literal(kind.name))
+    override fun listIndexesQuery(kind: SchemaItemKind): String =
+        listed(
+            literal(kind.name),
+            when (kind) {
+                SchemaItemKind.RANGE_INDEX -> listOf(SHARED, LABELLED)
+                SchemaItemKind.VECTOR_INDEX -> listOf(VECTORS)
+                SchemaItemKind.FULLTEXT_INDEX -> listOf(TEXTS)
+                else -> emptyList()
+            },
+        )
 
-    override fun listConstraintsQuery(): String = listed(literal(SchemaItemKind.UNIQUENESS_CONSTRAINT.name))
+    override fun listConstraintsQuery(): String = listed(literal(SchemaItemKind.UNIQUENESS_CONSTRAINT.name), listOf(UNIQUE, SHARED))
     companion object {
         /** The store's name, for what is said of a graph name it cannot take. */
         const val ENGINE = "Oracle"
@@ -530,6 +583,18 @@ ${made.entries.joinToString("\n") { (function, making) ->
 
         /** The keys of a range index's details: the name of its labelled index, or of the uniqueness constraint's index that stands for it. */
         private val RANGE_DETAILS = listOf("labelled", "unique")
+
+        /**
+         * What the names of a range index's index over every node, its labelled index, and a uniqueness constraint's index
+         * say they are.
+         */
+        const val SHARED = "ix"
+        const val LABELLED = "lx"
+        const val UNIQUE = "uq"
+
+        /** What the names of a vector index's and a full-text index's tables beside the nodes say they are, and their triggers' and indexes' after them. */
+        const val VECTORS = "v"
+        const val TEXTS = "t"
 
         /** The status a range index is listed with when it lacks what this version makes for it. */
         const val INCOMPLETE = "INCOMPLETE"

@@ -98,7 +98,7 @@ class SqliteDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
      */
     private fun recorded(spec: SchemaItemSpec, objectName: String?, details: String = "{}"): String = """
         INSERT INTO $catalog (kind, label, properties, name, object_name, details)
-        VALUES (${literal(spec.kind.name)}, ${literal(spec.label)}, ${literal(json(spec.properties))}, ${literal(spec.effectiveName)}, ${objectName?.let(::literal) ?: "NULL"}, ${literal(details)})
+        VALUES (${literal(spec.kind.name)}, ${literal(spec.label)}, ${literal(json(spec.properties))}, ${literal(spec.effectiveName)}, ${objectName?.let(::literal) ?: "NULL"}, ${literal(formed(details))})
         ON CONFLICT (kind, label, properties) DO NOTHING
     """
 
@@ -123,6 +123,9 @@ class SqliteDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
         val details = if (aliases.isEmpty()) "json_remove(details, '$.$ALIASES')" else "json_set(details, '$.$ALIASES', json(${literal(aliasesJson(aliases))}))"
         return statement("UPDATE $catalog SET details = $details WHERE ${recordOf(item)}")
     }
+
+    override fun formRecorded(item: CatalogItem): String =
+        statement("UPDATE $catalog SET details = json_set(details, '$.$FORM', $CURRENT_FORM) WHERE ${recordOf(item)}")
 
     /**
      * The partial index over [properties] of the nodes of [label]: each property as a statement reads it, and the test of
@@ -154,19 +157,41 @@ class SqliteDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
 
     override fun dropConstraint(item: CatalogItem): List<DdlStatement> = forgotten(item)
 
-    /** What is recorded of [kinds], and still there: an index dropped by hand is not listed, so that it is made again when asked for. */
-    private fun listed(kinds: String): String = """
+    /**
+     * What is recorded of [kinds], and still there: an index dropped by hand is not listed, so that it is made again when
+     * asked for. After the records, where [objects] names any, a row for each object of `sqlite_master` under a name
+     * Drivine gives an object of [objects], recorded or not: its `type`, its `table`, the statement that made it (`sql`),
+     * and of an index whether it is `unique` (`pragma_index_list`), which `store.schema` reads to tell another item under
+     * the name ([org.drivine.cypher.store.schema.ItemForm]).
+     */
+    private fun listed(kinds: String, objects: List<String>): String = if (objects.isEmpty()) """
         $JSON_ROWS
         SELECT json_object('kind', kind, 'label', label, 'properties', json(properties), 'name', name, 'details', json(details))
         FROM $catalog c
         WHERE kind IN ($kinds)
           AND (object_name IS NULL OR EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = c.object_name))
         ORDER BY label, properties
+    """.trimIndent() else """
+        $JSON_ROWS
+        SELECT listed FROM (
+            SELECT 0 AS part, label, properties, json_object('kind', kind, 'label', label, 'properties', json(properties), 'name', name, 'details', json(details)) AS listed
+            FROM $catalog c
+            WHERE kind IN ($kinds)
+              AND (object_name IS NULL OR EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = c.object_name))
+            UNION ALL
+            SELECT 1, m.name, NULL,
+                   json_object('object', m.name, 'type', m.type, 'table', m.tbl_name, 'sql', m.sql,
+                               'unique', (SELECT l."unique" FROM pragma_index_list(m.tbl_name) l WHERE l.name = m.name))
+            FROM sqlite_master m
+            WHERE ${namedAs("m.name", objects, upper = false)}
+        )
+        ORDER BY part, label, properties
     """.trimIndent()
 
-    override fun listIndexesQuery(kind: SchemaItemKind): String = listed(literal(kind.name))
+    override fun listIndexesQuery(kind: SchemaItemKind): String =
+        listed(literal(kind.name), if (kind == SchemaItemKind.RANGE_INDEX) listOf(RANGE) else emptyList())
 
-    override fun listConstraintsQuery(): String = listed(literal(SchemaItemKind.UNIQUENESS_CONSTRAINT.name))
+    override fun listConstraintsQuery(): String = listed(literal(SchemaItemKind.UNIQUENESS_CONSTRAINT.name), listOf(UNIQUE))
 
     companion object {
         /** The store's name, for what is said of a graph name it cannot take. */
@@ -188,8 +213,8 @@ class SqliteDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
         const val JSON_ROWS = "/* drivine:json */"
 
         /** What the name of a range index, and of a uniqueness constraint's index, says it is. */
-        private const val RANGE = "ix"
-        private const val UNIQUE = "uq"
+        const val RANGE = "ix"
+        const val UNIQUE = "uq"
 
         /** Why [name] cannot name a graph here; null where it can (see [SqlStoreDdl.refusal]). */
         fun refusal(name: String): String? = SqlStoreDdl.refusal(name, ENGINE, MAX_OBJECT_NAME)
