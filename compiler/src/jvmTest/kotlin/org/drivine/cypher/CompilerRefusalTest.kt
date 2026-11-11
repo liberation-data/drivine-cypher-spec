@@ -269,6 +269,37 @@ class CompilerRefusalTest {
     }
 
     @Test
+    fun `arithmetic, toBoolean(), SKIP and LIMIT of a kind they take, or left open, are compiled, as Neo4j plans them`() {
+        // #420: the spec's refusals hold what is refused. Neo4j 2026.10.1 takes null % 2, 'a' + 1, date - duration and duration * 2.
+        // A temporal value has no kind known, written or given, tagged or as java.time gives it, nor has a property, a parameter a
+        // WITH binds, or an item of a list of two kinds. A Short or a Byte is a whole number, as Neo4j's driver sends it.
+        listOf({ PostgresCypherCompiler("g") }, { OracleCypherCompiler("g") }, { SqliteCypherCompiler("g") }).forEach { compiler ->
+            listOf(
+                "RETURN date('2024-03-15') - duration('P1D'), duration('PT1H') * 2, duration('PT1H') / 2" to emptyMap(),
+                "RETURN \$d - duration('P1D'), \$t - duration('P1D'), \$u * 2" to mapOf(
+                    "d" to java.time.LocalDate.of(2024, 1, 1),
+                    "t" to org.drivine.cypher.json.TemporalValue(org.drivine.cypher.sql.Temporal.DATE, "2024-01-01"),
+                    "u" to java.time.Duration.ofHours(1),
+                ),
+                "RETURN null % 2, 2 - null, \$n ^ 2" to mapOf("n" to null),
+                "MATCH (n) RETURN n.x - 1, n.x * n.y, toBoolean(n.x)" to emptyMap(),
+                "WITH \$p AS x RETURN x - 1" to mapOf("p" to "a"),
+                "RETURN 'a' + 1, [1] + 1, \$s + 1" to mapOf("s" to "a"),
+                "UNWIND ['a', 1] AS s UNWIND ['a', null] AS t RETURN s % 2, t % 2" to emptyMap(),
+                "RETURN toBoolean(1), toBoolean('true'), toBoolean(true), toBoolean(null), toBoolean(\$i)" to mapOf("i" to 1),
+                "UNWIND [1, 2, 3] AS x RETURN x SKIP \$s LIMIT \$l" to mapOf("s" to 0, "l" to 2L),
+                "UNWIND [1, 2, 3] AS x RETURN x SKIP \$s LIMIT \$l" to mapOf("s" to 1.toShort(), "l" to 2.toByte()),
+            ).forEach { (cypher, parameters) -> compiler().compile(cypher, parameters) }
+            // The least whole number is read as one literal, not a negated one, and is refused as -1 is.
+            val cypher = "UNWIND [1, 2, 3] AS x RETURN x SKIP -9223372036854775808"
+            assertEquals(
+                "SKIP and LIMIT take a whole number of 0 or more, not -9223372036854775808, as in Neo4j.",
+                assertThrows<CompilerException>(cypher) { compiler().compile(cypher) }.message,
+            )
+        }
+    }
+
+    @Test
     fun `a start or length that may be an integer, or whose kind is known only when the row is read, is compiled, as Neo4j runs it`() {
         // #285: the spec's refusals hold a float the statement makes. Neo4j runs each of the first group, cutting a float toward
         // zero: a parameter, a property, an item of a list of an integer and a float or a null, a CASE of an integer and a float

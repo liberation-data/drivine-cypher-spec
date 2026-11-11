@@ -3697,23 +3697,25 @@ abstract class SqlCypherCompiler(
          * such as 2.0 among them, so one is refused here rather than taken as it was, as no limit or the whole of a float (#420).
          */
         private fun count(expression: Expression): String = when (expression) {
-            is Expression.Literal -> (expression.value as? Long)?.toString() ?: throw CompilerException("SKIP and LIMIT take a whole number, not ${org.drivine.cypher.text.JavaText.of(expression.value)}.")
+            is Expression.Literal -> when (val value = expression.value) {
+                // The least whole number is read as one literal: see [CypherReader].
+                is Long -> value.takeIf { it >= 0 }?.toString() ?: throw CompilerException("SKIP and LIMIT take a whole number of 0 or more, not $value, as in Neo4j.")
+                else -> throw CompilerException("SKIP and LIMIT take a whole number, not ${org.drivine.cypher.text.JavaText.of(value)}.")
+            }
             // `-1` is a negated number.
             is Expression.Unary -> {
-                val negated = (expression.operand as? Expression.Literal)?.value?.takeIf { expression.operator == Expression.Unary.Operator.NEGATE && it is Number }
-                    ?: unsupported("SKIP or LIMIT of an expression")
+                val negated = known(expression)?.takeIf { it is Number } ?: unsupported("SKIP or LIMIT of an expression")
                 throw CompilerException("SKIP and LIMIT take a whole number of 0 or more, not -${org.drivine.cypher.text.JavaText.of(negated)}, as in Neo4j.")
             }
             is Expression.Parameter -> {
                 val value = parameters.value(expression.name)
-                val whole = value as? Long ?: (value as? Int)?.toLong()
+                // A Short or a Byte is an integer as the store binds it (see [CypherJson]), and as Neo4j's driver sends it.
+                val whole = (value as? Number)?.takeIf { it is Long || it is Int || it is Short || it is Byte }?.toLong()
                 if (whole == null || whole < 0) {
                     val described = when (value) {
                         null -> "null"
                         is Number -> org.drivine.cypher.text.JavaText.of(value)
-                        is Map<*, *> -> "a map"
-                        is List<*> -> "a list"
-                        else -> Value.Known.of(value)?.noun ?: "of another kind"
+                        else -> givenKind(expression, emptyMap())?.noun ?: "of another kind"
                     }
                     throw CompilerException("SKIP and LIMIT take a whole number of 0 or more, and $${expression.name} is $described, as in Neo4j.")
                 }
@@ -4144,7 +4146,7 @@ abstract class SqlCypherCompiler(
          * Refuses [index], `subject[index]`, where the statement writes its subject as a value that is no list or map, or its
          * index as a value of a kind its subject is not indexed by ([knownKind]): a list by an integer, a map by a text. As
          * Neo4j refuses it; where the subject's kind is left open, it is compiled as before. An index given as a parameter is of
-         * its value's kind ([known]): the statement is compiled for each call, and its SQL is already made by that value, a
+         * its value's kind ([givenKind]): the statement is compiled for each call, and its SQL is already made by that value, a
          * text read as a property and a number as an item, so one of the other kind would be read as neither.
          */
         private fun indexOfKind(index: Expression.Index, scope: Map<String, Value>) {
@@ -4154,7 +4156,7 @@ abstract class SqlCypherCompiler(
                 Value.Known.MAP -> Value.Known.TEXT
                 else -> throw CompilerException("${subject.noun.replaceFirstChar(Char::uppercase)} is not a list or a map, and is indexed as one, as in Neo4j.")
             }
-            val kind = knownKind(index.index, scope) ?: (index.index as? Expression.Parameter)?.let { Value.Known.of(known(it)) } ?: return
+            val kind = givenKind(index.index, scope) ?: return
             if (kind != by) throw CompilerException("${subject.noun.replaceFirstChar(Char::uppercase)} is indexed by ${by.noun}, not ${kind.noun}, as in Neo4j.")
         }
 
