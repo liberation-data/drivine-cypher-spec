@@ -627,6 +627,7 @@ internal class SchemaProgram(
         val cleared = clearMismatched(spec, found) { findIndex(spec) }
         cleared.drift?.let { return it }
         val existing = cleared.existing ?: found
+        if (existing == null) dropUnrecorded(spec)
         if (existing != null) dropExisting(existing, spec)
         // Read again after the drop: on a store with an index a label, the label may still have one over other
         // properties, which the create takes into account.
@@ -914,6 +915,7 @@ internal class SchemaProgram(
         val cleared = clearMismatched(spec.made(), found) { findConstraint(spec) }
         cleared.drift?.let { return it }
         val existing = cleared.existing ?: found
+        if (existing == null) dropUnrecorded(spec.made())
         if (existing != null) ddl(store.ddl.dropConstraint(existing.catalogItem))
         // The copies are filled in again too, where a write that bypassed Drivine left one out of step.
         fillIn(spec) { true }
@@ -1058,6 +1060,34 @@ internal class SchemaProgram(
                 log(LogLevel.INFO, INDEX_MANAGER, dropped)
             }
             existing = find()
+        }
+    }
+
+    /**
+     * Before [spec], of which no record is listed, is made again: the objects under its names that were read as another
+     * library's form, and decided it, are dropped by their names ([StoreSchema.unrecordedDrops]), so the item is made in
+     * this version's form, and not recorded as made over the other's. Said as a mismatch's drop is.
+     */
+    private fun dropUnrecorded(spec: SchemaItemSpec) {
+        val statement = when (spec) {
+            is IndexSpec -> store.ddl.listIndexesQuery(spec.kind)
+            is ConstraintSpec -> store.ddl.listConstraintsQuery()
+        }
+        val rows = listings[statement] ?: return
+        val found = (formOf(spec) as? ItemForm.Stale)?.found ?: return
+        for (drop in store.unrecordedDrops(spec, rows)) {
+            ddl(drop.statements)
+            val dropped = "Dropped $engine ${drop.what} ${drop.name}, of $found under its name for ${spec.kind} on ${spec.label}${spec.properties}, which no record named, to make it in this version's form"
+            if (spec is ConstraintSpec) {
+                // Until drivine-cypher-spec#135 §4 (PR E) builds the new unique index first, as a mismatch's drop.
+                log(
+                    LogLevel.WARN, CONSTRAINT_MANAGER,
+                    "$dropped. The old index is gone, and the constraint is made again in its place: where the data repeats a key, " +
+                        "${spec.label}${spec.properties} is left with no index until the constraint is made",
+                )
+            } else {
+                log(LogLevel.INFO, INDEX_MANAGER, dropped)
+            }
         }
     }
 

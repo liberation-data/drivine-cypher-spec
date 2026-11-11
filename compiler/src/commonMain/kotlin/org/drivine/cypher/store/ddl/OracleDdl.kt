@@ -243,6 +243,12 @@ ${made.entries.joinToString("\n") { (function, making) ->
         return statement("UPDATE $catalog SET details = JSON_MERGEPATCH(details, ${literal(patch)}) WHERE ${recordOf(item)}")
     }
 
+    /** What drops the trigger [name], by its name: one of a table beside the nodes that another library made. */
+    fun droppedTrigger(name: String): String = "DROP TRIGGER IF EXISTS $name"
+
+    /** What drops the table [name] beside the nodes, by its name, and the index over it with it. */
+    fun droppedTable(name: String): String = "DROP TABLE IF EXISTS $name PURGE"
+
     override fun formRecorded(item: CatalogItem): String =
         statement("UPDATE $catalog SET details = JSON_MERGEPATCH(details, '{\"$FORM\": $CURRENT_FORM}') WHERE ${recordOf(item)}")
 

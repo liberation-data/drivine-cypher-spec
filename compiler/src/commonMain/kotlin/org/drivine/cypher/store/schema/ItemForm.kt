@@ -1,6 +1,11 @@
 package org.drivine.cypher.store.schema
 
 import org.drivine.DrivineInternalApi
+import org.drivine.cypher.store.ddl.DdlStatement
+
+/** An object a recreate drops by its name: what it is ([what], as a line names it), its [name], and the [statements] that drop it. */
+@DrivineInternalApi
+data class ObjectDrop(val what: String, val name: String, val statements: List<DdlStatement>)
 
 /**
  * What a SQL store's catalog and dictionary say of an item a spec declares, beyond whether it is there

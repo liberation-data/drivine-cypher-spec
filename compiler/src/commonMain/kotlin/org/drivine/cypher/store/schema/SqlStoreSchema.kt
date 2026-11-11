@@ -428,6 +428,25 @@ class OracleSchema(override val ddl: OracleDdl) : SqlStoreSchema() {
         }
     }
 
+    override fun unrecordedDrops(spec: SchemaItemSpec, rows: List<Any?>): List<ObjectDrop> {
+        val recorded = rows.filterIsInstance<Map<*, *>>().any { row ->
+            OBJECT !in row && parseIndexRows(listOf(row)).singleOrNull()?.let { matchesIdentity(it, spec) } == true
+        }
+        if (recorded) return emptyList()
+        val objects = StoreObject.read(rows)
+        if (unrecordedForm(spec, null, objects) !is ItemForm.Stale) return emptyList()
+        side(spec)?.let { side ->
+            // The trigger's text decided the form; the table, and the index over it, go with it.
+            val table = objects.of(side, "TABLE") ?: return emptyList()
+            return listOf(ObjectDrop("table", table.name, listOf(DdlStatement.Text(ddl.droppedTrigger(side + TRIGGER)), DdlStatement.Text(ddl.droppedTable(table.name)))))
+        }
+        // The labelled or the unique index's text decided it: never the index over the property of every node, which is
+        // alike in every library, and others' items share.
+        val kind = if (spec.kind == SchemaItemKind.UNIQUENESS_CONSTRAINT) OracleDdl.UNIQUE else OracleDdl.LABELLED
+        val index = objects.of(ddl.objectName(kind, listOf(spec.label) + spec.properties), StoreObject.INDEX) ?: return emptyList()
+        return listOf(ObjectDrop("index", index.name, listOf(DdlStatement.Text(ddl.droppedIndex(index.name)))))
+    }
+
     /** The table beside the nodes [spec]'s item is kept in: a vector index's or a full-text index's; null for any other. */
     private fun side(spec: SchemaItemSpec): String? = when (spec.kind) {
         SchemaItemKind.VECTOR_INDEX -> ddl.vectors(spec.label, spec.properties.single())

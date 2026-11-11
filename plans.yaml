@@ -5874,6 +5874,173 @@ cases:
                 - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=null)"]
                 - ["INFO", "IndexManager", "Completed {engine} RANGE_INDEX on Person[name]: it lacked part of what is made for it"]
                 - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 1 created, 0 already matching, 0 recreated, 0 needing attention"]
+  - case: "30w"
+    name: "A recreate over Drivine for TypeScript's Oracle uniqueness constraint that no record names"
+    description: "TypeScript made the uniqueness constraint; no record names it. recreateAll drops by name the objects whose text was read as its form, never the index over the property of every node, makes the item in this version's form, and records it as form 1: the enforce after finds it current, and says nothing of its form."
+    stores: ["oracle"]
+    catalogs:
+      - {owner: null, version: null, items: ["Uniqueness constraint"]}
+    steps:
+      - operation: {recreateAll: "all"}
+        runs:
+          - stores: ["oracle"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "constraints"}, rows: [{"object": "DRIVINE_IX_EMAIL_5C24B9C", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"], "tableColumns": null, "source": null}, {"object": "DRIVINE_UQ_PERSONEMAIL_5482A751", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "UNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["CASE JSON_EXISTS2(\"LABELS\" FORMAT OSON , '$?(@ == \"Person\")' /* json_path_str  $?(@.string() == \"Person\")  */  FALSE ON ERROR TYPE(LAX) ) WHEN 1 THEN JSON_VALUE(\"PROPS\" FORMAT OSON , '$.\"email\"' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) ) END "], "tableColumns": null, "source": null}]}
+              - now: 1000000
+                actions:
+                  - {execute: {statement: "DROP INDEX IF EXISTS DRIVINE_UQ_PERSONEMAIL_5482A751"}}
+                  - {query: {listing: "constraints"}, rows: [{"object": "DRIVINE_IX_EMAIL_5C24B9C", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"], "tableColumns": null, "source": null}]}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Uniqueness constraint"}}
+                  - {query: {listing: "constraints"}, rows: [{"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique", "details": {"form": 1}, "status": null}, {"object": "DRIVINE_IX_EMAIL_5C24B9C", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"], "tableColumns": null, "source": null}, {"object": "DRIVINE_UQ_PERSONEMAIL_5482A751", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "UNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["CASE  WHEN (JSON_EXISTS2(\"LABELS\" FORMAT OSON , '$[*]?(@ == \"Person\")' /* json_path_str  $[*]?(@.string() == \"Person\")  */  FALSE ON ERROR TYPE(LAX) )=1 AND JSON_EXISTS2(\"PROPS\" FORMAT OSON , '$.email' FALSE ON ERROR TYPE(LAX) )=1) THEN JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) ) END "], "tableColumns": null, "source": null}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+            done: 1000000
+            report:
+              owners:
+                - {"owner": null, "results": [{"spec": "Uniqueness constraint", "recreated": {"previous": null, "current": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique"}}}], "marker": {"version": null, "items": "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=true, versionChanged=false, version=null)"]
+                - ["WARN", "ConstraintManager", "Dropped {engine} index DRIVINE_UQ_PERSONEMAIL_5482A751, of TS's or Python's Oracle form under its name for UNIQUENESS_CONSTRAINT on Person[email], which no record named, to make it in this version's form. The old index is gone, and the constraint is made again in its place: where the data repeats a key, Person[email] is left with no index until the constraint is made"]
+                - ["INFO", "ConstraintManager", "Created {engine} UNIQUENESS_CONSTRAINT on Person[email]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 0 already matching, 1 recreated, 0 needing attention"]
+      - operation: {enforce: "all"}
+        runs:
+          - stores: ["oracle"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: ["items:UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"]}
+                  - {query: {listing: "constraints"}, rows: [{"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique", "details": {"form": 1}, "status": null}, {"object": "DRIVINE_IX_EMAIL_5C24B9C", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"], "tableColumns": null, "source": null}, {"object": "DRIVINE_UQ_PERSONEMAIL_5482A751", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "UNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["CASE  WHEN (JSON_EXISTS2(\"LABELS\" FORMAT OSON , '$[*]?(@ == \"Person\")' /* json_path_str  $[*]?(@.string() == \"Person\")  */  FALSE ON ERROR TYPE(LAX) )=1 AND JSON_EXISTS2(\"PROPS\" FORMAT OSON , '$.email' FALSE ON ERROR TYPE(LAX) )=1) THEN JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) ) END "], "tableColumns": null, "source": null}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+            done: 1000000
+            report:
+              owners:
+                - {"owner": null, "results": [{"spec": "Uniqueness constraint", "alreadyMatching": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique"}}], "marker": {"version": null, "items": "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 1 already matching, 0 recreated, 0 needing attention"]
+  - case: "30x"
+    name: "A recreate over Drivine for TypeScript's Oracle range index that no record names"
+    description: "TypeScript made the range index; no record names it. recreateAll drops by name the objects whose text was read as its form, never the index over the property of every node, makes the item in this version's form, and records it as form 1: the enforce after finds it current, and says nothing of its form."
+    stores: ["oracle"]
+    catalogs:
+      - {owner: null, version: null, items: ["Range index"]}
+    steps:
+      - operation: {recreateAll: "all"}
+        runs:
+          - stores: ["oracle"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, rows: [{"object": "DRIVINE_IX_NAME_337A8B", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.name' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"], "tableColumns": null, "source": null}, {"object": "DRIVINE_LX_PERSONNAME_44CE5436", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["CASE JSON_EXISTS2(\"LABELS\" FORMAT OSON , '$?(@ == \"Person\")' /* json_path_str  $?(@.string() == \"Person\")  */  FALSE ON ERROR TYPE(LAX) ) WHEN 1 THEN JSON_VALUE(\"PROPS\" FORMAT OSON , '$.\"name\"' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) ) END "], "tableColumns": null, "source": null}]}
+              - now: 1000000
+                actions:
+                  - {execute: {statement: "DROP INDEX IF EXISTS DRIVINE_LX_PERSONNAME_44CE5436"}}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, rows: [{"object": "DRIVINE_IX_NAME_337A8B", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.name' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"], "tableColumns": null, "source": null}]}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Range index"}}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, rows: [{"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": "Person_name_range", "details": {"form": 1, "labelled": "drivine_lx_Personname_44ce5436"}, "status": null}, {"object": "DRIVINE_IX_NAME_337A8B", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.name' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"], "tableColumns": null, "source": null}, {"object": "DRIVINE_LX_PERSONNAME_44CE5436", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["CASE JSON_EXISTS2(\"LABELS\" FORMAT OSON , '$[*]?(@ == \"Person\")' /* json_path_str  $[*]?(@.string() == \"Person\")  */  FALSE ON ERROR TYPE(LAX) ) WHEN 1 THEN JSON_VALUE(\"PROPS\" FORMAT OSON , '$.name' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) ) END "], "tableColumns": null, "source": null}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: "RANGE_INDEX:Person:name:Person_name_range"}}
+            done: 1000000
+            report:
+              owners:
+                - {"owner": null, "results": [{"spec": "Range index", "recreated": {"previous": null, "current": {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": "Person_name_range"}}}], "marker": {"version": null, "items": "RANGE_INDEX:Person:name:Person_name_range"}}
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=true, versionChanged=false, version=null)"]
+                - ["INFO", "IndexManager", "Dropped {engine} index DRIVINE_LX_PERSONNAME_44CE5436, of TS's or Python's Oracle form under its name for RANGE_INDEX on Person[name], which no record named, to make it in this version's form"]
+                - ["WARN", "IndexManager", "Recreated {engine} RANGE_INDEX on Person[name] — previously indexed data may be stale (vector indexes: stored embeddings need re-embedding)"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 0 already matching, 1 recreated, 0 needing attention"]
+      - operation: {enforce: "all"}
+        runs:
+          - stores: ["oracle"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: ["items:RANGE_INDEX:Person:name:Person_name_range"]}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, rows: [{"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": "Person_name_range", "details": {"form": 1, "labelled": "drivine_lx_Personname_44ce5436"}, "status": null}, {"object": "DRIVINE_IX_NAME_337A8B", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.name' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"], "tableColumns": null, "source": null}, {"object": "DRIVINE_LX_PERSONNAME_44CE5436", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["CASE JSON_EXISTS2(\"LABELS\" FORMAT OSON , '$[*]?(@ == \"Person\")' /* json_path_str  $[*]?(@.string() == \"Person\")  */  FALSE ON ERROR TYPE(LAX) ) WHEN 1 THEN JSON_VALUE(\"PROPS\" FORMAT OSON , '$.name' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) ) END "], "tableColumns": null, "source": null}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: "RANGE_INDEX:Person:name:Person_name_range"}}
+            done: 1000000
+            report:
+              owners:
+                - {"owner": null, "results": [{"spec": "Range index", "alreadyMatching": {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": "Person_name_range"}}], "marker": {"version": null, "items": "RANGE_INDEX:Person:name:Person_name_range"}}
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 1 already matching, 0 recreated, 0 needing attention"]
+  - case: "30y"
+    name: "A recreate over Drivine for TypeScript's Oracle vector index that no record names"
+    description: "TypeScript made the vector index; no record names it. recreateAll drops by name the objects whose text was read as its form, never the index over the property of every node, makes the item in this version's form, and records it as form 1: the enforce after finds it current, and says nothing of its form."
+    stores: ["oracle"]
+    catalogs:
+      - {owner: null, version: null, items: ["Vector index by cosine"]}
+    steps:
+      - operation: {recreateAll: "all"}
+        runs:
+          - stores: ["oracle"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "indexes.VECTOR_INDEX"}, rows: [{"object": "DRIVINE_V_CHUNKEMBEDDING_7E60BD64", "type": "TABLE", "table": null, "uniqueness": null, "indexType": null, "columns": null, "tableColumns": ["NID NUMBER", "EMBEDDING VECTOR"], "source": null}, {"object": "DRIVINE_V_CHUNKEMBEDDING_7E60BD64_I", "type": "INDEX", "table": "DRIVINE_V_CHUNKEMBEDDING_7E60BD64", "uniqueness": "NONUNIQUE", "indexType": "VECTOR", "columns": ["EMBEDDING"], "tableColumns": null, "source": null}, {"object": "DRIVINE_V_CHUNKEMBEDDING_7E60BD64_T", "type": "TRIGGER", "table": "DRIVINE_NODE", "uniqueness": null, "indexType": null, "columns": null, "tableColumns": null, "source": ["TRIGGER drivine_v_Chunkembedding_7e60bd64_t AFTER INSERT OR UPDATE OF labels, props ON drivine_node FOR EACH ROW BEGIN IF JSON_EXISTS(:NEW.labels, '$?(@ == \"Chunk\")') AND JSON_EXISTS(:NEW.props, '$.\"embedding\"') THEN BEGIN MERGE INTO drivine_v_Chunkembedding_7e60bd64 s USING (SELECT :NEW.nid AS nid, TO_VECTOR(JSON_QUERY(:NEW.props, '$.\"embedding\"' RETURNING CLOB)) AS embedding FROM dual) n ON (s.nid = n.nid) WHEN MATCHED THEN UPDATE SET s.embedding = n.embedding WHEN NOT MATCHED THEN INSERT (nid, embedding) VALUES (n.nid, n.embedding); EXCEPTION WHEN OTHERS THEN DELETE FROM drivine_v_Chunkembedding_7e60bd64 WHERE nid = :NEW.nid; END; ELSE DELETE FROM drivine_v_Chunkembedding_7e60bd64 WHERE nid = :NEW.nid; END IF; END;"]}]}
+              - now: 1000000
+                actions:
+                  - {execute: {statement: "DROP TRIGGER IF EXISTS drivine_v_Chunkembedding_7e60bd64_t"}}
+                  - {execute: {statement: "DROP TABLE IF EXISTS DRIVINE_V_CHUNKEMBEDDING_7E60BD64 PURGE"}}
+                  - {query: {listing: "indexes.VECTOR_INDEX"}, rows: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Vector index by cosine"}}
+                  - {query: {listing: "indexes.VECTOR_INDEX"}, rows: [{"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "name": "Chunk_embedding_vector", "details": {"form": 1, "dimensions": 384, "similarity": "COSINE"}, "status": null}, {"object": "DRIVINE_V_CHUNKEMBEDDING_7E60BD64", "type": "TABLE", "table": null, "uniqueness": null, "indexType": null, "columns": null, "tableColumns": ["NID NUMBER", "EMBEDDING VECTOR"], "source": null}, {"object": "DRIVINE_V_CHUNKEMBEDDING_7E60BD64_I", "type": "INDEX", "table": "DRIVINE_V_CHUNKEMBEDDING_7E60BD64", "uniqueness": "NONUNIQUE", "indexType": "VECTOR", "columns": ["EMBEDDING"], "tableColumns": null, "source": null}, {"object": "DRIVINE_V_CHUNKEMBEDDING_7E60BD64_T", "type": "TRIGGER", "table": "DRIVINE_NODE", "uniqueness": null, "indexType": null, "columns": null, "tableColumns": null, "source": ["TRIGGER drivine_v_Chunkembedding_7e60bd64_t AFTER INSERT OR UPDATE OF labels, props ON drivine_node FOR EACH ROW\n", "BEGIN\n", "    IF INSTR(',' || LTRIM(RTRIM(JSON_SERIALIZE(:NEW.labels), ']'), '[') || ',\"', ',\"Chunk\",\"') > 0 AND JSON_EXISTS(:NEW.props, '$.embedding') THEN\n", "                BEGIN\n", "            MERGE INTO drivine_v_Chunkembedding_7e60bd64 s USING (SELECT :NEW.nid AS nid, TO_VECTOR(JSON_QUERY(:NEW.props, '$.embedding' RETURNING CLOB)) AS embedding FROM dual) n ON (s.nid = n.nid)\n", "WHEN MATCHED THEN UPDATE SET s.embedding = n.embedding\n", "WHEN NOT MATCHED THEN INSERT (nid, embedding) VALUES (n.nid, n.embedding);\n", "        EXCEPTION WHEN OTHERS THEN\n", "            -- Not a payload the column takes: the node is kept, and left out of the table, as the graph engines leave it out of the index.\n", "            DELETE FROM drivine_v_Chunkembedding_7e60bd64 WHERE nid = :NEW.nid;\n", "        END;\n", "    ELSE\n", "        DELETE FROM drivine_v_Chunkembedding_7e60bd64 WHERE nid = :NEW.nid;\n", "    END IF;\n", "END;"]}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: "VECTOR_INDEX:Chunk:embedding:Chunk_embedding_vector"}}
+            done: 1000000
+            report:
+              owners:
+                - {"owner": null, "results": [{"spec": "Vector index by cosine", "recreated": {"previous": null, "current": {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "name": "Chunk_embedding_vector", "dimensions": 384, "similarity": "COSINE"}}}], "marker": {"version": null, "items": "VECTOR_INDEX:Chunk:embedding:Chunk_embedding_vector"}}
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=true, versionChanged=false, version=null)"]
+                - ["INFO", "IndexManager", "Dropped {engine} table DRIVINE_V_CHUNKEMBEDDING_7E60BD64, of TS's or Python's Oracle form under its name for VECTOR_INDEX on Chunk[embedding], which no record named, to make it in this version's form"]
+                - ["INFO", "IndexManager", "Vector index Chunk_embedding_vector on Chunk[embedding] effective config (engine defaults): dimensions=384, similarity=COSINE"]
+                - ["WARN", "IndexManager", "Recreated {engine} VECTOR_INDEX on Chunk[embedding] — previously indexed data may be stale (vector indexes: stored embeddings need re-embedding)"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 0 already matching, 1 recreated, 0 needing attention"]
+      - operation: {enforce: "all"}
+        runs:
+          - stores: ["oracle"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: ["items:VECTOR_INDEX:Chunk:embedding:Chunk_embedding_vector"]}
+                  - {query: {listing: "indexes.VECTOR_INDEX"}, rows: [{"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "name": "Chunk_embedding_vector", "details": {"form": 1, "dimensions": 384, "similarity": "COSINE"}, "status": null}, {"object": "DRIVINE_V_CHUNKEMBEDDING_7E60BD64", "type": "TABLE", "table": null, "uniqueness": null, "indexType": null, "columns": null, "tableColumns": ["NID NUMBER", "EMBEDDING VECTOR"], "source": null}, {"object": "DRIVINE_V_CHUNKEMBEDDING_7E60BD64_I", "type": "INDEX", "table": "DRIVINE_V_CHUNKEMBEDDING_7E60BD64", "uniqueness": "NONUNIQUE", "indexType": "VECTOR", "columns": ["EMBEDDING"], "tableColumns": null, "source": null}, {"object": "DRIVINE_V_CHUNKEMBEDDING_7E60BD64_T", "type": "TRIGGER", "table": "DRIVINE_NODE", "uniqueness": null, "indexType": null, "columns": null, "tableColumns": null, "source": ["TRIGGER drivine_v_Chunkembedding_7e60bd64_t AFTER INSERT OR UPDATE OF labels, props ON drivine_node FOR EACH ROW\n", "BEGIN\n", "    IF INSTR(',' || LTRIM(RTRIM(JSON_SERIALIZE(:NEW.labels), ']'), '[') || ',\"', ',\"Chunk\",\"') > 0 AND JSON_EXISTS(:NEW.props, '$.embedding') THEN\n", "                BEGIN\n", "            MERGE INTO drivine_v_Chunkembedding_7e60bd64 s USING (SELECT :NEW.nid AS nid, TO_VECTOR(JSON_QUERY(:NEW.props, '$.embedding' RETURNING CLOB)) AS embedding FROM dual) n ON (s.nid = n.nid)\n", "WHEN MATCHED THEN UPDATE SET s.embedding = n.embedding\n", "WHEN NOT MATCHED THEN INSERT (nid, embedding) VALUES (n.nid, n.embedding);\n", "        EXCEPTION WHEN OTHERS THEN\n", "            -- Not a payload the column takes: the node is kept, and left out of the table, as the graph engines leave it out of the index.\n", "            DELETE FROM drivine_v_Chunkembedding_7e60bd64 WHERE nid = :NEW.nid;\n", "        END;\n", "    ELSE\n", "        DELETE FROM drivine_v_Chunkembedding_7e60bd64 WHERE nid = :NEW.nid;\n", "    END IF;\n", "END;"]}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: "VECTOR_INDEX:Chunk:embedding:Chunk_embedding_vector"}}
+            done: 1000000
+            report:
+              owners:
+                - {"owner": null, "results": [{"spec": "Vector index by cosine", "alreadyMatching": {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "name": "Chunk_embedding_vector", "dimensions": 384, "similarity": "COSINE"}}], "marker": {"version": null, "items": "VECTOR_INDEX:Chunk:embedding:Chunk_embedding_vector"}}
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 1 already matching, 0 recreated, 0 needing attention"]
   - case: "item"
     name: "The public IndexManager and ConstraintManager calls"
     description: "Each on one item, with no marker: a constraint ensured and recreated, an index recreated where there is none, and dropped, where it is there and where it is not."
