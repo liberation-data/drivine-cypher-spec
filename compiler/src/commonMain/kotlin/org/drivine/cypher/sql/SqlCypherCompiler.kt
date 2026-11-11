@@ -2916,7 +2916,7 @@ abstract class SqlCypherCompiler(
 
         /**
          * The query a `WITH` or a `RETURN` makes of [select]: its items as columns, grouped where it
-         * aggregates, then ordered, skipped and limited. Rows it does not order, group or keep distinct
+         * aggregates, or is `DISTINCT` and orders by an aggregate ([groupsRows]), then ordered, skipped and limited. Rows it does not order, group or keep distinct
          * stay in the order [select] reads them, as a graph engine keeps them. With [statement], it is the statement's own last
          * `RETURN`, or one of its `UNION`'s, not a subquery's: it names the statement's columns ([returned]), and where the
          * statement is compiled [typed], gives its nodes and relationships tagged ([output]), and its `result` as the host's
