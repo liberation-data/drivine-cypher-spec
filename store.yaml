@@ -1442,6 +1442,8 @@ cases:
     spec: {kind: "RANGE_INDEX", label: "Person", properties: ["name"]}
     stores:
       postgres:
+        form: 1
+        digest: "c9bb18523dbc2feffcb007c8686adda7aaa5f55bdd6d6eb462f8c0edb081daeb"
         create:
           - "CREATE INDEX IF NOT EXISTS drivine_ix_Personname_44ce5436 ON drivine_node (((props ->> 'name'))) WHERE labels @> '[\"Person\"]'"
           - |-
@@ -1465,6 +1467,8 @@ cases:
             END
             $forget$
       oracle:
+        form: 1
+        digest: "79b9e0252acc42d79e86db708c4b20f99f36304568f2bd653a0f843f49f457b4"
         create:
           - |-
             DECLARE
@@ -1536,6 +1540,8 @@ cases:
                 COMMIT;
             END;
       sqlite:
+        form: 1
+        digest: "b810f69a6224398ca7c1e18a83b133d2955fdb0180a036507a6892b20722f0f6"
         create:
           - "CREATE INDEX IF NOT EXISTS drivine_ix_Personname_44ce5436 ON drivine_node ((CASE json_type(props, '$.\"name\"') WHEN 'text' THEN props ->> '$.\"name\"' WHEN 'null' THEN NULL ELSE props -> '$.\"name\"' END)) WHERE instr(labels, '\"Person\"') > 0"
           - |-
@@ -1569,6 +1575,8 @@ cases:
     spec: {kind: "RANGE_INDEX", label: "Person", properties: ["name", "born"]}
     stores:
       postgres:
+        form: 1
+        digest: "075eab6fac4b262641db91bd325150a7e3ed258b24705acf0259613b856bfac9"
         create:
           - "CREATE INDEX IF NOT EXISTS drivine_ix_Personnameborn_3f5a18d3 ON drivine_node (((props ->> 'name')), ((props ->> 'born'))) WHERE labels @> '[\"Person\"]'"
           - |-
@@ -1592,6 +1600,8 @@ cases:
             END
             $forget$
       oracle:
+        form: 1
+        digest: "608561bbe127fe8e8595a192a2a5bd2bed9d1549fe19301a15e383e6322a2ea7"
         create:
           - |-
             DECLARE
@@ -1663,6 +1673,8 @@ cases:
                 COMMIT;
             END;
       sqlite:
+        form: 1
+        digest: "bc98960dcf121982fc1846a2d1f2d9180434ceca29abe413dbacbe93830ca030"
         create:
           - "CREATE INDEX IF NOT EXISTS drivine_ix_Personnameborn_3f5a18d3 ON drivine_node ((CASE json_type(props, '$.\"name\"') WHEN 'text' THEN props ->> '$.\"name\"' WHEN 'null' THEN NULL ELSE props -> '$.\"name\"' END), (CASE json_type(props, '$.\"born\"') WHEN 'text' THEN props ->> '$.\"born\"' WHEN 'null' THEN NULL ELSE props -> '$.\"born\"' END)) WHERE instr(labels, '\"Person\"') > 0"
           - |-
@@ -1702,6 +1714,8 @@ cases:
     existing: ["name"]
     stores:
       postgres:
+        form: 1
+        digest: "075eab6fac4b262641db91bd325150a7e3ed258b24705acf0259613b856bfac9"
         create:
           - "CREATE INDEX IF NOT EXISTS drivine_ix_Personnameborn_3f5a18d3 ON drivine_node (((props ->> 'name')), ((props ->> 'born'))) WHERE labels @> '[\"Person\"]'"
           - |-
@@ -1725,6 +1739,8 @@ cases:
             END
             $forget$
       oracle:
+        form: 1
+        digest: "608561bbe127fe8e8595a192a2a5bd2bed9d1549fe19301a15e383e6322a2ea7"
         create:
           - |-
             DECLARE
@@ -1796,6 +1812,8 @@ cases:
                 COMMIT;
             END;
       sqlite:
+        form: 1
+        digest: "bc98960dcf121982fc1846a2d1f2d9180434ceca29abe413dbacbe93830ca030"
         create:
           - "CREATE INDEX IF NOT EXISTS drivine_ix_Personnameborn_3f5a18d3 ON drivine_node ((CASE json_type(props, '$.\"name\"') WHEN 'text' THEN props ->> '$.\"name\"' WHEN 'null' THEN NULL ELSE props -> '$.\"name\"' END), (CASE json_type(props, '$.\"born\"') WHEN 'text' THEN props ->> '$.\"born\"' WHEN 'null' THEN NULL ELSE props -> '$.\"born\"' END)) WHERE instr(labels, '\"Person\"') > 0"
           - |-
@@ -1820,6 +1838,8 @@ cases:
     existing: ["name", "born"]
     stores:
       postgres:
+        form: 1
+        digest: "075eab6fac4b262641db91bd325150a7e3ed258b24705acf0259613b856bfac9"
         create:
           - "CREATE INDEX IF NOT EXISTS drivine_ix_Personnameborn_3f5a18d3 ON drivine_node (((props ->> 'name')), ((props ->> 'born'))) WHERE labels @> '[\"Person\"]'"
           - |-
@@ -1843,6 +1863,8 @@ cases:
             END
             $forget$
       oracle:
+        form: 1
+        digest: "608561bbe127fe8e8595a192a2a5bd2bed9d1549fe19301a15e383e6322a2ea7"
         create:
           - |-
             DECLARE
@@ -1914,6 +1936,8 @@ cases:
                 COMMIT;
             END;
       sqlite:
+        form: 1
+        digest: "bc98960dcf121982fc1846a2d1f2d9180434ceca29abe413dbacbe93830ca030"
         create:
           - "CREATE INDEX IF NOT EXISTS drivine_ix_Personnameborn_3f5a18d3 ON drivine_node ((CASE json_type(props, '$.\"name\"') WHEN 'text' THEN props ->> '$.\"name\"' WHEN 'null' THEN NULL ELSE props -> '$.\"name\"' END), (CASE json_type(props, '$.\"born\"') WHEN 'text' THEN props ->> '$.\"born\"' WHEN 'null' THEN NULL ELSE props -> '$.\"born\"' END)) WHERE instr(labels, '\"Person\"') > 0"
           - |-
@@ -1945,6 +1969,8 @@ cases:
     spec: {kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "person_by_name"}
     stores:
       postgres:
+        form: 1
+        digest: "67ab288c4e29583d837d13cdfbc7b3238dec52071723a84f806778a503deb038"
         create:
           - "CREATE INDEX IF NOT EXISTS drivine_ix_Personname_44ce5436 ON drivine_node (((props ->> 'name'))) WHERE labels @> '[\"Person\"]'"
           - |-
@@ -1968,6 +1994,8 @@ cases:
             END
             $forget$
       oracle:
+        form: 1
+        digest: "d86930b322bb3ef5c1bfe73add64c577e59d409a85b3dfbae0a7dd465e7ab6a8"
         create:
           - |-
             DECLARE
@@ -2039,6 +2067,8 @@ cases:
                 COMMIT;
             END;
       sqlite:
+        form: 1
+        digest: "f071ace82ddab83393727bf50fcb8f07301d6b53159e370ae160fb2be7e48e74"
         create:
           - "CREATE INDEX IF NOT EXISTS drivine_ix_Personname_44ce5436 ON drivine_node ((CASE json_type(props, '$.\"name\"') WHEN 'text' THEN props ->> '$.\"name\"' WHEN 'null' THEN NULL ELSE props -> '$.\"name\"' END)) WHERE instr(labels, '\"Person\"') > 0"
           - |-
@@ -2060,6 +2090,8 @@ cases:
     spec: {kind: "RANGE_INDEX", label: "Person", properties: ["email"], ignoreCase: true}
     stores:
       postgres:
+        form: 1
+        digest: "3c4e46b37dd8b67a88a71a3d8c34821dcfb3fbf468b2ab04dd6bcf8cbab2c4cb"
         create:
           - "CREATE INDEX IF NOT EXISTS drivine_ix_Persondrivineloweremail_b3ad0b9b ON drivine_node (((props ->> '__drivine.lower.email'))) WHERE labels @> '[\"Person\"]'"
           - |-
@@ -2083,6 +2115,8 @@ cases:
             END
             $forget$
       oracle:
+        form: 1
+        digest: "4d0814bfddafa12c8633bdacfac043c60fdfd7dcc78bf3fc898a4300c30ccccf"
         create:
           - |-
             DECLARE
@@ -2154,6 +2188,8 @@ cases:
                 COMMIT;
             END;
       sqlite:
+        form: 1
+        digest: "5d94f3465abfafaebbe18d86aadb45177c863c39f73281a64cb34567f252d64e"
         create:
           - "CREATE INDEX IF NOT EXISTS drivine_ix_Persondrivineloweremail_b3ad0b9b ON drivine_node ((CASE json_type(props, '$.\"__drivine.lower.email\"') WHEN 'text' THEN props ->> '$.\"__drivine.lower.email\"' WHEN 'null' THEN NULL ELSE props -> '$.\"__drivine.lower.email\"' END)) WHERE instr(labels, '\"Person\"') > 0"
           - |-
@@ -2192,6 +2228,8 @@ cases:
     spec: {kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"]}
     stores:
       postgres:
+        form: 1
+        digest: "e2f609ca932a645f6b8be6486953d2308ff3177f73e92c09d5610085081e304a"
         create:
           - "CREATE UNIQUE INDEX IF NOT EXISTS drivine_uq_Personemail_5482a751 ON drivine_node (((props ->> 'email'))) WHERE labels @> '[\"Person\"]'"
           - |-
@@ -2215,6 +2253,8 @@ cases:
             END
             $forget$
       oracle:
+        form: 1
+        digest: "e2ecdc0f109d80d8ff257dd2f2e9eab619941aed479e07cbfc8392d534af0797"
         create:
           - |-
             DECLARE
@@ -2300,6 +2340,8 @@ cases:
                 COMMIT;
             END;
       sqlite:
+        form: 1
+        digest: "8b3ea3a99b267cd97289cb0b2669a643d1bba8985df143842b45fb43e1a44d75"
         create:
           - "CREATE UNIQUE INDEX IF NOT EXISTS drivine_uq_Personemail_5482a751 ON drivine_node ((CASE json_type(props, '$.\"email\"') WHEN 'text' THEN props ->> '$.\"email\"' WHEN 'null' THEN NULL ELSE props -> '$.\"email\"' END)) WHERE instr(labels, '\"Person\"') > 0"
           - |-
@@ -2349,6 +2391,8 @@ cases:
     spec: {kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["first", "last"]}
     stores:
       postgres:
+        form: 1
+        digest: "141bd2625a544b2be88b1dceed70bb959adca53e292b7d8fe9bfcb53c8885f5f"
         create:
           - "CREATE UNIQUE INDEX IF NOT EXISTS drivine_uq_Personfirstlast_58499b51 ON drivine_node (((props ->> 'first')), ((props ->> 'last'))) WHERE labels @> '[\"Person\"]'"
           - |-
@@ -2372,6 +2416,8 @@ cases:
             END
             $forget$
       oracle:
+        form: 1
+        digest: "a1546960731f51383f8c22da8218f677e144a82110eb11712471aac17a088896"
         create:
           - |-
             DECLARE
@@ -2468,6 +2514,8 @@ cases:
                 COMMIT;
             END;
       sqlite:
+        form: 1
+        digest: "63ac3801ca7bc8c7d1b17a10cc475249cad719b2f2610895d4d174387e8fa069"
         create:
           - "CREATE UNIQUE INDEX IF NOT EXISTS drivine_uq_Personfirstlast_58499b51 ON drivine_node ((CASE json_type(props, '$.\"first\"') WHEN 'text' THEN props ->> '$.\"first\"' WHEN 'null' THEN NULL ELSE props -> '$.\"first\"' END), (CASE json_type(props, '$.\"last\"') WHEN 'text' THEN props ->> '$.\"last\"' WHEN 'null' THEN NULL ELSE props -> '$.\"last\"' END)) WHERE instr(labels, '\"Person\"') > 0"
           - |-
@@ -2531,6 +2579,8 @@ cases:
     spec: {kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], ignoreCase: true}
     stores:
       postgres:
+        form: 1
+        digest: "d3bf413d5ee3a8d58a9c84ddd842b12e7698684f93c9b19e2b45f22655cd9e32"
         create:
           - "CREATE UNIQUE INDEX IF NOT EXISTS drivine_uq_Persondrivineloweremail_b3ad0b9b ON drivine_node (((props ->> '__drivine.lower.email'))) WHERE labels @> '[\"Person\"]'"
           - |-
@@ -2554,6 +2604,8 @@ cases:
             END
             $forget$
       oracle:
+        form: 1
+        digest: "8537ea69a6576a30ac279f36dcbf0b03e8fbfdf481861521a0b84358a94c93a7"
         create:
           - |-
             DECLARE
@@ -2639,6 +2691,8 @@ cases:
                 COMMIT;
             END;
       sqlite:
+        form: 1
+        digest: "cd73aaf9338b4f1ef078d1e70d84de1c9b9d55fdbf624ff6f1b7a5978ce94fe4"
         create:
           - "CREATE UNIQUE INDEX IF NOT EXISTS drivine_uq_Persondrivineloweremail_b3ad0b9b ON drivine_node ((CASE json_type(props, '$.\"__drivine.lower.email\"') WHEN 'text' THEN props ->> '$.\"__drivine.lower.email\"' WHEN 'null' THEN NULL ELSE props -> '$.\"__drivine.lower.email\"' END)) WHERE instr(labels, '\"Person\"') > 0"
           - |-
@@ -2688,6 +2742,8 @@ cases:
       options: {dimensions: 384, similarity: "COSINE"}
     stores:
       postgres:
+        form: 1
+        digest: "131c321b53aa381a72d6c33ed441aedae2b433007a52be7524cb1d9098806c36"
         create:
           - "CREATE EXTENSION IF NOT EXISTS vector"
           - "CREATE INDEX IF NOT EXISTS drivine_v_Chunkembedding_7e60bd64 ON drivine_node USING hnsw ((CAST(CAST((props -> 'embedding') AS text) AS vector(384))) vector_cosine_ops) WHERE labels @> '[\"Chunk\"]' AND jsonb_typeof((props -> 'embedding')) = 'array' AND jsonb_array_length((props -> 'embedding')) = 384"
@@ -2712,6 +2768,8 @@ cases:
             END
             $forget$
       oracle:
+        form: 1
+        digest: "c5452b464956e01ae1378dd5875de2984402a62fa3c6106bf24dbbb13abc5de3"
         create:
           - "CREATE TABLE IF NOT EXISTS drivine_v_Chunkembedding_7e60bd64 (nid NUMBER PRIMARY KEY REFERENCES drivine_node (nid) ON DELETE CASCADE, embedding VECTOR(384, FLOAT32) NOT NULL)"
           - |-
@@ -2765,6 +2823,8 @@ cases:
                 COMMIT;
             END;
       sqlite:
+        form: 1
+        digest: "4eaabf100ce5e6232a6db5733c866a8c66049c1180bfba2c7062952a508967e5"
         create:
           - |-
             INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
@@ -2802,6 +2862,8 @@ cases:
       options: {dimensions: 3, similarity: "EUCLIDEAN"}
     stores:
       postgres:
+        form: 1
+        digest: "464f8fd3f6faa899560c48bb406eb3f45eda473b0ea476a0fad855098e262022"
         create:
           - "CREATE EXTENSION IF NOT EXISTS vector"
           - "CREATE INDEX IF NOT EXISTS drivine_v_Chunkvec_f0370b61 ON drivine_node USING hnsw ((CAST(CAST((props -> 'vec') AS text) AS vector(3))) vector_l2_ops) WHERE labels @> '[\"Chunk\"]' AND jsonb_typeof((props -> 'vec')) = 'array' AND jsonb_array_length((props -> 'vec')) = 3"
@@ -2826,6 +2888,8 @@ cases:
             END
             $forget$
       oracle:
+        form: 1
+        digest: "3252be92b38f620efddcd8b348086eaa3c889341264633b393b9f598d3029daa"
         create:
           - "CREATE TABLE IF NOT EXISTS drivine_v_Chunkvec_f0370b61 (nid NUMBER PRIMARY KEY REFERENCES drivine_node (nid) ON DELETE CASCADE, embedding VECTOR(3, FLOAT32) NOT NULL)"
           - |-
@@ -2879,6 +2943,8 @@ cases:
                 COMMIT;
             END;
       sqlite:
+        form: 1
+        digest: "7b90148d480579981ba1b409cc9f41be63bcc11d7232275203b3c24e92d00052"
         create:
           - |-
             INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
@@ -2923,6 +2989,8 @@ cases:
         efRuntime: 10
     stores:
       postgres:
+        form: 1
+        digest: "b87f952392ad6d5c050a83b1ae1c328a75752fdf362fe817c5da3888aab55789"
         create:
           - "CREATE EXTENSION IF NOT EXISTS vector"
           - "CREATE INDEX IF NOT EXISTS drivine_v_Chunktuned_be8d03f9 ON drivine_node USING hnsw ((CAST(CAST((props -> 'tuned') AS text) AS vector(8))) vector_cosine_ops) WHERE labels @> '[\"Chunk\"]' AND jsonb_typeof((props -> 'tuned')) = 'array' AND jsonb_array_length((props -> 'tuned')) = 8"
@@ -2947,6 +3015,8 @@ cases:
             END
             $forget$
       oracle:
+        form: 1
+        digest: "0a67c68ae1aab823c374945f3f28b5d5b859581cdaea9ced4994c06a278c06e6"
         create:
           - "CREATE TABLE IF NOT EXISTS drivine_v_Chunktuned_be8d03f9 (nid NUMBER PRIMARY KEY REFERENCES drivine_node (nid) ON DELETE CASCADE, embedding VECTOR(8, FLOAT32) NOT NULL)"
           - |-
@@ -3000,6 +3070,8 @@ cases:
                 COMMIT;
             END;
       sqlite:
+        form: 1
+        digest: "48f115383745a90c4cf2cf3f8fc9b0761b96b98fd7fb736b05f8916356613c2c"
         create:
           - |-
             INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
@@ -3034,6 +3106,8 @@ cases:
     spec: {kind: "FULLTEXT_INDEX", label: "Doc", properties: ["title", "body"]}
     stores:
       postgres:
+        form: 1
+        digest: "d818982dd1f0af29e5416018bfccda5d730a1521157c24f361c6920ed2becb29"
         create:
           - "CREATE EXTENSION IF NOT EXISTS pg_trgm"
           - "CREATE INDEX IF NOT EXISTS drivine_t_Doctitlebody_f4762232 ON drivine_node USING gin ((lower(COALESCE((props ->> 'title'), '') || ' ' || COALESCE((props ->> 'body'), ''))) gin_trgm_ops) WHERE labels @> '[\"Doc\"]'"
@@ -3058,6 +3132,8 @@ cases:
             END
             $forget$
       oracle:
+        form: 1
+        digest: "f09704a8de4c559034464a9dd300713646c1696aa409979ebeed0144875b1d21"
         create:
           - |2-
                         DECLARE
@@ -3133,6 +3209,8 @@ cases:
                 COMMIT;
             END;
       sqlite:
+        form: 1
+        digest: "7f048984e49c442ae01e884f850f6bd5c29d87e76b0b2ec5bc50e3bd02ce85e9"
         create:
           - |-
             INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
@@ -3158,6 +3236,8 @@ cases:
     existing: ["title"]
     stores:
       postgres:
+        form: 1
+        digest: "d818982dd1f0af29e5416018bfccda5d730a1521157c24f361c6920ed2becb29"
         create:
           - "CREATE EXTENSION IF NOT EXISTS pg_trgm"
           - "CREATE INDEX IF NOT EXISTS drivine_t_Doctitlebody_f4762232 ON drivine_node USING gin ((lower(COALESCE((props ->> 'title'), '') || ' ' || COALESCE((props ->> 'body'), ''))) gin_trgm_ops) WHERE labels @> '[\"Doc\"]'"
@@ -3182,6 +3262,8 @@ cases:
             END
             $forget$
       oracle:
+        form: 1
+        digest: "f09704a8de4c559034464a9dd300713646c1696aa409979ebeed0144875b1d21"
         create:
           - |2-
                         DECLARE
@@ -3257,6 +3339,8 @@ cases:
                 COMMIT;
             END;
       sqlite:
+        form: 1
+        digest: "7f048984e49c442ae01e884f850f6bd5c29d87e76b0b2ec5bc50e3bd02ce85e9"
         create:
           - |-
             INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
@@ -3285,6 +3369,8 @@ cases:
       options: {analyzer: "english"}
     stores:
       postgres:
+        form: 1
+        digest: "99dadbc85938279dea87ad30b405e85397316d9fa15f54764e046d3b8889d16e"
         create:
           - "CREATE EXTENSION IF NOT EXISTS pg_trgm"
           - "CREATE INDEX IF NOT EXISTS drivine_t_Doctitle_e86cfd70 ON drivine_node USING gin ((lower(COALESCE((props ->> 'title'), ''))) gin_trgm_ops) WHERE labels @> '[\"Doc\"]'"
@@ -3309,6 +3395,8 @@ cases:
             END
             $forget$
       oracle:
+        form: 1
+        digest: "509feafbafd9f924fe5e4c655ada1c76baaf7ea2a692da1a40803ea4690c3f75"
         create:
           - |2-
                         DECLARE
@@ -3384,6 +3472,8 @@ cases:
                 COMMIT;
             END;
       sqlite:
+        form: 1
+        digest: "6f292ff79c4c933830f2b80846a0fa9e592646a721296c150090c938c7bb0acd"
         create:
           - |-
             INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
@@ -3468,6 +3558,8 @@ cases:
     spec: {kind: "RANGE_INDEX", label: "Per\"son", properties: ["name"]}
     stores:
       postgres:
+        form: 1
+        digest: "b4c6d442dc962b177120a364e0aa953d8be8183d0c76ea65842335c0144674ff"
         create:
           - "CREATE INDEX IF NOT EXISTS drivine_ix_Personname_f56cb9fe ON drivine_node (((props ->> 'name'))) WHERE labels @> '[\"Per\\\"son\"]'"
           - |-
@@ -3491,6 +3583,8 @@ cases:
             END
             $forget$
       oracle:
+        form: 1
+        digest: "8db652aa57a6179b86d76b440002cd4ff3b59d26457a8dd94efd63bab2dd8409"
         create:
           - |-
             DECLARE
@@ -3562,6 +3656,8 @@ cases:
                 COMMIT;
             END;
       sqlite:
+        form: 1
+        digest: "b189964c71127cc445951d76671be0732814f11c130f1521b6e2bfeea5559270"
         create:
           - "CREATE INDEX IF NOT EXISTS drivine_ix_Personname_f56cb9fe ON drivine_node ((CASE json_type(props, '$.\"name\"') WHEN 'text' THEN props ->> '$.\"name\"' WHEN 'null' THEN NULL ELSE props -> '$.\"name\"' END)) WHERE instr(labels, '\"Per\\\"son\"') > 0"
           - |-
@@ -3597,6 +3693,8 @@ cases:
     spec: {kind: "RANGE_INDEX", label: "a b", properties: ["name"]}
     stores:
       postgres:
+        form: 1
+        digest: "a899a6ef77235f485f3b0e141baf2ea131b0422778b7d7b3a5f77bd2b0442d41"
         create:
           - "CREATE INDEX IF NOT EXISTS drivine_ix_abname_a087d008 ON drivine_node (((props ->> 'name'))) WHERE labels @> '[\"a b\"]'"
           - |-
@@ -3620,6 +3718,8 @@ cases:
             END
             $forget$
       oracle:
+        form: 1
+        digest: "c1147dffa296bea04c90bc15c59d4af48e9f908d0ea4f556f9ce5502a03a4c34"
         create:
           - |-
             DECLARE
@@ -3691,6 +3791,8 @@ cases:
                 COMMIT;
             END;
       sqlite:
+        form: 1
+        digest: "4fbbf7dec838f2d568260c4b65266c337eb850d320bfb7a03e77d6384552e661"
         create:
           - "CREATE INDEX IF NOT EXISTS drivine_ix_abname_a087d008 ON drivine_node ((CASE json_type(props, '$.\"name\"') WHEN 'text' THEN props ->> '$.\"name\"' WHEN 'null' THEN NULL ELSE props -> '$.\"name\"' END)) WHERE instr(labels, '\"a b\"') > 0"
           - |-
@@ -3722,6 +3824,8 @@ cases:
     spec: {kind: "UNIQUENESS_CONSTRAINT", label: "Per\"son", properties: ["name"]}
     stores:
       postgres:
+        form: 1
+        digest: "581e0562c9c2486e87b047c04fd743980ee33ea08c7db51a7b3f6177d04840ce"
         create:
           - "CREATE UNIQUE INDEX IF NOT EXISTS drivine_uq_Personname_f56cb9fe ON drivine_node (((props ->> 'name'))) WHERE labels @> '[\"Per\\\"son\"]'"
           - |-
@@ -3745,6 +3849,8 @@ cases:
             END
             $forget$
       oracle:
+        form: 1
+        digest: "d6450e96b56f0ccb7c63cb693a92b8c0b4d20f83192620783b0431cfc663d974"
         create:
           - |-
             DECLARE
@@ -3830,6 +3936,8 @@ cases:
                 COMMIT;
             END;
       sqlite:
+        form: 1
+        digest: "1565c8aabe5aa53288e06f8f6d2bc8cd2c441537ddfb43ff155435b271d794ee"
         create:
           - "CREATE UNIQUE INDEX IF NOT EXISTS drivine_uq_Personname_f56cb9fe ON drivine_node ((CASE json_type(props, '$.\"name\"') WHEN 'text' THEN props ->> '$.\"name\"' WHEN 'null' THEN NULL ELSE props -> '$.\"name\"' END)) WHERE instr(labels, '\"Per\\\"son\"') > 0"
           - |-
@@ -3888,6 +3996,8 @@ cases:
     spec: {kind: "RANGE_INDEX", label: "Person", properties: ["address.city"]}
     stores:
       postgres:
+        form: 1
+        digest: "617c691ef51e68862fd5366fd82a73d4466847a3fe2919de8db5301fb89c2c56"
         create:
           - "CREATE INDEX IF NOT EXISTS drivine_ix_Personaddresscity_236e8dd0 ON drivine_node (((props ->> 'address.city'))) WHERE labels @> '[\"Person\"]'"
           - |-
@@ -3911,6 +4021,8 @@ cases:
             END
             $forget$
       oracle:
+        form: 1
+        digest: "03b366916afdceee0a39425ae5fc0a420f30076a1846e077db0fe0e242fc1703"
         create:
           - |-
             DECLARE
@@ -3982,6 +4094,8 @@ cases:
                 COMMIT;
             END;
       sqlite:
+        form: 1
+        digest: "de1fec3f8115e4012bf39a4020ad3d8c5b70f8e17c68dacd379a4a9abe745063"
         create:
           - "CREATE INDEX IF NOT EXISTS drivine_ix_Personaddresscity_236e8dd0 ON drivine_node ((CASE json_type(props, '$.\"address.city\"') WHEN 'text' THEN props ->> '$.\"address.city\"' WHEN 'null' THEN NULL ELSE props -> '$.\"address.city\"' END)) WHERE instr(labels, '\"Person\"') > 0"
           - |-
@@ -4017,6 +4131,8 @@ cases:
     spec: {kind: "RANGE_INDEX", label: "Person", properties: ["o'name"]}
     stores:
       postgres:
+        form: 1
+        digest: "88d15dbc501ac7aab38d74c01b089854e3551ad218d092abf1404ab66e8ff6d1"
         create:
           - "CREATE INDEX IF NOT EXISTS drivine_ix_Persononame_490e170e ON drivine_node (((props ->> 'o''name'))) WHERE labels @> '[\"Person\"]'"
           - |-
@@ -4040,6 +4156,8 @@ cases:
             END
             $forget$
       oracle:
+        form: 1
+        digest: "b99dde0172af3c1a2902f4a525f027792bfcb9ae43c61d962143045bb97da837"
         create:
           - |-
             DECLARE
@@ -4111,6 +4229,8 @@ cases:
                 COMMIT;
             END;
       sqlite:
+        form: 1
+        digest: "22d78beacfdb6b2a07b37bc9b79b773ba29a6eee1c0074589f205e627a87f538"
         create:
           - "CREATE INDEX IF NOT EXISTS drivine_ix_Persononame_490e170e ON drivine_node ((CASE json_type(props, '$.\"o''name\"') WHEN 'text' THEN props ->> '$.\"o''name\"' WHEN 'null' THEN NULL ELSE props -> '$.\"o''name\"' END)) WHERE instr(labels, '\"Person\"') > 0"
           - |-
@@ -4146,6 +4266,8 @@ cases:
     spec: {kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["say\"hi"]}
     stores:
       postgres:
+        form: 1
+        digest: "c2af74867fecd4433d9460b086e0952fcba6d4ba7315e9ce51d36bd162147a4a"
         create:
           - "CREATE UNIQUE INDEX IF NOT EXISTS drivine_uq_Personsayhi_5316dfc3 ON drivine_node (((props ->> 'say\"hi'))) WHERE labels @> '[\"Person\"]'"
           - |-
@@ -4169,6 +4291,8 @@ cases:
             END
             $forget$
       oracle:
+        form: 1
+        digest: "7bf6d9fdc3e18c513ed0f0d7dcd092dfbdc7d063818816e7ff4b4b2492e159bd"
         create:
           - |-
             DECLARE
@@ -4254,6 +4378,8 @@ cases:
                 COMMIT;
             END;
       sqlite:
+        form: 1
+        digest: "52cf31964aec9c3432d5e9bb3efb071d57759a9780d1fb7be34c683b04708e43"
         create:
           - "CREATE UNIQUE INDEX IF NOT EXISTS drivine_uq_Personsayhi_5316dfc3 ON drivine_node ((CASE json_type(props, '$.\"say\\\"hi\"') WHEN 'text' THEN props ->> '$.\"say\\\"hi\"' WHEN 'null' THEN NULL ELSE props -> '$.\"say\\\"hi\"' END)) WHERE instr(labels, '\"Person\"') > 0"
           - |-
