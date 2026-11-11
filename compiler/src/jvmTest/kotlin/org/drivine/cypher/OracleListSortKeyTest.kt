@@ -76,7 +76,9 @@ class OracleListSortKeyTest {
         val sql = oracle("UNWIND [[1], [2]] AS xs RETURN xs ORDER BY xs")
         assertTrue(sql.contains("JSON_ELEMENT_T.parse(JSON_SERIALIZE(cy_x RETURNING CLOB EXTENDED))"), sql)
         assertTrue(sql.contains("o.has('\$numberDouble')") && sql.contains("WHEN f = -BINARY_DOUBLE_INFINITY THEN HEXTORAW('050000')"), sql)
-        assertTrue(sql.contains("EXCEPTION WHEN too_long THEN") && sql.contains("SUBSTR(s, 1, 2000)"), sql)
+        // A text is read from its list as itself, and one past a VARCHAR2 from its CLOB.
+        assertTrue(sql.contains("a.get_String(i)") && sql.contains("EXCEPTION WHEN too_long OR VALUE_ERROR THEN") && sql.contains("a.get_Clob(i)") && sql.contains("SUBSTR(s, 1, 2000)"), sql)
+        assertTrue(!sql.contains("to_String"), sql)
     }
 
     @Test
