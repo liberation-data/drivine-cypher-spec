@@ -4080,7 +4080,10 @@ abstract class SqlCypherCompiler(
             return Value.Bool("EXISTS (${(listOf(inner.head("1")) + inner.from() + listOfNotNull(inner.whereClause())).joinToString(" ")})")
         }
 
-        /** An index written, or bound to a parameter, is known: a text is the property of that name, a number an item. */
+        /**
+         * The value [index] is where it is written, a number negated or bound to a parameter, else null: as an index, a text is
+         * the property of that name and a number an item. A `SKIP` or `LIMIT` ([count]) and a parameter's kind ([givenKind]) read it too.
+         */
         private fun known(index: Expression): Any? = when (index) {
             is Expression.Literal -> index.value
             is Expression.Parameter -> parameters.value(index.name)
