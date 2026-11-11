@@ -73,6 +73,9 @@ internal class SchemaProgram(
      */
     private var remake = "Call recreate() to make it again."
 
+    /** The names a mismatch has been said of: each once a plan, though a recreate after it reads it again. */
+    private val mismatchesSaid = mutableSetOf<String>()
+
     fun run(): DatabaseReport = when (val operation = request.operation) {
         is Operation.Enforce -> apply(forceRecreate = false, operation.owners, only = null)
         is Operation.RecreateAll -> apply(forceRecreate = true, operation.owners, only = null)
@@ -998,10 +1001,12 @@ internal class SchemaProgram(
     private fun mismatched(spec: SchemaItemSpec, existing: SchemaItemInfo?, form: ItemForm.Mismatch): EnsureResult.Drift {
         val (logger, what) = if (spec is ConstraintSpec) CONSTRAINT_MANAGER to "Constraint" else INDEX_MANAGER to "Index"
         val then = if (form.droppable) "Call recreate() to replace it (destructive)." else "Drop or rename it: Drivine makes the item under that name, and recreate() leaves it."
-        log(
-            LogLevel.WARN, logger,
-            "$what drift on ${spec.label}${spec.properties}: ${form.name}, under a name Drivine gives the ${spec.kind}, is ${form.reason}, so it is not taken as made. $then",
-        )
+        if (mismatchesSaid.add(form.name.uppercase())) {
+            log(
+                LogLevel.WARN, logger,
+                "$what drift on ${spec.label}${spec.properties}: ${form.name}, under a name Drivine gives the ${spec.kind}, is ${form.reason}, so it is not taken as made. $then",
+            )
+        }
         return EnsureResult.Drift(existing ?: SchemaItemInfo(spec.kind, spec.label, spec.properties, form.name), spec)
     }
 
@@ -1016,7 +1021,7 @@ internal class SchemaProgram(
         while (true) {
             val form = formOf(spec) as? ItemForm.Mismatch ?: return Cleared(existing, null)
             // One dropped already, and still there, can't be dropped.
-            if (!form.droppable || !dropped.add(form.name.uppercase())) return Cleared(existing, mismatched(spec, existing, form.copy(droppable = false)))
+            if (!form.droppable || !dropped.add(form.name.uppercase())) return Cleared(existing, mismatched(spec, existing, form))
             ddl(store.dropMismatched(form.name))
             log(
                 LogLevel.INFO, if (spec is ConstraintSpec) CONSTRAINT_MANAGER else INDEX_MANAGER,

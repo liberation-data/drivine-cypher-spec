@@ -1,7 +1,8 @@
 # The schema plan: what a schema manager runs on each store, round by round, for an enforce, a recreate, an ensure, a
 # remove or one of the public IndexManager and ConstraintManager calls, the answers the store gives, and what it reports. drivine4j's decisions, the reference, captured from its
 # SchemaManager, IndexManager and ConstraintManager over a scripted store, with no store; each statement named as
-# store.yaml and marker.yaml pin it. Read with no store. See README.md, "The schema plan".
+# store.yaml and marker.yaml pin it. Case 30, the form check, is the module's own, its listings answered with rows captured
+# from each store. Read with no store. See README.md, "The schema plan".
 
 graph: "drivine"
 database: "default"
@@ -4516,6 +4517,567 @@ cases:
               log:
                 - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=null)"]
                 - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 1 already matching, 0 recreated, 0 needing attention"]
+  - case: "30a"
+    name: "An item of another form, kept"
+    description: "Each item's record says form 0: each is kept, said so once with the form found and the form expected, and fails nothing under FAIL_FAST; the marker is written."
+    stores: ["postgres", "oracle", "sqlite"]
+    catalogs:
+      - {owner: "app", version: null, items: ["Range index", "Uniqueness constraint"]}
+    steps:
+      - operation: {enforce: "all"}
+        runs:
+          - stores: ["postgres"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "app"}, rows: []}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, rows: [{"kind": "RANGE_INDEX", "name": "Person_name_range", "label": "Person", "details": {"form": 0}, "properties": ["name"]}, {"type": "i", "table": "drivine_node", "where": "labels @> '[\"Person\"]'::jsonb", "method": "btree", "object": "drivine_ix_personname_44ce5436", "unique": false, "columns": ["(props ->> 'name'::text)"]}]}
+                  - {query: {listing: "constraints"}, rows: [{"kind": "UNIQUENESS_CONSTRAINT", "name": "Person_email_unique", "label": "Person", "details": {"form": 0}, "properties": ["email"]}, {"type": "i", "table": "drivine_node", "where": "labels @> '[\"Person\"]'::jsonb", "method": "btree", "object": "drivine_uq_personemail_5482a751", "unique": true, "columns": ["(props ->> 'email'::text)"]}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "app", version: null, items: "RANGE_INDEX:Person:name:Person_name_range\nUNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+            done: 1000000
+            report:
+              owners:
+                - {"owner": "app", "results": [{"spec": "Range index", "alreadyMatching": {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": "Person_name_range"}}, {"spec": "Uniqueness constraint", "alreadyMatching": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique"}}], "marker": {"version": null, "items": "RANGE_INDEX:Person:name:Person_name_range\nUNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'app' on 'default': 2 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["WARN", "IndexManager", "{engine} RANGE_INDEX on Person[name] is of another form than this version makes (form 1 expected, found form 0): it is kept and used as it is. SchemaManager.recreateAll(\"app\") makes it again."]
+                - ["WARN", "ConstraintManager", "{engine} UNIQUENESS_CONSTRAINT on Person[email] is of another form than this version makes (form 1 expected, found form 0): it is kept and used as it is. SchemaManager.recreateAll(\"app\") makes it again."]
+                - ["INFO", "SchemaManager", "Schema for owner 'app' on 'default': 0 created, 2 already matching, 0 recreated, 0 needing attention"]
+          - stores: ["oracle"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "app"}, rows: []}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, rows: [{"kind": "RANGE_INDEX", "label": "Person", "properties": ["email"], "name": "Person_email_range", "details": {"unique": "drivine_uq_Personemail_5482a751"}, "status": null}, {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": "Person_name_range", "details": {"labelled": "drivine_lx_Personname_44ce5436", "form": 0}, "status": null}, {"object": "DRIVINE_IX_EMAIL_5C24B9C", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"]}, {"object": "DRIVINE_IX_NAME_337A8B", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.name' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"]}, {"object": "DRIVINE_LX_PERSONNAME_44CE5436", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "columns": ["CASE JSON_EXISTS2(\"LABELS\" FORMAT OSON , '$[*]?(@ == \"Person\")' /* json_path_str  $[*]?(@.string() == \"Person\")  */  FALSE ON ERROR TYPE(LAX) ) WHEN 1 THEN JSON_VALUE(\"PROPS\" FORMAT OSON , '$.name' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) ) END "]}]}
+                  - {query: {listing: "constraints"}, rows: [{"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique", "details": {"form": 0}, "status": null}, {"object": "DRIVINE_IX_EMAIL_5C24B9C", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"]}, {"object": "DRIVINE_IX_NAME_337A8B", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.name' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"]}, {"object": "DRIVINE_UQ_PERSONEMAIL_5482A751", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "UNIQUE", "columns": ["CASE  WHEN (JSON_EXISTS2(\"LABELS\" FORMAT OSON , '$[*]?(@ == \"Person\")' /* json_path_str  $[*]?(@.string() == \"Person\")  */  FALSE ON ERROR TYPE(LAX) )=1 AND JSON_EXISTS2(\"PROPS\" FORMAT OSON , '$.email' FALSE ON ERROR TYPE(LAX) )=1) THEN JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) ) END "]}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "app", version: null, items: "RANGE_INDEX:Person:name:Person_name_range\nUNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+            done: 1000000
+            report:
+              owners:
+                - {"owner": "app", "results": [{"spec": "Range index", "alreadyMatching": {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": "Person_name_range"}}, {"spec": "Uniqueness constraint", "alreadyMatching": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique"}}], "marker": {"version": null, "items": "RANGE_INDEX:Person:name:Person_name_range\nUNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'app' on 'default': 2 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["WARN", "IndexManager", "{engine} RANGE_INDEX on Person[name] is of another form than this version makes (form 1 expected, found form 0): it is kept and used as it is. SchemaManager.recreateAll(\"app\") makes it again."]
+                - ["WARN", "ConstraintManager", "{engine} UNIQUENESS_CONSTRAINT on Person[email] is of another form than this version makes (form 1 expected, found form 0): it is kept and used as it is. SchemaManager.recreateAll(\"app\") makes it again."]
+                - ["INFO", "SchemaManager", "Schema for owner 'app' on 'default': 0 created, 2 already matching, 0 recreated, 0 needing attention"]
+          - stores: ["sqlite"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "app"}, rows: []}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, rows: [{"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": "Person_name_range", "details": {"form": 0}}, {"object": "drivine_ix_Personname_44ce5436", "type": "index", "table": "drivine_node", "sql": "CREATE INDEX drivine_ix_Personname_44ce5436 ON drivine_node ((CASE json_type(props, '$.\"name\"') WHEN 'text' THEN props ->> '$.\"name\"' WHEN 'null' THEN NULL ELSE props -> '$.\"name\"' END)) WHERE instr(labels, '\"Person\"') > 0", "unique": 0}]}
+                  - {query: {listing: "constraints"}, rows: [{"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique", "details": {"form": 0}}, {"object": "drivine_uq_Personemail_5482a751", "type": "index", "table": "drivine_node", "sql": "CREATE UNIQUE INDEX drivine_uq_Personemail_5482a751 ON drivine_node ((CASE json_type(props, '$.\"email\"') WHEN 'text' THEN props ->> '$.\"email\"' WHEN 'null' THEN NULL ELSE props -> '$.\"email\"' END)) WHERE instr(labels, '\"Person\"') > 0", "unique": 1}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "app", version: null, items: "RANGE_INDEX:Person:name:Person_name_range\nUNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+            done: 1000000
+            report:
+              owners:
+                - {"owner": "app", "results": [{"spec": "Range index", "alreadyMatching": {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": "Person_name_range"}}, {"spec": "Uniqueness constraint", "alreadyMatching": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique"}}], "marker": {"version": null, "items": "RANGE_INDEX:Person:name:Person_name_range\nUNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'app' on 'default': 2 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["WARN", "IndexManager", "{engine} RANGE_INDEX on Person[name] is of another form than this version makes (form 1 expected, found form 0): it is kept and used as it is. SchemaManager.recreateAll(\"app\") makes it again."]
+                - ["WARN", "ConstraintManager", "{engine} UNIQUENESS_CONSTRAINT on Person[email] is of another form than this version makes (form 1 expected, found form 0): it is kept and used as it is. SchemaManager.recreateAll(\"app\") makes it again."]
+                - ["INFO", "SchemaManager", "Schema for owner 'app' on 'default': 0 created, 2 already matching, 0 recreated, 0 needing attention"]
+  - case: "30b"
+    name: "Drivine for TypeScript's and drivine-python's Oracle form, kept"
+    description: "An Oracle store whose range index and uniqueness constraint TypeScript's or Python's DDL made, their records saying no form: each is kept and said so, and fails nothing."
+    stores: ["oracle"]
+    catalogs:
+      - {owner: null, version: null, items: ["Range index", "Uniqueness constraint"]}
+    steps:
+      - operation: {enforce: "all"}
+        runs:
+          - stores: ["oracle"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, rows: [{"kind": "RANGE_INDEX", "label": "Person", "properties": ["email"], "name": "Person_email_range", "details": {"unique": "drivine_uq_Personemail_5482a751"}, "status": null}, {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": "Person_name_range", "details": {"labelled": "drivine_lx_Personname_44ce5436"}, "status": null}, {"object": "DRIVINE_IX_EMAIL_5C24B9C", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"]}, {"object": "DRIVINE_IX_NAME_337A8B", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.name' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"]}, {"object": "DRIVINE_LX_PERSONNAME_44CE5436", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "columns": ["CASE JSON_EXISTS2(\"LABELS\" FORMAT OSON , '$?(@ == \"Person\")' /* json_path_str  $?(@.string() == \"Person\")  */  FALSE ON ERROR TYPE(LAX) ) WHEN 1 THEN JSON_VALUE(\"PROPS\" FORMAT OSON , '$.\"name\"' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) ) END "]}]}
+                  - {query: {listing: "constraints"}, rows: [{"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique", "details": {}, "status": null}, {"object": "DRIVINE_IX_EMAIL_5C24B9C", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"]}, {"object": "DRIVINE_IX_NAME_337A8B", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.name' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"]}, {"object": "DRIVINE_UQ_PERSONEMAIL_5482A751", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "UNIQUE", "columns": ["CASE JSON_EXISTS2(\"LABELS\" FORMAT OSON , '$?(@ == \"Person\")' /* json_path_str  $?(@.string() == \"Person\")  */  FALSE ON ERROR TYPE(LAX) ) WHEN 1 THEN JSON_VALUE(\"PROPS\" FORMAT OSON , '$.\"email\"' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) ) END "]}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: "RANGE_INDEX:Person:name:Person_name_range\nUNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+            done: 1000000
+            report:
+              owners:
+                - {"owner": null, "results": [{"spec": "Range index", "alreadyMatching": {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": "Person_name_range"}}, {"spec": "Uniqueness constraint", "alreadyMatching": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique"}}], "marker": {"version": null, "items": "RANGE_INDEX:Person:name:Person_name_range\nUNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 2 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["WARN", "IndexManager", "{engine} RANGE_INDEX on Person[name] is of another form than this version makes (form 1 expected, found TS's or Python's Oracle form): it is kept and used as it is. SchemaManager.recreateAll(null) makes it again."]
+                - ["WARN", "ConstraintManager", "{engine} UNIQUENESS_CONSTRAINT on Person[email] is of another form than this version makes (form 1 expected, found TS's or Python's Oracle form): it is kept and used as it is. SchemaManager.recreateAll(null) makes it again."]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 2 already matching, 0 recreated, 0 needing attention"]
+  - case: "30c"
+    name: "A record that says no form"
+    description: "drivine4j's range index, its record saying no form, and a constraint whose record says form 1: on Postgres and SQLite, where the libraries made every item alike, the range index is current; on Oracle its expressions are drivine4j's, and its form is recorded, once, nothing else touched."
+    stores: ["postgres", "sqlite", "oracle"]
+    catalogs:
+      - {owner: null, version: null, items: ["Range index", "Uniqueness constraint"]}
+    steps:
+      - operation: {enforce: "all"}
+        runs:
+          - stores: ["postgres"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, rows: [{"kind": "RANGE_INDEX", "name": "Person_name_range", "label": "Person", "details": {}, "properties": ["name"]}, {"type": "i", "table": "drivine_node", "where": "labels @> '[\"Person\"]'::jsonb", "method": "btree", "object": "drivine_ix_personname_44ce5436", "unique": false, "columns": ["(props ->> 'name'::text)"]}]}
+                  - {query: {listing: "constraints"}, rows: [{"kind": "UNIQUENESS_CONSTRAINT", "name": "Person_email_unique", "label": "Person", "details": {"form": 1}, "properties": ["email"]}, {"type": "i", "table": "drivine_node", "where": "labels @> '[\"Person\"]'::jsonb", "method": "btree", "object": "drivine_uq_personemail_5482a751", "unique": true, "columns": ["(props ->> 'email'::text)"]}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: "RANGE_INDEX:Person:name:Person_name_range\nUNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+            done: 1000000
+            report:
+              owners:
+                - {"owner": null, "results": [{"spec": "Range index", "alreadyMatching": {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": "Person_name_range"}}, {"spec": "Uniqueness constraint", "alreadyMatching": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique"}}], "marker": {"version": null, "items": "RANGE_INDEX:Person:name:Person_name_range\nUNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 2 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 2 already matching, 0 recreated, 0 needing attention"]
+          - stores: ["sqlite"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, rows: [{"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": "Person_name_range", "details": {}}, {"object": "drivine_ix_Personname_44ce5436", "type": "index", "table": "drivine_node", "sql": "CREATE INDEX drivine_ix_Personname_44ce5436 ON drivine_node ((CASE json_type(props, '$.\"name\"') WHEN 'text' THEN props ->> '$.\"name\"' WHEN 'null' THEN NULL ELSE props -> '$.\"name\"' END)) WHERE instr(labels, '\"Person\"') > 0", "unique": 0}]}
+                  - {query: {listing: "constraints"}, rows: [{"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique", "details": {"form": 1}}, {"object": "drivine_uq_Personemail_5482a751", "type": "index", "table": "drivine_node", "sql": "CREATE UNIQUE INDEX drivine_uq_Personemail_5482a751 ON drivine_node ((CASE json_type(props, '$.\"email\"') WHEN 'text' THEN props ->> '$.\"email\"' WHEN 'null' THEN NULL ELSE props -> '$.\"email\"' END)) WHERE instr(labels, '\"Person\"') > 0", "unique": 1}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: "RANGE_INDEX:Person:name:Person_name_range\nUNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+            done: 1000000
+            report:
+              owners:
+                - {"owner": null, "results": [{"spec": "Range index", "alreadyMatching": {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": "Person_name_range"}}, {"spec": "Uniqueness constraint", "alreadyMatching": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique"}}], "marker": {"version": null, "items": "RANGE_INDEX:Person:name:Person_name_range\nUNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 2 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 2 already matching, 0 recreated, 0 needing attention"]
+          - stores: ["oracle"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, rows: [{"kind": "RANGE_INDEX", "label": "Person", "properties": ["email"], "name": "Person_email_range", "details": {"unique": "drivine_uq_Personemail_5482a751"}, "status": null}, {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": "Person_name_range", "details": {"labelled": "drivine_lx_Personname_44ce5436"}, "status": null}, {"object": "DRIVINE_IX_EMAIL_5C24B9C", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"]}, {"object": "DRIVINE_IX_NAME_337A8B", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.name' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"]}, {"object": "DRIVINE_LX_PERSONNAME_44CE5436", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "columns": ["CASE JSON_EXISTS2(\"LABELS\" FORMAT OSON , '$[*]?(@ == \"Person\")' /* json_path_str  $[*]?(@.string() == \"Person\")  */  FALSE ON ERROR TYPE(LAX) ) WHEN 1 THEN JSON_VALUE(\"PROPS\" FORMAT OSON , '$.name' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) ) END "]}]}
+                  - {query: {listing: "constraints"}, rows: [{"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique", "details": {"form": 1}, "status": null}, {"object": "DRIVINE_IX_EMAIL_5C24B9C", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"]}, {"object": "DRIVINE_IX_NAME_337A8B", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.name' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"]}, {"object": "DRIVINE_UQ_PERSONEMAIL_5482A751", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "UNIQUE", "columns": ["CASE  WHEN (JSON_EXISTS2(\"LABELS\" FORMAT OSON , '$[*]?(@ == \"Person\")' /* json_path_str  $[*]?(@.string() == \"Person\")  */  FALSE ON ERROR TYPE(LAX) )=1 AND JSON_EXISTS2(\"PROPS\" FORMAT OSON , '$.email' FALSE ON ERROR TYPE(LAX) )=1) THEN JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) ) END "]}]}
+              - now: 1000000
+                actions:
+                  - {execute: {formRecorded: true}}
+                  - {query: {listing: "constraints"}, rows: [{"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique", "details": {"form": 1}, "status": null}, {"object": "DRIVINE_IX_EMAIL_5C24B9C", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"]}, {"object": "DRIVINE_IX_NAME_337A8B", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.name' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"]}, {"object": "DRIVINE_UQ_PERSONEMAIL_5482A751", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "UNIQUE", "columns": ["CASE  WHEN (JSON_EXISTS2(\"LABELS\" FORMAT OSON , '$[*]?(@ == \"Person\")' /* json_path_str  $[*]?(@.string() == \"Person\")  */  FALSE ON ERROR TYPE(LAX) )=1 AND JSON_EXISTS2(\"PROPS\" FORMAT OSON , '$.email' FALSE ON ERROR TYPE(LAX) )=1) THEN JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) ) END "]}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: "RANGE_INDEX:Person:name:Person_name_range\nUNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+            done: 1000000
+            report:
+              owners:
+                - {"owner": null, "results": [{"spec": "Range index", "alreadyMatching": {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": "Person_name_range"}}, {"spec": "Uniqueness constraint", "alreadyMatching": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique"}}], "marker": {"version": null, "items": "RANGE_INDEX:Person:name:Person_name_range\nUNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 2 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 2 already matching, 0 recreated, 0 needing attention"]
+  - case: "30d"
+    name: "Another item under the names Drivine gives, under FAIL_FAST"
+    description: "drivine4j#770: an index over another property under the range index's name, and a plain index under the uniqueness constraint's name, neither recorded. Each is drift and neither is made: the owner fails, and its marker is not written."
+    stores: ["postgres", "oracle", "sqlite"]
+    catalogs:
+      - {owner: null, version: null, items: ["Range index", "Uniqueness constraint"]}
+    steps:
+      - operation: {enforce: "all"}
+        runs:
+          - stores: ["postgres"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, rows: [{"type": "i", "table": "drivine_node", "where": "labels @> '[\"Person\"]'::jsonb", "method": "btree", "object": "drivine_ix_personname_44ce5436", "unique": false, "columns": ["(props ->> 'couponRef'::text)"]}]}
+                  - {query: {listing: "constraints"}, rows: [{"type": "i", "table": "drivine_node", "where": null, "method": "btree", "object": "drivine_uq_personemail_5482a751", "unique": false, "columns": ["(props ->> 'voucherRef'::text)"]}]}
+            done: 1000000
+            report:
+              owners:
+                - {"owner": null, "results": [{"spec": "Range index", "drift": {"existing": {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": "drivine_ix_personname_44ce5436"}, "requested": "Range index"}}, {"spec": "Uniqueness constraint", "drift": {"existing": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "drivine_uq_personemail_5482a751"}, "requested": "Uniqueness constraint"}}], "marker": null, "failure": "Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: RANGE_INDEX on Person[name] exists with a different shape: SchemaItemInfo(kind=RANGE_INDEX, label=Person, properties=[name], name=drivine_ix_personname_44ce5436, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=drivine_uq_personemail_5482a751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."}
+              failure: "Schema application on database 'default' failed for 1 owner(s):\nSchema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: RANGE_INDEX on Person[name] exists with a different shape: SchemaItemInfo(kind=RANGE_INDEX, label=Person, properties=[name], name=drivine_ix_personname_44ce5436, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=drivine_uq_personemail_5482a751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 2 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["WARN", "IndexManager", "Index drift on Person[name]: drivine_ix_personname_44ce5436, under a name Drivine gives the RANGE_INDEX, is an index over [couponRef], so it is not taken as made. Call recreate() to replace it (destructive)."]
+                - ["WARN", "ConstraintManager", "Constraint drift on Person[email]: drivine_uq_personemail_5482a751, under a name Drivine gives the UNIQUENESS_CONSTRAINT, is an index that is not unique, so it is not taken as made. Call recreate() to replace it (destructive)."]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 0 already matching, 0 recreated, 2 needing attention"]
+                - ["ERROR", "SchemaManager", "Schema application for owner 'schema' on 'default' failed: Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: RANGE_INDEX on Person[name] exists with a different shape: SchemaItemInfo(kind=RANGE_INDEX, label=Person, properties=[name], name=drivine_ix_personname_44ce5436, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=drivine_uq_personemail_5482a751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."]
+          - stores: ["oracle"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, rows: [{"object": "DRIVINE_IX_NAME_337A8B", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.\"couponRef\"' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"]}]}
+                  - {query: {listing: "constraints"}, rows: [{"object": "DRIVINE_IX_NAME_337A8B", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.\"couponRef\"' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"]}, {"object": "DRIVINE_UQ_PERSONEMAIL_5482A751", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.\"voucherRef\"' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"]}]}
+            done: 1000000
+            report:
+              owners:
+                - {"owner": null, "results": [{"spec": "Range index", "drift": {"existing": {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": "DRIVINE_IX_NAME_337A8B"}, "requested": "Range index"}}, {"spec": "Uniqueness constraint", "drift": {"existing": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "DRIVINE_UQ_PERSONEMAIL_5482A751"}, "requested": "Uniqueness constraint"}}], "marker": null, "failure": "Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: RANGE_INDEX on Person[name] exists with a different shape: SchemaItemInfo(kind=RANGE_INDEX, label=Person, properties=[name], name=DRIVINE_IX_NAME_337A8B, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=DRIVINE_UQ_PERSONEMAIL_5482A751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."}
+              failure: "Schema application on database 'default' failed for 1 owner(s):\nSchema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: RANGE_INDEX on Person[name] exists with a different shape: SchemaItemInfo(kind=RANGE_INDEX, label=Person, properties=[name], name=DRIVINE_IX_NAME_337A8B, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=DRIVINE_UQ_PERSONEMAIL_5482A751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 2 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["WARN", "IndexManager", "Index drift on Person[name]: DRIVINE_IX_NAME_337A8B, under a name Drivine gives the RANGE_INDEX, is an index over [couponRef], so it is not taken as made. Call recreate() to replace it (destructive)."]
+                - ["WARN", "ConstraintManager", "Constraint drift on Person[email]: DRIVINE_UQ_PERSONEMAIL_5482A751, under a name Drivine gives the UNIQUENESS_CONSTRAINT, is an index that is not unique, so it is not taken as made. Call recreate() to replace it (destructive)."]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 0 already matching, 0 recreated, 2 needing attention"]
+                - ["ERROR", "SchemaManager", "Schema application for owner 'schema' on 'default' failed: Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: RANGE_INDEX on Person[name] exists with a different shape: SchemaItemInfo(kind=RANGE_INDEX, label=Person, properties=[name], name=DRIVINE_IX_NAME_337A8B, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=DRIVINE_UQ_PERSONEMAIL_5482A751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."]
+          - stores: ["sqlite"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, rows: [{"object": "drivine_ix_Personname_44ce5436", "type": "index", "table": "drivine_node", "sql": "CREATE INDEX drivine_ix_Personname_44ce5436 ON drivine_node ((CASE json_type(props, '$.\"couponRef\"') WHEN 'text' THEN props ->> '$.\"couponRef\"' WHEN 'null' THEN NULL ELSE props -> '$.\"couponRef\"' END)) WHERE instr(labels, '\"Person\"') > 0", "unique": 0}]}
+                  - {query: {listing: "constraints"}, rows: [{"object": "drivine_uq_Personemail_5482a751", "type": "index", "table": "drivine_node", "sql": "CREATE INDEX drivine_uq_Personemail_5482a751 ON drivine_node ((CASE json_type(props, '$.\"voucherRef\"') WHEN 'text' THEN props ->> '$.\"voucherRef\"' WHEN 'null' THEN NULL ELSE props -> '$.\"voucherRef\"' END))", "unique": 0}]}
+            done: 1000000
+            report:
+              owners:
+                - {"owner": null, "results": [{"spec": "Range index", "drift": {"existing": {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": "drivine_ix_Personname_44ce5436"}, "requested": "Range index"}}, {"spec": "Uniqueness constraint", "drift": {"existing": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "drivine_uq_Personemail_5482a751"}, "requested": "Uniqueness constraint"}}], "marker": null, "failure": "Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: RANGE_INDEX on Person[name] exists with a different shape: SchemaItemInfo(kind=RANGE_INDEX, label=Person, properties=[name], name=drivine_ix_Personname_44ce5436, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=drivine_uq_Personemail_5482a751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."}
+              failure: "Schema application on database 'default' failed for 1 owner(s):\nSchema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: RANGE_INDEX on Person[name] exists with a different shape: SchemaItemInfo(kind=RANGE_INDEX, label=Person, properties=[name], name=drivine_ix_Personname_44ce5436, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=drivine_uq_Personemail_5482a751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 2 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["WARN", "IndexManager", "Index drift on Person[name]: drivine_ix_Personname_44ce5436, under a name Drivine gives the RANGE_INDEX, is an index over [couponRef], so it is not taken as made. Call recreate() to replace it (destructive)."]
+                - ["WARN", "ConstraintManager", "Constraint drift on Person[email]: drivine_uq_Personemail_5482a751, under a name Drivine gives the UNIQUENESS_CONSTRAINT, is an index that is not unique, so it is not taken as made. Call recreate() to replace it (destructive)."]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 0 already matching, 0 recreated, 2 needing attention"]
+                - ["ERROR", "SchemaManager", "Schema application for owner 'schema' on 'default' failed: Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: RANGE_INDEX on Person[name] exists with a different shape: SchemaItemInfo(kind=RANGE_INDEX, label=Person, properties=[name], name=drivine_ix_Personname_44ce5436, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=drivine_uq_Personemail_5482a751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."]
+  - case: "30e"
+    name: "Another item under the names Drivine gives, under WARN"
+    description: "drivine4j#770: an index over another property under the range index's name, and a plain index under the uniqueness constraint's name, neither recorded. Each is drift and neither is made: each is logged, and the marker written."
+    stores: ["postgres", "oracle", "sqlite"]
+    catalogs:
+      - {owner: null, version: null, items: ["Range index", "Uniqueness constraint"]}
+    policy: {mode: "WARN"}
+    steps:
+      - operation: {enforce: "all"}
+        runs:
+          - stores: ["postgres"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, rows: [{"type": "i", "table": "drivine_node", "where": "labels @> '[\"Person\"]'::jsonb", "method": "btree", "object": "drivine_ix_personname_44ce5436", "unique": false, "columns": ["(props ->> 'couponRef'::text)"]}]}
+                  - {query: {listing: "constraints"}, rows: [{"type": "i", "table": "drivine_node", "where": null, "method": "btree", "object": "drivine_uq_personemail_5482a751", "unique": false, "columns": ["(props ->> 'voucherRef'::text)"]}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: "RANGE_INDEX:Person:name:Person_name_range\nUNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+            done: 1000000
+            report:
+              owners:
+                - {"owner": null, "results": [{"spec": "Range index", "drift": {"existing": {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": "drivine_ix_personname_44ce5436"}, "requested": "Range index"}}, {"spec": "Uniqueness constraint", "drift": {"existing": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "drivine_uq_personemail_5482a751"}, "requested": "Uniqueness constraint"}}], "marker": {"version": null, "items": "RANGE_INDEX:Person:name:Person_name_range\nUNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 2 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["WARN", "IndexManager", "Index drift on Person[name]: drivine_ix_personname_44ce5436, under a name Drivine gives the RANGE_INDEX, is an index over [couponRef], so it is not taken as made. Call recreate() to replace it (destructive)."]
+                - ["WARN", "ConstraintManager", "Constraint drift on Person[email]: drivine_uq_personemail_5482a751, under a name Drivine gives the UNIQUENESS_CONSTRAINT, is an index that is not unique, so it is not taken as made. Call recreate() to replace it (destructive)."]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 0 already matching, 0 recreated, 2 needing attention"]
+                - ["WARN", "SchemaManager", "  - DRIFT: RANGE_INDEX on Person[name] exists with a different shape: SchemaItemInfo(kind=RANGE_INDEX, label=Person, properties=[name], name=drivine_ix_personname_44ce5436, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)"]
+                - ["WARN", "SchemaManager", "  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=drivine_uq_personemail_5482a751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)"]
+          - stores: ["oracle"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, rows: [{"object": "DRIVINE_IX_NAME_337A8B", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.\"couponRef\"' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"]}]}
+                  - {query: {listing: "constraints"}, rows: [{"object": "DRIVINE_IX_NAME_337A8B", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.\"couponRef\"' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"]}, {"object": "DRIVINE_UQ_PERSONEMAIL_5482A751", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.\"voucherRef\"' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"]}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: "RANGE_INDEX:Person:name:Person_name_range\nUNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+            done: 1000000
+            report:
+              owners:
+                - {"owner": null, "results": [{"spec": "Range index", "drift": {"existing": {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": "DRIVINE_IX_NAME_337A8B"}, "requested": "Range index"}}, {"spec": "Uniqueness constraint", "drift": {"existing": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "DRIVINE_UQ_PERSONEMAIL_5482A751"}, "requested": "Uniqueness constraint"}}], "marker": {"version": null, "items": "RANGE_INDEX:Person:name:Person_name_range\nUNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 2 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["WARN", "IndexManager", "Index drift on Person[name]: DRIVINE_IX_NAME_337A8B, under a name Drivine gives the RANGE_INDEX, is an index over [couponRef], so it is not taken as made. Call recreate() to replace it (destructive)."]
+                - ["WARN", "ConstraintManager", "Constraint drift on Person[email]: DRIVINE_UQ_PERSONEMAIL_5482A751, under a name Drivine gives the UNIQUENESS_CONSTRAINT, is an index that is not unique, so it is not taken as made. Call recreate() to replace it (destructive)."]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 0 already matching, 0 recreated, 2 needing attention"]
+                - ["WARN", "SchemaManager", "  - DRIFT: RANGE_INDEX on Person[name] exists with a different shape: SchemaItemInfo(kind=RANGE_INDEX, label=Person, properties=[name], name=DRIVINE_IX_NAME_337A8B, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)"]
+                - ["WARN", "SchemaManager", "  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=DRIVINE_UQ_PERSONEMAIL_5482A751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)"]
+          - stores: ["sqlite"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, rows: [{"object": "drivine_ix_Personname_44ce5436", "type": "index", "table": "drivine_node", "sql": "CREATE INDEX drivine_ix_Personname_44ce5436 ON drivine_node ((CASE json_type(props, '$.\"couponRef\"') WHEN 'text' THEN props ->> '$.\"couponRef\"' WHEN 'null' THEN NULL ELSE props -> '$.\"couponRef\"' END)) WHERE instr(labels, '\"Person\"') > 0", "unique": 0}]}
+                  - {query: {listing: "constraints"}, rows: [{"object": "drivine_uq_Personemail_5482a751", "type": "index", "table": "drivine_node", "sql": "CREATE INDEX drivine_uq_Personemail_5482a751 ON drivine_node ((CASE json_type(props, '$.\"voucherRef\"') WHEN 'text' THEN props ->> '$.\"voucherRef\"' WHEN 'null' THEN NULL ELSE props -> '$.\"voucherRef\"' END))", "unique": 0}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: "RANGE_INDEX:Person:name:Person_name_range\nUNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+            done: 1000000
+            report:
+              owners:
+                - {"owner": null, "results": [{"spec": "Range index", "drift": {"existing": {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": "drivine_ix_Personname_44ce5436"}, "requested": "Range index"}}, {"spec": "Uniqueness constraint", "drift": {"existing": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "drivine_uq_Personemail_5482a751"}, "requested": "Uniqueness constraint"}}], "marker": {"version": null, "items": "RANGE_INDEX:Person:name:Person_name_range\nUNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 2 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["WARN", "IndexManager", "Index drift on Person[name]: drivine_ix_Personname_44ce5436, under a name Drivine gives the RANGE_INDEX, is an index over [couponRef], so it is not taken as made. Call recreate() to replace it (destructive)."]
+                - ["WARN", "ConstraintManager", "Constraint drift on Person[email]: drivine_uq_Personemail_5482a751, under a name Drivine gives the UNIQUENESS_CONSTRAINT, is an index that is not unique, so it is not taken as made. Call recreate() to replace it (destructive)."]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 0 already matching, 0 recreated, 2 needing attention"]
+                - ["WARN", "SchemaManager", "  - DRIFT: RANGE_INDEX on Person[name] exists with a different shape: SchemaItemInfo(kind=RANGE_INDEX, label=Person, properties=[name], name=drivine_ix_Personname_44ce5436, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)"]
+                - ["WARN", "SchemaManager", "  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=drivine_uq_Personemail_5482a751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)"]
+  - case: "30f"
+    name: "A plain index under a uniqueness constraint's name, with recreateOnDrift"
+    description: "drivine4j#770: a plain index under the constraint's name is drift; with recreateOnDrift it is dropped by its name, and the constraint made in its place."
+    stores: ["postgres", "oracle", "sqlite"]
+    catalogs:
+      - {owner: null, version: null, items: ["Uniqueness constraint"]}
+    policy: {recreateOnDrift: true}
+    steps:
+      - operation: {enforce: "all"}
+        runs:
+          - stores: ["postgres"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "constraints"}, rows: [{"type": "i", "table": "drivine_node", "where": null, "method": "btree", "object": "drivine_uq_personemail_5482a751", "unique": false, "columns": ["(props ->> 'voucherRef'::text)"]}]}
+              - now: 1000000
+                actions:
+                  - {execute: {statement: "DROP INDEX IF EXISTS drivine_uq_personemail_5482a751"}}
+                  - {query: {listing: "constraints"}, rows: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Uniqueness constraint"}}
+                  - {query: {listing: "constraints"}, rows: [{"kind": "UNIQUENESS_CONSTRAINT", "name": "Person_email_unique", "label": "Person", "details": {}, "properties": ["email"]}, {"type": "i", "table": "drivine_node", "where": "labels @> '[\"Person\"]'::jsonb", "method": "btree", "object": "drivine_uq_personemail_5482a751", "unique": true, "columns": ["(props ->> 'email'::text)"]}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+            done: 1000000
+            report:
+              owners:
+                - {"owner": null, "results": [{"spec": "Uniqueness constraint", "recreated": {"previous": null, "current": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique"}}}], "marker": {"version": null, "items": "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["WARN", "ConstraintManager", "Constraint drift on Person[email]: drivine_uq_personemail_5482a751, under a name Drivine gives the UNIQUENESS_CONSTRAINT, is an index that is not unique, so it is not taken as made. Call recreate() to replace it (destructive)."]
+                - ["INFO", "ConstraintManager", "Dropped {engine} index drivine_uq_personemail_5482a751, under a name Drivine gives UNIQUENESS_CONSTRAINT on Person[email]: it was an index that is not unique"]
+                - ["INFO", "ConstraintManager", "Created {engine} UNIQUENESS_CONSTRAINT on Person[email]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 0 already matching, 1 recreated, 0 needing attention"]
+          - stores: ["oracle"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "constraints"}, rows: [{"object": "DRIVINE_IX_NAME_337A8B", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.\"couponRef\"' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"]}, {"object": "DRIVINE_UQ_PERSONEMAIL_5482A751", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.\"voucherRef\"' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"]}]}
+              - now: 1000000
+                actions:
+                  - {execute: {statement: "DROP INDEX IF EXISTS DRIVINE_UQ_PERSONEMAIL_5482A751"}}
+                  - {query: {listing: "constraints"}, rows: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Uniqueness constraint"}}
+                  - {query: {listing: "constraints"}, rows: [{"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique", "details": {}, "status": null}, {"object": "DRIVINE_IX_EMAIL_5C24B9C", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"]}, {"object": "DRIVINE_IX_NAME_337A8B", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.name' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"]}, {"object": "DRIVINE_UQ_PERSONEMAIL_5482A751", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "UNIQUE", "columns": ["CASE  WHEN (JSON_EXISTS2(\"LABELS\" FORMAT OSON , '$[*]?(@ == \"Person\")' /* json_path_str  $[*]?(@.string() == \"Person\")  */  FALSE ON ERROR TYPE(LAX) )=1 AND JSON_EXISTS2(\"PROPS\" FORMAT OSON , '$.email' FALSE ON ERROR TYPE(LAX) )=1) THEN JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) ) END "]}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+            done: 1000000
+            report:
+              owners:
+                - {"owner": null, "results": [{"spec": "Uniqueness constraint", "recreated": {"previous": null, "current": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique"}}}], "marker": {"version": null, "items": "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["WARN", "ConstraintManager", "Constraint drift on Person[email]: DRIVINE_UQ_PERSONEMAIL_5482A751, under a name Drivine gives the UNIQUENESS_CONSTRAINT, is an index that is not unique, so it is not taken as made. Call recreate() to replace it (destructive)."]
+                - ["INFO", "ConstraintManager", "Dropped {engine} index DRIVINE_UQ_PERSONEMAIL_5482A751, under a name Drivine gives UNIQUENESS_CONSTRAINT on Person[email]: it was an index that is not unique"]
+                - ["INFO", "ConstraintManager", "Created {engine} UNIQUENESS_CONSTRAINT on Person[email]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 0 already matching, 1 recreated, 0 needing attention"]
+          - stores: ["sqlite"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "constraints"}, rows: [{"object": "drivine_uq_Personemail_5482a751", "type": "index", "table": "drivine_node", "sql": "CREATE INDEX drivine_uq_Personemail_5482a751 ON drivine_node ((CASE json_type(props, '$.\"voucherRef\"') WHEN 'text' THEN props ->> '$.\"voucherRef\"' WHEN 'null' THEN NULL ELSE props -> '$.\"voucherRef\"' END))", "unique": 0}]}
+              - now: 1000000
+                actions:
+                  - {execute: {statement: "DROP INDEX IF EXISTS drivine_uq_Personemail_5482a751"}}
+                  - {query: {listing: "constraints"}, rows: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Uniqueness constraint"}}
+                  - {query: {listing: "constraints"}, rows: [{"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique", "details": {}}, {"object": "drivine_uq_Personemail_5482a751", "type": "index", "table": "drivine_node", "sql": "CREATE UNIQUE INDEX drivine_uq_Personemail_5482a751 ON drivine_node ((CASE json_type(props, '$.\"email\"') WHEN 'text' THEN props ->> '$.\"email\"' WHEN 'null' THEN NULL ELSE props -> '$.\"email\"' END)) WHERE instr(labels, '\"Person\"') > 0", "unique": 1}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+            done: 1000000
+            report:
+              owners:
+                - {"owner": null, "results": [{"spec": "Uniqueness constraint", "recreated": {"previous": null, "current": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique"}}}], "marker": {"version": null, "items": "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["WARN", "ConstraintManager", "Constraint drift on Person[email]: drivine_uq_Personemail_5482a751, under a name Drivine gives the UNIQUENESS_CONSTRAINT, is an index that is not unique, so it is not taken as made. Call recreate() to replace it (destructive)."]
+                - ["INFO", "ConstraintManager", "Dropped {engine} index drivine_uq_Personemail_5482a751, under a name Drivine gives UNIQUENESS_CONSTRAINT on Person[email]: it was an index that is not unique"]
+                - ["INFO", "ConstraintManager", "Created {engine} UNIQUENESS_CONSTRAINT on Person[email]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 0 already matching, 1 recreated, 0 needing attention"]
+  - case: "30g"
+    name: "Another index under a range index's name, with recreateOnDrift"
+    description: "drivine4j#770: an index over another property under the range index's name is drift; with recreateOnDrift it is dropped by its name, and the range index made in its place."
+    stores: ["postgres", "oracle", "sqlite"]
+    catalogs:
+      - {owner: null, version: null, items: ["Range index"]}
+    policy: {recreateOnDrift: true}
+    steps:
+      - operation: {enforce: "all"}
+        runs:
+          - stores: ["postgres"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, rows: [{"type": "i", "table": "drivine_node", "where": "labels @> '[\"Person\"]'::jsonb", "method": "btree", "object": "drivine_ix_personname_44ce5436", "unique": false, "columns": ["(props ->> 'couponRef'::text)"]}]}
+              - now: 1000000
+                actions:
+                  - {execute: {statement: "DROP INDEX IF EXISTS drivine_ix_personname_44ce5436"}}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, rows: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Range index"}}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, rows: [{"kind": "RANGE_INDEX", "name": "Person_name_range", "label": "Person", "details": {}, "properties": ["name"]}, {"type": "i", "table": "drivine_node", "where": "labels @> '[\"Person\"]'::jsonb", "method": "btree", "object": "drivine_ix_personname_44ce5436", "unique": false, "columns": ["(props ->> 'name'::text)"]}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: "RANGE_INDEX:Person:name:Person_name_range"}}
+            done: 1000000
+            report:
+              owners:
+                - {"owner": null, "results": [{"spec": "Range index", "recreated": {"previous": null, "current": {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": "Person_name_range"}}}], "marker": {"version": null, "items": "RANGE_INDEX:Person:name:Person_name_range"}}
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["WARN", "IndexManager", "Index drift on Person[name]: drivine_ix_personname_44ce5436, under a name Drivine gives the RANGE_INDEX, is an index over [couponRef], so it is not taken as made. Call recreate() to replace it (destructive)."]
+                - ["INFO", "IndexManager", "Dropped {engine} index drivine_ix_personname_44ce5436, under a name Drivine gives RANGE_INDEX on Person[name]: it was an index over [couponRef]"]
+                - ["WARN", "IndexManager", "Recreated {engine} RANGE_INDEX on Person[name] — previously indexed data may be stale (vector indexes: stored embeddings need re-embedding)"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 0 already matching, 1 recreated, 0 needing attention"]
+          - stores: ["oracle"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, rows: [{"object": "DRIVINE_IX_NAME_337A8B", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.\"couponRef\"' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"]}]}
+              - now: 1000000
+                actions:
+                  - {execute: {statement: "DROP INDEX IF EXISTS DRIVINE_IX_NAME_337A8B"}}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, rows: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Range index"}}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, rows: [{"kind": "RANGE_INDEX", "label": "Person", "properties": ["email"], "name": "Person_email_range", "details": {"unique": "drivine_uq_Personemail_5482a751"}, "status": null}, {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": "Person_name_range", "details": {"labelled": "drivine_lx_Personname_44ce5436"}, "status": null}, {"object": "DRIVINE_IX_EMAIL_5C24B9C", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"]}, {"object": "DRIVINE_IX_NAME_337A8B", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.name' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"]}, {"object": "DRIVINE_LX_PERSONNAME_44CE5436", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "columns": ["CASE JSON_EXISTS2(\"LABELS\" FORMAT OSON , '$[*]?(@ == \"Person\")' /* json_path_str  $[*]?(@.string() == \"Person\")  */  FALSE ON ERROR TYPE(LAX) ) WHEN 1 THEN JSON_VALUE(\"PROPS\" FORMAT OSON , '$.name' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) ) END "]}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: "RANGE_INDEX:Person:name:Person_name_range"}}
+            done: 1000000
+            report:
+              owners:
+                - {"owner": null, "results": [{"spec": "Range index", "recreated": {"previous": null, "current": {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": "Person_name_range"}}}], "marker": {"version": null, "items": "RANGE_INDEX:Person:name:Person_name_range"}}
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["WARN", "IndexManager", "Index drift on Person[name]: DRIVINE_IX_NAME_337A8B, under a name Drivine gives the RANGE_INDEX, is an index over [couponRef], so it is not taken as made. Call recreate() to replace it (destructive)."]
+                - ["INFO", "IndexManager", "Dropped {engine} index DRIVINE_IX_NAME_337A8B, under a name Drivine gives RANGE_INDEX on Person[name]: it was an index over [couponRef]"]
+                - ["WARN", "IndexManager", "Recreated {engine} RANGE_INDEX on Person[name] — previously indexed data may be stale (vector indexes: stored embeddings need re-embedding)"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 0 already matching, 1 recreated, 0 needing attention"]
+          - stores: ["sqlite"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, rows: [{"object": "drivine_ix_Personname_44ce5436", "type": "index", "table": "drivine_node", "sql": "CREATE INDEX drivine_ix_Personname_44ce5436 ON drivine_node ((CASE json_type(props, '$.\"couponRef\"') WHEN 'text' THEN props ->> '$.\"couponRef\"' WHEN 'null' THEN NULL ELSE props -> '$.\"couponRef\"' END)) WHERE instr(labels, '\"Person\"') > 0", "unique": 0}]}
+              - now: 1000000
+                actions:
+                  - {execute: {statement: "DROP INDEX IF EXISTS drivine_ix_Personname_44ce5436"}}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, rows: []}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Range index"}}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, rows: [{"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": "Person_name_range", "details": {}}, {"object": "drivine_ix_Personname_44ce5436", "type": "index", "table": "drivine_node", "sql": "CREATE INDEX drivine_ix_Personname_44ce5436 ON drivine_node ((CASE json_type(props, '$.\"name\"') WHEN 'text' THEN props ->> '$.\"name\"' WHEN 'null' THEN NULL ELSE props -> '$.\"name\"' END)) WHERE instr(labels, '\"Person\"') > 0", "unique": 0}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: "RANGE_INDEX:Person:name:Person_name_range"}}
+            done: 1000000
+            report:
+              owners:
+                - {"owner": null, "results": [{"spec": "Range index", "recreated": {"previous": null, "current": {"kind": "RANGE_INDEX", "label": "Person", "properties": ["name"], "name": "Person_name_range"}}}], "marker": {"version": null, "items": "RANGE_INDEX:Person:name:Person_name_range"}}
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["WARN", "IndexManager", "Index drift on Person[name]: drivine_ix_Personname_44ce5436, under a name Drivine gives the RANGE_INDEX, is an index over [couponRef], so it is not taken as made. Call recreate() to replace it (destructive)."]
+                - ["INFO", "IndexManager", "Dropped {engine} index drivine_ix_Personname_44ce5436, under a name Drivine gives RANGE_INDEX on Person[name]: it was an index over [couponRef]"]
+                - ["WARN", "IndexManager", "Recreated {engine} RANGE_INDEX on Person[name] — previously indexed data may be stale (vector indexes: stored embeddings need re-embedding)"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 0 already matching, 1 recreated, 0 needing attention"]
+  - case: "30h"
+    name: "A table under a uniqueness constraint's name"
+    description: "On Postgres and SQLite a table under the constraint's name is drift that no recreate drops, so with recreateOnDrift the owner still fails; Oracle names indexes apart from tables, so there the constraint is made beside it."
+    stores: ["postgres", "sqlite", "oracle"]
+    catalogs:
+      - {owner: null, version: null, items: ["Uniqueness constraint"]}
+    policy: {recreateOnDrift: true}
+    steps:
+      - operation: {enforce: "all"}
+        runs:
+          - stores: ["postgres"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "constraints"}, rows: [{"type": "r", "table": null, "where": null, "method": "heap", "object": "drivine_uq_personemail_5482a751", "unique": null, "columns": null}]}
+            done: 1000000
+            report:
+              owners:
+                - {"owner": null, "results": [{"spec": "Uniqueness constraint", "drift": {"existing": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "drivine_uq_personemail_5482a751"}, "requested": "Uniqueness constraint"}}], "marker": null, "failure": "Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=drivine_uq_personemail_5482a751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."}
+              failure: "Schema application on database 'default' failed for 1 owner(s):\nSchema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=drivine_uq_personemail_5482a751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["WARN", "ConstraintManager", "Constraint drift on Person[email]: drivine_uq_personemail_5482a751, under a name Drivine gives the UNIQUENESS_CONSTRAINT, is a table, not an index, so it is not taken as made. Drop or rename it: Drivine makes the item under that name, and recreate() leaves it."]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 0 already matching, 0 recreated, 1 needing attention"]
+                - ["ERROR", "SchemaManager", "Schema application for owner 'schema' on 'default' failed: Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=drivine_uq_personemail_5482a751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."]
+          - stores: ["sqlite"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "constraints"}, rows: [{"object": "drivine_uq_Personemail_5482a751", "type": "table", "table": "drivine_uq_Personemail_5482a751", "sql": "CREATE TABLE drivine_uq_Personemail_5482a751 (x INTEGER)", "unique": null}]}
+            done: 1000000
+            report:
+              owners:
+                - {"owner": null, "results": [{"spec": "Uniqueness constraint", "drift": {"existing": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "drivine_uq_Personemail_5482a751"}, "requested": "Uniqueness constraint"}}], "marker": null, "failure": "Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=drivine_uq_Personemail_5482a751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."}
+              failure: "Schema application on database 'default' failed for 1 owner(s):\nSchema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=drivine_uq_Personemail_5482a751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["WARN", "ConstraintManager", "Constraint drift on Person[email]: drivine_uq_Personemail_5482a751, under a name Drivine gives the UNIQUENESS_CONSTRAINT, is a table, not an index, so it is not taken as made. Drop or rename it: Drivine makes the item under that name, and recreate() leaves it."]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 0 already matching, 0 recreated, 1 needing attention"]
+                - ["ERROR", "SchemaManager", "Schema application for owner 'schema' on 'default' failed: Schema application for owner 'schema' on database 'default' found problems:\n  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=drivine_uq_Personemail_5482a751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)\nResolve them, set drivine.schema.recreate-on-drift=true (destructive), drivine.schema.replace-blocking-index=true for an index in the way of a constraint, drivine.schema.index-build-timeout longer for an index still being built, or set drivine.schema.mode=WARN to continue with warnings."]
+          - stores: ["oracle"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "constraints"}, rows: [{"object": "DRIVINE_UQ_PERSONEMAIL_5482A751", "type": "TABLE", "table": null, "uniqueness": null, "columns": null}]}
+              - now: 1000000
+                actions:
+                  - {execute: {create: "Uniqueness constraint"}}
+                  - {query: {listing: "constraints"}, rows: [{"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique", "details": {}, "status": null}, {"object": "DRIVINE_IX_EMAIL_5C24B9C", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "columns": ["JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )"]}, {"object": "DRIVINE_UQ_PERSONEMAIL_5482A751", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "UNIQUE", "columns": ["CASE  WHEN (JSON_EXISTS2(\"LABELS\" FORMAT OSON , '$[*]?(@ == \"Person\")' /* json_path_str  $[*]?(@.string() == \"Person\")  */  FALSE ON ERROR TYPE(LAX) )=1 AND JSON_EXISTS2(\"PROPS\" FORMAT OSON , '$.email' FALSE ON ERROR TYPE(LAX) )=1) THEN JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) ) END "]}, {"object": "DRIVINE_UQ_PERSONEMAIL_5482A751", "type": "TABLE", "table": null, "uniqueness": null, "columns": null}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+            done: 1000000
+            report:
+              owners:
+                - {"owner": null, "results": [{"spec": "Uniqueness constraint", "created": {"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique"}}], "marker": {"version": null, "items": "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["INFO", "ConstraintManager", "Created {engine} UNIQUENESS_CONSTRAINT on Person[email]"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 1 created, 0 already matching, 0 recreated, 0 needing attention"]
   - case: "item"
     name: "The public IndexManager and ConstraintManager calls"
     description: "Each on one item, with no marker: a constraint ensured and recreated, an index recreated where there is none, and dropped, where it is there and where it is not."
