@@ -7,6 +7,7 @@ import org.drivine.cypher.json.CypherJson
 import org.drivine.cypher.json.DecimalNode
 import org.drivine.cypher.json.MAX_DEPTH
 import org.drivine.cypher.json.JsonNode
+import org.drivine.cypher.json.LongNode
 import org.drivine.cypher.json.ObjectNode
 import org.drivine.cypher.json.TemporalValue
 import org.drivine.cypher.json.jvmDoubleText
@@ -60,6 +61,25 @@ import kotlin.io.encoding.ExperimentalEncodingApi
  */
 object CompileJson {
 
+    /**
+     * The process's compiler settings, `{"settings": {"parserCacheStates": 20000}}`, each one given set, and all of them
+     * answered as they are then, with the parser's caches' renewals and the states they hold:
+     * `{"settings": {"parserCacheStates": 20000, "parserCacheRenewals": 3, "parserCacheHeld": 4211}}`. `{"settings": {}}`
+     * asks them and sets none. See [CypherCompiler.parserCacheStates].
+     */
+    private fun settings(given: JsonNode?): String {
+        if (given !is ObjectNode) return error("A request's settings are a JSON object.")
+        val unknown = given.properties().map { it.key }.filter { it != "parserCacheStates" }
+        if (unknown.isNotEmpty()) return error("A request's settings give no ${unknown.joinToString()}: parserCacheStates is the one setting.")
+        given["parserCacheStates"]?.let { states ->
+            val value = (states as? LongNode)?.value?.takeIf { it in 1..Int.MAX_VALUE }?.toInt()
+            if (value == null) return error("A request's settings give parserCacheStates as a whole number, 1 or more.")
+            CypherCompiler.parserCacheStates = value
+        }
+        return "{\"settings\":{\"parserCacheStates\":${CypherCompiler.parserCacheStates}," +
+            "\"parserCacheRenewals\":${CypherCompiler.parserCacheRenewals},\"parserCacheHeld\":${CypherCompiler.parserCacheHeld}}}"
+    }
+
     fun compile(request: String): String {
         val tree = try {
             CypherJson.readTree(request) as? ObjectNode ?: throw IllegalArgumentException("A request is a JSON object.")
@@ -68,8 +88,11 @@ object CompileJson {
         }
         // A full-text search, asked of the same entry: a request with "search" or "searchIndex" in place of "cypher".
         // A request asks one thing: one that gives two would have the other read past as though it were not there.
-        if (listOf("cypher", "search", "searchIndex").count { tree.has(it) } > 1) return error("A request gives one of cypher, search and searchIndex.")
+        if (listOf("cypher", "search", "searchIndex", "settings").count { tree.has(it) } > 1) {
+            return error("A request gives one of cypher, search, searchIndex and settings.")
+        }
         if (tree.has("search") || tree.has("searchIndex")) return SearchJson.answer(tree)
+        if (tree.has("settings")) return settings(tree["settings"])
         val call = try {
             read(tree)
         } catch (e: Exception) {
