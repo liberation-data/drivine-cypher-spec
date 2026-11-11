@@ -1408,7 +1408,7 @@ cases:
         rows: [2]
 
   - name: "A stored empty text searched for and measured"
-    description: "A stored empty text starts with, ends with and holds the empty text, and no other; its size is 0. Oracle's empty text is null as SQL text (drivine4j#416)."
+    description: "A stored empty text starts with, ends with and holds the empty text, and no other; its size is 0, and the text functions make the empty text of it. Oracle's empty text is null as SQL text (drivine4j#416)."
     steps:
       - cypher: "CREATE (:CyWrite {k: 0, name: 'ab'}), (:CyWrite {k: 1, name: ''}), (:CyWrite {k: 2, name: 'xy'}), (:CyWrite {k: 3, name: 5})"
       - only: [neo4j, sql]
@@ -1437,6 +1437,10 @@ cases:
         only: [neo4j, sql]
         cypher: "MATCH (a:CyWrite {k: 1}) SET a.s = size(a.name), a.c = 'ab' CONTAINS a.name RETURN [a.s, a.c]"
         rows: [[0, true]]
+      - note: "Made from it by the text functions and +, read by the property's own path on Oracle."
+        only: [neo4j, sql]
+        cypher: "MATCH (a:CyWrite {k: 1}) RETURN [a.name + a.name, toUpper(a.name), trim(a.name), reverse(a.name), left(a.name, 1), substring(a.name, 0), replace(a.name, 'x', 'y'), toString(a.name), split(a.name, ',')]"
+        rows: [["", "", "", "", "", "", "", "", [""]]]
 
   - name: "A walk of 1,100 hops"
     description: "A variable-length relationship or a quantified path pattern walks a chain of 1,100 relationships, its path's nodes and relationships each in order. Oracle held a walk's ids as text of 4,000 bytes at most, and failed past them (ORA-01489, drivine4j#177)."
