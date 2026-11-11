@@ -3692,10 +3692,37 @@ abstract class SqlCypherCompiler(
             }
         }
 
-        /** A `SKIP` or `LIMIT`: a whole number, or a parameter bound to one. */
+        /**
+         * A `SKIP` or `LIMIT`: a whole number of 0 or more, written or bound to a parameter. Neo4j refuses any other, a float
+         * such as 2.0 among them, so one is refused here rather than taken as it was, as no limit or the whole of a float (#420).
+         */
         private fun count(expression: Expression): String = when (expression) {
-            is Expression.Literal -> (expression.value as? Long)?.toString() ?: throw CompilerException("SKIP and LIMIT take a whole number, not ${org.drivine.cypher.text.JavaText.of(expression.value)}.")
-            is Expression.Parameter -> parameters.count(expression.name)
+            is Expression.Literal -> when (val value = expression.value) {
+                // The least whole number is read as one literal: see [CypherReader].
+                is Long -> value.takeIf { it >= 0 }?.toString() ?: throw CompilerException("SKIP and LIMIT take a whole number of 0 or more, not $value, as in Neo4j.")
+                else -> throw CompilerException("SKIP and LIMIT take a whole number, not ${org.drivine.cypher.text.JavaText.of(value)}.")
+            }
+            // `-1` is a negated number.
+            is Expression.Unary -> {
+                val negated = known(expression)?.takeIf { it is Number } ?: unsupported("SKIP or LIMIT of an expression")
+                // `-0` is 0, which Neo4j takes.
+                if (negated == 0L) "0"
+                else throw CompilerException("SKIP and LIMIT take a whole number of 0 or more, not -${org.drivine.cypher.text.JavaText.of(negated)}, as in Neo4j.")
+            }
+            is Expression.Parameter -> {
+                val value = parameters.value(expression.name)
+                // A Short or a Byte is an integer as the store binds it (see [CypherJson]), and as Neo4j's driver sends it.
+                val whole = (value as? Number)?.takeIf { it is Long || it is Int || it is Short || it is Byte }?.toLong()
+                if (whole == null || whole < 0) {
+                    val described = when (value) {
+                        null -> "null"
+                        is Number -> org.drivine.cypher.text.JavaText.of(value)
+                        else -> givenKind(expression, emptyMap())?.noun ?: "of another kind"
+                    }
+                    throw CompilerException("SKIP and LIMIT take a whole number of 0 or more, and $${expression.name} is $described, as in Neo4j.")
+                }
+                parameters.count(expression.name)
+            }
             else -> unsupported("SKIP or LIMIT of an expression")
         }
 
@@ -4053,7 +4080,10 @@ abstract class SqlCypherCompiler(
             return Value.Bool("EXISTS (${(listOf(inner.head("1")) + inner.from() + listOfNotNull(inner.whereClause())).joinToString(" ")})")
         }
 
-        /** An index written, or bound to a parameter, is known: a text is the property of that name, a number an item. */
+        /**
+         * The value [index] is where it is written, a number negated or bound to a parameter, else null: as an index, a text is
+         * the property of that name and a number an item. A `SKIP` or `LIMIT` ([count]) and a parameter's kind ([givenKind]) read it too.
+         */
         private fun known(index: Expression): Any? = when (index) {
             is Expression.Literal -> index.value
             is Expression.Parameter -> parameters.value(index.name)
@@ -4121,7 +4151,7 @@ abstract class SqlCypherCompiler(
          * Refuses [index], `subject[index]`, where the statement writes its subject as a value that is no list or map, or its
          * index as a value of a kind its subject is not indexed by ([knownKind]): a list by an integer, a map by a text. As
          * Neo4j refuses it; where the subject's kind is left open, it is compiled as before. An index given as a parameter is of
-         * its value's kind ([known]): the statement is compiled for each call, and its SQL is already made by that value, a
+         * its value's kind ([givenKind]): the statement is compiled for each call, and its SQL is already made by that value, a
          * text read as a property and a number as an item, so one of the other kind would be read as neither.
          */
         private fun indexOfKind(index: Expression.Index, scope: Map<String, Value>) {
@@ -4131,8 +4161,35 @@ abstract class SqlCypherCompiler(
                 Value.Known.MAP -> Value.Known.TEXT
                 else -> throw CompilerException("${subject.noun.replaceFirstChar(Char::uppercase)} is not a list or a map, and is indexed as one, as in Neo4j.")
             }
-            val kind = knownKind(index.index, scope) ?: (index.index as? Expression.Parameter)?.let { Value.Known.of(known(it)) } ?: return
+            val kind = givenKind(index.index, scope) ?: return
             if (kind != by) throw CompilerException("${subject.noun.replaceFirstChar(Char::uppercase)} is indexed by ${by.noun}, not ${kind.noun}, as in Neo4j.")
+        }
+
+        /**
+         * The kind of [expression] where the statement makes it ([knownKind]) or a parameter gives it: a parameter's is its
+         * value's, as the statement is compiled for each call. Null where it is left open, or null.
+         */
+        private fun givenKind(expression: Expression, scope: Map<String, Value>): Value.Known? = knownKind(expression, scope)
+            ?: (expression as? Expression.Parameter)?.let { parameter ->
+                when (val value = known(parameter)) {
+                    is List<*> -> Value.Known.LIST
+                    is Map<*, *> -> Value.Known.MAP
+                    else -> Value.Known.of(value)
+                }
+            }
+
+        /**
+         * Refuses [binary], `-`, `*`, `/`, `%` or `^`, where a side is known to be a text, a truth value, a list or a map
+         * ([givenKind]): Neo4j refuses it when it plans the statement, where the SQL gave null (#420). A temporal value, of
+         * no such kind, is taken where the store takes it, as `date - duration` and `duration * 2`.
+         */
+        private fun numbersOfKind(binary: Expression.Binary, scope: Map<String, Value>) {
+            listOf(binary.left, binary.right).forEach { side ->
+                val kind = givenKind(side, scope) ?: return@forEach
+                if (kind != Value.Known.INTEGER && kind != Value.Known.FLOAT) {
+                    throw CompilerException("${NUMERIC_SYMBOLS[binary.operator]} takes numbers, not ${kind.noun}, as in Neo4j.")
+                }
+            }
         }
 
         /** Refuses [expression], an operand of [operator], where its kind is known ([knownKind]) to be other than a truth value, as Neo4j refuses it. */
@@ -4844,6 +4901,7 @@ abstract class SqlCypherCompiler(
             if (binary.operator == Operator.IN) knownKind(binary.right, scope)?.takeIf { it != Value.Known.LIST }?.let { kind ->
                 throw CompilerException("IN takes a list, not ${kind.noun}, as in Neo4j.")
             }
+            if (binary.operator in NUMERIC_ONLY) numbersOfKind(binary, scope)
             // An id in a list written or given, where the row must pass that, is tested by its key beside: see [idKey]. A list
             // read from the store or worked out may be no list, whose items no store's elements of it would read as Cypher does.
             val written = binary.right is Expression.ListLiteral || (binary.right as? Expression.Parameter)?.let { parameterTree(it.name)?.isArray } == true
@@ -5751,11 +5809,17 @@ abstract class SqlCypherCompiler(
                 }, items = itemsOf(one()), itemItems = itemItemsOf(one()), list = isList(one()), itemLists = holdsLists(one()), texts = holdsTexts(one()),
                     temporals = holdsTemporals(one()))
                 // A text is read as Cypher reads it, its case and the spaces around it aside; a number is true but for 0.
-                "toboolean" -> Value.Json(shared(comparable(json(one()))) { (x) ->
+                "toboolean" -> {
+                    // Neo4j takes a truth value, an integer or a text, and refuses another kind it knows (#420).
+                    function.arguments.singleOrNull()?.let { givenKind(it, scope) }?.takeIf { it in setOf(Value.Known.LIST, Value.Known.MAP, Value.Known.FLOAT) }?.let { kind ->
+                        throw CompilerException("toBoolean() takes a truth value, an integer or a text, not ${kind.noun}, as in Neo4j.")
+                    }
+                    Value.Json(shared(comparable(json(one()))) { (x) ->
                     "CASE WHEN ${typeOf(x)} = 'boolean' THEN $x " +
                         "WHEN ${typeOf(x)} = 'number' THEN CASE WHEN ${number(x)} = 0 THEN ${literalJson(false)} ELSE ${literalJson(true)} END " +
                         "WHEN LOWER(TRIM(${text(x)})) = 'true' THEN ${literalJson(true)} WHEN LOWER(TRIM(${text(x)})) = 'false' THEN ${literalJson(false)} END"
-                })
+                    })
+                }
                 "isempty" -> Value.Json(shared(comparable(json(one()))) { (x) ->
                     val size = function("size", x)!!
                     boolJson("CASE WHEN ${typeOf(x)} = 'object' THEN ${jsonEquals(x, literalJson(emptyMap<String, Any>()))} WHEN ${typeOf(x)} IN ('array', 'string') THEN ${number(size)} = 0 END")
@@ -6420,6 +6484,12 @@ abstract class SqlCypherCompiler(
 
         /** The operators of arithmetic, whose value is a number where both operands are: see [Value.Json.known]. */
         val ARITHMETIC = setOf(Operator.ADD, Operator.SUBTRACT, Operator.MULTIPLY, Operator.DIVIDE, Operator.MODULO, Operator.POWER)
+
+        /** The arithmetic that takes numbers alone, and temporal values where the store does: `+` puts texts and lists together too. */
+        val NUMERIC_ONLY = ARITHMETIC - Operator.ADD
+
+        /** How the statement writes each of [NUMERIC_ONLY], for a refusal to name it. */
+        val NUMERIC_SYMBOLS = mapOf(Operator.SUBTRACT to "-", Operator.MULTIPLY to "*", Operator.DIVIDE to "/", Operator.MODULO to "%", Operator.POWER to "^")
 
         /** The operators that compare two values: equal or not, and in order. */
         val COMPARISONS = setOf(
