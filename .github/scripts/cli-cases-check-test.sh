@@ -136,6 +136,18 @@ $ok
 refused "stdoutLines that aren't a list of texts" "cases:
 $ok
     stdoutLines: \"^n$\"" "\`stdoutLines\` is a list of texts"
+refused "a key given twice in one case" "cases:
+$ok
+    stdout: \"\"" "'stdout' is given twice in one map"
+passes "a key a merge brings in, given again" 'cases:
+  - <<: {name: "m", exit: 1}
+    args: []
+    exit: 0'
+refused "a json line nested too deep to read" "cases:
+  - name: \"a\"
+    args: [\"--format\", \"json\", \"RETURN 1\"]
+    stdout: \"$(python3 -c 'print("[" * 100000 + "]" * 100000, end="")')\\n\"
+    exit: 0" "line 1 of its json stdout isn't JSON: maximum recursion depth"
 passes "files of each form the README allows" "cases:
 $ok
     files: {a.cypher: \"RETURN 1;\", b.yml: {text: \"x\", mode: \"600\"}, c: {text: \"y\"}}"

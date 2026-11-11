@@ -2,7 +2,7 @@
 """
 Checks the drivine CLI's cases, cli/cli.yaml, against what cli/README.md says a case is, with no CLI and no store:
 
-- the file is YAML, a map whose one key is `cases`, a list of maps;
+- the file is YAML, with no key twice in one map, a map whose one key is `cases`, a list of maps;
 - each case has a `name`, a text, unique in the file, its `args`, a list of texts, and its `exit`, a whole number;
 - each case's keys are the ones the README's table of keys names ("Cases"), and no others;
 - `only` and `except` name stores the README names, or `graph` and `sql`; `os` names linux, macos or windows;
@@ -72,6 +72,26 @@ def a_file(file):
             and isinstance(file.get("mode", "644"), str) and re.fullmatch(r"[0-7]+", file.get("mode", "644")) is not None)
 
 
+class Loader(yaml.SafeLoader):
+    """PyYAML's safe loader, but a map that gives a key twice is refused, where PyYAML keeps the last and drops the
+    rest. A key a `<<` merge brings in may still be given again, as YAML allows."""
+
+
+def unique_keys(loader, node):
+    given = []
+    for key_node, _ in node.value:
+        if key_node.tag == "tag:yaml.org,2002:merge":
+            continue
+        key = loader.construct_object(key_node, deep=True)
+        if key in given:
+            raise yaml.constructor.ConstructorError(None, None, f"{key!r} is given twice in one map", key_node.start_mark)
+        given.append(key)
+    return loader.construct_mapping(node, deep=True)
+
+
+Loader.add_constructor("tag:yaml.org,2002:map", unique_keys)
+
+
 def bare(constant):
     """Refuses the NaN and infinities Python's json reads but JSON hasn't: json writes them as {"$float": ...}."""
     raise ValueError(f"{constant} isn't JSON")
@@ -80,7 +100,7 @@ def bare(constant):
 def problems(cases_text, readme_text):
     """Each way the cases break the README's rules, as a line naming the case; none where they keep them."""
     try:
-        document = yaml.safe_load(cases_text)
+        document = yaml.load(cases_text, Loader=Loader)
     except yaml.YAMLError as e:
         return [f"cli.yaml isn't YAML: {e}"]
     if not isinstance(document, dict) or set(document) != {"cases"} or not isinstance(document["cases"], list):
@@ -144,7 +164,7 @@ def problems(cases_text, readme_text):
             for n, line in enumerate(stdout.split("\n")[:-1] if stdout.endswith("\n") else stdout.split("\n"), 1):
                 try:
                     value = json.loads(line, parse_constant=bare)
-                except ValueError as e:
+                except (ValueError, RecursionError) as e:
                     found.append(f"{label}: line {n} of its json stdout isn't JSON: {e}")
                     continue
                 if not isinstance(value, dict) or set(value) != {"columns", "rows"}:
