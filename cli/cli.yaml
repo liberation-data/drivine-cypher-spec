@@ -64,6 +64,13 @@ cases:
     exit: 0
     note: "A SQL store refuses a path: liberation-data/drivine-cypher-spec#163."
 
+  - name: "A SQL store refuses a path, as a statement that fails"
+    only: [sql]
+    args: ["--format", "plain", "MATCH p = (:A)-[:R]->(:B) RETURN p"]
+    stdout: ""
+    exit: 1
+    note: "liberation-data/drivine-cypher-spec#163."
+
   - name: "plain prints a node and a relationship as cypher-shell does"
     cypherShell: true
     args: ["--format", "plain", "CREATE (n:P {name: 'x'})-[r:K {w: 1}]->(m:Q) RETURN n, r, m"]
