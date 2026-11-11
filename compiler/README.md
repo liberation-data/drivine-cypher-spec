@@ -366,10 +366,13 @@ void drivine_gc_collect(void);   /* collects now: see below */
 ```
 
 SQLite derives the entry point's name from the file's (`libdrivinecypher` or `drivinecypher`), so a host loads it by
-path alone. The host functions come in batches; so far it registers:
+path alone. The host functions come in batches, ported from drivine4j's: each is common code
+(`org.drivine.cypher.host.HostFunctions`), which the extension registers and a host on the JVM can call from its own
+registrations, and each comes with the spec's `host.yaml` cases that pin it. So far it registers:
 
 | Function | What it gives |
 |---|---|
+| `drivine_float_text(real)` | the float as Java writes a double, as Cypher's `toString` gives it (`2.0`, `1.0E7`, `Infinity`), where SQLite's own text has 17 digits; null of null. Deterministic. |
 | `drivine_extension_version()` | the module's version, as it was built (`-Pcompiler.version`, the Maven form: `0.36.0`, `0.36.0-rc.1`), so a host can check it loaded the library it meant to. Deterministic. |
 | `drivine_gc_collect()` | NULL, having collected: see below. Direct-only. |
 | `drivine_gc_heap()`, `drivine_gc_heap(bytes)` | the GC's floor, in bytes; given bytes, it sets the floor first, and 0 restores the runtime's own. Direct-only. |
@@ -424,8 +427,14 @@ keeps Kotlin/Native's defaults.
 
 `./gradlew nativeExtensionCheck` loads the host's release library into apsw's SQLite (`check/extension-native.py`; a
 Python with apsw, installed by hash from `check/extension-requirements.txt`, as `-Ppython=<path>`), calls each function
-through SQL, the throwing ones too, and then the C API by ctypes from the same path. CI runs it on Linux x64 and macOS,
-and the release runs it on each platform's installed wheel, Windows and Linux arm64 too.
+through SQL, the throwing ones too, and then the C API by ctypes from the same path. It also calls, through SQL, each
+`function` step of the spec's `host.yaml` whose function the extension registers (`./gradlew hostSpecJson` writes the
+file as JSON, in `build/host`), and names those it doesn't register yet. CI runs it on Linux x64 and macOS, and the
+release runs it on each platform's installed wheel, Windows and Linux arm64 too, without `host.yaml`.
+
+`HostSpecTest`, in the common tests, runs the same steps on every target (the JVM, native and wasm), calling the module's
+code as SQLite would. A function `host.yaml` calls that the module doesn't implement yet is on its `PENDING` list, which
+must hold exactly those, and each function the module implements must have a step.
 
 ## Building
 

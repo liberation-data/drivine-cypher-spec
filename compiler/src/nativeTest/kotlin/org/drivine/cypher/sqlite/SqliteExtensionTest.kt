@@ -35,6 +35,8 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import org.drivine.cypher.host.HostFunction
+import org.drivine.cypher.host.HostFunctions
 import org.drivine.sqlite.ext.SQLITE_BUSY
 import org.drivine.sqlite.ext.SQLITE_DETERMINISTIC
 import org.drivine.sqlite.ext.SQLITE_DIRECTONLY
@@ -142,10 +144,13 @@ class SqliteExtensionTest {
     fun itRegistersItsFunctionsThroughTheLoadingSqlitesRoutines() {
         registered.clear()
         assertEquals(SQLITE_OK to null, load(sqlite))
+        // The module's host functions, which compiled SQL calls, then the native library's own.
         assertEquals(
-            listOf("drivine_extension_version/0", "drivine_gc_collect/0", "drivine_gc_heap/0", "drivine_gc_heap/1"),
+            HostFunctions.all.map { "${it.name}/${it.arity}" } +
+                listOf("drivine_extension_version/0", "drivine_gc_collect/0", "drivine_gc_heap/0", "drivine_gc_heap/1"),
             registered.map { "${it.name}/${it.arity}" },
         )
+        assertEquals(SQLITE_UTF8 or SQLITE_DETERMINISTIC or SQLITE_INNOCUOUS, registered.single { it.name == "drivine_float_text" }.flags)
         val version = registered.single { it.name == "drivine_extension_version" }
         assertEquals(SQLITE_UTF8 or SQLITE_DETERMINISTIC or SQLITE_INNOCUOUS, version.flags)
         assertTrue(registered.filter { it.name.startsWith("drivine_gc_") }.all { it.flags == SQLITE_UTF8 or SQLITE_DIRECTONLY })
@@ -210,7 +215,7 @@ class SqliteExtensionTest {
         destroyedOnFailure = 0
         failRegistrations = SQLITE_BUSY
         try {
-            assertEquals(SQLITE_BUSY to "libdrivinecypher couldn't register drivine_extension_version (SQLite's code 5).", load(sqlite))
+            assertEquals(SQLITE_BUSY to "libdrivinecypher couldn't register ${hostFunctions.first().name} (SQLite's code 5).", load(sqlite))
         } finally {
             failRegistrations = SQLITE_OK
         }

@@ -56,6 +56,8 @@ object Oracle {
         File(out, "marker.json").writeText(json.writeValueAsString(yaml.readTree(File(spec, "marker.yaml"))))
         // The schema plan's cases, for each target's StorePlanTest.
         File(out, "plans.json").writeText(json.writeValueAsString(yaml.readTree(File(spec, "plans.yaml"))))
+        // The host functions' cases, for each target's HostSpecTest.
+        HostSpecJson.write(spec, out)
         // drivine4j's full-text search statements, for each target's FullTextSearchGoldenTest.
         File(out, "search-golden.json").writeBytes(searchGolden())
         println("jvmOracle: ${corpus.first} statements in the corpus (${corpus.second} left out, as they embed the clock); $doubles double cases.")

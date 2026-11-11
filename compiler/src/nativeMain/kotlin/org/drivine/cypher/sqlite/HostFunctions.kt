@@ -27,17 +27,27 @@ import kotlinx.cinterop.staticCFunction
 import kotlinx.cinterop.toCPointer
 import kotlinx.cinterop.usePinned
 import kotlin.concurrent.AtomicReference
+import org.drivine.cypher.host.HostArgs
+import org.drivine.cypher.host.HostFunction
+import org.drivine.cypher.host.HostResult
+import org.drivine.cypher.host.SqlType
+import org.drivine.cypher.host.TextEncoding
 import org.drivine.sqlite.ext.SQLITE_DETERMINISTIC
 import org.drivine.sqlite.ext.SQLITE_DIRECTONLY
+import org.drivine.sqlite.ext.SQLITE_BLOB
 import org.drivine.sqlite.ext.SQLITE_ERROR
+import org.drivine.sqlite.ext.SQLITE_FLOAT
+import org.drivine.sqlite.ext.SQLITE_INTEGER
 import org.drivine.sqlite.ext.SQLITE_INNOCUOUS
 import org.drivine.sqlite.ext.SQLITE_NULL
+import org.drivine.sqlite.ext.SQLITE_TEXT
 import org.drivine.sqlite.ext.SQLITE_UTF16
 import org.drivine.sqlite.ext.SQLITE_UTF8
 import org.drivine.sqlite.ext.sqlite3_api_routines
 
 /*
- * The registration of host functions, which every host function of the extension goes through: its arity and flags, a
+ * The registration of host functions (org.drivine.cypher.host), which every host function of the extension goes through:
+ * its arity and flags, a
  * callback that no Throwable escapes, and its arguments and result read and written through the loading SQLite's
  * routines. An exception escaping a staticCFunction into SQLite terminates the host process, so each call catches every
  * Throwable and fails the statement with its message instead.
@@ -66,29 +76,32 @@ internal object Sqlite {
     val api: sqlite3_api_routines get() = bound.value!!
 }
 
-/** The text encoding a host function prefers its text arguments in, which SQLite converts them to before the call. */
-internal enum class TextEncoding(val flag: Int) { UTF8(SQLITE_UTF8), UTF16(SQLITE_UTF16) }
 
 /**
  * A call's arguments, read in place through SQLite's routines: valid only within the call. Each text or blob read gives
  * a copy (the only allocation a read makes); the numeric reads allocate nothing.
  */
-internal value class SqlArgs(private val argv: CPointer<CPointerVar<sqlite3_value>>?) {
+internal value class SqlArgs(private val argv: CPointer<CPointerVar<sqlite3_value>>?) : HostArgs {
     private fun value(i: Int): CPointer<sqlite3_value>? = argv!![i]
 
-    /** The argument's fundamental type: SQLITE_INTEGER, SQLITE_FLOAT, SQLITE_TEXT, SQLITE_BLOB or SQLITE_NULL. */
-    fun type(i: Int): Int = Sqlite.api.value_type!!(value(i))
+    override fun type(i: Int): SqlType = when (val code = Sqlite.api.value_type!!(value(i))) {
+        SQLITE_INTEGER -> SqlType.INTEGER
+        SQLITE_FLOAT -> SqlType.FLOAT
+        SQLITE_TEXT -> SqlType.TEXT
+        SQLITE_BLOB -> SqlType.BLOB
+        SQLITE_NULL -> SqlType.NULL
+        else -> error("SQLite gave the type code $code, which it has none of.")
+    }
 
-    fun isNull(i: Int): Boolean = type(i) == SQLITE_NULL
+    override fun isNull(i: Int): Boolean = Sqlite.api.value_type!!(value(i)) == SQLITE_NULL
 
-    fun long(i: Int): Long = Sqlite.api.value_int64!!(value(i))
+    override fun long(i: Int): Long = Sqlite.api.value_int64!!(value(i))
 
-    fun int(i: Int): Int = Sqlite.api.value_int!!(value(i))
+    override fun int(i: Int): Int = Sqlite.api.value_int!!(value(i))
 
-    fun double(i: Int): Double = Sqlite.api.value_double!!(value(i))
+    override fun double(i: Int): Double = Sqlite.api.value_double!!(value(i))
 
-    /** The argument as UTF-8 text, decoded (an invalid sequence as U+FFFD); null where it is NULL. */
-    fun text(i: Int): String? {
+    override fun text(i: Int): String? {
         val a = Sqlite.api
         val v = value(i)
         val chars = a.value_text!!(v) ?: return null
@@ -96,8 +109,7 @@ internal value class SqlArgs(private val argv: CPointer<CPointerVar<sqlite3_valu
         return if (n == 0) "" else chars.reinterpret<ByteVar>().readBytes(n).decodeToString()
     }
 
-    /** The argument as UTF-16 text, its code units as they are (a lone surrogate kept); null where it is NULL. */
-    fun text16(i: Int): String? {
+    override fun text16(i: Int): String? {
         val a = Sqlite.api
         val v = value(i)
         val units = a.value_text16!!(v)?.reinterpret<UShortVar>() ?: return null
@@ -105,8 +117,7 @@ internal value class SqlArgs(private val argv: CPointer<CPointerVar<sqlite3_valu
         return CharArray(n) { Char(units[it]) }.concatToString()
     }
 
-    /** The argument as bytes (a text's UTF-8); null where it is NULL. */
-    fun blob(i: Int): ByteArray? {
+    override fun blob(i: Int): ByteArray? {
         val a = Sqlite.api
         val v = value(i)
         if (a.value_type!!(v) == SQLITE_NULL) return null
@@ -123,71 +134,47 @@ private val transient = (-1L).toCPointer<kotlinx.cinterop.CFunction<(COpaquePoin
 private val empty = nativeHeap.alloc<ByteVar>().ptr
 
 /** A call's result, written through SQLite's routines. The last one written is the call's. */
-internal value class SqlResult(private val ctx: CPointer<sqlite3_context>?) {
-    fun nullValue() = Sqlite.api.result_null!!(ctx)
+internal value class SqlResult(private val ctx: CPointer<sqlite3_context>?) : HostResult {
+    override fun nullValue() = Sqlite.api.result_null!!(ctx)
 
-    fun long(value: Long) = Sqlite.api.result_int64!!(ctx, value)
+    override fun long(value: Long) = Sqlite.api.result_int64!!(ctx, value)
 
-    fun int(value: Int) = Sqlite.api.result_int!!(ctx, value)
+    override fun int(value: Int) = Sqlite.api.result_int!!(ctx, value)
 
-    fun double(value: Double) = Sqlite.api.result_double!!(ctx, value)
+    override fun double(value: Double) = Sqlite.api.result_double!!(ctx, value)
 
-    /** The text, as UTF-8 (a lone surrogate as U+FFFD, as Kotlin encodes it). */
-    fun text(value: String) {
+    override fun text(value: String) {
         val bytes = value.encodeToByteArray()
         if (bytes.isEmpty()) return Sqlite.api.result_text!!(ctx, empty, 0, transient)
         bytes.usePinned { Sqlite.api.result_text!!(ctx, it.addressOf(0), bytes.size, transient) }
     }
 
-    /** The text, as UTF-16 in the machine's byte order: its code units as they are. */
-    fun text16(value: String) {
+    /** The text, as UTF-16 in the machine's byte order. */
+    override fun text16(value: String) {
         if (value.isEmpty()) return Sqlite.api.result_text16!!(ctx, empty, 0, transient)
         val chars = value.toCharArray()
         chars.usePinned { Sqlite.api.result_text16!!(ctx, it.addressOf(0), chars.size * 2, transient) }
     }
 
-    fun blob(value: ByteArray) {
+    override fun blob(value: ByteArray) {
         if (value.isEmpty()) return Sqlite.api.result_blob!!(ctx, empty, 0, transient)
         value.usePinned { Sqlite.api.result_blob!!(ctx, it.addressOf(0), value.size, transient) }
     }
 
     /** Fails the statement with [message]. SQLite copies it. */
-    fun error(message: String) {
+    override fun error(message: String) {
         val bytes = message.encodeToByteArray()
         if (bytes.isEmpty()) return Sqlite.api.result_error!!(ctx, empty, 0)
         bytes.usePinned { Sqlite.api.result_error!!(ctx, it.addressOf(0), bytes.size) }
     }
 }
 
-/** A host function's body: it reads [count] arguments from [args] and writes its result to [result]. */
-internal fun interface ScalarBody {
-    fun call(args: SqlArgs, count: Int, result: SqlResult)
-}
-
-/**
- * A scalar host function, as SQL calls it: [name], taking [arity] arguments (-1 for any number). [deterministic] where
- * it gives the same result for the same arguments within a statement, so SQLite may use it in an index or factor it out;
- * [innocuous] where it has no side effects and reads nothing outside its arguments, so a trigger or view of an
- * untrusted schema may call it; [directOnly] where it changes state, so only a statement of the host's own may call it.
- */
-internal class HostFunction(
-    val name: String,
-    val arity: Int,
-    val deterministic: Boolean,
-    val innocuous: Boolean = deterministic,
-    val directOnly: Boolean = false,
-    val encoding: TextEncoding = TextEncoding.UTF8,
-    val body: ScalarBody,
-) {
-    init {
-        require(!(innocuous && directOnly)) { "$name can't be both innocuous and direct-only." }
-    }
-
-    val flags: Int = encoding.flag or
+/** The flags [function] is registered with: its text encoding, and whether it is deterministic, innocuous or direct-only. */
+internal val HostFunction.flags: Int
+    get() = (if (encoding == TextEncoding.UTF16) SQLITE_UTF16 else SQLITE_UTF8) or
         (if (deterministic) SQLITE_DETERMINISTIC else 0) or
         (if (innocuous) SQLITE_INNOCUOUS else 0) or
         (if (directOnly) SQLITE_DIRECTONLY else 0)
-}
 
 /** The one callback SQLite calls for every host function: the function is the registration's user data. */
 private val trampoline = staticCFunction { ctx: CPointer<sqlite3_context>?, count: Int, argv: CPointer<CPointerVar<sqlite3_value>>? ->

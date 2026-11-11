@@ -374,18 +374,36 @@ tasks.register<Exec>("nativeCorpusCheck") {
     )
 }
 
+/** The spec's host.yaml as JSON, in build/host, for the SQLite extension's check: see HostSpecJson. jvmOracle writes it too. */
+val hostSpecDir = layout.buildDirectory.dir("host")
+val hostSpecJson = tasks.register<Exec>("hostSpecJson") {
+    description = "Writes the spec's host.yaml as JSON, into build/host."
+    val compilation = kotlin.jvm().compilations.getByName("test")
+    dependsOn(compilation.compileTaskProvider)
+    val classpath = files(compilation.output.allOutputs, compilation.runtimeDependencyFiles)
+    inputs.file(layout.projectDirectory.file("../host.yaml"))
+    outputs.dir(hostSpecDir)
+    doFirst {
+        executable(pinnedJava().absolutePath)
+        args("-cp", classpath.asPath, "org.drivine.cypher.oracle.HostSpecJson", layout.projectDirectory.dir("..").asFile.absolutePath, hostSpecDir.get().asFile.absolutePath)
+    }
+}
+
 /**
  * The SQLite extension's check on the host's native target: the release shared library loaded as a SQLite extension by
  * apsw, in a Python (`python3`, or -Ppython=<path>) that has it (check/extension-requirements.txt), its functions called
- * through SQL, and the C API called from the same path in the same process.
+ * through SQL, host.yaml's steps among them, and the C API called from the same path in the same process.
  */
 tasks.register<Exec>("nativeExtensionCheck") {
     description = "Checks the host's native shared library loads as a SQLite extension, beside its C API."
     group = "verification"
     val (link, library) = hostLibrary()
-    dependsOn(link)
+    dependsOn(link, hostSpecJson)
     executable(providers.gradleProperty("python").getOrElse("python3"))
-    args(layout.projectDirectory.file("check/extension-native.py").asFile.absolutePath, library.absolutePath, version)
+    args(
+        layout.projectDirectory.file("check/extension-native.py").asFile.absolutePath, library.absolutePath, version,
+        hostSpecDir.get().file("host.json").asFile.absolutePath,
+    )
 }
 
 /**
