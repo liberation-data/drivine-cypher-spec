@@ -223,7 +223,7 @@ class HostSpecTest {
             null -> null
             is String -> v
             is Long -> v.toString()
-            // SQLite writes a float's text with %!.15g: no step reads one so, and a guess here would pass a wrong one.
+            // SQLite writes a float's text its own way (1.0/3 as 0.33333333333333332): no step reads one so, and a guess here would pass a wrong one.
             else -> error("No step reads the text of the float $v")
         }
 
