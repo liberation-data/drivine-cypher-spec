@@ -103,7 +103,7 @@ def problems(cases_text, readme_text):
             found.append(f"{label}: its name is another case's too")
         else:
             seen.add(name)
-        for key in sorted(set(case) - allowed):
+        for key in sorted(set(case) - allowed, key=str):
             found.append(f"{label}: `{key}` isn't a key the README's table names")
         args = case.get("args")
         if not isinstance(args, list) or not all(isinstance(a, str) for a in args):

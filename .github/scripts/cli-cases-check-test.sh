@@ -59,6 +59,12 @@ passes "a json case whose -c prints its parameters" 'cases:
     args: ["--format", "json", "-c", ":params"]
     stdout: "{\n}\n"
     exit: 0'
+passes "a json case whose file prints the commands" 'cases:
+  - name: "h"
+    args: ["--format", "json", "-f", "a.cypher"]
+    files: {a.cypher: {text: "RETURN 1;\n:help\n"}}
+    stdout: "{\"columns\":[\"1\"],\"rows\":[[1]]}\nAvailable commands:\n"
+    exit: 0'
 
 refused "a file that isn't YAML" "cases: [" "isn't YAML"
 refused "a file of another shape" "- name: a" "whose one key is \`cases\`"
@@ -111,6 +117,10 @@ refused "a json line that isn't a result" 'cases:
     args: ["--format=json", "RETURN 1 AS n"]
     stdout: "[1]\n"
     exit: 0' "line 1 of its json stdout isn't an object of \`columns\` and \`rows\`"
+refused "keys the README doesn't name, a number among them" "cases:
+$ok
+    1: x
+    other: y" "\`1\` isn't a key the README's table names"
 refused "a case that isn't a map" "cases:
   - a" "case 1 isn't a map"
 refused "a name that isn't a text" "cases:
