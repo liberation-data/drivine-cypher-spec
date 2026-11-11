@@ -1,7 +1,8 @@
 # The store layout's DDL: what each store makes of the graph `drivine` and of a set of schema specs, the tables, the
 # probe that finds them made, each index and constraint, and the catalog's statements. Captured from drivine4j's grammars,
 # the reference, before the module wrote them; since then each record says the form its item is made in ("form": 1),
-# which drivine4j's grammars didn't write, and each SQL store's create is pinned to its form by a digest. Read with no
+# which drivine4j's grammars didn't write, and each SQL store's create, and a uniqueness constraint's safe recreate
+# (recreate), is pinned to its form by a digest. Read with no
 # store. See README.md.
 
 graph: "drivine"
@@ -2401,6 +2402,22 @@ cases:
                 DELETE FROM drivine_schema WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '["email"]';
             END
             $forget$
+        recreate:
+          form: 1
+          digest: "56893d53ec6d5ec8db9d50f859972f9ec7ef2c9208625490969f8f8d20cdbb28"
+          leftover:
+            - "DROP INDEX IF EXISTS drivine_uq_Personemail_5482a751_r"
+          build:
+            - "CREATE UNIQUE INDEX drivine_uq_Personemail_5482a751_r ON drivine_node (((props ->> 'email'))) WHERE labels @> '[\"Person\"]'"
+          swap:
+            - |-
+              DO $swap$
+              BEGIN
+                  DROP INDEX IF EXISTS drivine_uq_Personemail_5482a751;
+                  ALTER INDEX drivine_uq_Personemail_5482a751_r RENAME TO drivine_uq_Personemail_5482a751;
+              END
+              $swap$
+          remade: "UPDATE drivine_schema SET object_name = 'drivine_uq_Personemail_5482a751', details = jsonb_set(details, '{form}', '1') WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"email\"]'"
       oracle:
         form: 1
         digest: "e2ecdc0f109d80d8ff257dd2f2e9eab619941aed479e07cbfc8392d534af0797"
@@ -2488,6 +2505,33 @@ cases:
                 DELETE FROM drivine_schema WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '["email"]';
                 COMMIT;
             END;
+        recreate:
+          form: 1
+          digest: "12c0f2e784a418dbc09d7c2ecd4b9817d752e958c849d164e0fbe3ba80f84ce5"
+          leftover:
+            - "DROP INDEX IF EXISTS drivine_uq_Personemail_5482a751_r"
+          build:
+            - |-
+              DECLARE
+                  e_exists EXCEPTION; PRAGMA EXCEPTION_INIT(e_exists, -955);
+                  e_busy EXCEPTION; PRAGMA EXCEPTION_INIT(e_busy, -54);
+              BEGIN
+                  FOR attempt IN 1 .. 300 LOOP
+                      BEGIN
+                          EXECUTE IMMEDIATE 'CREATE UNIQUE INDEX drivine_uq_Personemail_5482a751_r ON drivine_node n (CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') AND JSON_EXISTS(n.props, ''$.email'') THEN JSON_VALUE(n.props, ''$.email'') END)';
+                          EXIT;
+                      EXCEPTION
+                          WHEN e_exists THEN EXIT;
+                          WHEN e_busy THEN
+                              IF attempt = 300 THEN RAISE; END IF;
+                              DBMS_SESSION.SLEEP(0.1);
+                      END;
+                  END LOOP;
+              END;
+          swap:
+            - "DROP INDEX IF EXISTS drivine_uq_Personemail_5482a751"
+            - "ALTER INDEX drivine_uq_Personemail_5482a751_r RENAME TO drivine_uq_Personemail_5482a751"
+          remade: "UPDATE drivine_schema SET object_name = 'drivine_uq_Personemail_5482a751', details = JSON_MERGEPATCH(details, '{\"form\": 1}') WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"email\"]'"
       sqlite:
         form: 1
         digest: "8b3ea3a99b267cd97289cb0b2669a643d1bba8985df143842b45fb43e1a44d75"
@@ -2500,6 +2544,18 @@ cases:
         drop:
           - "DROP INDEX IF EXISTS drivine_uq_Personemail_5482a751"
           - "DELETE FROM drivine_schema WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"email\"]'"
+        recreate:
+          form: 1
+          digest: "5b6968a722da059a72bde23d7ef3f54f9a285e9a6256c2c5c5f30e8dce34207b"
+          leftover:
+            - "DROP INDEX IF EXISTS drivine_uq_Personemail_5482a751_r"
+          build:
+            - "CREATE UNIQUE INDEX drivine_uq_Personemail_5482a751_r ON drivine_node ((CASE json_type(props, '$.\"email\"') WHEN 'text' THEN props ->> '$.\"email\"' WHEN 'null' THEN NULL ELSE props -> '$.\"email\"' END)) WHERE instr(labels, '\"Person\"') > 0"
+          swap:
+            - "DROP INDEX IF EXISTS drivine_uq_Personemail_5482a751"
+            - "CREATE UNIQUE INDEX drivine_uq_Personemail_5482a751 ON drivine_node ((CASE json_type(props, '$.\"email\"') WHEN 'text' THEN props ->> '$.\"email\"' WHEN 'null' THEN NULL ELSE props -> '$.\"email\"' END)) WHERE instr(labels, '\"Person\"') > 0"
+            - "DROP INDEX IF EXISTS drivine_uq_Personemail_5482a751_r"
+          remade: "UPDATE drivine_schema SET object_name = 'drivine_uq_Personemail_5482a751', details = json_set(details, '$.form', 1) WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"email\"]'"
       neo4j:
         create:
           - "CREATE CONSTRAINT `Person_email_unique` IF NOT EXISTS FOR (n:`Person`) REQUIRE (n.`email`) IS UNIQUE"
@@ -2564,6 +2620,22 @@ cases:
                 DELETE FROM drivine_schema WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '["first","last"]';
             END
             $forget$
+        recreate:
+          form: 1
+          digest: "964d7c9028ff9b7e12868cfa1a2672a95277ae6e956c0332f9639cda0178fe57"
+          leftover:
+            - "DROP INDEX IF EXISTS drivine_uq_Personfirstlast_58499b51_r"
+          build:
+            - "CREATE UNIQUE INDEX drivine_uq_Personfirstlast_58499b51_r ON drivine_node (((props ->> 'first')), ((props ->> 'last'))) WHERE labels @> '[\"Person\"]'"
+          swap:
+            - |-
+              DO $swap$
+              BEGIN
+                  DROP INDEX IF EXISTS drivine_uq_Personfirstlast_58499b51;
+                  ALTER INDEX drivine_uq_Personfirstlast_58499b51_r RENAME TO drivine_uq_Personfirstlast_58499b51;
+              END
+              $swap$
+          remade: "UPDATE drivine_schema SET object_name = 'drivine_uq_Personfirstlast_58499b51', details = jsonb_set(details, '{form}', '1') WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"first\",\"last\"]'"
       oracle:
         form: 1
         digest: "a1546960731f51383f8c22da8218f677e144a82110eb11712471aac17a088896"
@@ -2662,6 +2734,33 @@ cases:
                 DELETE FROM drivine_schema WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '["first","last"]';
                 COMMIT;
             END;
+        recreate:
+          form: 1
+          digest: "65c59ecdbd4419250360c84f9330f29a9a7b24abee48b41db8479d516d88d2e4"
+          leftover:
+            - "DROP INDEX IF EXISTS drivine_uq_Personfirstlast_58499b51_r"
+          build:
+            - |-
+              DECLARE
+                  e_exists EXCEPTION; PRAGMA EXCEPTION_INIT(e_exists, -955);
+                  e_busy EXCEPTION; PRAGMA EXCEPTION_INIT(e_busy, -54);
+              BEGIN
+                  FOR attempt IN 1 .. 300 LOOP
+                      BEGIN
+                          EXECUTE IMMEDIATE 'CREATE UNIQUE INDEX drivine_uq_Personfirstlast_58499b51_r ON drivine_node n (CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') AND JSON_EXISTS(n.props, ''$.first'') AND JSON_EXISTS(n.props, ''$.last'') THEN JSON_VALUE(n.props, ''$.first'') END, CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') AND JSON_EXISTS(n.props, ''$.first'') AND JSON_EXISTS(n.props, ''$.last'') THEN JSON_VALUE(n.props, ''$.last'') END)';
+                          EXIT;
+                      EXCEPTION
+                          WHEN e_exists THEN EXIT;
+                          WHEN e_busy THEN
+                              IF attempt = 300 THEN RAISE; END IF;
+                              DBMS_SESSION.SLEEP(0.1);
+                      END;
+                  END LOOP;
+              END;
+          swap:
+            - "DROP INDEX IF EXISTS drivine_uq_Personfirstlast_58499b51"
+            - "ALTER INDEX drivine_uq_Personfirstlast_58499b51_r RENAME TO drivine_uq_Personfirstlast_58499b51"
+          remade: "UPDATE drivine_schema SET object_name = 'drivine_uq_Personfirstlast_58499b51', details = JSON_MERGEPATCH(details, '{\"form\": 1}') WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"first\",\"last\"]'"
       sqlite:
         form: 1
         digest: "63ac3801ca7bc8c7d1b17a10cc475249cad719b2f2610895d4d174387e8fa069"
@@ -2674,6 +2773,18 @@ cases:
         drop:
           - "DROP INDEX IF EXISTS drivine_uq_Personfirstlast_58499b51"
           - "DELETE FROM drivine_schema WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"first\",\"last\"]'"
+        recreate:
+          form: 1
+          digest: "73129723800c0cbeda7e7d496f4f2fe993628de31b97bb0676e58025ac4bfca9"
+          leftover:
+            - "DROP INDEX IF EXISTS drivine_uq_Personfirstlast_58499b51_r"
+          build:
+            - "CREATE UNIQUE INDEX drivine_uq_Personfirstlast_58499b51_r ON drivine_node ((CASE json_type(props, '$.\"first\"') WHEN 'text' THEN props ->> '$.\"first\"' WHEN 'null' THEN NULL ELSE props -> '$.\"first\"' END), (CASE json_type(props, '$.\"last\"') WHEN 'text' THEN props ->> '$.\"last\"' WHEN 'null' THEN NULL ELSE props -> '$.\"last\"' END)) WHERE instr(labels, '\"Person\"') > 0"
+          swap:
+            - "DROP INDEX IF EXISTS drivine_uq_Personfirstlast_58499b51"
+            - "CREATE UNIQUE INDEX drivine_uq_Personfirstlast_58499b51 ON drivine_node ((CASE json_type(props, '$.\"first\"') WHEN 'text' THEN props ->> '$.\"first\"' WHEN 'null' THEN NULL ELSE props -> '$.\"first\"' END), (CASE json_type(props, '$.\"last\"') WHEN 'text' THEN props ->> '$.\"last\"' WHEN 'null' THEN NULL ELSE props -> '$.\"last\"' END)) WHERE instr(labels, '\"Person\"') > 0"
+            - "DROP INDEX IF EXISTS drivine_uq_Personfirstlast_58499b51_r"
+          remade: "UPDATE drivine_schema SET object_name = 'drivine_uq_Personfirstlast_58499b51', details = json_set(details, '$.form', 1) WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"first\",\"last\"]'"
       neo4j:
         create:
           - "CREATE CONSTRAINT `Person_first_last_unique` IF NOT EXISTS FOR (n:`Person`) REQUIRE (n.`first`, n.`last`) IS UNIQUE"
@@ -2752,6 +2863,22 @@ cases:
                 DELETE FROM drivine_schema WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '["__drivine.lower.email"]';
             END
             $forget$
+        recreate:
+          form: 1
+          digest: "06e08fdd3397c9e09f0fc580223df16d38a1d278bbb4dd5e1c691344c51e0c2e"
+          leftover:
+            - "DROP INDEX IF EXISTS drivine_uq_Persondrivineloweremail_b3ad0b9b_r"
+          build:
+            - "CREATE UNIQUE INDEX drivine_uq_Persondrivineloweremail_b3ad0b9b_r ON drivine_node (((props ->> '__drivine.lower.email'))) WHERE labels @> '[\"Person\"]'"
+          swap:
+            - |-
+              DO $swap$
+              BEGIN
+                  DROP INDEX IF EXISTS drivine_uq_Persondrivineloweremail_b3ad0b9b;
+                  ALTER INDEX drivine_uq_Persondrivineloweremail_b3ad0b9b_r RENAME TO drivine_uq_Persondrivineloweremail_b3ad0b9b;
+              END
+              $swap$
+          remade: "UPDATE drivine_schema SET object_name = 'drivine_uq_Persondrivineloweremail_b3ad0b9b', details = jsonb_set(details, '{form}', '1') WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"__drivine.lower.email\"]'"
       oracle:
         form: 1
         digest: "8537ea69a6576a30ac279f36dcbf0b03e8fbfdf481861521a0b84358a94c93a7"
@@ -2839,6 +2966,33 @@ cases:
                 DELETE FROM drivine_schema WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '["__drivine.lower.email"]';
                 COMMIT;
             END;
+        recreate:
+          form: 1
+          digest: "98fcdbd97b28c30ddf330ab413ad85f3d456ed35a2a9c16e074f660eb8ed33f3"
+          leftover:
+            - "DROP INDEX IF EXISTS drivine_uq_Persondrivineloweremail_b3ad0b9b_r"
+          build:
+            - |-
+              DECLARE
+                  e_exists EXCEPTION; PRAGMA EXCEPTION_INIT(e_exists, -955);
+                  e_busy EXCEPTION; PRAGMA EXCEPTION_INIT(e_busy, -54);
+              BEGIN
+                  FOR attempt IN 1 .. 300 LOOP
+                      BEGIN
+                          EXECUTE IMMEDIATE 'CREATE UNIQUE INDEX drivine_uq_Persondrivineloweremail_b3ad0b9b_r ON drivine_node n (CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') AND JSON_EXISTS(n.props, ''$."__drivine.lower.email"'') THEN JSON_VALUE(n.props, ''$."__drivine.lower.email"'') END)';
+                          EXIT;
+                      EXCEPTION
+                          WHEN e_exists THEN EXIT;
+                          WHEN e_busy THEN
+                              IF attempt = 300 THEN RAISE; END IF;
+                              DBMS_SESSION.SLEEP(0.1);
+                      END;
+                  END LOOP;
+              END;
+          swap:
+            - "DROP INDEX IF EXISTS drivine_uq_Persondrivineloweremail_b3ad0b9b"
+            - "ALTER INDEX drivine_uq_Persondrivineloweremail_b3ad0b9b_r RENAME TO drivine_uq_Persondrivineloweremail_b3ad0b9b"
+          remade: "UPDATE drivine_schema SET object_name = 'drivine_uq_Persondrivineloweremail_b3ad0b9b', details = JSON_MERGEPATCH(details, '{\"form\": 1}') WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"__drivine.lower.email\"]'"
       sqlite:
         form: 1
         digest: "cd73aaf9338b4f1ef078d1e70d84de1c9b9d55fdbf624ff6f1b7a5978ce94fe4"
@@ -2851,6 +3005,18 @@ cases:
         drop:
           - "DROP INDEX IF EXISTS drivine_uq_Persondrivineloweremail_b3ad0b9b"
           - "DELETE FROM drivine_schema WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"__drivine.lower.email\"]'"
+        recreate:
+          form: 1
+          digest: "5f95b136cbdacb10e57364b64c7bc4ea59812f60c43cb2f7fcb6bef36aa86db7"
+          leftover:
+            - "DROP INDEX IF EXISTS drivine_uq_Persondrivineloweremail_b3ad0b9b_r"
+          build:
+            - "CREATE UNIQUE INDEX drivine_uq_Persondrivineloweremail_b3ad0b9b_r ON drivine_node ((CASE json_type(props, '$.\"__drivine.lower.email\"') WHEN 'text' THEN props ->> '$.\"__drivine.lower.email\"' WHEN 'null' THEN NULL ELSE props -> '$.\"__drivine.lower.email\"' END)) WHERE instr(labels, '\"Person\"') > 0"
+          swap:
+            - "DROP INDEX IF EXISTS drivine_uq_Persondrivineloweremail_b3ad0b9b"
+            - "CREATE UNIQUE INDEX drivine_uq_Persondrivineloweremail_b3ad0b9b ON drivine_node ((CASE json_type(props, '$.\"__drivine.lower.email\"') WHEN 'text' THEN props ->> '$.\"__drivine.lower.email\"' WHEN 'null' THEN NULL ELSE props -> '$.\"__drivine.lower.email\"' END)) WHERE instr(labels, '\"Person\"') > 0"
+            - "DROP INDEX IF EXISTS drivine_uq_Persondrivineloweremail_b3ad0b9b_r"
+          remade: "UPDATE drivine_schema SET object_name = 'drivine_uq_Persondrivineloweremail_b3ad0b9b', details = json_set(details, '$.form', 1) WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"__drivine.lower.email\"]'"
       neo4j:
         create:
           - "CREATE CONSTRAINT `Person_email_ci_unique` IF NOT EXISTS FOR (n:`Person`) REQUIRE (n.`__drivine.lower.email`) IS UNIQUE"
@@ -3997,6 +4163,22 @@ cases:
                 DELETE FROM drivine_schema WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Per"son' AND properties = '["name"]';
             END
             $forget$
+        recreate:
+          form: 1
+          digest: "da0a6fe9107bb0c50f7f1a37337b92164083c67e5d1c34b5034c296008404541"
+          leftover:
+            - "DROP INDEX IF EXISTS drivine_uq_Personname_f56cb9fe_r"
+          build:
+            - "CREATE UNIQUE INDEX drivine_uq_Personname_f56cb9fe_r ON drivine_node (((props ->> 'name'))) WHERE labels @> '[\"Per\\\"son\"]'"
+          swap:
+            - |-
+              DO $swap$
+              BEGIN
+                  DROP INDEX IF EXISTS drivine_uq_Personname_f56cb9fe;
+                  ALTER INDEX drivine_uq_Personname_f56cb9fe_r RENAME TO drivine_uq_Personname_f56cb9fe;
+              END
+              $swap$
+          remade: "UPDATE drivine_schema SET object_name = 'drivine_uq_Personname_f56cb9fe', details = jsonb_set(details, '{form}', '1') WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Per\"son' AND properties = '[\"name\"]'"
       oracle:
         form: 1
         digest: "d6450e96b56f0ccb7c63cb693a92b8c0b4d20f83192620783b0431cfc663d974"
@@ -4084,6 +4266,33 @@ cases:
                 DELETE FROM drivine_schema WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Per"son' AND properties = '["name"]';
                 COMMIT;
             END;
+        recreate:
+          form: 1
+          digest: "6c753a5bd50f90e8d3936d32597dacde6ef14abe8921d070a0385a9cb99bc0ce"
+          leftover:
+            - "DROP INDEX IF EXISTS drivine_uq_Personname_f56cb9fe_r"
+          build:
+            - |-
+              DECLARE
+                  e_exists EXCEPTION; PRAGMA EXCEPTION_INIT(e_exists, -955);
+                  e_busy EXCEPTION; PRAGMA EXCEPTION_INIT(e_busy, -54);
+              BEGIN
+                  FOR attempt IN 1 .. 300 LOOP
+                      BEGIN
+                          EXECUTE IMMEDIATE 'CREATE UNIQUE INDEX drivine_uq_Personname_f56cb9fe_r ON drivine_node n (CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Per\"son")'') AND JSON_EXISTS(n.props, ''$.name'') THEN JSON_VALUE(n.props, ''$.name'') END)';
+                          EXIT;
+                      EXCEPTION
+                          WHEN e_exists THEN EXIT;
+                          WHEN e_busy THEN
+                              IF attempt = 300 THEN RAISE; END IF;
+                              DBMS_SESSION.SLEEP(0.1);
+                      END;
+                  END LOOP;
+              END;
+          swap:
+            - "DROP INDEX IF EXISTS drivine_uq_Personname_f56cb9fe"
+            - "ALTER INDEX drivine_uq_Personname_f56cb9fe_r RENAME TO drivine_uq_Personname_f56cb9fe"
+          remade: "UPDATE drivine_schema SET object_name = 'drivine_uq_Personname_f56cb9fe', details = JSON_MERGEPATCH(details, '{\"form\": 1}') WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Per\"son' AND properties = '[\"name\"]'"
       sqlite:
         form: 1
         digest: "1565c8aabe5aa53288e06f8f6d2bc8cd2c441537ddfb43ff155435b271d794ee"
@@ -4096,6 +4305,18 @@ cases:
         drop:
           - "DROP INDEX IF EXISTS drivine_uq_Personname_f56cb9fe"
           - "DELETE FROM drivine_schema WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Per\"son' AND properties = '[\"name\"]'"
+        recreate:
+          form: 1
+          digest: "14c5fe8aa9f5879c6c6e4df24bce3646365047cd886bb0b390008c3e1ca61763"
+          leftover:
+            - "DROP INDEX IF EXISTS drivine_uq_Personname_f56cb9fe_r"
+          build:
+            - "CREATE UNIQUE INDEX drivine_uq_Personname_f56cb9fe_r ON drivine_node ((CASE json_type(props, '$.\"name\"') WHEN 'text' THEN props ->> '$.\"name\"' WHEN 'null' THEN NULL ELSE props -> '$.\"name\"' END)) WHERE instr(labels, '\"Per\\\"son\"') > 0"
+          swap:
+            - "DROP INDEX IF EXISTS drivine_uq_Personname_f56cb9fe"
+            - "CREATE UNIQUE INDEX drivine_uq_Personname_f56cb9fe ON drivine_node ((CASE json_type(props, '$.\"name\"') WHEN 'text' THEN props ->> '$.\"name\"' WHEN 'null' THEN NULL ELSE props -> '$.\"name\"' END)) WHERE instr(labels, '\"Per\\\"son\"') > 0"
+            - "DROP INDEX IF EXISTS drivine_uq_Personname_f56cb9fe_r"
+          remade: "UPDATE drivine_schema SET object_name = 'drivine_uq_Personname_f56cb9fe', details = json_set(details, '$.form', 1) WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Per\"son' AND properties = '[\"name\"]'"
       neo4j:
         create:
           - "CREATE CONSTRAINT `Per\"son_name_unique` IF NOT EXISTS FOR (n:`Per\"son`) REQUIRE (n.`name`) IS UNIQUE"
@@ -4439,6 +4660,22 @@ cases:
                 DELETE FROM drivine_schema WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '["say\"hi"]';
             END
             $forget$
+        recreate:
+          form: 1
+          digest: "c598ed23113047aed308bfd948d4ac5422030731190bdadf68d437f5895ab296"
+          leftover:
+            - "DROP INDEX IF EXISTS drivine_uq_Personsayhi_5316dfc3_r"
+          build:
+            - "CREATE UNIQUE INDEX drivine_uq_Personsayhi_5316dfc3_r ON drivine_node (((props ->> 'say\"hi'))) WHERE labels @> '[\"Person\"]'"
+          swap:
+            - |-
+              DO $swap$
+              BEGIN
+                  DROP INDEX IF EXISTS drivine_uq_Personsayhi_5316dfc3;
+                  ALTER INDEX drivine_uq_Personsayhi_5316dfc3_r RENAME TO drivine_uq_Personsayhi_5316dfc3;
+              END
+              $swap$
+          remade: "UPDATE drivine_schema SET object_name = 'drivine_uq_Personsayhi_5316dfc3', details = jsonb_set(details, '{form}', '1') WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"say\\\"hi\"]'"
       oracle:
         form: 1
         digest: "7bf6d9fdc3e18c513ed0f0d7dcd092dfbdc7d063818816e7ff4b4b2492e159bd"
@@ -4526,6 +4763,33 @@ cases:
                 DELETE FROM drivine_schema WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '["say\"hi"]';
                 COMMIT;
             END;
+        recreate:
+          form: 1
+          digest: "c5688a6afdee2c10262876d363eeaa24ea5ce00e95c26b8fcf26c01ac64c3847"
+          leftover:
+            - "DROP INDEX IF EXISTS drivine_uq_Personsayhi_5316dfc3_r"
+          build:
+            - |-
+              DECLARE
+                  e_exists EXCEPTION; PRAGMA EXCEPTION_INIT(e_exists, -955);
+                  e_busy EXCEPTION; PRAGMA EXCEPTION_INIT(e_busy, -54);
+              BEGIN
+                  FOR attempt IN 1 .. 300 LOOP
+                      BEGIN
+                          EXECUTE IMMEDIATE 'CREATE UNIQUE INDEX drivine_uq_Personsayhi_5316dfc3_r ON drivine_node n (CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') AND JSON_EXISTS(n.props, ''$."say\"hi"'') THEN JSON_VALUE(n.props, ''$."say\"hi"'') END)';
+                          EXIT;
+                      EXCEPTION
+                          WHEN e_exists THEN EXIT;
+                          WHEN e_busy THEN
+                              IF attempt = 300 THEN RAISE; END IF;
+                              DBMS_SESSION.SLEEP(0.1);
+                      END;
+                  END LOOP;
+              END;
+          swap:
+            - "DROP INDEX IF EXISTS drivine_uq_Personsayhi_5316dfc3"
+            - "ALTER INDEX drivine_uq_Personsayhi_5316dfc3_r RENAME TO drivine_uq_Personsayhi_5316dfc3"
+          remade: "UPDATE drivine_schema SET object_name = 'drivine_uq_Personsayhi_5316dfc3', details = JSON_MERGEPATCH(details, '{\"form\": 1}') WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"say\\\"hi\"]'"
       sqlite:
         form: 1
         digest: "52cf31964aec9c3432d5e9bb3efb071d57759a9780d1fb7be34c683b04708e43"
@@ -4538,6 +4802,18 @@ cases:
         drop:
           - "DROP INDEX IF EXISTS drivine_uq_Personsayhi_5316dfc3"
           - "DELETE FROM drivine_schema WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"say\\\"hi\"]'"
+        recreate:
+          form: 1
+          digest: "03d1643d88bf17770ae5c0466e7299983ff949565a45e8dbb66cef33395681c3"
+          leftover:
+            - "DROP INDEX IF EXISTS drivine_uq_Personsayhi_5316dfc3_r"
+          build:
+            - "CREATE UNIQUE INDEX drivine_uq_Personsayhi_5316dfc3_r ON drivine_node ((CASE json_type(props, '$.\"say\\\"hi\"') WHEN 'text' THEN props ->> '$.\"say\\\"hi\"' WHEN 'null' THEN NULL ELSE props -> '$.\"say\\\"hi\"' END)) WHERE instr(labels, '\"Person\"') > 0"
+          swap:
+            - "DROP INDEX IF EXISTS drivine_uq_Personsayhi_5316dfc3"
+            - "CREATE UNIQUE INDEX drivine_uq_Personsayhi_5316dfc3 ON drivine_node ((CASE json_type(props, '$.\"say\\\"hi\"') WHEN 'text' THEN props ->> '$.\"say\\\"hi\"' WHEN 'null' THEN NULL ELSE props -> '$.\"say\\\"hi\"' END)) WHERE instr(labels, '\"Person\"') > 0"
+            - "DROP INDEX IF EXISTS drivine_uq_Personsayhi_5316dfc3_r"
+          remade: "UPDATE drivine_schema SET object_name = 'drivine_uq_Personsayhi_5316dfc3', details = json_set(details, '$.form', 1) WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"say\\\"hi\"]'"
       neo4j:
         create:
           - "CREATE CONSTRAINT `Person_say\"hi_unique` IF NOT EXISTS FOR (n:`Person`) REQUIRE (n.`say\"hi`) IS UNIQUE"
@@ -5948,12 +6224,12 @@ errors:
         gqlStatus: "22N79"
         message: "Property uniqueness constraint violated: Both Node(0) and Node(1) have the label `Person` and property `email` = 'a@b.c'."
     stores:
-      neo4j: {violation: true, blockedByIndex: false, buildTimeout: false}
-      memgraph: {violation: true, blockedByIndex: false, buildTimeout: false}
-      falkordb: {violation: true, blockedByIndex: false, buildTimeout: false}
-      postgres: {violation: false, blockedByIndex: false, buildTimeout: false}
-      oracle: {violation: false, blockedByIndex: false, buildTimeout: false}
-      sqlite: {violation: false, blockedByIndex: false, buildTimeout: false}
+      neo4j: {violation: true, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      memgraph: {violation: true, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      falkordb: {violation: true, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      postgres: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      oracle: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      sqlite: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
   - name: "Neo4j 2026: a refusal with an index entry conflict beneath it (22N80)"
     causes:
       - {message: "Unable to create Constraint( name='x', type='NODE PROPERTY UNIQUENESS' ):"}
@@ -5964,12 +6240,12 @@ errors:
         gqlStatus: "22N80"
         message: "Index entry conflict: Both Node(0) and Node(1) have the label `Person` and property `email` = 'a@b.c'."
     stores:
-      neo4j: {violation: true, blockedByIndex: false, buildTimeout: false}
-      memgraph: {violation: false, blockedByIndex: false, buildTimeout: false}
-      falkordb: {violation: false, blockedByIndex: false, buildTimeout: false}
-      postgres: {violation: false, blockedByIndex: false, buildTimeout: false}
-      oracle: {violation: false, blockedByIndex: false, buildTimeout: false}
-      sqlite: {violation: false, blockedByIndex: false, buildTimeout: false}
+      neo4j: {violation: true, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      memgraph: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      falkordb: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      postgres: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      oracle: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      sqlite: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
   - name: "Neo4j 5.26: a refusal with only an unexpected error beneath it is suspected"
     causes:
       - {message: "Unable to create Constraint( name='x', type='UNIQUENESS', schema=(:Person {email}) ):"}
@@ -5978,23 +6254,23 @@ errors:
         message: "Unable to create Constraint( name='x', type='UNIQUENESS', schema=(:Person {email}) ):"
       - {code: "N/A", gqlStatus: "50N42", message: "50N42: Unexpected error has occurred. See debug log for details."}
     stores:
-      neo4j: {violation: true, blockedByIndex: false, buildTimeout: false}
-      memgraph: {violation: false, blockedByIndex: false, buildTimeout: false}
-      falkordb: {violation: false, blockedByIndex: false, buildTimeout: false}
-      postgres: {violation: false, blockedByIndex: false, buildTimeout: false}
-      oracle: {violation: false, blockedByIndex: false, buildTimeout: false}
-      sqlite: {violation: false, blockedByIndex: false, buildTimeout: false}
+      neo4j: {violation: true, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      memgraph: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      falkordb: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      postgres: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      oracle: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      sqlite: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
   - name: "Neo4j: an unexpected error that isn't a refused constraint"
     causes:
       - {code: "Neo.DatabaseError.Statement.ExecutionFailed", gqlStatus: "50N11", message: "Something else failed."}
       - {code: "N/A", gqlStatus: "50N42", message: "Unexpected error."}
     stores:
-      neo4j: {violation: false, blockedByIndex: false, buildTimeout: false}
-      memgraph: {violation: false, blockedByIndex: false, buildTimeout: false}
-      falkordb: {violation: false, blockedByIndex: false, buildTimeout: false}
-      postgres: {violation: false, blockedByIndex: false, buildTimeout: false}
-      oracle: {violation: false, blockedByIndex: false, buildTimeout: false}
-      sqlite: {violation: false, blockedByIndex: false, buildTimeout: false}
+      neo4j: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      memgraph: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      falkordb: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      postgres: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      oracle: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      sqlite: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
   - name: "Neo4j: a refusal whose status names another cause (51N27, a key constraint on Community)"
     causes:
       - {message: "Unable to create Constraint( type='NODE KEY', schema=(:U {e}) ):"}
@@ -6003,36 +6279,36 @@ errors:
         message: "Unable to create Constraint( type='NODE KEY', schema=(:U {e}) ):"
       - {code: "N/A", gqlStatus: "51N27", message: "Key constraint is not supported in community edition."}
     stores:
-      neo4j: {violation: false, blockedByIndex: false, buildTimeout: false}
-      memgraph: {violation: false, blockedByIndex: false, buildTimeout: false}
-      falkordb: {violation: false, blockedByIndex: false, buildTimeout: false}
-      postgres: {violation: false, blockedByIndex: false, buildTimeout: false}
-      oracle: {violation: false, blockedByIndex: false, buildTimeout: false}
-      sqlite: {violation: false, blockedByIndex: false, buildTimeout: false}
+      neo4j: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      memgraph: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      falkordb: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      postgres: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      oracle: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      sqlite: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
   - name: "Neo4j older than GQL statuses: a refusal by its code alone"
     causes:
       - code: "Neo.DatabaseError.Schema.ConstraintCreationFailed"
         gqlStatus: "50N42"
         message: "Unable to create Constraint( name='x' ):"
     stores:
-      neo4j: {violation: true, blockedByIndex: false, buildTimeout: false}
-      memgraph: {violation: false, blockedByIndex: false, buildTimeout: false}
-      falkordb: {violation: false, blockedByIndex: false, buildTimeout: false}
-      postgres: {violation: false, blockedByIndex: false, buildTimeout: false}
-      oracle: {violation: false, blockedByIndex: false, buildTimeout: false}
-      sqlite: {violation: false, blockedByIndex: false, buildTimeout: false}
+      neo4j: {violation: true, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      memgraph: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      falkordb: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      postgres: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      oracle: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      sqlite: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
   - name: "Neo4j: a write the constraint refuses, whatever its status"
     causes:
       - code: "Neo.ClientError.Schema.ConstraintValidationFailed"
         gqlStatus: "22N41"
         message: "Node(0) already exists with label `Person` and property `email` = 'a@b.c'"
     stores:
-      neo4j: {violation: true, blockedByIndex: false, buildTimeout: false}
-      memgraph: {violation: false, blockedByIndex: false, buildTimeout: false}
-      falkordb: {violation: false, blockedByIndex: false, buildTimeout: false}
-      postgres: {violation: false, blockedByIndex: false, buildTimeout: false}
-      oracle: {violation: false, blockedByIndex: false, buildTimeout: false}
-      sqlite: {violation: false, blockedByIndex: false, buildTimeout: false}
+      neo4j: {violation: true, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      memgraph: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      falkordb: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      postgres: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      oracle: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      sqlite: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
   - name: "Neo4j: an index in the way of a constraint, wrapped"
     causes:
       - {message: "wrapped"}
@@ -6040,24 +6316,24 @@ errors:
         gqlStatus: "50N42"
         message: "There already exists an index (:Person {email}). A constraint cannot be created until the index has been dropped."
     stores:
-      neo4j: {violation: false, blockedByIndex: true, buildTimeout: false}
-      memgraph: {violation: false, blockedByIndex: false, buildTimeout: false}
-      falkordb: {violation: false, blockedByIndex: false, buildTimeout: false}
-      postgres: {violation: false, blockedByIndex: false, buildTimeout: false}
-      oracle: {violation: false, blockedByIndex: false, buildTimeout: false}
-      sqlite: {violation: false, blockedByIndex: false, buildTimeout: false}
+      neo4j: {violation: false, blockedByIndex: true, buildTimeout: false, alreadyIndexed: false}
+      memgraph: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      falkordb: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      postgres: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      oracle: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      sqlite: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
   - name: "Neo4j: an index of the same name is not in the way"
     causes:
       - code: "Neo.ClientError.Schema.IndexWithNameAlreadyExists"
         gqlStatus: "50N42"
         message: "There already exists an index called 'person_email'."
     stores:
-      neo4j: {violation: false, blockedByIndex: false, buildTimeout: false}
-      memgraph: {violation: false, blockedByIndex: false, buildTimeout: false}
-      falkordb: {violation: false, blockedByIndex: false, buildTimeout: false}
-      postgres: {violation: false, blockedByIndex: false, buildTimeout: false}
-      oracle: {violation: false, blockedByIndex: false, buildTimeout: false}
-      sqlite: {violation: false, blockedByIndex: false, buildTimeout: false}
+      neo4j: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      memgraph: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      falkordb: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      postgres: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      oracle: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      sqlite: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
   - name: "Neo4j: a wait for an index that ran out, wrapped"
     causes:
       - {message: "Timed out waiting for index"}
@@ -6065,100 +6341,100 @@ errors:
         gqlStatus: "50N42"
         message: "Timed out waiting for index"
     stores:
-      neo4j: {violation: false, blockedByIndex: false, buildTimeout: true}
-      memgraph: {violation: false, blockedByIndex: false, buildTimeout: false}
-      falkordb: {violation: false, blockedByIndex: false, buildTimeout: false}
-      postgres: {violation: false, blockedByIndex: false, buildTimeout: false}
-      oracle: {violation: false, blockedByIndex: false, buildTimeout: false}
-      sqlite: {violation: false, blockedByIndex: false, buildTimeout: false}
+      neo4j: {violation: false, blockedByIndex: false, buildTimeout: true, alreadyIndexed: false}
+      memgraph: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      falkordb: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      postgres: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      oracle: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      sqlite: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
   - name: "Neo4j: an index whose build failed"
     causes: [{code: "Neo.DatabaseError.Schema.IndexCreationFailed", gqlStatus: "50N42", message: "Index failed"}]
     stores:
-      neo4j: {violation: false, blockedByIndex: false, buildTimeout: false}
-      memgraph: {violation: false, blockedByIndex: false, buildTimeout: false}
-      falkordb: {violation: false, blockedByIndex: false, buildTimeout: false}
-      postgres: {violation: false, blockedByIndex: false, buildTimeout: false}
-      oracle: {violation: false, blockedByIndex: false, buildTimeout: false}
-      sqlite: {violation: false, blockedByIndex: false, buildTimeout: false}
+      neo4j: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      memgraph: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      falkordb: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      postgres: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      oracle: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      sqlite: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
   - name: "Neo4j: a syntax error"
     causes: [{code: "Neo.ClientError.Statement.SyntaxError", gqlStatus: "50N42", message: "Invalid input"}]
     stores:
-      neo4j: {violation: false, blockedByIndex: false, buildTimeout: false}
-      memgraph: {violation: false, blockedByIndex: false, buildTimeout: false}
-      falkordb: {violation: false, blockedByIndex: false, buildTimeout: false}
-      postgres: {violation: false, blockedByIndex: false, buildTimeout: false}
-      oracle: {violation: false, blockedByIndex: false, buildTimeout: false}
-      sqlite: {violation: false, blockedByIndex: false, buildTimeout: false}
+      neo4j: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      memgraph: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      falkordb: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      postgres: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      oracle: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      sqlite: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
   - name: "No driver's error: words alone say nothing on Neo4j or the SQL stores"
     causes:
       - message: "Unable to create Constraint: both nodes have the same value; constraint violated; UNIQUE constraint failed"
     stores:
-      neo4j: {violation: false, blockedByIndex: false, buildTimeout: false}
-      memgraph: {violation: true, blockedByIndex: false, buildTimeout: false}
-      falkordb: {violation: true, blockedByIndex: false, buildTimeout: false}
-      postgres: {violation: false, blockedByIndex: false, buildTimeout: false}
-      oracle: {violation: false, blockedByIndex: false, buildTimeout: false}
-      sqlite: {violation: false, blockedByIndex: false, buildTimeout: false}
+      neo4j: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      memgraph: {violation: true, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      falkordb: {violation: true, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      postgres: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      oracle: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      sqlite: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
   - name: "No driver's error: an index in the way, by its words alone"
     causes: [{message: "There already exists an index (:Person {email})."}]
     stores:
-      neo4j: {violation: false, blockedByIndex: false, buildTimeout: false}
-      memgraph: {violation: false, blockedByIndex: false, buildTimeout: false}
-      falkordb: {violation: false, blockedByIndex: false, buildTimeout: false}
-      postgres: {violation: false, blockedByIndex: false, buildTimeout: false}
-      oracle: {violation: false, blockedByIndex: false, buildTimeout: false}
-      sqlite: {violation: false, blockedByIndex: false, buildTimeout: false}
+      neo4j: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      memgraph: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      falkordb: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      postgres: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      oracle: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      sqlite: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
   - name: "No cause at all"
     causes: [{message: "no cause"}]
     stores:
-      neo4j: {violation: false, blockedByIndex: false, buildTimeout: false}
-      memgraph: {violation: false, blockedByIndex: false, buildTimeout: false}
-      falkordb: {violation: false, blockedByIndex: false, buildTimeout: false}
-      postgres: {violation: false, blockedByIndex: false, buildTimeout: false}
-      oracle: {violation: false, blockedByIndex: false, buildTimeout: false}
-      sqlite: {violation: false, blockedByIndex: false, buildTimeout: false}
+      neo4j: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      memgraph: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      falkordb: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      postgres: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      oracle: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      sqlite: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
   - name: "Memgraph: an existing node violates the constraint"
     causes:
       - code: "Memgraph.ClientError.MemgraphError.MemgraphError"
         gqlStatus: "50N42"
         message: "Unable to create unique constraint :Person(email), because an existing node violates it."
     stores:
-      neo4j: {violation: false, blockedByIndex: false, buildTimeout: false}
-      memgraph: {violation: true, blockedByIndex: false, buildTimeout: false}
-      falkordb: {violation: true, blockedByIndex: false, buildTimeout: false}
-      postgres: {violation: false, blockedByIndex: false, buildTimeout: false}
-      oracle: {violation: false, blockedByIndex: false, buildTimeout: false}
-      sqlite: {violation: false, blockedByIndex: false, buildTimeout: false}
+      neo4j: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      memgraph: {violation: true, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      falkordb: {violation: true, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      postgres: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      oracle: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      sqlite: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
   - name: "Memgraph: constraints not supported in analytical mode"
     causes:
       - code: "Memgraph.ClientError.MemgraphError.MemgraphError"
         gqlStatus: "50N42"
         message: "Constraints are not supported in analytical storage mode."
     stores:
-      neo4j: {violation: false, blockedByIndex: false, buildTimeout: false}
-      memgraph: {violation: false, blockedByIndex: false, buildTimeout: false}
-      falkordb: {violation: false, blockedByIndex: false, buildTimeout: false}
-      postgres: {violation: false, blockedByIndex: false, buildTimeout: false}
-      oracle: {violation: false, blockedByIndex: false, buildTimeout: false}
-      sqlite: {violation: false, blockedByIndex: false, buildTimeout: false}
+      neo4j: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      memgraph: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      falkordb: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      postgres: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      oracle: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      sqlite: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
   - name: "Graph engines: the words split across the chain still count"
     causes: [{message: "Could not make the constraint"}, {message: "data violates it"}]
     stores:
-      neo4j: {violation: false, blockedByIndex: false, buildTimeout: false}
-      memgraph: {violation: true, blockedByIndex: false, buildTimeout: false}
-      falkordb: {violation: true, blockedByIndex: false, buildTimeout: false}
-      postgres: {violation: false, blockedByIndex: false, buildTimeout: false}
-      oracle: {violation: false, blockedByIndex: false, buildTimeout: false}
-      sqlite: {violation: false, blockedByIndex: false, buildTimeout: false}
+      neo4j: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      memgraph: {violation: true, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      falkordb: {violation: true, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      postgres: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      oracle: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      sqlite: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
   - name: "FalkorDB: a violation said by the driver at submit time"
     causes: [{message: "ERR constraint violation: duplicate key"}]
     stores:
-      neo4j: {violation: false, blockedByIndex: false, buildTimeout: false}
-      memgraph: {violation: true, blockedByIndex: false, buildTimeout: false}
-      falkordb: {violation: true, blockedByIndex: false, buildTimeout: false}
-      postgres: {violation: false, blockedByIndex: false, buildTimeout: false}
-      oracle: {violation: false, blockedByIndex: false, buildTimeout: false}
-      sqlite: {violation: false, blockedByIndex: false, buildTimeout: false}
+      neo4j: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      memgraph: {violation: true, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      falkordb: {violation: true, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      postgres: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      oracle: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      sqlite: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
   - name: "Postgres: 23505, a unique index over rows that repeat a key"
     causes:
       - {message: "wrapped"}
@@ -6168,63 +6444,63 @@ errors:
           ERROR: could not create unique index "drivine_uq_x"
             Detail: Key ((props ->> 'email'::text))=(a@b.c) is duplicated.
     stores:
-      neo4j: {violation: false, blockedByIndex: false, buildTimeout: false}
-      memgraph: {violation: false, blockedByIndex: false, buildTimeout: false}
-      falkordb: {violation: false, blockedByIndex: false, buildTimeout: false}
-      postgres: {violation: true, blockedByIndex: false, buildTimeout: false}
-      oracle: {violation: false, blockedByIndex: false, buildTimeout: false}
-      sqlite: {violation: false, blockedByIndex: false, buildTimeout: false}
+      neo4j: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      memgraph: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      falkordb: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      postgres: {violation: true, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      oracle: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      sqlite: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
   - name: "Postgres: another SQL state"
     causes: [{sqlState: "42501", vendorCode: 0, message: "ERROR: permission denied for schema public"}]
     stores:
-      neo4j: {violation: false, blockedByIndex: false, buildTimeout: false}
-      memgraph: {violation: false, blockedByIndex: false, buildTimeout: false}
-      falkordb: {violation: false, blockedByIndex: false, buildTimeout: false}
-      postgres: {violation: false, blockedByIndex: false, buildTimeout: false}
-      oracle: {violation: false, blockedByIndex: false, buildTimeout: false}
-      sqlite: {violation: false, blockedByIndex: false, buildTimeout: false}
+      neo4j: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      memgraph: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      falkordb: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      postgres: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      oracle: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      sqlite: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
   - name: "Oracle: ORA-01452, a unique index over rows that repeat a key"
     causes:
       - {sqlState: "72000", vendorCode: 1452, message: "ORA-01452: cannot CREATE UNIQUE INDEX; duplicate keys found"}
     stores:
-      neo4j: {violation: false, blockedByIndex: false, buildTimeout: false}
-      memgraph: {violation: false, blockedByIndex: false, buildTimeout: false}
-      falkordb: {violation: false, blockedByIndex: false, buildTimeout: false}
-      postgres: {violation: false, blockedByIndex: false, buildTimeout: false}
-      oracle: {violation: true, blockedByIndex: false, buildTimeout: false}
-      sqlite: {violation: false, blockedByIndex: false, buildTimeout: false}
+      neo4j: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      memgraph: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      falkordb: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      postgres: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      oracle: {violation: true, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      sqlite: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
   - name: "Oracle: ORA-00001, a second row for a unique key"
     causes:
       - {message: "wrapped"}
       - {sqlState: "23000", vendorCode: 1, message: "ORA-00001: unique constraint (DRIVINE.DRIVINE_UQ_X) violated"}
     stores:
-      neo4j: {violation: false, blockedByIndex: false, buildTimeout: false}
-      memgraph: {violation: true, blockedByIndex: false, buildTimeout: false}
-      falkordb: {violation: true, blockedByIndex: false, buildTimeout: false}
-      postgres: {violation: false, blockedByIndex: false, buildTimeout: false}
-      oracle: {violation: true, blockedByIndex: false, buildTimeout: false}
-      sqlite: {violation: false, blockedByIndex: false, buildTimeout: false}
+      neo4j: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      memgraph: {violation: true, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      falkordb: {violation: true, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      postgres: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      oracle: {violation: true, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      sqlite: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
   - name: "Oracle: ORA-01408, the same expressions indexed already"
     causes: [{sqlState: "72000", vendorCode: 1408, message: "ORA-01408: such column list already indexed"}]
     stores:
-      neo4j: {violation: false, blockedByIndex: false, buildTimeout: false}
-      memgraph: {violation: false, blockedByIndex: false, buildTimeout: false}
-      falkordb: {violation: false, blockedByIndex: false, buildTimeout: false}
-      postgres: {violation: false, blockedByIndex: false, buildTimeout: false}
-      oracle: {violation: false, blockedByIndex: false, buildTimeout: false}
-      sqlite: {violation: false, blockedByIndex: false, buildTimeout: false}
+      neo4j: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      memgraph: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      falkordb: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      postgres: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      oracle: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: true}
+      sqlite: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
   - name: "SQLite: UNIQUE constraint failed, said in a driver's error"
     causes:
       - sqlState: null
         vendorCode: 19
         message: "[SQLITE_CONSTRAINT_UNIQUE] A UNIQUE constraint failed (UNIQUE constraint failed: index 'drivine_uq_x')"
     stores:
-      neo4j: {violation: false, blockedByIndex: false, buildTimeout: false}
-      memgraph: {violation: false, blockedByIndex: false, buildTimeout: false}
-      falkordb: {violation: false, blockedByIndex: false, buildTimeout: false}
-      postgres: {violation: false, blockedByIndex: false, buildTimeout: false}
-      oracle: {violation: false, blockedByIndex: false, buildTimeout: false}
-      sqlite: {violation: true, blockedByIndex: false, buildTimeout: false}
+      neo4j: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      memgraph: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      falkordb: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      postgres: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      oracle: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      sqlite: {violation: true, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
   - name: "SQLite: the words in no driver's error, beneath a driver's error that doesn't say them"
     causes:
       - sqlState: null
@@ -6232,21 +6508,63 @@ errors:
         message: "[SQLITE_CONSTRAINT_NOTNULL] A NOT NULL constraint failed (NOT NULL constraint failed: drivine_node.x)"
       - {message: "UNIQUE constraint failed"}
     stores:
-      neo4j: {violation: false, blockedByIndex: false, buildTimeout: false}
-      memgraph: {violation: false, blockedByIndex: false, buildTimeout: false}
-      falkordb: {violation: false, blockedByIndex: false, buildTimeout: false}
-      postgres: {violation: false, blockedByIndex: false, buildTimeout: false}
-      oracle: {violation: false, blockedByIndex: false, buildTimeout: false}
-      sqlite: {violation: false, blockedByIndex: false, buildTimeout: false}
+      neo4j: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      memgraph: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      falkordb: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      postgres: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      oracle: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      sqlite: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
   - name: "SQLite: a driver's error with no code"
     causes: [{sqlState: null, vendorCode: 0, message: "UNIQUE constraint failed: drivine_node.x"}]
     stores:
-      neo4j: {violation: false, blockedByIndex: false, buildTimeout: false}
-      memgraph: {violation: false, blockedByIndex: false, buildTimeout: false}
-      falkordb: {violation: false, blockedByIndex: false, buildTimeout: false}
-      postgres: {violation: false, blockedByIndex: false, buildTimeout: false}
-      oracle: {violation: false, blockedByIndex: false, buildTimeout: false}
-      sqlite: {violation: true, blockedByIndex: false, buildTimeout: false}
+      neo4j: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      memgraph: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      falkordb: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      postgres: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      oracle: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      sqlite: {violation: true, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+  - name: "Oracle: ORA-01408 from the unique index built anew beside the old one, raised through its block"
+    causes:
+      - {sqlState: "72000", vendorCode: 1408, message: "ORA-01408: such column list already indexed\nORA-06512: at line 7\n\nhttps://docs.oracle.com/error-help/db/ora-01408/"}
+      - {message: "ORA-01408: such column list already indexed\nORA-06512: at line 7\n"}
+    stores:
+      neo4j: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      memgraph: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      falkordb: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      postgres: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      oracle: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: true}
+      sqlite: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+  - name: "Oracle: ORA-01452 from the unique index built anew, raised through its block"
+    causes:
+      - {sqlState: "72000", vendorCode: 1452, message: "ORA-01452: cannot CREATE UNIQUE INDEX; duplicate keys found\nORA-06512: at line 7\n\nhttps://docs.oracle.com/error-help/db/ora-01452/"}
+      - {message: "ORA-01452: cannot CREATE UNIQUE INDEX; duplicate keys found\nORA-06512: at line 7\n"}
+    stores:
+      neo4j: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      memgraph: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      falkordb: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      postgres: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      oracle: {violation: true, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      sqlite: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+  - name: "Postgres: 23505 from the unique index built anew under the name it is built under first"
+    causes:
+      - {sqlState: "23505", vendorCode: 0, message: "ERROR: could not create unique index \"drivine_uq_personemail_5482a751_r\"\n  Detail: Key ((props ->> 'email'::text))=(a@x) is duplicated."}
+    stores:
+      neo4j: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      memgraph: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      falkordb: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      postgres: {violation: true, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      oracle: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      sqlite: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+  - name: "SQLite: UNIQUE constraint failed from the unique index built anew under the name it is built under first"
+    causes:
+      - {sqlState: null, vendorCode: 19, message: "[SQLITE_CONSTRAINT_UNIQUE] A UNIQUE constraint failed (UNIQUE constraint failed: index 'drivine_uq_Personemail_5482a751_r')"}
+    stores:
+      neo4j: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      memgraph: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      falkordb: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      postgres: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      oracle: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
+      sqlite: {violation: true, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
 declarations:
   - name: "Identical declarations are one"
     specs:

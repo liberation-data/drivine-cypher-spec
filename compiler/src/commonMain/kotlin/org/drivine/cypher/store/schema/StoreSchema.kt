@@ -230,6 +230,14 @@ interface StoreSchema {
     /** Whether [error], from [awaitIndexStatement], says the index was still being built when the wait ran out, rather than that its build failed. */
     fun isBuildTimeout(error: StoreError): Boolean = false
 
+    /**
+     * Whether [error], from building a uniqueness constraint's unique index anew beside the old one
+     * ([org.drivine.cypher.store.ddl.UniqueRecreation.build]), says an index over the same expressions is there already,
+     * so it can't be built beside it (Oracle's `ORA-01408`). Never, on a store that builds a second index over the same
+     * expressions.
+     */
+    fun isAlreadyIndexed(error: StoreError): Boolean = false
+
     companion object {
 
         /** The key of a record's `details` that holds its aliases, as the module's DDL writes them there. */

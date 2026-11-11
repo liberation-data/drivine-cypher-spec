@@ -44,6 +44,29 @@ data class CatalogItem(
 )
 
 /**
+ * How a SQL store makes a uniqueness constraint again without leaving it with no index where the data refuses it
+ * (drivine-cypher-spec#135 §4), each a list of statements run in order:
+ *
+ * - [leftover] drops the unique index [temporary], where a recreate that stopped short left it;
+ * - [build] makes the unique index anew under [temporary], over the expressions the constraint's `create` makes it over,
+ *   while the old one stands: data that repeats a key refuses it, and the old index and its record are kept;
+ * - [swap] puts it in the old index's place, under [name]: on Postgres one block that drops the old and renames it, on
+ *   Oracle the drop and then the rename, and on SQLite, which renames no index, the drop, the index made again under
+ *   [name] (which the data, held unique by [temporary], can't refuse), and [temporary] dropped;
+ * - [remade] records the record as made in this version's form as [name], keeping its aliases, after the constraint's
+ *   `create`, which finds the index there and records the item where no record is.
+ */
+@DrivineInternalApi
+data class UniqueRecreation(
+    val name: String,
+    val temporary: String,
+    val leftover: List<DdlStatement>,
+    val build: List<DdlStatement>,
+    val swap: List<DdlStatement>,
+    val remade: String,
+)
+
+/**
  * The statements that make, drop and list a store's indexes and constraints, for a graph and the schema specs: what the
  * three libraries' schema grammars each wrote, written once here so that a store one library makes is the store another
  * reads. Each is a pure function of its arguments. Running them, and deciding what to run, stays each library's.
@@ -220,6 +243,29 @@ abstract class SqlStoreDdl(val name: String, final override val engine: String, 
      */
     fun droppedIndex(name: String): String = "DROP INDEX IF EXISTS $name"
 
+    /**
+     * The name a uniqueness constraint's unique index named [name] is built under first, when it is made again
+     * ([recreation]): [name] and `_r`. [objectName] leaves two characters for it, so it fits within the [maxObjectName]
+     * the store allows, but for a graph whose name is as long as a graph's may be ([refusal]), whose `uq` names are one
+     * character longer: there it is cut by one, and its last character, of the hash, gives way. No name Drivine gives
+     * an object ends in `_r`, the hash being hexadecimal, so it is never another object's.
+     */
+    fun temporaryName(name: String): String = name.take(maxObjectName - TEMPORARY.length) + TEMPORARY
+
+    /**
+     * What makes the uniqueness constraint [spec] again so that data it refuses leaves the index it had (#135 §4): the
+     * unique index is built under a name of its own first ([temporaryName]), and only once it holds is it put in the
+     * place of the old one. A library's `create` follows it, which finds the index made, and then the record is made the
+     * current form's ([UniqueRecreation.remade]).
+     */
+    abstract fun recreation(spec: ConstraintSpec): UniqueRecreation
+
+    /**
+     * What records [item]'s record as made in [CURRENT_FORM] as the object [objectName], and changes nothing else (its
+     * aliases are kept): for a uniqueness constraint made again in its place ([recreation]). Safe to run again.
+     */
+    abstract fun remade(item: CatalogItem, objectName: String): String
+
     companion object {
         /** The key in a record's details its aliases are kept under. */
         const val ALIASES = "aliases"
@@ -236,6 +282,9 @@ abstract class SqlStoreDdl(val name: String, final override val engine: String, 
 
         /** The longest an object made beside another adds to its name: a trigger's `_t`, an index's `_i`. */
         private const val BESIDE = "_t"
+
+        /** What follows a unique index's name in the name it is built under first, when it is made again. */
+        const val TEMPORARY = "_r"
 
         private val NOT_READABLE = Regex("[^A-Za-z0-9]")
 

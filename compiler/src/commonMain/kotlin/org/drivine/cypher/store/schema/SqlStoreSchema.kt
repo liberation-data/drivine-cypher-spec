@@ -73,20 +73,13 @@ abstract class SqlStoreSchema internal constructor() : StoreSchema {
      */
     override fun formOf(spec: SchemaItemSpec, rows: List<Any?>): ItemForm {
         val objects = StoreObject.read(rows)
-        val record = rows.filterIsInstance<Map<*, *>>().firstOrNull { row ->
-            OBJECT !in row && parseIndexRows(listOf(row)).singleOrNull()?.let { matchesIdentity(it, spec) } == true
-        }
-        val form = ((record?.get("details") as? Map<*, *>)?.get(SqlStoreDdl.FORM) as? Number)?.toLong()
+        val record = recordOf(spec, rows)
+        val form = formRecorded(record)
         // A newer version's item is made in a form this version may not read: the record is trusted so long as what stands
         // under each name is of its structure, and its expressions aren't compared, so an older version in a rolling deploy
         // never drops a newer one's index, nor reports it drift, for what it can't read.
         val newer = form != null && form > SqlStoreDdl.CURRENT_FORM
-        for (made in madeAs(spec)) {
-            val there = objects[made.name] ?: continue
-            // Where indexes are named apart from other objects, a name another object has is no index's.
-            if (!there.isIndex && indexesNamedApart) continue
-            mismatchOf(made, there, structureOnly = newer)?.let { return ItemForm.Mismatch(there.name, it, droppable = there.isIndex) }
-        }
+        objectMismatches(spec, objects, newer).firstOrNull()?.let { return it }
         otherMismatch(spec, objects, structureOnly = newer)?.let { return it }
         // Objects under the item's names with no record of it: read as a record that says no form would be, so another
         // library's are kept as they are, not made over and recorded as this version's. This version's, or what isn't
@@ -100,6 +93,32 @@ abstract class SqlStoreSchema internal constructor() : StoreSchema {
             else -> ItemForm.Stale("form $form", SqlStoreDdl.CURRENT_FORM)
         }
     }
+
+    /**
+     * Each index the store has under a name Drivine gives one of [spec]'s objects ([madeAs]) that isn't the object it is
+     * made as, in [madeAs]'s order: what [formOf] reads first of all, and gives the first of. A uniqueness constraint made
+     * again drops each but its unique index's, which it builds anew before it drops (#135 §4).
+     */
+    fun mismatchesOf(spec: SchemaItemSpec, rows: List<Any?>): List<ItemForm.Mismatch> {
+        val form = formRecorded(recordOf(spec, rows))
+        return objectMismatches(spec, StoreObject.read(rows), newer = form != null && form > SqlStoreDdl.CURRENT_FORM)
+    }
+
+    private fun objectMismatches(spec: SchemaItemSpec, objects: StoreObjects, newer: Boolean): List<ItemForm.Mismatch> =
+        madeAs(spec).mapNotNull { made ->
+            val there = objects[made.name] ?: return@mapNotNull null
+            // Where indexes are named apart from other objects, a name another object has is no index's.
+            if (!there.isIndex && indexesNamedApart) return@mapNotNull null
+            mismatchOf(made, there, structureOnly = newer)?.let { ItemForm.Mismatch(there.name, it, droppable = there.isIndex) }
+        }
+
+    /** The record [rows] list of [spec]'s item; null where they list none. */
+    private fun recordOf(spec: SchemaItemSpec, rows: List<Any?>): Map<*, *>? = rows.filterIsInstance<Map<*, *>>().firstOrNull { row ->
+        OBJECT !in row && parseIndexRows(listOf(row)).singleOrNull()?.let { matchesIdentity(it, spec) } == true
+    }
+
+    /** The form [record] says its item was made in; null where it says none. */
+    private fun formRecorded(record: Map<*, *>?): Long? = ((record?.get("details") as? Map<*, *>)?.get(SqlStoreDdl.FORM) as? Number)?.toLong()
 
     /**
      * The form of [spec]'s item whose [record] says none, from [objects]: the module's, here, as on Postgres and SQLite the
@@ -543,6 +562,9 @@ class OracleSchema(override val ddl: OracleDdl) : SqlStoreSchema() {
 
         val VIOLATIONS = setOf(1, 1452)
 
+        /** `ORA-01408: such column list already indexed`. */
+        const val ALREADY_INDEXED = 1408
+
         /** What follows a table beside the nodes' name in its trigger's, and in its index's. */
         const val TRIGGER = "_t"
         const val INDEX = "_i"
@@ -565,6 +587,9 @@ class OracleSchema(override val ddl: OracleDdl) : SqlStoreSchema() {
 
     /** `ORA-00001`, a second row for a unique key; `ORA-01452`, a unique index over rows that already repeat one. */
     override fun isViolation(error: StoreError): Boolean = error.causes.any { it.isSqlError && it.vendorCode in VIOLATIONS }
+
+    /** `ORA-01408`: an index over the same expressions is there already, which Oracle allows only one of. */
+    override fun isAlreadyIndexed(error: StoreError): Boolean = error.causes.any { it.isSqlError && it.vendorCode == ALREADY_INDEXED }
 
     /**
      * Each node of a key that repeats is numbered within its key, and counted with it, so that a row names [limit] of its

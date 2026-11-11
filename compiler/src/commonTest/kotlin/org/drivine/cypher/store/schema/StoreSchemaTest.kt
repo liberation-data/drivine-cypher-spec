@@ -43,7 +43,8 @@ import kotlin.test.fail
  * - each store says what it can do, and gives the await, state and sample statements, as drivine4j's grammar did;
  * - each listing's rows read back to the items drivine4j read, with the aliases each record keeps;
  * - each pair of an item and a spec is the same item, and in its shape, where drivine4j said so, on every store;
- * - each error is a violation, an index in the way, or a build that ran out, where drivine4j said so, on every store;
+ * - each error is a violation, an index in the way, or a build that ran out, where drivine4j said so, on every store, and
+ *   the same expressions indexed already where a unique index built anew meets the old one (drivine-cypher-spec#135 §4);
  * - a catalog's declarations merge to drivine4j's items, or are refused with its message.
  */
 class StoreSchemaTest {
@@ -162,6 +163,7 @@ class StoreSchemaTest {
                 assertEquals(expected["violation"]!!.booleanValue(), schema.isViolation(error), "$id, $name: a violation")
                 assertEquals(expected["blockedByIndex"]!!.booleanValue(), schema.isBlockedByIndex(error), "$id, $name: an index in the way")
                 assertEquals(expected["buildTimeout"]!!.booleanValue(), schema.isBuildTimeout(error), "$id, $name: a build that ran out")
+                assertEquals(expected["alreadyIndexed"]!!.booleanValue(), schema.isAlreadyIndexed(error), "$id, $name: the same expressions indexed already")
             }
         }
     }

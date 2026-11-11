@@ -207,6 +207,41 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
     override fun dropConstraint(item: CatalogItem): List<DdlStatement> = forgotten(item)
 
     /**
+     * The unique index built under [temporaryName] while the old one stands, and swapped into its place in one block,
+     * which Postgres runs in one transaction: the old index is gone only where the new one has its name.
+     */
+    override fun recreation(spec: ConstraintSpec): UniqueRecreation = when (spec) {
+        is UniquenessConstraintSpec -> {
+            val name = objectName(UNIQUE, listOf(spec.label) + spec.properties)
+            val temporary = temporaryName(name)
+            UniqueRecreation(
+                name = name,
+                temporary = temporary,
+                leftover = listOf(DdlStatement.Text(droppedIndex(temporary))),
+                build = listOf(DdlStatement.Text(statement("CREATE UNIQUE INDEX $temporary ON ${over(spec.label, spec.properties)}"))),
+                swap = listOf(
+                    DdlStatement.Text(
+                        statement(
+                            """
+                            DO ${'$'}swap${'$'}
+                            BEGIN
+                                DROP INDEX IF EXISTS $name;
+                                ALTER INDEX $temporary RENAME TO $name;
+                            END
+                            ${'$'}swap${'$'}
+                            """
+                        )
+                    )
+                ),
+                remade = remade(CatalogItem(spec.kind, spec.label, spec.properties), name),
+            )
+        }
+    }
+
+    override fun remade(item: CatalogItem, objectName: String): String =
+        statement("UPDATE $catalog SET object_name = ${literal(objectName)}, details = jsonb_set(details, '{$FORM}', '$CURRENT_FORM') WHERE ${recordOf(item)}")
+
+    /**
      * What is recorded of [kinds], and still there: an index dropped by hand is not listed, so that it is made again when
      * asked for. After the records, a row for each relation of the schema the store reads under a name Drivine gives an
      * object of [objects], recorded or not, with what it is: its `type` (`relkind`), and of an index its `table`, whether
