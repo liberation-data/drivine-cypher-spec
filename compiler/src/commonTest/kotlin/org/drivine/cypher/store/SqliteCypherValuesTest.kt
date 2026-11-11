@@ -94,6 +94,8 @@ class SqliteCypherValuesTest {
         ascending("[false]", "[true]")
         ascending("[-1e308]", "[-1]", "[-0.0,1]", "[0,2]", "[1]")
         assertEquals(key("[-0.0]"), key("[0]"))
+        // A map by its canonical text: the same entries in any order are the same key.
+        assertEquals(key("[{\"b\":1,\"a\":[2]}]"), key("[{\"a\":[2],\"b\":1}]"))
     }
 
     @Test
