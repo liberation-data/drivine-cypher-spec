@@ -176,6 +176,9 @@ abstract class TemporalSql(protected val shared: (List<String>, (List<String>) -
     /** As [storedKey], of a value whose kind's word the SQL [kind] gives: null where the store keeps no such function. */
     open fun storedKeyOf(text: String, kind: String): String? = null
 
+    /** As [storedKeyOf], where a comparison or an order reads the key: a store may cut it from the text where it can. */
+    open fun comparedKeyOf(text: String, kind: String): String? = storedKeyOf(text, kind)
+
     /** The whole number the text [text] of digits, signed or not, is, as a 64-bit integer. */
     open fun integer(text: String) = "CAST($text AS INTEGER)"
 

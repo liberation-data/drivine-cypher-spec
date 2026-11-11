@@ -135,7 +135,7 @@ class Temporals(
      * [sortKey] of the canonical text [text] of the kind whose word the SQL [kind] gives, as the statement runs: by the store's
      * function where it keeps one, else by a `CASE` of each kind's.
      */
-    fun sortKeyOf(text: String, kind: String): String = sql.storedKeyOf(text, kind) ?: shared(listOf(text, kind)) { (t, k) ->
+    fun sortKeyOf(text: String, kind: String, compared: Boolean = false): String = (if (compared) sql.comparedKeyOf(text, kind) else sql.storedKeyOf(text, kind)) ?: shared(listOf(text, kind)) { (t, k) ->
         "CASE $k ${Temporal.instants.joinToString(" ") { "WHEN '${it.function}' THEN ${sortKey(t, it)}" }} END"
     }
 

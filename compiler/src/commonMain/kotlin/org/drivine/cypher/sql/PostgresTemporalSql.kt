@@ -10,13 +10,19 @@ class PostgresTemporalSql(
     /** The store's `PostgresDdl.temporalKey`: written inline, the key of a zoned moment is some 2,500 characters. */
     override fun storedKey(text: String, kind: Temporal): String? = storedKeyOf(text, "'${kind.function}'")
 
+    override fun storedKeyOf(text: String, kind: String): String? = graph?.let { "${org.drivine.cypher.store.ddl.PostgresDdl.temporalKeyName(it)}($kind, $text)" }
+
     /**
-     * The store's function, or where the value is a date, a local date-time or a moment at UTC of a year from 1000 to 9999, as
-     * a value worked out as the statement runs mostly is, its key cut from its text as it stands: the year, the month and day,
-     * the clock and the fraction are the key's own digits there, and no UTC day is worked out. Called for each row a compared
-     * sum is made for, the function took that sum's time a tenth as long again (#161).
+     * [storedKeyOf], or where the value is a date, a local date-time or a moment at UTC of a year from 1000 to 9999, as a value
+     * worked out as the statement runs mostly is, its key cut from its text as it stands: the year, the month and day, the
+     * clock and the fraction are the key's own digits there, and no UTC day is worked out. Called for each row a compared sum is
+     * made for, the function took that sum's time a tenth as long again (#161). Only where a comparison or an order reads the
+     * key: written into every tag a statement makes whole, it made a sum of a stored duration some 28,000 characters, which
+     * Postgres's backend died compiling.
      */
-    override fun storedKeyOf(text: String, kind: String): String? = graph?.let { graph ->
+    override fun comparedKeyOf(text: String, kind: String): String? = graph?.let { graph ->
+        val function = "${org.drivine.cypher.store.ddl.PostgresDdl.temporalKeyName(graph)}($kind, $text)"
+        if (text.length > CUT_UP_TO || kind.length > CUT_UP_TO) return@let function
         shared(listOf(text, kind)) { (t, k) ->
             fun cut(from: Int, length: Int) = "SUBSTR($t, $from, $length)"
             val day = "'100000' || ${cut(1, 4)} || ${cut(6, 2)} || ${cut(9, 2)}"
@@ -124,6 +130,9 @@ class PostgresTemporalSql(
     }
 
     private companion object {
+        /** How long a text and its kind may be for [storedKeyOf] to cut the key from the text: a column, or a key read from one. */
+        const val CUT_UP_TO = 200
+
         /** The key's offset of UTC, 0 seconds plus [Temporals.OFFSET_BIAS], in its six digits. */
         val OFFSET_ZERO = Temporals.OFFSET_BIAS.toString().padStart(6, '0')
 
