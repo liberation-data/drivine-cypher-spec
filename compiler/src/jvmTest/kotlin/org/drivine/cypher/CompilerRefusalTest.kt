@@ -610,6 +610,69 @@ class CompilerRefusalTest {
     }
 
     @Test
+    fun `an aggregate in the ORDER BY of a WITH or RETURN that neither aggregates nor is DISTINCT is refused, as Neo4j refuses it`() {
+        // #439: Neo4j's "Illegal aggregation expression(s) in order by". Compiled, the query aggregated with no GROUP BY, and SQLite
+        // gave one row. The spec's refusals hold the rest.
+        fun order(aggregate: String) = "$aggregate aggregates, and an ORDER BY holds no aggregate unless its WITH or RETURN aggregates or is DISTINCT, " +
+            "as in Neo4j: give the aggregate as an item, and order by its name, as in RETURN x, count(*) AS c ORDER BY c."
+        val refused = listOf(
+            "MATCH (n) RETURN * ORDER BY count(*)" to order("count(*)"),
+            "MATCH (n) WITH * ORDER BY count(*) RETURN n" to order("count(*)"),
+            "MATCH (n) RETURN n.num1 AS a ORDER BY CASE WHEN n.num1 > 0 THEN max(n.num2) END" to order("max()"),
+            "MATCH (n) RETURN n.num1 AS a ORDER BY toString(min(n.num2))" to order("min()"),
+            "MATCH (n) RETURN n.num1 AS a ORDER BY a, count(*)" to order("count(*)"),
+            "MATCH (n) RETURN n.num1 AS a UNION MATCH (n) RETURN n.num1 AS a ORDER BY max(n.num2)" to order("max()"),
+            "MATCH (n) CALL (n) { MATCH (n)-->(m) RETURN m.num1 AS b ORDER BY count(*) } RETURN b" to order("count(*)"),
+            "MATCH (n) RETURN COUNT { MATCH (n)-->(m) RETURN m.num1 AS b ORDER BY sum(m.num2) } AS c" to order("sum()"),
+        )
+        listOf(PostgresCypherCompiler("g"), OracleCypherCompiler("g"), SqliteCypherCompiler("g")).forEach { compiler ->
+            refused.forEach { (cypher, message) ->
+                val store = compiler::class.simpleName
+                assertEquals(message, assertThrows<CompilerException>("$store: $cypher") { compiler.compile(cypher) }.message, "$store: $cypher")
+            }
+            // One that is DISTINCT, or aggregates in any item, orders by an aggregate; a COUNT { }, a comprehension or a pattern
+            // comprehension in the ORDER BY isn't an aggregate of the projection. Checked on Neo4j 2026.10.1 for the first four.
+            listOf(
+                "MATCH (n) RETURN DISTINCT n.num1 AS a ORDER BY max(n.num2)",
+                "MATCH (n) RETURN n.num1 AS a, count(*) AS c ORDER BY max(n.num2)",
+                "MATCH (n) RETURN n.num1 AS a ORDER BY COUNT { (n)--() }",
+                "MATCH (n) RETURN n.num1 AS a ORDER BY size([x IN [1, 2] | x])",
+                "MATCH (n) RETURN n.num1 AS a ORDER BY size([(n)-->(m) | m])",
+                "MATCH (n) RETURN DISTINCT * ORDER BY count(*)",
+                "MATCH (n) RETURN *, count(*) AS c ORDER BY max(n.num2)",
+                "MATCH (n) WITH n.num1 AS a, collect(n) AS c ORDER BY max(n.num2) RETURN a",
+                "MATCH (n) RETURN reduce(s = 0, x IN collect(n.num1) | s + x) AS t ORDER BY max(n.num2)",
+                "MATCH (n) RETURN 1 IN collect(n.num1) AS t ORDER BY max(n.num2)",
+            ).forEach { compiler.compile(it) }
+            // One that is DISTINCT groups by its items, so the aggregate is worked out over each group, not over all the rows as one.
+            listOf(
+                "MATCH (n) RETURN DISTINCT n.num1 AS a ORDER BY max(n.num2)",
+                "MATCH (n) RETURN DISTINCT * ORDER BY count(*)",
+                "MATCH (n) WITH DISTINCT n.num1 AS a ORDER BY count(*) RETURN a",
+            ).forEach { cypher ->
+                assertTrue("GROUP BY" in compiler.compile(cypher).sql, "${compiler::class.simpleName}: $cypher")
+            }
+            // An item holding a parameter or a subquery is worked out first, as where an item aggregates: no store groups by a
+            // parameter it binds once for each mention, nor Oracle by a subquery.
+            listOf(
+                "MATCH (n) RETURN DISTINCT n.num1 + \$p AS a ORDER BY max(n.num2)",
+                "MATCH (n) RETURN DISTINCT COUNT { (n)--() } AS a ORDER BY max(n.num2)",
+            ).forEach { cypher ->
+                val groupBy = compiler.compile(cypher, mapOf("p" to 1L)).sql.substringAfter("GROUP BY ").lineSequence().first()
+                assertTrue("\$_cy_p" !in groupBy && "SELECT" !in groupBy, "${compiler::class.simpleName}: $cypher groups by $groupBy")
+            }
+            // So it names no variable outside its aggregates and the items, as one that aggregates names none: grouped by n, the
+            // DISTINCT gave a row for each n.num2 beside the same a.
+            val outside = "MATCH (n) RETURN DISTINCT n.num1 AS a ORDER BY n.num2 + max(n.num2)"
+            assertEquals(
+                "A term of an ORDER BY aggregates, and names n outside its aggregates and the items: " +
+                    "Cypher would group by it without being told. Order by an item's name, or by an expression of the items and aggregates.",
+                assertThrows<CompilerException>(outside) { compiler.compile(outside) }.message,
+            )
+        }
+    }
+
+    @Test
     fun `an aggregating item or order term that names a variable no item groups by, in a comprehension's or a pattern's body too, is refused`() {
         // #482: Neo4j's 42I18, "reference to non-grouping sub-expression". The body of a comprehension, a quantifier, a reduce() or a
         // pattern was not read for the variables it names, nor an order term at all. The spec's refusals hold the rest.

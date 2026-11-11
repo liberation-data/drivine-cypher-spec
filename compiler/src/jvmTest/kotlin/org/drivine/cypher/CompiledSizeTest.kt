@@ -430,8 +430,9 @@ class CompiledSizeTest {
             // Beside a grouping key, with DISTINCT, as an order term, and beside a variable-length walk.
             "MATCH (n) RETURN n.k AS k, $texts AS t" to "MATCH (n) WITH n.k AS k, max(n.title) AS a, max(n.first) AS b, max(n.last) AS c RETURN k, a + ': ' + b + ' ' + c AS t",
             "MATCH (n) RETURN DISTINCT $texts" to "MATCH (n) $worked RETURN DISTINCT a + ': ' + b + ' ' + c",
-            "MATCH (n) RETURN n.k AS k ORDER BY $texts" to
-                "MATCH (n) WITH n.k AS k, max(n.title) AS a, max(n.first) AS b, max(n.last) AS c RETURN k ORDER BY a + ': ' + b + ' ' + c",
+            // Beside an item that aggregates: Neo4j refuses an aggregate in the ORDER BY of one that doesn't (#439).
+            "MATCH (n) RETURN n.k AS k, count(*) AS x ORDER BY $texts" to
+                "MATCH (n) WITH n.k AS k, count(*) AS x, max(n.title) AS a, max(n.first) AS b, max(n.last) AS c RETURN k, x ORDER BY a + ': ' + b + ' ' + c",
             // An order term that reads an item by its name, which ran the compiler out of memory.
             "MATCH (n) RETURN n.k AS k, count(*) AS c ORDER BY ${four("toString", "count(*) * 10 + size(k)")}" to
                 "MATCH (n) WITH n.k AS k, count(*) AS x RETURN k, x AS c ORDER BY ${four("toString", "x * 10 + size(k)")}",
@@ -448,8 +449,8 @@ class CompiledSizeTest {
             "MATCH (n)-[*1..3]->(m) RETURN ${four("toLower", "max(m.name)")}" to "MATCH (n)-[*1..3]->(m) WITH max(m.name) AS x RETURN ${four("toLower", "x")}",
             // An order term over an aggregate's result beside a walk is worked out first over the grouping WITH (see sortsFirst),
             // as it is over a WITH's column.
-            "MATCH (n)-[*1..3]->(m) RETURN n.k AS k ORDER BY ${four("toLower", "max(m.name)")}" to
-                "MATCH (n)-[*1..3]->(m) WITH n.k AS k, max(m.name) AS x RETURN k ORDER BY ${four("toLower", "x")}",
+            "MATCH (n)-[*1..3]->(m) RETURN n.k AS k, count(*) AS c ORDER BY ${four("toLower", "max(m.name)")}" to
+                "MATCH (n)-[*1..3]->(m) WITH n.k AS k, count(*) AS c, max(m.name) AS x RETURN k, c ORDER BY ${four("toLower", "x")}",
         )
         compilers.forEach { compiler ->
             statements.forEach { (over, first) ->

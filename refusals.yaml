@@ -934,6 +934,26 @@ cases:
       - cypher: "MATCH (n) WHERE (n)-->(a) RETURN n"
         error: "a is not defined: a pattern used as an expression binds no new variable, as in Neo4j. Bind it in a MATCH, or test the pattern with EXISTS { … }."
 
+  - name: "Aggregate in the ORDER BY of a projection that doesn't aggregate"
+    description: "An aggregate in the ORDER BY of a WITH or a RETURN whose items don't aggregate, and that isn't DISTINCT, is refused, as Neo4j refuses it (\"Illegal aggregation expression(s) in order by\"): there are no groups for it to aggregate over. Compiled, it made the query aggregate with no GROUP BY, so SQLite gave one row of an arbitrary value (liberation-data/drivine4j#439). A WITH or a RETURN that aggregates, or is DISTINCT, orders by an aggregate, as Neo4j does (see queries.yaml, \"Grouping by maps and lists\")."
+    steps:
+      - cypher: "MATCH (n) WITH n.num1 AS foo ORDER BY max(n.num2) RETURN foo AS foo"
+        error: "max() aggregates, and an ORDER BY holds no aggregate unless its WITH or RETURN aggregates or is DISTINCT, as in Neo4j: give the aggregate as an item, and order by its name, as in RETURN x, count(*) AS c ORDER BY c."
+      - cypher: "MATCH (n) RETURN n.num1 ORDER BY max(n.num2)"
+        error: "max() aggregates, and an ORDER BY holds no aggregate unless its WITH or RETURN aggregates or is DISTINCT, as in Neo4j: give the aggregate as an item, and order by its name, as in RETURN x, count(*) AS c ORDER BY c."
+      - cypher: "MATCH (n) WITH n.num1 AS foo ORDER BY n.num1, max(n.num2) RETURN foo AS foo"
+        error: "max() aggregates, and an ORDER BY holds no aggregate unless its WITH or RETURN aggregates or is DISTINCT, as in Neo4j: give the aggregate as an item, and order by its name, as in RETURN x, count(*) AS c ORDER BY c."
+      - cypher: "MATCH (n) WITH 'k' AS foo ORDER BY max(n.num2) RETURN foo AS foo"
+        error: "max() aggregates, and an ORDER BY holds no aggregate unless its WITH or RETURN aggregates or is DISTINCT, as in Neo4j: give the aggregate as an item, and order by its name, as in RETURN x, count(*) AS c ORDER BY c."
+      - cypher: "UNWIND [3, 1, 2] AS x RETURN 'k' AS k ORDER BY count(x)"
+        error: "count() aggregates, and an ORDER BY holds no aggregate unless its WITH or RETURN aggregates or is DISTINCT, as in Neo4j: give the aggregate as an item, and order by its name, as in RETURN x, count(*) AS c ORDER BY c."
+      - note: "Of a DISTINCT projection, an aggregate in an ORDER BY term that names a variable outside the items is refused as an implicit grouping, as Neo4j refuses it."
+        cypher: "MATCH (n) RETURN DISTINCT n.num1 AS a ORDER BY n.num2 + max(n.num2)"
+        error: "A term of an ORDER BY aggregates, and names n outside its aggregates and the items: Cypher would group by it without being told. Order by an item's name, or by an expression of the items and aggregates."
+      - note: "Neo4j 2026.10.1 refuses each of these. A COUNT { … } or a comprehension in the ORDER BY isn't an aggregate of the projection, and is taken."
+        cypher: "MATCH (n) WITH n ORDER BY count(*) WHERE n.num1 > 0 RETURN n.num1"
+        error: "count(*) aggregates, and an ORDER BY holds no aggregate unless its WITH or RETURN aggregates or is DISTINCT, as in Neo4j: give the aggregate as an item, and order by its name, as in RETURN x, count(*) AS c ORDER BY c."
+
   - name: "Aggregate in a WHERE"
     description: "An aggregate in a WHERE is refused, as Neo4j refuses it (its 42I24, \"invalid use of aggregate function\"): of a MATCH or a WITH that groups nothing, a pattern comprehension, a list comprehension, a quantifier, a quantified path pattern, EXISTS { … } and COUNT { … }, in a subquery's or a CALL { … }'s query too, and in a comprehension's, a quantifier's or a pattern's own WHERE or body within the WHERE of a WITH that groups. The WHERE of a WITH that aggregates, or is DISTINCT, holds an aggregate, and so does one after a subquery or a CALL that aggregates in its own projection (see queries.yaml, \"Aggregate in the WHERE of a WITH that groups\" and \"Aggregate beside a WHERE\")."
     steps:
