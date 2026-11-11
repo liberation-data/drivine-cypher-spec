@@ -546,7 +546,7 @@ abstract class SqlCypherCompiler(
     }
 
     /** The sort key of the JSON [json], a tag that may be in flight: its key `s`, or where it has none, the key of its text. */
-    protected fun keyOf(json: String): String = "COALESCE(${tagKey(json)}, ${temporals.sortKeyOf(tagText(json), tagKind(json))})"
+    protected fun keyOf(json: String): String = "COALESCE(${tagKey(json)}, ${temporals.sortKeyOf(tagText(json), tagKind(json), compared = true)})"
 
     /** [value] in flight, where the statement works it out as it runs (see [Value.Json.inflight]); else [value]. */
     protected fun inFlight(value: Value.Json): Value.Json = value.inflight?.let { value.copy(sql = it, inflight = null) } ?: value
@@ -793,6 +793,12 @@ abstract class SqlCypherCompiler(
 
     /** Whether the JSON value [x] is equal to [y], the JSON of [given], a value the statement gives that is not null. */
     protected open fun givenEquals(x: String, y: String, given: Any) = "$x = $y"
+
+    /**
+     * [x] [operator] [y], JSON values, where the statement writes or is given [left] or [right], one of them a whole number from
+     * 2^53 on that the store compares with a float inexactly: null where it compares them as it compares any two (see Oracle's).
+     */
+    protected open fun orderedPast(x: String, operator: String, y: String, left: Any?, right: Any?): String? = null
 
     /**
      * A test of a JSON value alone, for an `IN` of a list whose items the statement writes or is given, [items], each a text, a
@@ -5055,6 +5061,8 @@ abstract class SqlCypherCompiler(
                     // Two temporal values' tags of one kind, not durations, by their sort keys, as Cypher orders them: a side in flight
                     // by the key of its text, where it has none.
                     else {
+                        // A whole number from 2^53 on, written or given, beside a number: as the store compares it exactly, where one is.
+                        listOf(binary.left, binary.right).map { given(it) }.let { (gl, gr) -> orderedPast(a, operator, b, gl, gr) }?.let { return Value.Bool(it) }
                         val flights = listOf(left, right).map { json(it) }
                         fun key(json: String, side: Int) = if (flights[side].inflight != null) keyOf(json) else tagKey(json)
                         Value.Bool(sharedCompared(comparable(inFlight(flights[0])), comparable(inFlight(flights[1]))) { (x, y) ->

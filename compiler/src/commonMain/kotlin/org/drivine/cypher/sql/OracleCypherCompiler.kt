@@ -506,6 +506,26 @@ class OracleCypherCompiler(
      * bound, and a property read by its own path, by [sharedCompared]. NaN, which JSON orders after every number, and which
      * Cypher orders with nothing, is false (#409).
      */
+    /**
+     * Oracle compares a `NUMBER` with a binary double as a double, so 2^53 + 1 was not greater than the float 2^53 (#161): beside a
+     * whole number from 2^53 on, written or given, the other number is read as a `NUMBER` and the two compared so, the given one
+     * as its exact digits. Null beside anything else, as [ordered] compares it.
+     */
+    override fun orderedPast(x: String, operator: String, y: String, left: Any?, right: Any?): String? {
+        fun exact(given: Any?) = when (given) {
+            is Long -> given.takeIf { it >= EXACT_DOUBLES || it <= -EXACT_DOUBLES }?.toString()
+            is Double -> given.takeIf { it == kotlin.math.floor(it) && kotlin.math.abs(it) >= EXACT_DOUBLES && kotlin.math.abs(it) < 9.2e18 }?.toLong()?.toString()
+            else -> null
+        }
+        val (l, r) = exact(left) to exact(right)
+        if (asJson || (l == null && r == null)) return null
+        return sharedCompared(x, y) { (a, b) ->
+            fun number(json: String, digits: String?) = digits ?: "JSON_VALUE($json, '\$' RETURNING NUMBER NULL ON ERROR)"
+            "CASE WHEN DECODE(${kind(a)}, 'double', 'number', ${kind(a)}) = 'number' AND DECODE(${kind(b)}, 'double', 'number', ${kind(b)}) = 'number' " +
+                "THEN ${number(a, l)} $operator ${number(b, r)} END"
+        }
+    }
+
     override fun ordered(x: String, operator: String, y: String): String {
         val numbers = shared(x, y) { (a, b) -> "(NOT (${isNaN(a)} OR ${isNaN(b)}) AND $a $operator $b)" }
         return if (asJson) numbers else "CASE WHEN ${kind(x)} = 'string' THEN ${textOrder(x, operator, y)} ELSE $numbers END"
