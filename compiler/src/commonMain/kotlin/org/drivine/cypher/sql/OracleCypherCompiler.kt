@@ -193,6 +193,9 @@ class OracleCypherCompiler(
      */
     override fun listSortKey(json: String) = if (procedural) sortKey(json) else listKey(json)
 
+    /** [listSortKey], then where it may tie, a key cut short at 2,000 bytes, the list as `JSON` sorts it. */
+    override fun listSortKeys(json: String) = if (procedural) listOf(sortKey(json)) else listOf(listKey(json), json)
+
     /** [LIST_KEY]'s key of the JSON [json], its function declared: see [listSortKey]. */
     private fun listKey(json: String): String {
         declare(LIST_KEY)
@@ -2224,7 +2227,7 @@ class OracleCypherCompiler(
          * a number its `NUMBER` bytes, which Oracle keeps in the number's order, and a byte 0, below any of them, so `1` comes before `1.04` whatever follows it; NaN or an infinity, which no `NUMBER`
          * holds, after them. A map is where maps come, and no store orders two maps here yet. JSON's null, and SQL's, is no
          * key, so it sorts where null does. Past 2,000 bytes, as long a `RAW` as SQL takes, a key is cut short, so lists
-         * that differ only after that sort as equals. It is the query's own, declared with `WITH FUNCTION`, not the store's.
+         * that differ only after that are sorted as `JSON` sorts them, by the term after it ([listSortKeys]). It is the query's own, declared with `WITH FUNCTION`, not the store's.
          */
         private val LIST_KEY = listOf(
             "FUNCTION cy_list_key(cy_x JSON) RETURN RAW IS",
@@ -2256,7 +2259,7 @@ class OracleCypherCompiler(
             "    END;",
             "BEGIN",
             "    IF cy_x IS NULL THEN RETURN NULL; END IF;",
-            "    e := JSON_ELEMENT_T.parse(JSON_SERIALIZE(cy_x RETURNING CLOB EXTENDED));",
+            "    e := JSON_ELEMENT_T.parse(JSON_SERIALIZE(cy_x RETURNING CLOB));",
             "    IF e.is_Null THEN RETURN NULL; END IF;",
             "    k(e);",
             "    RETURN UTL_RAW.SUBSTR(r, 1, LEAST(UTL_RAW.LENGTH(r), 2000));",

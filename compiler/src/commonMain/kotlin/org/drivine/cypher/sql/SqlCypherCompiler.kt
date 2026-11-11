@@ -798,6 +798,9 @@ abstract class SqlCypherCompiler(
     /** What an order sorts the JSON value [json] by where the statement makes it a list ([Value.Json.list]): as [sortKey] where the store orders lists as Cypher does. */
     protected open fun listSortKey(json: String) = sortKey(json)
 
+    /** The terms an order sorts the JSON list [json] by, the first deciding: [listSortKey] alone, unless a store's key may tie where the lists differ. */
+    protected open fun listSortKeys(json: String): List<String> = listOf(listSortKey(json))
+
     /** The term [term] of an `ORDER BY`, ascending or [descending]: null after every value ascending, and before them descending. */
     protected open fun orderTerm(term: String, descending: Boolean) = if (descending) "$term DESC" else term
 
@@ -6114,7 +6117,7 @@ abstract class SqlCypherCompiler(
             value is Value.Json && value.itemLists && value.itemItems?.zoned == true ->
                 comparable(value) to { listOf(momentsKey(it, value.itemItems, depth = 2)) }
             // A list the statement makes sorts as Cypher sorts lists, item by item; any other value as the store sorts its JSON.
-            isList(value) -> comparable(json(value)) to { listOf(listSortKey(it)) }
+            isList(value) -> comparable(json(value)) to { listSortKeys(it) }
             value !is Value.Json || value.temporal != null || isText(value) -> comparable(json(value)) to { listOf(sortKey(it)) }
             mayBeJsonNull(value) -> comparable(json(value)) to { jsonNullSortKey(it) }
             else -> comparable(json(value)) to { openSortKey(it) }
