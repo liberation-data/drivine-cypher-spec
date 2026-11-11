@@ -405,10 +405,7 @@ class OracleSchema(override val ddl: OracleDdl) : SqlStoreSchema() {
         if (paths.isEmpty()) return ItemForm.Current
         return when {
             paths.all { it.startsWith(LIBRARIES_LABEL_TEST) } -> ItemForm.Stale(LIBRARIES_FORM, SqlStoreDdl.CURRENT_FORM)
-            paths.all { it.startsWith(MODULES_LABEL_TEST) } -> {
-                val properties = (record["properties"] as List<*>).map { it.toString() }
-                ItemForm.Unrecorded(ddl.formRecorded(CatalogItem(spec.kind, spec.label, properties)))
-            }
+            paths.all { it.startsWith(MODULES_LABEL_TEST) } -> ItemForm.Unrecorded(ddl.formRecorded(CatalogItem(spec.kind, spec.label, properties)))
             else -> ItemForm.Current
         }
     }

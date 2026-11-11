@@ -763,7 +763,12 @@ internal class SchemaProgram(
     /** Records [aliases] as every alias of [item], whose record is there. */
     private fun alias(item: SchemaItemInfo, aliases: List<String>) {
         val ddl = store.ddl as? SqlStoreDdl ?: return
-        val action = PlanAction.Execute(DdlStatement.Text(ddl.aliased(item.catalogItem, aliases)), purpose = Purpose.ALIASES)
+        updateRecord(ddl.aliased(item.catalogItem, aliases))
+    }
+
+    /** Runs [statement], which changes what a SQL store's record keeps of an item (its aliases, its form), and nothing else. */
+    private fun updateRecord(statement: String) {
+        val action = PlanAction.Execute(DdlStatement.Text(statement), purpose = Purpose.ALIASES)
         val outcome = io.run(action)
         // What a later read lists has changed.
         listings.clear()
@@ -1067,12 +1072,7 @@ internal class SchemaProgram(
 
     /** Records the form of an item made in this version's form whose record says none ([ItemForm.Unrecorded]). */
     private fun adoptForm(form: ItemForm) {
-        if (form !is ItemForm.Unrecorded) return
-        val action = PlanAction.Execute(DdlStatement.Text(form.statement), purpose = Purpose.ALIASES)
-        val outcome = io.run(action)
-        // What a later read lists has changed.
-        listings.clear()
-        if (outcome is PlanOutcome.Failed) throw RawFailure(outcome.error, action, io.lastRound)
+        if (form is ItemForm.Unrecorded) updateRecord(form.statement)
     }
 
     // ----- Reads and DDL -----
