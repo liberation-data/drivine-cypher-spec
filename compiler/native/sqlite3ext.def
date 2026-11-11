@@ -1,0 +1,7 @@
+# SQLite's extension API, as a loadable extension sees it: the loading SQLite's sqlite3_api_routines, whose function
+# pointers the extension calls, so it binds to whatever SQLite loads it and links against none. The headers are those of
+# native/sqlite (see native/sqlite/sqlite.properties). Only the declarations are read: the routines are called through
+# the struct, never as sqlite3_* symbols, and none is linked.
+headers = sqlite3ext.h
+headerFilter = sqlite3ext.h sqlite3.h
+package = org.drivine.sqlite.ext

@@ -59,6 +59,8 @@ on:
       - .github/scripts/compiler-konan-dependencies.sh
       - compiler/check/corpus-node.cjs
       - compiler/check/corpus-native.py
+      - compiler/check/extension-native.py
+      - compiler/check/extension-requirements.txt
       - compiler/python/**
       - compiler/native/**
       - .github/actions/pinned-toolchain/**
@@ -753,6 +755,12 @@ jobs:
         run: |
           "$VENV_PYTHON" -I -X utf8 "$GITHUB_WORKSPACE/compiler/check/corpus-native.py" --installed \
             oracle/corpus.jsonl differences.jsonl oracle/mutants.jsonl differences-mutants.jsonl
+      # The installed package's library, as a SQLite extension: loaded by apsw (installed by hash into the same venv),
+      # its functions called through SQL, and its C API from the same path in the same process.
+      - name: The installed package's library loads as a SQLite extension
+        run: |
+          "$VENV_PYTHON" -m pip install --require-hashes --no-deps --only-binary :all: -r check/extension-requirements.txt
+          cd "$TEMP_DIR" && "$VENV_PYTHON" -I -X utf8 "$GITHUB_WORKSPACE/compiler/check/extension-native.py" --installed "$VERSION"
       - name: The wheel holds to its manylinux tag
         if: runner.os == 'Linux'
         env:
