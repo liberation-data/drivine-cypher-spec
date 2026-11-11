@@ -1,6 +1,7 @@
 package org.drivine.cypher.store.plan
 
 import org.drivine.cypher.CompilerException
+import org.drivine.cypher.store.ddl.CatalogItem
 import org.drivine.cypher.store.ddl.DdlStatement
 import org.drivine.cypher.store.ddl.FalkorDbDdl
 import org.drivine.cypher.store.ddl.SqlStoreDdl
@@ -916,9 +917,29 @@ internal class SchemaProgram(
 
     /** `ConstraintManager.drop`, a constraint whose build failed too. */
     private fun dropConstraint(spec: ConstraintSpec): Boolean {
-        val existing = findConstraint(spec) ?: return false
+        val existing = findConstraint(spec) ?: return dropCutOff(spec)
         ddl(store.ddl.dropConstraint(existing.catalogItem))
         log(LogLevel.INFO, CONSTRAINT_MANAGER, "Dropped $engine ${spec.kind} on ${spec.label}${spec.properties}")
+        return true
+    }
+
+    /**
+     * Where only the index a cut-off recreate built first holds [spec] on a SQL store ([SqlStoreSchema.cutOff]), and so no
+     * record is listed: that index is dropped, and the record forgotten, as it is what Drivine made of the constraint, and
+     * left standing would go on refusing a key the data repeats. False where it isn't so.
+     */
+    private fun dropCutOff(spec: ConstraintSpec): Boolean {
+        val sql = store.ddl as? SqlStoreDdl ?: return false
+        val schema = store as? SqlStoreSchema ?: return false
+        val made = spec.made()
+        val recreation = sql.recreation(made)
+        if (!schema.cutOff(made, listings[sql.listConstraintsQuery()].orEmpty(), recreation.name, recreation.temporary)) return false
+        ddl(recreation.leftover)
+        ddl(sql.dropConstraint(CatalogItem(made.kind, made.label, made.properties, made.effectiveName)))
+        log(
+            LogLevel.INFO, CONSTRAINT_MANAGER,
+            "Dropped $engine ${spec.kind} on ${spec.label}${spec.properties}, held by ${recreation.temporary}, the index a recreate of it that was cut off built first",
+        )
         return true
     }
 
