@@ -65,6 +65,12 @@ def same(got, expected):
     return got == expected
 
 
+def refuse_nan(values):
+    """SQLite binds a NaN as NULL, so the function would be given null, not what the step says."""
+    if any(isinstance(v, float) and math.isnan(v) for v in values):
+        raise ValueError("SQLite can't be given NaN as an argument")
+
+
 def host_steps(connection, host):
     """Each function step of host.yaml whose function the extension registers, through SQL; the functions it doesn't."""
     registered = {row[0] for row in connection.execute("SELECT name FROM pragma_function_list")}
@@ -83,15 +89,14 @@ def host_steps(connection, host):
                     values = [sql_value(v) for v in step["ascending"]]
                     if len(values) < 2:
                         raise ValueError("ascending has two values or more, each before the next")
+                    refuse_nan(values)
                     for a, b in zip(values, values[1:]):
                         before = connection.execute(f"SELECT {name}(?) < {name}(?)", (a, b)).fetchall()[0][0]
                         if before != 1:
                             report(f"{where}: {name}({a!r}) before {name}({b!r})", False, f"got {before!r}")
                 else:
                     args = [sql_value(v) for v in step["args"]]
-                    if any(isinstance(a, float) and math.isnan(a) for a in args):
-                        # SQLite binds a NaN as NULL, so the function would be given null, not what the step says.
-                        raise ValueError("SQLite can't be given NaN as an argument")
+                    refuse_nan(args)
                     got = connection.execute(f"SELECT {name}({', '.join('?' for _ in args)})", args).fetchall()[0][0]
                     expected = sql_value(step["result"])
                     if not same(got, expected):

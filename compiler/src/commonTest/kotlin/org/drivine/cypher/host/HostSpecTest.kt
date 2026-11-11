@@ -92,6 +92,10 @@ class HostSpecTest {
         assertContains(assertFails { check(text, "text") }.message!!, "No step reads the float of the text")
         val nan = CypherJson.readTree("""{"function": "drivine_float_text", "args": [{"${'$'}float": "NaN"}], "result": "NaN"}""")
         assertContains(assertFails { check(nan, "nan") }.message!!, "can't be given NaN")
+        val nanAscending = CypherJson.readTree("""{"function": "drivine_float_text", "ascending": [1.0, {"${'$'}float": "NaN"}]}""")
+        assertContains(assertFails { check(nanAscending, "nanAscending") }.message!!, "can't be given NaN")
+        val truth = CypherJson.readTree("""{"function": "drivine_float_text", "args": [true], "result": "1.0"}""")
+        assertContains(assertFails { check(truth, "truth") }.message!!, "No SQL value of")
         val pending = CypherJson.readTree("""{"function": "drivine_equal", "args": ["1", "1"], "result": 1}""")
         assertEquals(Outcome.PENDING, check(pending, "pending"))
         val read = CypherJson.readTree("""{"read": {"store": "sqlite", "nonFinite": false, "column": "1"}, "value": 1, "note": "n"}""")
@@ -129,6 +133,7 @@ class HostSpecTest {
         if (ascending != null) {
             val values = ascending.map(::expanded)
             require(values.size >= 2) { "$where: ascending has two values or more, each before the next" }
+            refuseNaN(values, where)
             values.zipWithNext().forEach { (a, b) ->
                 val x = call(functions, listOf(a), where)
                 val y = call(functions, listOf(b), where)
@@ -137,12 +142,15 @@ class HostSpecTest {
             }
         } else {
             val args = step["args"]!!.map(::expanded)
-            // SQLite binds a NaN as NULL (check/extension-native.py refuses it too): the function would be given null.
-            require(args.none { it is Double && it.isNaN() }) { "$where: SQLite can't be given NaN as an argument" }
+            refuseNaN(args, where)
             assertEquals(expanded(step["result"]!!), call(functions, args, where), "$where: $name$args")
         }
         return Outcome.RAN
     }
+
+    /** SQLite binds a NaN as NULL (check/extension-native.py refuses it too): the function would be given null. */
+    private fun refuseNaN(values: List<Any?>, where: String) =
+        require(values.none { it is Double && it.isNaN() }) { "$where: SQLite can't be given NaN as an argument" }
 
     /** The function of [functions] that takes [args], called as SQLite calls it: its result, or why it failed. */
     private fun call(functions: List<HostFunction>, args: List<Any?>, where: String): Any? {
