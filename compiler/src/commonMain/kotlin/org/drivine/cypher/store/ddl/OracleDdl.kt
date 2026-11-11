@@ -218,9 +218,9 @@ ${made.entries.joinToString("\n") { (function, making) ->
         BEGIN
             MERGE INTO $catalog c
             USING (SELECT ${literal(spec.kind.name)} AS kind, ${literal(spec.label)} AS label, ${literal(json(spec.properties))} AS properties FROM dual) k
-            ON (c.kind = k.kind AND c.label = k.label AND c.properties = k.properties)${if (updated) "\n            WHEN MATCHED THEN UPDATE SET c.details = JSON_MERGEPATCH(c.details, ${literal(rangeDetails(details))})" else ""}
+            ON (c.kind = k.kind AND c.label = k.label AND c.properties = k.properties)${if (updated) "\n            WHEN MATCHED THEN UPDATE SET c.details = JSON_MERGEPATCH(c.details, ${literal(rangeDetails(formed(details)))})" else ""}
             WHEN NOT MATCHED THEN INSERT (kind, label, properties, name, object_name, details)
-                VALUES (k.kind, k.label, k.properties, ${literal(spec.effectiveName)}, ${objectName?.let(::literal) ?: "NULL"}, ${literal(details)});
+                VALUES (k.kind, k.label, k.properties, ${literal(spec.effectiveName)}, ${objectName?.let(::literal) ?: "NULL"}, ${literal(formed(details))});
         EXCEPTION WHEN DUP_VAL_ON_INDEX THEN
             -- Another process recorded it between the MERGE's read and its insert: it is recorded.
             NULL;
@@ -459,7 +459,7 @@ ${made.entries.joinToString("\n") { (function, making) ->
                 IF v_labelled IS NOT NULL THEN
                     EXECUTE IMMEDIATE 'DROP INDEX IF EXISTS ' || v_labelled;
                 END IF;
-                UPDATE $catalog SET details = JSON_MERGEPATCH(details, ${literal(rangeDetails(details))}) WHERE $record;
+                UPDATE $catalog SET details = JSON_MERGEPATCH(details, ${literal(rangeDetails(formed(details)))}) WHERE $record;
                 COMMIT;
             END;
         """

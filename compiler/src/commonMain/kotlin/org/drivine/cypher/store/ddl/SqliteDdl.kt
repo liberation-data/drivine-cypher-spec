@@ -98,7 +98,7 @@ class SqliteDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
      */
     private fun recorded(spec: SchemaItemSpec, objectName: String?, details: String = "{}"): String = """
         INSERT INTO $catalog (kind, label, properties, name, object_name, details)
-        VALUES (${literal(spec.kind.name)}, ${literal(spec.label)}, ${literal(json(spec.properties))}, ${literal(spec.effectiveName)}, ${objectName?.let(::literal) ?: "NULL"}, ${literal(details)})
+        VALUES (${literal(spec.kind.name)}, ${literal(spec.label)}, ${literal(json(spec.properties))}, ${literal(spec.effectiveName)}, ${objectName?.let(::literal) ?: "NULL"}, ${literal(formed(details))})
         ON CONFLICT (kind, label, properties) DO NOTHING
     """
 

@@ -1446,7 +1446,7 @@ cases:
           - "CREATE INDEX IF NOT EXISTS drivine_ix_Personname_44ce5436 ON drivine_node (((props ->> 'name'))) WHERE labels @> '[\"Person\"]'"
           - |-
             INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
-            VALUES ('RANGE_INDEX', 'Person', '["name"]', 'Person_name_range', 'drivine_ix_Personname_44ce5436', '{}')
+            VALUES ('RANGE_INDEX', 'Person', '["name"]', 'Person_name_range', 'drivine_ix_Personname_44ce5436', '{"form": 1}')
             ON CONFLICT (kind, label, properties) DO NOTHING
         drop:
           - |-
@@ -1509,9 +1509,9 @@ cases:
                 MERGE INTO drivine_schema c
                 USING (SELECT 'RANGE_INDEX' AS kind, 'Person' AS label, '["name"]' AS properties FROM dual) k
                 ON (c.kind = k.kind AND c.label = k.label AND c.properties = k.properties)
-                WHEN MATCHED THEN UPDATE SET c.details = JSON_MERGEPATCH(c.details, '{"labelled": "drivine_lx_Personname_44ce5436", "unique": null}')
+                WHEN MATCHED THEN UPDATE SET c.details = JSON_MERGEPATCH(c.details, '{"form": 1, "labelled": "drivine_lx_Personname_44ce5436", "unique": null}')
                 WHEN NOT MATCHED THEN INSERT (kind, label, properties, name, object_name, details)
-                    VALUES (k.kind, k.label, k.properties, 'Person_name_range', 'drivine_ix_name_337a8b', '{"labelled": "drivine_lx_Personname_44ce5436"}');
+                    VALUES (k.kind, k.label, k.properties, 'Person_name_range', 'drivine_ix_name_337a8b', '{"form": 1, "labelled": "drivine_lx_Personname_44ce5436"}');
             EXCEPTION WHEN DUP_VAL_ON_INDEX THEN
                 -- Another process recorded it between the MERGE's read and its insert: it is recorded.
                 NULL;
@@ -1540,7 +1540,7 @@ cases:
           - "CREATE INDEX IF NOT EXISTS drivine_ix_Personname_44ce5436 ON drivine_node ((CASE json_type(props, '$.\"name\"') WHEN 'text' THEN props ->> '$.\"name\"' WHEN 'null' THEN NULL ELSE props -> '$.\"name\"' END)) WHERE instr(labels, '\"Person\"') > 0"
           - |-
             INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
-            VALUES ('RANGE_INDEX', 'Person', '["name"]', 'Person_name_range', 'drivine_ix_Personname_44ce5436', '{}')
+            VALUES ('RANGE_INDEX', 'Person', '["name"]', 'Person_name_range', 'drivine_ix_Personname_44ce5436', '{"form": 1}')
             ON CONFLICT (kind, label, properties) DO NOTHING
         drop:
           - "DROP INDEX IF EXISTS drivine_ix_Personname_44ce5436"
@@ -1573,7 +1573,7 @@ cases:
           - "CREATE INDEX IF NOT EXISTS drivine_ix_Personnameborn_3f5a18d3 ON drivine_node (((props ->> 'name')), ((props ->> 'born'))) WHERE labels @> '[\"Person\"]'"
           - |-
             INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
-            VALUES ('RANGE_INDEX', 'Person', '["name","born"]', 'Person_name_born_range', 'drivine_ix_Personnameborn_3f5a18d3', '{}')
+            VALUES ('RANGE_INDEX', 'Person', '["name","born"]', 'Person_name_born_range', 'drivine_ix_Personnameborn_3f5a18d3', '{"form": 1}')
             ON CONFLICT (kind, label, properties) DO NOTHING
         drop:
           - |-
@@ -1636,9 +1636,9 @@ cases:
                 MERGE INTO drivine_schema c
                 USING (SELECT 'RANGE_INDEX' AS kind, 'Person' AS label, '["name","born"]' AS properties FROM dual) k
                 ON (c.kind = k.kind AND c.label = k.label AND c.properties = k.properties)
-                WHEN MATCHED THEN UPDATE SET c.details = JSON_MERGEPATCH(c.details, '{"labelled": "drivine_lx_Personnameborn_3f5a18d3", "unique": null}')
+                WHEN MATCHED THEN UPDATE SET c.details = JSON_MERGEPATCH(c.details, '{"form": 1, "labelled": "drivine_lx_Personnameborn_3f5a18d3", "unique": null}')
                 WHEN NOT MATCHED THEN INSERT (kind, label, properties, name, object_name, details)
-                    VALUES (k.kind, k.label, k.properties, 'Person_name_born_range', 'drivine_ix_nameborn_44489f9e', '{"labelled": "drivine_lx_Personnameborn_3f5a18d3"}');
+                    VALUES (k.kind, k.label, k.properties, 'Person_name_born_range', 'drivine_ix_nameborn_44489f9e', '{"form": 1, "labelled": "drivine_lx_Personnameborn_3f5a18d3"}');
             EXCEPTION WHEN DUP_VAL_ON_INDEX THEN
                 -- Another process recorded it between the MERGE's read and its insert: it is recorded.
                 NULL;
@@ -1667,7 +1667,7 @@ cases:
           - "CREATE INDEX IF NOT EXISTS drivine_ix_Personnameborn_3f5a18d3 ON drivine_node ((CASE json_type(props, '$.\"name\"') WHEN 'text' THEN props ->> '$.\"name\"' WHEN 'null' THEN NULL ELSE props -> '$.\"name\"' END), (CASE json_type(props, '$.\"born\"') WHEN 'text' THEN props ->> '$.\"born\"' WHEN 'null' THEN NULL ELSE props -> '$.\"born\"' END)) WHERE instr(labels, '\"Person\"') > 0"
           - |-
             INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
-            VALUES ('RANGE_INDEX', 'Person', '["name","born"]', 'Person_name_born_range', 'drivine_ix_Personnameborn_3f5a18d3', '{}')
+            VALUES ('RANGE_INDEX', 'Person', '["name","born"]', 'Person_name_born_range', 'drivine_ix_Personnameborn_3f5a18d3', '{"form": 1}')
             ON CONFLICT (kind, label, properties) DO NOTHING
         drop:
           - "DROP INDEX IF EXISTS drivine_ix_Personnameborn_3f5a18d3"
@@ -1706,7 +1706,7 @@ cases:
           - "CREATE INDEX IF NOT EXISTS drivine_ix_Personnameborn_3f5a18d3 ON drivine_node (((props ->> 'name')), ((props ->> 'born'))) WHERE labels @> '[\"Person\"]'"
           - |-
             INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
-            VALUES ('RANGE_INDEX', 'Person', '["name","born"]', 'Person_name_born_range', 'drivine_ix_Personnameborn_3f5a18d3', '{}')
+            VALUES ('RANGE_INDEX', 'Person', '["name","born"]', 'Person_name_born_range', 'drivine_ix_Personnameborn_3f5a18d3', '{"form": 1}')
             ON CONFLICT (kind, label, properties) DO NOTHING
         drop:
           - |-
@@ -1769,9 +1769,9 @@ cases:
                 MERGE INTO drivine_schema c
                 USING (SELECT 'RANGE_INDEX' AS kind, 'Person' AS label, '["name","born"]' AS properties FROM dual) k
                 ON (c.kind = k.kind AND c.label = k.label AND c.properties = k.properties)
-                WHEN MATCHED THEN UPDATE SET c.details = JSON_MERGEPATCH(c.details, '{"labelled": "drivine_lx_Personnameborn_3f5a18d3", "unique": null}')
+                WHEN MATCHED THEN UPDATE SET c.details = JSON_MERGEPATCH(c.details, '{"form": 1, "labelled": "drivine_lx_Personnameborn_3f5a18d3", "unique": null}')
                 WHEN NOT MATCHED THEN INSERT (kind, label, properties, name, object_name, details)
-                    VALUES (k.kind, k.label, k.properties, 'Person_name_born_range', 'drivine_ix_nameborn_44489f9e', '{"labelled": "drivine_lx_Personnameborn_3f5a18d3"}');
+                    VALUES (k.kind, k.label, k.properties, 'Person_name_born_range', 'drivine_ix_nameborn_44489f9e', '{"form": 1, "labelled": "drivine_lx_Personnameborn_3f5a18d3"}');
             EXCEPTION WHEN DUP_VAL_ON_INDEX THEN
                 -- Another process recorded it between the MERGE's read and its insert: it is recorded.
                 NULL;
@@ -1800,7 +1800,7 @@ cases:
           - "CREATE INDEX IF NOT EXISTS drivine_ix_Personnameborn_3f5a18d3 ON drivine_node ((CASE json_type(props, '$.\"name\"') WHEN 'text' THEN props ->> '$.\"name\"' WHEN 'null' THEN NULL ELSE props -> '$.\"name\"' END), (CASE json_type(props, '$.\"born\"') WHEN 'text' THEN props ->> '$.\"born\"' WHEN 'null' THEN NULL ELSE props -> '$.\"born\"' END)) WHERE instr(labels, '\"Person\"') > 0"
           - |-
             INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
-            VALUES ('RANGE_INDEX', 'Person', '["name","born"]', 'Person_name_born_range', 'drivine_ix_Personnameborn_3f5a18d3', '{}')
+            VALUES ('RANGE_INDEX', 'Person', '["name","born"]', 'Person_name_born_range', 'drivine_ix_Personnameborn_3f5a18d3', '{"form": 1}')
             ON CONFLICT (kind, label, properties) DO NOTHING
         drop:
           - "DROP INDEX IF EXISTS drivine_ix_Personnameborn_3f5a18d3"
@@ -1824,7 +1824,7 @@ cases:
           - "CREATE INDEX IF NOT EXISTS drivine_ix_Personnameborn_3f5a18d3 ON drivine_node (((props ->> 'name')), ((props ->> 'born'))) WHERE labels @> '[\"Person\"]'"
           - |-
             INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
-            VALUES ('RANGE_INDEX', 'Person', '["name","born"]', 'Person_name_born_range', 'drivine_ix_Personnameborn_3f5a18d3', '{}')
+            VALUES ('RANGE_INDEX', 'Person', '["name","born"]', 'Person_name_born_range', 'drivine_ix_Personnameborn_3f5a18d3', '{"form": 1}')
             ON CONFLICT (kind, label, properties) DO NOTHING
         drop:
           - |-
@@ -1887,9 +1887,9 @@ cases:
                 MERGE INTO drivine_schema c
                 USING (SELECT 'RANGE_INDEX' AS kind, 'Person' AS label, '["name","born"]' AS properties FROM dual) k
                 ON (c.kind = k.kind AND c.label = k.label AND c.properties = k.properties)
-                WHEN MATCHED THEN UPDATE SET c.details = JSON_MERGEPATCH(c.details, '{"labelled": "drivine_lx_Personnameborn_3f5a18d3", "unique": null}')
+                WHEN MATCHED THEN UPDATE SET c.details = JSON_MERGEPATCH(c.details, '{"form": 1, "labelled": "drivine_lx_Personnameborn_3f5a18d3", "unique": null}')
                 WHEN NOT MATCHED THEN INSERT (kind, label, properties, name, object_name, details)
-                    VALUES (k.kind, k.label, k.properties, 'Person_name_born_range', 'drivine_ix_nameborn_44489f9e', '{"labelled": "drivine_lx_Personnameborn_3f5a18d3"}');
+                    VALUES (k.kind, k.label, k.properties, 'Person_name_born_range', 'drivine_ix_nameborn_44489f9e', '{"form": 1, "labelled": "drivine_lx_Personnameborn_3f5a18d3"}');
             EXCEPTION WHEN DUP_VAL_ON_INDEX THEN
                 -- Another process recorded it between the MERGE's read and its insert: it is recorded.
                 NULL;
@@ -1918,7 +1918,7 @@ cases:
           - "CREATE INDEX IF NOT EXISTS drivine_ix_Personnameborn_3f5a18d3 ON drivine_node ((CASE json_type(props, '$.\"name\"') WHEN 'text' THEN props ->> '$.\"name\"' WHEN 'null' THEN NULL ELSE props -> '$.\"name\"' END), (CASE json_type(props, '$.\"born\"') WHEN 'text' THEN props ->> '$.\"born\"' WHEN 'null' THEN NULL ELSE props -> '$.\"born\"' END)) WHERE instr(labels, '\"Person\"') > 0"
           - |-
             INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
-            VALUES ('RANGE_INDEX', 'Person', '["name","born"]', 'Person_name_born_range', 'drivine_ix_Personnameborn_3f5a18d3', '{}')
+            VALUES ('RANGE_INDEX', 'Person', '["name","born"]', 'Person_name_born_range', 'drivine_ix_Personnameborn_3f5a18d3', '{"form": 1}')
             ON CONFLICT (kind, label, properties) DO NOTHING
         drop:
           - "DROP INDEX IF EXISTS drivine_ix_Personnameborn_3f5a18d3"
@@ -1949,7 +1949,7 @@ cases:
           - "CREATE INDEX IF NOT EXISTS drivine_ix_Personname_44ce5436 ON drivine_node (((props ->> 'name'))) WHERE labels @> '[\"Person\"]'"
           - |-
             INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
-            VALUES ('RANGE_INDEX', 'Person', '["name"]', 'person_by_name', 'drivine_ix_Personname_44ce5436', '{}')
+            VALUES ('RANGE_INDEX', 'Person', '["name"]', 'person_by_name', 'drivine_ix_Personname_44ce5436', '{"form": 1}')
             ON CONFLICT (kind, label, properties) DO NOTHING
         drop:
           - |-
@@ -2012,9 +2012,9 @@ cases:
                 MERGE INTO drivine_schema c
                 USING (SELECT 'RANGE_INDEX' AS kind, 'Person' AS label, '["name"]' AS properties FROM dual) k
                 ON (c.kind = k.kind AND c.label = k.label AND c.properties = k.properties)
-                WHEN MATCHED THEN UPDATE SET c.details = JSON_MERGEPATCH(c.details, '{"labelled": "drivine_lx_Personname_44ce5436", "unique": null}')
+                WHEN MATCHED THEN UPDATE SET c.details = JSON_MERGEPATCH(c.details, '{"form": 1, "labelled": "drivine_lx_Personname_44ce5436", "unique": null}')
                 WHEN NOT MATCHED THEN INSERT (kind, label, properties, name, object_name, details)
-                    VALUES (k.kind, k.label, k.properties, 'person_by_name', 'drivine_ix_name_337a8b', '{"labelled": "drivine_lx_Personname_44ce5436"}');
+                    VALUES (k.kind, k.label, k.properties, 'person_by_name', 'drivine_ix_name_337a8b', '{"form": 1, "labelled": "drivine_lx_Personname_44ce5436"}');
             EXCEPTION WHEN DUP_VAL_ON_INDEX THEN
                 -- Another process recorded it between the MERGE's read and its insert: it is recorded.
                 NULL;
@@ -2043,7 +2043,7 @@ cases:
           - "CREATE INDEX IF NOT EXISTS drivine_ix_Personname_44ce5436 ON drivine_node ((CASE json_type(props, '$.\"name\"') WHEN 'text' THEN props ->> '$.\"name\"' WHEN 'null' THEN NULL ELSE props -> '$.\"name\"' END)) WHERE instr(labels, '\"Person\"') > 0"
           - |-
             INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
-            VALUES ('RANGE_INDEX', 'Person', '["name"]', 'person_by_name', 'drivine_ix_Personname_44ce5436', '{}')
+            VALUES ('RANGE_INDEX', 'Person', '["name"]', 'person_by_name', 'drivine_ix_Personname_44ce5436', '{"form": 1}')
             ON CONFLICT (kind, label, properties) DO NOTHING
         drop:
           - "DROP INDEX IF EXISTS drivine_ix_Personname_44ce5436"
@@ -2064,7 +2064,7 @@ cases:
           - "CREATE INDEX IF NOT EXISTS drivine_ix_Persondrivineloweremail_b3ad0b9b ON drivine_node (((props ->> '__drivine.lower.email'))) WHERE labels @> '[\"Person\"]'"
           - |-
             INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
-            VALUES ('RANGE_INDEX', 'Person', '["__drivine.lower.email"]', 'Person_email_ci_range', 'drivine_ix_Persondrivineloweremail_b3ad0b9b', '{}')
+            VALUES ('RANGE_INDEX', 'Person', '["__drivine.lower.email"]', 'Person_email_ci_range', 'drivine_ix_Persondrivineloweremail_b3ad0b9b', '{"form": 1}')
             ON CONFLICT (kind, label, properties) DO NOTHING
         drop:
           - |-
@@ -2127,9 +2127,9 @@ cases:
                 MERGE INTO drivine_schema c
                 USING (SELECT 'RANGE_INDEX' AS kind, 'Person' AS label, '["__drivine.lower.email"]' AS properties FROM dual) k
                 ON (c.kind = k.kind AND c.label = k.label AND c.properties = k.properties)
-                WHEN MATCHED THEN UPDATE SET c.details = JSON_MERGEPATCH(c.details, '{"labelled": "drivine_lx_Persondrivineloweremail_b3ad0b9b", "unique": null}')
+                WHEN MATCHED THEN UPDATE SET c.details = JSON_MERGEPATCH(c.details, '{"form": 1, "labelled": "drivine_lx_Persondrivineloweremail_b3ad0b9b", "unique": null}')
                 WHEN NOT MATCHED THEN INSERT (kind, label, properties, name, object_name, details)
-                    VALUES (k.kind, k.label, k.properties, 'Person_email_ci_range', 'drivine_ix_drivineloweremail_7ae8b9e6', '{"labelled": "drivine_lx_Persondrivineloweremail_b3ad0b9b"}');
+                    VALUES (k.kind, k.label, k.properties, 'Person_email_ci_range', 'drivine_ix_drivineloweremail_7ae8b9e6', '{"form": 1, "labelled": "drivine_lx_Persondrivineloweremail_b3ad0b9b"}');
             EXCEPTION WHEN DUP_VAL_ON_INDEX THEN
                 -- Another process recorded it between the MERGE's read and its insert: it is recorded.
                 NULL;
@@ -2158,7 +2158,7 @@ cases:
           - "CREATE INDEX IF NOT EXISTS drivine_ix_Persondrivineloweremail_b3ad0b9b ON drivine_node ((CASE json_type(props, '$.\"__drivine.lower.email\"') WHEN 'text' THEN props ->> '$.\"__drivine.lower.email\"' WHEN 'null' THEN NULL ELSE props -> '$.\"__drivine.lower.email\"' END)) WHERE instr(labels, '\"Person\"') > 0"
           - |-
             INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
-            VALUES ('RANGE_INDEX', 'Person', '["__drivine.lower.email"]', 'Person_email_ci_range', 'drivine_ix_Persondrivineloweremail_b3ad0b9b', '{}')
+            VALUES ('RANGE_INDEX', 'Person', '["__drivine.lower.email"]', 'Person_email_ci_range', 'drivine_ix_Persondrivineloweremail_b3ad0b9b', '{"form": 1}')
             ON CONFLICT (kind, label, properties) DO NOTHING
         drop:
           - "DROP INDEX IF EXISTS drivine_ix_Persondrivineloweremail_b3ad0b9b"
@@ -2196,7 +2196,7 @@ cases:
           - "CREATE UNIQUE INDEX IF NOT EXISTS drivine_uq_Personemail_5482a751 ON drivine_node (((props ->> 'email'))) WHERE labels @> '[\"Person\"]'"
           - |-
             INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
-            VALUES ('UNIQUENESS_CONSTRAINT', 'Person', '["email"]', 'Person_email_unique', 'drivine_uq_Personemail_5482a751', '{}')
+            VALUES ('UNIQUENESS_CONSTRAINT', 'Person', '["email"]', 'Person_email_unique', 'drivine_uq_Personemail_5482a751', '{"form": 1}')
             ON CONFLICT (kind, label, properties) DO NOTHING
         drop:
           - |-
@@ -2239,7 +2239,7 @@ cases:
                 USING (SELECT 'RANGE_INDEX' AS kind, 'Person' AS label, '["email"]' AS properties FROM dual) k
                 ON (c.kind = k.kind AND c.label = k.label AND c.properties = k.properties)
                 WHEN NOT MATCHED THEN INSERT (kind, label, properties, name, object_name, details)
-                    VALUES (k.kind, k.label, k.properties, 'Person_email_range', 'drivine_ix_email_5c24b9c', '{"unique": "drivine_uq_Personemail_5482a751"}');
+                    VALUES (k.kind, k.label, k.properties, 'Person_email_range', 'drivine_ix_email_5c24b9c', '{"form": 1, "unique": "drivine_uq_Personemail_5482a751"}');
             EXCEPTION WHEN DUP_VAL_ON_INDEX THEN
                 -- Another process recorded it between the MERGE's read and its insert: it is recorded.
                 NULL;
@@ -2269,7 +2269,7 @@ cases:
                 IF v_labelled IS NOT NULL THEN
                     EXECUTE IMMEDIATE 'DROP INDEX IF EXISTS ' || v_labelled;
                 END IF;
-                UPDATE drivine_schema SET details = JSON_MERGEPATCH(details, '{"unique": "drivine_uq_Personemail_5482a751", "labelled": null}') WHERE kind = 'RANGE_INDEX' AND label = 'Person' AND properties = '["email"]';
+                UPDATE drivine_schema SET details = JSON_MERGEPATCH(details, '{"form": 1, "unique": "drivine_uq_Personemail_5482a751", "labelled": null}') WHERE kind = 'RANGE_INDEX' AND label = 'Person' AND properties = '["email"]';
                 COMMIT;
             END;
           - |-
@@ -2278,7 +2278,7 @@ cases:
                 USING (SELECT 'UNIQUENESS_CONSTRAINT' AS kind, 'Person' AS label, '["email"]' AS properties FROM dual) k
                 ON (c.kind = k.kind AND c.label = k.label AND c.properties = k.properties)
                 WHEN NOT MATCHED THEN INSERT (kind, label, properties, name, object_name, details)
-                    VALUES (k.kind, k.label, k.properties, 'Person_email_unique', 'drivine_uq_Personemail_5482a751', '{}');
+                    VALUES (k.kind, k.label, k.properties, 'Person_email_unique', 'drivine_uq_Personemail_5482a751', '{"form": 1}');
             EXCEPTION WHEN DUP_VAL_ON_INDEX THEN
                 -- Another process recorded it between the MERGE's read and its insert: it is recorded.
                 NULL;
@@ -2304,7 +2304,7 @@ cases:
           - "CREATE UNIQUE INDEX IF NOT EXISTS drivine_uq_Personemail_5482a751 ON drivine_node ((CASE json_type(props, '$.\"email\"') WHEN 'text' THEN props ->> '$.\"email\"' WHEN 'null' THEN NULL ELSE props -> '$.\"email\"' END)) WHERE instr(labels, '\"Person\"') > 0"
           - |-
             INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
-            VALUES ('UNIQUENESS_CONSTRAINT', 'Person', '["email"]', 'Person_email_unique', 'drivine_uq_Personemail_5482a751', '{}')
+            VALUES ('UNIQUENESS_CONSTRAINT', 'Person', '["email"]', 'Person_email_unique', 'drivine_uq_Personemail_5482a751', '{"form": 1}')
             ON CONFLICT (kind, label, properties) DO NOTHING
         drop:
           - "DROP INDEX IF EXISTS drivine_uq_Personemail_5482a751"
@@ -2353,7 +2353,7 @@ cases:
           - "CREATE UNIQUE INDEX IF NOT EXISTS drivine_uq_Personfirstlast_58499b51 ON drivine_node (((props ->> 'first')), ((props ->> 'last'))) WHERE labels @> '[\"Person\"]'"
           - |-
             INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
-            VALUES ('UNIQUENESS_CONSTRAINT', 'Person', '["first","last"]', 'Person_first_last_unique', 'drivine_uq_Personfirstlast_58499b51', '{}')
+            VALUES ('UNIQUENESS_CONSTRAINT', 'Person', '["first","last"]', 'Person_first_last_unique', 'drivine_uq_Personfirstlast_58499b51', '{"form": 1}')
             ON CONFLICT (kind, label, properties) DO NOTHING
         drop:
           - |-
@@ -2416,9 +2416,9 @@ cases:
                 MERGE INTO drivine_schema c
                 USING (SELECT 'RANGE_INDEX' AS kind, 'Person' AS label, '["first","last"]' AS properties FROM dual) k
                 ON (c.kind = k.kind AND c.label = k.label AND c.properties = k.properties)
-                WHEN MATCHED THEN UPDATE SET c.details = JSON_MERGEPATCH(c.details, '{"labelled": "drivine_lx_Personfirstlast_58499b51", "unique": null}')
+                WHEN MATCHED THEN UPDATE SET c.details = JSON_MERGEPATCH(c.details, '{"form": 1, "labelled": "drivine_lx_Personfirstlast_58499b51", "unique": null}')
                 WHEN NOT MATCHED THEN INSERT (kind, label, properties, name, object_name, details)
-                    VALUES (k.kind, k.label, k.properties, 'Person_first_last_range', 'drivine_ix_firstlast_f12bede6', '{"labelled": "drivine_lx_Personfirstlast_58499b51"}');
+                    VALUES (k.kind, k.label, k.properties, 'Person_first_last_range', 'drivine_ix_firstlast_f12bede6', '{"form": 1, "labelled": "drivine_lx_Personfirstlast_58499b51"}');
             EXCEPTION WHEN DUP_VAL_ON_INDEX THEN
                 -- Another process recorded it between the MERGE's read and its insert: it is recorded.
                 NULL;
@@ -2446,7 +2446,7 @@ cases:
                 USING (SELECT 'UNIQUENESS_CONSTRAINT' AS kind, 'Person' AS label, '["first","last"]' AS properties FROM dual) k
                 ON (c.kind = k.kind AND c.label = k.label AND c.properties = k.properties)
                 WHEN NOT MATCHED THEN INSERT (kind, label, properties, name, object_name, details)
-                    VALUES (k.kind, k.label, k.properties, 'Person_first_last_unique', 'drivine_uq_Personfirstlast_58499b51', '{}');
+                    VALUES (k.kind, k.label, k.properties, 'Person_first_last_unique', 'drivine_uq_Personfirstlast_58499b51', '{"form": 1}');
             EXCEPTION WHEN DUP_VAL_ON_INDEX THEN
                 -- Another process recorded it between the MERGE's read and its insert: it is recorded.
                 NULL;
@@ -2472,7 +2472,7 @@ cases:
           - "CREATE UNIQUE INDEX IF NOT EXISTS drivine_uq_Personfirstlast_58499b51 ON drivine_node ((CASE json_type(props, '$.\"first\"') WHEN 'text' THEN props ->> '$.\"first\"' WHEN 'null' THEN NULL ELSE props -> '$.\"first\"' END), (CASE json_type(props, '$.\"last\"') WHEN 'text' THEN props ->> '$.\"last\"' WHEN 'null' THEN NULL ELSE props -> '$.\"last\"' END)) WHERE instr(labels, '\"Person\"') > 0"
           - |-
             INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
-            VALUES ('UNIQUENESS_CONSTRAINT', 'Person', '["first","last"]', 'Person_first_last_unique', 'drivine_uq_Personfirstlast_58499b51', '{}')
+            VALUES ('UNIQUENESS_CONSTRAINT', 'Person', '["first","last"]', 'Person_first_last_unique', 'drivine_uq_Personfirstlast_58499b51', '{"form": 1}')
             ON CONFLICT (kind, label, properties) DO NOTHING
         drop:
           - "DROP INDEX IF EXISTS drivine_uq_Personfirstlast_58499b51"
@@ -2535,7 +2535,7 @@ cases:
           - "CREATE UNIQUE INDEX IF NOT EXISTS drivine_uq_Persondrivineloweremail_b3ad0b9b ON drivine_node (((props ->> '__drivine.lower.email'))) WHERE labels @> '[\"Person\"]'"
           - |-
             INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
-            VALUES ('UNIQUENESS_CONSTRAINT', 'Person', '["__drivine.lower.email"]', 'Person_email_ci_unique', 'drivine_uq_Persondrivineloweremail_b3ad0b9b', '{}')
+            VALUES ('UNIQUENESS_CONSTRAINT', 'Person', '["__drivine.lower.email"]', 'Person_email_ci_unique', 'drivine_uq_Persondrivineloweremail_b3ad0b9b', '{"form": 1}')
             ON CONFLICT (kind, label, properties) DO NOTHING
         drop:
           - |-
@@ -2578,7 +2578,7 @@ cases:
                 USING (SELECT 'RANGE_INDEX' AS kind, 'Person' AS label, '["__drivine.lower.email"]' AS properties FROM dual) k
                 ON (c.kind = k.kind AND c.label = k.label AND c.properties = k.properties)
                 WHEN NOT MATCHED THEN INSERT (kind, label, properties, name, object_name, details)
-                    VALUES (k.kind, k.label, k.properties, 'Person___drivine.lower.email_range', 'drivine_ix_drivineloweremail_7ae8b9e6', '{"unique": "drivine_uq_Persondrivineloweremail_b3ad0b9b"}');
+                    VALUES (k.kind, k.label, k.properties, 'Person___drivine.lower.email_range', 'drivine_ix_drivineloweremail_7ae8b9e6', '{"form": 1, "unique": "drivine_uq_Persondrivineloweremail_b3ad0b9b"}');
             EXCEPTION WHEN DUP_VAL_ON_INDEX THEN
                 -- Another process recorded it between the MERGE's read and its insert: it is recorded.
                 NULL;
@@ -2608,7 +2608,7 @@ cases:
                 IF v_labelled IS NOT NULL THEN
                     EXECUTE IMMEDIATE 'DROP INDEX IF EXISTS ' || v_labelled;
                 END IF;
-                UPDATE drivine_schema SET details = JSON_MERGEPATCH(details, '{"unique": "drivine_uq_Persondrivineloweremail_b3ad0b9b", "labelled": null}') WHERE kind = 'RANGE_INDEX' AND label = 'Person' AND properties = '["__drivine.lower.email"]';
+                UPDATE drivine_schema SET details = JSON_MERGEPATCH(details, '{"form": 1, "unique": "drivine_uq_Persondrivineloweremail_b3ad0b9b", "labelled": null}') WHERE kind = 'RANGE_INDEX' AND label = 'Person' AND properties = '["__drivine.lower.email"]';
                 COMMIT;
             END;
           - |-
@@ -2617,7 +2617,7 @@ cases:
                 USING (SELECT 'UNIQUENESS_CONSTRAINT' AS kind, 'Person' AS label, '["__drivine.lower.email"]' AS properties FROM dual) k
                 ON (c.kind = k.kind AND c.label = k.label AND c.properties = k.properties)
                 WHEN NOT MATCHED THEN INSERT (kind, label, properties, name, object_name, details)
-                    VALUES (k.kind, k.label, k.properties, 'Person_email_ci_unique', 'drivine_uq_Persondrivineloweremail_b3ad0b9b', '{}');
+                    VALUES (k.kind, k.label, k.properties, 'Person_email_ci_unique', 'drivine_uq_Persondrivineloweremail_b3ad0b9b', '{"form": 1}');
             EXCEPTION WHEN DUP_VAL_ON_INDEX THEN
                 -- Another process recorded it between the MERGE's read and its insert: it is recorded.
                 NULL;
@@ -2643,7 +2643,7 @@ cases:
           - "CREATE UNIQUE INDEX IF NOT EXISTS drivine_uq_Persondrivineloweremail_b3ad0b9b ON drivine_node ((CASE json_type(props, '$.\"__drivine.lower.email\"') WHEN 'text' THEN props ->> '$.\"__drivine.lower.email\"' WHEN 'null' THEN NULL ELSE props -> '$.\"__drivine.lower.email\"' END)) WHERE instr(labels, '\"Person\"') > 0"
           - |-
             INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
-            VALUES ('UNIQUENESS_CONSTRAINT', 'Person', '["__drivine.lower.email"]', 'Person_email_ci_unique', 'drivine_uq_Persondrivineloweremail_b3ad0b9b', '{}')
+            VALUES ('UNIQUENESS_CONSTRAINT', 'Person', '["__drivine.lower.email"]', 'Person_email_ci_unique', 'drivine_uq_Persondrivineloweremail_b3ad0b9b', '{"form": 1}')
             ON CONFLICT (kind, label, properties) DO NOTHING
         drop:
           - "DROP INDEX IF EXISTS drivine_uq_Persondrivineloweremail_b3ad0b9b"
@@ -2693,7 +2693,7 @@ cases:
           - "CREATE INDEX IF NOT EXISTS drivine_v_Chunkembedding_7e60bd64 ON drivine_node USING hnsw ((CAST(CAST((props -> 'embedding') AS text) AS vector(384))) vector_cosine_ops) WHERE labels @> '[\"Chunk\"]' AND jsonb_typeof((props -> 'embedding')) = 'array' AND jsonb_array_length((props -> 'embedding')) = 384"
           - |-
             INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
-            VALUES ('VECTOR_INDEX', 'Chunk', '["embedding"]', 'Chunk_embedding_vector', 'drivine_v_Chunkembedding_7e60bd64', '{"dimensions": 384, "similarity": "COSINE"}')
+            VALUES ('VECTOR_INDEX', 'Chunk', '["embedding"]', 'Chunk_embedding_vector', 'drivine_v_Chunkembedding_7e60bd64', '{"form": 1, "dimensions": 384, "similarity": "COSINE"}')
             ON CONFLICT (kind, label, properties) DO NOTHING
         drop:
           - |-
@@ -2742,7 +2742,7 @@ cases:
                 USING (SELECT 'VECTOR_INDEX' AS kind, 'Chunk' AS label, '["embedding"]' AS properties FROM dual) k
                 ON (c.kind = k.kind AND c.label = k.label AND c.properties = k.properties)
                 WHEN NOT MATCHED THEN INSERT (kind, label, properties, name, object_name, details)
-                    VALUES (k.kind, k.label, k.properties, 'Chunk_embedding_vector', 'drivine_v_Chunkembedding_7e60bd64', '{"dimensions": 384, "similarity": "COSINE"}');
+                    VALUES (k.kind, k.label, k.properties, 'Chunk_embedding_vector', 'drivine_v_Chunkembedding_7e60bd64', '{"form": 1, "dimensions": 384, "similarity": "COSINE"}');
             EXCEPTION WHEN DUP_VAL_ON_INDEX THEN
                 -- Another process recorded it between the MERGE's read and its insert: it is recorded.
                 NULL;
@@ -2768,7 +2768,7 @@ cases:
         create:
           - |-
             INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
-            VALUES ('VECTOR_INDEX', 'Chunk', '["embedding"]', 'Chunk_embedding_vector', NULL, '{"dimensions": 384, "similarity": "COSINE"}')
+            VALUES ('VECTOR_INDEX', 'Chunk', '["embedding"]', 'Chunk_embedding_vector', NULL, '{"form": 1, "dimensions": 384, "similarity": "COSINE"}')
             ON CONFLICT (kind, label, properties) DO NOTHING
         drop:
           - "DELETE FROM drivine_schema WHERE kind = 'VECTOR_INDEX' AND label = 'Chunk' AND properties = '[\"embedding\"]'"
@@ -2807,7 +2807,7 @@ cases:
           - "CREATE INDEX IF NOT EXISTS drivine_v_Chunkvec_f0370b61 ON drivine_node USING hnsw ((CAST(CAST((props -> 'vec') AS text) AS vector(3))) vector_l2_ops) WHERE labels @> '[\"Chunk\"]' AND jsonb_typeof((props -> 'vec')) = 'array' AND jsonb_array_length((props -> 'vec')) = 3"
           - |-
             INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
-            VALUES ('VECTOR_INDEX', 'Chunk', '["vec"]', 'Chunk_vec_vector', 'drivine_v_Chunkvec_f0370b61', '{"dimensions": 3, "similarity": "EUCLIDEAN"}')
+            VALUES ('VECTOR_INDEX', 'Chunk', '["vec"]', 'Chunk_vec_vector', 'drivine_v_Chunkvec_f0370b61', '{"form": 1, "dimensions": 3, "similarity": "EUCLIDEAN"}')
             ON CONFLICT (kind, label, properties) DO NOTHING
         drop:
           - |-
@@ -2856,7 +2856,7 @@ cases:
                 USING (SELECT 'VECTOR_INDEX' AS kind, 'Chunk' AS label, '["vec"]' AS properties FROM dual) k
                 ON (c.kind = k.kind AND c.label = k.label AND c.properties = k.properties)
                 WHEN NOT MATCHED THEN INSERT (kind, label, properties, name, object_name, details)
-                    VALUES (k.kind, k.label, k.properties, 'Chunk_vec_vector', 'drivine_v_Chunkvec_f0370b61', '{"dimensions": 3, "similarity": "EUCLIDEAN"}');
+                    VALUES (k.kind, k.label, k.properties, 'Chunk_vec_vector', 'drivine_v_Chunkvec_f0370b61', '{"form": 1, "dimensions": 3, "similarity": "EUCLIDEAN"}');
             EXCEPTION WHEN DUP_VAL_ON_INDEX THEN
                 -- Another process recorded it between the MERGE's read and its insert: it is recorded.
                 NULL;
@@ -2882,7 +2882,7 @@ cases:
         create:
           - |-
             INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
-            VALUES ('VECTOR_INDEX', 'Chunk', '["vec"]', 'Chunk_vec_vector', NULL, '{"dimensions": 3, "similarity": "EUCLIDEAN"}')
+            VALUES ('VECTOR_INDEX', 'Chunk', '["vec"]', 'Chunk_vec_vector', NULL, '{"form": 1, "dimensions": 3, "similarity": "EUCLIDEAN"}')
             ON CONFLICT (kind, label, properties) DO NOTHING
         drop:
           - "DELETE FROM drivine_schema WHERE kind = 'VECTOR_INDEX' AND label = 'Chunk' AND properties = '[\"vec\"]'"
@@ -2928,7 +2928,7 @@ cases:
           - "CREATE INDEX IF NOT EXISTS drivine_v_Chunktuned_be8d03f9 ON drivine_node USING hnsw ((CAST(CAST((props -> 'tuned') AS text) AS vector(8))) vector_cosine_ops) WHERE labels @> '[\"Chunk\"]' AND jsonb_typeof((props -> 'tuned')) = 'array' AND jsonb_array_length((props -> 'tuned')) = 8"
           - |-
             INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
-            VALUES ('VECTOR_INDEX', 'Chunk', '["tuned"]', 'chunk_tuned', 'drivine_v_Chunktuned_be8d03f9', '{"dimensions": 8, "similarity": "COSINE"}')
+            VALUES ('VECTOR_INDEX', 'Chunk', '["tuned"]', 'chunk_tuned', 'drivine_v_Chunktuned_be8d03f9', '{"form": 1, "dimensions": 8, "similarity": "COSINE"}')
             ON CONFLICT (kind, label, properties) DO NOTHING
         drop:
           - |-
@@ -2977,7 +2977,7 @@ cases:
                 USING (SELECT 'VECTOR_INDEX' AS kind, 'Chunk' AS label, '["tuned"]' AS properties FROM dual) k
                 ON (c.kind = k.kind AND c.label = k.label AND c.properties = k.properties)
                 WHEN NOT MATCHED THEN INSERT (kind, label, properties, name, object_name, details)
-                    VALUES (k.kind, k.label, k.properties, 'chunk_tuned', 'drivine_v_Chunktuned_be8d03f9', '{"dimensions": 8, "similarity": "COSINE"}');
+                    VALUES (k.kind, k.label, k.properties, 'chunk_tuned', 'drivine_v_Chunktuned_be8d03f9', '{"form": 1, "dimensions": 8, "similarity": "COSINE"}');
             EXCEPTION WHEN DUP_VAL_ON_INDEX THEN
                 -- Another process recorded it between the MERGE's read and its insert: it is recorded.
                 NULL;
@@ -3003,7 +3003,7 @@ cases:
         create:
           - |-
             INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
-            VALUES ('VECTOR_INDEX', 'Chunk', '["tuned"]', 'chunk_tuned', NULL, '{"dimensions": 8, "similarity": "COSINE"}')
+            VALUES ('VECTOR_INDEX', 'Chunk', '["tuned"]', 'chunk_tuned', NULL, '{"form": 1, "dimensions": 8, "similarity": "COSINE"}')
             ON CONFLICT (kind, label, properties) DO NOTHING
         drop:
           - "DELETE FROM drivine_schema WHERE kind = 'VECTOR_INDEX' AND label = 'Chunk' AND properties = '[\"tuned\"]'"
@@ -3039,7 +3039,7 @@ cases:
           - "CREATE INDEX IF NOT EXISTS drivine_t_Doctitlebody_f4762232 ON drivine_node USING gin ((lower(COALESCE((props ->> 'title'), '') || ' ' || COALESCE((props ->> 'body'), ''))) gin_trgm_ops) WHERE labels @> '[\"Doc\"]'"
           - |-
             INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
-            VALUES ('FULLTEXT_INDEX', 'Doc', '["title","body"]', 'Doc_title_body_fulltext', 'drivine_t_Doctitlebody_f4762232', '{}')
+            VALUES ('FULLTEXT_INDEX', 'Doc', '["title","body"]', 'Doc_title_body_fulltext', 'drivine_t_Doctitlebody_f4762232', '{"form": 1}')
             ON CONFLICT (kind, label, properties) DO NOTHING
         drop:
           - |-
@@ -3082,7 +3082,7 @@ cases:
                                             USING (SELECT 'FULLTEXT_INDEX' AS kind, 'Doc' AS label, '["title","body"]' AS properties FROM dual) k
                                             ON (c.kind = k.kind AND c.label = k.label AND c.properties = k.properties)
                                             WHEN NOT MATCHED THEN INSERT (kind, label, properties, name, object_name, details)
-                                                VALUES (k.kind, k.label, k.properties, 'Doc_title_body_fulltext', NULL, '{}');
+                                                VALUES (k.kind, k.label, k.properties, 'Doc_title_body_fulltext', NULL, '{"form": 1}');
                                         EXCEPTION WHEN DUP_VAL_ON_INDEX THEN
                                             -- Another process recorded it between the MERGE's read and its insert: it is recorded.
                                             NULL;
@@ -3109,7 +3109,7 @@ cases:
                                 USING (SELECT 'FULLTEXT_INDEX' AS kind, 'Doc' AS label, '["title","body"]' AS properties FROM dual) k
                                 ON (c.kind = k.kind AND c.label = k.label AND c.properties = k.properties)
                                 WHEN NOT MATCHED THEN INSERT (kind, label, properties, name, object_name, details)
-                                    VALUES (k.kind, k.label, k.properties, 'Doc_title_body_fulltext', 'drivine_t_Doctitlebody_f4762232', '{}');
+                                    VALUES (k.kind, k.label, k.properties, 'Doc_title_body_fulltext', 'drivine_t_Doctitlebody_f4762232', '{"form": 1}');
                             EXCEPTION WHEN DUP_VAL_ON_INDEX THEN
                                 -- Another process recorded it between the MERGE's read and its insert: it is recorded.
                                 NULL;
@@ -3136,7 +3136,7 @@ cases:
         create:
           - |-
             INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
-            VALUES ('FULLTEXT_INDEX', 'Doc', '["title","body"]', 'Doc_title_body_fulltext', NULL, '{}')
+            VALUES ('FULLTEXT_INDEX', 'Doc', '["title","body"]', 'Doc_title_body_fulltext', NULL, '{"form": 1}')
             ON CONFLICT (kind, label, properties) DO NOTHING
         drop:
           - "DELETE FROM drivine_schema WHERE kind = 'FULLTEXT_INDEX' AND label = 'Doc' AND properties = '[\"title\",\"body\"]'"
@@ -3163,7 +3163,7 @@ cases:
           - "CREATE INDEX IF NOT EXISTS drivine_t_Doctitlebody_f4762232 ON drivine_node USING gin ((lower(COALESCE((props ->> 'title'), '') || ' ' || COALESCE((props ->> 'body'), ''))) gin_trgm_ops) WHERE labels @> '[\"Doc\"]'"
           - |-
             INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
-            VALUES ('FULLTEXT_INDEX', 'Doc', '["title","body"]', 'Doc_title_body_fulltext', 'drivine_t_Doctitlebody_f4762232', '{}')
+            VALUES ('FULLTEXT_INDEX', 'Doc', '["title","body"]', 'Doc_title_body_fulltext', 'drivine_t_Doctitlebody_f4762232', '{"form": 1}')
             ON CONFLICT (kind, label, properties) DO NOTHING
         drop:
           - |-
@@ -3206,7 +3206,7 @@ cases:
                                             USING (SELECT 'FULLTEXT_INDEX' AS kind, 'Doc' AS label, '["title","body"]' AS properties FROM dual) k
                                             ON (c.kind = k.kind AND c.label = k.label AND c.properties = k.properties)
                                             WHEN NOT MATCHED THEN INSERT (kind, label, properties, name, object_name, details)
-                                                VALUES (k.kind, k.label, k.properties, 'Doc_title_body_fulltext', NULL, '{}');
+                                                VALUES (k.kind, k.label, k.properties, 'Doc_title_body_fulltext', NULL, '{"form": 1}');
                                         EXCEPTION WHEN DUP_VAL_ON_INDEX THEN
                                             -- Another process recorded it between the MERGE's read and its insert: it is recorded.
                                             NULL;
@@ -3233,7 +3233,7 @@ cases:
                                 USING (SELECT 'FULLTEXT_INDEX' AS kind, 'Doc' AS label, '["title","body"]' AS properties FROM dual) k
                                 ON (c.kind = k.kind AND c.label = k.label AND c.properties = k.properties)
                                 WHEN NOT MATCHED THEN INSERT (kind, label, properties, name, object_name, details)
-                                    VALUES (k.kind, k.label, k.properties, 'Doc_title_body_fulltext', 'drivine_t_Doctitlebody_f4762232', '{}');
+                                    VALUES (k.kind, k.label, k.properties, 'Doc_title_body_fulltext', 'drivine_t_Doctitlebody_f4762232', '{"form": 1}');
                             EXCEPTION WHEN DUP_VAL_ON_INDEX THEN
                                 -- Another process recorded it between the MERGE's read and its insert: it is recorded.
                                 NULL;
@@ -3260,7 +3260,7 @@ cases:
         create:
           - |-
             INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
-            VALUES ('FULLTEXT_INDEX', 'Doc', '["title","body"]', 'Doc_title_body_fulltext', NULL, '{}')
+            VALUES ('FULLTEXT_INDEX', 'Doc', '["title","body"]', 'Doc_title_body_fulltext', NULL, '{"form": 1}')
             ON CONFLICT (kind, label, properties) DO NOTHING
         drop:
           - "DELETE FROM drivine_schema WHERE kind = 'FULLTEXT_INDEX' AND label = 'Doc' AND properties = '[\"title\",\"body\"]'"
@@ -3290,7 +3290,7 @@ cases:
           - "CREATE INDEX IF NOT EXISTS drivine_t_Doctitle_e86cfd70 ON drivine_node USING gin ((lower(COALESCE((props ->> 'title'), ''))) gin_trgm_ops) WHERE labels @> '[\"Doc\"]'"
           - |-
             INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
-            VALUES ('FULLTEXT_INDEX', 'Doc', '["title"]', 'Doc_title_fulltext', 'drivine_t_Doctitle_e86cfd70', '{"analyzer": "english"}')
+            VALUES ('FULLTEXT_INDEX', 'Doc', '["title"]', 'Doc_title_fulltext', 'drivine_t_Doctitle_e86cfd70', '{"form": 1, "analyzer": "english"}')
             ON CONFLICT (kind, label, properties) DO NOTHING
         drop:
           - |-
@@ -3333,7 +3333,7 @@ cases:
                                             USING (SELECT 'FULLTEXT_INDEX' AS kind, 'Doc' AS label, '["title"]' AS properties FROM dual) k
                                             ON (c.kind = k.kind AND c.label = k.label AND c.properties = k.properties)
                                             WHEN NOT MATCHED THEN INSERT (kind, label, properties, name, object_name, details)
-                                                VALUES (k.kind, k.label, k.properties, 'Doc_title_fulltext', NULL, '{"analyzer": "english"}');
+                                                VALUES (k.kind, k.label, k.properties, 'Doc_title_fulltext', NULL, '{"form": 1, "analyzer": "english"}');
                                         EXCEPTION WHEN DUP_VAL_ON_INDEX THEN
                                             -- Another process recorded it between the MERGE's read and its insert: it is recorded.
                                             NULL;
@@ -3360,7 +3360,7 @@ cases:
                                 USING (SELECT 'FULLTEXT_INDEX' AS kind, 'Doc' AS label, '["title"]' AS properties FROM dual) k
                                 ON (c.kind = k.kind AND c.label = k.label AND c.properties = k.properties)
                                 WHEN NOT MATCHED THEN INSERT (kind, label, properties, name, object_name, details)
-                                    VALUES (k.kind, k.label, k.properties, 'Doc_title_fulltext', 'drivine_t_Doctitle_e86cfd70', '{"analyzer": "english"}');
+                                    VALUES (k.kind, k.label, k.properties, 'Doc_title_fulltext', 'drivine_t_Doctitle_e86cfd70', '{"form": 1, "analyzer": "english"}');
                             EXCEPTION WHEN DUP_VAL_ON_INDEX THEN
                                 -- Another process recorded it between the MERGE's read and its insert: it is recorded.
                                 NULL;
@@ -3387,7 +3387,7 @@ cases:
         create:
           - |-
             INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
-            VALUES ('FULLTEXT_INDEX', 'Doc', '["title"]', 'Doc_title_fulltext', NULL, '{"analyzer": "english"}')
+            VALUES ('FULLTEXT_INDEX', 'Doc', '["title"]', 'Doc_title_fulltext', NULL, '{"form": 1, "analyzer": "english"}')
             ON CONFLICT (kind, label, properties) DO NOTHING
         drop:
           - "DELETE FROM drivine_schema WHERE kind = 'FULLTEXT_INDEX' AND label = 'Doc' AND properties = '[\"title\"]'"
@@ -3472,7 +3472,7 @@ cases:
           - "CREATE INDEX IF NOT EXISTS drivine_ix_Personname_f56cb9fe ON drivine_node (((props ->> 'name'))) WHERE labels @> '[\"Per\\\"son\"]'"
           - |-
             INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
-            VALUES ('RANGE_INDEX', 'Per"son', '["name"]', 'Per"son_name_range', 'drivine_ix_Personname_f56cb9fe', '{}')
+            VALUES ('RANGE_INDEX', 'Per"son', '["name"]', 'Per"son_name_range', 'drivine_ix_Personname_f56cb9fe', '{"form": 1}')
             ON CONFLICT (kind, label, properties) DO NOTHING
         drop:
           - |-
@@ -3535,9 +3535,9 @@ cases:
                 MERGE INTO drivine_schema c
                 USING (SELECT 'RANGE_INDEX' AS kind, 'Per"son' AS label, '["name"]' AS properties FROM dual) k
                 ON (c.kind = k.kind AND c.label = k.label AND c.properties = k.properties)
-                WHEN MATCHED THEN UPDATE SET c.details = JSON_MERGEPATCH(c.details, '{"labelled": "drivine_lx_Personname_f56cb9fe", "unique": null}')
+                WHEN MATCHED THEN UPDATE SET c.details = JSON_MERGEPATCH(c.details, '{"form": 1, "labelled": "drivine_lx_Personname_f56cb9fe", "unique": null}')
                 WHEN NOT MATCHED THEN INSERT (kind, label, properties, name, object_name, details)
-                    VALUES (k.kind, k.label, k.properties, 'Per"son_name_range', 'drivine_ix_name_337a8b', '{"labelled": "drivine_lx_Personname_f56cb9fe"}');
+                    VALUES (k.kind, k.label, k.properties, 'Per"son_name_range', 'drivine_ix_name_337a8b', '{"form": 1, "labelled": "drivine_lx_Personname_f56cb9fe"}');
             EXCEPTION WHEN DUP_VAL_ON_INDEX THEN
                 -- Another process recorded it between the MERGE's read and its insert: it is recorded.
                 NULL;
@@ -3566,7 +3566,7 @@ cases:
           - "CREATE INDEX IF NOT EXISTS drivine_ix_Personname_f56cb9fe ON drivine_node ((CASE json_type(props, '$.\"name\"') WHEN 'text' THEN props ->> '$.\"name\"' WHEN 'null' THEN NULL ELSE props -> '$.\"name\"' END)) WHERE instr(labels, '\"Per\\\"son\"') > 0"
           - |-
             INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
-            VALUES ('RANGE_INDEX', 'Per"son', '["name"]', 'Per"son_name_range', 'drivine_ix_Personname_f56cb9fe', '{}')
+            VALUES ('RANGE_INDEX', 'Per"son', '["name"]', 'Per"son_name_range', 'drivine_ix_Personname_f56cb9fe', '{"form": 1}')
             ON CONFLICT (kind, label, properties) DO NOTHING
         drop:
           - "DROP INDEX IF EXISTS drivine_ix_Personname_f56cb9fe"
@@ -3601,7 +3601,7 @@ cases:
           - "CREATE INDEX IF NOT EXISTS drivine_ix_abname_a087d008 ON drivine_node (((props ->> 'name'))) WHERE labels @> '[\"a b\"]'"
           - |-
             INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
-            VALUES ('RANGE_INDEX', 'a b', '["name"]', 'a b_name_range', 'drivine_ix_abname_a087d008', '{}')
+            VALUES ('RANGE_INDEX', 'a b', '["name"]', 'a b_name_range', 'drivine_ix_abname_a087d008', '{"form": 1}')
             ON CONFLICT (kind, label, properties) DO NOTHING
         drop:
           - |-
@@ -3664,9 +3664,9 @@ cases:
                 MERGE INTO drivine_schema c
                 USING (SELECT 'RANGE_INDEX' AS kind, 'a b' AS label, '["name"]' AS properties FROM dual) k
                 ON (c.kind = k.kind AND c.label = k.label AND c.properties = k.properties)
-                WHEN MATCHED THEN UPDATE SET c.details = JSON_MERGEPATCH(c.details, '{"labelled": "drivine_lx_abname_a087d008", "unique": null}')
+                WHEN MATCHED THEN UPDATE SET c.details = JSON_MERGEPATCH(c.details, '{"form": 1, "labelled": "drivine_lx_abname_a087d008", "unique": null}')
                 WHEN NOT MATCHED THEN INSERT (kind, label, properties, name, object_name, details)
-                    VALUES (k.kind, k.label, k.properties, 'a b_name_range', 'drivine_ix_name_337a8b', '{"labelled": "drivine_lx_abname_a087d008"}');
+                    VALUES (k.kind, k.label, k.properties, 'a b_name_range', 'drivine_ix_name_337a8b', '{"form": 1, "labelled": "drivine_lx_abname_a087d008"}');
             EXCEPTION WHEN DUP_VAL_ON_INDEX THEN
                 -- Another process recorded it between the MERGE's read and its insert: it is recorded.
                 NULL;
@@ -3695,7 +3695,7 @@ cases:
           - "CREATE INDEX IF NOT EXISTS drivine_ix_abname_a087d008 ON drivine_node ((CASE json_type(props, '$.\"name\"') WHEN 'text' THEN props ->> '$.\"name\"' WHEN 'null' THEN NULL ELSE props -> '$.\"name\"' END)) WHERE instr(labels, '\"a b\"') > 0"
           - |-
             INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
-            VALUES ('RANGE_INDEX', 'a b', '["name"]', 'a b_name_range', 'drivine_ix_abname_a087d008', '{}')
+            VALUES ('RANGE_INDEX', 'a b', '["name"]', 'a b_name_range', 'drivine_ix_abname_a087d008', '{"form": 1}')
             ON CONFLICT (kind, label, properties) DO NOTHING
         drop:
           - "DROP INDEX IF EXISTS drivine_ix_abname_a087d008"
@@ -3726,7 +3726,7 @@ cases:
           - "CREATE UNIQUE INDEX IF NOT EXISTS drivine_uq_Personname_f56cb9fe ON drivine_node (((props ->> 'name'))) WHERE labels @> '[\"Per\\\"son\"]'"
           - |-
             INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
-            VALUES ('UNIQUENESS_CONSTRAINT', 'Per"son', '["name"]', 'Per"son_name_unique', 'drivine_uq_Personname_f56cb9fe', '{}')
+            VALUES ('UNIQUENESS_CONSTRAINT', 'Per"son', '["name"]', 'Per"son_name_unique', 'drivine_uq_Personname_f56cb9fe', '{"form": 1}')
             ON CONFLICT (kind, label, properties) DO NOTHING
         drop:
           - |-
@@ -3769,7 +3769,7 @@ cases:
                 USING (SELECT 'RANGE_INDEX' AS kind, 'Per"son' AS label, '["name"]' AS properties FROM dual) k
                 ON (c.kind = k.kind AND c.label = k.label AND c.properties = k.properties)
                 WHEN NOT MATCHED THEN INSERT (kind, label, properties, name, object_name, details)
-                    VALUES (k.kind, k.label, k.properties, 'Per"son_name_range', 'drivine_ix_name_337a8b', '{"unique": "drivine_uq_Personname_f56cb9fe"}');
+                    VALUES (k.kind, k.label, k.properties, 'Per"son_name_range', 'drivine_ix_name_337a8b', '{"form": 1, "unique": "drivine_uq_Personname_f56cb9fe"}');
             EXCEPTION WHEN DUP_VAL_ON_INDEX THEN
                 -- Another process recorded it between the MERGE's read and its insert: it is recorded.
                 NULL;
@@ -3799,7 +3799,7 @@ cases:
                 IF v_labelled IS NOT NULL THEN
                     EXECUTE IMMEDIATE 'DROP INDEX IF EXISTS ' || v_labelled;
                 END IF;
-                UPDATE drivine_schema SET details = JSON_MERGEPATCH(details, '{"unique": "drivine_uq_Personname_f56cb9fe", "labelled": null}') WHERE kind = 'RANGE_INDEX' AND label = 'Per"son' AND properties = '["name"]';
+                UPDATE drivine_schema SET details = JSON_MERGEPATCH(details, '{"form": 1, "unique": "drivine_uq_Personname_f56cb9fe", "labelled": null}') WHERE kind = 'RANGE_INDEX' AND label = 'Per"son' AND properties = '["name"]';
                 COMMIT;
             END;
           - |-
@@ -3808,7 +3808,7 @@ cases:
                 USING (SELECT 'UNIQUENESS_CONSTRAINT' AS kind, 'Per"son' AS label, '["name"]' AS properties FROM dual) k
                 ON (c.kind = k.kind AND c.label = k.label AND c.properties = k.properties)
                 WHEN NOT MATCHED THEN INSERT (kind, label, properties, name, object_name, details)
-                    VALUES (k.kind, k.label, k.properties, 'Per"son_name_unique', 'drivine_uq_Personname_f56cb9fe', '{}');
+                    VALUES (k.kind, k.label, k.properties, 'Per"son_name_unique', 'drivine_uq_Personname_f56cb9fe', '{"form": 1}');
             EXCEPTION WHEN DUP_VAL_ON_INDEX THEN
                 -- Another process recorded it between the MERGE's read and its insert: it is recorded.
                 NULL;
@@ -3834,7 +3834,7 @@ cases:
           - "CREATE UNIQUE INDEX IF NOT EXISTS drivine_uq_Personname_f56cb9fe ON drivine_node ((CASE json_type(props, '$.\"name\"') WHEN 'text' THEN props ->> '$.\"name\"' WHEN 'null' THEN NULL ELSE props -> '$.\"name\"' END)) WHERE instr(labels, '\"Per\\\"son\"') > 0"
           - |-
             INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
-            VALUES ('UNIQUENESS_CONSTRAINT', 'Per"son', '["name"]', 'Per"son_name_unique', 'drivine_uq_Personname_f56cb9fe', '{}')
+            VALUES ('UNIQUENESS_CONSTRAINT', 'Per"son', '["name"]', 'Per"son_name_unique', 'drivine_uq_Personname_f56cb9fe', '{"form": 1}')
             ON CONFLICT (kind, label, properties) DO NOTHING
         drop:
           - "DROP INDEX IF EXISTS drivine_uq_Personname_f56cb9fe"
@@ -3892,7 +3892,7 @@ cases:
           - "CREATE INDEX IF NOT EXISTS drivine_ix_Personaddresscity_236e8dd0 ON drivine_node (((props ->> 'address.city'))) WHERE labels @> '[\"Person\"]'"
           - |-
             INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
-            VALUES ('RANGE_INDEX', 'Person', '["address.city"]', 'Person_address.city_range', 'drivine_ix_Personaddresscity_236e8dd0', '{}')
+            VALUES ('RANGE_INDEX', 'Person', '["address.city"]', 'Person_address.city_range', 'drivine_ix_Personaddresscity_236e8dd0', '{"form": 1}')
             ON CONFLICT (kind, label, properties) DO NOTHING
         drop:
           - |-
@@ -3955,9 +3955,9 @@ cases:
                 MERGE INTO drivine_schema c
                 USING (SELECT 'RANGE_INDEX' AS kind, 'Person' AS label, '["address.city"]' AS properties FROM dual) k
                 ON (c.kind = k.kind AND c.label = k.label AND c.properties = k.properties)
-                WHEN MATCHED THEN UPDATE SET c.details = JSON_MERGEPATCH(c.details, '{"labelled": "drivine_lx_Personaddresscity_236e8dd0", "unique": null}')
+                WHEN MATCHED THEN UPDATE SET c.details = JSON_MERGEPATCH(c.details, '{"form": 1, "labelled": "drivine_lx_Personaddresscity_236e8dd0", "unique": null}')
                 WHEN NOT MATCHED THEN INSERT (kind, label, properties, name, object_name, details)
-                    VALUES (k.kind, k.label, k.properties, 'Person_address.city_range', 'drivine_ix_addresscity_d068f25', '{"labelled": "drivine_lx_Personaddresscity_236e8dd0"}');
+                    VALUES (k.kind, k.label, k.properties, 'Person_address.city_range', 'drivine_ix_addresscity_d068f25', '{"form": 1, "labelled": "drivine_lx_Personaddresscity_236e8dd0"}');
             EXCEPTION WHEN DUP_VAL_ON_INDEX THEN
                 -- Another process recorded it between the MERGE's read and its insert: it is recorded.
                 NULL;
@@ -3986,7 +3986,7 @@ cases:
           - "CREATE INDEX IF NOT EXISTS drivine_ix_Personaddresscity_236e8dd0 ON drivine_node ((CASE json_type(props, '$.\"address.city\"') WHEN 'text' THEN props ->> '$.\"address.city\"' WHEN 'null' THEN NULL ELSE props -> '$.\"address.city\"' END)) WHERE instr(labels, '\"Person\"') > 0"
           - |-
             INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
-            VALUES ('RANGE_INDEX', 'Person', '["address.city"]', 'Person_address.city_range', 'drivine_ix_Personaddresscity_236e8dd0', '{}')
+            VALUES ('RANGE_INDEX', 'Person', '["address.city"]', 'Person_address.city_range', 'drivine_ix_Personaddresscity_236e8dd0', '{"form": 1}')
             ON CONFLICT (kind, label, properties) DO NOTHING
         drop:
           - "DROP INDEX IF EXISTS drivine_ix_Personaddresscity_236e8dd0"
@@ -4021,7 +4021,7 @@ cases:
           - "CREATE INDEX IF NOT EXISTS drivine_ix_Persononame_490e170e ON drivine_node (((props ->> 'o''name'))) WHERE labels @> '[\"Person\"]'"
           - |-
             INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
-            VALUES ('RANGE_INDEX', 'Person', '["o''name"]', 'Person_o''name_range', 'drivine_ix_Persononame_490e170e', '{}')
+            VALUES ('RANGE_INDEX', 'Person', '["o''name"]', 'Person_o''name_range', 'drivine_ix_Persononame_490e170e', '{"form": 1}')
             ON CONFLICT (kind, label, properties) DO NOTHING
         drop:
           - |-
@@ -4084,9 +4084,9 @@ cases:
                 MERGE INTO drivine_schema c
                 USING (SELECT 'RANGE_INDEX' AS kind, 'Person' AS label, '["o''name"]' AS properties FROM dual) k
                 ON (c.kind = k.kind AND c.label = k.label AND c.properties = k.properties)
-                WHEN MATCHED THEN UPDATE SET c.details = JSON_MERGEPATCH(c.details, '{"labelled": "drivine_lx_Persononame_490e170e", "unique": null}')
+                WHEN MATCHED THEN UPDATE SET c.details = JSON_MERGEPATCH(c.details, '{"form": 1, "labelled": "drivine_lx_Persononame_490e170e", "unique": null}')
                 WHEN NOT MATCHED THEN INSERT (kind, label, properties, name, object_name, details)
-                    VALUES (k.kind, k.label, k.properties, 'Person_o''name_range', 'drivine_ix_oname_bfc2fc23', '{"labelled": "drivine_lx_Persononame_490e170e"}');
+                    VALUES (k.kind, k.label, k.properties, 'Person_o''name_range', 'drivine_ix_oname_bfc2fc23', '{"form": 1, "labelled": "drivine_lx_Persononame_490e170e"}');
             EXCEPTION WHEN DUP_VAL_ON_INDEX THEN
                 -- Another process recorded it between the MERGE's read and its insert: it is recorded.
                 NULL;
@@ -4115,7 +4115,7 @@ cases:
           - "CREATE INDEX IF NOT EXISTS drivine_ix_Persononame_490e170e ON drivine_node ((CASE json_type(props, '$.\"o''name\"') WHEN 'text' THEN props ->> '$.\"o''name\"' WHEN 'null' THEN NULL ELSE props -> '$.\"o''name\"' END)) WHERE instr(labels, '\"Person\"') > 0"
           - |-
             INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
-            VALUES ('RANGE_INDEX', 'Person', '["o''name"]', 'Person_o''name_range', 'drivine_ix_Persononame_490e170e', '{}')
+            VALUES ('RANGE_INDEX', 'Person', '["o''name"]', 'Person_o''name_range', 'drivine_ix_Persononame_490e170e', '{"form": 1}')
             ON CONFLICT (kind, label, properties) DO NOTHING
         drop:
           - "DROP INDEX IF EXISTS drivine_ix_Persononame_490e170e"
@@ -4150,7 +4150,7 @@ cases:
           - "CREATE UNIQUE INDEX IF NOT EXISTS drivine_uq_Personsayhi_5316dfc3 ON drivine_node (((props ->> 'say\"hi'))) WHERE labels @> '[\"Person\"]'"
           - |-
             INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
-            VALUES ('UNIQUENESS_CONSTRAINT', 'Person', '["say\"hi"]', 'Person_say"hi_unique', 'drivine_uq_Personsayhi_5316dfc3', '{}')
+            VALUES ('UNIQUENESS_CONSTRAINT', 'Person', '["say\"hi"]', 'Person_say"hi_unique', 'drivine_uq_Personsayhi_5316dfc3', '{"form": 1}')
             ON CONFLICT (kind, label, properties) DO NOTHING
         drop:
           - |-
@@ -4193,7 +4193,7 @@ cases:
                 USING (SELECT 'RANGE_INDEX' AS kind, 'Person' AS label, '["say\"hi"]' AS properties FROM dual) k
                 ON (c.kind = k.kind AND c.label = k.label AND c.properties = k.properties)
                 WHEN NOT MATCHED THEN INSERT (kind, label, properties, name, object_name, details)
-                    VALUES (k.kind, k.label, k.properties, 'Person_say"hi_range', 'drivine_ix_sayhi_c9cbc4d8', '{"unique": "drivine_uq_Personsayhi_5316dfc3"}');
+                    VALUES (k.kind, k.label, k.properties, 'Person_say"hi_range', 'drivine_ix_sayhi_c9cbc4d8', '{"form": 1, "unique": "drivine_uq_Personsayhi_5316dfc3"}');
             EXCEPTION WHEN DUP_VAL_ON_INDEX THEN
                 -- Another process recorded it between the MERGE's read and its insert: it is recorded.
                 NULL;
@@ -4223,7 +4223,7 @@ cases:
                 IF v_labelled IS NOT NULL THEN
                     EXECUTE IMMEDIATE 'DROP INDEX IF EXISTS ' || v_labelled;
                 END IF;
-                UPDATE drivine_schema SET details = JSON_MERGEPATCH(details, '{"unique": "drivine_uq_Personsayhi_5316dfc3", "labelled": null}') WHERE kind = 'RANGE_INDEX' AND label = 'Person' AND properties = '["say\"hi"]';
+                UPDATE drivine_schema SET details = JSON_MERGEPATCH(details, '{"form": 1, "unique": "drivine_uq_Personsayhi_5316dfc3", "labelled": null}') WHERE kind = 'RANGE_INDEX' AND label = 'Person' AND properties = '["say\"hi"]';
                 COMMIT;
             END;
           - |-
@@ -4232,7 +4232,7 @@ cases:
                 USING (SELECT 'UNIQUENESS_CONSTRAINT' AS kind, 'Person' AS label, '["say\"hi"]' AS properties FROM dual) k
                 ON (c.kind = k.kind AND c.label = k.label AND c.properties = k.properties)
                 WHEN NOT MATCHED THEN INSERT (kind, label, properties, name, object_name, details)
-                    VALUES (k.kind, k.label, k.properties, 'Person_say"hi_unique', 'drivine_uq_Personsayhi_5316dfc3', '{}');
+                    VALUES (k.kind, k.label, k.properties, 'Person_say"hi_unique', 'drivine_uq_Personsayhi_5316dfc3', '{"form": 1}');
             EXCEPTION WHEN DUP_VAL_ON_INDEX THEN
                 -- Another process recorded it between the MERGE's read and its insert: it is recorded.
                 NULL;
@@ -4258,7 +4258,7 @@ cases:
           - "CREATE UNIQUE INDEX IF NOT EXISTS drivine_uq_Personsayhi_5316dfc3 ON drivine_node ((CASE json_type(props, '$.\"say\\\"hi\"') WHEN 'text' THEN props ->> '$.\"say\\\"hi\"' WHEN 'null' THEN NULL ELSE props -> '$.\"say\\\"hi\"' END)) WHERE instr(labels, '\"Person\"') > 0"
           - |-
             INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
-            VALUES ('UNIQUENESS_CONSTRAINT', 'Person', '["say\"hi"]', 'Person_say"hi_unique', 'drivine_uq_Personsayhi_5316dfc3', '{}')
+            VALUES ('UNIQUENESS_CONSTRAINT', 'Person', '["say\"hi"]', 'Person_say"hi_unique', 'drivine_uq_Personsayhi_5316dfc3', '{"form": 1}')
             ON CONFLICT (kind, label, properties) DO NOTHING
         drop:
           - "DROP INDEX IF EXISTS drivine_uq_Personsayhi_5316dfc3"

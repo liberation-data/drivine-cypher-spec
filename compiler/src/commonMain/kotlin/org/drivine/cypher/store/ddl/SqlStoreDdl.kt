@@ -175,6 +175,16 @@ abstract class SqlStoreDdl(val name: String, final override val engine: String, 
             }.joinToString("", "\"", "\"")
         }
 
+    /**
+     * [details], a record's, with the form this version makes its item in ([CURRENT_FORM]) first among them: every record
+     * the module writes says the form it was made in, so a later version, or another library, tells an item made in
+     * another form from one made as it makes it (see `org.drivine.cypher.store.schema.ItemForm`).
+     */
+    protected fun formed(details: String): String {
+        val body = details.trim().removePrefix("{").removeSuffix("}").trim()
+        return if (body.isEmpty()) "{\"$FORM\": $CURRENT_FORM}" else "{\"$FORM\": $CURRENT_FORM, $body}"
+    }
+
     /** The SQL literal of [text]: every SQL store reads a quote doubled, and a backslash as itself. */
     protected fun literal(text: String): String = "'${text.replace("'", "''")}'"
 
@@ -191,6 +201,16 @@ abstract class SqlStoreDdl(val name: String, final override val engine: String, 
     companion object {
         /** The key in a record's details its aliases are kept under. */
         const val ALIASES = "aliases"
+
+        /** The key in a record's details the form its item was made in is kept under. */
+        const val FORM = "form"
+
+        /**
+         * The form this version makes every item in, on Postgres, Oracle and SQLite, as its record says. A change to what
+         * an item's create makes is a new form, and its record says so: `store.yaml` pins each case's form, and a digest
+         * of its create statements, so a change of the DDL that keeps the form fails its tests.
+         */
+        const val CURRENT_FORM = 1
 
         /** The longest an object made beside another adds to its name: a trigger's `_t`, an index's `_i`. */
         private const val BESIDE = "_t"
