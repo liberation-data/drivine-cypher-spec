@@ -26,6 +26,7 @@ import java.time.format.DateTimeFormatter
  *   other targets have no YAML reader. See `StoreDdlTest`.
  * - `marker.json`: the spec's `marker.yaml`, the schema marker and the stamps, as JSON likewise. See `StoreMarkerTest`.
  * - `plans.json`: the spec's `plans.yaml`, the schema plan's cases, as JSON likewise. See `StorePlanTest`.
+ * - `host.json`: the spec's `host.yaml`, the host functions' cases, as JSON likewise. See [HostSpecJson] and `HostSpecTest`.
  * - `search-golden.json`: drivine4j's full-text search statements, the module's golden (`src/commonTest/resources`), for
  *   each target's `FullTextSearchGoldenTest`. Its requests are in `corpus.jsonl` too, as [CompileJson] answers them.
  *
@@ -56,6 +57,8 @@ object Oracle {
         File(out, "marker.json").writeText(json.writeValueAsString(yaml.readTree(File(spec, "marker.yaml"))))
         // The schema plan's cases, for each target's StorePlanTest.
         File(out, "plans.json").writeText(json.writeValueAsString(yaml.readTree(File(spec, "plans.yaml"))))
+        // The host functions' cases, for each target's HostSpecTest.
+        HostSpecJson.write(spec, out)
         // drivine4j's full-text search statements, for each target's FullTextSearchGoldenTest.
         File(out, "search-golden.json").writeBytes(searchGolden())
         println("jvmOracle: ${corpus.first} statements in the corpus (${corpus.second} left out, as they embed the clock); $doubles double cases.")

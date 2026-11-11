@@ -20,8 +20,10 @@ import kotlinx.cinterop.usePinned
 import kotlinx.cinterop.value
 import kotlin.concurrent.AtomicInt
 import kotlin.native.runtime.GC
+import org.drivine.cypher.host.HostFunction
+import org.drivine.cypher.host.HostFunctions
+import org.drivine.cypher.host.SqlType
 import org.drivine.sqlite.ext.SQLITE_ERROR
-import org.drivine.sqlite.ext.SQLITE_INTEGER
 import org.drivine.sqlite.ext.SQLITE_OK
 import org.drivine.sqlite.ext.sqlite3_api_routines
 import platform.posix.memcpy
@@ -36,8 +38,11 @@ import platform.posix.memcpy
 /** The oldest SQLite the extension takes: 3.31.0 brought SQLITE_DIRECTONLY and SQLITE_INNOCUOUS, which it registers with. */
 private const val OLDEST_SQLITE = 3_031_000
 
-/** The extension's functions, registered on each connection it is loaded into. */
-internal val hostFunctions: List<HostFunction> = listOf(
+/**
+ * The extension's functions, registered on each connection it is loaded into: the module's own (HostFunctions), which
+ * compiled SQL calls, and the native library's.
+ */
+internal val hostFunctions: List<HostFunction> = HostFunctions.all + listOf(
     // The module's version, as it was built: a host checks it loaded the library it meant to.
     HostFunction("drivine_extension_version", 0, deterministic = true) { _, _, result -> result.text(MODULE_VERSION) },
     // Collects now, for a host to call between statements: the collection the deferred floor puts off.
@@ -48,7 +53,7 @@ internal val hostFunctions: List<HostFunction> = listOf(
     // The GC's floor, in bytes, as it now is; with an argument, set first (0 restores the runtime's own).
     HostFunction("drivine_gc_heap", 0, deterministic = false, directOnly = true) { _, _, result -> result.long(GcFloor.bytes) },
     HostFunction("drivine_gc_heap", 1, deterministic = false, directOnly = true) { args, _, result ->
-        require(args.type(0) == SQLITE_INTEGER) { "the floor is a whole number of bytes." }
+        require(args.type(0) == SqlType.INTEGER) { "the floor is a whole number of bytes." }
         result.long(GcFloor.set(args.long(0)))
     },
 )
