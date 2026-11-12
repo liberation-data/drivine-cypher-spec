@@ -764,6 +764,33 @@ storeLayout:
       stamps: []
       foreignNodes: true
       verdict: "current"
+  # The order a library asks in, which no statement of the module's can hold it to: the verdict on a graph's first connection
+  # comes before the store's ensuring or ddl and the stamp's prepare make anything, as this layout's lock table, which they
+  # make, is the verdict's evidence that a graph without a stamp is of this layout. Each library's runner sets each case up
+  # on the store (its statements, {graph} the graph the runner uses), opens a manager of the graph, and checks that its first
+  # connection refuses the graph and that none of `absent` was made.
+  firstConnection:
+    - name: "An earlier layout's graph holding values, with no stamp: refused before anything is made"
+      store: "postgres"
+      setup:
+        - "CREATE TABLE {graph}_node (nid bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, labels jsonb NOT NULL, props jsonb NOT NULL)"
+        - "INSERT INTO {graph}_node (labels, props) VALUES ('[\"Person\"]', '{\"name\": \"Ada\", \"born\": \"1815-12-10\"}')"
+      refused: true
+      absent: ["{graph}_lock2"]
+    - name: "An earlier layout's graph holding values, with no stamp: refused before anything is made, on Oracle"
+      store: "oracle"
+      setup:
+        - "CREATE TABLE {graph}_node (nid NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY, labels JSON NOT NULL, props JSON NOT NULL)"
+        - "INSERT INTO {graph}_node (labels, props) VALUES ('[\"Person\"]', '{\"name\": \"Ada\", \"born\": \"1815-12-10\"}')"
+      refused: true
+      absent: ["{graph}_lock2"]
+    - name: "An earlier layout's graph holding values, with no stamp: refused before anything is made, on SQLite"
+      store: "sqlite"
+      setup:
+        - "CREATE TABLE {graph}_node (nid INTEGER PRIMARY KEY AUTOINCREMENT, labels TEXT NOT NULL, props TEXT NOT NULL)"
+        - "INSERT INTO {graph}_node (labels, props) VALUES ('[\"Person\"]', '{\"name\": \"Ada\", \"born\": \"1815-12-10\"}')"
+      refused: true
+      absent: ["{graph}_lock2"]
 nodeStamps:
   property: "__drivine.stamp"
   token: 16

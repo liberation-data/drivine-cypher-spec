@@ -252,6 +252,29 @@ class StoreMarkerTest {
         assertTrue(checked > 0, "marker.yaml has no storeLayout cases")
     }
 
+    /**
+     * Each `firstConnection` case, which a library's runner sets up on its store: a graph holding values, with no stamp and
+     * nothing of this layout's, which the verdict refuses before anything is made. The module can't run the order; it checks
+     * that the state each case sets up is one it refuses, and that the lock table it names is the store's.
+     */
+    @Test
+    fun eachFirstConnectionCaseSetsUpAGraphTheVerdictRefuses() {
+        val cases = pinned["storeLayout"]!!["firstConnection"]!!
+        var checked = 0
+        for (case in cases) {
+            val name = case["name"]!!.textValue()!!
+            val ddl = stores.getValue(case["store"]!!.textValue()!!) as org.drivine.cypher.store.ddl.SqlStoreDdl
+            assertTrue(case["refused"]!!.booleanValue(), name)
+            assertEquals(listOf("{graph}_lock2"), texts(case["absent"]!!), name)
+            assertEquals("${graph}_lock2", ddl.lock, "$name: the lock table the case names is the store's")
+            // As the graph stands after the setup: no stamp, a node of the application's, and no object of this layout's.
+            val verdict = StoreLayout.verdict(StoreStamp.engine(ddl), graph, emptyList(), true, emptyList(), ddl)
+            assertTrue(verdict is StoreLayout.Verdict.Refuse, "$name: $verdict")
+            checked++
+        }
+        assertEquals(3, checked, "a case for each SQL store")
+    }
+
     @Test
     fun nodeStampsAreWrittenAndReadAsDrivine4jDoes() {
         val stamps = pinned["nodeStamps"]!!
