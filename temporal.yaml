@@ -768,6 +768,14 @@ cases:
         cypher: "RETURN datetime({year: 2024, month: 1, day: 1, timezone: $z}).offset"
         parameters: {z: "-03:30"}
         rows: ["-03:30"]
+      - note: "A zone by name an expression gives for a time of day fails too."
+        only: [sql]
+        cypher: "UNWIND ['Europe/Stockholm'] AS z RETURN time({hour: 12, timezone: z})"
+        error: true
+      - note: "An offset whose seconds are none, written or given, is that offset; UTC's an expression gives, however written, is Z."
+        cypher: "UNWIND ['-00:00'] AS z RETURN [datetime({year: 2024, month: 1, day: 1, timezone: '+02:00:00'}).offset, time({hour: 12, timezone: $z}).offset, time({hour: 12, timezone: z}).offset]"
+        parameters: {z: "-00:00:00"}
+        rows: [["+02:00", "Z", "Z"]]
 
   - name: "Converting between temporal kinds"
     description: "A temporal value of one kind is made from a value of another."

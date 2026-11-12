@@ -4604,12 +4604,14 @@ abstract class SqlCypherCompiler(
                 fields.keys.firstOrNull { it !in known }?.let { unsupported("${function.name}() of a map with $it") }
                 val numbers = fields.filterKeys { it != "timezone" }.mapValues { number(comparable(json(it.value))) }
                 if (kind == Temporal.DURATION) return of(temporals.duration(numbers))
-                val timezone = fields["timezone"]?.let { text(comparable(json(it))) }
                 // A zone the statement writes or a parameter gives is read here: one by name, which no store's text holds yet,
                 // an offset with seconds, and a text that is no zone are refused rather than given as null, or on SQLite failing
                 // as the statement runs, so a value made from such a moment, `time({time: other})`, is refused too (#508,
-                // drivine4j#424). One an expression gives fails the statement where it makes the value null.
+                // drivine4j#424); an offset is given as its id, `+02:00` for `+02:00:00`, which every store's text reads. One an
+                // expression gives fails the statement where it is no offset the store reads.
                 val zoneWritten = written.entries.firstOrNull { it.first == "timezone" }?.second
+                val zoneGiven = zoneWritten?.takeIf { it is Expression.Literal || it is Expression.Parameter }?.let { given(it) } as? String
+                val timezone = zoneGiven?.let { "'${offset(it)}'" } ?: fields["timezone"]?.let { text(comparable(json(it))) }
                 val guard = zoneGuard(function, zoneWritten, timezone)
                 if (fields.keys.any { it in Temporals.CALENDAR_FIELDS }) {
                     val date = calendarDate(function, written)
@@ -4704,7 +4706,8 @@ abstract class SqlCypherCompiler(
          * no temporal value or is of a kind that hasn't what it is to give, fields of two calendars, a date of its fields that
          * is not whole (a year, a month and a day; a week and a day of the week; an ordinal day; a quarter and a day of the
          * quarter) beside a value that gives the time, a field of the time without the one above it where no value gives the
-         * time, and a number written that is not whole or past its field's range. A zone by name is refused.
+         * time, and a number written that is not whole or past its field's range. A zone by name, or an offset with seconds, is
+         * refused as [zone] refuses it, or where an expression gives it fails as [zoneGuard] has it.
          */
         private fun fromTemporal(kind: Temporal, function: Expression.Function, written: Expression.MapLiteral, scope: Map<String, Value>): String {
             val name = function.name
@@ -4809,7 +4812,8 @@ abstract class SqlCypherCompiler(
 
         /**
          * The offset's text the time zone [zone] written gives a value, as Neo4j takes one: `Z`, or an offset written `+01:00`.
-         * A zone by name, which no store's text holds yet, is refused; any other text fails.
+         * A zone by name or an offset with seconds, which no store's text holds yet, is refused (see [offset]); any other
+         * text fails.
          */
         private fun zone(zone: String): String {
             val id = offset(zone)
@@ -4836,8 +4840,9 @@ abstract class SqlCypherCompiler(
          * What a temporal value [function] makes in the time zone [written] is passed through, its SQL text being [zone]. A
          * zone the statement writes, or a parameter gives, as a text is read with [offset] here, and the value is as it is;
          * a parameter that gives no text is refused. A zone an expression gives, which the store reads as the statement
-         * runs, fails the statement where it is given and the value is null, as a zone by name or an offset with seconds
-         * makes it, rather than give null in its place (drivine4j#424).
+         * runs, fails the statement where it is given and is no offset the store's text reads, as a zone by name or an
+         * offset with seconds is, rather than give null in its place (drivine4j#424): its text is tested, not the value's
+         * null, which a field that is null makes too.
          */
         private fun zoneGuard(function: Expression.Function, written: Expression?, zone: String?): (String) -> String {
             if (written == null || zone == null || written is Expression.Literal) {
@@ -4851,7 +4856,8 @@ abstract class SqlCypherCompiler(
                     else -> throw CompilerException("${function.name}() takes a time zone, not ${org.drivine.cypher.text.JavaText.of(given)}.")
                 }
             }
-            return { made -> shared(made, zone) { (value, z) -> "CASE WHEN $z IS NOT NULL AND $value IS NULL THEN ${text(scalar(failure(ZONE_NOT_COMPILED, z)))} ELSE $value END" } }
+            val read = literal(temporalSql.regex("^${Temporal.OFFSET}"))
+            return { made -> shared(made, zone) { (value, z) -> "CASE WHEN $z IS NOT NULL AND NOT ${temporalSql.matches(z, read)} THEN ${text(scalar(failure(ZONE_NOT_COMPILED, z)))} ELSE $value END" } }
         }
 
         /**
