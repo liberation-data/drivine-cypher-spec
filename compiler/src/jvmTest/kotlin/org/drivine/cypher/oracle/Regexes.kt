@@ -213,6 +213,8 @@ object Regexes {
         // Code points past the BMP whose low 16 bits are syntax (Harmony misreads them in a pattern), and case pairs.
         addAll(listOf("\uD800\uDC26", "\uD800\uDC28 (", "\uD800\uDC5B[", "\uD800\uDC5D", "x\uD800\uDC00\uD800\uDC0Dy", "\uD801\uDC00\uD801\uDC28\uD801\uDC4F",
             "\uD83D\uDE4F\uD83D\uDE50", "\u01C5 \u01C4 \u01C6", "\u1E9E ß", "\u03A3 \u03C3 \u03C2", "a b\n#c", "LATIN"))
+        // Texts of the patterns past the escapes and comments mode.
+        addAll(listOf("١", "a\u001Cb", "a-c_e", "[-]"))
     }
 
     /** Users' `=~` patterns, each with the construct it exercises. */
@@ -271,6 +273,24 @@ object Regexes {
         "[\\x{1F600}-\\x{1F64F}]" to "astral range",
         // Comments mode in a class, flags off and on, and (?U) on.
         "(?x)[ a b ]+ # c" to "(?x) class", "(?x)a\\ b" to "(?x)", "(?i)a(?-i)b" to "(?-i)", "(?s:.)+" to "(?s:…)", "(?U)\\d" to "(?U)",
+        // (?x) takes out ASCII's whitespace alone, and a comment to a line break, which it leaves; a range's - past whitespace.
+        "(?x)a\u00A0b" to "(?x) no-break space", "(?x)a\u001Cb" to "(?x) separator", "(?x)a#c\rb" to "(?x) comment to \\r",
+        "(?x)(?d)a#c\rb" to "(?x) comment to \\r", "(?x)a#c\u2028b" to "(?x) comment to \\u2028", "(?x)a#c\u0085b" to "(?x) comment to \\u0085",
+        "(?x)(?d)a#c\u2029b" to "(?x) comment past \\u2029", "(?x)[a - c]+" to "(?x) range",
+        "(?i)(?x)[a - c]+" to "(?x) range",
+        // A - after a class escape, or a member (?i) writes as several, is itself.
+        "[\\w-a]+" to "- after \\w in a class", "[\\s-z]+" to "- after \\s in a class", "[\\d-z]" to "- after \\d in a class",
+        "(?i)[a-c-e]+" to "- after a range", "(?i)[k-z]+" to "(?i) range", "(?i)[a-]+" to "- last in a class",
+        // A backslash before a letter or digit outside ASCII makes it itself.
+        "(?i)\\é" to "escaped non-ASCII letter", "\\é" to "escaped non-ASCII letter", "(?i)[\\é]" to "escaped non-ASCII letter",
+        "\\١" to "escaped non-ASCII digit", "\\😀" to "escaped astral",
+        // A back reference to a group opened later, which matches in a repetition after the group has.
+        "(?:\\1b|(a))+" to "forward backreference", "\\1(a)" to "forward backreference", "(?:\\3|\\1b|(a))+" to "forward backreference",
+        // \b quantified, which is no \b{g}.
+        "\\b{2}a" to "\\b quantified",
+        // Hexadecimal escapes take ASCII's digits alone, and no sign.
+        "\\x{0000041}" to "\\x{…} leading zeros", "\\x{+41}" to "\\x{…} signed", "\\x{}" to "\\x{…} empty", "\\x{110000}" to "\\x{…} past U+10FFFF",
+        "\\u٣٣٣٣" to "\\uNNNN other digits", "\\x{٤١}" to "\\x{…} other digits", "(a)(b)(c)(d)(e)(f)(g)(h)(i)(j)(k)(l)(m)\\1٣" to "backreference, other digit",
     )
 
     /** The spec's directory, and the oracle's (corpus.jsonl and mutants.jsonl already written there). */

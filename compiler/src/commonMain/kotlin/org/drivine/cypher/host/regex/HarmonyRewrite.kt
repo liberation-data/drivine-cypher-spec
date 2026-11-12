@@ -16,12 +16,13 @@ import org.drivine.DrivineInternalApi
  *   Java's takes, and Harmony is given no `(?i)`.
  * - Its `.` misses a match after a line break in a search (`.+` in "\na"): written as the class Java's `.` is.
  * - It reads `(?x)`'s whitespace and comments otherwise: they are taken out here.
- * - It refuses `\x{…}`, and a back reference to a group not yet opened (which never matches in Java): written as the code
- *   point, and as `(?!)`.
+ * - It refuses `\x{…}`, and a back reference to a group the pattern never opens (which never matches in Java): written as
+ *   the code point, and as `(?!)`.
  * - Two bugs in Kotlin 2.2.20 with code points past the BMP in a pattern: see [astral] and [write].
  *
  * What it can't make match as Java's does, it refuses by name ([UnsupportedPatternException]): `\G`, `\X`, `\N{…}`,
- * `\b{g}`, a back reference under `(?i)` (Java folds each code point of it, Harmony its own way), and `(?-U)` and `(?-u)`,
+ * `\b{g}`, a back reference under `(?i)` (Java folds each code point of it, Harmony its own way), a back reference to a
+ * group the pattern opens only after it (which Harmony refuses, and Java matches in a repetition), and `(?-U)` and `(?-u)`,
  * which turn off what drivine4j's patterns always have on.
  */
 internal object HarmonyRewrite {
@@ -61,15 +62,19 @@ internal object HarmonyRewrite {
         /** The first code point past the BMP the class being written holds: see [characterClass]. */
         private var firstAstral: Int? = null
 
+        /** The smallest number of a back reference to a group not yet opened where it is, 0 where none is: see [backReference]. */
+        private var forward = 0
+
         fun write(): String {
             while (at < p.length) atom()
             flush()
+            if (forward in 1..groups) throw UnsupportedPatternException("a back reference to a later group")
             return out.toString()
         }
 
         private fun atom() {
             val c = p[at]
-            if (flags.x && (c.isWhitespace() || c == '#')) {
+            if (flags.x && spaceOrComment(c)) {
                 // Java reads past them, within a run of literals too.
                 skipComment()
                 return
@@ -166,13 +171,28 @@ internal object HarmonyRewrite {
             run.clear()
         }
 
-        /** Whitespace, or a comment to the line's end, which Java's comments mode takes out. */
+        /**
+         * Whether [c] begins what Java's comments mode takes out: ASCII's whitespace alone (Pattern's `ASCII.isSpace`, not
+         * Kotlin's `isWhitespace`, which takes a no-break space too), or a comment's `#`.
+         */
+        private fun spaceOrComment(c: Char) = c == ' ' || c in '\t'..'\r' || c == '#'
+
+        /**
+         * Whitespace, or a comment to the line's end, as Pattern's isLineSeparator ends one: before a `\n`, or under no `(?d)`
+         * a `\r`, `\u0085`, `\u2028` or `\u2029`. The line break is left to be read, and so is a literal where it is no ASCII
+         * whitespace, as it is in Java (`(?x)a#c\u2028b` matches "a\u2028b").
+         */
         private fun skipComment() {
             if (p[at] == '#') {
-                while (at < p.length && p[at] != '\n') at++
+                while (at < p.length && p[at] != '\n' && (flags.d || p[at] !in "\r\u0085\u2028\u2029")) at++
             } else {
                 at++
             }
+        }
+
+        /** Under `(?x)`, past what Java's comments mode takes out at [at], as its `peek` reads past it. */
+        private fun skipSpaces() {
+            while (flags.x && at < p.length && spaceOrComment(p[at])) skipComment()
         }
 
         private fun group() {
@@ -249,7 +269,8 @@ internal object HarmonyRewrite {
             at += 2
             when (e) {
                 'b' -> {
-                    if (p.getOrNull(at) == '{') throw UnsupportedPatternException("\\b{g}")
+                    // \b{g} alone: Java reads any other \b{ as \b and a quantifier, or refuses it.
+                    if (p.startsWith("{g}", at)) throw UnsupportedPatternException("\\b{g}")
                     out.append(boundary(true))
                 }
                 'B' -> out.append(boundary(false))
@@ -274,25 +295,30 @@ internal object HarmonyRewrite {
                     at = end + 1
                 }
                 in '1'..'9' -> backReference(e)
-                else -> out.append('\\').append(e)
+                else -> {
+                    illegal(e)
+                    out.append('\\').append(e)
+                }
             }
         }
 
         /**
          * A back reference, as Java reads one: more digits while there are that many groups so far. One to a group not yet
-         * opened never matches in Java, where Harmony refuses it.
+         * opened, which Harmony refuses, is `(?!)`: it never matches in Java where the pattern never opens that group; where
+         * it opens it later, a repetition can match it (`(?:\1b|(a))+` in "aab"), so [write] refuses it.
          */
         private fun backReference(first: Char) {
             var n = first.digitToInt()
-            while (at < p.length && p[at].isDigit() && n * 10 + p[at].digitToInt() <= groups) n = n * 10 + p[at++].digitToInt()
+            while (at < p.length && p[at] in '0'..'9' && n * 10 + p[at].digitToInt() <= groups) n = n * 10 + p[at++].digitToInt()
             if (n > groups) {
+                if (forward == 0 || n < forward) forward = n
                 out.append("(?!)")
                 return
             }
             if (flags.i) throw UnsupportedPatternException("a back reference under (?i)")
             out.append('\\').append(n)
             // A digit after it is itself, where Harmony would read it as more of the number.
-            if (at < p.length && p[at].isDigit()) out.append("(?:)")
+            if (at < p.length && p[at] in '0'..'9') out.append("(?:)")
         }
 
         /**
@@ -323,7 +349,7 @@ internal object HarmonyRewrite {
                 }
                 'x' -> if (p.getOrNull(at + 2) == '{') {
                     val close = p.indexOf('}', at + 3)
-                    val value = (if (close < 0) null else p.substring(at + 3, close).toIntOrNull(16))?.takeIf { it in 0..0x10FFFF } ?: return null
+                    val value = (if (close < 0) null else hex(at + 3, close - at - 3)) ?: return null
                     end = close + 1
                     value
                 } else {
@@ -342,16 +368,55 @@ internal object HarmonyRewrite {
                         high
                     }
                 }
-                else -> if (e.isLetterOrDigit()) return null else e.code
+                // Java's escape refuses an ASCII letter or digit it doesn't name; any other character is itself.
+                else -> if (e < '\u0080' && e.isLetterOrDigit()) {
+                    return null
+                } else {
+                    codePoint(p, at + 1).also { if (it > 0xFFFF) end++ }
+                }
             }
             at = end
-            // As written where Harmony reads it alike; \x{…} and a pair of \uNNNN, which it doesn't, as the code point.
-            return Literal(cp, if (e == 'x' || e == 'u') text(cp) else p.substring(start, end))
+            // As written where Harmony reads it alike; \x{…}, a pair of \uNNNN and a character past ASCII, which it may not, as
+            // the code point.
+            return Literal(cp, if (e == 'x' || e == 'u' || cp >= 0x80) text(cp) else p.substring(start, end))
         }
 
-        /** The [digits] hexadecimal digits at [from] as a number; null where they aren't. */
-        private fun hex(from: Int, digits: Int): Int? =
-            if (from + digits > p.length) null else p.substring(from, from + digits).takeIf { t -> t.all { it.isDigit() || it in 'a'..'f' || it in 'A'..'F' } }?.toInt(16)
+        /**
+         * The [digits] hexadecimal digits at [from] as a code point; null where they aren't, there are none, or it is past
+         * U+10FFFF. ASCII's alone, as Java reads them: Kotlin's `isDigit` and `toInt(16)` take other scripts' digits, and the
+         * latter a sign.
+         */
+        private fun hex(from: Int, digits: Int): Int? {
+            if (digits < 1 || from + digits > p.length) return null
+            var value = 0
+            for (i in from until from + digits) {
+                val c = p[i]
+                val digit = when (c) {
+                    in '0'..'9' -> c - '0'
+                    in 'a'..'f' -> c - 'a' + 10
+                    in 'A'..'F' -> c - 'A' + 10
+                    else -> return null
+                }
+                value = value * 16 + digit
+                if (value > 0x10FFFF) return null
+            }
+            return value
+        }
+
+        /**
+         * Refuses, as Java does, a `\u`, `\x`, `\0` or `\c` that [charEscape] couldn't read: Harmony reads other scripts' digits
+         * in some (`\u٣٣٣٣`), so it isn't left to refuse them.
+         */
+        private fun illegal(e: Char) {
+            val kind = when (e) {
+                'u' -> "Unicode"
+                'x' -> "hexadecimal"
+                '0' -> "octal"
+                'c' -> "control"
+                else -> return
+            }
+            throw IllegalArgumentException("Illegal $kind escape sequence")
+        }
 
         /** `\b` or `\B` as lookarounds on Java's `\w`, which they are with UNICODE_CHARACTER_CLASS since JDK 19. */
         private fun boundary(at: Boolean): String {
@@ -423,7 +488,7 @@ internal object HarmonyRewrite {
             while (at < p.length) {
                 val c = p[at]
                 when {
-                    flags.x && (c.isWhitespace() || c == '#') -> skipComment()
+                    flags.x && spaceOrComment(c) -> skipComment()
                     c == '\\' -> {
                         val escaped = classEscape(inClass = true)
                         if (escaped != null) {
@@ -449,6 +514,7 @@ internal object HarmonyRewrite {
                                     member(literal)
                                 } else {
                                     // No escape Java reads in a class (\b, a letter of none): Harmony refuses it as Java does.
+                                    p.getOrNull(at + 1)?.let(::illegal)
                                     out.append(p, at, minOf(p.length, at + 2))
                                     at += 2
                                 }
@@ -479,7 +545,9 @@ internal object HarmonyRewrite {
                     else -> {
                         val cp = codePoint(p, at)
                         at += if (cp > 0xFFFF) 2 else 1
-                        member(Literal(cp, if (cp > 0xFFFF) astral(cp) else c.toString()))
+                        // A - that is no range is written escaped: after a class escape written out, or a member (?i) writes as
+                        // several, Harmony would read it as a range from the last code point written.
+                        member(Literal(cp, if (cp > 0xFFFF) astral(cp) else if (c == '-') "\\-" else c.toString()))
                     }
                 }
             }
@@ -488,10 +556,15 @@ internal object HarmonyRewrite {
 
         /** A class's member, [first] (read already), and the range it begins where a `-` and another literal follow. */
         private fun member(first: Literal) {
+            // Java's range reads past (?x)'s whitespace to the - and past it, but looks at the character after the - as it is.
+            skipSpaces()
             if (p.getOrNull(at) == '-' && at + 1 < p.length && p[at + 1] != ']' && p[at + 1] != '[') {
                 val saved = at
                 at++
-                val last = if (p[at] == '\\') {
+                skipSpaces()
+                val last = if (at >= p.length) {
+                    null
+                } else if (p[at] == '\\') {
                     charEscape()
                 } else {
                     val cp = codePoint(p, at)
@@ -517,8 +590,7 @@ internal object HarmonyRewrite {
 
         /** A class's range: as Java's ranges are written ([write]), and under `(?i)` with the code points Java takes beside it. */
         private fun range(first: Literal, last: Literal): String {
-            // Java refuses a range that ends before it starts; so does Harmony, as written.
-            if (last.cp < first.cp) return first.text + "-" + last.text
+            if (last.cp < first.cp) throw IllegalArgumentException("Illegal character range")
             val range = first.cp..last.cp
             if (range.last > 0xFFFF && firstAstral == null) firstAstral = maxOf(range.first, 0x10000)
             val extra = if (flags.i) JavaCase.range(range).joinToString("") { text(it) } else ""

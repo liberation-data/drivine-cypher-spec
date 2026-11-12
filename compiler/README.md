@@ -484,8 +484,8 @@ POSIX class (`[:alnum:]`, `[:alpha:]`, `[:digit:]`, `[:space:]`, `[:upper:]`, `[
   (`RegexTables`); under `(?i)`, each literal and class as the code points Java's case-insensitivity takes for it; `.` as
   the class Java's is; and `(?x)`'s comments taken out. What it can't match as Java does it refuses, failing the statement
   with the construct's name (`regexp: \G is not supported on this platform; rewrite the pattern without it.`): `\G`, `\X`,
-  `\N{…}`, `\b{g}`, a back reference under `(?i)`, and `(?-U)` and `(?-u)`, which turn off what the patterns always have
-  on. The comments in `HarmonyRewrite` and `HarmonyPattern` name the Kotlin 2.2.20 bugs each workaround is for, and
+  `\N{…}`, `\b{g}`, a back reference under `(?i)`, a back reference to a group the pattern opens only after it (`(?:\1b|(a))+`,
+  which Java matches in a repetition), and `(?-U)` and `(?-u)`, which turn off what the patterns always have on. The comments in `HarmonyRewrite` and `HarmonyPattern` name the Kotlin 2.2.20 bugs each workaround is for, and
   `HarmonyBugsTest` fails once Kotlin fixes one, so its workaround can come out.
 
 A process keeps the 256 patterns used last (`JavaPatterns`), for every connection: a pattern rewritten for Harmony takes a

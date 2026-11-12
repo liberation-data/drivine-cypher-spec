@@ -9,6 +9,7 @@ import org.drivine.cypher.number.target
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNotSame
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
@@ -37,6 +38,20 @@ class JavaPatternTest {
         assertFailsWith<IndexOutOfBoundsException> { replace("a", "(a)", "\\5") }
         // Each match after the last, and an empty one at the end after one that ends there.
         assertEquals("<>u<><>", replace("ux", "x*", "<>"))
+        // A backslash at the end is itself.
+        assertEquals("<\\>", replace("a", "a", "<\\>"))
+    }
+
+    @Test
+    fun `each function is null where an argument it reads as text is null`() {
+        assertEquals(null, call(HostFunctions.regexp, null, "a"))
+        assertEquals(null, call(HostFunctions.regexp, "a", null))
+        assertEquals(null, call(HostFunctions.regexGroup, null, "a", 0L))
+        assertEquals(null, call(HostFunctions.regexGroup, "a", null, 0L))
+        assertEquals(null, call(HostFunctions.regexpReplace, null, "a", "b"))
+        assertEquals(null, call(HostFunctions.regexpReplace, "a", null, "b"))
+        assertEquals(null, call(HostFunctions.regexpReplace, "a", "a", null))
+        assertEquals(1L, call(HostFunctions.regexp, "", ""), "an empty pattern matches an empty text")
     }
 
     @Test
@@ -52,7 +67,8 @@ class JavaPatternTest {
     fun `a pattern Java refuses fails and what this platform can't match as Java does is refused by name`() {
         assertFailsWith<IllegalArgumentException> { call(HostFunctions.regexp, "(", "a") }
         assertFailsWith<IllegalArgumentException> { call(HostFunctions.regexp, "\\p{Nope}", "a") }
-        for (construct in listOf("\\G" to "\\Ga", "\\X" to "\\X", "\\N{…}" to "\\N{LATIN SMALL LETTER A}", "\\b{g}" to "\\b{g}", "(?-U)" to "(?-U)a", "(?-u)" to "(?-u)a")) {
+        for (construct in listOf("\\G" to "\\Ga", "\\X" to "\\X", "\\N{…}" to "\\N{LATIN SMALL LETTER A}", "\\b{g}" to "\\b{g}", "(?-U)" to "(?-U)a", "(?-u)" to "(?-u)a",
+            "a back reference under (?i)" to "(?i)(a)\\1", "a back reference to a later group" to "(?:\\1b|(a))+")) {
             if (target == "jvm") {
                 call(HostFunctions.regexp, construct.second, "a")
             } else {
@@ -67,6 +83,7 @@ class JavaPatternTest {
     fun `the patterns compiled are kept the most used last`() {
         val first = JavaPatterns.of("^kept\\z")
         assertSame(first, JavaPatterns.of("^kept\\z"))
+        val dropped = JavaPatterns.of("^dropped\\z")
         repeat(JavaPatterns.MAX + 10) { i ->
             JavaPatterns.of("^p$i\\z")
             // Used again, so it stays among the most used.
@@ -74,6 +91,8 @@ class JavaPatternTest {
         }
         assertTrue(JavaPatterns.size <= JavaPatterns.MAX)
         assertSame(first, JavaPatterns.of("^kept\\z"))
+        // Used least lately: dropped, and compiled anew.
+        assertNotSame(dropped, JavaPatterns.of("^dropped\\z"))
     }
 
     /** [function] called as SQLite calls it, with [args] (a text, a whole number or null): its result, or what it threw. */
