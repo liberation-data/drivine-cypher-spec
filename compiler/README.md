@@ -379,6 +379,7 @@ on a text that is no JSON, and takes an empty one as no value, as drivine4j's do
 | `drivine_canonical(json)` | the JSON text with each map in it, at any depth, its keys in order, so two maps of the same entries group together; JSON's null as given, null of null. Deterministic. |
 | `drivine_sort_key(json)` | of a JSON list, a text that orders, as SQLite orders text, as Cypher orders lists; of any other value its JSON text as given, null of null. Deterministic. |
 | `drivine_list_order(a, b)` | -1, 0 or 1, where the JSON list `a` comes beside the list `b` in a comparison (`<`, `>=` …); null where either is no list or the pair that decides isn't ordered. Deterministic. |
+| `drivine_round(number, precision, mode)` | the number rounded to as many decimal places by the mode (`HALF_UP`, `HALF_EVEN` … as Java names them), in decimal as Neo4j rounds, so 2.345 to 2 places `HALF_UP` is 2.35; a float. An infinity is itself; null where the number or the precision is. Deterministic. |
 | `drivine_extension_version()` | the module's version, as it was built (`-Pcompiler.version`, the Maven form: `0.36.0`, `0.36.0-rc.1`), so a host can check it loaded the library it meant to. Deterministic. |
 | `drivine_gc_collect()` | NULL, having collected: see below. Direct-only. |
 | `drivine_gc_heap()`, `drivine_gc_heap(bytes)` | the GC's floor, in bytes; given bytes, it sets the floor first, and 0 restores the runtime's own. Direct-only. |

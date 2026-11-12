@@ -2,7 +2,9 @@ package org.drivine.cypher.host
 
 import org.drivine.DrivineInternalApi
 import org.drivine.cypher.json.ArrayNode
+import org.drivine.cypher.number.DecimalRound
 import org.drivine.cypher.number.DoubleText
+import org.drivine.cypher.sql.RoundingMode
 import org.drivine.cypher.store.SqliteCypherValues
 import org.drivine.cypher.store.SqliteFunctions
 
@@ -91,6 +93,24 @@ object HostFunctions {
         if (order == null) result.nullValue() else result.int(order)
     }
 
+    /**
+     * `drivine_round(number, precision, mode)`: the number rounded to as many decimal places by the mode, in decimal, as
+     * Neo4j's `round(value, precision, mode)` does ([DecimalRound]): 2.345 is halfway between 2.34 and 2.35, where SQLite's
+     * binary arithmetic finds it just below. A float, as a REAL. Null where the number or the precision is. An infinity,
+     * which SQLite stores and a decimal holds no value for, is itself. The mode is one of [RoundingMode]'s names, as the
+     * compiler writes it; any other fails the statement.
+     */
+    val round = HostFunction(SqliteFunctions.ROUND, 3, deterministic = true) { args, _, result ->
+        if (args.isNull(0) || args.isNull(1)) return@HostFunction result.nullValue()
+        val text = args.text(2)
+        val mode = RoundingMode.entries.firstOrNull { it.name == text }
+            ?: return@HostFunction result.error("${SqliteFunctions.ROUND}: no rounding mode is named $text.")
+        val places = args.long(1)
+        if (args.type(0) == SqlType.INTEGER) return@HostFunction result.double(DecimalRound.of(args.long(0), places, mode))
+        val number = args.double(0)
+        result.double(if (number.isInfinite()) number else DecimalRound.of(number, places, mode))
+    }
+
     /** Every host function the module implements, in the order each host registers them. */
-    val all: List<HostFunction> = listOf(floatText, equal, add, canonical, sortKey, listOrder)
+    val all: List<HostFunction> = listOf(floatText, equal, add, canonical, sortKey, listOrder, round)
 }
