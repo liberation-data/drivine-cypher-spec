@@ -89,6 +89,9 @@ It takes `reencodeJson` too, false where left out, the Kotlin form of the reques
 [Oracle's documents encoded again](#oracles-documents-encoded-again)). JDBC reads every OSON version, so drivine4j leaves it
 false; the hosts on thin drivers, python-oracledb's and node-oracledb's, set it.
 
+It takes `readsAsText` too, false where left out, the Kotlin form of the request's `oracleReadsAsText` (see
+[Oracle's reads as text](#oracles-reads-as-text)). JDBC keeps a number's digits, so drivine4j leaves it false.
+
 A host with no Kotlin types calls `CompileJson.compile(request)`, JSON text in and out. The wasm build exports it as
 `compile`, and the shared library as `drivine_compile`:
 
@@ -100,9 +103,9 @@ A host with no Kotlin types calls `CompileJson.compile(request)`, JSON text in a
 ```
 
 `store` is `postgres`, `oracle` or `sqlite`. `graph` has the graph's `name`; the rest of it is Oracle's, and may be left
-out: `nullsEqualStored` and `eraStored` (true where left out), `indexedProperties`, `oracleRowsAsText` and `oracleReencodeJson` (false
-where left out, see [Oracle's rows as text](#oracles-rows-as-text) and
-[Oracle's documents encoded again](#oracles-documents-encoded-again)). `typed`, false where left out, asks for the rows' nodes and
+out: `nullsEqualStored` and `eraStored` (true where left out), `indexedProperties`, `oracleRowsAsText`, `oracleReencodeJson` and
+`oracleReadsAsText` (false where left out, see [Oracle's rows as text](#oracles-rows-as-text),
+[Oracle's documents encoded again](#oracles-documents-encoded-again) and [Oracle's reads as text](#oracles-reads-as-text)). `typed`, false where left out, asks for the rows' nodes and
 relationships tagged and for the columns: see [Columns and typed rows](#columns-and-typed-rows). The answer is one of:
 
 - `{"sql": …, "parameters": {…}, "setup": […], "warnings": […], "nonFinite": false}`, and on Oracle
@@ -269,6 +272,30 @@ With `oracleRowsAsText` too, a write's rows are serialized to text already; its 
 sets both. A statement that returns nothing, and every statement on the other stores, is compiled alike either way. The
 option is temporary: a host sets it until its thin driver reads OSON version 2 (oracle/python-oracledb#622,
 oracle/node-oracledb#1796), then drops it, and it goes from the module with them.
+
+### Oracle's reads as text
+
+A statement that reads returns a row of `JSON` each. node-oracledb's thin mode reads a `JSON` value's numbers through a
+double, so a whole number past 2^53 loses its last digits: 9007199254740993 comes back 9007199254740992 (#198).
+
+So a host whose driver does that sets `"oracleReadsAsText": true` in `graph` (`GraphOptions.oracleReadsAsText` in Kotlin).
+A statement that only reads then returns each row's value as its text in Oracle's extended JSON, a `CLOB` in the column
+`result`, in the read's order:
+
+```sql
+SELECT JSON_SERIALIZE(cy_r.result RETURNING CLOB EXTENDED) AS result FROM (
+    SELECT cy_q.result, ROWNUM AS cy_n FROM (
+        <the read>
+    ) cy_q
+) cy_r
+ORDER BY cy_r.cy_n
+```
+
+A hint the read starts with, and the functions it declares before it (`WITH FUNCTION …`), still start the statement. The
+text is the extended JSON of [Oracle's rows as text](#oracles-rows-as-text): a whole number in full, and a float marked as
+one, `{"$numberDouble": 2}`. A statement that writes, one compiled typed, and every statement on the other stores, is
+compiled alike either way. With `oracleReencodeJson` too, the value encoded again is the one serialized. A host on
+node-oracledb sets it; drivine4j's JDBC keeps a number's digits, and leaves it false.
 
 ### The parser's caches
 
@@ -537,7 +564,8 @@ The JVM is the oracle. `./gradlew jvmOracle` writes, into `build/oracle`:
   `schema.yaml`), compiled for Postgres, Oracle and SQLite, and some with parameters the spec has no form for (whole
   floats, temporal values, bytes, `$` keys) and Oracle's graph options, and on Oracle with `oracleRowsAsText` each of
   those statements whose SQL it changes (every write that returns rows), and two writes of its own, of a long text and of
-  many rows, and with `oracleReencodeJson` each of those statements whose SQL it changes (every one that returns rows).
+  many rows, with `oracleReencodeJson` each of those statements whose SQL it changes (every one that returns rows), and
+  with `oracleReadsAsText` each of those statements whose SQL it changes (every one that only reads).
   Last, compiled typed: `results.yaml`'s statements, and each other statement whose SQL typed changes (one
   that returns a node or a relationship), on Oracle with `oracleRowsAsText` too where that changes it, and with
   `oracleReencodeJson`. Each request and the JVM's answer. A statement whose SQL embeds the moment it was compiled, as SQLite's

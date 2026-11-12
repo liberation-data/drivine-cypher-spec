@@ -190,6 +190,35 @@ class CompileJsonTest {
     }
 
     @Test
+    fun oraclesReadsAsTextIsABooleanFalseWhereLeftOutAndServesReadsOnly() {
+        fun compile(graph: String, cypher: String, store: String = "oracle") =
+            CompileJson.compile("{\"store\": \"$store\", \"graph\": $graph, \"cypher\": \"$cypher\"}")
+        val read = "MATCH (n:N) RETURN n.i ORDER BY n.i DESC"
+        val write = "MERGE (t:N {id: 1}) SET t.x = 2 RETURN properties(t)"
+        assertEquals(
+            "{\"error\":\"A request's graph gives oracleReadsAsText as true or false.\"}",
+            compile("{\"name\": \"g\", \"oracleReadsAsText\": \"true\"}", read),
+        )
+        val plain = compile("{\"name\": \"g\"}", read)
+        assertEquals(plain, compile("{\"name\": \"g\", \"oracleReadsAsText\": false}", read))
+        assertEquals(plain, compile("{\"name\": \"g\", \"oracleReadsAsText\": null}", read))
+        assertTrue("cy_r.cy_n" !in plain, plain)
+        val text = compile("{\"name\": \"g\", \"oracleReadsAsText\": true}", read)
+        assertTrue("JSON_SERIALIZE(cy_r.result RETURNING CLOB EXTENDED) AS result FROM (" in text && "ORDER BY cy_r.cy_n\"" in text, text)
+        // A write is compiled alike, with rows as text or without; its rows as text are oracleRowsAsText's.
+        for (rows in listOf("", ", \"oracleRowsAsText\": true")) {
+            assertEquals(compile("{\"name\": \"g\"$rows}", write), compile("{\"name\": \"g\", \"oracleReadsAsText\": true$rows}", write), rows)
+        }
+        // With oracleReencodeJson too, the value encoded again is the one serialized.
+        val both = compile("{\"name\": \"g\", \"oracleReadsAsText\": true, \"oracleReencodeJson\": true}", read)
+        assertTrue("JSON_SERIALIZE(cy_r.result RETURNING CLOB EXTENDED)" in both && ", KEEP '$') AS result" in both, both)
+        // Meaningful on Oracle only: the other stores compile alike either way.
+        for (store in listOf("postgres", "sqlite")) {
+            assertEquals(compile("{\"name\": \"g\"}", read, store), compile("{\"name\": \"g\", \"oracleReadsAsText\": true}", read, store), store)
+        }
+    }
+
+    @Test
     fun anAnswersTextEscapesNulAndALoneSurrogate() {
         assertEquals("\"a\\u0000\\u001Fb\\\"\\\\\u2028\uD83D\uDE00\"", written("a\u0000\u001Fb\"\\\u2028\uD83D\uDE00"))
         assertEquals("\"a\\uD800b\\uDFFF\"", written("a\uD800b\uDFFF"))
