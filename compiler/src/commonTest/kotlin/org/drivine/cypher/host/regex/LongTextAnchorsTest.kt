@@ -27,10 +27,11 @@ class LongTextAnchorsTest {
     fun `a word boundary replaced over forty thousand characters takes time linear in the text`() {
         val text = "a graph, database! ".repeat(40_000 / 19 + 1).take(40_000)
         val replaced = within(5.seconds, "\\b replaced over 40,000 characters") { JavaPatterns.compile("\\b").replaceAll(text, "|") }
-        // Four words a repetition, a boundary either side of each.
-        assertEquals(text.length + Regex("[a-z]+").findAll(text).count() * 2, replaced.length)
-        val unbounded = within(5.seconds, "\\B replaced over 40,000 characters") { JavaPatterns.compile("\\B").replaceAll(text, "") }
-        assertEquals(text, unbounded)
+        // Three words a repetition, a boundary either side of each; \B at each other of the text's length + 1 places.
+        val boundaries = Regex("[a-z]+").findAll(text).count() * 2
+        assertEquals(text.length + boundaries, replaced.length)
+        val unbounded = within(5.seconds, "\\B replaced over 40,000 characters") { JavaPatterns.compile("\\B").replaceAll(text, "|") }
+        assertEquals(text.length + text.length + 1 - boundaries, unbounded.length)
     }
 
     @Test
