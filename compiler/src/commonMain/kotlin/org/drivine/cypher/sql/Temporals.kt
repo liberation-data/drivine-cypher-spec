@@ -519,7 +519,8 @@ class Temporals(
     private fun durationField(parts: Parts, name: String): String? {
         val (m, d, s) = Triple(parts.months, parts.days, parts.seconds)
         val floor = sql::floor
-        val whole = floor(s)
+        // Lazy: on SQLite a floor binds its number, and a binding made for a field that reads no seconds is left unread.
+        val whole by lazy { floor(s) }
         return when (name) {
             "years" -> "${sql.trunc}($m / 12)"
             "quarters" -> "${sql.trunc}($m / 3)"

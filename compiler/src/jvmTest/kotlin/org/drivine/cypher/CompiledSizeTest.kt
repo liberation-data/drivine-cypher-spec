@@ -36,6 +36,15 @@ class CompiledSizeTest {
     }
 
     @Test
+    fun `a duration's field that reads no seconds binds nothing for them`() {
+        // drivine4j#418: SQLite's floor binds its number; built for every field, it bound the seconds of `years` in a
+        // subquery left unread, and the statement's subqueries were numbered with a gap where it had been.
+        val sql = SqliteCypherCompiler("g").compile("MATCH (c:Claim) RETURN duration(c.d).years").sql
+        val aliases = Regex("\\) sh([0-9]+)\\b").findAll(sql).map { it.groupValues[1].toInt() }.toSortedSet()
+        assertEquals((aliases.first()..aliases.last()).toSortedSet(), aliases, sql)
+    }
+
+    @Test
     fun `a duration added to a value read from the store compiles to a statement that grows with each addition, not exponentially`() {
         fun added(times: Int) = "MATCH (c:Claim) RETURN " + "(".repeat(times) + "c.day" + (1..times).joinToString("") { " + duration('P1D'))" }
         compilers.forEach { compiler ->
