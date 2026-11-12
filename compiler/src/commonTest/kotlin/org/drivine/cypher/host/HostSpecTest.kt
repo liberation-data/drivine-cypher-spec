@@ -99,6 +99,8 @@ class HostSpecTest {
         assertContains(assertFails { check(gives, "gives") }.message!!, "gave no error")
         val otherError = CypherJson.readTree("""{"function": "drivine_round", "args": [2.5, 0, "UNNECESSARY"], "error": "no such"}""")
         assertContains(assertFails { check(otherError, "otherError") }.message!!, "Rounding necessary")
+        val untexted = CypherJson.readTree("""{"function": "drivine_round", "args": [2.5, 0, "UNNECESSARY"], "error": 1}""")
+        assertContains(assertFails { check(untexted, "untexted") }.message!!, "error is a text, not 1")
         val pending = CypherJson.readTree("""{"function": "regexp", "args": ["a", "a"], "result": 1}""")
         assertEquals(Outcome.PENDING, check(pending, "pending"))
         val read = CypherJson.readTree("""{"read": {"store": "sqlite", "nonFinite": false, "column": "1"}, "value": 1, "note": "n"}""")
@@ -192,7 +194,7 @@ class HostSpecTest {
         } else {
             val args = step["args"]!!.map(::expanded)
             refuseNaN(args, where)
-            val error = step["error"]?.let { it.textValue() ?: throw IllegalArgumentException("$where: error is a text, not $it") }
+            val error = step["error"]?.let { it.textValue() ?: throw IllegalArgumentException("$where: error is a text, not ${CypherJson.writeValueAsString(it)}") }
             if (error == null) assertEquals(expanded(step["result"]!!), call(functions, args, where), "$where: $name$args")
             else {
                 val failure = runCatching { call(functions, args, where) }.exceptionOrNull()
