@@ -341,7 +341,7 @@ of its own, so the three libraries read rows, key a temporal value and judge a g
 - **`temporalKey`** gives the sort key `s` of a temporal value's canonical text: `{"key": "…"}`, or null for a duration. A
   `v` that is not its kind's canonical text (`10:00` for a `localtime`, where it is `10:00:00`) is an error. A
   host writes it into a tag of its own (`{"$t", "v", "s"}`) where it builds a stored value itself. `host.yaml`'s keys pin it.
-- **`layout`** judges a graph by its stamps' layouts (as `readStamps` gives them), whether it holds a node other than
+- **`layout`** is asked on the graph's first connection, before anything is made in it: before the store's `ensuring` or `ddl` and the stamp's `prepare`, which make this layout's lock table, the evidence the verdict reads. A graph with no table of nodes yet is new, and asks nothing. It judges a graph by its stamps' layouts (as `readStamps` gives them), whether it holds a node other than
   Drivine's own (`foreignNodes`), and the objects `layoutObjects` listed. The engine is named as a stamp names it
   (`POSTGRES`, not `postgres`), and a stamp's `layout` is a whole number, its text, or null. The answer is one of:
   - `{"verdict": "current"}`: use the graph;

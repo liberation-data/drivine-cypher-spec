@@ -28,6 +28,7 @@ import org.drivine.cypher.store.ddl.StoreDdl
  * | above the library's own | any, none among them | [Verdict.Refuse]: written by a later Drivine, to be upgraded |
  * | several, of different layouts | any | [Verdict.Refuse] |
  * | none | none, and no earlier layout's object | [Verdict.Current]: a new graph, or one cleared; the stamp is assigned as ever |
+ * | none | none, and an earlier layout's objects | [Verdict.Stamp]: those dropped, whatever of this layout's stands beside them, then asked again |
  * | none | some, and the store's objects show this layout made it and no earlier one did | [Verdict.Stamp] with [Verdict.Stamp.assign]: a graph of this layout whose stamp a clear deleted (`MATCH (n) DETACH DELETE n` deletes Drivine's own nodes too), stamped again |
  * | none | some, and objects of this layout and an earlier one | [Verdict.Refuse], naming both |
  *
@@ -90,7 +91,9 @@ object StoreLayout {
         if (stampRows.isEmpty() && engine in SQL_ENGINES && sql != null) {
             val old = oldObjects(sql, objects)
             val ours = ownObjects(sql, objects)
-            if (old.isNotEmpty() && ours.isNotEmpty()) {
+            // Values beside both layouts' objects can't be told apart. An empty graph can: on Postgres the library's prepare
+            // has made the lock table before the objects are listed, and an earlier layout's are dropped as below.
+            if (foreignNodes && old.isNotEmpty() && ours.isNotEmpty()) {
                 return Verdict.Refuse(
                     "The graph '$graph' on $store has no store stamp, and holds objects of store layout $own (${ours.joinToString()}) and of an earlier layout " +
                         "(${old.joinToString { it.first }}): two versions of Drivine made it. This version of Drivine reads layout $own only. " +
@@ -129,12 +132,12 @@ object StoreLayout {
      * whose name begins with the graph's, and another graph's, `g_t`'s table `g_t_node` among them, is never dropped.
      */
     fun oldObjects(ddl: SqlStoreDdl, objects: List<Map<String, Any?>>): List<Pair<String, String>> {
-        val generated = Regex("^${Regex.escape(ddl.name)}_(ix|lx|uq|t|v)([0-9]*)_[a-z0-9]*_[0-9a-f]{1,8}(_t|_i)?$", RegexOption.IGNORE_CASE)
+        val generated = generated(ddl)
         return objects.mapNotNull { row ->
             val name = row["name"] as? String ?: return@mapNotNull null
             val type = (row["type"] as? String)?.uppercase() ?: "INDEX"
-            val layout = generated.find(name)?.groupValues?.get(2) ?: return@mapNotNull null
-            if ((layout.toIntOrNull() ?: GRAPH_ENGINE_LAYOUT) < ValueLayout.LAYOUT) name to type else null
+            val layout = generatedLayout(generated, name) ?: return@mapNotNull null
+            if (layout < ValueLayout.LAYOUT) name to type else null
         }
     }
 
@@ -144,14 +147,23 @@ object StoreLayout {
      * is gone.
      */
     fun ownObjects(ddl: SqlStoreDdl, objects: List<Map<String, Any?>>): List<String> {
-        val generated = Regex("^${Regex.escape(ddl.name)}_(ix|lx|uq|t|v)([0-9]*)_[a-z0-9]*_[0-9a-f]{1,8}(_t|_i)?$", RegexOption.IGNORE_CASE)
+        val generated = generated(ddl)
         return objects.mapNotNull { row ->
             val name = row["name"] as? String ?: return@mapNotNull null
-            if (name.equals(ddl.lock, ignoreCase = true)) return@mapNotNull name
-            val layout = generated.find(name)?.groupValues?.get(2)?.toIntOrNull() ?: return@mapNotNull null
-            if (layout == ValueLayout.LAYOUT) name else null
+            if (name.equals(ddl.lock, ignoreCase = true) || generatedLayout(generated, name) == ValueLayout.LAYOUT) name else null
         }
     }
+
+    /**
+     * A whole name the store [ddl] generates for the graph ([SqlStoreDdl.objectName]), its readable part, its hash and what is
+     * made beside it, so that another graph's, whose name begins with this one's, is never taken for it.
+     */
+    private fun generated(ddl: SqlStoreDdl) =
+        Regex("^${Regex.escape(ddl.name)}_(ix|lx|uq|t|v)([0-9]*)_[a-z0-9]*_[0-9a-f]{1,8}(_t|_i)?$", RegexOption.IGNORE_CASE)
+
+    /** The layout the [generated] name [name] carries: none is 1; null where the name is no generated one. */
+    private fun generatedLayout(generated: Regex, name: String): Int? =
+        generated.find(name)?.groupValues?.get(2)?.let { it.toIntOrNull() ?: GRAPH_ENGINE_LAYOUT }
 
     /**
      * The statements that drop the [oldObjects] of [objects] on the store [ddl], and the records of the catalog that name
