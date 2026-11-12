@@ -102,6 +102,7 @@ class LayoutJsonTest {
             "{\"layout\": 3}" to "A layout request gives {\"engine\": …, \"graph\": …, \"stamps\": […], \"foreignNodes\": …}.",
             "{\"layout\": {\"graph\": \"g\", \"stamps\": [], \"foreignNodes\": false}}" to "A layout request gives the engine as a text.",
             "{\"layout\": {\"engine\": \"postgres\", \"graph\": \"g\", \"stamps\": [], \"foreignNodes\": false}}" to "A layout request names the engine as its stamp does: POSTGRES, not postgres.",
+            "{\"layout\": {\"engine\": \"neo4j\", \"graph\": \"g\", \"stamps\": [{\"layout\": 2}], \"foreignNodes\": false}}" to "A layout request names the engine as its stamp does: NEO4J, not neo4j.",
             "{\"layout\": {\"engine\": \"POSTGRES\", \"stamps\": [], \"foreignNodes\": false}}" to "A layout request gives the graph as a text.",
             "{\"layout\": {\"engine\": \"POSTGRES\", \"graph\": \"g\", \"stamps\": {}, \"foreignNodes\": false}}" to "A layout request gives the stamps as a list.",
             "{\"layout\": {\"engine\": \"POSTGRES\", \"graph\": \"g\", \"stamps\": [2], \"foreignNodes\": false}}" to "A layout request's stamp is a map.",
@@ -114,6 +115,11 @@ class LayoutJsonTest {
             assertEquals(message, answer(request)["error"]?.textValue(), request)
         }
         assertTrue(answer("{\"read\": \"{\"}")["error"]!!.textValue()!!.startsWith("A read request's column is no JSON"))
+        // A column is read as a request is, so one that nests past MAX_DEPTH is an error, not a stack overflown on native.
+        assertEquals(
+            "A read request's column is no JSON: A request nests its arrays and objects at most 64 deep.",
+            answer("{\"read\": ${json("[".repeat(65) + "]".repeat(65))}}")["error"]?.textValue(),
+        )
         assertEquals("null", CypherJson.writeValueAsString(answer("{\"temporalKey\": {\"kind\": \"duration\", \"v\": \"P1D\"}}")["key"]!!), "a duration has no key")
         // A stamp's layout as a whole double or as its text is that layout, and objects given as null are left out.
         for (layout in listOf("2", "2.0", "\"2\"")) {

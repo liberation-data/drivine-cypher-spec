@@ -18,7 +18,8 @@ import org.drivine.cypher.store.marker.StoreLayout
  * libraries read rows, key a temporal value and judge a graph's layout alike, as drivine4j does through the Kotlin types:
  *
  * - `{"read": "<a column's JSON text>", "typed": false}`: [ValueLayout.read] of the column, a tag read as its text and each
- *   map's keys unescaped, at any depth; with `typed`, a tag as `{"$t", "v"}` and a map that has a `$t` key of its own as
+ *   map's keys unescaped, at any depth (a column that nests past [org.drivine.cypher.json.MAX_DEPTH] is an error, as a
+ *   request is, as its read would overflow a native host's stack); with `typed`, a tag as `{"$t", "v"}` and a map that has a `$t` key of its own as
  *   `{"$t": "map", "v": …}`. Answered `{"value": <the value as JSON>}`. The column is given as its text, as the store gave it,
  *   so a host's JSON reader never rounds a whole number past 2^53 first (a fraction is read as a double, as the host's own reader would).
  * - `{"temporalKey": {"kind": "date", "v": "2024-01-01"}}`: [Temporals.key], the sort key `s` a tag of that kind and
@@ -79,8 +80,9 @@ internal object LayoutJson {
     private fun layout(given: JsonNode?): String {
         require(given is ObjectNode) { "A layout request gives {\"engine\": …, \"graph\": …, \"stamps\": […], \"foreignNodes\": …}." }
         val engine = given["engine"]?.textValue() ?: throw IllegalArgumentException("A layout request gives the engine as a text.")
-        // A SQL store's engine named in another case, as a statement's request names its store, would be judged a graph engine's.
-        require(engine.uppercase() !in StoreLayout.SQL_ENGINES || engine in StoreLayout.SQL_ENGINES) {
+        // A SQL store's engine named in another case, as a statement's request names its store, would be judged a graph engine's,
+        // and a graph engine's would be named so in a refusal's message, not as drivine4j names it.
+        require(engine.uppercase() !in StoreLayout.ENGINE_NAMES || engine in StoreLayout.ENGINE_NAMES) {
             "A layout request names the engine as its stamp does: ${engine.uppercase()}, not $engine."
         }
         val graph = given["graph"]?.textValue() ?: throw IllegalArgumentException("A layout request gives the graph as a text.")

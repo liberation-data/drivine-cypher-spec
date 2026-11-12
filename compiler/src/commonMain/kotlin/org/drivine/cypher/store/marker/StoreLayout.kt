@@ -142,8 +142,8 @@ object StoreLayout {
     /** The engines, as a stamp names them, whose store layout this module defines ([ValueLayout.LAYOUT]). */
     val SQL_ENGINES = setOf("POSTGRES", "ORACLE", "SQLITE")
 
-    /** How a message names each engine. */
-    private val ENGINE_NAMES = mapOf(
+    /** How a message names each engine, by the name its stamp gives it. */
+    internal val ENGINE_NAMES = mapOf(
         "POSTGRES" to PostgresDdl.ENGINE, "ORACLE" to "Oracle", "SQLITE" to "SQLite",
         "NEO4J" to "Neo4j", "MEMGRAPH" to "Memgraph", "FALKORDB" to "FalkorDB",
     )
