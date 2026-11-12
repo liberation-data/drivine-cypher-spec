@@ -29,7 +29,8 @@ class HostTemporalOracleTest {
             val args = case["args"]!!.map(::sqlValue)
             val where = "${case["group"]!!.textValue()}: $function${args.map(::show)}"
             val error = case["error"]?.textValue()
-            val got = runCatching { callHost(functions, args, where, floatText = true) }
+            // An argument the harness can't hand over (Unreadable) fails the test, never passes as Java's failure.
+            val got = runCatching { callHost(functions, args, where, floatText = true) }.also { r -> r.exceptionOrNull()?.let { if (it is Unreadable) throw it } }
             val wrong = if (error == null) {
                 val expected = sqlValue(case["result"]!!)
                 when {

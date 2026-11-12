@@ -186,6 +186,9 @@ class HostSpecTest {
         // A step the runner can't run is no hold.
         val heldUnreadable = CypherJson.readTree("""{"note": "$HELD", "function": "drivine_float_text", "args": [true], "result": "1.0"}""")
         assertContains(assertFails { check(heldUnreadable, "heldUnreadable") }.message!!, "No SQL value of")
+        // Nor is a step of an error whose argument the runner can't hand over as SQLite would: its failure is the runner's.
+        val heldUnreadableError = CypherJson.readTree("""{"note": "$HELD", "function": "drivine_temporal", "args": ["add_months", "2024-01-31T00:00:00.000000", 2.5], "error": "x"}""")
+        assertContains(assertFails { check(heldUnreadableError, "heldUnreadableError") }.message!!, "No step reads the text of the float")
         val otherNote = CypherJson.readTree("""{"note": "drivine4j#421", "function": "drivine_float_text", "args": [1.0], "result": "1"}""")
         assertFails { check(otherNote, "otherNote") }
         val heldPending = CypherJson.readTree("""{"note": "$HELD", "function": "drivine_pending", "args": ["local", "x"], "result": null}""")
@@ -242,7 +245,8 @@ class HostSpecTest {
             val error = step["error"]?.let { it.textValue() ?: throw IllegalArgumentException("$where: error is a text, not ${CypherJson.writeValueAsString(it)}") }
             if (error == null) assertEquals(expanded(step["result"]!!), call(functions, args, where), "$where: $name$args")
             else {
-                val failure = runCatching { call(functions, args, where) }.exceptionOrNull()
+                // An argument the runner can't hand over (Unreadable) is the step's failure to run, never the function's error.
+                val failure = runCatching { call(functions, args, where) }.exceptionOrNull()?.also { if (it is Unreadable) throw it }
                     ?: throw AssertionError("$where: $name$args fails with \"$error\", but gave no error")
                 assertContains(failure.message!!, error, message = "$where: $name$args")
             }
