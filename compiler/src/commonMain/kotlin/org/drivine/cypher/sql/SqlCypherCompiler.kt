@@ -4769,10 +4769,6 @@ abstract class SqlCypherCompiler(
         }
 
         /**
-         * The offset's text the time zone [zone] written gives a value, as Neo4j takes one: `Z`, or an offset written `+01:00`.
-         * A zone by name, which no store's text holds yet, is refused; any other text fails.
-         */
-        /**
          * `date.statement()`, `datetime.transaction()` or `localtime.realtime()` and the rest, of [function]: the moment the
          * statement runs, however it is asked for, as one statement is one moment here. Given a time zone, the moment there,
          * as `datetime({datetime: …, timezone: …})` moves it, then of the function's kind; given null, null, as in Neo4j
@@ -4796,6 +4792,10 @@ abstract class SqlCypherCompiler(
             return expression(if (kind == Temporal.DATE_TIME) moment else Expression.Function(kind.function, false, listOf(moment)), scope)
         }
 
+        /**
+         * The offset's text the time zone [zone] written gives a value, as Neo4j takes one: `Z`, or an offset written `+01:00`.
+         * A zone by name, which no store's text holds yet, is refused; any other text fails.
+         */
         private fun zone(zone: String): String {
             val id = CommonTime.offsetId(zone)
             return when {

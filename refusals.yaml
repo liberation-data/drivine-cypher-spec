@@ -118,6 +118,9 @@ cases:
         error: "date.statement() of a time zone an expression gives is Cypher, and is not compiled to SQL yet."
       - cypher: "RETURN localtime.realtime(1)"
         error: "localtime.realtime() takes a time zone, a text, or nothing."
+      - cypher: "RETURN time.statement($z)"
+        parameters: {z: 1}
+        error: "time.statement() takes a time zone, a text, or nothing."
 
   - name: "Temporal map not compiled yet"
     description: "A temporal value made from a map of fields the compiler doesn't handle yet is refused, naming what it is."
