@@ -45,4 +45,17 @@ class OracleKeyedMapFloatTest {
         assertTrue(it.parameters.values.any { v -> v == """{"${'$'}numberDouble":"1.0E20"}""" }, it.parameters.toString())
         assertTrue(it.parameters.values.any { v -> v == """{"${'$'}k":"a","k":"b"}""" }, it.parameters.toString())
     }
+
+    @Test
+    fun `a float nested in another map, in a list, or not finite, beside a map keyed with $ deeper down, is written as extended JSON's double`() {
+        val it = OracleCypherCompiler("g").compile(
+            "CREATE (n:N {a: \$m.n.x, l: \$l, f: \$f, k: \$k.b}) RETURN n",
+            mapOf("m" to mapOf("n" to mapOf("x" to 2.0)), "l" to listOf(1.0, 1.5), "f" to Double.NaN, "k" to mapOf("a" to mapOf("\$k" to 1), "b" to 3)),
+        )
+        val text = it.parameters.values.single() as String
+        val d = "${'$'}numberDouble"
+        assertEquals("""{"m":{"n":{"x":{"$d":"2.0"}}},"l":[{"$d":"1.0"},1.5],"f":{"$d":"NaN"},"k":{"a":{"${'$'}k":1},"b":3}}""", text)
+        for (path in listOf("\$.m.n.x", "\$.l", "\$.f")) assertTrue(it.sql.contains("JSON(JSON_QUERY(cy_params, '$path' RETURNING CLOB) EXTENDED)"), "$path: ${it.sql}")
+        assertFalse(it.sql.contains("JSON(JSON_QUERY(cy_params, '\$.k"), it.sql)
+    }
 }

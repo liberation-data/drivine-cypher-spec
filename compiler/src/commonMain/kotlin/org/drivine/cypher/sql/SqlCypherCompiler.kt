@@ -435,7 +435,10 @@ abstract class SqlCypherCompiler(
      */
     protected open val parameterPath: ((marker: String, text: String?, keys: List<String>, value: Any?) -> String)? = null
 
-    /** The JSON text a parameter's [value] is bound as. */
+    /**
+     * The JSON text a parameter's [value] is bound as, in a statement that only reads: one that writes binds them all at
+     * once, see [parametersText].
+     */
     protected open fun parameterText(value: Any?): String = CypherJson.writeValueAsString(value, encoder = encoder)
 
     /**

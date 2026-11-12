@@ -147,7 +147,7 @@ class OracleCypherCompiler(
      * value that holds a map with a key as extended JSON's are, `{"${'$'}numberLong": "5"}`, which `JSON(… EXTENDED)` would read as
      * the value it writes: such a value is written as JSON is, its floats that are whole numbers read as whole numbers. A
      * statement that writes binds all its parameters as one text, and reads as extended JSON only those of them with such
-     * a double in them: see [propertyOf].
+     * a double in them: see [propertyOf], and [parametersText] for one where a parameter holds such a key.
      */
     override fun parameterText(value: Any?): String {
         val tree = CypherJson.valueToTree(value, encoder)
