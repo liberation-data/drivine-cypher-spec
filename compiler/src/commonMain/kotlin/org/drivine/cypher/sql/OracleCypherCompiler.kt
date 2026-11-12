@@ -57,7 +57,24 @@ class OracleCypherCompiler(
      * [org.drivine.cypher.api.GraphOptions.oracleReencodeJson]. False where it is left out, as the other constructors leave it.
      */
     private val reencodeJson: Boolean,
+    /**
+     * Whether a statement that only reads returns each row's value as its extended JSON text, in place of `JSON`: see
+     * [readAsText], and [org.drivine.cypher.api.GraphOptions.oracleReadsAsText]. False where it is left out, as the other
+     * constructors leave it.
+     */
+    private val readsAsText: Boolean,
 ) : SqlCypherCompiler(graph, encoder) {
+
+    // The constructor with reencodeJson and without readsAsText, kept so that what was compiled against it still links.
+    constructor(
+        graph: String,
+        nullsEqualStored: Boolean,
+        eraStored: Boolean,
+        indexedProperties: Set<Pair<String, String>>,
+        encoder: CypherEncoder?,
+        rowsAsText: Boolean,
+        reencodeJson: Boolean,
+    ) : this(graph, nullsEqualStored, eraStored, indexedProperties, encoder, rowsAsText, reencodeJson, false)
 
     // The constructor with rowsAsText and without reencodeJson, kept so that what was compiled against it still links.
     constructor(
@@ -67,7 +84,7 @@ class OracleCypherCompiler(
         indexedProperties: Set<Pair<String, String>>,
         encoder: CypherEncoder?,
         rowsAsText: Boolean,
-    ) : this(graph, nullsEqualStored, eraStored, indexedProperties, encoder, rowsAsText, false)
+    ) : this(graph, nullsEqualStored, eraStored, indexedProperties, encoder, rowsAsText, false, false)
 
     // The constructor drivine4j's compiler had, its defaults among it, kept so that what was compiled against it still links.
     constructor(
@@ -75,7 +92,7 @@ class OracleCypherCompiler(
         nullsEqualStored: Boolean = true,
         eraStored: Boolean = true,
         indexedProperties: Set<Pair<String, String>> = emptySet(),
-    ) : this(graph, nullsEqualStored, eraStored, indexedProperties, null, false, false)
+    ) : this(graph, nullsEqualStored, eraStored, indexedProperties, null, false, false, false)
 
     // The constructor with an encoder and without rowsAsText, kept so that what was compiled against it still links.
     constructor(
@@ -84,7 +101,7 @@ class OracleCypherCompiler(
         eraStored: Boolean,
         indexedProperties: Set<Pair<String, String>>,
         encoder: CypherEncoder?,
-    ) : this(graph, nullsEqualStored, eraStored, indexedProperties, encoder, false, false)
+    ) : this(graph, nullsEqualStored, eraStored, indexedProperties, encoder, false, false, false)
 
     /** The function the store keeps that compares two values that may hold a null: see [nullsEqual]. */
     private val storedNullsEqual = nullsEqualName(graph)
@@ -1619,7 +1636,25 @@ class OracleCypherCompiler(
      * a list or a map, or as a nested property, is routed the CLOB way on Oracle, to avoid an Oracle server defect
      * (drivine4j#670). See [OracleLongReads].
      */
-    override fun finished(compiled: CompiledCypher) = compiled.copy(sql = OracleLongReads.routed(compiled.sql))
+    override fun finished(compiled: CompiledCypher): CompiledCypher {
+        val routed = OracleLongReads.routed(compiled.sql)
+        return compiled.copy(sql = if (readsAsText && !procedural && !typed) readAsText(routed) else routed)
+    }
+
+    /**
+     * The read [query], as [readAsText] gives it: each row's value, its `result`, given as its text in Oracle's extended JSON, as a `CLOB`:
+     * `JSON_SERIALIZE(… RETURNING CLOB EXTENDED)`, as a write's rows are with [rowsAsText]. A whole number keeps its
+     * digits, and a float is marked as one (`{"${'$'}numberDouble": 2}`), where a host's driver reads a `JSON` value's
+     * numbers through a double of its own: node-oracledb does (liberation-data/drivine-cypher-spec#198). The rows are
+     * numbered in [query]'s order and given in it. A hint [query] starts with is the statement's, so it starts the
+     * statement still. Not where the statement is compiled typed, whose rows hold more columns than `result`.
+     */
+    private fun readAsText(query: String): String {
+        val hint = LEADING_HINT.find(query)
+        val (head, inner) = if (hint == null) "SELECT" to query else "SELECT ${hint.groupValues[1]}" to "SELECT " + query.substring(hint.range.last + 1)
+        val numbered = "SELECT cy_q.result, ROWNUM AS cy_n FROM (\n${indent(inner)}\n) cy_q"
+        return "$head JSON_SERIALIZE(cy_r.result RETURNING CLOB EXTENDED) AS result FROM (\n${indent(numbered)}\n) cy_r\nORDER BY cy_r.cy_n"
+    }
 
     /**
      * A query that reads the graph's tables twice or more is not rewritten by Oracle's JSON table transformation
@@ -1996,6 +2031,9 @@ class OracleCypherCompiler(
     private fun kind(json: String) = "JSON_VALUE($json, '\$.type()')"
 
     companion object {
+        /** A hint a query starts with: `SELECT /*+ … */ `. */
+        private val LEADING_HINT = Regex("""^SELECT (/\*\+.*?\*/) """)
+
         /**
          * Whether every statement holds its lists of ids as JSON ([idsAsJson]), whatever its walks' bounds: for tests only, so
          * that the JSON form is run over every walk and path a spec has, not only over a walk with no bound. False but in a
