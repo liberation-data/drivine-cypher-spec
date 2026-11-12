@@ -62,6 +62,13 @@ class SqliteTemporalSql(shared: (List<String>, (List<String>) -> String) -> Stri
 
     override val trunc = SqliteFunctions.TRUNC
 
+    /**
+     * SQLite's numbers are binary, so a fraction of a second times a power of ten misses a whole number by a unit of its
+     * last place or two: [trunc] takes such a number to be the whole number, and so does this, going down from it only
+     * where a negative number is below it by more than that.
+     */
+    override fun floor(number: String) = "($trunc($number) - CASE WHEN $number < 0 AND $number < $trunc($number) - ABS($number) * 1e-15 THEN 1 ELSE 0 END)"
+
     override val epoch = "'1970-01-01T00:00:00.000000'"
 
     /** SQLite divides one whole number by another to a whole number: the dividend is made a real number first. */

@@ -518,7 +518,7 @@ class Temporals(
      */
     private fun durationField(parts: Parts, name: String): String? {
         val (m, d, s) = Triple(parts.months, parts.days, parts.seconds)
-        fun floor(x: String) = "(${sql.trunc}($x) - CASE WHEN $x < ${sql.trunc}($x) THEN 1 ELSE 0 END)"
+        val floor = sql::floor
         val whole = floor(s)
         return when (name) {
             "years" -> "${sql.trunc}($m / 12)"
