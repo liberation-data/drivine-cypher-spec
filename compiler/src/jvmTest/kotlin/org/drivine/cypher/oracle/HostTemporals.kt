@@ -416,6 +416,18 @@ object HostTemporals {
         "FM0000", "FM00", "FM000000", "FM", "FM9999999999990.999999999", "FM0.999", "FM.99", "FM0.", "FM9", "FM0000000000000000000000", "FMx0y0",
     )
 
+    /**
+     * Decimal texts of exponents near an int's ends, and of many digits, which Java answers or fails on at once, but
+     * which a power of ten written out would hang on: each is beyond `BigInteger`'s range (or `setScale`'s scale) or a
+     * zero, or small enough for Java to write out. Java's wrapping `longValue` is in them too (`1e19`, `3e63`, `1e64`).
+     */
+    private val HUGE_DECIMALS = listOf(
+        "1e2147483647", "-1e2147483647", "10e2147483647", "1e2147483640", "1e715827883", "-1e715827883", "1e-2147483647",
+        "1e-2147483648", "1.5e-2147483646", "-1e-715827892", "0e999999999", "0e2147483647", "-0e-2147483647", "0.000e-2147483647",
+        "1e19", "123e17", "-9.3e18", "3e63", "-3e63", "1e64", "1e10000", "-1e-10000", "9.5e-1", "-4e-1", "99.5", "0.99999999995",
+        "7".repeat(5000), "-" + "3".repeat(5000) + "e-4990", "5" + "0".repeat(4999) + "e-5000",
+    )
+
     /** The cases: each function over its inputs, by group. */
     private fun cases(random: Random): List<Map<String, Any?>> = buildList {
         fun case(function: String, group: String, vararg args: Any?) {
@@ -501,7 +513,7 @@ object HostTemporals {
             case(TEMPORAL, "add_time", "add_time", stamp, -1L, Long.MIN_VALUE, Long.MIN_VALUE)
             for (unit in listOf("weekYear", "millennium", "week")) case(TEMPORAL, "truncate", "truncate", stamp, unit)
         }
-        for (amount in listOf("2.5", "-2.5", "2.4", "1e3", "0.5", "-0.5", "x", "", " 1", "\u0661\u0662.\u0665")) {
+        for (amount in listOf("2.5", "-2.5", "2.4", "1e3", "0.5", "-0.5", "x", "", " 1", "\u0661\u0662.\u0665") + HUGE_DECIMALS) {
             case(TEMPORAL, "add_months", "add_months", "2024-01-31T00:00:00.000000", amount)
             case(TEMPORAL, "add_time", "add_time", "2024-01-31T00:00:00.000000", amount, 0L, 0L)
             case(TEMPORAL, "add_time", "add_time", "2024-01-31T00:00:00.000000", 0L, amount, 0L)
@@ -560,7 +572,7 @@ object HostTemporals {
             "2.5", "-2.5", "0.4999999999", "1.0000000005", "-0.0000000004", "1e3", "12345678901234567890.123456789123", "x", "", "2024-03-15T10:30:00.000000",
             // Any Unicode decimal digits, as BigDecimal reads them: Arabic-Indic and fullwidth.
             "\u0661\u0662.\u0665", "-\uff11\uff12e\uff11",
-        ) + List(1500) {
+        ) + HUGE_DECIMALS + List(1500) {
             when (random.nextInt(3)) {
                 0 -> random.nextLong(-1_000_000, 1_000_000)
                 1 -> float(BigDecimal(random.nextLong(-1_000_000_000_000, 1_000_000_000_000)).movePointLeft(random.nextInt(0, 13)).toDouble())

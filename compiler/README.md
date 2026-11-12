@@ -448,8 +448,11 @@ The extension registers the module's own functions, so on a connection that load
 `t`; a fraction of up to nine digits, or none after the point), its calendar arithmetic (`plusMonths`, `plusSeconds`,
 `plusNanos`, `ChronoUnit.MONTHS.between`, `Duration.between`, the ISO week-based year) with its range checks and
 messages, and java.math's `BigDecimal` reading, `HALF_UP` and `stripTrailingZeros`, are written out in common code, as
-kotlinx-datetime's own parse and arithmetic check and word otherwise. The JVM writes java.time's answers to 120,000 calls
-or so (`host-temporal.json`, `org.drivine.cypher.oracle.HostTemporals`): every edge year from -999,999,999 to 999,999,999,
+kotlinx-datetime's own parse and arithmetic check and word otherwise. A decimal is held as its digits and its scale,
+never as a power of ten, so a stored text of an exponent near ±2^31 (`1e2147483647`) is answered, or fails with
+java.math's message (`BigInteger would overflow supported range`, `Underflow`), at once, where Java can take
+minutes; a whole number's wrapped low 64 bits are worked out of the digits alone. The JVM writes java.time's answers
+to 120,000 calls or so (`host-temporal.json`, `org.drivine.cypher.oracle.HostTemporals`): every edge year from -999,999,999 to 999,999,999,
 ISO-week turns, the texts of every temporal kind with and without offsets (those of real zones' transitions among them),
 and floats and decimal texts for `drivine_trunc` and `drivine_to_char`. `HostTemporalOracleTest` checks each on every
 target, its result exactly and of its type, or its failure, and `jvmOracle` checks `host.yaml`'s steps of them against
