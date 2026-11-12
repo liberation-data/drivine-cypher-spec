@@ -65,8 +65,8 @@ internal object SearchJson {
         }.toString()
     }
 
-    /** The graph a SQL store's search runs over; a graph engine's needs none. */
-    private fun graph(tree: ObjectNode, store: SearchStore): GraphOptions {
+    /** The graph a SQL store's search runs over; a graph engine's needs none. [VectorJson]'s too. */
+    fun graph(tree: ObjectNode, store: SearchStore): GraphOptions {
         val graph = tree["graph"]?.takeUnless { it.isNull }
         if (graph == null && store.graphEngine) return GraphOptions("")
         require(graph is ObjectNode) { "A request gives its graph: {\"name\": …}." }
@@ -103,14 +103,14 @@ internal object SearchJson {
         )
     }
 
-    /** The text at [key], null where it is left out or null; refused where it is no text. */
-    private fun text(node: ObjectNode, key: String): String? {
+    /** The text at [key], null where it is left out or null; refused where it is no text. [VectorJson]'s too. */
+    fun text(node: ObjectNode, key: String): String? {
         val value: JsonNode = node[key]?.takeUnless { it.isNull } ?: return null
         return value.textValue() ?: throw IllegalArgumentException("A request gives $key as text.")
     }
 
-    /** The texts at [key], a JSON array of them. */
-    private fun texts(node: ObjectNode, key: String, of: String): List<String> {
+    /** The texts at [key], a JSON array of them. [VectorJson]'s too. */
+    fun texts(node: ObjectNode, key: String, of: String): List<String> {
         val value = node[key] as? ArrayNode ?: throw IllegalArgumentException("A request's $of gives its $key as [\"…\", …].")
         return value.map { it.textValue() ?: throw IllegalArgumentException("A request's $of gives its $key as [\"…\", …].") }
     }

@@ -103,9 +103,9 @@ data class StoredFunctions(val nullsEqual: Boolean, val era: Boolean)
 
 /**
  * The compiler refuses the statement, with [message]: what each library throws, as the spec's refusals pin it. Or a
- * full-text search's query ([FullTextSearch]).
+ * full-text search's query ([FullTextSearch]), or a vector search ([VectorSearch]).
  */
-data class Refusal(val message: String) : CompileResult, SearchResult
+data class Refusal(val message: String) : CompileResult, SearchResult, VectorResult
 
 /**
  * Drivine's Cypher compiler: a statement in Drivine's flavour of Cypher, as SQL for Postgres, Oracle or SQLite.
