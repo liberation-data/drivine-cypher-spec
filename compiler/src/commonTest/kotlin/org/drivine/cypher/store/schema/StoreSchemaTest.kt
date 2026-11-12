@@ -107,6 +107,22 @@ class StoreSchemaTest {
     }
 
     @Test
+    fun aConstraintOverAPropertyThatBeginsWithADollarIsSampledAtTheKeyTheStoreHoldsItAt() {
+        // Layout 2 holds `$x` as `$$x` (ValueLayout.escape): sampled at `$x`, no key would repeat, and a violation the build
+        // found would be thrown, not reported. Each sample still names the property as declared.
+        val spec = UniquenessConstraintSpec("Person", listOf("${'$'}x"))
+        for (id in listOf("postgres", "oracle", "sqlite")) {
+            val schema = schemas.getValue(id)
+            // A refill's sample names the copy it fills in, the declared property lowercased.
+            val sampled = mapOf("${'$'}x" to schema.sampleConflictsQuery(spec, 10), "__drivine.lower.${'$'}x" to schema.sampleRefilledConflictsQuery(spec.copy(ignoreCase = true), 10))
+            for ((named, sample) in sampled) {
+                assertTrue("${'$'}${'$'}x" in sample, "$id reads the stored key: $sample")
+                assertTrue("'$named'" in sample, "$id names the property as declared: $sample")
+            }
+        }
+    }
+
+    @Test
     fun eachListingIsReadBackAsDrivine4jReadIt() {
         for (case in store["listings"]!!) {
             val name = case["name"]!!.textValue()

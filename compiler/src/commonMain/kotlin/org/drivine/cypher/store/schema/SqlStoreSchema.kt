@@ -462,11 +462,11 @@ class PostgresSchema(override val ddl: PostgresDdl) : SqlStoreSchema() {
     override fun isViolation(error: StoreError): Boolean = error.causes.any { it.isSqlError && it.sqlState == "23505" }
 
     /** A node's element id is its `nid`; [limit] of a key's nodes at most are named, the first made first. */
-    override fun sampleConflictsQuery(spec: ConstraintSpec, limit: Int): String = sample(spec, spec.properties.map { PostgresSql.property("n", it) }, limit)
+    override fun sampleConflictsQuery(spec: ConstraintSpec, limit: Int): String = sample(spec, SqlStoreDdl.storedKeys(spec.properties).map { PostgresSql.property("n", it) }, limit)
 
     /** Each key lowercased as the copies are filled in, with `lower`. */
     override fun sampleRefilledConflictsQuery(spec: ConstraintSpec, limit: Int): String =
-        sample(spec.made(), spec.properties.map { "lower(${PostgresSql.property("n", it)})" }, limit)
+        sample(spec.made(), SqlStoreDdl.storedKeys(spec.properties).map { "lower(${PostgresSql.property("n", it)})" }, limit)
 
     private fun sample(spec: ConstraintSpec, keys: List<String>, limit: Int): String {
         val entries = spec.properties.zip(keys).joinToString(", ") { (property, key) -> "${PostgresSql.literal(property)}, $key" }
@@ -669,11 +669,11 @@ class OracleSchema(override val ddl: OracleDdl) : SqlStoreSchema() {
      * nodes at most however many hold the key. A node's element id is its `nid`.
      */
     override fun sampleConflictsQuery(spec: ConstraintSpec, limit: Int): String =
-        sample(spec, spec.properties.map { "JSON_VALUE(n.props, ${OracleSql.path(it)})" }, limit)
+        sample(spec, SqlStoreDdl.storedKeys(spec.properties).map { "JSON_VALUE(n.props, ${OracleSql.path(it)})" }, limit)
 
     /** Each key lowercased as the copies are filled in, with `LOWER`. */
     override fun sampleRefilledConflictsQuery(spec: ConstraintSpec, limit: Int): String =
-        sample(spec.made(), spec.properties.map { "LOWER(JSON_VALUE(n.props, ${OracleSql.path(it)}))" }, limit)
+        sample(spec.made(), SqlStoreDdl.storedKeys(spec.properties).map { "LOWER(JSON_VALUE(n.props, ${OracleSql.path(it)}))" }, limit)
 
     private fun sample(spec: ConstraintSpec, keys: List<String>, limit: Int): String {
         val aliases = keys.indices.map { "k$it" }
@@ -763,11 +763,11 @@ class SqliteSchema(override val ddl: SqliteDdl) : SqlStoreSchema() {
         error.causes.any { it.isSqlError && it.message.orEmpty().contains("UNIQUE constraint failed") }
 
     /** A node's element id is its `nid`; [limit] of a key's nodes at most are named, the first made first. Its rows are JSON ([SqliteDdl.JSON_ROWS]). */
-    override fun sampleConflictsQuery(spec: ConstraintSpec, limit: Int): String = sample(spec, spec.properties.map { SqliteSql.property("n", it) }, limit)
+    override fun sampleConflictsQuery(spec: ConstraintSpec, limit: Int): String = sample(spec, SqlStoreDdl.storedKeys(spec.properties).map { SqliteSql.property("n", it) }, limit)
 
     /** Each key lowercased as the copies are filled in, with the library's own [SqliteFunctions.LOWER]. */
     override fun sampleRefilledConflictsQuery(spec: ConstraintSpec, limit: Int): String =
-        sample(spec.made(), spec.properties.map { "${SqliteFunctions.LOWER}(${SqliteSql.property("n", it)})" }, limit)
+        sample(spec.made(), SqlStoreDdl.storedKeys(spec.properties).map { "${SqliteFunctions.LOWER}(${SqliteSql.property("n", it)})" }, limit)
 
     private fun sample(spec: ConstraintSpec, keys: List<String>, limit: Int): String {
         val columns = keys.mapIndexed { i, key -> "$key AS k$i" }.joinToString(", ")
