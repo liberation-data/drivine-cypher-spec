@@ -1,6 +1,7 @@
 package org.drivine.cypher.host
 
 import org.drivine.DrivineInternalApi
+import org.drivine.cypher.host.regex.JavaPatterns
 import org.drivine.cypher.json.ArrayNode
 import org.drivine.cypher.number.DecimalRound
 import org.drivine.cypher.number.DoubleText
@@ -111,6 +112,53 @@ object HostFunctions {
         result.double(if (number.isInfinite()) number else DecimalRound.of(number, places, mode))
     }
 
+    /**
+     * `regexp(pattern, text)`, which SQLite calls for its operator `text REGEXP pattern` (the pattern first): 1 where the
+     * regular expression matches somewhere in the text, 0 where it matches nowhere; null where either is null, as a
+     * comparison with null is. The pattern is Java's, as drivine4j reads it ([JavaPatterns]); it fails the statement where
+     * Java refuses it, or where this platform can't match it as Java does (a construct named in the message).
+     */
+    val regexp = HostFunction(SqliteFunctions.REGEXP, 2, deterministic = true) { args, _, result ->
+        val pattern = args.text(0)
+        val text = args.text(1)
+        if (pattern == null || text == null) result.nullValue() else result.int(if (JavaPatterns.of(pattern).find(text) != null) 1 else 0)
+    }
+
+    /**
+     * `drivine_regex_group(text, pattern, group)`: the text the group of that number matches where the pattern first matches
+     * in the text, as Postgres's `regexp_match` gives it (0 the whole match); null where it matches nowhere, or the group
+     * takes no part or is past the pattern's groups, or the text or the pattern is null. A null group is 0, as SQLite reads
+     * it as a whole number; a negative one fails the statement, as Java's `Matcher.group` refuses it.
+     */
+    val regexGroup = HostFunction(SqliteFunctions.REGEX_GROUP, 3, deterministic = true) { args, _, result ->
+        val text = args.text(0)
+        val pattern = args.text(1)
+        if (text == null || pattern == null) return@HostFunction result.nullValue()
+        val groups = JavaPatterns.of(pattern).find(text)
+        val group = args.int(2)
+        when {
+            groups == null || group >= groups.size -> result.nullValue()
+            group < 0 -> throw IndexOutOfBoundsException("No group $group")
+            else -> groups[group]?.let { result.text(it) } ?: result.nullValue()
+        }
+    }
+
+    /**
+     * `drivine_regexp_replace(text, pattern, replacement)`: the text with each match of the pattern replaced, the
+     * replacement naming a group as Postgres's and Oracle's do, a backslash and a digit (`\1`), and anything else itself;
+     * null where any is null. A match whose replacement names a group the pattern hasn't fails the statement, as Java's does.
+     */
+    val regexpReplace = HostFunction(SqliteFunctions.REGEX_REPLACE, 3, deterministic = true) { args, _, result ->
+        val text = args.text(0)
+        val pattern = args.text(1)
+        val replacement = args.text(2)
+        if (text == null || pattern == null || replacement == null) {
+            result.nullValue()
+        } else {
+            result.text(JavaPatterns.of(pattern).replaceAll(text, JavaPatterns.javaReplacement(replacement)))
+        }
+    }
+
     /** Every host function the module implements, in the order each host registers them. */
-    val all: List<HostFunction> = listOf(floatText, equal, add, canonical, sortKey, listOrder, round)
+    val all: List<HostFunction> = listOf(floatText, equal, add, canonical, sortKey, listOrder, round, regexp, regexGroup, regexpReplace)
 }

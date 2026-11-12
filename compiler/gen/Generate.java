@@ -7,7 +7,14 @@ import java.text.BreakIterator;
 import java.time.ZoneId;
 import java.util.Locale;
 import java.time.zone.ZoneRulesProvider;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Writes the compiler's generated sources, run by the build on the JVM it pins (see build.gradle.kts):
@@ -20,6 +27,11 @@ import java.util.TreeSet;
  *   it, for the platforms whose own tables are of another Unicode release (see CommonUnicode): the characters a word
  *   holds, those Oracle's [[:alnum:]] was measured to hold, each code point's lower case, the characters
  *   `String.toLowerCase` counts as cased before a final sigma, and the classes its word breaks read each character as.
+ * - org/drivine/cypher/host/regex/RegexTables.kt: the code points each class escape and character property of Java's
+ *   regular expressions holds with UNICODE_CHARACTER_CLASS, as that JVM's Pattern answers it, under each name Pattern
+ *   reads a property by, and the case mappings case-insensitive matching reads: for the platforms whose
+ *   regular expressions are not Java's (see org.drivine.cypher.host.regex.HarmonyRewrite). It reads Character's tables of
+ *   block and script names, so it runs with --add-opens java.base/java.lang=ALL-UNNAMED.
  *
  *   java gen/Generate.java <output directory> [<pinned JDK version> <pinned tzdb>]
  */
@@ -40,6 +52,7 @@ public class Generate {
         write(out.resolve("org/drivine/cypher/time/JvmZoneIds.kt"), zoneIds());
         write(out.resolve("org/drivine/cypher/number/DoubleTables.kt"), doubleTables());
         write(out.resolve("org/drivine/cypher/text/UnicodeTables.kt"), unicodeTables());
+        write(out.resolve("org/drivine/cypher/host/regex/RegexTables.kt"), regexTables());
     }
 
     private static void write(Path file, String text) throws IOException {
@@ -279,5 +292,175 @@ public class Generate {
             + "    /** Each code point's classes to the word breaks a final sigma is read by, from where they change: `cp:flags`. */\n"
             + "    val BREAK_CLASSES: String =\n" + chunks(classes.toString()) + "\n"
             + "}\n";
+    }
+    // ----- Java's regular expressions' classes (org.drivine.cypher.host.regex.JavaClasses) -----
+
+    /** Each code point but the surrogates, in order, as one text: a class's runs in it are its ranges. */
+    private static final String ALL;
+    /** The code point at each char of [ALL]. */
+    private static final int[] AT;
+
+    static {
+        StringBuilder all = new StringBuilder();
+        List<Integer> at = new ArrayList<>();
+        for (int cp = 0; cp < 0x110000; cp++) {
+            if (cp >= 0xD800 && cp <= 0xDFFF) continue;
+            all.appendCodePoint(cp);
+            at.add(cp);
+            if (cp > 0xFFFF) at.add(cp);
+        }
+        ALL = all.toString();
+        AT = at.stream().mapToInt(Integer::intValue).toArray();
+    }
+
+    /** The code points [escape] (a class escape, `\w` or `\p{…}`) holds with UNICODE_CHARACTER_CLASS, and [caseInsensitive]. */
+    private static boolean[] holds(String escape, boolean caseInsensitive) {
+        int flags = Pattern.UNICODE_CHARACTER_CLASS | (caseInsensitive ? Pattern.CASE_INSENSITIVE : 0);
+        boolean[] in = new boolean[0x110000];
+        Matcher runs = Pattern.compile("(?:" + escape + ")+", flags).matcher(ALL);
+        while (runs.find()) {
+            for (int i = runs.start(); i < runs.end(); i++) in[AT[i]] = true;
+        }
+        Matcher one = Pattern.compile(escape, flags).matcher("");
+        for (int cp = 0xD800; cp <= 0xDFFF; cp++) in[cp] = one.reset(String.valueOf((char) cp)).matches();
+        return in;
+    }
+
+    /**
+     * [in]'s code points as ranges, a space between them, each written by how far it starts past the last one's end (the
+     * first from -1) and, where it holds more than one, `-` and how many more, in base 36: `30-39 41-5a` is `1c-9 7-p`.
+     */
+    private static String ranges(boolean[] in) {
+        StringBuilder out = new StringBuilder();
+        int start = -1;
+        int last = -1;
+        for (int cp = 0; cp <= in.length; cp++) {
+            boolean holds = cp < in.length && in[cp];
+            if (holds && start < 0) start = cp;
+            if (!holds && start >= 0) {
+                if (out.length() > 0) out.append(' ');
+                out.append(Integer.toString(start - last - 1, 36));
+                if (cp - 1 > start) out.append('-').append(Integer.toString(cp - 1 - start, 36));
+                last = cp - 1;
+                start = -1;
+            }
+        }
+        return out.toString();
+    }
+
+    private static String regexTables() throws IOException {
+        String jvm = System.getProperty("java.vendor") + " " + System.getProperty("java.runtime.version");
+        Map<String, Integer> sets = new LinkedHashMap<>();
+        // family:key=set, a family for each table of names Pattern reads a property from (see JavaClasses).
+        TreeMap<String, Integer> names = new TreeMap<>();
+        java.util.function.BiConsumer<String, String> name = (key, ranges) -> names.put(key, sets.computeIfAbsent(ranges, r -> sets.size()));
+        // The class escapes, which case-insensitivity leaves be.
+        for (String escape : new String[] {"w", "d", "s", "h", "v"}) name.accept("escape:" + escape, ranges(holds("\\" + escape, false)));
+        // CharPredicates.forPOSIXName and forUnicodeProperty's names, upper case, as \p{Name} and \p{IsName} read them;
+        // forProperty's, as \p{gc=Name} reads them. Each with case-insensitivity too, where that changes it.
+        String[] posix = {"ALPHA", "LOWER", "UPPER", "SPACE", "PUNCT", "XDIGIT", "ALNUM", "CNTRL", "DIGIT", "BLANK", "GRAPH", "PRINT"};
+        String[] unicode = {"ALPHABETIC", "ASSIGNED", "CONTROL", "EMOJI", "EMOJI_PRESENTATION", "EMOJI_MODIFIER", "EMOJI_MODIFIER_BASE",
+            "EMOJI_COMPONENT", "EXTENDED_PICTOGRAPHIC", "HEXDIGIT", "HEX_DIGIT", "IDEOGRAPHIC", "JOINCONTROL", "JOIN_CONTROL", "LETTER",
+            "LOWERCASE", "NONCHARACTERCODEPOINT", "NONCHARACTER_CODE_POINT", "TITLECASE", "PUNCTUATION", "UPPERCASE", "WHITESPACE",
+            "WHITE_SPACE", "WORD"};
+        String[] property = {"Cn", "Lu", "Ll", "Lt", "Lm", "Lo", "Mn", "Me", "Mc", "Nd", "Nl", "No", "Zs", "Zl", "Zp", "Cc", "Cf", "Co",
+            "Cs", "Pd", "Ps", "Pe", "Pc", "Po", "Sm", "Sc", "Sk", "So", "Pi", "Pf", "L", "M", "N", "Z", "C", "P", "S", "LC", "LD", "L1",
+            "all", "ASCII", "Alnum", "Alpha", "Blank", "Cntrl", "Digit", "Graph", "Lower", "Print", "Punct", "Space", "Upper", "XDigit",
+            "javaLowerCase", "javaUpperCase", "javaAlphabetic", "javaIdeographic", "javaTitleCase", "javaDigit", "javaDefined",
+            "javaLetter", "javaLetterOrDigit", "javaJavaIdentifierStart", "javaJavaIdentifierPart", "javaUnicodeIdentifierStart",
+            "javaUnicodeIdentifierPart", "javaIdentifierIgnorable", "javaSpaceChar", "javaWhitespace", "javaISOControl", "javaMirrored"};
+        String[][] families = {{"posix", null}, {"unicode", null}, {"property", null}};
+        for (String[] family : families) {
+            String[] keys = family[0].equals("posix") ? posix : family[0].equals("unicode") ? concat(unicode, posix) : property;
+            for (String key : keys) {
+                // \p{Name} reads POSIX's names first; \p{IsName} forUnicodeProperty's (then POSIX's); \p{gc=Name} forProperty's.
+                String escape = family[0].equals("posix") ? "\\p{" + key + "}" : family[0].equals("unicode") ? "\\p{Is" + key + "}" : "\\p{gc=" + key + "}";
+                String plain = ranges(holds(escape, false));
+                String folded = ranges(holds(escape, true));
+                name.accept(family[0] + ":" + key, plain);
+                if (!folded.equals(plain)) name.accept(family[0] + "-ci:" + key, folded);
+            }
+        }
+        // Scripts and blocks, by every name their forName takes (upper case), from Character's own tables of names.
+        Map<String, Character.UnicodeScript> scriptNames = new TreeMap<>(field(Character.UnicodeScript.class, "aliases"));
+        for (Character.UnicodeScript script : Character.UnicodeScript.values()) scriptNames.put(script.name(), script);
+        // Each code point's script and block, and the ranges of each worked out once, for all its names: a table of
+        // code points for each at once would take a gigabyte of heap.
+        Character.UnicodeScript[] scriptOf = new Character.UnicodeScript[0x110000];
+        Character.UnicodeBlock[] blockOf = new Character.UnicodeBlock[0x110000];
+        for (int cp = 0; cp < 0x110000; cp++) {
+            scriptOf[cp] = Character.UnicodeScript.of(cp);
+            blockOf[cp] = Character.UnicodeBlock.of(cp);
+        }
+        Map<Object, String> held = new java.util.HashMap<>();
+        for (Map.Entry<String, Character.UnicodeScript> entry : scriptNames.entrySet()) {
+            name.accept("script:" + entry.getKey(), held.computeIfAbsent(entry.getValue(), s -> ranges(where(scriptOf, s))));
+        }
+        Map<String, Character.UnicodeBlock> blockNames = field(Character.UnicodeBlock.class, "map");
+        for (Map.Entry<String, Character.UnicodeBlock> entry : new TreeMap<>(blockNames).entrySet()) {
+            name.accept("block:" + entry.getKey(), held.computeIfAbsent(entry.getValue(), b -> ranges(where(blockOf, b))));
+        }
+        // Character.toUpperCase and toLowerCase of each code point either changes, which case-insensitive matching reads.
+        StringBuilder caseMap = new StringBuilder();
+        for (int cp = 0; cp < 0x110000; cp++) {
+            if (cp >= 0xD800 && cp <= 0xDFFF) continue;
+            int upper = Character.toUpperCase(cp);
+            int lower = Character.toLowerCase(cp);
+            if (upper == cp && lower == cp) continue;
+            if (caseMap.length() > 0) caseMap.append(' ');
+            caseMap.append(Integer.toHexString(cp)).append(':').append(Integer.toHexString(upper)).append(':').append(Integer.toHexString(lower));
+        }
+        StringBuilder setsText = new StringBuilder();
+        int index = 0;
+        for (String ranges : sets.keySet()) {
+            String literal = ranges.isEmpty() ? "    \"\"" : chunks(ranges);
+            setsText.append("        // ").append(index++).append('\n').append(literal.replace("\n    \"", "\n            \"").replaceFirst("^    ", "        ")).append(",\n");
+        }
+        StringBuilder namesText = new StringBuilder();
+        for (Map.Entry<String, Integer> entry : names.entrySet()) {
+            if (namesText.length() > 0) namesText.append(' ');
+            namesText.append(entry.getKey().replace(' ', '+')).append('=').append(entry.getValue());
+        }
+        return "// Generated by gen/Generate.java from " + jvm + ". Do not edit.\n"
+            + "package org.drivine.cypher.host.regex\n\n"
+            + "/** Java's regular expressions' classes with UNICODE_CHARACTER_CLASS, as " + jvm + " answers them: see JavaClasses. */\n"
+            + "internal object RegexTables {\n"
+            + "    /** Each set of code points a name below holds, as ranges written as Generate.ranges writes them. */\n"
+            + "    val SETS: Array<String> = arrayOf(\n" + setsText + "    )\n\n"
+            + "    /**\n"
+            + "     * `family:key=set`, the index of a set in SETS, a space between them (a space in a key written `+`, as no key\n"
+            + "     * holds one): `escape` the class escapes, `posix` and `unicode` the names CharPredicates reads in upper case,\n"
+            + "     * `property` those it reads as written, each with `-ci` where case-insensitivity changes it, `script` and\n"
+            + "     * `block` every name Character.UnicodeScript.forName and UnicodeBlock.forName take, in upper case.\n"
+            + "     */\n"
+            + "    val NAMES: String =\n" + chunks(namesText.toString()) + "\n\n"
+            + "    /** `cp:upper:lower` in hexadecimal, Character.toUpperCase and toLowerCase of each code point either changes. */\n"
+            + "    val CASE_MAP: String =\n" + chunks(caseMap.toString()) + "\n"
+            + "}\n";
+    }
+
+    /** The code points [at] gives [value]. */
+    private static boolean[] where(Object[] at, Object value) {
+        boolean[] in = new boolean[at.length];
+        for (int cp = 0; cp < at.length; cp++) in[cp] = at[cp] == value;
+        return in;
+    }
+
+    private static String[] concat(String[] a, String[] b) {
+        String[] out = java.util.Arrays.copyOf(a, a.length + b.length);
+        System.arraycopy(b, 0, out, a.length, b.length);
+        return out;
+    }
+
+    /** The private static map [name] of [type], one of Character's tables of names. */
+    @SuppressWarnings("unchecked")
+    private static <K, V> Map<K, V> field(Class<?> type, String name) {
+        try {
+            java.lang.reflect.Field field = type.getDeclaredField(name);
+            field.setAccessible(true);
+            return (Map<K, V>) field.get(null);
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException("Character's " + type.getSimpleName() + "." + name + " can't be read: run with --add-opens java.base/java.lang=ALL-UNNAMED", e);
+        }
     }
 }

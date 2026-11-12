@@ -407,6 +407,9 @@ on a text that is no JSON, and takes an empty one as no value, as drivine4j's do
 | `drivine_sort_key(json)` | of a JSON list, a text that orders, as SQLite orders text, as Cypher orders lists; of any other value its JSON text as given, null of null. Deterministic. |
 | `drivine_list_order(a, b)` | -1, 0 or 1, where the JSON list `a` comes beside the list `b` in a comparison (`<`, `>=` …); null where either is no list or the pair that decides isn't ordered. Deterministic. |
 | `drivine_round(number, precision, mode)` | the number rounded to as many decimal places by the mode (`HALF_UP`, `HALF_EVEN` … as Java names them), in decimal as Neo4j rounds, so 2.345 to 2 places `HALF_UP` is 2.35; a float. An infinity is itself; null where the number or the precision is. Deterministic. |
+| `regexp(pattern, text)` | 1 where the regular expression matches somewhere in the text, 0 where it matches nowhere; null where either is null. SQLite calls it for `text REGEXP pattern`. The pattern is Java's: see [Regular expressions](#regular-expressions). Deterministic. |
+| `drivine_regex_group(text, pattern, group)` | the text the group of that number matches where the pattern first matches (0 the whole match), as Postgres's `regexp_match` gives it; null where it matches nowhere, the group takes no part or is past the pattern's, or the text or pattern is null. A null group is 0; a negative one fails the statement. Deterministic. |
+| `drivine_regexp_replace(text, pattern, replacement)` | the text with each match replaced, `\1` in the replacement naming a group as Postgres's and Oracle's do, anything else itself; null where any is null. A match whose replacement names a group the pattern hasn't fails the statement, as Java's does. Deterministic. |
 | `drivine_extension_version()` | the module's version, as it was built (`-Pcompiler.version`, the Maven form: `0.36.0`, `0.36.0-rc.1`), so a host can check it loaded the library it meant to. Deterministic. |
 | `drivine_gc_collect()` | NULL, having collected: see below. Direct-only. |
 | `drivine_gc_heap()`, `drivine_gc_heap(bytes)` | the GC's floor, in bytes; given bytes, it sets the floor first, and 0 restores the runtime's own. Direct-only. |
@@ -465,6 +468,93 @@ through SQL, the throwing ones too, and then the C API by ctypes from the same p
 `function` step of the spec's `host.yaml` whose function the extension registers (`./gradlew hostSpecJson` writes the
 file as JSON, in `build/host`), and names those it doesn't register yet. CI runs it on Linux x64 and macOS, and the
 release runs it on each platform's installed wheel, Windows and Linux arm64 too, without `host.yaml`.
+
+### Regular expressions
+
+The regular expression functions read a pattern as drivine4j's do: Java's, compiled with `UNICODE_CHARACTER_CLASS`, with a
+POSIX class (`[:alnum:]`, `[:alpha:]`, `[:digit:]`, `[:space:]`, `[:upper:]`, `[:lower:]`, `[:punct:]`) read as Java names it
+(`\p{Alnum}` …), so a full-text search's expressions, written for Postgres, read the same. `org.drivine.cypher.host.regex`:
+
+- On the JVM, `java.util.regex` itself.
+- On Kotlin/Native and Kotlin/Wasm, `kotlin.text.Regex`, which on both is the stdlib's own engine (a port of Apache
+  Harmony's), not JavaScript's `RegExp` on wasm. It reads Java's syntax, but its classes are ASCII's, its case-insensitivity
+  and some of its constructs aren't Java's, and it has bugs with code points past the BMP. So there the functions take a
+  fixed grammar, the part of Java's that is simple and that `HarmonyRewrite` makes Harmony match exactly, and refuse the
+  rest by name.
+
+**Native and wasm take**, each matching as Java's does:
+
+- literals and escapes (`\t`, `\n`, `\xNN`, `\x{…}`, `\uNNNN`, `\0`…, `\cX`, a backslash before punctuation, `\Q…\E`);
+- classes, `[…]`, nested, negated and intersected as Java reads them, POSIX's (`[:alnum:]` …), `\p{…}` and `\P{…}` by every
+  name Java knows, `\w`, `\d`, `\s`, `\h`, `\v` and their negations, and `.`: each written out as the code points Java's
+  holds with `UNICODE_CHARACTER_CLASS`, from tables gen/Generate.java writes on the pinned JDK (`RegexTables`);
+- greedy and lazy quantifiers (`*`, `+`, `?`, `{n}`, `{n,}`, `{n,m}`, and each with `?`) on one of those;
+- greedy quantifiers on a group, and `*?` and `??` on one;
+- capturing, named and non-capturing groups, and alternatives;
+- `^`, `$`, `\b`, `\B`, `\A`, `\z` and `\Z`;
+- the inline flags `(?i)`, `(?s)`, `(?m)`, `(?x)`, `(?d)`, `(?u)` and `(?U)`, alone or as `(?i:…)`;
+- and one lookahead: `(?=…)` or `(?!…)` of literals, classes, alternatives, `$` and `\z` alone, unquantified, as a
+  full-text search's `(?=$|[^[:alnum:]_])` is.
+
+Every pattern the compiler, a full-text search and `host.yaml` write is inside it: `DrivinePatternsTest` builds each from
+the compiler's own constants and functions and compiles it on every target, and `RegexOracleTest` fails where any the
+compiler writes over the corpus is refused.
+
+**Native and wasm refuse**, failing the statement with the construct's name (`regexp: a lookbehind is not supported on
+this platform; rewrite the pattern without it.`):
+
+- a lookbehind, and any lookahead but the one above (`a lookahead holding a quantifier`, `… a group`, `… an anchor but $
+  and \z`);
+- a back reference, `\1` or `\k<name>`;
+- a possessive quantifier, and an atomic group, `(?>…)`;
+- `\G`, `\X`, `\R`, `\N{…}` and `\b{g}`;
+- a quantifier on what has no width (`^*`, `\b{2}`, `(?=a)+`, and a group of nothing else, `(\b)*` or `()+`, which Java
+  repeats otherwise), and a quantifier on a quantifier (`a{2}{3}`, which Java reads);
+- a lazy quantifier on a group but `*?` and `??` (`(bc)+?`), which Harmony counts wrongly;
+- a capturing group in a group repeated (by any quantifier but `?`) whose length can't vary, with no alternative and no
+  quantifier but `{n}` in it (`(?:(a))*a`): Java leaves the group as a repetition it gave back set it;
+- a group that can match nothing, under any quantifier (`?` and `{1}` too), in a group repeated (`(?:a(?:b*)*){2}`,
+  `(?:a(?:b*)?)+`), which Harmony stops repeating early;
+- groups repeated within each other more than 3 deep (`((((a)*b)+c)*d)*`): the compiler's take 2, and each level deeper
+  multiplies the backtracking and stack Harmony takes where its repetition of groups is least like Java's;
+- `(?-U)` and `(?-u)`, which turn off what the patterns always have on, and `(?c)`, after which Java reads each class and
+  `\p{…}` by graphemes;
+- and a pattern written as more than 2,000,000 characters (each `\b` is some 30,000: a thousand of them took 1.2 GB and
+  two seconds to compile).
+
+This is a documented limit of native and wasm alone: on the JVM the functions keep the whole of `java.util.regex`. The
+comments in `HarmonyRewrite` and `HarmonyPattern` name the Kotlin 2.2.20 bugs each workaround within the grammar is for,
+and `HarmonyBugsTest` fails once Kotlin fixes one, so its workaround can come out.
+
+**The stack.** Harmony's engine recurses: as it compiles, into each group and along each node, and as it matches, for each
+node it passes and again for each repetition of a group, so `(a|b)*` recurses once a character. Java's does too, and throws
+`StackOverflowError` where its thread's stack runs out (measured on JDK 21: `(a|b)*` over about 770 characters on a 512 KiB
+stack, 7,800 on 1 MiB, 73,000 on 8 MiB); on Kotlin/Native an overflow is a crash that ends the host's process. So on
+Kotlin/Native (`StackRoom`) the module compiles a pattern only where the thread has stack left for the pattern's longest
+path through Harmony's nodes, 1 KiB a node (4 KiB in a debug binary) and 64 KiB more. Only a group repeated (`*`, `+`,
+`{n,}`, `{n,m}` with m over 1) takes more stack for a longer text, a path for each repetition: a quantifier on one
+character, `.`, `\w` and a class, greedy or lazy, loops, and so do alternatives and lookaheads outside such a group. So
+where the pattern repeats a group and the text is longer than the stack left covers at a path a character, or where it
+repeats none and the stack doesn't cover the path once for each lookahead nested, the text is read through a check at each
+character that the stack keeps that much, a check that made a full-text search's replace over 1,400 characters 984 µs
+where it is 179 µs without; past it the statement fails (`regexp: the regular expression takes more of this thread's
+stack than is left on this platform, …`). Measured on macOS arm64's release library, through SQLite: `(a|b)*` answers
+over 29,694 characters on the main thread's 8 MiB, where it crashed from 29,772, and 818 on a Python thread of 512 KiB,
+where it crashed from 949; groups nested 12,200 deep crashed compiling on 8 MiB, and are refused from 7,800; 20,300 nodes
+in a row (`a?` …) crashed, and are refused from 8,200.
+Kotlin/Wasm's overflow is a `RangeError` its host's JavaScript catches, and isn't checked.
+
+**A known limit: long texts and `$`, `\Z`, `\b`, `\B`.** The rewrite writes these with lookbehinds, and Harmony takes
+time proportional to the text for a lookbehind at each place it tries one, so on native and wasm a pattern holding one
+takes time quadratic in the text's length: a `\b` replace takes 1.9 s over 10,000 characters and 33 s over 40,000. A
+text of a chunk's length is fine (a full-text search's term, replaced over 1,420 characters, 182 µs). Until #204 is
+fixed, a library keeps its own regular expression functions rather than registering these.
+
+A process keeps the 256 patterns used last (`JavaPatterns`), for every connection: a pattern rewritten for Harmony takes a
+millisecond or more to compile, its classes written out, where a find takes about a microsecond. `RegexOracleTest` checks
+every target against Java's answers (`regex.json`, see [Checks](#checks)), both ways where it can: `JavaPatterns`, as the
+functions compile a pattern there, and the rewrite, which on the JVM runs on `java.util.regex` without
+`UNICODE_CHARACTER_CLASS`, so the JVM checks the rewrite's tables too.
 
 `HostSpecTest`, in the common tests, runs the same steps on every target (the JVM, native and wasm), calling the module's
 code as SQLite would. A function `host.yaml` calls that the module doesn't implement yet is on its `PENDING` list, which
@@ -590,6 +680,13 @@ The JVM is the oracle. `./gradlew jvmOracle` writes, into `build/oracle`:
 - `host.json`: the spec's `host.yaml` as JSON, which `HostSpecTest` reads on every target: the `function` steps the
   module's host functions (`org.drivine.cypher.host.HostFunctions`) must give. `./gradlew hostSpecJson` writes it alone,
   into `build/host`, for `nativeExtensionCheck`.
+- `regex.json`: Java's answers for the regular expressions SQLite's functions see, which `RegexOracleTest` reads on every
+  target (see [Regular expressions](#regular-expressions)): each pattern the compiler writes on SQLite over the corpus and
+  the mutants, each a full-text search gives, each of `host.yaml`'s, and users' `=~` patterns written and wrapped as `=~`
+  wraps them, over texts of many scripts, code points past the BMP and every line break; whether each is found, its first
+  match's groups, its count and every match replaced, or Java's refusal; and what `(?i)` takes for each code point with a
+  case. `RegexOracleTest` fails on any other answer, on any refusal but the platform's named ones, and on any refusal of a
+  pattern the compiler, a full-text search or `host.yaml` gives.
 - `search-golden.json`: drivine4j's full-text search statements (see [Full-text search](#full-text-search)), which
   `FullTextSearchGoldenTest` reads on every target. Its requests are in `corpus.jsonl` too.
 - `standins-<name>.txt`: what Java gives where the module stands in for it, worked out by Java's own API on the pinned
