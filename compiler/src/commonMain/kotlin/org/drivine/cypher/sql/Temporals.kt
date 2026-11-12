@@ -510,30 +510,37 @@ class Temporals(
         }
     }
 
-    /** A field of a duration of the parts [parts], by Cypher's name for it: null for a name a duration has no field of. */
+    /**
+     * A field of a duration of the parts [parts], by Cypher's name for it: null for a name a duration has no field of. As
+     * Cypher holds a duration's seconds, they are whole seconds, floored, and a fraction of a second from 0 up to 1, so a
+     * negative duration of -86399.9 seconds has `seconds` -86400 and `nanosecondsOfSecond` 100000000 (drivine4j#418);
+     * the larger units are of the whole seconds, counted toward zero.
+     */
     private fun durationField(parts: Parts, name: String): String? {
         val (m, d, s) = Triple(parts.months, parts.days, parts.seconds)
+        fun floor(x: String) = "(${sql.trunc}($x) - CASE WHEN $x < ${sql.trunc}($x) THEN 1 ELSE 0 END)"
+        val whole = floor(s)
         return when (name) {
             "years" -> "${sql.trunc}($m / 12)"
             "quarters" -> "${sql.trunc}($m / 3)"
             "months" -> m
             "weeks" -> "${sql.trunc}($d / 7)"
             "days" -> d
-            "hours" -> "${sql.trunc}($s / 3600)"
-            "minutes" -> "${sql.trunc}($s / 60)"
-            "seconds" -> "${sql.trunc}($s)"
-            "milliseconds" -> "${sql.trunc}($s * 1000)"
-            "microseconds" -> "${sql.trunc}($s * 1000000)"
-            "nanoseconds" -> "${sql.trunc}($s * 1000000000)"
+            "hours" -> "${sql.trunc}($whole / 3600)"
+            "minutes" -> "${sql.trunc}($whole / 60)"
+            "seconds" -> whole
+            "milliseconds" -> floor("$s * 1000")
+            "microseconds" -> floor("$s * 1000000")
+            "nanoseconds" -> floor("$s * 1000000000")
             "quartersOfYear" -> "(${sql.trunc}($m / 3) - ${sql.trunc}($m / 12) * 4)"
             "monthsOfQuarter" -> "($m - ${sql.trunc}($m / 3) * 3)"
             "monthsOfYear" -> "($m - ${sql.trunc}($m / 12) * 12)"
             "daysOfWeek" -> "($d - ${sql.trunc}($d / 7) * 7)"
-            "minutesOfHour" -> "(${sql.trunc}($s / 60) - ${sql.trunc}($s / 3600) * 60)"
-            "secondsOfMinute" -> "(${sql.trunc}($s) - ${sql.trunc}($s / 60) * 60)"
-            "millisecondsOfSecond" -> "(${sql.trunc}($s * 1000) - ${sql.trunc}($s) * 1000)"
-            "microsecondsOfSecond" -> "(${sql.trunc}($s * 1000000) - ${sql.trunc}($s) * 1000000)"
-            "nanosecondsOfSecond" -> "(${sql.trunc}($s * 1000000000) - ${sql.trunc}($s) * 1000000000)"
+            "minutesOfHour" -> "(${sql.trunc}($whole / 60) - ${sql.trunc}($whole / 3600) * 60)"
+            "secondsOfMinute" -> "($whole - ${sql.trunc}($whole / 60) * 60)"
+            "millisecondsOfSecond" -> "(${floor("$s * 1000")} - $whole * 1000)"
+            "microsecondsOfSecond" -> "(${floor("$s * 1000000")} - $whole * 1000000)"
+            "nanosecondsOfSecond" -> "(${floor("$s * 1000000000")} - $whole * 1000000000)"
             else -> null
         }
     }
@@ -558,11 +565,16 @@ class Temporals(
      * `duration.between`: the duration from the text [from] of [kind] to the text [to] of [toKind], in whole months
      * as a calendar counts them, then days, then seconds; with [unit] `months`, `days` or `seconds`, in that alone.
      * Two zoned values are read as the moments they are; where either is local, both are read on their wall clocks.
+     * Where one is a time of day and the other has a date, only their times of day are compared, as in Cypher: the one
+     * with a date is read as its time of day, of the other's kind, so a date is its midnight (drivine4j#418).
      */
     fun between(from: String, to: String, kind: Temporal, unit: String? = null, toKind: Temporal = kind): String {
         val zoned = kind.zoned && toKind.zoned
+        val times = kind in TIMES || toKind in TIMES
+        val (a, aKind) = if (times && kind !in TIMES) convert(from, kind, toKind) to toKind else from to kind
+        val (b, bKind) = if (times && toKind !in TIMES) convert(to, toKind, kind) to kind else to to toKind
         fun read(text: String, of: Temporal) = if (zoned) sql.utc(text, of) else sql.local(text, of)
-        return between(read(from, kind), read(to, toKind), kind in TIMES || toKind in TIMES, unit)
+        return between(read(a, aKind), read(b, bKind), times, unit)
     }
 
     private fun between(from: String, to: String, times: Boolean, unit: String?): String = shared(listOf(from, to)) { (a, b) ->
