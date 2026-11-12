@@ -385,7 +385,7 @@ object HostTemporals {
             add("LOCAL_DATE_TIME" to text)
             add("DATE_TIME" to text + offsets.random(random))
         }
-        for (text in listOf("", "2024", "2024-1-1", "12", "T12:00", "2024-01-01T", "2024-01-01 12:00", "12:00+1", "P1D", "12:00:00.", "2024-03-15T10:30:00.1234567", "2024-03-15t10:30:00", "2024-03-15T10:30:00Z\n", "10:30:00+01:00\n")) {
+        for (text in listOf("", "2024", "2024-1-1", "12", "T12:00", "2024-01-01T", "2024-01-01 12:00", "12:00+1", "P1D", "12:00:00.", "2024-03-15T10:30:00.1234567", "2024-03-15t10:30:00", "2024-03-15T10:30:00Z\n", "10:30:00+01:00\n", "3000000000-01-01", "3000000000-01-01T00:00", "-9999999999-01-01T00:00Z")) {
             for (kind in Temporal.entries) add(kind.name to text)
         }
         for (text in zoneTexts()) {
@@ -501,7 +501,7 @@ object HostTemporals {
             case(TEMPORAL, "add_time", "add_time", stamp, -1L, Long.MIN_VALUE, Long.MIN_VALUE)
             for (unit in listOf("weekYear", "millennium", "week")) case(TEMPORAL, "truncate", "truncate", stamp, unit)
         }
-        for (amount in listOf("2.5", "-2.5", "2.4", "1e3", "0.5", "-0.5", "x", "", " 1")) {
+        for (amount in listOf("2.5", "-2.5", "2.4", "1e3", "0.5", "-0.5", "x", "", " 1", "\u0661\u0662.\u0665")) {
             case(TEMPORAL, "add_months", "add_months", "2024-01-31T00:00:00.000000", amount)
             case(TEMPORAL, "add_time", "add_time", "2024-01-31T00:00:00.000000", amount, 0L, 0L)
             case(TEMPORAL, "add_time", "add_time", "2024-01-31T00:00:00.000000", 0L, amount, 0L)
@@ -525,7 +525,7 @@ object HostTemporals {
             }
             for (i in args.indices) case(TEMPORAL, "null", op, *args.toMutableList().also { it[i] = null }.toTypedArray())
             if (op != "local" && op != "utc") {
-                for (bad in listOf("2024-02-30T00:00:00.000000", "2024-03-15", "x", "2024-03-15 10:30:00.000000", "2024-03-15T10:30", "2024-03-15T10:30:00.1234567891", "+10000-01-01T00:00:00.000000", "10000-01-01T00:00:00.000000", "2024-03-15t10:30:00.000000", "2024-03-15T10:30:59.999999999", "+0000002024-03-15T10:30:00.000000")) {
+                for (bad in listOf("2024-02-30T00:00:00.000000", "2024-03-15", "x", "2024-03-15 10:30:00.000000", "2024-03-15T10:30", "2024-03-15T10:30:00.1234567891", "+10000-01-01T00:00:00.000000", "10000-01-01T00:00:00.000000", "2024-03-15t10:30:00.000000", "2024-03-15T10:30:59.999999999", "+0000002024-03-15T10:30:00.000000", "3000000000-03-15T10:30:00.000000")) {
                     case(TEMPORAL, "timestamps", op, bad, *args.drop(1).toTypedArray())
                 }
             }
@@ -558,6 +558,8 @@ object HostTemporals {
             0L, 1L, -1L, 12L, -5L, 123456L, Long.MAX_VALUE, Long.MIN_VALUE, float(2.5), float(-2.5), float(2.0), float(0.5), float(-0.5),
             float(0.0005), float(-0.0004), float(1e-10), float(-1e-10), float(123.456), float(1e20), float(-1e15), float(99.9995),
             "2.5", "-2.5", "0.4999999999", "1.0000000005", "-0.0000000004", "1e3", "12345678901234567890.123456789123", "x", "", "2024-03-15T10:30:00.000000",
+            // Any Unicode decimal digits, as BigDecimal reads them: Arabic-Indic and fullwidth.
+            "\u0661\u0662.\u0665", "-\uff11\uff12e\uff11",
         ) + List(1500) {
             when (random.nextInt(3)) {
                 0 -> random.nextLong(-1_000_000, 1_000_000)
@@ -571,6 +573,7 @@ object HostTemporals {
         case(TO_CHAR, "to_char null", null, null)
         case(TO_CHAR, "to_char clock", 20240315L, "YYYY")
         case(TO_CHAR, "to_char clock", float(2.5), "YYYY")
+        case(TO_CHAR, "to_char clock", "3000000000-03-15T10:30:00.000000", "YYYY")
     }
 
     /** A SQL value as the file writes it: a float as `{$float: …}`, so a whole one is not read as a whole number. */

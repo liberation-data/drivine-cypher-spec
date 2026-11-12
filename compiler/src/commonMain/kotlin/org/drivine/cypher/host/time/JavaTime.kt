@@ -66,7 +66,7 @@ internal object JavaTime {
         val day = c.digits(2, 2)?.toInt() ?: return null
         val signed = if (negative) -year else year
         if (signed !in -999_999_999L..999_999_999L || month !in 1..12 || day !in 1..31) return null
-        if (day > lengthOfMonth(signed.toInt(), month)) return null
+        if (day > CommonTime.lengthOfMonth(signed.toInt(), month)) return null
         return LocalDate(signed.toInt(), month, day)
     }
 
@@ -145,22 +145,9 @@ internal object JavaTime {
 
     // ----- Arithmetic, as LocalDate's and LocalDateTime's -----
 
-    /** `Math.addExact`. */
-    fun addExact(a: Long, b: Long): Long {
-        val sum = a + b
-        if (((a xor sum) and (b xor sum)) < 0) throw ArithmeticException("long overflow")
-        return sum
-    }
-
     private fun floorDiv(a: Long, b: Long): Long = a / b - if ((a % b != 0L) && ((a xor b) < 0)) 1 else 0
 
     private fun floorMod(a: Long, b: Long): Long = a - floorDiv(a, b) * b
-
-    fun lengthOfMonth(year: Int, month: Int): Int = when (month) {
-        2 -> if (CommonTime.lengthOfYear(year) == 366) 29 else 28
-        4, 6, 9, 11 -> 30
-        else -> 31
-    }
 
     /** `LocalDate.plusDays`. */
     fun plusDays(date: LocalDate, days: Long): LocalDate = CommonTime.plusDays(date, days)
@@ -174,7 +161,7 @@ internal object JavaTime {
         val count = date.year * 12L + (date.month.number - 1) + months
         val year = CommonTime.checkYear(floorDiv(count, 12))
         val month = floorMod(count, 12).toInt() + 1
-        return LocalDate(year, month, minOf(date.day, lengthOfMonth(year, month)))
+        return LocalDate(year, month, minOf(date.day, CommonTime.lengthOfMonth(year, month)))
     }
 
     /** `LocalDateTime.plusSeconds` and `plusNanos`: `plusWithOverflow`, its days carried into the date. */
