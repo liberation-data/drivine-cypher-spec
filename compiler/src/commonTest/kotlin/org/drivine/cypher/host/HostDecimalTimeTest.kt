@@ -12,8 +12,8 @@ import kotlin.time.measureTimedValue
  * ten written out for it once hung the database the function ran in. Each call has a ceiling of 2 s, far over the
  * milliseconds each takes; a hang that never returns is ended by the test task's timeout (build.gradle.kts).
  *
- * The exponents here at `BigInteger`'s range of 2^31 - 1 bits (10^646456993 is past it, 10^646456992 within) are ones
- * Java takes minutes over, so they are here, not in the oracle; the others the oracle has from Java too.
+ * The exponents just within the powers of ten `BigInteger.pow` writes out (10^536870919; it refuses 10^536870920 at once)
+ * are ones Java takes minutes over, so they are here, not in the oracle; the others the oracle has from Java too.
  */
 class HostDecimalTimeTest {
 
@@ -40,7 +40,7 @@ class HostDecimalTimeTest {
 
     @Test
     fun `an exponent past an int's places fails as Java's does`() {
-        for (text in listOf("1e2147483647", "-1e2147483647", "1e-2147483647", "1e646456993", "1e-646456993")) {
+        for (text in listOf("1e2147483647", "-1e2147483647", "1e-2147483647", "1e536870920", "1e-536870920", "-1e646456993")) {
             assertFails(OVERFLOW, call(toChar, text, "FM0."))
             assertFails(OVERFLOW, call(toChar, text, "FM0000"))
             amounts(text).forEach { assertFails(OVERFLOW, it) }
@@ -49,13 +49,13 @@ class HostDecimalTimeTest {
     }
 
     @Test
-    fun `an exponent within BigInteger's range is answered without writing it out`() {
-        // 10^646456992 is in a long's low 64 bits 0: no months, days, seconds or nanoseconds.
-        amounts("1e646456992").forEach { assertEquals(STAMP, it.getOrThrow()) }
-        assertEquals("0", call(toChar, "1e-646456992", "FM0").getOrThrow())
-        // To three places, Java divides 1e-646456995 by 10^646456992, within the range, and 1e-646456996 by 10^646456993, past it.
-        assertEquals("0.", call(toChar, "-1e-646456995", "FM0.999").getOrThrow())
-        assertFails(OVERFLOW, call(toChar, "-1e-646456996", "FM0.999"))
+    fun `an exponent within the powers of ten Java writes out is answered without writing it out`() {
+        // 10^536870919 is in a long's low 64 bits 0: no months, days, seconds or nanoseconds.
+        amounts("1e536870919").forEach { assertEquals(STAMP, it.getOrThrow()) }
+        assertEquals("0", call(toChar, "1e-536870919", "FM0").getOrThrow())
+        // To three places, Java divides 1e-536870922 by 10^536870919, which it writes out, and 1e-536870923 by 10^536870920, which it refuses.
+        assertEquals("0.", call(toChar, "-1e-536870922", "FM0.999").getOrThrow())
+        assertFails(OVERFLOW, call(toChar, "-1e-536870923", "FM0.999"))
     }
 
     @Test

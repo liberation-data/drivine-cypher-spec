@@ -10,7 +10,7 @@ import kotlin.math.log2
  * The unscaled value is held as its [digits] and a count of [zeros] after them, never as a number: a text's exponent
  * can be near ±2^31, and a power of ten that large, which Java refuses or takes minutes over, would hang the database
  * the function runs in. Each operation works on the digits, and fails as Java's does, as fast, where Java's
- * `BigInteger` would pass its range of [Int.MAX_VALUE] bits.
+ * `BigInteger` would pass its range of [Int.MAX_VALUE] bits, or `BigInteger.pow` would refuse its power of ten.
  */
 internal class JavaDecimal private constructor(
     private val negative: Boolean,
@@ -26,7 +26,8 @@ internal class JavaDecimal private constructor(
     /**
      * This to [places] places, rounded half away from zero (`setScale(places, RoundingMode.HALF_UP)`), failing as Java's
      * does: "Underflow" where the places raise the scale by more than an int holds, and `BigInteger`'s overflow where
-     * the unscaled value raised, or the power of ten Java divides by to drop 19 places or more, would pass its range.
+     * the power of ten Java multiplies or divides by is one `BigInteger.pow` refuses ([TEN_POW_REFUSED] or more), or
+     * the unscaled value raised would pass its range.
      */
     fun halfUp(places: Long): JavaDecimal {
         if (places == scale) return this
@@ -34,11 +35,11 @@ internal class JavaDecimal private constructor(
         if (places > scale) {
             val raise = places - scale
             if (raise > Int.MAX_VALUE) throw ArithmeticException("Underflow")
-            if (log2Of(digits.length + zeros + raise) >= Int.MAX_VALUE) overflow()
+            if (raise >= TEN_POW_REFUSED || log2Of(digits.length + zeros + raise) >= Int.MAX_VALUE) overflow()
             return JavaDecimal(negative, digits, zeros + raise, places)
         }
         val drop = scale - places
-        if (drop >= 19 && drop * LOG2_10 >= Int.MAX_VALUE) overflow()
+        if (drop >= TEN_POW_REFUSED) overflow()
         if (drop <= zeros) return JavaDecimal(negative, digits, zeros - drop, places)
         // Half up: away from zero where the first digit dropped is 5 or more.
         val cut = drop - zeros
@@ -84,6 +85,12 @@ internal class JavaDecimal private constructor(
 
     companion object {
         private val LOG2_10 = log2(10.0)
+
+        /**
+         * The least n for which `BigInteger.TEN.pow(n)` fails at once, before writing anything out: its check
+         * `bitLength() * n / Integer.SIZE > MAX_MAG_LENGTH` is 4n / 32 > 2^26 for ten. Below it, Java writes 10^n out.
+         */
+        private const val TEN_POW_REFUSED = 8L * ((1L shl 26) + 1)
 
         private fun overflow(): Nothing = throw ArithmeticException("BigInteger would overflow supported range")
 
