@@ -62,7 +62,7 @@ object Oracle {
         File(out, "plans.json").writeText(json.writeValueAsString(yaml.readTree(File(spec, "plans.yaml"))))
         // The host functions' cases, for each target's HostSpecTest.
         HostSpecJson.write(spec, out)
-        // Java's answers for the regular expressions SQLite's host functions see, for each target's RegexTargetsTest (#108).
+        // Java's answers for the regular expressions SQLite's host functions see, for each target's RegexOracleTest (#108).
         Regexes.write(spec, out)
         // drivine4j's full-text search statements, for each target's FullTextSearchGoldenTest.
         File(out, "search-golden.json").writeBytes(searchGolden())

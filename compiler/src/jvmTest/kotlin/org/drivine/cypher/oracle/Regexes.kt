@@ -373,6 +373,7 @@ object Regexes {
         // A capturing group in a group Java repeats at a fixed length, and a group that can match nothing repeated in a repeated group.
         "(?:(a))*a" to "group in a fixed-length repetition", "(?:(a)(?!b))*a" to "group in a fixed-length repetition", "(?:(a)b){2}|a" to "group in a fixed-length repetition",
         "(?:a(?:b*)*){2}" to "repeated empty group repeated", "(?:a(\\w*){2}|x){2}" to "repeated empty group repeated",
+        "(?:a(?:b*)?){2}" to "repeated empty group repeated", "(?:a(?:b*){1})+" to "repeated empty group repeated", "(?:a(b))+c|a" to "group in a fixed-length repetition",
         // Searches that pass between a pair's halves, which Java tries only where its pattern has no supplementary characters.
         "\\B." to "match between a pair's halves", "(?!.)" to "match between a pair's halves", "\\B\\w*" to "match between a pair's halves",
         // A run of literals under (?i), which Java reads as one slice, its ß taking ẞ too.
