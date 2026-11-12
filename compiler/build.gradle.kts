@@ -2,6 +2,7 @@ import com.strumenta.antlrkotlin.gradle.AntlrKotlinTask
 import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompilationTask
 import java.security.MessageDigest
+import java.time.Duration
 import java.util.Properties
 
 plugins {
@@ -248,6 +249,12 @@ val jvmOracle = tasks.register<Exec>("jvmOracle") {
         args(listOf("-Xmx2g") + jvmArgs + listOf("-cp", classpath.asPath, "org.drivine.cypher.oracle.Oracle") + oracleArgs)
     }
 }
+
+/*
+ * A test that hangs fails its task within the hour, rather than stalling the run: a host function given a stored value
+ * must answer at once, and HostDecimalTimeTest's ceilings catch one that is slow but returns, not one that never does.
+ */
+tasks.withType<AbstractTestTask>().configureEach { timeout.set(Duration.ofMinutes(60)) }
 
 // The double fuzz on each target reads the JVM's answers.
 tasks.withType<Test>().configureEach {

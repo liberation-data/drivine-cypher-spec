@@ -259,7 +259,7 @@ class Temporals(
     private fun overFields(day: String?, clock: String?, fields: Map<String, String>, offset: String?, kind: Temporal): String {
         val time = buildMap {
             listOf("hour" to "HOUR", "minute" to "MINUTE").forEach { (name, part) -> (fields[name] ?: clock?.let { sql.extract(part, it) })?.let { put(name, it) } }
-            (fields["second"] ?: clock?.let { "${sql.trunc}(${sql.extract("SECOND", it)})" })?.let { put("second", it) }
+            (fields["second"] ?: clock?.let { wholeSecond(it) })?.let { put("second", it) }
             if (FRACTION.any { it in fields }) putAll(fields.filterKeys { it in FRACTION })
             else if (clock != null) put("microsecond", sql.number(sql.micros(clock)))
         }
@@ -307,6 +307,7 @@ class Temporals(
         }
         if (kind.zoned && name in setOf("timezone", "offset", "offsetMinutes", "offsetSeconds")) return zoneField(text, name)
         val epoch = sql.epoch
+        if (sql.exactTime && (name == "epochSeconds" || name == "epochMillis")) return Field(exactEpoch(sql.utc(text, kind), name), text = false)
         when (name) {
             "epochSeconds" -> return Field("${sql.trunc}(${sql.secondsBetween(epoch, sql.utc(text, kind))})", text = false)
             "epochMillis" -> return Field("${sql.trunc}(${sql.secondsBetween(epoch, sql.utc(text, kind))} * 1000)", text = false)
@@ -320,7 +321,10 @@ class Temporals(
 
     /** The field [name], one of [INSTANT_FIELDS], of the wall clock [t], a number. */
     private fun clockField(t: String, name: String): String {
-        val second = sql.extract("SECOND", t)
+        // Lazy: a store of exact time reads the nanoseconds into the minute, and has no SECOND to extract.
+        val second by lazy { sql.extract("SECOND", t) }
+        val nanos by lazy { sql.nanosOfMinute(t) }
+        val exact = sql.exactTime
         return when (name) {
             "year" -> sql.year(t)
             "quarter" -> "${sql.trunc}((${sql.extract("MONTH", t)} + 2) / 3)"
@@ -333,10 +337,28 @@ class Temporals(
             "dayOfWeek", "weekDay" -> sql.dayOfWeek(t)
             "hour" -> sql.extract("HOUR", t)
             "minute" -> sql.extract("MINUTE", t)
-            "second" -> "${sql.trunc}($second)"
-            "millisecond" -> "(${sql.trunc}($second * 1000) - ${sql.trunc}($second) * 1000)"
-            "microsecond" -> "(${sql.trunc}($second * 1000000) - ${sql.trunc}($second) * 1000000)"
-            else -> "((${sql.trunc}($second * 1000000) - ${sql.trunc}($second) * 1000000) * 1000)"
+            "second" -> if (exact) "($nanos / 1000000000)" else "${sql.trunc}($second)"
+            "millisecond" -> if (exact) "($nanos / 1000000 % 1000)" else "(${sql.trunc}($second * 1000) - ${sql.trunc}($second) * 1000)"
+            "microsecond" -> if (exact) "($nanos / 1000 % 1000000)" else "(${sql.trunc}($second * 1000000) - ${sql.trunc}($second) * 1000000)"
+            else -> if (exact) "($nanos % 1000000000)" else "((${sql.trunc}($second * 1000000) - ${sql.trunc}($second) * 1000000) * 1000)"
+        }
+    }
+
+    /** The whole seconds of the wall clock [t] into its minute: of its nanoseconds, where the store's time is exact. */
+    private fun wholeSecond(t: String): String =
+        if (sql.exactTime) "(${sql.nanosOfMinute(t)} / 1000000000)" else "${sql.trunc}(${sql.extract("SECOND", t)})"
+
+    /**
+     * `epochSeconds` or `epochMillis` of [moment], a timestamp in UTC, on a store whose time is exact
+     * ([TemporalSql.exactTime]): of the whole seconds since the epoch, floored, and the nanoseconds past them, in whole
+     * numbers alone, counted toward zero as the other stores' `TRUNC` of their seconds counts them: a moment a fraction of
+     * a second before the epoch has `epochSeconds` 0.
+     */
+    private fun exactEpoch(moment: String, name: String): String = shared(listOf(moment)) { (m) ->
+        val (seconds, nanos) = sql.exactBetween(sql.epoch, m)
+        shared(listOf(seconds, nanos)) { (s, n) ->
+            if (name == "epochSeconds") "($s + ($s < 0 AND $n > 0))"
+            else "($s * 1000 + $n / 1000000 + ($s < 0 AND $n % 1000000 > 0))"
         }
     }
 
@@ -384,6 +406,21 @@ class Temporals(
      */
     private fun moved(timestamp: String, duration: String, sign: Int, date: String? = null): String {
         val s = if (sign < 0) "-" else ""
+        if (sql.exactTime) return exactParts(duration) { months, days, wholeSeconds, nanos ->
+            val months = "$s($months)"
+            if (date == null) {
+                sql.addExactTime(sql.addMonths(timestamp, months), "$s($days)", "$s($wholeSeconds)", "$s($nanos)")
+            } else {
+                // A date takes the whole days of the duration's time alone, counted toward zero, as below.
+                shared(listOf(wholeSeconds, nanos)) { (sec, n) ->
+                    val toward = "CASE WHEN $sec % 86400 = 0 AND $sec > 0 AND $n < 0 THEN 1 WHEN $sec % 86400 = 0 AND $sec < 0 AND $n > 0 THEN -1 ELSE 0 END"
+                    sql.addExactTime(
+                        sql.addMonths(timestamp, months), "$s($days)",
+                        "$s(CASE WHEN $date THEN ($sec / 86400 - $toward) * 86400 ELSE $sec END)", "$s(CASE WHEN $date THEN 0 ELSE $n END)",
+                    )
+                }
+            }
+        }
         val parts = parts(duration)
         val seconds = if (date == null) parts.seconds else shared(listOf(parts.seconds)) { (sec) -> "CASE WHEN $date THEN ${sql.trunc}($sec / 86400) * 86400 ELSE $sec END" }
         return sql.addTime(sql.addMonths(timestamp, "$s(${parts.months})"), "$s(${parts.days})", "$s($seconds)")
@@ -421,7 +458,7 @@ class Temporals(
         val given = overrides.fields
         val own = mapOf(
             "year" to sql.year(cut), "month" to sql.extract("MONTH", cut), "day" to sql.extract("DAY", cut),
-            "hour" to sql.extract("HOUR", cut), "minute" to sql.extract("MINUTE", cut), "second" to "${sql.trunc}(${sql.extract("SECOND", cut)})",
+            "hour" to sql.extract("HOUR", cut), "minute" to sql.extract("MINUTE", cut), "second" to wholeSecond(cut),
         )
         val micros = sql.number(sql.micros(cut))
         val carried = unit == "millisecond" && "microsecond" in given
@@ -478,6 +515,26 @@ class Temporals(
             "($sign * (${part("weeks")} * 7 + ${part("days")}))",
             "($sign * (${part("hours")} * 3600 + ${part("minutes")} * 60 + ${part("seconds")}))",
         )
+    }
+
+    /**
+     * [body] of the parts of the duration text [text], as [parts] reads them, but its time as whole seconds and nanoseconds,
+     * whole numbers each, for a store whose time is exact ([TemporalSql.exactTime]): the seconds part's digits before its
+     * point and the nine after it are read as text, never through a float. Its hours and minutes are whole, as a duration's
+     * text writes them; a fraction of one is cut to the whole second.
+     */
+    private fun exactParts(text: String, body: (months: String, days: String, wholeSeconds: String, nanos: String) -> String): String {
+        val parts = parts(text)
+        fun group(name: String) = Temporal.DURATION_PARTS.getValue(name).let { (pattern, group) -> sql.group(text, literal(sql.regex(pattern)), group) }
+        fun part(name: String) = "COALESCE(${sql.number(group(name))}, 0)"
+        val sign = "CASE WHEN SUBSTR($text, 1, 1) = '-' THEN -1 WHEN $text IS NOT NULL THEN 1 END"
+        return shared(listOf(group("seconds"))) { (g) ->
+            val point = "INSTR($g, '.')"
+            val fraction = "CASE WHEN $point > 0 THEN CAST(SUBSTR(SUBSTR($g, $point + 1) || '000000000', 1, 9) AS INTEGER) ELSE 0 END"
+            val whole = "${sql.trunc}($sign * (${part("hours")} * 3600 + ${part("minutes")} * 60 + COALESCE(CAST($g AS INTEGER), 0)))"
+            val nanos = "($sign * CASE WHEN SUBSTR($g, 1, 1) = '-' THEN -1 ELSE 1 END * $fraction)"
+            body(parts.months, parts.days, whole, nanos)
+        }
     }
 
     /** The duration text of the fields [fields], SQL numbers each by Cypher's names (`years`, `months`, `weeks`, `days`, `hours`…). */
@@ -580,13 +637,60 @@ class Temporals(
 
     private fun between(from: String, to: String, times: Boolean, unit: String?): String = shared(listOf(from, to)) { (a, b) ->
         val months = if (times) "0" else sql.monthsBetween(a, b)
-        when (unit) {
+        if (sql.exactTime) exactBetween(a, b, months, unit) else when (unit) {
             "months" -> text(Parts(months, "0", "0"))
             "days" -> text(Parts("0", "${sql.trunc}(${sql.secondsBetween(a, b)} / 86400)", "0"))
             "seconds" -> text(Parts("0", "0", sql.secondsBetween(a, b)))
             else -> shared(listOf(months)) { (m) ->
                 shared(listOf(sql.secondsBetween(sql.addMonths(a, m), b))) { (rest) -> text(Parts(m, "${sql.trunc}($rest / 86400)", "($rest - ${sql.trunc}($rest / 86400) * 86400)")) }
             }
+        }
+    }
+
+    /**
+     * [between] on a store whose time is exact ([TemporalSql.exactTime]): of the whole seconds from [a] to [b], floored, and
+     * the nanoseconds past them, in whole numbers alone, so the duration's seconds are exact (drivine4j#418) over the whole
+     * range of years, where a count of nanoseconds would overflow past ±292 years.
+     */
+    private fun exactBetween(a: String, b: String, months: String, unit: String?): String = when (unit) {
+        "months" -> text(Parts(months, "0", "0"))
+        "days" -> sql.exactBetween(a, b).let { (s, n) -> shared(listOf(s, n)) { (sec, ns) -> text(Parts("0", wholeDays(sec, ns), "0")) } }
+        "seconds" -> sql.exactBetween(a, b).let { (s, n) -> exactText("0", "0", s, n) }
+        else -> shared(listOf(months)) { (m) ->
+            sql.exactBetween(sql.addMonths(a, m), b).let { (s, n) ->
+                shared(listOf(s, n)) { (sec, ns) ->
+                    shared(listOf(wholeDays(sec, ns))) { (d) -> exactText(m, d, "($sec - $d * 86400)", ns) }
+                }
+            }
+        }
+    }
+
+    /**
+     * The whole days of [seconds], floored, and [nanos] past them (0 up to a second), counted toward zero, as `TRUNC` of
+     * their sum over 86400 counts them: SQLite's `/` of whole numbers counts toward zero already, but for a negative whole
+     * number of days with nanoseconds past it, which is a day nearer zero.
+     */
+    private fun wholeDays(seconds: String, nanos: String) = "($seconds / 86400 + ($seconds < 0 AND $seconds % 86400 = 0 AND $nanos > 0))"
+
+    /**
+     * The duration text of whole [months] and [days], and [seconds], floored, and [nanos] past them, 0 up to a second, all
+     * whole numbers, as [text] writes one, but with no float: its seconds and their fraction counted toward zero, the
+     * fraction's digits written from the nanoseconds, its trailing zeros left out (`PT-22.142S`). Null where a part is null.
+     */
+    private fun exactText(months: String, days: String, seconds: String, nanos: String): String = shared(listOf(months, days, seconds, nanos)) { (m, d, s0, n0) ->
+        // Toward zero: -22.142 seconds are -23 and 858000000 nanoseconds floored, -22 and -142000000 so.
+        val back = "($s0 < 0 AND $n0 > 0)"
+        shared(listOf("($s0 + $back)", "($n0 - $back * 1000000000)")) { (s, n) ->
+            val hours = "($s / 3600)"
+            val minutes = "($s / 60 - $hours * 60)"
+            val secs = "($s - $s / 60 * 60)"
+            val fraction = "CASE WHEN $n = 0 THEN '' ELSE '.' || RTRIM(SUBSTR('000000000' || ABS($n), -9), '0') END"
+            val second = "CASE WHEN $secs < 0 OR $n < 0 THEN '-' ELSE '' END || ABS($secs) || $fraction || 'S'"
+            fun unit(value: String, letter: String) = "CASE WHEN $value <> 0 THEN ${number(value)} || '$letter' ELSE '' END"
+            val years = "($m / 12)"
+            "CASE WHEN $m = 0 AND $d = 0 AND $s = 0 AND $n = 0 THEN 'PT0S' WHEN $s IS NOT NULL AND $n IS NOT NULL THEN 'P' || ${unit(years, "Y")} || " +
+                "${unit("($m - $years * 12)", "M")} || ${unit(d, "D")} || CASE WHEN $s <> 0 OR $n <> 0 THEN 'T' || ${unit(hours, "H")} || " +
+                "${unit(minutes, "M")} || CASE WHEN $secs <> 0 OR $n <> 0 THEN $second ELSE '' END ELSE '' END END"
         }
     }
 

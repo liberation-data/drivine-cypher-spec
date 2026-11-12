@@ -30,9 +30,16 @@ if (absent.length > 0) {
     process.exit(1);
 }
 const started = performance.now();
-const { compile } = require(require('path').resolve(packageDir));
+const { compile, hostVersion } = require(require('path').resolve(packageDir));
 compile(JSON.stringify({ store: 'postgres', graph: { name: 'g' }, cypher: 'RETURN 1' }));
 const loadMs = performance.now() - started;
+// The host functions' version the package gives is the one host.yaml pins (the JVM's host.json, beside the corpus).
+const host = JSON.parse(fs.readFileSync(require('path').join(require('path').dirname(corpus), 'host.json'), 'utf8'));
+const pinned = host.cases.find((c) => c.name === 'drivine_host_version').steps[0].result;
+if (hostVersion() !== pinned) {
+    console.error(`The npm package's hostVersion() is ${hostVersion()}, not ${pinned} as host.yaml's drivine_host_version pins it.`);
+    process.exit(1);
+}
 const run = (file) =>
     fs.readFileSync(file, 'utf8').split('\n').filter((line) => line.trim()).map((line) => {
         const { request, answer } = JSON.parse(line);

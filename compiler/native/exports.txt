@@ -1,4 +1,5 @@
 _drivine_compile
 _drivine_free
 _drivine_gc_collect
+_drivine_host_version
 _sqlite3_drivinecypher_init

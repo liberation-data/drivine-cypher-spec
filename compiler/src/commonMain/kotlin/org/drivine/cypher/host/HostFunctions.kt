@@ -2,6 +2,7 @@ package org.drivine.cypher.host
 
 import org.drivine.DrivineInternalApi
 import org.drivine.cypher.host.regex.JavaPatterns
+import org.drivine.cypher.host.time.HostTemporal
 import org.drivine.cypher.json.ArrayNode
 import org.drivine.cypher.number.DecimalRound
 import org.drivine.cypher.number.DoubleText
@@ -159,6 +160,36 @@ object HostFunctions {
         }
     }
 
+    /**
+     * `drivine_temporal(operation, …)`: what compiled SQL works out of a timestamp, the text of a wall clock to the
+     * microsecond, by its operation (`local`, `utc`, `extract`, `day_of_week`, `add_months`, `add_time`, `months_between`,
+     * `seconds_between`, `nanos_between`, `truncate`), as java.time works it out: see [HostTemporal.temporal]. Null where
+     * an argument after the operation is null. Any number of arguments, the operation's.
+     */
+    val temporal = HostFunction(SqliteFunctions.TEMPORAL, -1, deterministic = true) { args, count, result -> HostTemporal.temporal(args, count, result) }
+
+    /**
+     * `drivine_trunc(number)`: the number's fraction cut off, a whole number where one holds it, as Postgres's and Oracle's
+     * `TRUNC` give it, where SQLite's own `trunc` gives a float: see [HostTemporal.trunc].
+     */
+    val trunc = HostFunction(SqliteFunctions.TRUNC, 1, deterministic = true) { args, _, result -> HostTemporal.trunc(args, result) }
+
+    /**
+     * `drivine_to_char(value, pattern)`: a timestamp or a number in a pattern of Postgres's and Oracle's `to_char`, those
+     * compiled SQL writes temporal values with: see [HostTemporal.toChar].
+     */
+    val toChar = HostFunction(SqliteFunctions.TO_CHAR, 2, deterministic = true) { args, _, result -> HostTemporal.toChar(args, result) }
+
+    /**
+     * `drivine_host_version()`: [SqliteFunctions.HOST_VERSION], the version of the forms of these functions' arguments and
+     * results, which a host checks once on each connection it registers them on: see [HostCheck].
+     */
+    val hostVersion = HostFunction(SqliteFunctions.HOST_VERSION_FUNCTION, 0, deterministic = true) { _, _, result ->
+        result.long(SqliteFunctions.HOST_VERSION.toLong())
+    }
+
     /** Every host function the module implements, in the order each host registers them. */
-    val all: List<HostFunction> = listOf(floatText, equal, add, canonical, sortKey, listOrder, round, regexp, regexGroup, regexpReplace)
+    val all: List<HostFunction> = listOf(
+        floatText, equal, add, canonical, sortKey, listOrder, round, regexp, regexGroup, regexpReplace, temporal, trunc, toChar, hostVersion,
+    )
 }
