@@ -63,6 +63,11 @@ class DecimalRoundTest {
         assertEquals(Double.NEGATIVE_INFINITY, round(-2.5, -1_000_000_000, FLOOR))
         assertEquals(0.0, round(-2.5, -1_000_000_000, CEILING))
         assertEquals(1.0E20, round(2.5, -20, CEILING))
+        // At the place just past the number's digits it can be half of it; one place further, less.
+        assertEquals(10.0, DecimalRound.of(5L, -1, HALF_UP))
+        assertEquals(0.0, DecimalRound.of(5L, -1, HALF_EVEN))
+        assertEquals(1.0, round(0.5, 0, HALF_UP))
+        assertEquals(0.0, DecimalRound.of(5L, -2, HALF_UP))
         assertEquals(Double.POSITIVE_INFINITY, round(2.5, -400, UP))
         assertEquals(0.0, DecimalRound.of(Long.MAX_VALUE, -1_000_000_000, HALF_EVEN))
         // Past Int's range too, where -places overflows a Long.
