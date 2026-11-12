@@ -7,7 +7,7 @@ the same process, so one image serves both.
 
 With host.json (the spec's host.yaml as `./gradlew hostSpecJson` writes it), each `function` step of host.yaml whose
 function the extension registers is called through SQL, as SQLite calls it for a compiled statement, and must give its
-`result`, or its values ascend; the functions it doesn't register yet are named. HostSpecTest runs the same steps on the
+`result`, fail with its `error`, or its values ascend; the functions it doesn't register yet are named. HostSpecTest runs the same steps on the
 module's code directly, on every target.
 
 In place of the library, `--installed` checks the installed Python package drivine-cypher-compiler's library instead,

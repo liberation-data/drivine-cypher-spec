@@ -14,8 +14,8 @@ import kotlin.test.assertTrue
 
 /**
  * The spec's host.yaml (as host.json, `./gradlew jvmOracle`), over the module's own host functions ([HostFunctions]), called
- * as SQLite calls them, on every target: each `function` step of a function the module implements gives its `result`, or
- * its values ascend. A function host.yaml calls that the module doesn't implement yet is in [PENDING], and [PENDING] holds
+ * as SQLite calls them, on every target: each `function` step of a function the module implements gives its `result`, fails
+ * with its `error`, or its values ascend. A function host.yaml calls that the module doesn't implement yet is in [PENDING], and [PENDING] holds
  * nothing else; each function the module implements has a step. A `read` step pins each library's row reader, not the
  * module's, and is passed over. The cases' `pairs` are checked by each library's runner (drivine4j's HostSpecTest), which
  * compiles them. The SQLite extension's check (check/extension-native.py) runs the same steps through SQL, on the
@@ -24,7 +24,7 @@ import kotlin.test.assertTrue
 class HostSpecTest {
 
     private companion object {
-        /** The keys of each kind of step, beside its optional `note`: a function's result, its order, and a read. */
+        /** The keys of each kind of step, beside its optional `note`: a function's result, its failure, its order, and a read. */
         val SHAPES = setOf(setOf("function", "args", "result"), setOf("function", "args", "error"), setOf("function", "ascending"), setOf("read", "value"))
 
         /** Drivine's functions, and `regexp`, which SQLite calls, as `regexp(pattern, text)`, for `text REGEXP pattern`. */
@@ -192,7 +192,7 @@ class HostSpecTest {
         } else {
             val args = step["args"]!!.map(::expanded)
             refuseNaN(args, where)
-            val error = step["error"]?.textValue()
+            val error = step["error"]?.let { it.textValue() ?: throw IllegalArgumentException("$where: error is a text, not $it") }
             if (error == null) assertEquals(expanded(step["result"]!!), call(functions, args, where), "$where: $name$args")
             else {
                 val failure = runCatching { call(functions, args, where) }.exceptionOrNull()

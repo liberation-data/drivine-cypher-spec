@@ -568,13 +568,20 @@ cases:
         function: "drivine_temporal"
         args: ["extract", "2024-03-15T10:30:59.999999999", "NANOSECOND_OF_MINUTE"]
         result: 59999999999
-      - note: "drivine4j#424: an offset with seconds, which the compiler refuses, fails here rather than being misread as hours and minutes."
+      - note: "drivine4j#424: an offset with seconds, which the compiler refuses in a text but passes on from a map's timezone (time({hour: 12, timezone: '+02:05:59'})), fails here rather than being misread as hours and minutes."
         function: "drivine_temporal"
         args: ["utc", "10:00:00+02:05:59", "TIME"]
         error: "'10:00:00+02:05:59' is no temporal value"
+      - note: "An offset of hours and minutes is read, as before."
+        function: "drivine_temporal"
+        args: ["utc", "10:00:00+02:05", "TIME"]
+        result: "1970-01-01T07:55:00.000000"
       - function: "drivine_temporal"
         args: ["local", "2024-03-15T10:00:00+02:05:59", "DATE_TIME"]
         error: "'2024-03-15T10:00:00+02:05:59' is no temporal value"
+      - function: "drivine_temporal"
+        args: ["local", "2024-03-15T10:00:00+02:05", "DATE_TIME"]
+        result: "2024-03-15T10:00:00.000000"
       - note: "drivine4j#421 (layout 2): a text's nanoseconds are kept."
         function: "drivine_temporal"
         args: ["local", "2024-03-15T10:30:00.123456789", "LOCAL_DATE_TIME"]
