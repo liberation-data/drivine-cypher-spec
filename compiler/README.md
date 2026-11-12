@@ -744,7 +744,7 @@ reviewed pull request. To bump it:
 The JVM is the oracle. `./gradlew jvmOracle` writes, into `build/oracle`:
 
 - `corpus.jsonl`: every statement in the spec's files (`queries.yaml`, `writes.yaml`, `temporal.yaml`, `refusals.yaml`,
-  `schema.yaml`), compiled for Postgres, Oracle and SQLite, and some with parameters the spec has no form for (whole
+  `schema.yaml`, `vector.yaml`), compiled for Postgres, Oracle and SQLite, and some with parameters the spec has no form for (whole
   floats, temporal values, bytes, `$` keys) and Oracle's graph options, and on Oracle with `oracleRowsAsText` each of
   those statements whose SQL it changes (every write that returns rows), and two writes of its own, of a long text and of
   many rows, with `oracleReencodeJson` each of those statements whose SQL it changes (every one that returns rows), and

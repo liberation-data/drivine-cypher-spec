@@ -12,6 +12,7 @@ These files say what a statement in Drivine's flavour of Cypher gives on each st
 - `plans.yaml`: the schema plan: what a schema manager runs on each store, round by round, for an enforce, a recreate, an ensure or a remove, what the store answers, and what the manager reports, its log lines among it. Read with no store. See [The schema plan](#the-schema-plan).
 - `host.yaml`: what each library's own code does with the values compiled SQL hands it: the functions it registers on SQLite, and how it reads a column of a statement's rows. Read with no store. See [Host functions and readers](#host-functions-and-readers).
 - `search.yaml`: full-text search: the nodes a search finds on each store, over the graph the file's `graph` writes, and how closely each other store ranks a corpus, `search/docs-corpus.json`, as Neo4j's full-text index ranks it. See [Full-text search](#full-text-search).
+- `vector.yaml`: vector search in Cypher: the nodes `db.index.vector.queryNodes()` and Cypher 25's `SEARCH` find on each store, with their scores, over the graph the file's `graph` writes, and what `vector.similarity.cosine()` and `vector.similarity.euclidean()` give. See [Vector search](#vector-search).
 - `results.yaml`: a statement's columns, and its values with their kinds kept, a node with its labels and a relationship with its type, as each library's call that gives them reads them (drivine4j#741), over the graph the file's `graph` writes. See [Columns and typed values](#columns-and-typed-values).
 - `cli/`: the `drivine` CLI's contract, which runs Cypher on every store and prints its results as cypher-shell does, and `cli.yaml`, the cases each build of it runs. See `cli/README.md`.
 - `model/`: the model file each library writes of an application's fragments, views and how they are stored, which Drivine Studio reads. See `model/README.md`.
@@ -519,6 +520,34 @@ A case says what Neo4j's index gives, with Neo4j's default analyzer, `standard-n
 **The corpus** was drivine4j's `src/test/resources/fulltext/docs-corpus.json` at dd4a66f0, byte for byte (SHA-256 `865f814ceaba8ade6ba604dcb3614aa344529c0f701991c40b6c169ee4c9c0e5`); drivine4j's `FullTextRankingAgreementTest` now reads this copy: the sections of Drivine's own docs at 3a8b0b12, as that test says, each a node. Its `queries` are that test's.
 
 **Recording Neo4j's ranking again.** `recorded` names the image the `neo4j` lists were recorded on, by digest, the `version` it reported and the `date`, and the statements that record them: the index made and filled, and each query asked of it. When Neo4j's pin moves, run them on the new image, through the test lock, and write the lists again with the new image's name and digest; a change of a list is Neo4j's and is said so in the pull request. drivine4j's `Neo4jRanking` asks Neo4j the same way.
+
+## Vector search
+
+A vector index finds the nodes of its label whose embedding, a list of numbers, is nearest a vector. In Cypher, Neo4j searches one with the procedure `db.index.vector.queryNodes(name, k, vector)`, which yields each `node` and its `score`, and with Cypher 25's `SEARCH` clause, which binds them to a `MATCH`'s variable; `vector.similarity.cosine()` and `vector.similarity.euclidean()` score two lists with no index. A graph engine runs the statements itself. On a SQL store Drivine is to compile them, to a search of the store's own vector index where it has one (liberation-data/drivine-cypher-spec#160). `vector.yaml` pins what each gives, and Neo4j's answer is the rule.
+
+```yaml
+graph: |
+  CREATE (a:Chunk {id: 'a', embedding: [1.0, 0.0, 0.0], lang: 'en'}), ...
+indexes:
+  - {kind: "VECTOR_INDEX", label: "Chunk", properties: ["embedding"], name: "chunk_cos", options: {dimensions: 3, similarity: "COSINE"}}
+cases:
+  - name: "A filter after the k nearest"
+    description: "A WHERE on what a search finds is applied to its k nearest, after they are found, so it may leave fewer than k."
+    steps:
+      - cypher: "CALL db.index.vector.queryNodes('chunk_cos', 2, [1.0, 0.0, 0.0]) YIELD node, score WHERE node.lang = 'en' RETURN node.id, score"
+        rows: [["a", 1.0]]
+        today: [{stores: ["sql"], error: "A procedure call (CALL) is Cypher, and is not compiled to SQL yet.", issue: "liberation-data/drivine-cypher-spec#160"}]
+```
+
+**The stores.** The file runs on `neo4j`, `postgres`, `oracle` and `sqlite`, and `sql` names the last three. Memgraph and FalkorDB run none of it: each has a vector search procedure of its own (`vector_search.search` on Memgraph, `db.idx.vector.queryNodes` on FalkorDB), and Drivine is to refuse these statements there, naming it (liberation-data/drivine-cypher-spec#214). Neptune runs none of it either.
+
+**A case.** For each store, a runner empties the graph, makes each of `indexes`, a schema spec as `store.yaml` writes one, its `name` the one the statements search by, as the schema API ensures a spec, writes `graph`, and waits for the indexes to hold it (`CALL db.awaitIndexes()` on Neo4j). On Postgres it runs every case twice: with the indexes made, and with each index's record kept and its HNSW index (the record's object) dropped, as SQLite always is, so that the search measures every node of the label. A statement finds an index by its name through the record, which holds its label, property, dimensions and similarity, so the record is kept in both runs, and read as it is: the schema listing leaves out a record whose object is gone ([Forms](#the-stores-schema)), so the runner drops the HNSW index after it makes the indexes, before each case. The index only narrows the nodes read (exactly, on a graph this small), and both give the same rows. A step is a statement, as in `queries.yaml`, with its `cypher`, `parameters`, `rows` or `error`, `only`, `except` and `note`, and `today`, as in `search.yaml`: what a store gives today where it differs, with `rows`, `error`, or neither where it gives anything but the step's, and the issue; a library holds such a step in its own HELD list, and `today` is not read. Every step that gives rows is held on the SQL stores today. An `error` is `true`: the step's note says Neo4j's code and message, and each SQL store's own message is not pinned yet.
+
+**Comparing rows.** Rows are compared as `queries.yaml` compares them, except that each float is compared within 1e-6, as Neo4j's scores are float32s (0.8 comes back 0.800000011920929), and a run of consecutive rows whose last column, the score, is the same number within 1e-6 is compared in any order, as if sorted by id. Neo4j's own order of hits that score alike is not stable: of the same two hits, a search for 10 gave `a` then `d`, and one for 2 gave `d` then `a`. No step rests on which of two such hits a search keeps: where `k` cuts between hits, they score apart.
+
+**What Neo4j gives.** A cosine index scores a node (1 + cos) / 2, from 1.0 for the same direction to 0.0 for the opposite; a euclidean index 1 / (1 + d²). A node is in an index if it has the index's label and its property is a list of numbers of the index's size, and on a cosine index not a list of zeros. A filter on what a search finds, a `WHERE` after its `YIELD`, or before or after `SEARCH`, is applied after the k nearest are found, so it may leave fewer than k. What a search finds is read on as any node is: matched out from, optionally, in `EXISTS { }`, and aggregated. The cases were recorded on Neo4j 2026.10.1 community, in Cypher 25, its default.
+
+**Refused.** Of Neo4j's vector search, a SQL store refuses by name what it has no counterpart of (see `refusals.yaml`): `db.index.vector.queryRelationships()`, as it makes no vector index on relationships; Neo4j's `VECTOR` type and its functions, `vector()`, `vector_distance()`, `vector_norm()` and `vector_dimension_count()`, as an embedding there is a list of numbers; `db.create.setNodeVectorProperty()`, for a `SET` of the list; and a `k` written as a float, `1.5` or `2.0`, as Neo4j refuses it (a whole number or a parameter is refused as any procedure call is, until the search is compiled).
 
 ## Changing the spec
 
