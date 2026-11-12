@@ -366,13 +366,19 @@ void drivine_gc_collect(void);   /* collects now: see below */
 ```
 
 SQLite derives the entry point's name from the file's (`libdrivinecypher` or `drivinecypher`), so a host loads it by
-path alone. The host functions come in batches, ported from drivine4j's: each is common code
+path alone. The host functions are ported from drivine4j's: each is common code
 (`org.drivine.cypher.host.HostFunctions`), which the extension registers and a host on the JVM can call from its own
-registrations, and each comes with the spec's `host.yaml` cases that pin it. So far it registers:
+registrations, and each comes with the spec's `host.yaml` cases that pin it. A function of JSON values fails its statement
+on a text that is no JSON, and takes an empty one as no value, as drivine4j's do. So far it registers:
 
 | Function | What it gives |
 |---|---|
 | `drivine_float_text(real)` | the float as Java writes a double, as Cypher's `toString` gives it (`2.0`, `1.0E7`, `Infinity`), where SQLite's own text has 17 digits; null of null. Deterministic. |
+| `drivine_equal(a, b)` | 1 or 0, whether the JSON values are equal as Cypher compares them (`1` equal to `1.0`, maps by their entries in any order, NaN equal to nothing); null where either is no value or a null in them decides. Deterministic. |
+| `drivine_add(a, b)` | Cypher's `a + b` of the JSON values, as JSON text: numbers summed (a whole number where both are, past a long's range too), lists joined or an item added, texts and numbers written together; null where Cypher adds no such two. Deterministic. |
+| `drivine_canonical(json)` | the JSON text with each map in it, at any depth, its keys in order, so two maps of the same entries group together; JSON's null as given, null of null. Deterministic. |
+| `drivine_sort_key(json)` | of a JSON list, a text that orders, as SQLite orders text, as Cypher orders lists; of any other value its JSON text as given, null of null. Deterministic. |
+| `drivine_list_order(a, b)` | -1, 0 or 1, where the JSON list `a` comes beside the list `b` in a comparison (`<`, `>=` …); null where either is no list or the pair that decides isn't ordered. Deterministic. |
 | `drivine_extension_version()` | the module's version, as it was built (`-Pcompiler.version`, the Maven form: `0.36.0`, `0.36.0-rc.1`), so a host can check it loaded the library it meant to. Deterministic. |
 | `drivine_gc_collect()` | NULL, having collected: see below. Direct-only. |
 | `drivine_gc_heap()`, `drivine_gc_heap(bytes)` | the GC's floor, in bytes; given bytes, it sets the floor first, and 0 restores the runtime's own. Direct-only. |
