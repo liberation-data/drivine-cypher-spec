@@ -4777,7 +4777,7 @@ abstract class SqlCypherCompiler(
          * refused, where it could give null in place of the moment.
          */
         private fun now(function: Expression.Function, scope: Map<String, Value>): Value {
-            val kind = Temporal.ofFunction(function.name.substringBefore('.'))!!
+            val kind = Temporal.ofFunction(function.name.lowercase().substringBefore('.'))!!
             if (function.arguments.isEmpty()) return Value.Json(scalar(temporals.now(kind)), temporal = kind)
             if (function.arguments.size != 1) throw CompilerException("${function.name}() takes a time zone, or nothing.")
             val written = function.arguments.single()
