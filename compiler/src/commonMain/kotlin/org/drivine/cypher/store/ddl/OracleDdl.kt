@@ -527,16 +527,16 @@ ${made.entries.joinToString("\n") { (function, making) ->
 
     override fun dropConstraint(item: CatalogItem): List<DdlStatement> = forgotten(item)
 
+    /** Oracle's swap drops and then renames, not in one step: see [SqlStoreDdl.dropsLeftoverOnEnsure]. */
+    override val dropsLeftoverOnEnsure: Boolean
+        get() = false
+
     /**
      * The unique index built under [temporaryName] while the old one stands, waiting out another session's lock as the
      * constraint's own index is made ([waitingOutBusy]), then the old one dropped and it renamed into its place. Oracle
      * refuses a second index over the expressions of one there (`ORA-01408`): an old index made as this version makes it
      * refuses the build so, and a schema manager then drops it and makes it again, as before.
      */
-    /** Oracle's swap drops and then renames, not in one step: see [SqlStoreDdl.dropsLeftoverOnEnsure]. */
-    override val dropsLeftoverOnEnsure: Boolean
-        get() = false
-
     override fun recreation(spec: ConstraintSpec): UniqueRecreation = when (spec) {
         is UniquenessConstraintSpec -> {
             val name = objectName(UNIQUE, listOf(spec.label) + spec.properties)

@@ -63,4 +63,15 @@ class OracleKeyedMapFloatTest {
         assertTrue(it.sql.contains("JSON(JSON_QUERY(cy_params, '\$.x' RETURNING CLOB) EXTENDED)"), it.sql)
         assertFalse(it.sql.contains("JSON(JSON_QUERY(cy_params, '\$.m' RETURNING CLOB) EXTENDED)"), it.sql)
     }
+
+    @Test
+    fun `a float beside a temporal value in one parameter is written as extended JSON's double, the tag being no extended JSON`() {
+        // A temporal value is a tag, {"$t", "v", "s"}, whose `$t` is the layout's own key, not one extended JSON reads.
+        val rows = listOf(mapOf("d" to java.time.LocalDate.of(2024, 3, 15), "f" to 2.0))
+        val it = OracleCypherCompiler("g").compile("UNWIND \$rows AS r CREATE (n:N {d: r.d, f: r.f}) RETURN n", mapOf("rows" to rows))
+        assertEquals(
+            """{"rows":[{"d":{"${'$'}t":"date","v":"2024-03-15","s":"10000020240315"},"f":{"$d":"2.0"}}]}""",
+            it.parameters.values.single() as String,
+        )
+    }
 }

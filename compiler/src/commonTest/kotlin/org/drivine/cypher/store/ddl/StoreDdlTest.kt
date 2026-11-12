@@ -193,6 +193,22 @@ class StoreDdlTest {
     }
 
     /**
+     * A recreate builds its index over the keys the create indexes, so over a property whose name begins with `$`, held as
+     * `$$` ([SqlStoreDdl.storedKeys]), it builds over `$$x`, as the create does, not over `$x`, which no node holds: an
+     * index over that, swapped in, would hold nothing unique (drivine-cypher-spec#161).
+     */
+    @Test
+    fun aUniqueRecreateBuildsOverTheStoredKeysOfAPropertyThatBeginsWithADollar() {
+        val made = UniquenessConstraintSpec("Person", listOf("${'$'}x", "y")).made()
+        for (ddl in listOf(postgres, oracle, sqlite)) {
+            val recreation = ddl.recreation(made)
+            val create = ddl.createConstraint(made).map { (it as DdlStatement.Text).statement }
+            val unique = create.single { "CREATE UNIQUE INDEX IF NOT EXISTS ${recreation.name} " in it }
+            assertEquals(unique.replace("IF NOT EXISTS ${recreation.name} ", "${recreation.temporary} "), (recreation.build.single() as DdlStatement.Text).statement, ddl.engine)
+        }
+    }
+
+    /**
      * The name a unique index is built under first fits within the store's longest name, and is never a name Drivine
      * gives: [SqlStoreDdl.objectName] leaves two characters for it, and a graph's name is at most the store's longest less
      * 16 ([SqlStoreDdl.refusal]), so even its `uq2` names leave them.

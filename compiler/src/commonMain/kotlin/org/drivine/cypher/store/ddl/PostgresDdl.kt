@@ -350,7 +350,7 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
                 name = name,
                 temporary = temporary,
                 leftover = listOf(DdlStatement.Text(droppedIndex(temporary))),
-                build = listOf(DdlStatement.Text(statement("CREATE UNIQUE INDEX $temporary ON ${over(spec.label, spec.properties)}"))),
+                build = listOf(DdlStatement.Text(statement("CREATE UNIQUE INDEX $temporary ON ${over(spec.label, spec.keys)}"))),
                 swap = listOf(
                     DdlStatement.Text(
                         statement(

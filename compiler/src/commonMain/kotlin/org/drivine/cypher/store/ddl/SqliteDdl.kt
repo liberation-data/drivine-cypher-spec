@@ -197,7 +197,7 @@ class SqliteDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
         is UniquenessConstraintSpec -> {
             val name = objectName(UNIQUE, listOf(spec.label) + spec.properties)
             val temporary = temporaryName(name)
-            val over = over(spec.label, spec.properties)
+            val over = over(spec.label, spec.keys)
             UniqueRecreation(
                 name = name,
                 temporary = temporary,

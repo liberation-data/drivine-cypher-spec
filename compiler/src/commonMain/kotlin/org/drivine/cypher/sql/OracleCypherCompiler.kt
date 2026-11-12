@@ -11,6 +11,7 @@ import org.drivine.cypher.ast.RelationshipPattern
 import org.drivine.cypher.json.CypherEncoder
 import org.drivine.cypher.json.CypherJson
 import org.drivine.cypher.store.Stamps
+import org.drivine.cypher.store.ValueLayout
 import org.drivine.cypher.store.ddl.SqlStoreDdl
 
 /**
@@ -186,12 +187,15 @@ class OracleCypherCompiler(
 
     /**
      * Whether [node] holds a map with a key that starts with one `$`, as extended JSON's keys do. A user's key that starts
-     * with `$` is held with one more ([org.drivine.cypher.store.ValueLayout.escape]), which Oracle's extended JSON reads as
-     * the key it is, so in layout 2 no parameter holds one (drivine-cypher-spec#202): this is for a host's encoder that
-     * gives a tree with one of its own.
+     * with `$` is held with one more ([ValueLayout.escape]), which Oracle's extended JSON reads as the key it is, and a
+     * temporal value's tag's `$t` is no key extended JSON reads either, as Oracle reads tags back through it ([LIST_KEY]),
+     * so in layout 2 no parameter holds one (drivine-cypher-spec#202): this is for a host's encoder that gives a tree with
+     * one of its own. Were a tag such a key, a float beside a temporal value in one parameter, as a row of `UNWIND $rows`
+     * holds, would be read as JSON and stored as a whole number.
      */
     private fun keyedAsExtended(node: JsonNode): Boolean =
-        (node is ObjectNode && node.fieldNames().asSequence().any { it.startsWith("$") && !it.startsWith("$$") }) || node.any(::keyedAsExtended)
+        (node is ObjectNode && !ValueLayout.isTag(node) && node.fieldNames().asSequence().any { it.startsWith("$") && !it.startsWith("$$") }) ||
+            node.any(::keyedAsExtended)
 
     /**
      * [node] with each float in it written as extended JSON's double, calling [doubled] for each. A
