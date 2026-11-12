@@ -93,12 +93,33 @@ class LayoutJsonTest {
             "{\"read\": 1}" to "A read request gives the column as its JSON text.",
             "{\"read\": \"{\", \"typed\": \"yes\"}" to "A request gives typed as true or false.",
             "{\"layout\": {\"engine\": \"POSTGRES\", \"graph\": \"g\", \"stamps\": [], \"foreignNodes\": \"no\"}}" to "A layout request gives foreignNodes as true or false.",
+            "{\"temporalKey\": {\"kind\": \"localtime\", \"v\": \"10:00\"}}" to "A temporalKey request gives v as a localtime's canonical text: 10:00:00, not 10:00.",
+            "{\"temporalKey\": {\"kind\": \"date\", \"v\": \"20240101\"}}" to "A temporalKey request gives v as a date's canonical text: no date, not 20240101.",
+            "{\"temporalKey\": {\"kind\": \"datetime\", \"v\": \"2024-01-01\"}}" to "A temporalKey request gives v as a datetime's canonical text: 2024-01-01T00:00:00Z, not 2024-01-01.",
+            "{\"temporalKey\": {\"kind\": \"date\"}}" to "A temporalKey request gives v, the canonical text, as a text.",
+            "{\"temporalKey\": {\"v\": \"2024-01-01\"}}" to "A temporalKey request gives the kind as a text.",
+            "{\"temporalKey\": 3}" to "A temporalKey request gives {\"kind\": …, \"v\": …}.",
+            "{\"layout\": 3}" to "A layout request gives {\"engine\": …, \"graph\": …, \"stamps\": […], \"foreignNodes\": …}.",
+            "{\"layout\": {\"graph\": \"g\", \"stamps\": [], \"foreignNodes\": false}}" to "A layout request gives the engine as a text.",
+            "{\"layout\": {\"engine\": \"postgres\", \"graph\": \"g\", \"stamps\": [], \"foreignNodes\": false}}" to "A layout request names the engine as its stamp does: POSTGRES, not postgres.",
+            "{\"layout\": {\"engine\": \"POSTGRES\", \"stamps\": [], \"foreignNodes\": false}}" to "A layout request gives the graph as a text.",
+            "{\"layout\": {\"engine\": \"POSTGRES\", \"graph\": \"g\", \"stamps\": {}, \"foreignNodes\": false}}" to "A layout request gives the stamps as a list.",
+            "{\"layout\": {\"engine\": \"POSTGRES\", \"graph\": \"g\", \"stamps\": [2], \"foreignNodes\": false}}" to "A layout request's stamp is a map.",
+            "{\"layout\": {\"engine\": \"POSTGRES\", \"graph\": \"g\", \"stamps\": [{\"layout\": 2.5}], \"foreignNodes\": false}}" to "A layout request's stamp gives its layout as a whole number: 2.5.",
+            "{\"layout\": {\"engine\": \"POSTGRES\", \"graph\": \"g\", \"stamps\": [{\"layout\": 4294967298}], \"foreignNodes\": false}}" to "A layout request's stamp gives its layout as a whole number: 4294967298.",
+            "{\"layout\": {\"engine\": \"POSTGRES\", \"graph\": \"g\", \"stamps\": [], \"foreignNodes\": false, \"objects\": {}}}" to "A layout request gives the objects as a list.",
+            "{\"layout\": {\"engine\": \"POSTGRES\", \"graph\": \"g\", \"stamps\": [], \"foreignNodes\": false, \"objects\": [\"x\"]}}" to "A layout request's object is a map.",
             "{\"read\": \"1\", \"cypher\": \"RETURN 1\"}" to "A request gives one of cypher, search, searchIndex, settings, read, temporalKey and layout.",
         )) {
             assertEquals(message, answer(request)["error"]?.textValue(), request)
         }
         assertTrue(answer("{\"read\": \"{\"}")["error"]!!.textValue()!!.startsWith("A read request's column is no JSON"))
         assertEquals("null", CypherJson.writeValueAsString(answer("{\"temporalKey\": {\"kind\": \"duration\", \"v\": \"P1D\"}}")["key"]!!), "a duration has no key")
+        // A stamp's layout as a whole double or as its text is that layout, and objects given as null are left out.
+        for (layout in listOf("2", "2.0", "\"2\"")) {
+            val got = answer("{\"layout\": {\"engine\": \"POSTGRES\", \"graph\": \"g\", \"stamps\": [{\"layout\": $layout}], \"foreignNodes\": true, \"objects\": null}}")
+            assertEquals("current", got["verdict"]?.textValue(), "layout $layout: $got")
+        }
     }
 
     private fun texts(node: JsonNode): List<String> = (node as ArrayNode).map { it.textValue()!! }

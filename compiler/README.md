@@ -334,13 +334,15 @@ of its own, so the three libraries read rows, key a temporal value and judge a g
 ```
 
 - **`read`** takes a column of a compiled statement's rows as the store gave it, its JSON text, so the host's JSON reader
-  never rounds its numbers first. The answer is `{"value": …}`: each temporal value's tag read as its text, and each map's
+  never rounds a whole number past 2^53 first (a fraction is read as a double, as the host's own reader would). The answer is `{"value": …}`: each temporal value's tag read as its text, and each map's
   keys unescaped (`$$k` read as `$k`), at any depth. With `"typed": true`, a tag is instead `{"$t": kind, "v": text}`, and a
   map with a `$t` key of its own is `{"$t": "map", "v": …}`. `host.yaml`'s reads pin it.
 - **`temporalKey`** gives the sort key `s` of a temporal value's canonical text: `{"key": "…"}`, or null for a duration. A
+  `v` that is not its kind's canonical text (`10:00` for a `localtime`, where it is `10:00:00`) is an error. A
   host writes it into a tag of its own (`{"$t", "v", "s"}`) where it builds a stored value itself. `host.yaml`'s keys pin it.
 - **`layout`** judges a graph by its stamps' layouts (as `readStamps` gives them), whether it holds a node other than
-  Drivine's own (`foreignNodes`), and the objects `layoutObjects` listed. The answer is one of:
+  Drivine's own (`foreignNodes`), and the objects `layoutObjects` listed. The engine is named as a stamp names it
+  (`POSTGRES`, not `postgres`), and a stamp's `layout` is a whole number, its text, or null. The answer is one of:
   - `{"verdict": "current"}`: use the graph;
   - `{"verdict": "stamp", "drops": [...], "parameters": {...}}`: run the drops, then `restampLayout` with the parameters,
     then read the stamps back and ask again;
