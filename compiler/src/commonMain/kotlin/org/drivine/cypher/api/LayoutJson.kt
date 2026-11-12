@@ -30,8 +30,10 @@ import org.drivine.cypher.store.marker.StoreLayout
  *   [StoreLayout.verdict] on the graph, its stamps as `StoreStampStatements.readStamps` gave them, whether it holds a node
  *   other than Drivine's own, and the objects `StoreStampStatements.layoutObjects` listed (`objects` may be left out).
  *   The engine is named as a stamp names it (`POSTGRES`, not `postgres`), and a stamp's `layout` is a whole number, its text, or null.
- *   Answered `{"verdict": "current"}`, `{"verdict": "stamp", "drops": [<statement>, …], "parameters": {…}}`: run the drops,
- *   then the restamp with the parameters, then read the stamps and ask again; or `{"verdict": "refuse", "message": "…"}`.
+ *   Answered `{"verdict": "current"}`, `{"verdict": "stamp", "drops": [<statement>, …], "assign": false, "parameters": {…}}`:
+ *   run the drops, then the restamp with the parameters, or where `assign`, the stamp's `assignIfAbsent` with its own
+ *   parameters, as the graph has no stamp to give the layout, then read the stamps and ask again; or
+ *   `{"verdict": "refuse", "message": "…"}`.
  */
 @DrivineInternalApi
 internal object LayoutJson {
@@ -113,7 +115,7 @@ internal object LayoutJson {
         return when (val verdict = StoreLayout.verdict(engine, graph, stamps, foreign, objects, ddl)) {
             StoreLayout.Verdict.Current -> "{\"verdict\":\"current\"}"
             is StoreLayout.Verdict.Stamp ->
-                "{\"verdict\":\"stamp\",\"drops\":${CypherJson.writeValueAsString(CypherJson.valueToTree(verdict.drops))}," +
+                "{\"verdict\":\"stamp\",\"drops\":${CypherJson.writeValueAsString(CypherJson.valueToTree(verdict.drops))},\"assign\":${verdict.assign}," +
                     "\"parameters\":${CypherJson.writeValueAsString(CypherJson.valueToTree(verdict.parameters))}}"
             is StoreLayout.Verdict.Refuse -> "{\"verdict\":\"refuse\",\"message\":${CypherJson.writeValueAsString(CypherJson.valueToTree(verdict.message))}}"
         }

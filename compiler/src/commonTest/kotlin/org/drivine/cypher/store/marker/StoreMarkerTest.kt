@@ -243,6 +243,7 @@ class StoreMarkerTest {
                     val stamp = verdict as? StoreLayout.Verdict.Stamp ?: fail("$name: $verdict, not a re-stamp")
                     assertEquals(texts(expected["stamp"]!!["drops"]!!), stamp.drops, "$name: the old layout's drops")
                     assertEquals(StoreStamp.restampParameters(StoreStamp.engine(ddl)), stamp.parameters, "$name: the re-stamp's parameters")
+                    assertEquals(expected["stamp"]!!["assign"]?.booleanValue() ?: false, stamp.assign, "$name: whether it is stamped anew")
                 }
                 else -> assertEquals(StoreLayout.Verdict.Refuse(expected["refuse"]!!.textValue()!!), verdict, name)
             }

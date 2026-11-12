@@ -345,8 +345,10 @@ of its own, so the three libraries read rows, key a temporal value and judge a g
   Drivine's own (`foreignNodes`), and the objects `layoutObjects` listed. The engine is named as a stamp names it
   (`POSTGRES`, not `postgres`), and a stamp's `layout` is a whole number, its text, or null. The answer is one of:
   - `{"verdict": "current"}`: use the graph;
-  - `{"verdict": "stamp", "drops": [...], "parameters": {...}}`: run the drops, then `restampLayout` with the parameters,
-    then read the stamps back and ask again;
+  - `{"verdict": "stamp", "drops": [...], "assign": false, "parameters": {...}}`: run the drops, then `restampLayout` with
+    the parameters, then read the stamps back and ask again. Where `assign` is true, the graph has no stamp to give the layout:
+    a graph of this layout whose stamp a clear (`MATCH (n) DETACH DELETE n`) deleted. Then run `assignIfAbsent`, as when a
+    stamp is first made, in place of `restampLayout`;
   - `{"verdict": "refuse", "message": "…"}`: throw the message.
 
   `marker.yaml`'s `storeLayout` pins it.

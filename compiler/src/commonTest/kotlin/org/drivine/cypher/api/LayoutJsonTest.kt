@@ -45,6 +45,7 @@ class LayoutJsonTest {
                 expected["stamp"] != null -> {
                     assertEquals("stamp", got["verdict"]?.textValue(), "on $target, $name: $got")
                     assertEquals(texts(expected["stamp"]!!["drops"]!!), texts(got["drops"]!!), "on $target, $name: the drops")
+                    assertEquals(expected["stamp"]!!["assign"]?.booleanValue() ?: false, got["assign"]!!.booleanValue(), "on $target, $name: whether it is stamped anew")
                     assertEquals(
                         StoreStamp.restampParameters(engine).mapValues { (_, v) -> v?.toString() },
                         (got["parameters"] as ObjectNode).properties().associate { (k, v) -> k to (if (v.isNull) null else v.asText()) },

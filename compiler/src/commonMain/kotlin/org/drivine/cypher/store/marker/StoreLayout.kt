@@ -27,6 +27,12 @@ import org.drivine.cypher.store.ddl.StoreDdl
  * | absent or older | some | [Verdict.Refuse]: names the graph, its layout and this one's, and the reload |
  * | above the library's own | any, none among them | [Verdict.Refuse]: written by a later Drivine, to be upgraded |
  * | several, of different layouts | any | [Verdict.Refuse] |
+ * | none | none, and no earlier layout's object | [Verdict.Current]: a new graph, or one cleared; the stamp is assigned as ever |
+ * | none | some, and the store's objects show this layout made it and no earlier one did | [Verdict.Stamp] with [Verdict.Stamp.assign]: a graph of this layout whose stamp a clear deleted (`MATCH (n) DETACH DELETE n` deletes Drivine's own nodes too), stamped again |
+ * | none | some, and objects of this layout and an earlier one | [Verdict.Refuse], naming both |
+ *
+ * This layout's objects are its lock table ([SqlStoreDdl.lock]), which only this layout makes, and the names it generates
+ * ([SqlStoreDdl.objectName], `g_ix2_…`); an earlier layout's, the names it generated (`g_ix_…`, [oldObjects]).
  *
  * After a [Verdict.Stamp]'s statements the library reads the stamps back and asks again, and refuses anything but
  * [Verdict.Current]: two processes may stamp an empty graph at once, one of them a library from before layouts that stamps
@@ -42,9 +48,12 @@ object StoreLayout {
 
         /**
          * The graph holds no value of its own, and is in an older layout or none: run [drops], each a statement of the store's,
-         * then [StoreStampStatements.restampLayout] with [parameters], then read the stamps back and ask [verdict] again.
+         * then [StoreStampStatements.restampLayout] with [parameters], then read the stamps back and ask [verdict] again. Where
+         * [assign], the graph has no stamp to give the layout, a graph of this layout whose stamp a clear deleted: run
+         * [StoreStampStatements.assignIfAbsent] with [StoreStamp.assignParameters] (the library's own id and moment) in place of
+         * the re-stamp, then ask again.
          */
-        data class Stamp(val drops: List<String>, val parameters: Map<String, Any?>) : Verdict
+        data class Stamp(val drops: List<String>, val parameters: Map<String, Any?>, val assign: Boolean = false) : Verdict
 
         /** The graph is not to be used: throw [message]. */
         data class Refuse(val message: String) : Verdict
@@ -75,6 +84,21 @@ object StoreLayout {
                 "The graph '$graph' on $store has store stamps of layouts ${layouts.joinToString(" and ")}: two versions of Drivine stamped it at once. " +
                     "This version of Drivine reads layout $own only. Reload it: export it with the Drivine version that wrote it and import it with this one; see the upgrade notes.",
             )
+        }
+        val sql = ddl as? SqlStoreDdl
+        // No stamp at all: a new graph, or one whose stamp a clear deleted, told by what the store holds.
+        if (stampRows.isEmpty() && engine in SQL_ENGINES && sql != null) {
+            val old = oldObjects(sql, objects)
+            val ours = ownObjects(sql, objects)
+            if (old.isNotEmpty() && ours.isNotEmpty()) {
+                return Verdict.Refuse(
+                    "The graph '$graph' on $store has no store stamp, and holds objects of store layout $own (${ours.joinToString()}) and of an earlier layout " +
+                        "(${old.joinToString { it.first }}): two versions of Drivine made it. This version of Drivine reads layout $own only. " +
+                        "Reload it: export it with the Drivine version that wrote it and import it with this one; see the upgrade notes.",
+                )
+            }
+            if (!foreignNodes && old.isEmpty()) return Verdict.Current
+            if (foreignNodes && ours.isNotEmpty()) return Verdict.Stamp(emptyList(), StoreStamp.restampParameters(engine), assign = true)
         }
         val layout = layouts.singleOrNull() ?: GRAPH_ENGINE_LAYOUT
         return when {
@@ -111,6 +135,21 @@ object StoreLayout {
             val type = (row["type"] as? String)?.uppercase() ?: "INDEX"
             val layout = generated.find(name)?.groupValues?.get(2) ?: return@mapNotNull null
             if ((layout.toIntOrNull() ?: GRAPH_ENGINE_LAYOUT) < ValueLayout.LAYOUT) name to type else null
+        }
+    }
+
+    /**
+     * Of [objects], as the store [ddl] lists them, those only this layout makes: its lock table ([SqlStoreDdl.lock]), and each
+     * generated name whose kind carries this layout (`g_ix2_…`): the evidence that this layout made the graph, where its stamp
+     * is gone.
+     */
+    fun ownObjects(ddl: SqlStoreDdl, objects: List<Map<String, Any?>>): List<String> {
+        val generated = Regex("^${Regex.escape(ddl.name)}_(ix|lx|uq|t|v)([0-9]*)_[a-z0-9]*_[0-9a-f]{1,8}(_t|_i)?$", RegexOption.IGNORE_CASE)
+        return objects.mapNotNull { row ->
+            val name = row["name"] as? String ?: return@mapNotNull null
+            if (name.equals(ddl.lock, ignoreCase = true)) return@mapNotNull name
+            val layout = generated.find(name)?.groupValues?.get(2)?.toIntOrNull() ?: return@mapNotNull null
+            if (layout == ValueLayout.LAYOUT) name else null
         }
     }
 

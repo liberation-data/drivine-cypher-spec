@@ -97,7 +97,8 @@ interface StoreStampStatements {
 
     /**
      * Lists the indexes, tables and triggers Drivine may have made for the graph, each a map `{name, type}`, so that
-     * [StoreLayout.drops] finds an earlier layout's among them. Null on a graph engine.
+     * [StoreLayout.drops] finds an earlier layout's among them, and [StoreLayout.ownObjects] this layout's, its lock table
+     * among them. Null on a graph engine.
      */
     val layoutObjects: String?
 
@@ -174,7 +175,10 @@ class PostgresStoreStampStatements(private val ddl: PostgresDdl) : StoreStampSta
     override val layoutObjects: String = """
         SELECT jsonb_build_object('name', indexname, 'type', 'INDEX') FROM pg_indexes
         WHERE schemaname = current_schema() AND tablename = ${PostgresSql.literal(ddl.nodes.lowercase())}
-        ORDER BY indexname
+        UNION ALL
+        SELECT jsonb_build_object('name', tablename, 'type', 'TABLE') FROM pg_tables
+        WHERE schemaname = current_schema() AND tablename = ${PostgresSql.literal(ddl.lock.lowercase())}
+        ORDER BY 1
     """.trimIndent()
 }
 
@@ -245,8 +249,8 @@ class SqliteStoreStampStatements(private val ddl: SqliteDdl) : StoreStampStateme
 
     override val layoutObjects: String = """
         ${SqliteDdl.JSON_ROWS}
-        SELECT json_object('name', name, 'type', 'INDEX') FROM sqlite_master
-        WHERE type = 'index' AND tbl_name = ${SqliteSql.literal(ddl.nodes)}
+        SELECT json_object('name', name, 'type', upper(type)) FROM sqlite_master
+        WHERE (type = 'index' AND tbl_name = ${SqliteSql.literal(ddl.nodes)}) OR (type = 'table' AND name = ${SqliteSql.literal(ddl.lock)})
         ORDER BY name
     """.trimIndent()
 }
