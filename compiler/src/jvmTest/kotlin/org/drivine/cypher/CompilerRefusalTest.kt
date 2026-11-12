@@ -269,6 +269,62 @@ class CompilerRefusalTest {
     }
 
     @Test
+    fun `arithmetic, toBoolean(), SKIP and LIMIT of a kind they take, or left open, are compiled, as Neo4j plans them`() {
+        // #420: the spec's refusals hold what is refused. Neo4j 2026.10.1 takes null % 2, 'a' + 1, date - duration and duration * 2.
+        // A temporal value has no kind known, written or given, tagged or as java.time gives it, nor has a property, a parameter a
+        // WITH binds, or an item of a list of two kinds. A Short or a Byte is a whole number, as Neo4j's driver sends it.
+        listOf({ PostgresCypherCompiler("g") }, { OracleCypherCompiler("g") }, { SqliteCypherCompiler("g") }).forEach { compiler ->
+            listOf(
+                "RETURN date('2024-03-15') - duration('P1D'), duration('PT1H') * 2, duration('PT1H') / 2" to emptyMap(),
+                "RETURN \$d - duration('P1D'), \$t - duration('P1D'), \$u * 2" to mapOf(
+                    "d" to java.time.LocalDate.of(2024, 1, 1),
+                    "t" to org.drivine.cypher.json.TemporalValue(org.drivine.cypher.sql.Temporal.DATE, "2024-01-01"),
+                    "u" to java.time.Duration.ofHours(1),
+                ),
+                "RETURN null % 2, 2 - null, \$n ^ 2" to mapOf("n" to null),
+                "MATCH (n) RETURN n.x - 1, n.x * n.y, toBoolean(n.x)" to emptyMap(),
+                "WITH \$p AS x RETURN x - 1" to mapOf("p" to "a"),
+                "RETURN 'a' + 1, [1] + 1, \$s + 1" to mapOf("s" to "a"),
+                "UNWIND ['a', 1] AS s UNWIND ['a', null] AS t RETURN s % 2, t % 2" to emptyMap(),
+                "RETURN toBoolean(1), toBoolean('true'), toBoolean(true), toBoolean(null), toBoolean(\$i)" to mapOf("i" to 1),
+                "UNWIND [1, 2, 3] AS x RETURN x SKIP \$s LIMIT \$l" to mapOf("s" to 0, "l" to 2L),
+                "UNWIND [1, 2, 3] AS x RETURN x SKIP \$s LIMIT \$l" to mapOf("s" to 1.toShort(), "l" to 2.toByte()),
+                // -0 is 0, which Neo4j 2026.10.1 takes.
+                "UNWIND [1, 2, 3] AS x RETURN x SKIP -0 LIMIT -0" to emptyMap(),
+            ).forEach { (cypher, parameters) -> compiler().compile(cypher, parameters) }
+            // The least whole number is read as one literal, not a negated one, and is refused as -1 is.
+            val cypher = "UNWIND [1, 2, 3] AS x RETURN x SKIP -9223372036854775808"
+            assertEquals(
+                "SKIP and LIMIT take a whole number of 0 or more, not -9223372036854775808, as in Neo4j.",
+                assertThrows<CompilerException>(cypher) { compiler().compile(cypher) }.message,
+            )
+        }
+    }
+
+    @Test
+    fun `arithmetic, toBoolean(), SKIP and LIMIT of a parameter of another kind, or a negated float, are refused, each kind named`() {
+        // #420: the spec's refusals hold a text and a list given; a map, a truth value, a float and a temporal value given are
+        // refused as they are.
+        val date = org.drivine.cypher.json.TemporalValue(org.drivine.cypher.sql.Temporal.DATE, "2024-01-01")
+        listOf({ PostgresCypherCompiler("g") }, { OracleCypherCompiler("g") }, { SqliteCypherCompiler("g") }).forEach { compiler ->
+            listOf(
+                Triple("RETURN \$m * 2", mapOf("m" to mapOf("a" to 1)), "* takes numbers, not a map, as in Neo4j."),
+                Triple("RETURN 2 ^ \$l", mapOf("l" to listOf(1)), "^ takes numbers, not a list, as in Neo4j."),
+                Triple("RETURN \$b / 2", mapOf("b" to true), "/ takes numbers, not a truth value, as in Neo4j."),
+                Triple("RETURN toBoolean(\$f)", mapOf("f" to 1.5), "toBoolean() takes a truth value, an integer or a text, not a float, as in Neo4j."),
+                Triple("RETURN toBoolean(\$m)", mapOf("m" to mapOf("a" to 1)), "toBoolean() takes a truth value, an integer or a text, not a map, as in Neo4j."),
+                Triple("UNWIND [1] AS x RETURN x SKIP -1.5", emptyMap(), "SKIP and LIMIT take a whole number of 0 or more, not -1.5, as in Neo4j."),
+                Triple("UNWIND [1] AS x RETURN x SKIP \$s", mapOf("s" to listOf(1)), "SKIP and LIMIT take a whole number of 0 or more, and \$s is a list, as in Neo4j."),
+                Triple("UNWIND [1] AS x RETURN x SKIP \$s", mapOf("s" to mapOf("a" to 1)), "SKIP and LIMIT take a whole number of 0 or more, and \$s is a map, as in Neo4j."),
+                Triple("UNWIND [1] AS x RETURN x LIMIT \$s", mapOf("s" to true), "SKIP and LIMIT take a whole number of 0 or more, and \$s is a truth value, as in Neo4j."),
+                Triple("UNWIND [1] AS x RETURN x LIMIT \$s", mapOf("s" to date), "SKIP and LIMIT take a whole number of 0 or more, and \$s is of another kind, as in Neo4j."),
+            ).forEach { (cypher, parameters, message) ->
+                assertEquals(message, assertThrows<CompilerException>(cypher) { compiler().compile(cypher, parameters) }.message, cypher)
+            }
+        }
+    }
+
+    @Test
     fun `a start or length that may be an integer, or whose kind is known only when the row is read, is compiled, as Neo4j runs it`() {
         // #285: the spec's refusals hold a float the statement makes. Neo4j runs each of the first group, cutting a float toward
         // zero: a parameter, a property, an item of a list of an integer and a float or a null, a CASE of an integer and a float
@@ -550,6 +606,69 @@ class CompilerRefusalTest {
                 "MATCH (n) WITH n, count(*) AS c WHERE EXISTS { MATCH (n)-->(m) WITH m, count(*) AS k WHERE count(*) > 0 RETURN m } RETURN n.x",
                 "UNWIND [1, 2] AS i CALL (i) { UNWIND [i, i] AS x WITH x, count(*) AS c WHERE count(*) > 1 RETURN c } RETURN i, c",
             ).forEach { compiler.compile(it) }
+        }
+    }
+
+    @Test
+    fun `an aggregate in the ORDER BY of a WITH or RETURN that neither aggregates nor is DISTINCT is refused, as Neo4j refuses it`() {
+        // #439: Neo4j's "Illegal aggregation expression(s) in order by". Compiled, the query aggregated with no GROUP BY, and SQLite
+        // gave one row. The spec's refusals hold the rest.
+        fun order(aggregate: String) = "$aggregate aggregates, and an ORDER BY holds no aggregate unless its WITH or RETURN aggregates or is DISTINCT, " +
+            "as in Neo4j: give the aggregate as an item, and order by its name, as in RETURN x, count(*) AS c ORDER BY c."
+        val refused = listOf(
+            "MATCH (n) RETURN * ORDER BY count(*)" to order("count(*)"),
+            "MATCH (n) WITH * ORDER BY count(*) RETURN n" to order("count(*)"),
+            "MATCH (n) RETURN n.num1 AS a ORDER BY CASE WHEN n.num1 > 0 THEN max(n.num2) END" to order("max()"),
+            "MATCH (n) RETURN n.num1 AS a ORDER BY toString(min(n.num2))" to order("min()"),
+            "MATCH (n) RETURN n.num1 AS a ORDER BY a, count(*)" to order("count(*)"),
+            "MATCH (n) RETURN n.num1 AS a UNION MATCH (n) RETURN n.num1 AS a ORDER BY max(n.num2)" to order("max()"),
+            "MATCH (n) CALL (n) { MATCH (n)-->(m) RETURN m.num1 AS b ORDER BY count(*) } RETURN b" to order("count(*)"),
+            "MATCH (n) RETURN COUNT { MATCH (n)-->(m) RETURN m.num1 AS b ORDER BY sum(m.num2) } AS c" to order("sum()"),
+        )
+        listOf(PostgresCypherCompiler("g"), OracleCypherCompiler("g"), SqliteCypherCompiler("g")).forEach { compiler ->
+            refused.forEach { (cypher, message) ->
+                val store = compiler::class.simpleName
+                assertEquals(message, assertThrows<CompilerException>("$store: $cypher") { compiler.compile(cypher) }.message, "$store: $cypher")
+            }
+            // One that is DISTINCT, or aggregates in any item, orders by an aggregate; a COUNT { }, a comprehension or a pattern
+            // comprehension in the ORDER BY isn't an aggregate of the projection. Checked on Neo4j 2026.10.1 for the first four.
+            listOf(
+                "MATCH (n) RETURN DISTINCT n.num1 AS a ORDER BY max(n.num2)",
+                "MATCH (n) RETURN n.num1 AS a, count(*) AS c ORDER BY max(n.num2)",
+                "MATCH (n) RETURN n.num1 AS a ORDER BY COUNT { (n)--() }",
+                "MATCH (n) RETURN n.num1 AS a ORDER BY size([x IN [1, 2] | x])",
+                "MATCH (n) RETURN n.num1 AS a ORDER BY size([(n)-->(m) | m])",
+                "MATCH (n) RETURN DISTINCT * ORDER BY count(*)",
+                "MATCH (n) RETURN *, count(*) AS c ORDER BY max(n.num2)",
+                "MATCH (n) WITH n.num1 AS a, collect(n) AS c ORDER BY max(n.num2) RETURN a",
+                "MATCH (n) RETURN reduce(s = 0, x IN collect(n.num1) | s + x) AS t ORDER BY max(n.num2)",
+                "MATCH (n) RETURN 1 IN collect(n.num1) AS t ORDER BY max(n.num2)",
+            ).forEach { compiler.compile(it) }
+            // One that is DISTINCT groups by its items, so the aggregate is worked out over each group, not over all the rows as one.
+            listOf(
+                "MATCH (n) RETURN DISTINCT n.num1 AS a ORDER BY max(n.num2)",
+                "MATCH (n) RETURN DISTINCT * ORDER BY count(*)",
+                "MATCH (n) WITH DISTINCT n.num1 AS a ORDER BY count(*) RETURN a",
+            ).forEach { cypher ->
+                assertTrue("GROUP BY" in compiler.compile(cypher).sql, "${compiler::class.simpleName}: $cypher")
+            }
+            // An item holding a parameter or a subquery is worked out first, as where an item aggregates: no store groups by a
+            // parameter it binds once for each mention, nor Oracle by a subquery.
+            listOf(
+                "MATCH (n) RETURN DISTINCT n.num1 + \$p AS a ORDER BY max(n.num2)",
+                "MATCH (n) RETURN DISTINCT COUNT { (n)--() } AS a ORDER BY max(n.num2)",
+            ).forEach { cypher ->
+                val groupBy = compiler.compile(cypher, mapOf("p" to 1L)).sql.substringAfter("GROUP BY ").lineSequence().first()
+                assertTrue("\$_cy_p" !in groupBy && "SELECT" !in groupBy, "${compiler::class.simpleName}: $cypher groups by $groupBy")
+            }
+            // So it names no variable outside its aggregates and the items, as one that aggregates names none: grouped by n, the
+            // DISTINCT gave a row for each n.num2 beside the same a.
+            val outside = "MATCH (n) RETURN DISTINCT n.num1 AS a ORDER BY n.num2 + max(n.num2)"
+            assertEquals(
+                "A term of an ORDER BY aggregates, and names n outside its aggregates and the items: " +
+                    "Cypher would group by it without being told. Order by an item's name, or by an expression of the items and aggregates.",
+                assertThrows<CompilerException>(outside) { compiler.compile(outside) }.message,
+            )
         }
     }
 

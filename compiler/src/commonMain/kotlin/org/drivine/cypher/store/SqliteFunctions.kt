@@ -20,8 +20,8 @@ import org.drivine.DrivineInternalApi
  *
  * Compiled Cypher calls the rest, for what Cypher does with its values, JSON text each, that SQLite does not:
  *
- * - [EQUAL], [CONTAINS], [CANONICAL] and [ADD] compare, group and add them: see [SqliteEqualFunction],
- *   [SqliteContainsFunction], [SqliteCanonicalFunction] and [SqliteAddFunction].
+ * - [EQUAL], [CANONICAL] and [ADD] compare, group and add them: see [SqliteEqualFunction],
+ *   [SqliteCanonicalFunction] and [SqliteAddFunction].
  * - [UPPER], [SPLIT], [REVERSE] and [UUID] are Cypher's `toUpper`, `split`, `reverse` and `randomUUID`: see
  *   [SqliteUpperFunction], [SqliteSplitFunction], [SqliteReverseFunction] and [SqliteUuidFunction].
  * - [MATH] and [ROUND] work out Cypher's functions of numbers, `exp`, `log`, `sin` …, and `round` by a mode, as
@@ -49,7 +49,6 @@ object SqliteFunctions {
     const val LOWER = "drivine_lower"
     const val EPOCH = "drivine_epoch"
     const val EQUAL = "drivine_equal"
-    const val CONTAINS = "drivine_contains"
     const val ADD = "drivine_add"
     const val CANONICAL = "drivine_canonical"
     const val CYPHER = "drivine_cypher"
