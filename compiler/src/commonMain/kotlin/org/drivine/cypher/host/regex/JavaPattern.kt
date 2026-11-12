@@ -21,7 +21,8 @@ interface JavaPattern {
     /**
      * [text] with each match replaced, as Java's `Matcher.replaceAll` replaces it: [replacement] as Java writes one
      * (`$1` a group, `\` before a character it makes itself; see [JavaPatterns.javaReplacement]). It throws, as Java does,
-     * where a match's replacement names a group the pattern hasn't.
+     * where a match's replacement names a group the pattern hasn't. Off the JVM a group is named by number alone: `${name}`
+     * throws there, as [JavaPatterns.javaReplacement], the host functions' replacement, never writes one.
      */
     fun replaceAll(text: String, replacement: String): String
 }
