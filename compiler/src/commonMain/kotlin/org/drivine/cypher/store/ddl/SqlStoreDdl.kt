@@ -286,9 +286,9 @@ abstract class SqlStoreDdl(val name: String, final override val engine: String, 
     /**
      * The name a uniqueness constraint's unique index named [name] is built under first, when it is made again
      * ([recreation]): [name] and `_r`. [objectName] leaves two characters for it, so it fits within the [maxObjectName]
-     * the store allows, but for a graph whose name is as long as a graph's may be ([refusal]), whose `uq` names are one
-     * character longer: there it is cut by one, and its last character, of the hash, gives way. No name Drivine gives
-     * an object ends in `_r`, the hash being hexadecimal, so it is never another object's.
+     * the store allows, a graph's name being at most the store's longest less 16 ([refusal]); a longer [name], which
+     * Drivine doesn't give, is cut so it fits. No name Drivine gives an object ends in `_r`, the hash being hexadecimal, so
+     * it is never another object's.
      */
     fun temporaryName(name: String): String = name.take(maxObjectName - TEMPORARY.length) + TEMPORARY
 

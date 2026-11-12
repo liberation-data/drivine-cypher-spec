@@ -2471,8 +2471,11 @@ class OracleCypherCompiler(
          * a number its `NUMBER` bytes, which Oracle keeps in the number's order, and a byte 0, below any of them, so `1` comes before `1.04` whatever follows it.
          * The list is read as extended JSON, so a double is one, not a map: -Infinity comes before any `NUMBER`, and a double
          * past one's range before or after them all, Infinity after that and NaN last, as Cypher orders them. A text is cut at
-         * 2,000 characters, more than the key holds, so one too long for a `VARCHAR2` is read. A map is where maps come, and
-         * no store orders two maps here yet. JSON's null, and SQL's, is no key, so it sorts where null does. Past 2,000 bytes,
+         * 2,000 characters, more than the key holds, so one too long for a `VARCHAR2` is read. A temporal value's tag
+         * (layout 2's `{"${'$'}t", "v", "s"}`) comes after every list and before every text, as Cypher orders them: the list's
+         * byte 2 and then 255, above any item's rank or a list's end, then its kind's place in [TAG_ORDER] and its sort key
+         * (a duration, which has none, its text) and a byte 0. Any other map is where maps come, and no store orders two maps
+         * here yet. JSON's null, and SQL's, is no key, so it sorts where null does. Past 2,000 bytes,
          * as long a `RAW` as SQL takes, a key is cut short, so lists that differ only after that are sorted by the term after
          * it: by their text ([listSortKeys]). It is the query's own,
          * declared with `WITH FUNCTION`, not the store's.
@@ -2505,6 +2508,20 @@ class OracleCypherCompiler(
             "        END;",
             "        add(UTL_RAW.CONCAT(HEXTORAW('03'), UTL_RAW.CAST_TO_RAW(REPLACE(REPLACE(SUBSTR(s, 1, 2000), CHR(1), CHR(1) || CHR(2)), CHR(0), CHR(1) || CHR(1))), HEXTORAW('00')));",
             "    END;",
+            // A temporal value's tag, after every list and before every text; any other map where maps come.
+            "    PROCEDURE obj(v JSON_ELEMENT_T) IS",
+            "        o JSON_OBJECT_T := TREAT(v AS JSON_OBJECT_T);",
+            "        t VARCHAR2(32);",
+            "        n PLS_INTEGER;",
+            "    BEGIN",
+            "        IF o.has('${'$'}t') AND o.has('v') THEN",
+            "            IF o.get('${'$'}t').is_String AND o.get('v').is_String THEN t := o.get_String('${'$'}t'); END IF;",
+            "        END IF;",
+            "        n := CASE t ${TAG_ORDER.withIndex().joinToString(" ") { (i, kind) -> "WHEN '${kind.function}' THEN ${i + 1}" }} END;",
+            "        IF n IS NULL THEN add(HEXTORAW('01')); RETURN; END IF;",
+            "        add(UTL_RAW.CONCAT(HEXTORAW('02FF' || TO_CHAR(n, 'FM0X')),",
+            "            UTL_RAW.CAST_TO_RAW(CASE WHEN o.has('s') AND o.get('s').is_String THEN o.get_String('s') ELSE o.get_String('v') END), HEXTORAW('00')));",
+            "    END;",
             "    PROCEDURE k(v JSON_ELEMENT_T) IS",
             "        a JSON_ARRAY_T;",
             "        d VARCHAR2(64) := dbl(v);",
@@ -2516,7 +2533,7 @@ class OracleCypherCompiler(
             "            add(HEXTORAW('02'));",
             "            FOR i IN 0 .. a.get_Size - 1 LOOP IF a.get(i).is_String THEN txt(a, i); ELSE k(a.get(i)); END IF; END LOOP;",
             "            add(HEXTORAW('00'));",
-            "        ELSIF v.is_Object AND d IS NULL THEN add(HEXTORAW('01'));",
+            "        ELSIF v.is_Object AND d IS NULL THEN obj(v);",
             "        ELSIF v.is_Boolean THEN",
             "            add(CASE WHEN TREAT(v AS JSON_SCALAR_T).to_Boolean THEN HEXTORAW('0401') ELSE HEXTORAW('0400') END);",
             "        ELSIF d IS NOT NULL THEN",

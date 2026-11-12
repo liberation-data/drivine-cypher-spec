@@ -1546,6 +1546,16 @@ cases:
         only: [neo4j, sql]
         rows: [8]
 
+  - name: "Lists that hold temporal values and values of other kinds, in Cypher's order"
+    description: "Lists sort item by item, and an item that is a temporal value sorts among the other kinds as Cypher orders them: after a map and a list, the moments by their instants, the local moments, the dates, the times, the local times and the durations, then the texts, the truth values and the numbers. A list whose items' kinds the statement leaves open sorts so on every SQL store: Oracle by the key its query declares, Postgres by its jsonb key, and SQLite by drivine_sort_key, which host.yaml pins (#161)."
+    steps:
+      - cypher: "UNWIND [[duration('P1D'), 'du'], ['a', 's'], [date('2024-03-15'), 'd'], [[1], 'l'], [datetime('2024-03-15T10:00:00+02:00'), 'dt1'], [localtime('10:00:00'), 'lt'], [1, 'i'], [datetime('2024-03-15T09:00:00Z'), 'dt2'], [{}, 'm'], [localdatetime('2024-03-15T10:00:00'), 'ldt'], [true, 'b'], [time('10:00:00Z'), 't'], [date('2024-03-14'), 'd0']] AS l RETURN l[1] ORDER BY l"
+        only: [neo4j, sql]
+        rows: ["m", "l", "dt1", "dt2", "ldt", "d0", "d", "t", "lt", "du", "s", "b", "i"]
+      - cypher: "UNWIND [[duration('P1D'), 'du'], ['a', 's'], [date('2024-03-15'), 'd'], [[1], 'l'], [datetime('2024-03-15T10:00:00+02:00'), 'dt1'], [localtime('10:00:00'), 'lt'], [1, 'i'], [datetime('2024-03-15T09:00:00Z'), 'dt2'], [{}, 'm'], [localdatetime('2024-03-15T10:00:00'), 'ldt'], [true, 'b'], [time('10:00:00Z'), 't'], [date('2024-03-14'), 'd0']] AS l RETURN l[1] ORDER BY l DESC"
+        only: [neo4j, sql]
+        rows: ["i", "b", "s", "du", "lt", "t", "d", "d0", "ldt", "dt2", "dt1", "l", "m"]
+
   - name: "A property stored as temporal values and values of other kinds, in Cypher's order of kinds"
     description: "A temporal value's tag sorts among the other kinds as Cypher orders them: after a list, the moments, the local moments, the dates, the times, the local times and the durations, then the texts, the truth values and the numbers, and a missing property last; min() and max() take that order too, a tag by its sort key in its kind (#161). Postgres sorts the kinds as jsonb does (drivine4j#307)."
     steps:

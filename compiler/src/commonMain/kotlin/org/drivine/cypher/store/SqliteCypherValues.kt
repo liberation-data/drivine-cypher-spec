@@ -8,6 +8,7 @@ import org.drivine.cypher.json.JsonNode
 import org.drivine.cypher.json.JsonNodeFactory
 import org.drivine.cypher.json.NullNode
 import org.drivine.cypher.json.ObjectNode
+import org.drivine.cypher.sql.Temporal
 import org.drivine.cypher.text.CommonUnicode
 import kotlin.math.floor
 import kotlin.math.sign
@@ -119,12 +120,15 @@ object SqliteCypherValues {
     /**
      * Where [a] comes beside [b] as Cypher orders two values in a comparison (`<`, `>=` …): -1 before, 0 equal, 1 after. A list
      * beside a list item by item, the first pair that is not equal deciding, and a list that the other starts with first; a
-     * number beside a number, a text beside a text by its code points, and a truth value beside a truth value. Null where they
-     * are not ordered: a null, values of two kinds, or two maps that differ, which Cypher orders and the compiler does not yet.
+     * number beside a number, a text beside a text by its code points, a truth value beside a truth value, and a temporal
+     * value's tag ([ValueLayout.isTag]) beside a tag of its kind by their sort keys. Null where they are not ordered: a null,
+     * values of two kinds (tags of two kinds among them, and a tag beside a map or a text), two durations, which Cypher
+     * doesn't order, or two maps that differ, which Cypher orders and the compiler does not yet.
      */
     fun order(a: JsonNode, b: JsonNode): Int? = when {
         a.isNull || b.isNull || isNaN(a) || isNaN(b) -> null
         a.isArray && b.isArray -> listOrder(a, b)
+        ValueLayout.isTag(a) || ValueLayout.isTag(b) -> tagOrder(a, b)
         a.isObject && b.isObject -> 0.takeIf { compare(a, b) == true }
         a.isNumber && b.isNumber -> numberOrder(a, b)
         // By code points, as Cypher orders texts: Kotlin's `compareTo` orders UTF-16's units.
@@ -135,10 +139,11 @@ object SqliteCypherValues {
 
     /**
      * A text that orders, as SQLite orders text, as Cypher orders the list [node]: item by item, a list that begins another
-     * first, and items of different kinds as Cypher orders kinds (a map, a list, a text, a truth value, a number, then null
-     * last). Each item is its kind's rank, then itself: a number by the bits of its double, so their text orders as the
-     * numbers do, NaN after them all; a text up to a mark below any character; a list its own items, then its end, which
-     * comes before any item.
+     * first, and items of different kinds as Cypher orders kinds (a map, a list, a temporal value's tag, a text, a truth
+     * value, a number, then null last). Each item is its kind's rank, then itself: a number by the bits of its double, so
+     * their text orders as the numbers do, NaN after them all; a text up to a mark below any character; a list its own items,
+     * then its end, which comes before any item; a tag its kind's place in Cypher's order ([ValueLayout.ORDER]),
+     * then its sort key (a duration, which has none, its text), as a text is.
      */
     fun sortKey(node: ArrayNode): String = StringBuilder().also { list(node, it) }.toString()
 
@@ -153,6 +158,19 @@ object SqliteCypherValues {
 
     /** The text [node], a text or a number, is put together with another as: NaN and an infinity as Java writes them. */
     private fun text(node: JsonNode) = if (isNaN(node)) "NaN" else node.asText()
+
+    /**
+     * [order] of [a] and [b], one of them a temporal value's tag at least: by their sort keys where both are tags of one kind
+     * that has them, which a duration doesn't; null otherwise.
+     */
+    private fun tagOrder(a: JsonNode, b: JsonNode): Int? {
+        if (!ValueLayout.isTag(a) || !ValueLayout.isTag(b)) return null
+        val kind = a[ValueLayout.KIND]!!.textValue()
+        if (kind != b[ValueLayout.KIND]!!.textValue() || ValueLayout.kindOf(kind!!) == Temporal.DURATION) return null
+        val x = a[ValueLayout.KEY]?.textValue() ?: return null
+        val y = b[ValueLayout.KEY]?.textValue() ?: return null
+        return codePointOrder(x, y)
+    }
 
     /** [order] of the lists [a] and [b]: by their first pair that is not equal, which is null where it is not ordered; else by their sizes. */
     private fun listOrder(a: JsonNode, b: JsonNode): Int? {
@@ -215,6 +233,12 @@ object SqliteCypherValues {
         when {
             // NaN, as a statement given it writes it, is a number, whose bits come after every other's, an infinity's too.
             isNaN(node) -> out.append('5').append(numberKey(Double.NaN))
+            // After every list, whose rank is followed by an item's rank or its end, each a digit below TAG; before every text.
+            ValueLayout.isTag(node) -> {
+                val kind = ValueLayout.kindOf(node[ValueLayout.KIND]!!.textValue()!!)!!
+                out.append('2').append(TAG).append('0' + ValueLayout.ORDER.indexOf(kind))
+                textKey((node[ValueLayout.KEY] ?: node[ValueLayout.TEXT])!!.textValue()!!, out)
+            }
             node.isObject -> out.append('1').also { textKey(write(canonical(node)), out) }
             node.isArray -> out.append('2').also { list(node, out) }
             node.isTextual -> out.append('3').also { textKey(node.textValue()!!, out) }
@@ -245,6 +269,9 @@ object SqliteCypherValues {
 
     /** The end of a list, which comes before any item's rank. */
     private const val END = '0'
+
+    /** What follows a tag's rank, after its kind's rank, a list's: above each item's rank and a list's [END]. */
+    private const val TAG = '7'
 
     private val LONG_MIN = BigInteger.fromLong(Long.MIN_VALUE)
     private val LONG_MAX = BigInteger.fromLong(Long.MAX_VALUE)

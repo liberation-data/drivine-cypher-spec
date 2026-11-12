@@ -35,6 +35,9 @@ object ValueLayout {
     /** The tag's key that holds a temporal value's sort key. */
     const val KEY = "s"
 
+    /** The temporal kinds in Cypher's order of them, as it orders values of several kinds: a tag's rank among its kinds. */
+    val ORDER: List<Temporal> = listOf(Temporal.DATE_TIME, Temporal.LOCAL_DATE_TIME, Temporal.DATE, Temporal.TIME, Temporal.LOCAL_TIME, Temporal.DURATION)
+
     /** The word [KIND] names [kind] by, as typed output does: its function's name. */
     fun word(kind: Temporal): String = kind.function
 

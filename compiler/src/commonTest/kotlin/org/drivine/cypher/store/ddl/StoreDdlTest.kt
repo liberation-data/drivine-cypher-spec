@@ -194,8 +194,8 @@ class StoreDdlTest {
 
     /**
      * The name a unique index is built under first fits within the store's longest name, and is never a name Drivine
-     * gives: [SqlStoreDdl.objectName] leaves two characters, but for a graph whose name is as long as one may be, whose
-     * `uq` names are one character longer, where the name built under first is cut by one.
+     * gives: [SqlStoreDdl.objectName] leaves two characters for it, and a graph's name is at most the store's longest less
+     * 16 ([SqlStoreDdl.refusal]), so even its `uq2` names leave them.
      */
     @Test
     fun theNameAUniqueIndexIsBuiltUnderFirstFitsTheStoresNames() {
@@ -206,7 +206,7 @@ class StoreDdlTest {
         )
         for ((engine, max, make) in makers) {
             // The longest name a graph may have, and one shorter.
-            val longest = max - ("_v__".length + 8 + "_t".length)
+            val longest = max - ("_uq2__".length + 8 + "_t".length)
             for (graph in listOf("g" + "x".repeat(longest - 1), "g" + "x".repeat(longest - 2), "drivine")) {
                 val ddl = make(graph)
                 for (parts in listOf(listOf("Person", "email"), listOf("Membership", "tenantId", "userId"), listOf("P".repeat(80), "q"))) {
@@ -218,13 +218,14 @@ class StoreDdlTest {
                     assertEquals(expected, temporary, "$engine, $graph, $parts")
                 }
             }
-            assertEquals("drivine_uq_Personemail_5482a751_r", make("drivine").temporaryName("drivine_uq_Personemail_5482a751"), engine)
+            assertEquals("drivine_uq2_Personemail_5482a751_r", make("drivine").temporaryName("drivine_uq2_Personemail_5482a751"), engine)
         }
-        // At the longest a graph's name may be, a `uq` name with a hash of eight digits is one short of the store's longest.
-        val longest = PostgresDdl("g" + "x".repeat(PostgresDdl.MAX_OBJECT_NAME - 15))
+        // At the longest a graph's name may be, a `uq2` name with a hash of eight digits is two short of the store's longest,
+        // so `_r` fits whole.
+        val longest = PostgresDdl("g" + "x".repeat(PostgresDdl.MAX_OBJECT_NAME - 17))
         val full = longest.objectName("uq", listOf("Person", "email"))
-        assertEquals(PostgresDdl.MAX_OBJECT_NAME - 1, full.length, full)
-        assertEquals(full.dropLast(1) + "_r", longest.temporaryName(full))
+        assertEquals(PostgresDdl.MAX_OBJECT_NAME - 2, full.length, full)
+        assertEquals(full + "_r", longest.temporaryName(full))
     }
 
     private fun digest(statements: List<String>): String =

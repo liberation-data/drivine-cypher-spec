@@ -2781,23 +2781,23 @@ cases:
             END
             $forget$
         recreate:
-          form: 1
-          digest: "34b7b8ec2a2c124714825b90b93f9d5d7405e94169b4dbeb31591fff9bb61ac2"
+          form: 2
+          digest: "9e6e30dfa1ed638cc82217c9222d57b7beac2263a0863970411d8ce90a5e0010"
           leftover:
-            - "DROP INDEX IF EXISTS drivine_uq_Personemail_5482a751_r"
+            - "DROP INDEX IF EXISTS drivine_uq2_Personemail_5482a751_r"
           build:
-            - "CREATE UNIQUE INDEX drivine_uq_Personemail_5482a751_r ON drivine_node (((props ->> 'email'))) WHERE labels @> '[\"Person\"]'"
+            - "CREATE UNIQUE INDEX drivine_uq2_Personemail_5482a751_r ON drivine_node (((props -> 'email'))) WHERE labels @> '[\"Person\"]'"
           swap:
             - |-
               DO $swap$
               BEGIN
-                  DROP INDEX IF EXISTS drivine_uq_Personemail_5482a751;
-                  ALTER INDEX drivine_uq_Personemail_5482a751_r RENAME TO drivine_uq_Personemail_5482a751;
+                  DROP INDEX IF EXISTS drivine_uq2_Personemail_5482a751;
+                  ALTER INDEX drivine_uq2_Personemail_5482a751_r RENAME TO drivine_uq2_Personemail_5482a751;
               END
               $swap$
           finish:
-            - "ALTER INDEX drivine_uq_Personemail_5482a751_r RENAME TO drivine_uq_Personemail_5482a751"
-          remade: "UPDATE drivine_schema SET name = 'Person_email_unique', object_name = 'drivine_uq_Personemail_5482a751', details = jsonb_set(details, '{form}', '1') WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"email\"]'"
+            - "ALTER INDEX drivine_uq2_Personemail_5482a751_r RENAME TO drivine_uq2_Personemail_5482a751"
+          remade: "UPDATE drivine_schema SET name = 'Person_email_unique', object_name = 'drivine_uq2_Personemail_5482a751', details = jsonb_set(details, '{form}', '2') WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"email\"]'"
       oracle:
         form: 2
         digest: "d6322c8e86ad5942f3849273521e0cb631a11af50cc00ecd638764f0bae9253d"
@@ -2886,10 +2886,10 @@ cases:
                 COMMIT;
             END;
         recreate:
-          form: 1
-          digest: "8de5e60a19284fb254cfe9555d71ddae54a63a2033e8ba3056311de151f5d261"
+          form: 2
+          digest: "191998eafcd858d2f237ada3307672de53ce487d8e72ea1bb334d298a6eb00d9"
           leftover:
-            - "DROP INDEX IF EXISTS drivine_uq_Personemail_5482a751_r"
+            - "DROP INDEX IF EXISTS drivine_uq2_Personemail_5482a751_r"
           build:
             - |-
               DECLARE
@@ -2898,7 +2898,7 @@ cases:
               BEGIN
                   FOR attempt IN 1 .. 300 LOOP
                       BEGIN
-                          EXECUTE IMMEDIATE 'CREATE UNIQUE INDEX drivine_uq_Personemail_5482a751_r ON drivine_node n (CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') AND JSON_EXISTS(n.props, ''$.email'') THEN JSON_VALUE(n.props, ''$.email'') END)';
+                          EXECUTE IMMEDIATE 'CREATE UNIQUE INDEX drivine_uq2_Personemail_5482a751_r ON drivine_node n (CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') AND JSON_EXISTS(n.props, ''$.email'') THEN CASE WHEN CASE JSON_VALUE(n.props, ''$.email.type()'' RETURNING VARCHAR2(16)) WHEN ''object'' THEN COALESCE(JSON_VALUE(n.props, ''$.email.s''), JSON_VALUE(n.props, ''$.email.v'')) WHEN ''number'' THEN TO_CHAR(JSON_VALUE(n.props, ''$.email'' RETURNING NUMBER), ''TM9'') WHEN ''double'' THEN CASE WHEN JSON_VALUE(n.props, ''$.email'' RETURNING BINARY_DOUBLE) = FLOOR(JSON_VALUE(n.props, ''$.email'' RETURNING BINARY_DOUBLE)) AND JSON_VALUE(n.props, ''$.email'' RETURNING BINARY_DOUBLE) >= -9223372036854775808 AND JSON_VALUE(n.props, ''$.email'' RETURNING BINARY_DOUBLE) < 9223372036854775808 THEN TO_CHAR(CAST(FLOOR(JSON_VALUE(n.props, ''$.email'' RETURNING BINARY_DOUBLE) / 4294967296) AS NUMBER) * 4294967296 + CAST(JSON_VALUE(n.props, ''$.email'' RETURNING BINARY_DOUBLE) - FLOOR(JSON_VALUE(n.props, ''$.email'' RETURNING BINARY_DOUBLE) / 4294967296) * 4294967296 AS NUMBER), ''TM9'') ELSE ''d'' || TO_CHAR(JSON_VALUE(n.props, ''$.email'' RETURNING BINARY_DOUBLE)) END ELSE JSON_VALUE(n.props, ''$.email'') END IS NOT NULL THEN CASE JSON_VALUE(n.props, ''$.email.type()'' RETURNING VARCHAR2(16)) WHEN ''object'' THEN JSON_VALUE(n.props, ''$.email."$t"'' RETURNING VARCHAR2(16)) WHEN ''double'' THEN ''number'' ELSE JSON_VALUE(n.props, ''$.email.type()'' RETURNING VARCHAR2(16)) END END END, CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') AND JSON_EXISTS(n.props, ''$.email'') THEN CASE JSON_VALUE(n.props, ''$.email.type()'' RETURNING VARCHAR2(16)) WHEN ''object'' THEN COALESCE(JSON_VALUE(n.props, ''$.email.s''), JSON_VALUE(n.props, ''$.email.v'')) WHEN ''number'' THEN TO_CHAR(JSON_VALUE(n.props, ''$.email'' RETURNING NUMBER), ''TM9'') WHEN ''double'' THEN CASE WHEN JSON_VALUE(n.props, ''$.email'' RETURNING BINARY_DOUBLE) = FLOOR(JSON_VALUE(n.props, ''$.email'' RETURNING BINARY_DOUBLE)) AND JSON_VALUE(n.props, ''$.email'' RETURNING BINARY_DOUBLE) >= -9223372036854775808 AND JSON_VALUE(n.props, ''$.email'' RETURNING BINARY_DOUBLE) < 9223372036854775808 THEN TO_CHAR(CAST(FLOOR(JSON_VALUE(n.props, ''$.email'' RETURNING BINARY_DOUBLE) / 4294967296) AS NUMBER) * 4294967296 + CAST(JSON_VALUE(n.props, ''$.email'' RETURNING BINARY_DOUBLE) - FLOOR(JSON_VALUE(n.props, ''$.email'' RETURNING BINARY_DOUBLE) / 4294967296) * 4294967296 AS NUMBER), ''TM9'') ELSE ''d'' || TO_CHAR(JSON_VALUE(n.props, ''$.email'' RETURNING BINARY_DOUBLE)) END ELSE JSON_VALUE(n.props, ''$.email'') END END)';
                           EXIT;
                       EXCEPTION
                           WHEN e_exists THEN EXIT;
@@ -2909,11 +2909,11 @@ cases:
                   END LOOP;
               END;
           swap:
-            - "DROP INDEX IF EXISTS drivine_uq_Personemail_5482a751"
-            - "ALTER INDEX drivine_uq_Personemail_5482a751_r RENAME TO drivine_uq_Personemail_5482a751"
+            - "DROP INDEX IF EXISTS drivine_uq2_Personemail_5482a751"
+            - "ALTER INDEX drivine_uq2_Personemail_5482a751_r RENAME TO drivine_uq2_Personemail_5482a751"
           finish:
-            - "ALTER INDEX drivine_uq_Personemail_5482a751_r RENAME TO drivine_uq_Personemail_5482a751"
-          remade: "UPDATE drivine_schema SET name = 'Person_email_unique', object_name = 'drivine_uq_Personemail_5482a751', details = JSON_MERGEPATCH(details, '{\"form\": 1}') WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"email\"]'"
+            - "ALTER INDEX drivine_uq2_Personemail_5482a751_r RENAME TO drivine_uq2_Personemail_5482a751"
+          remade: "UPDATE drivine_schema SET name = 'Person_email_unique', object_name = 'drivine_uq2_Personemail_5482a751', details = JSON_MERGEPATCH(details, '{\"form\": 2}') WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"email\"]'"
       sqlite:
         form: 2
         digest: "8c9ae6d7d27f6e50ffc7fbd10038a553894f668f68c20f98879d6959b8dfb9cb"
@@ -2927,20 +2927,20 @@ cases:
           - "DROP INDEX IF EXISTS drivine_uq2_Personemail_5482a751"
           - "DELETE FROM drivine_schema WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"email\"]'"
         recreate:
-          form: 1
-          digest: "d1568ef0e38dca70c1c7e7a31c217c6276a06322dd4443617465d63889c29147"
+          form: 2
+          digest: "ad9535012395950139ac535e11e95f2a2d12386ee9964183d986a7c02ccee6a5"
           leftover:
-            - "DROP INDEX IF EXISTS drivine_uq_Personemail_5482a751_r"
+            - "DROP INDEX IF EXISTS drivine_uq2_Personemail_5482a751_r"
           build:
-            - "CREATE UNIQUE INDEX drivine_uq_Personemail_5482a751_r ON drivine_node ((CASE json_type(props, '$.\"email\"') WHEN 'text' THEN props ->> '$.\"email\"' WHEN 'null' THEN NULL ELSE props -> '$.\"email\"' END)) WHERE instr(labels, '\"Person\"') > 0"
+            - "CREATE UNIQUE INDEX drivine_uq2_Personemail_5482a751_r ON drivine_node (COALESCE(props ->> '$.\"email\".\"$t\"', CASE json_type(props, '$.\"email\"') WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'null' THEN NULL ELSE json_type(props, '$.\"email\"') END), COALESCE(props ->> '$.\"email\".s', props ->> '$.\"email\".v', props ->> '$.\"email\"')) WHERE instr(labels, '\"Person\"') > 0"
           swap:
-            - "DROP INDEX IF EXISTS drivine_uq_Personemail_5482a751"
-            - "CREATE UNIQUE INDEX drivine_uq_Personemail_5482a751 ON drivine_node ((CASE json_type(props, '$.\"email\"') WHEN 'text' THEN props ->> '$.\"email\"' WHEN 'null' THEN NULL ELSE props -> '$.\"email\"' END)) WHERE instr(labels, '\"Person\"') > 0"
-            - "DROP INDEX IF EXISTS drivine_uq_Personemail_5482a751_r"
+            - "DROP INDEX IF EXISTS drivine_uq2_Personemail_5482a751"
+            - "CREATE UNIQUE INDEX drivine_uq2_Personemail_5482a751 ON drivine_node (COALESCE(props ->> '$.\"email\".\"$t\"', CASE json_type(props, '$.\"email\"') WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'null' THEN NULL ELSE json_type(props, '$.\"email\"') END), COALESCE(props ->> '$.\"email\".s', props ->> '$.\"email\".v', props ->> '$.\"email\"')) WHERE instr(labels, '\"Person\"') > 0"
+            - "DROP INDEX IF EXISTS drivine_uq2_Personemail_5482a751_r"
           finish:
-            - "CREATE UNIQUE INDEX drivine_uq_Personemail_5482a751 ON drivine_node ((CASE json_type(props, '$.\"email\"') WHEN 'text' THEN props ->> '$.\"email\"' WHEN 'null' THEN NULL ELSE props -> '$.\"email\"' END)) WHERE instr(labels, '\"Person\"') > 0"
-            - "DROP INDEX IF EXISTS drivine_uq_Personemail_5482a751_r"
-          remade: "UPDATE drivine_schema SET name = 'Person_email_unique', object_name = 'drivine_uq_Personemail_5482a751', details = json_set(details, '$.form', 1) WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"email\"]'"
+            - "CREATE UNIQUE INDEX drivine_uq2_Personemail_5482a751 ON drivine_node (COALESCE(props ->> '$.\"email\".\"$t\"', CASE json_type(props, '$.\"email\"') WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'null' THEN NULL ELSE json_type(props, '$.\"email\"') END), COALESCE(props ->> '$.\"email\".s', props ->> '$.\"email\".v', props ->> '$.\"email\"')) WHERE instr(labels, '\"Person\"') > 0"
+            - "DROP INDEX IF EXISTS drivine_uq2_Personemail_5482a751_r"
+          remade: "UPDATE drivine_schema SET name = 'Person_email_unique', object_name = 'drivine_uq2_Personemail_5482a751', details = json_set(details, '$.form', 2) WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"email\"]'"
       neo4j:
         create:
           - "CREATE CONSTRAINT `Person_email_unique` IF NOT EXISTS FOR (n:`Person`) REQUIRE (n.`email`) IS UNIQUE"
@@ -3010,23 +3010,23 @@ cases:
             END
             $forget$
         recreate:
-          form: 1
-          digest: "d6e7619bc84335070bee5caabf77f77daac4fc2d3fb78121cc98eac9c95dfc9d"
+          form: 2
+          digest: "e4bbea86dee6fddfe0c47ca20dfab6ca922beb2c270bae233161ef5e093bdb3b"
           leftover:
-            - "DROP INDEX IF EXISTS drivine_uq_Personfirstlast_58499b51_r"
+            - "DROP INDEX IF EXISTS drivine_uq2_Personfirstlast_58499b51_r"
           build:
-            - "CREATE UNIQUE INDEX drivine_uq_Personfirstlast_58499b51_r ON drivine_node (((props ->> 'first')), ((props ->> 'last'))) WHERE labels @> '[\"Person\"]'"
+            - "CREATE UNIQUE INDEX drivine_uq2_Personfirstlast_58499b51_r ON drivine_node (((props -> 'first')), ((props -> 'last'))) WHERE labels @> '[\"Person\"]'"
           swap:
             - |-
               DO $swap$
               BEGIN
-                  DROP INDEX IF EXISTS drivine_uq_Personfirstlast_58499b51;
-                  ALTER INDEX drivine_uq_Personfirstlast_58499b51_r RENAME TO drivine_uq_Personfirstlast_58499b51;
+                  DROP INDEX IF EXISTS drivine_uq2_Personfirstlast_58499b51;
+                  ALTER INDEX drivine_uq2_Personfirstlast_58499b51_r RENAME TO drivine_uq2_Personfirstlast_58499b51;
               END
               $swap$
           finish:
-            - "ALTER INDEX drivine_uq_Personfirstlast_58499b51_r RENAME TO drivine_uq_Personfirstlast_58499b51"
-          remade: "UPDATE drivine_schema SET name = 'Person_first_last_unique', object_name = 'drivine_uq_Personfirstlast_58499b51', details = jsonb_set(details, '{form}', '1') WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"first\",\"last\"]'"
+            - "ALTER INDEX drivine_uq2_Personfirstlast_58499b51_r RENAME TO drivine_uq2_Personfirstlast_58499b51"
+          remade: "UPDATE drivine_schema SET name = 'Person_first_last_unique', object_name = 'drivine_uq2_Personfirstlast_58499b51', details = jsonb_set(details, '{form}', '2') WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"first\",\"last\"]'"
       oracle:
         form: 2
         digest: "5a2b968d4982187d4f6f780717ade9349ac379745d78bb905b53bb7ea4888ed4"
@@ -3126,10 +3126,10 @@ cases:
                 COMMIT;
             END;
         recreate:
-          form: 1
-          digest: "594a709c3448e5549cb4fb587b5df2f9e606f39d83ee8fba0d1e843048bf1a55"
+          form: 2
+          digest: "9806d8a16ebc04441604df75ec6dccdbe1362c610b36804972d184f4ba5e768a"
           leftover:
-            - "DROP INDEX IF EXISTS drivine_uq_Personfirstlast_58499b51_r"
+            - "DROP INDEX IF EXISTS drivine_uq2_Personfirstlast_58499b51_r"
           build:
             - |-
               DECLARE
@@ -3138,7 +3138,7 @@ cases:
               BEGIN
                   FOR attempt IN 1 .. 300 LOOP
                       BEGIN
-                          EXECUTE IMMEDIATE 'CREATE UNIQUE INDEX drivine_uq_Personfirstlast_58499b51_r ON drivine_node n (CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') AND JSON_EXISTS(n.props, ''$.first'') AND JSON_EXISTS(n.props, ''$.last'') THEN JSON_VALUE(n.props, ''$.first'') END, CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') AND JSON_EXISTS(n.props, ''$.first'') AND JSON_EXISTS(n.props, ''$.last'') THEN JSON_VALUE(n.props, ''$.last'') END)';
+                          EXECUTE IMMEDIATE 'CREATE UNIQUE INDEX drivine_uq2_Personfirstlast_58499b51_r ON drivine_node n (CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') AND JSON_EXISTS(n.props, ''$.first'') AND JSON_EXISTS(n.props, ''$.last'') THEN CASE WHEN CASE JSON_VALUE(n.props, ''$.first.type()'' RETURNING VARCHAR2(16)) WHEN ''object'' THEN COALESCE(JSON_VALUE(n.props, ''$.first.s''), JSON_VALUE(n.props, ''$.first.v'')) WHEN ''number'' THEN TO_CHAR(JSON_VALUE(n.props, ''$.first'' RETURNING NUMBER), ''TM9'') WHEN ''double'' THEN CASE WHEN JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE) = FLOOR(JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE)) AND JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE) >= -9223372036854775808 AND JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE) < 9223372036854775808 THEN TO_CHAR(CAST(FLOOR(JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE) / 4294967296) AS NUMBER) * 4294967296 + CAST(JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE) - FLOOR(JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE) / 4294967296) * 4294967296 AS NUMBER), ''TM9'') ELSE ''d'' || TO_CHAR(JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE)) END ELSE JSON_VALUE(n.props, ''$.first'') END IS NOT NULL THEN CASE JSON_VALUE(n.props, ''$.first.type()'' RETURNING VARCHAR2(16)) WHEN ''object'' THEN JSON_VALUE(n.props, ''$.first."$t"'' RETURNING VARCHAR2(16)) WHEN ''double'' THEN ''number'' ELSE JSON_VALUE(n.props, ''$.first.type()'' RETURNING VARCHAR2(16)) END END END, CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') AND JSON_EXISTS(n.props, ''$.first'') AND JSON_EXISTS(n.props, ''$.last'') THEN CASE JSON_VALUE(n.props, ''$.first.type()'' RETURNING VARCHAR2(16)) WHEN ''object'' THEN COALESCE(JSON_VALUE(n.props, ''$.first.s''), JSON_VALUE(n.props, ''$.first.v'')) WHEN ''number'' THEN TO_CHAR(JSON_VALUE(n.props, ''$.first'' RETURNING NUMBER), ''TM9'') WHEN ''double'' THEN CASE WHEN JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE) = FLOOR(JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE)) AND JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE) >= -9223372036854775808 AND JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE) < 9223372036854775808 THEN TO_CHAR(CAST(FLOOR(JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE) / 4294967296) AS NUMBER) * 4294967296 + CAST(JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE) - FLOOR(JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE) / 4294967296) * 4294967296 AS NUMBER), ''TM9'') ELSE ''d'' || TO_CHAR(JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE)) END ELSE JSON_VALUE(n.props, ''$.first'') END END, CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') AND JSON_EXISTS(n.props, ''$.first'') AND JSON_EXISTS(n.props, ''$.last'') THEN CASE WHEN CASE JSON_VALUE(n.props, ''$.last.type()'' RETURNING VARCHAR2(16)) WHEN ''object'' THEN COALESCE(JSON_VALUE(n.props, ''$.last.s''), JSON_VALUE(n.props, ''$.last.v'')) WHEN ''number'' THEN TO_CHAR(JSON_VALUE(n.props, ''$.last'' RETURNING NUMBER), ''TM9'') WHEN ''double'' THEN CASE WHEN JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE) = FLOOR(JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE)) AND JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE) >= -9223372036854775808 AND JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE) < 9223372036854775808 THEN TO_CHAR(CAST(FLOOR(JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE) / 4294967296) AS NUMBER) * 4294967296 + CAST(JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE) - FLOOR(JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE) / 4294967296) * 4294967296 AS NUMBER), ''TM9'') ELSE ''d'' || TO_CHAR(JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE)) END ELSE JSON_VALUE(n.props, ''$.last'') END IS NOT NULL THEN CASE JSON_VALUE(n.props, ''$.last.type()'' RETURNING VARCHAR2(16)) WHEN ''object'' THEN JSON_VALUE(n.props, ''$.last."$t"'' RETURNING VARCHAR2(16)) WHEN ''double'' THEN ''number'' ELSE JSON_VALUE(n.props, ''$.last.type()'' RETURNING VARCHAR2(16)) END END END, CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') AND JSON_EXISTS(n.props, ''$.first'') AND JSON_EXISTS(n.props, ''$.last'') THEN CASE JSON_VALUE(n.props, ''$.last.type()'' RETURNING VARCHAR2(16)) WHEN ''object'' THEN COALESCE(JSON_VALUE(n.props, ''$.last.s''), JSON_VALUE(n.props, ''$.last.v'')) WHEN ''number'' THEN TO_CHAR(JSON_VALUE(n.props, ''$.last'' RETURNING NUMBER), ''TM9'') WHEN ''double'' THEN CASE WHEN JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE) = FLOOR(JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE)) AND JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE) >= -9223372036854775808 AND JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE) < 9223372036854775808 THEN TO_CHAR(CAST(FLOOR(JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE) / 4294967296) AS NUMBER) * 4294967296 + CAST(JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE) - FLOOR(JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE) / 4294967296) * 4294967296 AS NUMBER), ''TM9'') ELSE ''d'' || TO_CHAR(JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE)) END ELSE JSON_VALUE(n.props, ''$.last'') END END)';
                           EXIT;
                       EXCEPTION
                           WHEN e_exists THEN EXIT;
@@ -3149,11 +3149,11 @@ cases:
                   END LOOP;
               END;
           swap:
-            - "DROP INDEX IF EXISTS drivine_uq_Personfirstlast_58499b51"
-            - "ALTER INDEX drivine_uq_Personfirstlast_58499b51_r RENAME TO drivine_uq_Personfirstlast_58499b51"
+            - "DROP INDEX IF EXISTS drivine_uq2_Personfirstlast_58499b51"
+            - "ALTER INDEX drivine_uq2_Personfirstlast_58499b51_r RENAME TO drivine_uq2_Personfirstlast_58499b51"
           finish:
-            - "ALTER INDEX drivine_uq_Personfirstlast_58499b51_r RENAME TO drivine_uq_Personfirstlast_58499b51"
-          remade: "UPDATE drivine_schema SET name = 'Person_first_last_unique', object_name = 'drivine_uq_Personfirstlast_58499b51', details = JSON_MERGEPATCH(details, '{\"form\": 1}') WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"first\",\"last\"]'"
+            - "ALTER INDEX drivine_uq2_Personfirstlast_58499b51_r RENAME TO drivine_uq2_Personfirstlast_58499b51"
+          remade: "UPDATE drivine_schema SET name = 'Person_first_last_unique', object_name = 'drivine_uq2_Personfirstlast_58499b51', details = JSON_MERGEPATCH(details, '{\"form\": 2}') WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"first\",\"last\"]'"
       sqlite:
         form: 2
         digest: "427a4d956285d5b1e2bb814719292e444b4f824196f8ced5a4d1b9ecc490a7a3"
@@ -3167,20 +3167,20 @@ cases:
           - "DROP INDEX IF EXISTS drivine_uq2_Personfirstlast_58499b51"
           - "DELETE FROM drivine_schema WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"first\",\"last\"]'"
         recreate:
-          form: 1
-          digest: "3bd2086f1230b85d5bcc14a59494cbe386ff4002040ee6154290e9f707079fe8"
+          form: 2
+          digest: "b9b46155d39041fc7df22ded6c516585024b065b5d6b2b259945c469e0c59506"
           leftover:
-            - "DROP INDEX IF EXISTS drivine_uq_Personfirstlast_58499b51_r"
+            - "DROP INDEX IF EXISTS drivine_uq2_Personfirstlast_58499b51_r"
           build:
-            - "CREATE UNIQUE INDEX drivine_uq_Personfirstlast_58499b51_r ON drivine_node ((CASE json_type(props, '$.\"first\"') WHEN 'text' THEN props ->> '$.\"first\"' WHEN 'null' THEN NULL ELSE props -> '$.\"first\"' END), (CASE json_type(props, '$.\"last\"') WHEN 'text' THEN props ->> '$.\"last\"' WHEN 'null' THEN NULL ELSE props -> '$.\"last\"' END)) WHERE instr(labels, '\"Person\"') > 0"
+            - "CREATE UNIQUE INDEX drivine_uq2_Personfirstlast_58499b51_r ON drivine_node (COALESCE(props ->> '$.\"first\".\"$t\"', CASE json_type(props, '$.\"first\"') WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'null' THEN NULL ELSE json_type(props, '$.\"first\"') END), COALESCE(props ->> '$.\"first\".s', props ->> '$.\"first\".v', props ->> '$.\"first\"'), COALESCE(props ->> '$.\"last\".\"$t\"', CASE json_type(props, '$.\"last\"') WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'null' THEN NULL ELSE json_type(props, '$.\"last\"') END), COALESCE(props ->> '$.\"last\".s', props ->> '$.\"last\".v', props ->> '$.\"last\"')) WHERE instr(labels, '\"Person\"') > 0"
           swap:
-            - "DROP INDEX IF EXISTS drivine_uq_Personfirstlast_58499b51"
-            - "CREATE UNIQUE INDEX drivine_uq_Personfirstlast_58499b51 ON drivine_node ((CASE json_type(props, '$.\"first\"') WHEN 'text' THEN props ->> '$.\"first\"' WHEN 'null' THEN NULL ELSE props -> '$.\"first\"' END), (CASE json_type(props, '$.\"last\"') WHEN 'text' THEN props ->> '$.\"last\"' WHEN 'null' THEN NULL ELSE props -> '$.\"last\"' END)) WHERE instr(labels, '\"Person\"') > 0"
-            - "DROP INDEX IF EXISTS drivine_uq_Personfirstlast_58499b51_r"
+            - "DROP INDEX IF EXISTS drivine_uq2_Personfirstlast_58499b51"
+            - "CREATE UNIQUE INDEX drivine_uq2_Personfirstlast_58499b51 ON drivine_node (COALESCE(props ->> '$.\"first\".\"$t\"', CASE json_type(props, '$.\"first\"') WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'null' THEN NULL ELSE json_type(props, '$.\"first\"') END), COALESCE(props ->> '$.\"first\".s', props ->> '$.\"first\".v', props ->> '$.\"first\"'), COALESCE(props ->> '$.\"last\".\"$t\"', CASE json_type(props, '$.\"last\"') WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'null' THEN NULL ELSE json_type(props, '$.\"last\"') END), COALESCE(props ->> '$.\"last\".s', props ->> '$.\"last\".v', props ->> '$.\"last\"')) WHERE instr(labels, '\"Person\"') > 0"
+            - "DROP INDEX IF EXISTS drivine_uq2_Personfirstlast_58499b51_r"
           finish:
-            - "CREATE UNIQUE INDEX drivine_uq_Personfirstlast_58499b51 ON drivine_node ((CASE json_type(props, '$.\"first\"') WHEN 'text' THEN props ->> '$.\"first\"' WHEN 'null' THEN NULL ELSE props -> '$.\"first\"' END), (CASE json_type(props, '$.\"last\"') WHEN 'text' THEN props ->> '$.\"last\"' WHEN 'null' THEN NULL ELSE props -> '$.\"last\"' END)) WHERE instr(labels, '\"Person\"') > 0"
-            - "DROP INDEX IF EXISTS drivine_uq_Personfirstlast_58499b51_r"
-          remade: "UPDATE drivine_schema SET name = 'Person_first_last_unique', object_name = 'drivine_uq_Personfirstlast_58499b51', details = json_set(details, '$.form', 1) WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"first\",\"last\"]'"
+            - "CREATE UNIQUE INDEX drivine_uq2_Personfirstlast_58499b51 ON drivine_node (COALESCE(props ->> '$.\"first\".\"$t\"', CASE json_type(props, '$.\"first\"') WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'null' THEN NULL ELSE json_type(props, '$.\"first\"') END), COALESCE(props ->> '$.\"first\".s', props ->> '$.\"first\".v', props ->> '$.\"first\"'), COALESCE(props ->> '$.\"last\".\"$t\"', CASE json_type(props, '$.\"last\"') WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'null' THEN NULL ELSE json_type(props, '$.\"last\"') END), COALESCE(props ->> '$.\"last\".s', props ->> '$.\"last\".v', props ->> '$.\"last\"')) WHERE instr(labels, '\"Person\"') > 0"
+            - "DROP INDEX IF EXISTS drivine_uq2_Personfirstlast_58499b51_r"
+          remade: "UPDATE drivine_schema SET name = 'Person_first_last_unique', object_name = 'drivine_uq2_Personfirstlast_58499b51', details = json_set(details, '$.form', 2) WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"first\",\"last\"]'"
       neo4j:
         create:
           - "CREATE CONSTRAINT `Person_first_last_unique` IF NOT EXISTS FOR (n:`Person`) REQUIRE (n.`first`, n.`last`) IS UNIQUE"
@@ -3242,13 +3242,13 @@ cases:
     spec: {kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["last", "first"]}
     stores:
       postgres:
-        form: 1
-        digest: "3f7e4d1eea89882b0aa34c70ca78ae9148a377749938645b42a3aa7f5cca5190"
+        form: 2
+        digest: "60dcc137e79493646a1b76ced11aa923728dee92847a6afd605b1dbfca7f8b85"
         create:
-          - "CREATE UNIQUE INDEX IF NOT EXISTS drivine_uq_Personlastfirst_4c504a31 ON drivine_node (((props ->> 'last')), ((props ->> 'first'))) WHERE labels @> '[\"Person\"]'"
+          - "CREATE UNIQUE INDEX IF NOT EXISTS drivine_uq2_Personlastfirst_4c504a31 ON drivine_node (((props -> 'last')), ((props -> 'first'))) WHERE labels @> '[\"Person\"]'"
           - |-
             INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
-            VALUES ('UNIQUENESS_CONSTRAINT', 'Person', '["last","first"]', 'Person_last_first_unique', 'drivine_uq_Personlastfirst_4c504a31', '{"form": 1}')
+            VALUES ('UNIQUENESS_CONSTRAINT', 'Person', '["last","first"]', 'Person_last_first_unique', 'drivine_uq2_Personlastfirst_4c504a31', '{"form": 2}')
             ON CONFLICT (kind, label, properties) DO NOTHING
         drop:
           - |-
@@ -3267,26 +3267,26 @@ cases:
             END
             $forget$
         recreate:
-          form: 1
-          digest: "29575e5e134def5b8a25f82b73fa34b300e7868f4d2ca3ac834b8801d1a63bdd"
+          form: 2
+          digest: "a8796dc279e43ce9d042b5ce7f246f69deb0fbf24304ce5c71115d64ad1c25ef"
           leftover:
-            - "DROP INDEX IF EXISTS drivine_uq_Personlastfirst_4c504a31_r"
+            - "DROP INDEX IF EXISTS drivine_uq2_Personlastfirst_4c504a31_r"
           build:
-            - "CREATE UNIQUE INDEX drivine_uq_Personlastfirst_4c504a31_r ON drivine_node (((props ->> 'last')), ((props ->> 'first'))) WHERE labels @> '[\"Person\"]'"
+            - "CREATE UNIQUE INDEX drivine_uq2_Personlastfirst_4c504a31_r ON drivine_node (((props -> 'last')), ((props -> 'first'))) WHERE labels @> '[\"Person\"]'"
           swap:
             - |-
               DO $swap$
               BEGIN
-                  DROP INDEX IF EXISTS drivine_uq_Personlastfirst_4c504a31;
-                  ALTER INDEX drivine_uq_Personlastfirst_4c504a31_r RENAME TO drivine_uq_Personlastfirst_4c504a31;
+                  DROP INDEX IF EXISTS drivine_uq2_Personlastfirst_4c504a31;
+                  ALTER INDEX drivine_uq2_Personlastfirst_4c504a31_r RENAME TO drivine_uq2_Personlastfirst_4c504a31;
               END
               $swap$
           finish:
-            - "ALTER INDEX drivine_uq_Personlastfirst_4c504a31_r RENAME TO drivine_uq_Personlastfirst_4c504a31"
-          remade: "UPDATE drivine_schema SET name = 'Person_last_first_unique', object_name = 'drivine_uq_Personlastfirst_4c504a31', details = jsonb_set(details, '{form}', '1') WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"last\",\"first\"]'"
+            - "ALTER INDEX drivine_uq2_Personlastfirst_4c504a31_r RENAME TO drivine_uq2_Personlastfirst_4c504a31"
+          remade: "UPDATE drivine_schema SET name = 'Person_last_first_unique', object_name = 'drivine_uq2_Personlastfirst_4c504a31', details = jsonb_set(details, '{form}', '2') WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"last\",\"first\"]'"
       oracle:
-        form: 1
-        digest: "4d4389dcd0a16bb43361f478b6b388ef0f6fdf8393a1a81523ef4746bb98fead"
+        form: 2
+        digest: "9172d99657882a46a6b77b3440f46d1053cfcf304350b45e3379b6a97999f4f0"
         create:
           - |-
             DECLARE
@@ -3295,7 +3295,7 @@ cases:
             BEGIN
                 FOR attempt IN 1 .. 300 LOOP
                     BEGIN
-                        EXECUTE IMMEDIATE 'CREATE INDEX IF NOT EXISTS drivine_ix_lastfirst_e5329cc6 ON drivine_node (JSON_VALUE(props, ''$.last''), JSON_VALUE(props, ''$.first''))';
+                        EXECUTE IMMEDIATE 'CREATE INDEX IF NOT EXISTS drivine_ix2_lastfirst_e5329cc6 ON drivine_node (CASE WHEN CASE JSON_VALUE(props, ''$.last.type()'' RETURNING VARCHAR2(16)) WHEN ''object'' THEN COALESCE(JSON_VALUE(props, ''$.last.s''), JSON_VALUE(props, ''$.last.v'')) WHEN ''number'' THEN TO_CHAR(JSON_VALUE(props, ''$.last'' RETURNING NUMBER), ''TM9'') WHEN ''double'' THEN CASE WHEN JSON_VALUE(props, ''$.last'' RETURNING BINARY_DOUBLE) = FLOOR(JSON_VALUE(props, ''$.last'' RETURNING BINARY_DOUBLE)) AND JSON_VALUE(props, ''$.last'' RETURNING BINARY_DOUBLE) >= -9223372036854775808 AND JSON_VALUE(props, ''$.last'' RETURNING BINARY_DOUBLE) < 9223372036854775808 THEN TO_CHAR(CAST(FLOOR(JSON_VALUE(props, ''$.last'' RETURNING BINARY_DOUBLE) / 4294967296) AS NUMBER) * 4294967296 + CAST(JSON_VALUE(props, ''$.last'' RETURNING BINARY_DOUBLE) - FLOOR(JSON_VALUE(props, ''$.last'' RETURNING BINARY_DOUBLE) / 4294967296) * 4294967296 AS NUMBER), ''TM9'') ELSE ''d'' || TO_CHAR(JSON_VALUE(props, ''$.last'' RETURNING BINARY_DOUBLE)) END ELSE JSON_VALUE(props, ''$.last'') END IS NOT NULL THEN CASE JSON_VALUE(props, ''$.last.type()'' RETURNING VARCHAR2(16)) WHEN ''object'' THEN JSON_VALUE(props, ''$.last."$t"'' RETURNING VARCHAR2(16)) WHEN ''double'' THEN ''number'' ELSE JSON_VALUE(props, ''$.last.type()'' RETURNING VARCHAR2(16)) END END, CASE JSON_VALUE(props, ''$.last.type()'' RETURNING VARCHAR2(16)) WHEN ''object'' THEN COALESCE(JSON_VALUE(props, ''$.last.s''), JSON_VALUE(props, ''$.last.v'')) WHEN ''number'' THEN TO_CHAR(JSON_VALUE(props, ''$.last'' RETURNING NUMBER), ''TM9'') WHEN ''double'' THEN CASE WHEN JSON_VALUE(props, ''$.last'' RETURNING BINARY_DOUBLE) = FLOOR(JSON_VALUE(props, ''$.last'' RETURNING BINARY_DOUBLE)) AND JSON_VALUE(props, ''$.last'' RETURNING BINARY_DOUBLE) >= -9223372036854775808 AND JSON_VALUE(props, ''$.last'' RETURNING BINARY_DOUBLE) < 9223372036854775808 THEN TO_CHAR(CAST(FLOOR(JSON_VALUE(props, ''$.last'' RETURNING BINARY_DOUBLE) / 4294967296) AS NUMBER) * 4294967296 + CAST(JSON_VALUE(props, ''$.last'' RETURNING BINARY_DOUBLE) - FLOOR(JSON_VALUE(props, ''$.last'' RETURNING BINARY_DOUBLE) / 4294967296) * 4294967296 AS NUMBER), ''TM9'') ELSE ''d'' || TO_CHAR(JSON_VALUE(props, ''$.last'' RETURNING BINARY_DOUBLE)) END ELSE JSON_VALUE(props, ''$.last'') END, CASE WHEN CASE JSON_VALUE(props, ''$.first.type()'' RETURNING VARCHAR2(16)) WHEN ''object'' THEN COALESCE(JSON_VALUE(props, ''$.first.s''), JSON_VALUE(props, ''$.first.v'')) WHEN ''number'' THEN TO_CHAR(JSON_VALUE(props, ''$.first'' RETURNING NUMBER), ''TM9'') WHEN ''double'' THEN CASE WHEN JSON_VALUE(props, ''$.first'' RETURNING BINARY_DOUBLE) = FLOOR(JSON_VALUE(props, ''$.first'' RETURNING BINARY_DOUBLE)) AND JSON_VALUE(props, ''$.first'' RETURNING BINARY_DOUBLE) >= -9223372036854775808 AND JSON_VALUE(props, ''$.first'' RETURNING BINARY_DOUBLE) < 9223372036854775808 THEN TO_CHAR(CAST(FLOOR(JSON_VALUE(props, ''$.first'' RETURNING BINARY_DOUBLE) / 4294967296) AS NUMBER) * 4294967296 + CAST(JSON_VALUE(props, ''$.first'' RETURNING BINARY_DOUBLE) - FLOOR(JSON_VALUE(props, ''$.first'' RETURNING BINARY_DOUBLE) / 4294967296) * 4294967296 AS NUMBER), ''TM9'') ELSE ''d'' || TO_CHAR(JSON_VALUE(props, ''$.first'' RETURNING BINARY_DOUBLE)) END ELSE JSON_VALUE(props, ''$.first'') END IS NOT NULL THEN CASE JSON_VALUE(props, ''$.first.type()'' RETURNING VARCHAR2(16)) WHEN ''object'' THEN JSON_VALUE(props, ''$.first."$t"'' RETURNING VARCHAR2(16)) WHEN ''double'' THEN ''number'' ELSE JSON_VALUE(props, ''$.first.type()'' RETURNING VARCHAR2(16)) END END, CASE JSON_VALUE(props, ''$.first.type()'' RETURNING VARCHAR2(16)) WHEN ''object'' THEN COALESCE(JSON_VALUE(props, ''$.first.s''), JSON_VALUE(props, ''$.first.v'')) WHEN ''number'' THEN TO_CHAR(JSON_VALUE(props, ''$.first'' RETURNING NUMBER), ''TM9'') WHEN ''double'' THEN CASE WHEN JSON_VALUE(props, ''$.first'' RETURNING BINARY_DOUBLE) = FLOOR(JSON_VALUE(props, ''$.first'' RETURNING BINARY_DOUBLE)) AND JSON_VALUE(props, ''$.first'' RETURNING BINARY_DOUBLE) >= -9223372036854775808 AND JSON_VALUE(props, ''$.first'' RETURNING BINARY_DOUBLE) < 9223372036854775808 THEN TO_CHAR(CAST(FLOOR(JSON_VALUE(props, ''$.first'' RETURNING BINARY_DOUBLE) / 4294967296) AS NUMBER) * 4294967296 + CAST(JSON_VALUE(props, ''$.first'' RETURNING BINARY_DOUBLE) - FLOOR(JSON_VALUE(props, ''$.first'' RETURNING BINARY_DOUBLE) / 4294967296) * 4294967296 AS NUMBER), ''TM9'') ELSE ''d'' || TO_CHAR(JSON_VALUE(props, ''$.first'' RETURNING BINARY_DOUBLE)) END ELSE JSON_VALUE(props, ''$.first'') END)';
                         EXIT;
                     EXCEPTION
                         WHEN e_exists THEN EXIT;
@@ -3315,7 +3315,7 @@ cases:
                 IF v_unique = 0 THEN
                     FOR attempt IN 1 .. 300 LOOP
                         BEGIN
-                            EXECUTE IMMEDIATE 'CREATE INDEX IF NOT EXISTS drivine_lx_Personlastfirst_4c504a31 ON drivine_node n (CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') THEN JSON_VALUE(n.props, ''$.last'') END, CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') THEN JSON_VALUE(n.props, ''$.first'') END)';
+                            EXECUTE IMMEDIATE 'CREATE INDEX IF NOT EXISTS drivine_lx2_Personlastfirst_4c504a31 ON drivine_node n (CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') THEN CASE WHEN CASE JSON_VALUE(n.props, ''$.last.type()'' RETURNING VARCHAR2(16)) WHEN ''object'' THEN COALESCE(JSON_VALUE(n.props, ''$.last.s''), JSON_VALUE(n.props, ''$.last.v'')) WHEN ''number'' THEN TO_CHAR(JSON_VALUE(n.props, ''$.last'' RETURNING NUMBER), ''TM9'') WHEN ''double'' THEN CASE WHEN JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE) = FLOOR(JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE)) AND JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE) >= -9223372036854775808 AND JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE) < 9223372036854775808 THEN TO_CHAR(CAST(FLOOR(JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE) / 4294967296) AS NUMBER) * 4294967296 + CAST(JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE) - FLOOR(JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE) / 4294967296) * 4294967296 AS NUMBER), ''TM9'') ELSE ''d'' || TO_CHAR(JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE)) END ELSE JSON_VALUE(n.props, ''$.last'') END IS NOT NULL THEN CASE JSON_VALUE(n.props, ''$.last.type()'' RETURNING VARCHAR2(16)) WHEN ''object'' THEN JSON_VALUE(n.props, ''$.last."$t"'' RETURNING VARCHAR2(16)) WHEN ''double'' THEN ''number'' ELSE JSON_VALUE(n.props, ''$.last.type()'' RETURNING VARCHAR2(16)) END END END, CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') THEN CASE JSON_VALUE(n.props, ''$.last.type()'' RETURNING VARCHAR2(16)) WHEN ''object'' THEN COALESCE(JSON_VALUE(n.props, ''$.last.s''), JSON_VALUE(n.props, ''$.last.v'')) WHEN ''number'' THEN TO_CHAR(JSON_VALUE(n.props, ''$.last'' RETURNING NUMBER), ''TM9'') WHEN ''double'' THEN CASE WHEN JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE) = FLOOR(JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE)) AND JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE) >= -9223372036854775808 AND JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE) < 9223372036854775808 THEN TO_CHAR(CAST(FLOOR(JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE) / 4294967296) AS NUMBER) * 4294967296 + CAST(JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE) - FLOOR(JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE) / 4294967296) * 4294967296 AS NUMBER), ''TM9'') ELSE ''d'' || TO_CHAR(JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE)) END ELSE JSON_VALUE(n.props, ''$.last'') END END, CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') THEN CASE WHEN CASE JSON_VALUE(n.props, ''$.first.type()'' RETURNING VARCHAR2(16)) WHEN ''object'' THEN COALESCE(JSON_VALUE(n.props, ''$.first.s''), JSON_VALUE(n.props, ''$.first.v'')) WHEN ''number'' THEN TO_CHAR(JSON_VALUE(n.props, ''$.first'' RETURNING NUMBER), ''TM9'') WHEN ''double'' THEN CASE WHEN JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE) = FLOOR(JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE)) AND JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE) >= -9223372036854775808 AND JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE) < 9223372036854775808 THEN TO_CHAR(CAST(FLOOR(JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE) / 4294967296) AS NUMBER) * 4294967296 + CAST(JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE) - FLOOR(JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE) / 4294967296) * 4294967296 AS NUMBER), ''TM9'') ELSE ''d'' || TO_CHAR(JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE)) END ELSE JSON_VALUE(n.props, ''$.first'') END IS NOT NULL THEN CASE JSON_VALUE(n.props, ''$.first.type()'' RETURNING VARCHAR2(16)) WHEN ''object'' THEN JSON_VALUE(n.props, ''$.first."$t"'' RETURNING VARCHAR2(16)) WHEN ''double'' THEN ''number'' ELSE JSON_VALUE(n.props, ''$.first.type()'' RETURNING VARCHAR2(16)) END END END, CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') THEN CASE JSON_VALUE(n.props, ''$.first.type()'' RETURNING VARCHAR2(16)) WHEN ''object'' THEN COALESCE(JSON_VALUE(n.props, ''$.first.s''), JSON_VALUE(n.props, ''$.first.v'')) WHEN ''number'' THEN TO_CHAR(JSON_VALUE(n.props, ''$.first'' RETURNING NUMBER), ''TM9'') WHEN ''double'' THEN CASE WHEN JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE) = FLOOR(JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE)) AND JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE) >= -9223372036854775808 AND JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE) < 9223372036854775808 THEN TO_CHAR(CAST(FLOOR(JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE) / 4294967296) AS NUMBER) * 4294967296 + CAST(JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE) - FLOOR(JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE) / 4294967296) * 4294967296 AS NUMBER), ''TM9'') ELSE ''d'' || TO_CHAR(JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE)) END ELSE JSON_VALUE(n.props, ''$.first'') END END)';
                             EXIT;
                         EXCEPTION
                             WHEN e_exists THEN EXIT;
@@ -3331,9 +3331,9 @@ cases:
                 MERGE INTO drivine_schema c
                 USING (SELECT 'RANGE_INDEX' AS kind, 'Person' AS label, '["last","first"]' AS properties FROM dual) k
                 ON (c.kind = k.kind AND c.label = k.label AND c.properties = k.properties)
-                WHEN MATCHED THEN UPDATE SET c.details = JSON_MERGEPATCH(c.details, '{"form": 1, "labelled": "drivine_lx_Personlastfirst_4c504a31", "unique": null}')
+                WHEN MATCHED THEN UPDATE SET c.details = JSON_MERGEPATCH(c.details, '{"form": 2, "labelled": "drivine_lx2_Personlastfirst_4c504a31", "unique": null}')
                 WHEN NOT MATCHED THEN INSERT (kind, label, properties, name, object_name, details)
-                    VALUES (k.kind, k.label, k.properties, 'Person_last_first_range', 'drivine_ix_lastfirst_e5329cc6', '{"form": 1, "labelled": "drivine_lx_Personlastfirst_4c504a31"}');
+                    VALUES (k.kind, k.label, k.properties, 'Person_last_first_range', 'drivine_ix2_lastfirst_e5329cc6', '{"form": 2, "labelled": "drivine_lx2_Personlastfirst_4c504a31"}');
             EXCEPTION WHEN DUP_VAL_ON_INDEX THEN
                 -- Another process recorded it between the MERGE's read and its insert: it is recorded.
                 NULL;
@@ -3345,7 +3345,7 @@ cases:
             BEGIN
                 FOR attempt IN 1 .. 300 LOOP
                     BEGIN
-                        EXECUTE IMMEDIATE 'CREATE UNIQUE INDEX IF NOT EXISTS drivine_uq_Personlastfirst_4c504a31 ON drivine_node n (CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') AND JSON_EXISTS(n.props, ''$.last'') AND JSON_EXISTS(n.props, ''$.first'') THEN JSON_VALUE(n.props, ''$.last'') END, CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') AND JSON_EXISTS(n.props, ''$.last'') AND JSON_EXISTS(n.props, ''$.first'') THEN JSON_VALUE(n.props, ''$.first'') END)';
+                        EXECUTE IMMEDIATE 'CREATE UNIQUE INDEX IF NOT EXISTS drivine_uq2_Personlastfirst_4c504a31 ON drivine_node n (CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') AND JSON_EXISTS(n.props, ''$.last'') AND JSON_EXISTS(n.props, ''$.first'') THEN CASE WHEN CASE JSON_VALUE(n.props, ''$.last.type()'' RETURNING VARCHAR2(16)) WHEN ''object'' THEN COALESCE(JSON_VALUE(n.props, ''$.last.s''), JSON_VALUE(n.props, ''$.last.v'')) WHEN ''number'' THEN TO_CHAR(JSON_VALUE(n.props, ''$.last'' RETURNING NUMBER), ''TM9'') WHEN ''double'' THEN CASE WHEN JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE) = FLOOR(JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE)) AND JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE) >= -9223372036854775808 AND JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE) < 9223372036854775808 THEN TO_CHAR(CAST(FLOOR(JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE) / 4294967296) AS NUMBER) * 4294967296 + CAST(JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE) - FLOOR(JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE) / 4294967296) * 4294967296 AS NUMBER), ''TM9'') ELSE ''d'' || TO_CHAR(JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE)) END ELSE JSON_VALUE(n.props, ''$.last'') END IS NOT NULL THEN CASE JSON_VALUE(n.props, ''$.last.type()'' RETURNING VARCHAR2(16)) WHEN ''object'' THEN JSON_VALUE(n.props, ''$.last."$t"'' RETURNING VARCHAR2(16)) WHEN ''double'' THEN ''number'' ELSE JSON_VALUE(n.props, ''$.last.type()'' RETURNING VARCHAR2(16)) END END END, CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') AND JSON_EXISTS(n.props, ''$.last'') AND JSON_EXISTS(n.props, ''$.first'') THEN CASE JSON_VALUE(n.props, ''$.last.type()'' RETURNING VARCHAR2(16)) WHEN ''object'' THEN COALESCE(JSON_VALUE(n.props, ''$.last.s''), JSON_VALUE(n.props, ''$.last.v'')) WHEN ''number'' THEN TO_CHAR(JSON_VALUE(n.props, ''$.last'' RETURNING NUMBER), ''TM9'') WHEN ''double'' THEN CASE WHEN JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE) = FLOOR(JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE)) AND JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE) >= -9223372036854775808 AND JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE) < 9223372036854775808 THEN TO_CHAR(CAST(FLOOR(JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE) / 4294967296) AS NUMBER) * 4294967296 + CAST(JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE) - FLOOR(JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE) / 4294967296) * 4294967296 AS NUMBER), ''TM9'') ELSE ''d'' || TO_CHAR(JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE)) END ELSE JSON_VALUE(n.props, ''$.last'') END END, CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') AND JSON_EXISTS(n.props, ''$.last'') AND JSON_EXISTS(n.props, ''$.first'') THEN CASE WHEN CASE JSON_VALUE(n.props, ''$.first.type()'' RETURNING VARCHAR2(16)) WHEN ''object'' THEN COALESCE(JSON_VALUE(n.props, ''$.first.s''), JSON_VALUE(n.props, ''$.first.v'')) WHEN ''number'' THEN TO_CHAR(JSON_VALUE(n.props, ''$.first'' RETURNING NUMBER), ''TM9'') WHEN ''double'' THEN CASE WHEN JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE) = FLOOR(JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE)) AND JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE) >= -9223372036854775808 AND JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE) < 9223372036854775808 THEN TO_CHAR(CAST(FLOOR(JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE) / 4294967296) AS NUMBER) * 4294967296 + CAST(JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE) - FLOOR(JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE) / 4294967296) * 4294967296 AS NUMBER), ''TM9'') ELSE ''d'' || TO_CHAR(JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE)) END ELSE JSON_VALUE(n.props, ''$.first'') END IS NOT NULL THEN CASE JSON_VALUE(n.props, ''$.first.type()'' RETURNING VARCHAR2(16)) WHEN ''object'' THEN JSON_VALUE(n.props, ''$.first."$t"'' RETURNING VARCHAR2(16)) WHEN ''double'' THEN ''number'' ELSE JSON_VALUE(n.props, ''$.first.type()'' RETURNING VARCHAR2(16)) END END END, CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') AND JSON_EXISTS(n.props, ''$.last'') AND JSON_EXISTS(n.props, ''$.first'') THEN CASE JSON_VALUE(n.props, ''$.first.type()'' RETURNING VARCHAR2(16)) WHEN ''object'' THEN COALESCE(JSON_VALUE(n.props, ''$.first.s''), JSON_VALUE(n.props, ''$.first.v'')) WHEN ''number'' THEN TO_CHAR(JSON_VALUE(n.props, ''$.first'' RETURNING NUMBER), ''TM9'') WHEN ''double'' THEN CASE WHEN JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE) = FLOOR(JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE)) AND JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE) >= -9223372036854775808 AND JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE) < 9223372036854775808 THEN TO_CHAR(CAST(FLOOR(JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE) / 4294967296) AS NUMBER) * 4294967296 + CAST(JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE) - FLOOR(JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE) / 4294967296) * 4294967296 AS NUMBER), ''TM9'') ELSE ''d'' || TO_CHAR(JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE)) END ELSE JSON_VALUE(n.props, ''$.first'') END END)';
                         EXIT;
                     EXCEPTION
                         WHEN e_exists THEN EXIT;
@@ -3361,7 +3361,7 @@ cases:
                 USING (SELECT 'UNIQUENESS_CONSTRAINT' AS kind, 'Person' AS label, '["last","first"]' AS properties FROM dual) k
                 ON (c.kind = k.kind AND c.label = k.label AND c.properties = k.properties)
                 WHEN NOT MATCHED THEN INSERT (kind, label, properties, name, object_name, details)
-                    VALUES (k.kind, k.label, k.properties, 'Person_last_first_unique', 'drivine_uq_Personlastfirst_4c504a31', '{"form": 1}');
+                    VALUES (k.kind, k.label, k.properties, 'Person_last_first_unique', 'drivine_uq2_Personlastfirst_4c504a31', '{"form": 2}');
             EXCEPTION WHEN DUP_VAL_ON_INDEX THEN
                 -- Another process recorded it between the MERGE's read and its insert: it is recorded.
                 NULL;
@@ -3383,10 +3383,10 @@ cases:
                 COMMIT;
             END;
         recreate:
-          form: 1
-          digest: "de01eb144a74685f5ff96b9bf364493fb22b7facc2df23c98bb60f21420b08c7"
+          form: 2
+          digest: "a04ffbb205978be500d9408dae0be1b2fe67bcfc6267cf7c1381f382949feeb9"
           leftover:
-            - "DROP INDEX IF EXISTS drivine_uq_Personlastfirst_4c504a31_r"
+            - "DROP INDEX IF EXISTS drivine_uq2_Personlastfirst_4c504a31_r"
           build:
             - |-
               DECLARE
@@ -3395,7 +3395,7 @@ cases:
               BEGIN
                   FOR attempt IN 1 .. 300 LOOP
                       BEGIN
-                          EXECUTE IMMEDIATE 'CREATE UNIQUE INDEX drivine_uq_Personlastfirst_4c504a31_r ON drivine_node n (CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') AND JSON_EXISTS(n.props, ''$.last'') AND JSON_EXISTS(n.props, ''$.first'') THEN JSON_VALUE(n.props, ''$.last'') END, CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') AND JSON_EXISTS(n.props, ''$.last'') AND JSON_EXISTS(n.props, ''$.first'') THEN JSON_VALUE(n.props, ''$.first'') END)';
+                          EXECUTE IMMEDIATE 'CREATE UNIQUE INDEX drivine_uq2_Personlastfirst_4c504a31_r ON drivine_node n (CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') AND JSON_EXISTS(n.props, ''$.last'') AND JSON_EXISTS(n.props, ''$.first'') THEN CASE WHEN CASE JSON_VALUE(n.props, ''$.last.type()'' RETURNING VARCHAR2(16)) WHEN ''object'' THEN COALESCE(JSON_VALUE(n.props, ''$.last.s''), JSON_VALUE(n.props, ''$.last.v'')) WHEN ''number'' THEN TO_CHAR(JSON_VALUE(n.props, ''$.last'' RETURNING NUMBER), ''TM9'') WHEN ''double'' THEN CASE WHEN JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE) = FLOOR(JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE)) AND JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE) >= -9223372036854775808 AND JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE) < 9223372036854775808 THEN TO_CHAR(CAST(FLOOR(JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE) / 4294967296) AS NUMBER) * 4294967296 + CAST(JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE) - FLOOR(JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE) / 4294967296) * 4294967296 AS NUMBER), ''TM9'') ELSE ''d'' || TO_CHAR(JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE)) END ELSE JSON_VALUE(n.props, ''$.last'') END IS NOT NULL THEN CASE JSON_VALUE(n.props, ''$.last.type()'' RETURNING VARCHAR2(16)) WHEN ''object'' THEN JSON_VALUE(n.props, ''$.last."$t"'' RETURNING VARCHAR2(16)) WHEN ''double'' THEN ''number'' ELSE JSON_VALUE(n.props, ''$.last.type()'' RETURNING VARCHAR2(16)) END END END, CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') AND JSON_EXISTS(n.props, ''$.last'') AND JSON_EXISTS(n.props, ''$.first'') THEN CASE JSON_VALUE(n.props, ''$.last.type()'' RETURNING VARCHAR2(16)) WHEN ''object'' THEN COALESCE(JSON_VALUE(n.props, ''$.last.s''), JSON_VALUE(n.props, ''$.last.v'')) WHEN ''number'' THEN TO_CHAR(JSON_VALUE(n.props, ''$.last'' RETURNING NUMBER), ''TM9'') WHEN ''double'' THEN CASE WHEN JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE) = FLOOR(JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE)) AND JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE) >= -9223372036854775808 AND JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE) < 9223372036854775808 THEN TO_CHAR(CAST(FLOOR(JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE) / 4294967296) AS NUMBER) * 4294967296 + CAST(JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE) - FLOOR(JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE) / 4294967296) * 4294967296 AS NUMBER), ''TM9'') ELSE ''d'' || TO_CHAR(JSON_VALUE(n.props, ''$.last'' RETURNING BINARY_DOUBLE)) END ELSE JSON_VALUE(n.props, ''$.last'') END END, CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') AND JSON_EXISTS(n.props, ''$.last'') AND JSON_EXISTS(n.props, ''$.first'') THEN CASE WHEN CASE JSON_VALUE(n.props, ''$.first.type()'' RETURNING VARCHAR2(16)) WHEN ''object'' THEN COALESCE(JSON_VALUE(n.props, ''$.first.s''), JSON_VALUE(n.props, ''$.first.v'')) WHEN ''number'' THEN TO_CHAR(JSON_VALUE(n.props, ''$.first'' RETURNING NUMBER), ''TM9'') WHEN ''double'' THEN CASE WHEN JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE) = FLOOR(JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE)) AND JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE) >= -9223372036854775808 AND JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE) < 9223372036854775808 THEN TO_CHAR(CAST(FLOOR(JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE) / 4294967296) AS NUMBER) * 4294967296 + CAST(JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE) - FLOOR(JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE) / 4294967296) * 4294967296 AS NUMBER), ''TM9'') ELSE ''d'' || TO_CHAR(JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE)) END ELSE JSON_VALUE(n.props, ''$.first'') END IS NOT NULL THEN CASE JSON_VALUE(n.props, ''$.first.type()'' RETURNING VARCHAR2(16)) WHEN ''object'' THEN JSON_VALUE(n.props, ''$.first."$t"'' RETURNING VARCHAR2(16)) WHEN ''double'' THEN ''number'' ELSE JSON_VALUE(n.props, ''$.first.type()'' RETURNING VARCHAR2(16)) END END END, CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') AND JSON_EXISTS(n.props, ''$.last'') AND JSON_EXISTS(n.props, ''$.first'') THEN CASE JSON_VALUE(n.props, ''$.first.type()'' RETURNING VARCHAR2(16)) WHEN ''object'' THEN COALESCE(JSON_VALUE(n.props, ''$.first.s''), JSON_VALUE(n.props, ''$.first.v'')) WHEN ''number'' THEN TO_CHAR(JSON_VALUE(n.props, ''$.first'' RETURNING NUMBER), ''TM9'') WHEN ''double'' THEN CASE WHEN JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE) = FLOOR(JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE)) AND JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE) >= -9223372036854775808 AND JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE) < 9223372036854775808 THEN TO_CHAR(CAST(FLOOR(JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE) / 4294967296) AS NUMBER) * 4294967296 + CAST(JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE) - FLOOR(JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE) / 4294967296) * 4294967296 AS NUMBER), ''TM9'') ELSE ''d'' || TO_CHAR(JSON_VALUE(n.props, ''$.first'' RETURNING BINARY_DOUBLE)) END ELSE JSON_VALUE(n.props, ''$.first'') END END)';
                           EXIT;
                       EXCEPTION
                           WHEN e_exists THEN EXIT;
@@ -3406,38 +3406,38 @@ cases:
                   END LOOP;
               END;
           swap:
-            - "DROP INDEX IF EXISTS drivine_uq_Personlastfirst_4c504a31"
-            - "ALTER INDEX drivine_uq_Personlastfirst_4c504a31_r RENAME TO drivine_uq_Personlastfirst_4c504a31"
+            - "DROP INDEX IF EXISTS drivine_uq2_Personlastfirst_4c504a31"
+            - "ALTER INDEX drivine_uq2_Personlastfirst_4c504a31_r RENAME TO drivine_uq2_Personlastfirst_4c504a31"
           finish:
-            - "ALTER INDEX drivine_uq_Personlastfirst_4c504a31_r RENAME TO drivine_uq_Personlastfirst_4c504a31"
-          remade: "UPDATE drivine_schema SET name = 'Person_last_first_unique', object_name = 'drivine_uq_Personlastfirst_4c504a31', details = JSON_MERGEPATCH(details, '{\"form\": 1}') WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"last\",\"first\"]'"
+            - "ALTER INDEX drivine_uq2_Personlastfirst_4c504a31_r RENAME TO drivine_uq2_Personlastfirst_4c504a31"
+          remade: "UPDATE drivine_schema SET name = 'Person_last_first_unique', object_name = 'drivine_uq2_Personlastfirst_4c504a31', details = JSON_MERGEPATCH(details, '{\"form\": 2}') WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"last\",\"first\"]'"
       sqlite:
-        form: 1
-        digest: "1516302613cc1332e851a2a7fcab2c3819c2a1b5bb890ff0169d2ae5bf52af24"
+        form: 2
+        digest: "d77ad374aae02c40942aa7f0c5e34ca34a1a4e85bb5bcd0a5cd44603d37f6c94"
         create:
-          - "CREATE UNIQUE INDEX IF NOT EXISTS drivine_uq_Personlastfirst_4c504a31 ON drivine_node ((CASE json_type(props, '$.\"last\"') WHEN 'text' THEN props ->> '$.\"last\"' WHEN 'null' THEN NULL ELSE props -> '$.\"last\"' END), (CASE json_type(props, '$.\"first\"') WHEN 'text' THEN props ->> '$.\"first\"' WHEN 'null' THEN NULL ELSE props -> '$.\"first\"' END)) WHERE instr(labels, '\"Person\"') > 0"
+          - "CREATE UNIQUE INDEX IF NOT EXISTS drivine_uq2_Personlastfirst_4c504a31 ON drivine_node (COALESCE(props ->> '$.\"last\".\"$t\"', CASE json_type(props, '$.\"last\"') WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'null' THEN NULL ELSE json_type(props, '$.\"last\"') END), COALESCE(props ->> '$.\"last\".s', props ->> '$.\"last\".v', props ->> '$.\"last\"'), COALESCE(props ->> '$.\"first\".\"$t\"', CASE json_type(props, '$.\"first\"') WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'null' THEN NULL ELSE json_type(props, '$.\"first\"') END), COALESCE(props ->> '$.\"first\".s', props ->> '$.\"first\".v', props ->> '$.\"first\"')) WHERE instr(labels, '\"Person\"') > 0"
           - |-
             INSERT INTO drivine_schema (kind, label, properties, name, object_name, details)
-            VALUES ('UNIQUENESS_CONSTRAINT', 'Person', '["last","first"]', 'Person_last_first_unique', 'drivine_uq_Personlastfirst_4c504a31', '{"form": 1}')
+            VALUES ('UNIQUENESS_CONSTRAINT', 'Person', '["last","first"]', 'Person_last_first_unique', 'drivine_uq2_Personlastfirst_4c504a31', '{"form": 2}')
             ON CONFLICT (kind, label, properties) DO NOTHING
         drop:
-          - "DROP INDEX IF EXISTS drivine_uq_Personlastfirst_4c504a31"
+          - "DROP INDEX IF EXISTS drivine_uq2_Personlastfirst_4c504a31"
           - "DELETE FROM drivine_schema WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"last\",\"first\"]'"
         recreate:
-          form: 1
-          digest: "17ce525895d3359d5f28485a5ab59168338b5e8d4044bc02c9fc9ccde259b341"
+          form: 2
+          digest: "1e386b0faf99b21f4651cf62f95d34282fae794b68e8dd43f2c9aaffa36dff13"
           leftover:
-            - "DROP INDEX IF EXISTS drivine_uq_Personlastfirst_4c504a31_r"
+            - "DROP INDEX IF EXISTS drivine_uq2_Personlastfirst_4c504a31_r"
           build:
-            - "CREATE UNIQUE INDEX drivine_uq_Personlastfirst_4c504a31_r ON drivine_node ((CASE json_type(props, '$.\"last\"') WHEN 'text' THEN props ->> '$.\"last\"' WHEN 'null' THEN NULL ELSE props -> '$.\"last\"' END), (CASE json_type(props, '$.\"first\"') WHEN 'text' THEN props ->> '$.\"first\"' WHEN 'null' THEN NULL ELSE props -> '$.\"first\"' END)) WHERE instr(labels, '\"Person\"') > 0"
+            - "CREATE UNIQUE INDEX drivine_uq2_Personlastfirst_4c504a31_r ON drivine_node (COALESCE(props ->> '$.\"last\".\"$t\"', CASE json_type(props, '$.\"last\"') WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'null' THEN NULL ELSE json_type(props, '$.\"last\"') END), COALESCE(props ->> '$.\"last\".s', props ->> '$.\"last\".v', props ->> '$.\"last\"'), COALESCE(props ->> '$.\"first\".\"$t\"', CASE json_type(props, '$.\"first\"') WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'null' THEN NULL ELSE json_type(props, '$.\"first\"') END), COALESCE(props ->> '$.\"first\".s', props ->> '$.\"first\".v', props ->> '$.\"first\"')) WHERE instr(labels, '\"Person\"') > 0"
           swap:
-            - "DROP INDEX IF EXISTS drivine_uq_Personlastfirst_4c504a31"
-            - "CREATE UNIQUE INDEX drivine_uq_Personlastfirst_4c504a31 ON drivine_node ((CASE json_type(props, '$.\"last\"') WHEN 'text' THEN props ->> '$.\"last\"' WHEN 'null' THEN NULL ELSE props -> '$.\"last\"' END), (CASE json_type(props, '$.\"first\"') WHEN 'text' THEN props ->> '$.\"first\"' WHEN 'null' THEN NULL ELSE props -> '$.\"first\"' END)) WHERE instr(labels, '\"Person\"') > 0"
-            - "DROP INDEX IF EXISTS drivine_uq_Personlastfirst_4c504a31_r"
+            - "DROP INDEX IF EXISTS drivine_uq2_Personlastfirst_4c504a31"
+            - "CREATE UNIQUE INDEX drivine_uq2_Personlastfirst_4c504a31 ON drivine_node (COALESCE(props ->> '$.\"last\".\"$t\"', CASE json_type(props, '$.\"last\"') WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'null' THEN NULL ELSE json_type(props, '$.\"last\"') END), COALESCE(props ->> '$.\"last\".s', props ->> '$.\"last\".v', props ->> '$.\"last\"'), COALESCE(props ->> '$.\"first\".\"$t\"', CASE json_type(props, '$.\"first\"') WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'null' THEN NULL ELSE json_type(props, '$.\"first\"') END), COALESCE(props ->> '$.\"first\".s', props ->> '$.\"first\".v', props ->> '$.\"first\"')) WHERE instr(labels, '\"Person\"') > 0"
+            - "DROP INDEX IF EXISTS drivine_uq2_Personlastfirst_4c504a31_r"
           finish:
-            - "CREATE UNIQUE INDEX drivine_uq_Personlastfirst_4c504a31 ON drivine_node ((CASE json_type(props, '$.\"last\"') WHEN 'text' THEN props ->> '$.\"last\"' WHEN 'null' THEN NULL ELSE props -> '$.\"last\"' END), (CASE json_type(props, '$.\"first\"') WHEN 'text' THEN props ->> '$.\"first\"' WHEN 'null' THEN NULL ELSE props -> '$.\"first\"' END)) WHERE instr(labels, '\"Person\"') > 0"
-            - "DROP INDEX IF EXISTS drivine_uq_Personlastfirst_4c504a31_r"
-          remade: "UPDATE drivine_schema SET name = 'Person_last_first_unique', object_name = 'drivine_uq_Personlastfirst_4c504a31', details = json_set(details, '$.form', 1) WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"last\",\"first\"]'"
+            - "CREATE UNIQUE INDEX drivine_uq2_Personlastfirst_4c504a31 ON drivine_node (COALESCE(props ->> '$.\"last\".\"$t\"', CASE json_type(props, '$.\"last\"') WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'null' THEN NULL ELSE json_type(props, '$.\"last\"') END), COALESCE(props ->> '$.\"last\".s', props ->> '$.\"last\".v', props ->> '$.\"last\"'), COALESCE(props ->> '$.\"first\".\"$t\"', CASE json_type(props, '$.\"first\"') WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'null' THEN NULL ELSE json_type(props, '$.\"first\"') END), COALESCE(props ->> '$.\"first\".s', props ->> '$.\"first\".v', props ->> '$.\"first\"')) WHERE instr(labels, '\"Person\"') > 0"
+            - "DROP INDEX IF EXISTS drivine_uq2_Personlastfirst_4c504a31_r"
+          remade: "UPDATE drivine_schema SET name = 'Person_last_first_unique', object_name = 'drivine_uq2_Personlastfirst_4c504a31', details = json_set(details, '$.form', 2) WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"last\",\"first\"]'"
       neo4j:
         create:
           - "CREATE CONSTRAINT `Person_last_first_unique` IF NOT EXISTS FOR (n:`Person`) REQUIRE (n.`last`, n.`first`) IS UNIQUE"
@@ -3502,23 +3502,23 @@ cases:
             END
             $forget$
         recreate:
-          form: 1
-          digest: "9726b924b7653b7009998e3e9a62706e69e424b6674723c099c8df3f71f9d043"
+          form: 2
+          digest: "faf9ac6d1f0da1d5f5def852b917c7247b8549ebb35856b50d446030cef7734f"
           leftover:
-            - "DROP INDEX IF EXISTS drivine_uq_Persondrivineloweremail_b3ad0b9b_r"
+            - "DROP INDEX IF EXISTS drivine_uq2_Persondrivineloweremail_b3ad0b9b_r"
           build:
-            - "CREATE UNIQUE INDEX drivine_uq_Persondrivineloweremail_b3ad0b9b_r ON drivine_node (((props ->> '__drivine.lower.email'))) WHERE labels @> '[\"Person\"]'"
+            - "CREATE UNIQUE INDEX drivine_uq2_Persondrivineloweremail_b3ad0b9b_r ON drivine_node (((props -> '__drivine.lower.email'))) WHERE labels @> '[\"Person\"]'"
           swap:
             - |-
               DO $swap$
               BEGIN
-                  DROP INDEX IF EXISTS drivine_uq_Persondrivineloweremail_b3ad0b9b;
-                  ALTER INDEX drivine_uq_Persondrivineloweremail_b3ad0b9b_r RENAME TO drivine_uq_Persondrivineloweremail_b3ad0b9b;
+                  DROP INDEX IF EXISTS drivine_uq2_Persondrivineloweremail_b3ad0b9b;
+                  ALTER INDEX drivine_uq2_Persondrivineloweremail_b3ad0b9b_r RENAME TO drivine_uq2_Persondrivineloweremail_b3ad0b9b;
               END
               $swap$
           finish:
-            - "ALTER INDEX drivine_uq_Persondrivineloweremail_b3ad0b9b_r RENAME TO drivine_uq_Persondrivineloweremail_b3ad0b9b"
-          remade: "UPDATE drivine_schema SET name = 'Person_email_ci_unique', object_name = 'drivine_uq_Persondrivineloweremail_b3ad0b9b', details = jsonb_set(details, '{form}', '1') WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"__drivine.lower.email\"]'"
+            - "ALTER INDEX drivine_uq2_Persondrivineloweremail_b3ad0b9b_r RENAME TO drivine_uq2_Persondrivineloweremail_b3ad0b9b"
+          remade: "UPDATE drivine_schema SET name = 'Person_email_ci_unique', object_name = 'drivine_uq2_Persondrivineloweremail_b3ad0b9b', details = jsonb_set(details, '{form}', '2') WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"__drivine.lower.email\"]'"
       oracle:
         form: 2
         digest: "06fdd900532865e925ed52c16ebb3c054a236ab6c94287e3feb8d73d9a7c45d3"
@@ -3607,10 +3607,10 @@ cases:
                 COMMIT;
             END;
         recreate:
-          form: 1
-          digest: "55f94396c57a73e896b1f18f131f5d719a78678f4366ee7d71c3990ebbb2308c"
+          form: 2
+          digest: "6403a7ef7f1c2cbc0826756d02a3a19de0005450c44a686c5515b3b0828f003f"
           leftover:
-            - "DROP INDEX IF EXISTS drivine_uq_Persondrivineloweremail_b3ad0b9b_r"
+            - "DROP INDEX IF EXISTS drivine_uq2_Persondrivineloweremail_b3ad0b9b_r"
           build:
             - |-
               DECLARE
@@ -3619,7 +3619,7 @@ cases:
               BEGIN
                   FOR attempt IN 1 .. 300 LOOP
                       BEGIN
-                          EXECUTE IMMEDIATE 'CREATE UNIQUE INDEX drivine_uq_Persondrivineloweremail_b3ad0b9b_r ON drivine_node n (CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') AND JSON_EXISTS(n.props, ''$."__drivine.lower.email"'') THEN JSON_VALUE(n.props, ''$."__drivine.lower.email"'') END)';
+                          EXECUTE IMMEDIATE 'CREATE UNIQUE INDEX drivine_uq2_Persondrivineloweremail_b3ad0b9b_r ON drivine_node n (CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') AND JSON_EXISTS(n.props, ''$."__drivine.lower.email"'') THEN CASE WHEN CASE JSON_VALUE(n.props, ''$."__drivine.lower.email".type()'' RETURNING VARCHAR2(16)) WHEN ''object'' THEN COALESCE(JSON_VALUE(n.props, ''$."__drivine.lower.email".s''), JSON_VALUE(n.props, ''$."__drivine.lower.email".v'')) WHEN ''number'' THEN TO_CHAR(JSON_VALUE(n.props, ''$."__drivine.lower.email"'' RETURNING NUMBER), ''TM9'') WHEN ''double'' THEN CASE WHEN JSON_VALUE(n.props, ''$."__drivine.lower.email"'' RETURNING BINARY_DOUBLE) = FLOOR(JSON_VALUE(n.props, ''$."__drivine.lower.email"'' RETURNING BINARY_DOUBLE)) AND JSON_VALUE(n.props, ''$."__drivine.lower.email"'' RETURNING BINARY_DOUBLE) >= -9223372036854775808 AND JSON_VALUE(n.props, ''$."__drivine.lower.email"'' RETURNING BINARY_DOUBLE) < 9223372036854775808 THEN TO_CHAR(CAST(FLOOR(JSON_VALUE(n.props, ''$."__drivine.lower.email"'' RETURNING BINARY_DOUBLE) / 4294967296) AS NUMBER) * 4294967296 + CAST(JSON_VALUE(n.props, ''$."__drivine.lower.email"'' RETURNING BINARY_DOUBLE) - FLOOR(JSON_VALUE(n.props, ''$."__drivine.lower.email"'' RETURNING BINARY_DOUBLE) / 4294967296) * 4294967296 AS NUMBER), ''TM9'') ELSE ''d'' || TO_CHAR(JSON_VALUE(n.props, ''$."__drivine.lower.email"'' RETURNING BINARY_DOUBLE)) END ELSE JSON_VALUE(n.props, ''$."__drivine.lower.email"'') END IS NOT NULL THEN CASE JSON_VALUE(n.props, ''$."__drivine.lower.email".type()'' RETURNING VARCHAR2(16)) WHEN ''object'' THEN JSON_VALUE(n.props, ''$."__drivine.lower.email"."$t"'' RETURNING VARCHAR2(16)) WHEN ''double'' THEN ''number'' ELSE JSON_VALUE(n.props, ''$."__drivine.lower.email".type()'' RETURNING VARCHAR2(16)) END END END, CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') AND JSON_EXISTS(n.props, ''$."__drivine.lower.email"'') THEN CASE JSON_VALUE(n.props, ''$."__drivine.lower.email".type()'' RETURNING VARCHAR2(16)) WHEN ''object'' THEN COALESCE(JSON_VALUE(n.props, ''$."__drivine.lower.email".s''), JSON_VALUE(n.props, ''$."__drivine.lower.email".v'')) WHEN ''number'' THEN TO_CHAR(JSON_VALUE(n.props, ''$."__drivine.lower.email"'' RETURNING NUMBER), ''TM9'') WHEN ''double'' THEN CASE WHEN JSON_VALUE(n.props, ''$."__drivine.lower.email"'' RETURNING BINARY_DOUBLE) = FLOOR(JSON_VALUE(n.props, ''$."__drivine.lower.email"'' RETURNING BINARY_DOUBLE)) AND JSON_VALUE(n.props, ''$."__drivine.lower.email"'' RETURNING BINARY_DOUBLE) >= -9223372036854775808 AND JSON_VALUE(n.props, ''$."__drivine.lower.email"'' RETURNING BINARY_DOUBLE) < 9223372036854775808 THEN TO_CHAR(CAST(FLOOR(JSON_VALUE(n.props, ''$."__drivine.lower.email"'' RETURNING BINARY_DOUBLE) / 4294967296) AS NUMBER) * 4294967296 + CAST(JSON_VALUE(n.props, ''$."__drivine.lower.email"'' RETURNING BINARY_DOUBLE) - FLOOR(JSON_VALUE(n.props, ''$."__drivine.lower.email"'' RETURNING BINARY_DOUBLE) / 4294967296) * 4294967296 AS NUMBER), ''TM9'') ELSE ''d'' || TO_CHAR(JSON_VALUE(n.props, ''$."__drivine.lower.email"'' RETURNING BINARY_DOUBLE)) END ELSE JSON_VALUE(n.props, ''$."__drivine.lower.email"'') END END)';
                           EXIT;
                       EXCEPTION
                           WHEN e_exists THEN EXIT;
@@ -3630,11 +3630,11 @@ cases:
                   END LOOP;
               END;
           swap:
-            - "DROP INDEX IF EXISTS drivine_uq_Persondrivineloweremail_b3ad0b9b"
-            - "ALTER INDEX drivine_uq_Persondrivineloweremail_b3ad0b9b_r RENAME TO drivine_uq_Persondrivineloweremail_b3ad0b9b"
+            - "DROP INDEX IF EXISTS drivine_uq2_Persondrivineloweremail_b3ad0b9b"
+            - "ALTER INDEX drivine_uq2_Persondrivineloweremail_b3ad0b9b_r RENAME TO drivine_uq2_Persondrivineloweremail_b3ad0b9b"
           finish:
-            - "ALTER INDEX drivine_uq_Persondrivineloweremail_b3ad0b9b_r RENAME TO drivine_uq_Persondrivineloweremail_b3ad0b9b"
-          remade: "UPDATE drivine_schema SET name = 'Person_email_ci_unique', object_name = 'drivine_uq_Persondrivineloweremail_b3ad0b9b', details = JSON_MERGEPATCH(details, '{\"form\": 1}') WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"__drivine.lower.email\"]'"
+            - "ALTER INDEX drivine_uq2_Persondrivineloweremail_b3ad0b9b_r RENAME TO drivine_uq2_Persondrivineloweremail_b3ad0b9b"
+          remade: "UPDATE drivine_schema SET name = 'Person_email_ci_unique', object_name = 'drivine_uq2_Persondrivineloweremail_b3ad0b9b', details = JSON_MERGEPATCH(details, '{\"form\": 2}') WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"__drivine.lower.email\"]'"
       sqlite:
         form: 2
         digest: "8d8859a8a3ecaca9f9db89f3b8647d3042c0f511c6431619e42ae5733d1e1714"
@@ -3648,20 +3648,20 @@ cases:
           - "DROP INDEX IF EXISTS drivine_uq2_Persondrivineloweremail_b3ad0b9b"
           - "DELETE FROM drivine_schema WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"__drivine.lower.email\"]'"
         recreate:
-          form: 1
-          digest: "0423cbe09c4f285a3ae4e7d9ac3700bfff998ea51f2c7f5924e681533217fe25"
+          form: 2
+          digest: "4953941ffccb71850c326bdde401ddbb37779f201386b0e22d99b9ea269f184f"
           leftover:
-            - "DROP INDEX IF EXISTS drivine_uq_Persondrivineloweremail_b3ad0b9b_r"
+            - "DROP INDEX IF EXISTS drivine_uq2_Persondrivineloweremail_b3ad0b9b_r"
           build:
-            - "CREATE UNIQUE INDEX drivine_uq_Persondrivineloweremail_b3ad0b9b_r ON drivine_node ((CASE json_type(props, '$.\"__drivine.lower.email\"') WHEN 'text' THEN props ->> '$.\"__drivine.lower.email\"' WHEN 'null' THEN NULL ELSE props -> '$.\"__drivine.lower.email\"' END)) WHERE instr(labels, '\"Person\"') > 0"
+            - "CREATE UNIQUE INDEX drivine_uq2_Persondrivineloweremail_b3ad0b9b_r ON drivine_node (COALESCE(props ->> '$.\"__drivine.lower.email\".\"$t\"', CASE json_type(props, '$.\"__drivine.lower.email\"') WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'null' THEN NULL ELSE json_type(props, '$.\"__drivine.lower.email\"') END), COALESCE(props ->> '$.\"__drivine.lower.email\".s', props ->> '$.\"__drivine.lower.email\".v', props ->> '$.\"__drivine.lower.email\"')) WHERE instr(labels, '\"Person\"') > 0"
           swap:
-            - "DROP INDEX IF EXISTS drivine_uq_Persondrivineloweremail_b3ad0b9b"
-            - "CREATE UNIQUE INDEX drivine_uq_Persondrivineloweremail_b3ad0b9b ON drivine_node ((CASE json_type(props, '$.\"__drivine.lower.email\"') WHEN 'text' THEN props ->> '$.\"__drivine.lower.email\"' WHEN 'null' THEN NULL ELSE props -> '$.\"__drivine.lower.email\"' END)) WHERE instr(labels, '\"Person\"') > 0"
-            - "DROP INDEX IF EXISTS drivine_uq_Persondrivineloweremail_b3ad0b9b_r"
+            - "DROP INDEX IF EXISTS drivine_uq2_Persondrivineloweremail_b3ad0b9b"
+            - "CREATE UNIQUE INDEX drivine_uq2_Persondrivineloweremail_b3ad0b9b ON drivine_node (COALESCE(props ->> '$.\"__drivine.lower.email\".\"$t\"', CASE json_type(props, '$.\"__drivine.lower.email\"') WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'null' THEN NULL ELSE json_type(props, '$.\"__drivine.lower.email\"') END), COALESCE(props ->> '$.\"__drivine.lower.email\".s', props ->> '$.\"__drivine.lower.email\".v', props ->> '$.\"__drivine.lower.email\"')) WHERE instr(labels, '\"Person\"') > 0"
+            - "DROP INDEX IF EXISTS drivine_uq2_Persondrivineloweremail_b3ad0b9b_r"
           finish:
-            - "CREATE UNIQUE INDEX drivine_uq_Persondrivineloweremail_b3ad0b9b ON drivine_node ((CASE json_type(props, '$.\"__drivine.lower.email\"') WHEN 'text' THEN props ->> '$.\"__drivine.lower.email\"' WHEN 'null' THEN NULL ELSE props -> '$.\"__drivine.lower.email\"' END)) WHERE instr(labels, '\"Person\"') > 0"
-            - "DROP INDEX IF EXISTS drivine_uq_Persondrivineloweremail_b3ad0b9b_r"
-          remade: "UPDATE drivine_schema SET name = 'Person_email_ci_unique', object_name = 'drivine_uq_Persondrivineloweremail_b3ad0b9b', details = json_set(details, '$.form', 1) WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"__drivine.lower.email\"]'"
+            - "CREATE UNIQUE INDEX drivine_uq2_Persondrivineloweremail_b3ad0b9b ON drivine_node (COALESCE(props ->> '$.\"__drivine.lower.email\".\"$t\"', CASE json_type(props, '$.\"__drivine.lower.email\"') WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'null' THEN NULL ELSE json_type(props, '$.\"__drivine.lower.email\"') END), COALESCE(props ->> '$.\"__drivine.lower.email\".s', props ->> '$.\"__drivine.lower.email\".v', props ->> '$.\"__drivine.lower.email\"')) WHERE instr(labels, '\"Person\"') > 0"
+            - "DROP INDEX IF EXISTS drivine_uq2_Persondrivineloweremail_b3ad0b9b_r"
+          remade: "UPDATE drivine_schema SET name = 'Person_email_ci_unique', object_name = 'drivine_uq2_Persondrivineloweremail_b3ad0b9b', details = json_set(details, '$.form', 2) WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"__drivine.lower.email\"]'"
       neo4j:
         create:
           - "CREATE CONSTRAINT `Person_email_ci_unique` IF NOT EXISTS FOR (n:`Person`) REQUIRE (n.`__drivine.lower.email`) IS UNIQUE"
@@ -4822,23 +4822,23 @@ cases:
             END
             $forget$
         recreate:
-          form: 1
-          digest: "b21bc69c4ccd689eefc886fd3093fab1d35030c9f037f126725019bd8dc22fe0"
+          form: 2
+          digest: "80171249b0a4e168ed5a8a9cec14cbda7598a9da5496e774b78a75803bed32b9"
           leftover:
-            - "DROP INDEX IF EXISTS drivine_uq_Personname_f56cb9fe_r"
+            - "DROP INDEX IF EXISTS drivine_uq2_Personname_f56cb9fe_r"
           build:
-            - "CREATE UNIQUE INDEX drivine_uq_Personname_f56cb9fe_r ON drivine_node (((props ->> 'name'))) WHERE labels @> '[\"Per\\\"son\"]'"
+            - "CREATE UNIQUE INDEX drivine_uq2_Personname_f56cb9fe_r ON drivine_node (((props -> 'name'))) WHERE labels @> '[\"Per\\\"son\"]'"
           swap:
             - |-
               DO $swap$
               BEGIN
-                  DROP INDEX IF EXISTS drivine_uq_Personname_f56cb9fe;
-                  ALTER INDEX drivine_uq_Personname_f56cb9fe_r RENAME TO drivine_uq_Personname_f56cb9fe;
+                  DROP INDEX IF EXISTS drivine_uq2_Personname_f56cb9fe;
+                  ALTER INDEX drivine_uq2_Personname_f56cb9fe_r RENAME TO drivine_uq2_Personname_f56cb9fe;
               END
               $swap$
           finish:
-            - "ALTER INDEX drivine_uq_Personname_f56cb9fe_r RENAME TO drivine_uq_Personname_f56cb9fe"
-          remade: "UPDATE drivine_schema SET name = 'Per\"son_name_unique', object_name = 'drivine_uq_Personname_f56cb9fe', details = jsonb_set(details, '{form}', '1') WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Per\"son' AND properties = '[\"name\"]'"
+            - "ALTER INDEX drivine_uq2_Personname_f56cb9fe_r RENAME TO drivine_uq2_Personname_f56cb9fe"
+          remade: "UPDATE drivine_schema SET name = 'Per\"son_name_unique', object_name = 'drivine_uq2_Personname_f56cb9fe', details = jsonb_set(details, '{form}', '2') WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Per\"son' AND properties = '[\"name\"]'"
       oracle:
         form: 2
         digest: "87e8d6b40941672c229e7c8dd0bddf6ad4c9c49f68630d76fd11d96fd9524cd8"
@@ -4927,10 +4927,10 @@ cases:
                 COMMIT;
             END;
         recreate:
-          form: 1
-          digest: "496baf7ecb3255988346515e69166eb6c82f0b87501f89e1dbac6d560f2ec48a"
+          form: 2
+          digest: "0fdf6a57f27a65ce9cee22f5ab5bc6a90dba52339abcfdd5420c49e42e8b04aa"
           leftover:
-            - "DROP INDEX IF EXISTS drivine_uq_Personname_f56cb9fe_r"
+            - "DROP INDEX IF EXISTS drivine_uq2_Personname_f56cb9fe_r"
           build:
             - |-
               DECLARE
@@ -4939,7 +4939,7 @@ cases:
               BEGIN
                   FOR attempt IN 1 .. 300 LOOP
                       BEGIN
-                          EXECUTE IMMEDIATE 'CREATE UNIQUE INDEX drivine_uq_Personname_f56cb9fe_r ON drivine_node n (CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Per\"son")'') AND JSON_EXISTS(n.props, ''$.name'') THEN JSON_VALUE(n.props, ''$.name'') END)';
+                          EXECUTE IMMEDIATE 'CREATE UNIQUE INDEX drivine_uq2_Personname_f56cb9fe_r ON drivine_node n (CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Per\"son")'') AND JSON_EXISTS(n.props, ''$.name'') THEN CASE WHEN CASE JSON_VALUE(n.props, ''$.name.type()'' RETURNING VARCHAR2(16)) WHEN ''object'' THEN COALESCE(JSON_VALUE(n.props, ''$.name.s''), JSON_VALUE(n.props, ''$.name.v'')) WHEN ''number'' THEN TO_CHAR(JSON_VALUE(n.props, ''$.name'' RETURNING NUMBER), ''TM9'') WHEN ''double'' THEN CASE WHEN JSON_VALUE(n.props, ''$.name'' RETURNING BINARY_DOUBLE) = FLOOR(JSON_VALUE(n.props, ''$.name'' RETURNING BINARY_DOUBLE)) AND JSON_VALUE(n.props, ''$.name'' RETURNING BINARY_DOUBLE) >= -9223372036854775808 AND JSON_VALUE(n.props, ''$.name'' RETURNING BINARY_DOUBLE) < 9223372036854775808 THEN TO_CHAR(CAST(FLOOR(JSON_VALUE(n.props, ''$.name'' RETURNING BINARY_DOUBLE) / 4294967296) AS NUMBER) * 4294967296 + CAST(JSON_VALUE(n.props, ''$.name'' RETURNING BINARY_DOUBLE) - FLOOR(JSON_VALUE(n.props, ''$.name'' RETURNING BINARY_DOUBLE) / 4294967296) * 4294967296 AS NUMBER), ''TM9'') ELSE ''d'' || TO_CHAR(JSON_VALUE(n.props, ''$.name'' RETURNING BINARY_DOUBLE)) END ELSE JSON_VALUE(n.props, ''$.name'') END IS NOT NULL THEN CASE JSON_VALUE(n.props, ''$.name.type()'' RETURNING VARCHAR2(16)) WHEN ''object'' THEN JSON_VALUE(n.props, ''$.name."$t"'' RETURNING VARCHAR2(16)) WHEN ''double'' THEN ''number'' ELSE JSON_VALUE(n.props, ''$.name.type()'' RETURNING VARCHAR2(16)) END END END, CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Per\"son")'') AND JSON_EXISTS(n.props, ''$.name'') THEN CASE JSON_VALUE(n.props, ''$.name.type()'' RETURNING VARCHAR2(16)) WHEN ''object'' THEN COALESCE(JSON_VALUE(n.props, ''$.name.s''), JSON_VALUE(n.props, ''$.name.v'')) WHEN ''number'' THEN TO_CHAR(JSON_VALUE(n.props, ''$.name'' RETURNING NUMBER), ''TM9'') WHEN ''double'' THEN CASE WHEN JSON_VALUE(n.props, ''$.name'' RETURNING BINARY_DOUBLE) = FLOOR(JSON_VALUE(n.props, ''$.name'' RETURNING BINARY_DOUBLE)) AND JSON_VALUE(n.props, ''$.name'' RETURNING BINARY_DOUBLE) >= -9223372036854775808 AND JSON_VALUE(n.props, ''$.name'' RETURNING BINARY_DOUBLE) < 9223372036854775808 THEN TO_CHAR(CAST(FLOOR(JSON_VALUE(n.props, ''$.name'' RETURNING BINARY_DOUBLE) / 4294967296) AS NUMBER) * 4294967296 + CAST(JSON_VALUE(n.props, ''$.name'' RETURNING BINARY_DOUBLE) - FLOOR(JSON_VALUE(n.props, ''$.name'' RETURNING BINARY_DOUBLE) / 4294967296) * 4294967296 AS NUMBER), ''TM9'') ELSE ''d'' || TO_CHAR(JSON_VALUE(n.props, ''$.name'' RETURNING BINARY_DOUBLE)) END ELSE JSON_VALUE(n.props, ''$.name'') END END)';
                           EXIT;
                       EXCEPTION
                           WHEN e_exists THEN EXIT;
@@ -4950,11 +4950,11 @@ cases:
                   END LOOP;
               END;
           swap:
-            - "DROP INDEX IF EXISTS drivine_uq_Personname_f56cb9fe"
-            - "ALTER INDEX drivine_uq_Personname_f56cb9fe_r RENAME TO drivine_uq_Personname_f56cb9fe"
+            - "DROP INDEX IF EXISTS drivine_uq2_Personname_f56cb9fe"
+            - "ALTER INDEX drivine_uq2_Personname_f56cb9fe_r RENAME TO drivine_uq2_Personname_f56cb9fe"
           finish:
-            - "ALTER INDEX drivine_uq_Personname_f56cb9fe_r RENAME TO drivine_uq_Personname_f56cb9fe"
-          remade: "UPDATE drivine_schema SET name = 'Per\"son_name_unique', object_name = 'drivine_uq_Personname_f56cb9fe', details = JSON_MERGEPATCH(details, '{\"form\": 1}') WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Per\"son' AND properties = '[\"name\"]'"
+            - "ALTER INDEX drivine_uq2_Personname_f56cb9fe_r RENAME TO drivine_uq2_Personname_f56cb9fe"
+          remade: "UPDATE drivine_schema SET name = 'Per\"son_name_unique', object_name = 'drivine_uq2_Personname_f56cb9fe', details = JSON_MERGEPATCH(details, '{\"form\": 2}') WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Per\"son' AND properties = '[\"name\"]'"
       sqlite:
         form: 2
         digest: "1453dc5a843d1999182c276bd6303217bb1efccbd17d5a6087959d1c13ba424f"
@@ -4968,20 +4968,20 @@ cases:
           - "DROP INDEX IF EXISTS drivine_uq2_Personname_f56cb9fe"
           - "DELETE FROM drivine_schema WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Per\"son' AND properties = '[\"name\"]'"
         recreate:
-          form: 1
-          digest: "5104838fb259c0eb3ce8c123cba841fbdb6cc0a982fd955752ee4ed79d6d3b73"
+          form: 2
+          digest: "c6b4f09653253cbcf42837bac286f66a850ce98a3610a7618d8053df36b10dd1"
           leftover:
-            - "DROP INDEX IF EXISTS drivine_uq_Personname_f56cb9fe_r"
+            - "DROP INDEX IF EXISTS drivine_uq2_Personname_f56cb9fe_r"
           build:
-            - "CREATE UNIQUE INDEX drivine_uq_Personname_f56cb9fe_r ON drivine_node ((CASE json_type(props, '$.\"name\"') WHEN 'text' THEN props ->> '$.\"name\"' WHEN 'null' THEN NULL ELSE props -> '$.\"name\"' END)) WHERE instr(labels, '\"Per\\\"son\"') > 0"
+            - "CREATE UNIQUE INDEX drivine_uq2_Personname_f56cb9fe_r ON drivine_node (COALESCE(props ->> '$.\"name\".\"$t\"', CASE json_type(props, '$.\"name\"') WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'null' THEN NULL ELSE json_type(props, '$.\"name\"') END), COALESCE(props ->> '$.\"name\".s', props ->> '$.\"name\".v', props ->> '$.\"name\"')) WHERE instr(labels, '\"Per\\\"son\"') > 0"
           swap:
-            - "DROP INDEX IF EXISTS drivine_uq_Personname_f56cb9fe"
-            - "CREATE UNIQUE INDEX drivine_uq_Personname_f56cb9fe ON drivine_node ((CASE json_type(props, '$.\"name\"') WHEN 'text' THEN props ->> '$.\"name\"' WHEN 'null' THEN NULL ELSE props -> '$.\"name\"' END)) WHERE instr(labels, '\"Per\\\"son\"') > 0"
-            - "DROP INDEX IF EXISTS drivine_uq_Personname_f56cb9fe_r"
+            - "DROP INDEX IF EXISTS drivine_uq2_Personname_f56cb9fe"
+            - "CREATE UNIQUE INDEX drivine_uq2_Personname_f56cb9fe ON drivine_node (COALESCE(props ->> '$.\"name\".\"$t\"', CASE json_type(props, '$.\"name\"') WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'null' THEN NULL ELSE json_type(props, '$.\"name\"') END), COALESCE(props ->> '$.\"name\".s', props ->> '$.\"name\".v', props ->> '$.\"name\"')) WHERE instr(labels, '\"Per\\\"son\"') > 0"
+            - "DROP INDEX IF EXISTS drivine_uq2_Personname_f56cb9fe_r"
           finish:
-            - "CREATE UNIQUE INDEX drivine_uq_Personname_f56cb9fe ON drivine_node ((CASE json_type(props, '$.\"name\"') WHEN 'text' THEN props ->> '$.\"name\"' WHEN 'null' THEN NULL ELSE props -> '$.\"name\"' END)) WHERE instr(labels, '\"Per\\\"son\"') > 0"
-            - "DROP INDEX IF EXISTS drivine_uq_Personname_f56cb9fe_r"
-          remade: "UPDATE drivine_schema SET name = 'Per\"son_name_unique', object_name = 'drivine_uq_Personname_f56cb9fe', details = json_set(details, '$.form', 1) WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Per\"son' AND properties = '[\"name\"]'"
+            - "CREATE UNIQUE INDEX drivine_uq2_Personname_f56cb9fe ON drivine_node (COALESCE(props ->> '$.\"name\".\"$t\"', CASE json_type(props, '$.\"name\"') WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'null' THEN NULL ELSE json_type(props, '$.\"name\"') END), COALESCE(props ->> '$.\"name\".s', props ->> '$.\"name\".v', props ->> '$.\"name\"')) WHERE instr(labels, '\"Per\\\"son\"') > 0"
+            - "DROP INDEX IF EXISTS drivine_uq2_Personname_f56cb9fe_r"
+          remade: "UPDATE drivine_schema SET name = 'Per\"son_name_unique', object_name = 'drivine_uq2_Personname_f56cb9fe', details = json_set(details, '$.form', 2) WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Per\"son' AND properties = '[\"name\"]'"
       neo4j:
         create:
           - "CREATE CONSTRAINT `Per\"son_name_unique` IF NOT EXISTS FOR (n:`Per\"son`) REQUIRE (n.`name`) IS UNIQUE"
@@ -5338,23 +5338,23 @@ cases:
             END
             $forget$
         recreate:
-          form: 1
-          digest: "3fe4fc90cafb8c6d686f763e69cb0e9fb6d165dcb16bd2d42752a9769e48367b"
+          form: 2
+          digest: "3116aadad6544abb61b7625a40da6a84b3c327f0aab33a07de3bbe84f73194fe"
           leftover:
-            - "DROP INDEX IF EXISTS drivine_uq_Personsayhi_5316dfc3_r"
+            - "DROP INDEX IF EXISTS drivine_uq2_Personsayhi_5316dfc3_r"
           build:
-            - "CREATE UNIQUE INDEX drivine_uq_Personsayhi_5316dfc3_r ON drivine_node (((props ->> 'say\"hi'))) WHERE labels @> '[\"Person\"]'"
+            - "CREATE UNIQUE INDEX drivine_uq2_Personsayhi_5316dfc3_r ON drivine_node (((props -> 'say\"hi'))) WHERE labels @> '[\"Person\"]'"
           swap:
             - |-
               DO $swap$
               BEGIN
-                  DROP INDEX IF EXISTS drivine_uq_Personsayhi_5316dfc3;
-                  ALTER INDEX drivine_uq_Personsayhi_5316dfc3_r RENAME TO drivine_uq_Personsayhi_5316dfc3;
+                  DROP INDEX IF EXISTS drivine_uq2_Personsayhi_5316dfc3;
+                  ALTER INDEX drivine_uq2_Personsayhi_5316dfc3_r RENAME TO drivine_uq2_Personsayhi_5316dfc3;
               END
               $swap$
           finish:
-            - "ALTER INDEX drivine_uq_Personsayhi_5316dfc3_r RENAME TO drivine_uq_Personsayhi_5316dfc3"
-          remade: "UPDATE drivine_schema SET name = 'Person_say\"hi_unique', object_name = 'drivine_uq_Personsayhi_5316dfc3', details = jsonb_set(details, '{form}', '1') WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"say\\\"hi\"]'"
+            - "ALTER INDEX drivine_uq2_Personsayhi_5316dfc3_r RENAME TO drivine_uq2_Personsayhi_5316dfc3"
+          remade: "UPDATE drivine_schema SET name = 'Person_say\"hi_unique', object_name = 'drivine_uq2_Personsayhi_5316dfc3', details = jsonb_set(details, '{form}', '2') WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"say\\\"hi\"]'"
       oracle:
         form: 2
         digest: "c1049de65fa0c643ac71dbcd3d4588bf263f3533861c44522305b6133e21d6aa"
@@ -5443,10 +5443,10 @@ cases:
                 COMMIT;
             END;
         recreate:
-          form: 1
-          digest: "0a3a2bac4a407ffeca0e1733f32bc5f8e7ea87bb001bc31968c02ed78e909a73"
+          form: 2
+          digest: "7777469d21ce0db40be7c76bf71bc7b520673ce7f2e82a9ea251f10d9ad910bf"
           leftover:
-            - "DROP INDEX IF EXISTS drivine_uq_Personsayhi_5316dfc3_r"
+            - "DROP INDEX IF EXISTS drivine_uq2_Personsayhi_5316dfc3_r"
           build:
             - |-
               DECLARE
@@ -5455,7 +5455,7 @@ cases:
               BEGIN
                   FOR attempt IN 1 .. 300 LOOP
                       BEGIN
-                          EXECUTE IMMEDIATE 'CREATE UNIQUE INDEX drivine_uq_Personsayhi_5316dfc3_r ON drivine_node n (CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') AND JSON_EXISTS(n.props, ''$."say\"hi"'') THEN JSON_VALUE(n.props, ''$."say\"hi"'') END)';
+                          EXECUTE IMMEDIATE 'CREATE UNIQUE INDEX drivine_uq2_Personsayhi_5316dfc3_r ON drivine_node n (CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') AND JSON_EXISTS(n.props, ''$."say\"hi"'') THEN CASE WHEN CASE JSON_VALUE(n.props, ''$."say\"hi".type()'' RETURNING VARCHAR2(16)) WHEN ''object'' THEN COALESCE(JSON_VALUE(n.props, ''$."say\"hi".s''), JSON_VALUE(n.props, ''$."say\"hi".v'')) WHEN ''number'' THEN TO_CHAR(JSON_VALUE(n.props, ''$."say\"hi"'' RETURNING NUMBER), ''TM9'') WHEN ''double'' THEN CASE WHEN JSON_VALUE(n.props, ''$."say\"hi"'' RETURNING BINARY_DOUBLE) = FLOOR(JSON_VALUE(n.props, ''$."say\"hi"'' RETURNING BINARY_DOUBLE)) AND JSON_VALUE(n.props, ''$."say\"hi"'' RETURNING BINARY_DOUBLE) >= -9223372036854775808 AND JSON_VALUE(n.props, ''$."say\"hi"'' RETURNING BINARY_DOUBLE) < 9223372036854775808 THEN TO_CHAR(CAST(FLOOR(JSON_VALUE(n.props, ''$."say\"hi"'' RETURNING BINARY_DOUBLE) / 4294967296) AS NUMBER) * 4294967296 + CAST(JSON_VALUE(n.props, ''$."say\"hi"'' RETURNING BINARY_DOUBLE) - FLOOR(JSON_VALUE(n.props, ''$."say\"hi"'' RETURNING BINARY_DOUBLE) / 4294967296) * 4294967296 AS NUMBER), ''TM9'') ELSE ''d'' || TO_CHAR(JSON_VALUE(n.props, ''$."say\"hi"'' RETURNING BINARY_DOUBLE)) END ELSE JSON_VALUE(n.props, ''$."say\"hi"'') END IS NOT NULL THEN CASE JSON_VALUE(n.props, ''$."say\"hi".type()'' RETURNING VARCHAR2(16)) WHEN ''object'' THEN JSON_VALUE(n.props, ''$."say\"hi"."$t"'' RETURNING VARCHAR2(16)) WHEN ''double'' THEN ''number'' ELSE JSON_VALUE(n.props, ''$."say\"hi".type()'' RETURNING VARCHAR2(16)) END END END, CASE WHEN JSON_EXISTS(n.labels, ''$[*]?(@ == "Person")'') AND JSON_EXISTS(n.props, ''$."say\"hi"'') THEN CASE JSON_VALUE(n.props, ''$."say\"hi".type()'' RETURNING VARCHAR2(16)) WHEN ''object'' THEN COALESCE(JSON_VALUE(n.props, ''$."say\"hi".s''), JSON_VALUE(n.props, ''$."say\"hi".v'')) WHEN ''number'' THEN TO_CHAR(JSON_VALUE(n.props, ''$."say\"hi"'' RETURNING NUMBER), ''TM9'') WHEN ''double'' THEN CASE WHEN JSON_VALUE(n.props, ''$."say\"hi"'' RETURNING BINARY_DOUBLE) = FLOOR(JSON_VALUE(n.props, ''$."say\"hi"'' RETURNING BINARY_DOUBLE)) AND JSON_VALUE(n.props, ''$."say\"hi"'' RETURNING BINARY_DOUBLE) >= -9223372036854775808 AND JSON_VALUE(n.props, ''$."say\"hi"'' RETURNING BINARY_DOUBLE) < 9223372036854775808 THEN TO_CHAR(CAST(FLOOR(JSON_VALUE(n.props, ''$."say\"hi"'' RETURNING BINARY_DOUBLE) / 4294967296) AS NUMBER) * 4294967296 + CAST(JSON_VALUE(n.props, ''$."say\"hi"'' RETURNING BINARY_DOUBLE) - FLOOR(JSON_VALUE(n.props, ''$."say\"hi"'' RETURNING BINARY_DOUBLE) / 4294967296) * 4294967296 AS NUMBER), ''TM9'') ELSE ''d'' || TO_CHAR(JSON_VALUE(n.props, ''$."say\"hi"'' RETURNING BINARY_DOUBLE)) END ELSE JSON_VALUE(n.props, ''$."say\"hi"'') END END)';
                           EXIT;
                       EXCEPTION
                           WHEN e_exists THEN EXIT;
@@ -5466,11 +5466,11 @@ cases:
                   END LOOP;
               END;
           swap:
-            - "DROP INDEX IF EXISTS drivine_uq_Personsayhi_5316dfc3"
-            - "ALTER INDEX drivine_uq_Personsayhi_5316dfc3_r RENAME TO drivine_uq_Personsayhi_5316dfc3"
+            - "DROP INDEX IF EXISTS drivine_uq2_Personsayhi_5316dfc3"
+            - "ALTER INDEX drivine_uq2_Personsayhi_5316dfc3_r RENAME TO drivine_uq2_Personsayhi_5316dfc3"
           finish:
-            - "ALTER INDEX drivine_uq_Personsayhi_5316dfc3_r RENAME TO drivine_uq_Personsayhi_5316dfc3"
-          remade: "UPDATE drivine_schema SET name = 'Person_say\"hi_unique', object_name = 'drivine_uq_Personsayhi_5316dfc3', details = JSON_MERGEPATCH(details, '{\"form\": 1}') WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"say\\\"hi\"]'"
+            - "ALTER INDEX drivine_uq2_Personsayhi_5316dfc3_r RENAME TO drivine_uq2_Personsayhi_5316dfc3"
+          remade: "UPDATE drivine_schema SET name = 'Person_say\"hi_unique', object_name = 'drivine_uq2_Personsayhi_5316dfc3', details = JSON_MERGEPATCH(details, '{\"form\": 2}') WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"say\\\"hi\"]'"
       sqlite:
         form: 2
         digest: "f537e7ee43cbe66288a094b719e0ff45cfc1f924254fbeae8e1a1d66f0630793"
@@ -5484,20 +5484,20 @@ cases:
           - "DROP INDEX IF EXISTS drivine_uq2_Personsayhi_5316dfc3"
           - "DELETE FROM drivine_schema WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"say\\\"hi\"]'"
         recreate:
-          form: 1
-          digest: "5c65d45707f2819d808038baa3a3683af6f65db9cb8becfaa1530b4bf9936cb5"
+          form: 2
+          digest: "0d5d7c0c75bd94fd3b30a176eeb671185519a0a86c10217d4ccae0da48ce7b9c"
           leftover:
-            - "DROP INDEX IF EXISTS drivine_uq_Personsayhi_5316dfc3_r"
+            - "DROP INDEX IF EXISTS drivine_uq2_Personsayhi_5316dfc3_r"
           build:
-            - "CREATE UNIQUE INDEX drivine_uq_Personsayhi_5316dfc3_r ON drivine_node ((CASE json_type(props, '$.\"say\\\"hi\"') WHEN 'text' THEN props ->> '$.\"say\\\"hi\"' WHEN 'null' THEN NULL ELSE props -> '$.\"say\\\"hi\"' END)) WHERE instr(labels, '\"Person\"') > 0"
+            - "CREATE UNIQUE INDEX drivine_uq2_Personsayhi_5316dfc3_r ON drivine_node (COALESCE(props ->> '$.\"say\\\"hi\".\"$t\"', CASE json_type(props, '$.\"say\\\"hi\"') WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'null' THEN NULL ELSE json_type(props, '$.\"say\\\"hi\"') END), COALESCE(props ->> '$.\"say\\\"hi\".s', props ->> '$.\"say\\\"hi\".v', props ->> '$.\"say\\\"hi\"')) WHERE instr(labels, '\"Person\"') > 0"
           swap:
-            - "DROP INDEX IF EXISTS drivine_uq_Personsayhi_5316dfc3"
-            - "CREATE UNIQUE INDEX drivine_uq_Personsayhi_5316dfc3 ON drivine_node ((CASE json_type(props, '$.\"say\\\"hi\"') WHEN 'text' THEN props ->> '$.\"say\\\"hi\"' WHEN 'null' THEN NULL ELSE props -> '$.\"say\\\"hi\"' END)) WHERE instr(labels, '\"Person\"') > 0"
-            - "DROP INDEX IF EXISTS drivine_uq_Personsayhi_5316dfc3_r"
+            - "DROP INDEX IF EXISTS drivine_uq2_Personsayhi_5316dfc3"
+            - "CREATE UNIQUE INDEX drivine_uq2_Personsayhi_5316dfc3 ON drivine_node (COALESCE(props ->> '$.\"say\\\"hi\".\"$t\"', CASE json_type(props, '$.\"say\\\"hi\"') WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'null' THEN NULL ELSE json_type(props, '$.\"say\\\"hi\"') END), COALESCE(props ->> '$.\"say\\\"hi\".s', props ->> '$.\"say\\\"hi\".v', props ->> '$.\"say\\\"hi\"')) WHERE instr(labels, '\"Person\"') > 0"
+            - "DROP INDEX IF EXISTS drivine_uq2_Personsayhi_5316dfc3_r"
           finish:
-            - "CREATE UNIQUE INDEX drivine_uq_Personsayhi_5316dfc3 ON drivine_node ((CASE json_type(props, '$.\"say\\\"hi\"') WHEN 'text' THEN props ->> '$.\"say\\\"hi\"' WHEN 'null' THEN NULL ELSE props -> '$.\"say\\\"hi\"' END)) WHERE instr(labels, '\"Person\"') > 0"
-            - "DROP INDEX IF EXISTS drivine_uq_Personsayhi_5316dfc3_r"
-          remade: "UPDATE drivine_schema SET name = 'Person_say\"hi_unique', object_name = 'drivine_uq_Personsayhi_5316dfc3', details = json_set(details, '$.form', 1) WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"say\\\"hi\"]'"
+            - "CREATE UNIQUE INDEX drivine_uq2_Personsayhi_5316dfc3 ON drivine_node (COALESCE(props ->> '$.\"say\\\"hi\".\"$t\"', CASE json_type(props, '$.\"say\\\"hi\"') WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'null' THEN NULL ELSE json_type(props, '$.\"say\\\"hi\"') END), COALESCE(props ->> '$.\"say\\\"hi\".s', props ->> '$.\"say\\\"hi\".v', props ->> '$.\"say\\\"hi\"')) WHERE instr(labels, '\"Person\"') > 0"
+            - "DROP INDEX IF EXISTS drivine_uq2_Personsayhi_5316dfc3_r"
+          remade: "UPDATE drivine_schema SET name = 'Person_say\"hi_unique', object_name = 'drivine_uq2_Personsayhi_5316dfc3', details = json_set(details, '$.form', 2) WHERE kind = 'UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"say\\\"hi\"]'"
       neo4j:
         create:
           - "CREATE CONSTRAINT `Person_say\"hi_unique` IF NOT EXISTS FOR (n:`Person`) REQUIRE (n.`say\"hi`) IS UNIQUE"

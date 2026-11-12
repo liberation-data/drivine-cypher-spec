@@ -153,12 +153,6 @@ object OracleSql {
         return listOf(indexClass(props(alias), key), indexKey(props(alias), key)).map { "CASE WHEN $constrained THEN $it END" }
     }
 
-    /** As [labelled], what a uniqueness constraint's index held in the store layout 1, which no index of layout 2 holds ([uniqueIndex]). */
-    fun unique(alias: String, label: String, keys: List<String>, key: String): String {
-        val constrained = (listOf(hasLabel(alias, label)) + keys.map { "JSON_EXISTS($alias.props, ${path(it)})" }).joinToString(" AND ")
-        return "CASE WHEN $constrained THEN JSON_VALUE($alias.props, ${path(key)}) END"
-    }
-
     /**
      * The text a full-text search reads of the property [key] of [alias], a CLOB: a temporal value's tag's text `v` (see
      * [ValueLayout]), any other value's as `JSON_VALUE` reads it. Oracle Text's document, a side table's payload, reads it so too.

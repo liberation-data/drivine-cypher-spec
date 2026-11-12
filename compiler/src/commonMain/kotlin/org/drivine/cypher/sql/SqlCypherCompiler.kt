@@ -6796,8 +6796,8 @@ abstract class SqlCypherCompiler(
         /** A column of a row, `n1.props`, as a pattern binds a node's or a relationship's: see [propertyOfRow]. */
         private val COLUMN = Regex("""\w+\.\w+""")
 
-        /** The temporal kinds in Cypher's order of them, as it orders values of several kinds: see [tagRank]. */
-        val TAG_ORDER = listOf(Temporal.DATE_TIME, Temporal.LOCAL_DATE_TIME, Temporal.DATE, Temporal.TIME, Temporal.LOCAL_TIME, Temporal.DURATION)
+        /** The temporal kinds in Cypher's order of them, as it orders values of several kinds ([ValueLayout.ORDER]): see [tagRank]. */
+        val TAG_ORDER = ValueLayout.ORDER
 
         /** How long a value [shared] binds may be written where it is read, in characters. */
         const val SHARED_ABOVE = 200

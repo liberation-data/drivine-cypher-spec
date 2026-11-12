@@ -29,7 +29,7 @@ import org.drivine.schema.VectorIndexSpec
  *   property of the nodes that carry the label and is null for every other node ([OracleSql.labelled]): a filter on the
  *   label's nodes is read through it, so one index answers both the label and the property;
  * - a uniqueness constraint is a unique index over the property of the nodes that carry the label, and null for every other
- *   node ([OracleSql.unique]). It comes with the range index a node is found by. Over one property its index is the same
+ *   node ([OracleSql.uniqueIndex]). It comes with the range index a node is found by. Over one property its index is the same
  *   value a labelled index would be, so it stands for one, and no labelled index is made beside it.
  *
  * A vector index is a table of embeddings beside the nodes, and a full-text index a table of their text, each with an
@@ -537,7 +537,8 @@ ${made.entries.joinToString("\n") { (function, making) ->
         is UniquenessConstraintSpec -> {
             val name = objectName(UNIQUE, listOf(spec.label) + spec.properties)
             val temporary = temporaryName(name)
-            val expressions = spec.properties.joinToString(", ") { OracleSql.unique("n", spec.label, spec.properties, it) }
+            // The create's own expressions ([createConstraint]), so what the swap leaves is the index the create makes.
+            val expressions = uniqueColumns(spec.label, spec.keys).joinToString(", ")
             UniqueRecreation(
                 name = name,
                 temporary = temporary,
