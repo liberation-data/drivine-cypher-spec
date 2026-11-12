@@ -526,8 +526,13 @@ oC_ImplicitProcedureInvocation
 oC_ProcedureResultField
                     :  oC_SymbolicName ;
 
+// drivine4j: a word Cypher keeps may name a part of a procedure's namespace, `db.create.setNodeVectorProperty`, as in
+// Neo4j's Cypher (#160).
 oC_ProcedureName
-             :  oC_Namespace oC_SymbolicName ;
+             :  oC_ProcedureNamespace oC_SymbolicName ;
+
+oC_ProcedureNamespace
+                  :  ( oC_SchemaName '.' )* ;
 
 oC_Namespace
          :  ( oC_SymbolicName '.' )* ;

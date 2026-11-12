@@ -76,7 +76,7 @@ object Oracle {
         println("jvmOracle: stand-in cases ${standIns.entries.joinToString { (name, n) -> "$name $n" }}.")
     }
 
-    private val FILES = listOf("queries.yaml", "writes.yaml", "temporal.yaml", "refusals.yaml", "schema.yaml")
+    private val FILES = listOf("queries.yaml", "writes.yaml", "temporal.yaml", "refusals.yaml", "schema.yaml", "vector.yaml")
     internal val STORES = listOf("postgres", "oracle", "sqlite")
 
     /** Writes the corpus to [into]: how many lines, and how many statements left out for the clock. */
