@@ -93,7 +93,8 @@ It takes `readsAsText` too, false where left out, the Kotlin form of the request
 [Oracle's reads as text](#oracles-reads-as-text)). JDBC keeps a number's digits, so drivine4j leaves it false.
 
 A host with no Kotlin types calls `CompileJson.compile(request)`, JSON text in and out. The wasm build exports it as
-`compile`, and the shared library as `drivine_compile`:
+`compile`, and the shared library as `drivine_compile`. Each also exports the SQLite host functions' version the
+compiled SQL needs, `hostVersion()` and `drivine_host_version()`: see [The host functions' version](#the-host-functions-version).
 
 ```json
 {"store": "oracle",
@@ -325,6 +326,7 @@ hold to.
 ```js
 const { compile } = require('@liberation-data/drivine-cypher-compiler');      // or: import { compile } from '@liberation-data/drivine-cypher-compiler'
 const answer = JSON.parse(compile(JSON.stringify({ store: 'sqlite', graph: { name: 'g' }, cypher: 'RETURN 1' })));
+const { hostVersion } = require('@liberation-data/drivine-cypher-compiler');  // what SELECT drivine_host_version() must give
 ```
 
 The CommonJS entry (`npm/index.cjs`) loads the wasm synchronously. Kotlin/Wasm writes only an ES module loader, with a
@@ -371,6 +373,7 @@ library alone, the same bytes from the same libraries; `python/check_wheel.py` c
 ```c
 char *drivine_compile(const char *request);   /* NUL-terminated UTF-8 JSON in, and out */
 void drivine_free(char *answer);              /* frees what drivine_compile gave */
+int drivine_host_version(void);               /* the host functions' version the compiled SQL needs */
 ```
 
 A NULL request is answered as an empty one, with `{"error": …}`. `drivine_compile` gives NULL only where it can't allocate
@@ -390,13 +393,14 @@ and macOS, that the library imports no `sqlite3_` symbol and exports only the C 
 ```c
 int sqlite3_drivinecypher_init(sqlite3 *db, char **errorMessage, const sqlite3_api_routines *routines);
 void drivine_gc_collect(void);   /* collects now: see below */
+int drivine_host_version(void);  /* the host functions' version the compiled SQL needs: see below */
 ```
 
 SQLite derives the entry point's name from the file's (`libdrivinecypher` or `drivinecypher`), so a host loads it by
 path alone. The host functions are ported from drivine4j's: each is common code
 (`org.drivine.cypher.host.HostFunctions`), which the extension registers and a host on the JVM can call from its own
 registrations, and each comes with the spec's `host.yaml` cases that pin it. A function of JSON values fails its statement
-on a text that is no JSON, and takes an empty one as no value, as drivine4j's do. So far it registers:
+on a text that is no JSON, and takes an empty one as no value, as drivine4j's do. It registers every function `host.yaml` pins:
 
 | Function | What it gives |
 |---|---|
@@ -410,9 +414,51 @@ on a text that is no JSON, and takes an empty one as no value, as drivine4j's do
 | `regexp(pattern, text)` | 1 where the regular expression matches somewhere in the text, 0 where it matches nowhere; null where either is null. SQLite calls it for `text REGEXP pattern`. The pattern is Java's: see [Regular expressions](#regular-expressions). Deterministic. |
 | `drivine_regex_group(text, pattern, group)` | the text the group of that number matches where the pattern first matches (0 the whole match), as Postgres's `regexp_match` gives it; null where it matches nowhere, the group takes no part or is past the pattern's, or the text or pattern is null. A null group is 0; a negative one fails the statement. Deterministic. |
 | `drivine_regexp_replace(text, pattern, replacement)` | the text with each match replaced, `\1` in the replacement naming a group as Postgres's and Oracle's do, anything else itself; null where any is null. A match whose replacement names a group the pattern hasn't fails the statement, as Java's does. Deterministic. |
+| `drivine_temporal(operation, …)` | what compiled SQL works out of a timestamp, the text of a wall clock to the microsecond (`2024-03-15T10:30:00.000000`), as java.time works it out, by its operation: `local(text, kind)` and `utc(text, kind)`, the wall clock an ISO text of a kind (`DATE_TIME` …) reads, its offset (`Z`, `±hh:mm` or `±hhmm`; one with seconds is none) left out or moved to UTC; `extract(timestamp, field)`, `YEAR`, `MONTH`, `DAY`, `HOUR`, `MINUTE` or `NANOSECOND_OF_MINUTE` (no `SECOND`); `day_of_week(timestamp)`; `add_months(timestamp, months)`; `add_time(timestamp, days, seconds, nanos)`, added as Java's `plusDays`, `plusSeconds` and `plusNanos` add them; `months_between(from, to)`; `seconds_between(from, to)`, whole seconds, floored, and `nanos_between(from, to)`, the nanoseconds past them, 0 to 999,999,999, so the two are exact over the whole range of years; `truncate(timestamp, unit)`. Whole numbers each, but for the timestamps; a count given as a float or a text is read as a decimal rounded half away from zero. A timestamp it writes keeps the microsecond, cut, never rounded. Null where an argument after the operation is null; a text that is no temporal value fails the statement, naming it. Deterministic. |
+| `drivine_trunc(number)` | the number with its fraction cut off, a whole number where one holds it, as Postgres's and Oracle's `TRUNC` give it; a float within two units of its last place of a whole number is that whole number (SQLite's binary misses `33.001 * 1e6` by that much); past a whole number's range, the float. Null of null. Deterministic. |
+| `drivine_to_char(value, pattern)` | a timestamp in a pattern of `YYYY`, `MM`, `DD`, `HH24`, `MI`, `SS`, `IYYY`, `IW`, `DDD` and quoted text, its year signed before 0 (`-0044`), or a number in an `FM` pattern (`FM0000`, `FM9999999999990.999999999`), rounded half away from zero, as Postgres's and Oracle's `to_char` write those compiled SQL writes; null where either is null. Deterministic. |
+| `drivine_host_version()` | the version of these functions' forms, `SqliteFunctions.HOST_VERSION`, which a host checks: see below. Deterministic. |
 | `drivine_extension_version()` | the module's version, as it was built (`-Pcompiler.version`, the Maven form: `0.36.0`, `0.36.0-rc.1`), so a host can check it loaded the library it meant to. Deterministic. |
 | `drivine_gc_collect()` | NULL, having collected: see below. Direct-only. |
 | `drivine_gc_heap()`, `drivine_gc_heap(bytes)` | the GC's floor, in bytes; given bytes, it sets the floor first, and 0 restores the runtime's own. Direct-only. |
+
+#### The host functions' version
+
+The compiled SQL calls the host functions in the forms the spec's `host.yaml` pins, which change now and then
+(`drivine_temporal`'s `add_time` took a float of seconds before version 1). `SqliteFunctions.HOST_VERSION` is the version
+of the forms the compiler's SQL calls, bumped with each change to them, in the same change as their `host.yaml` steps;
+`drivine_host_version()` gives the version of the functions registered. A host that registers the functions itself
+(drivine4j on xerial, the TypeScript and Python libraries) checks the two agree once on each connection, right after
+registering, so a stale copy fails on connecting rather than mid-statement: `HostCheck.SQL` is the statement to run, and
+`HostCheck.verify(reported)` throws where its answer (null where SQLite has no such function, as with drivine4j's older
+functions) is not the compiler's. A host with no Kotlin types reads the compiler's version from `drivine_host_version()`
+in C or `hostVersion()` in wasm, and words the failure as `HostCheck` does:
+
+```text
+SQLite's drivine_ functions are version 0, the compiler needs 1: register the module's host functions
+SQLite has no drivine_host_version(): its drivine_ functions are older than version 1, the compiler's: register the module's host functions
+```
+
+The extension registers the module's own functions, so on a connection that loaded it the two always agree.
+
+#### Temporal functions without java.time
+
+`drivine_temporal`, `drivine_trunc` and `drivine_to_char` are drivine4j's, ported onto kotlinx-datetime's values alone
+(`org.drivine.cypher.host.time`): java.time's ISO parsers' acceptance (a year of four digits, or signed with more; `T` or
+`t`; a fraction of up to nine digits, or none after the point), its calendar arithmetic (`plusMonths`, `plusSeconds`,
+`plusNanos`, `ChronoUnit.MONTHS.between`, `Duration.between`, the ISO week-based year) with its range checks and
+messages, and java.math's `BigDecimal` reading, `HALF_UP` and `stripTrailingZeros`, are written out in common code, as
+kotlinx-datetime's own parse and arithmetic check and word otherwise. The JVM writes java.time's answers to 120,000 calls
+or so (`host-temporal.json`, `org.drivine.cypher.oracle.HostTemporals`): every edge year from -999,999,999 to 999,999,999,
+ISO-week turns, the texts of every temporal kind with and without offsets (those of real zones' transitions among them),
+and floats and decimal texts for `drivine_trunc` and `drivine_to_char`. `HostTemporalOracleTest` checks each on every
+target, its result exactly and of its type, or its failure, and `jvmOracle` checks `host.yaml`'s steps of them against
+java.time first. A step noted `drivine4j#421 (layout 2)` needs nine-digit timestamps, and must fail until they are the store's.
+
+On SQLite the compiler reads no float of seconds: a duration is added as whole seconds and nanoseconds read from its text,
+`duration.between`, `epochSeconds` and `epochMillis` are worked out of `seconds_between` and `nanos_between`, and a
+clock's `second`, `millisecond`, `microsecond` and `nanosecond` of `NANOSECOND_OF_MINUTE`, whole numbers each
+(`TemporalSql.exactTime`). Postgres's and Oracle's SQL is unchanged.
 
 A direct-only function changes the process's state, so SQLite lets only the host's own statements call it, never a
 trigger or view of the database's. A function that throws fails its statement with its message (`drivine_gc_heap: the

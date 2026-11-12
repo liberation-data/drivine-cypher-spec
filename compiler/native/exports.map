@@ -6,6 +6,7 @@
     drivine_compile;
     drivine_free;
     drivine_gc_collect;
+    drivine_host_version;
     sqlite3_drivinecypher_init;
   local:
     *;

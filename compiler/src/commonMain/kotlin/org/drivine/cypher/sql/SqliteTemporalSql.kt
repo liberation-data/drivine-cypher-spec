@@ -9,7 +9,8 @@ import kotlinx.datetime.toLocalDateTime
  * SQLite's SQL for temporal values: see [TemporalSql]. SQLite has no type for a moment and no arithmetic of the
  * calendar, so a timestamp is the text of a wall clock to the microsecond, `2024-03-15T10:30:00.000000`, which
  * compares and orders as the clock does (see `SqliteTimestamps`), and what is worked out of one is worked out by
- * the functions Drivine registers on each connection, with `java.time`: see `SqliteTemporalFunction`.
+ * the functions Drivine registers on each connection, with `java.time`: see `SqliteTemporalFunction`, and the module's
+ * port of it, `org.drivine.cypher.host.HostFunctions.temporal`. Its time is [exactTime]: worked out in whole numbers.
  */
 class SqliteTemporalSql(shared: (List<String>, (List<String>) -> String) -> String) : TemporalSql(shared) {
 
@@ -48,11 +49,22 @@ class SqliteTemporalSql(shared: (List<String>, (List<String>) -> String) -> Stri
 
     override fun addMonths(timestamp: String, months: String) = temporal("add_months", timestamp, months)
 
-    override fun addTime(timestamp: String, days: String, seconds: String) = temporal("add_time", timestamp, days, seconds)
+    /** Whole [seconds] alone, as each caller of this form gives (`0`, an offset's seconds): see [addExactTime]. */
+    override fun addTime(timestamp: String, days: String, seconds: String) = addExactTime(timestamp, days, seconds, "0")
+
+    override val exactTime = true
+
+    override fun addExactTime(timestamp: String, days: String, seconds: String, nanos: String) = temporal("add_time", timestamp, days, seconds, nanos)
 
     override fun monthsBetween(from: String, to: String) = temporal("months_between", from, to)
 
-    override fun secondsBetween(from: String, to: String) = temporal("seconds_between", from, to)
+    /** None: the seconds with their fraction are a float, so [exactBetween] gives them, in two whole numbers. */
+    override fun secondsBetween(from: String, to: String): String =
+        throw UnsupportedOperationException("SQLite works out the time between two timestamps exactly: see exactBetween.")
+
+    override fun exactBetween(from: String, to: String) = temporal("seconds_between", from, to) to temporal("nanos_between", from, to)
+
+    override fun nanosOfMinute(timestamp: String) = temporal("extract", timestamp, "'NANOSECOND_OF_MINUTE'")
 
     override fun truncate(unit: String, timestamp: String) = if (unit in UNITS) temporal("truncate", timestamp, "'$unit'") else null
 
@@ -74,7 +86,11 @@ class SqliteTemporalSql(shared: (List<String>, (List<String>) -> String) -> Stri
     /** SQLite divides one whole number by another to a whole number: the dividend is made a real number first. */
     override fun quotient(dividend: String, divisor: String) = "($dividend + 0.0) / $divisor"
 
-    override fun extract(field: String, timestamp: String) = temporal("extract", timestamp, "'$field'")
+    /** A whole number of [field]: `SECOND`, a float, is none, as the host function has none ([nanosOfMinute] gives the seconds). */
+    override fun extract(field: String, timestamp: String): String {
+        require(field != "SECOND") { "SQLite reads a timestamp's seconds by nanosOfMinute, not extract('SECOND')." }
+        return temporal("extract", timestamp, "'$field'")
+    }
 
     /** `java.time` numbers years as Cypher does, and its `to_char` writes one before 0 with its sign. */
     override val numbersBcFromOne = false

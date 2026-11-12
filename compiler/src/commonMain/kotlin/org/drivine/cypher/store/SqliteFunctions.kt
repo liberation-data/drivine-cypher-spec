@@ -31,7 +31,12 @@ import org.drivine.DrivineInternalApi
  * - [FLOAT_TEXT] writes a float as Java does, for `toString`, [SORT_KEY] orders a list as Cypher does, and [LIST_ORDER]
  *   compares two lists as Cypher does: see [SqliteFloatTextFunction], [SqliteSortKeyFunction] and [SqliteListOrderFunction].
  * - [TRUNC], [TO_CHAR] and [TEMPORAL] work out temporal values: see [SqliteTruncFunction], [SqliteToCharFunction]
- *   and [SqliteTemporalFunction].
+ *   and [SqliteTemporalFunction]. The module implements them in common code (`org.drivine.cypher.host.HostFunctions`),
+ *   in the forms the compiler's SQL calls: `drivine_temporal`'s `add_time(timestamp, days, seconds, nanos)`, whole
+ *   numbers each; `seconds_between(from, to)`, whole seconds, floored, and `nanos_between(from, to)`, the nanoseconds past
+ *   them; and `extract(timestamp, 'NANOSECOND_OF_MINUTE')`, where `SECOND` is no field.
+ * - [HOST_VERSION_FUNCTION] gives [HOST_VERSION], the version of those forms, which a host checks once on each
+ *   connection, as `org.drivine.cypher.host.HostCheck` words it.
  * - [CYPHER] carries out the procedure a statement that writes compiles to: see [SqliteCypherFunction].
  * - [FAIL] fails the statement with its text, where Neo4j fails on a value it reads: see [SqliteFailFunction].
  *
@@ -68,4 +73,13 @@ object SqliteFunctions {
     const val ROUND = "drivine_round"
     const val FAIL = "drivine_fail"
     const val REGEXP = "regexp"
+    const val HOST_VERSION_FUNCTION = "drivine_host_version"
+
+    /**
+     * The version of the host functions' contract: the forms of their arguments and results the compiler's SQL calls them
+     * with, which the spec's host.yaml pins. A change to a function's form bumps it, in the same change as its host.yaml
+     * steps, so a host that registers older functions fails on connecting, not mid-statement. 1 is the first a function
+     * reports; functions with no [HOST_VERSION_FUNCTION] are drivine4j's older forms.
+     */
+    const val HOST_VERSION = 1
 }

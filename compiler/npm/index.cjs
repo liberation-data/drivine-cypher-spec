@@ -57,4 +57,12 @@ function compile(request) {
     return load().compile(request);
 }
 
-module.exports = { compile };
+/**
+ * The version of the SQLite host functions' forms the compiled SQL calls: a host checks `SELECT drivine_host_version()`
+ * gives it on each connection it registers the functions on.
+ */
+function hostVersion() {
+    return load().hostVersion();
+}
+
+module.exports = { compile, hostVersion };

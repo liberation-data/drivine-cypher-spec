@@ -71,10 +71,49 @@ def refuse_nan(values):
         raise ValueError("SQLite can't be given NaN as an argument")
 
 
+HELD = "drivine4j#421 (layout 2)"
+"""The note of a step held until SQLite's timestamps keep nine digits (layout 2): it runs, and must fail, as HostSpecTest's."""
+
+
+def run_step(connection, name, step):
+    """The step through SQL: None where it gives what it says, else why not. Raises ValueError where it can't be run."""
+    if "ascending" in step:
+        values = [sql_value(v) for v in step["ascending"]]
+        if len(values) < 2:
+            raise ValueError("ascending has two values or more, each before the next")
+        refuse_nan(values)
+        for a, b in zip(values, values[1:]):
+            try:
+                before = connection.execute(f"SELECT {name}(?) < {name}(?)", (a, b)).fetchall()[0][0]
+            except Exception as e:  # noqa: BLE001 - SQLite's error, or one a function raised through it
+                return f"{name}({a!r}) before {name}({b!r}): failed: {type(e).__name__}: {e}"
+            if before != 1:
+                return f"{name}({a!r}) before {name}({b!r}): got {before!r}"
+        return None
+    args = [sql_value(v) for v in step["args"]]
+    refuse_nan(args)
+    expected = None if "error" in step else sql_value(step["result"])
+    try:
+        got = connection.execute(f"SELECT {name}({', '.join('?' for _ in args)})", args).fetchall()[0][0]
+    except Exception as e:  # noqa: BLE001 - SQLite's error, or one a function raised through it
+        if "error" in step and step["error"] in str(e):
+            return None
+        wanted = f"expected {step['error']!r}" if "error" in step else f"expected {expected!r}"
+        return f"{name}{tuple(args)!r}: failed with {type(e).__name__}: {e}, {wanted}"
+    if "error" in step:
+        return f"{name}{tuple(args)!r}: gave {got!r}, expected it to fail with {step['error']!r}"
+    if not same(got, expected):
+        return f"{name}{tuple(args)!r}: got {got!r}, expected {expected!r}"
+    return None
+
+
 def host_steps(connection, host):
-    """Each function step of host.yaml whose function the extension registers, through SQL; the functions it doesn't."""
+    """
+    Each function step of host.yaml whose function the extension registers, through SQL; the functions it doesn't. A step
+    held for layout 2 (HELD in its note) must fail, and is listed; one that passes fails the check, so its hold comes off.
+    """
     registered = {row[0] for row in connection.execute("SELECT name FROM pragma_function_list")}
-    ran, pending = 0, set()
+    ran, pending, held = 0, set(), []
     for case in host["cases"]:
         for index, step in enumerate(case["steps"], 1):
             name = step.get("function")
@@ -85,36 +124,23 @@ def host_steps(connection, host):
                 continue
             where = f"host.yaml {case['name']}, step {index}"
             try:
-                if "ascending" in step:
-                    values = [sql_value(v) for v in step["ascending"]]
-                    if len(values) < 2:
-                        raise ValueError("ascending has two values or more, each before the next")
-                    refuse_nan(values)
-                    for a, b in zip(values, values[1:]):
-                        before = connection.execute(f"SELECT {name}(?) < {name}(?)", (a, b)).fetchall()[0][0]
-                        if before != 1:
-                            report(f"{where}: {name}({a!r}) before {name}({b!r})", False, f"got {before!r}")
-                elif "error" in step:
-                    args = [sql_value(v) for v in step["args"]]
-                    refuse_nan(args)
-                    try:
-                        got = connection.execute(f"SELECT {name}({', '.join('?' for _ in args)})", args).fetchall()[0][0]
-                        report(f"{where}: {name}{tuple(args)!r}", False, f"gave {got!r}, expected it to fail with {step['error']!r}")
-                    except apsw.Error as e:
-                        if step["error"] not in str(e):
-                            report(f"{where}: {name}{tuple(args)!r}", False, f"failed with {e}, expected {step['error']!r}")
+                why = run_step(connection, name, step)
+            except ValueError as e:
+                report(f"{where}: {name}", False, f"can't be run: {e}")
+                continue
+            if HELD in step.get("note", ""):
+                if why is None:
+                    report(f"{where}: {name}", False, f"held for layout 2 ({HELD}), and passing: take the hold off")
                 else:
-                    args = [sql_value(v) for v in step["args"]]
-                    refuse_nan(args)
-                    got = connection.execute(f"SELECT {name}({', '.join('?' for _ in args)})", args).fetchall()[0][0]
-                    expected = sql_value(step["result"])
-                    if not same(got, expected):
-                        report(f"{where}: {name}{tuple(args)!r}", False, f"got {got!r}, expected {expected!r}")
-            except (apsw.Error, ValueError) as e:
-                report(f"{where}: {name}", False, f"failed: {type(e).__name__}: {e}")
+                    held.append(where)
+                continue
+            if why is not None:
+                report(f"{where}: {name}", False, why)
             ran += 1
     report(f"host.yaml: {ran} function steps through SQL", ran > 0, "no function step ran")
-    print(f"host.yaml: not registered yet: {', '.join(sorted(pending)) or 'none'}")
+    print(f"host.yaml: held for layout 2, and failing as they should: {'; '.join(held) or 'none'}")
+    # Every function host.yaml calls is ported (#108), so one the extension doesn't register is missing.
+    report("host.yaml: every function it calls is registered", not pending, f"not registered: {', '.join(sorted(pending))}")
 
 
 def main(library, version, host=None):
@@ -182,6 +208,11 @@ def main(library, version, host=None):
     check("drivine_compile through ctypes compiles", "sql" in compiled, True)
     lib.drivine_gc_collect()
     check("drivine_gc_collect through ctypes returns, and SQL still answers", one("SELECT drivine_extension_version()"), version)
+    # The compiler's host contract version, as C gives it, is the registered functions' (HostCheck).
+    lib.drivine_host_version.argtypes = []
+    lib.drivine_host_version.restype = ctypes.c_int
+    check("drivine_host_version through ctypes is the registered functions' version", lib.drivine_host_version(),
+          one("SELECT drivine_host_version()"))
     connection.close()
     other.close()
 

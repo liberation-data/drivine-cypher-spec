@@ -71,7 +71,8 @@ object CommonTime {
                 else -> return LocalDate(checkYear(year + 1L), 1, (dom - length).toInt())
             }
         }
-        val epochDay = date.toEpochDays() + days
+        // Math.addExact, as Java's: a sum past a long's range fails, rather than wrapping back into the range.
+        val epochDay = date.toEpochDays().let { from -> (from + days).also { if (((from xor it) and (days xor it)) < 0) throw ArithmeticException("long overflow") } }
         if (epochDay !in MIN_EPOCH_DAY..MAX_EPOCH_DAY) {
             throw TemporalException("Invalid value for EpochDay (valid values $MIN_EPOCH_DAY - $MAX_EPOCH_DAY): $epochDay")
         }

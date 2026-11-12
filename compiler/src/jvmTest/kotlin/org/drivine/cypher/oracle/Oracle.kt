@@ -30,6 +30,9 @@ import java.time.format.DateTimeFormatter
  * - `host.json`: the spec's `host.yaml`, the host functions' cases, as JSON likewise. See [HostSpecJson] and `HostSpecTest`.
  * - `regex.json`: Java's answers for the regular expressions SQLite's host functions see, for each target's
  *   `RegexOracleTest`. See [Regexes].
+ * - `host-temporal.json`: Java's answers for SQLite's temporal host functions, `drivine_temporal`, `drivine_trunc` and
+ *   `drivine_to_char`, in the forms the module's port gives them, for each target's `HostTemporalOracleTest`; host.yaml's
+ *   steps of them are checked against it first. See [HostTemporals].
  * - `search-golden.json`: drivine4j's full-text search statements, the module's golden (`src/commonTest/resources`), for
  *   each target's `FullTextSearchGoldenTest`. Its requests are in `corpus.jsonl` too, as [CompileJson] answers them.
  *
@@ -64,6 +67,8 @@ object Oracle {
         HostSpecJson.write(spec, out)
         // Java's answers for the regular expressions SQLite's host functions see, for each target's RegexOracleTest (#108).
         Regexes.write(spec, out)
+        // Java's answers for SQLite's temporal host functions, for each target's HostTemporalOracleTest (#108).
+        HostTemporals.write(spec, out)
         // drivine4j's full-text search statements, for each target's FullTextSearchGoldenTest.
         File(out, "search-golden.json").writeBytes(searchGolden())
         println("jvmOracle: ${corpus.first} statements in the corpus (${corpus.second} left out, as they embed the clock); $doubles double cases.")
