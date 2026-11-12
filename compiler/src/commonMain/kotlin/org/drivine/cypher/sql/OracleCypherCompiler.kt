@@ -159,6 +159,26 @@ class OracleCypherCompiler(
         return CypherJson.writeValueAsString(written, encoder = encoder).also { if (doubled) extended += it }
     }
 
+    /**
+     * A statement's parameters, one map, as [parameterText] writes them, but where one of them holds a map with a key as
+     * extended JSON's are (`${'$'}k`): the map can't then be read as extended JSON whole, which would read that key as
+     * the value it writes, so each other parameter that holds a float that is a whole number, or past a long's range, is
+     * written as extended JSON's double and read so on its own (see [propertyOf]). Before, the map was written as JSON
+     * is, so such a float was read as a whole number: `1e20` was stored as `100000000000000000000` (#200). A float in the
+     * parameter that holds such a key is still written as JSON is: that parameter is read as JSON.
+     */
+    override fun parametersText(parameters: Any?): String {
+        val tree = CypherJson.valueToTree(parameters, encoder)
+        if (tree !is ObjectNode || !keyedAsExtended(tree)) return parameterText(parameters)
+        for ((key, value) in tree.properties().toList()) {
+            if (keyedAsExtended(value)) continue
+            var doubled = false
+            tree.set<JsonNode>(key, doubles(value) { doubled = true })
+            if (doubled) extendedParameters += key
+        }
+        return CypherJson.writeValueAsString(tree, encoder = encoder)
+    }
+
     /** Whether [node] holds a map with a key that starts with `$`, as extended JSON's keys do. */
     private fun keyedAsExtended(node: JsonNode): Boolean =
         (node is ObjectNode && node.fieldNames().asSequence().any { it.startsWith("$") }) || node.any(::keyedAsExtended)

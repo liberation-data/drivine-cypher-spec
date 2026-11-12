@@ -262,7 +262,7 @@ abstract class SqlCypherCompiler(
         // A procedure takes its parameters as one object, and reads each from it.
         val writer = Writer(
             Parameters(
-                parameters, { name, _ -> nullIfJsonNull(propertyOf(PARAMS, name)) }, { number(propertyOf(PARAMS, it)) }, inObject = true, text = ::parameterText,
+                parameters, { name, _ -> nullIfJsonNull(propertyOf(PARAMS, name)) }, { number(propertyOf(PARAMS, it)) }, inObject = true, text = ::parametersText,
                 asPath = parameterPath?.let { read -> { name, _, keys, value -> read(PARAMS, null, listOf(name) + keys, value) } },
             )
         )
@@ -437,6 +437,12 @@ abstract class SqlCypherCompiler(
 
     /** The JSON text a parameter's [value] is bound as. */
     protected open fun parameterText(value: Any?): String = CypherJson.writeValueAsString(value, encoder = encoder)
+
+    /**
+     * The JSON text a statement that writes binds all its [parameters] as, one map: as [parameterText] writes a value,
+     * unless the store writes the map otherwise (Oracle, see its own).
+     */
+    protected open fun parametersText(parameters: Any?): String = parameterText(parameters)
 
     /** The parameter bound as [marker], a whole number, as one. */
     protected abstract fun parameterCount(marker: String): String
