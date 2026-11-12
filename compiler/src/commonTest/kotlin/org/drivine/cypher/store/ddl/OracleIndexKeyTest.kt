@@ -53,7 +53,7 @@ class OracleIndexKeyTest {
     }
 
     @Test
-    fun `each pinned double key is d and Oracle's text of a double, and no two are alike`() {
+    fun `each pinned double key is d and Oracle's text of a double and no two are alike`() {
         val keys = store["doubleKeys"]!!["oracle"]!!.toList()
         assertTrue(keys.size >= 4, "doubleKeys pins too few doubles: ${keys.size}")
         val texts = keys.map { it["key"]!!.textValue()!! }

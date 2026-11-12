@@ -99,7 +99,7 @@ class SqliteCypherValuesTest {
     }
 
     @Test
-    fun `a tag whose sort key is no text sorts by its text, as Oracle's list key does, and a tag is ordered beside no map`() {
+    fun `a tag whose sort key is no text sorts by its text as Oracle's list key does and a tag is ordered beside no map`() {
         fun key(text: String) = SqliteCypherValues.sortKey(json(text) as ArrayNode)
         val t = "${'$'}t"
         assertEquals(key("""[{"$t":"date","v":"2024-01-01"}]"""), key("""[{"$t":"date","v":"2024-01-01","s":1}]"""))
