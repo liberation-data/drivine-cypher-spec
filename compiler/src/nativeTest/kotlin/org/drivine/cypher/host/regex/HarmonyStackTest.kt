@@ -116,6 +116,8 @@ class HarmonyStackTest {
 
     @Test
     fun `the path counted for each anchor written is no shorter than Harmony's nodes on it`() {
+        // Flags alone, as (?i) is written before an anchor, are no group and no node: \A one, (?:a) three.
+        assertEquals(4, harmonyNodes("(?i)\\A(?:a)"))
         for (anchor in listOf("\$", "\\Z", "(?m)\$", "\\b", "\\B", "(?i)\\b")) {
             val written = HarmonyRewrite.rewritten(anchor)
             assertTrue(written.text.endsWith(SNAPSHOT), anchor)
@@ -186,6 +188,12 @@ private fun harmonyNodes(written: String): Int {
     while (at < written.length) {
         when (val c = written[at]) {
             '(' -> {
+                // Flags alone ((?i)) open no group.
+                val flags = written.indexOfAny(charArrayOf(':', '=', '!', '>', ')'), at)
+                if (written.getOrNull(at + 1) == '?' && written[flags] == ')') {
+                    at = flags + 1
+                    continue
+                }
                 outer.addLast(nodes to longest)
                 nodes = 0
                 longest = 0
