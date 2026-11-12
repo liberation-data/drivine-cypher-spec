@@ -26,6 +26,16 @@ class CompiledSizeTest {
     }
 
     @Test
+    fun `a duration's fraction of a second, floored, compiles to a statement that writes the duration's seconds twice, not eight times`() {
+        // drivine4j#418: SQLite's floor reads its number four times, and nanosecondsOfSecond floors twice; unbound, the
+        // seconds were written eight times, 9,200 characters where TRUNC had written 1,900.
+        compilers.forEach { compiler ->
+            val sql = compiler.compile("RETURN duration('PT-86399.9S').nanosecondsOfSecond").sql
+            assertTrue(sql.length < 3_000, "${compiler::class.simpleName}: ${sql.length} characters")
+        }
+    }
+
+    @Test
     fun `a duration added to a value read from the store compiles to a statement that grows with each addition, not exponentially`() {
         fun added(times: Int) = "MATCH (c:Claim) RETURN " + "(".repeat(times) + "c.day" + (1..times).joinToString("") { " + duration('P1D'))" }
         compilers.forEach { compiler ->

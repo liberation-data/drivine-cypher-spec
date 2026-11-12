@@ -80,8 +80,11 @@ cases:
                   inDays: duration.inDays(date('1984-10-11'), localtime('16:30')).days,
                   inSeconds: duration.inSeconds(date('1984-10-11'), localtime('16:30')).seconds,
                   back: duration.between(localdatetime('2018-01-01T23:00'), localtime('01:00')).minutes,
-                  zoned: duration.between(time('10:00+01:00'), datetime('1984-10-11T12:00+02:00')).minutes}
-        rows: [{between: 990, inDays: 0, inSeconds: 59400, back: -1320, zoned: 60}]
+                  zoned: duration.between(time('10:00+01:00'), datetime('1984-10-11T12:00+02:00')).minutes,
+                  local: duration.between(datetime('1984-10-11T12:00+02:00'), localtime('16:30')).minutes,
+                  date: duration.between(time('10:00+01:00'), date('1984-10-11')).minutes,
+                  inMonths: duration.inMonths(date('1984-10-11'), localtime('16:30')).months}
+        rows: [{between: 990, inDays: 0, inSeconds: 59400, back: -1320, zoned: 60, local: 270, date: -600, inMonths: 0}]
       - note: "And on the SQL stores, as text."
         only: [sql]
         cypher: "RETURN [duration.between(date('1984-10-11'), localtime('16:30')), duration.inDays(date('1984-10-11'), localtime('16:30'))]"
@@ -94,6 +97,13 @@ cases:
                   secondsOfMinute: d.secondsOfMinute}
         rows: [{seconds: -86400, nanosecondsOfSecond: 100000000, millisecondsOfSecond: 100, milliseconds: -86399900, hours: -24,
                 minutes: -1440, minutesOfHour: 0, secondsOfMinute: 0}]
+      - note: "And of a fraction below a millisecond."
+        cypher: |
+          WITH duration('PT-0.0005S') AS d
+          RETURN {seconds: d.seconds, milliseconds: d.milliseconds, microseconds: d.microseconds, nanoseconds: d.nanoseconds,
+                  millisecondsOfSecond: d.millisecondsOfSecond, microsecondsOfSecond: d.microsecondsOfSecond, nanosecondsOfSecond: d.nanosecondsOfSecond}
+        rows: [{seconds: -1, milliseconds: -1, microseconds: -500, nanoseconds: -500000, millisecondsOfSecond: 999, microsecondsOfSecond: 999500,
+                nanosecondsOfSecond: 999500000}]
 
   - name: "Truncation and the statement's moment"
     description: "A moment truncates to a unit, and every clock function in a statement reads the same moment."
