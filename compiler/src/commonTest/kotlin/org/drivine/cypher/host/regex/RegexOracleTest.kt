@@ -116,10 +116,11 @@ class RegexOracleTest {
 
     private companion object {
         /** What a target whose regular expressions are not Java's refuses by name: see HarmonyRewrite. */
-        val REFUSED = setOf("\\G", "\\X", "\\R", "\\N{…}", "\\b{g}", "(?-U)", "(?-u)", "a back reference", "a lookbehind", "an atomic group",
+        val REFUSED = setOf("\\G", "\\X", "\\R", "\\N{…}", "\\b{g}", "(?-U)", "(?-u)", "(?c)", "a back reference", "a lookbehind", "an atomic group",
             "a possessive quantifier", "a quantifier on what has no width", "a quantifier on a quantifier", "a lazy quantifier on a group but *? and ??",
             "groups repeated within each other more than ${HarmonyRewrite.MAX_NESTED} deep", "a lookahead holding a quantifier", "a lookahead holding a group",
-            "a lookahead holding an anchor but \$ and \\z")
+            "a lookahead holding an anchor but \$ and \\z",
+            "a capturing group in a repeated group of fixed length", "a group that can match nothing, repeated in a repeated group")
 
         /** The sources of the patterns Drivine writes itself (Regexes.write), none of which may be refused. */
         val OURS = setOf("compiler", "search", "host")

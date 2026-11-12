@@ -33,6 +33,26 @@ class HarmonyBugsTest {
     }
 
     @Test
+    fun `a lookaround restores the state another saved after it`() {
+        if (!harmony) return
+        val group = Regex("(?:(?=a)(a)(?=x)|a)").find("a")!!.groups[1]
+        assertTrue(group != null, "Fixed: take SNAPSHOT out of HarmonyRewrite.")
+    }
+
+    @Test
+    fun `a group of flags ending in a quote is refused`() {
+        if (!harmony) return
+        val refused = runCatching { Regex("(?m:\\Q\uD800\uDC26\\E)") }.isFailure
+        assertTrue(refused, "Fixed: take the (?:) before a group's ) after a \\E out of HarmonyRewrite's close.")
+    }
+
+    @Test
+    fun `a repeated group asks of the time before whether its last repetition took nothing`() {
+        if (!harmony) return
+        assertEquals("aba", Regex("(?:a(b*)*){2}").find("abab")!!.value, "Fixed: HarmonyRewrite may take a group that can match nothing repeated in a repeated group.")
+    }
+
+    @Test
     fun `replace drops an empty match at the end after a match that ends there`() {
         if (!harmony) return
         assertEquals("<>u<>", Regex("x*").replace("ux", "<>"), "Fixed: HarmonyPattern.replaceAll may use Regex.replace's matches.")

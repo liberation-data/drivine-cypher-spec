@@ -492,7 +492,7 @@ POSIX class (`[:alnum:]`, `[:alpha:]`, `[:digit:]`, `[:space:]`, `[:upper:]`, `[
 - greedy quantifiers on a group, and `*?` and `??` on one;
 - capturing, named and non-capturing groups, and alternatives;
 - `^`, `$`, `\b`, `\B`, `\A`, `\z` and `\Z`;
-- the inline flags `(?i)`, `(?s)`, `(?m)`, `(?x)`, `(?d)`, `(?u)`, `(?U)` and `(?c)`, alone or as `(?i:…)`;
+- the inline flags `(?i)`, `(?s)`, `(?m)`, `(?x)`, `(?d)`, `(?u)` and `(?U)`, alone or as `(?i:…)`;
 - and one lookahead: `(?=…)` or `(?!…)` of literals, classes, alternatives, `$` and `\z` alone, unquantified, as a
   full-text search's `(?=$|[^[:alnum:]_])` is.
 
@@ -508,12 +508,16 @@ this platform; rewrite the pattern without it.`):
 - a back reference, `\1` or `\k<name>`;
 - a possessive quantifier, and an atomic group, `(?>…)`;
 - `\G`, `\X`, `\R`, `\N{…}` and `\b{g}`;
-- a quantifier on what has no width (`^*`, `\b{2}`, `(?=a)+`), and a quantifier on a quantifier (`a{2}{3}`, which Java
-  reads);
+- a quantifier on what has no width (`^*`, `\b{2}`, `(?=a)+`, and a group of nothing else, `(\b)*` or `()+`, which Java
+  repeats otherwise), and a quantifier on a quantifier (`a{2}{3}`, which Java reads);
 - a lazy quantifier on a group but `*?` and `??` (`(bc)+?`), which Harmony counts wrongly;
+- a capturing group in a group repeated (by any quantifier but `?`) whose length can't vary, with no alternative and no
+  quantifier but `{n}` in it (`(?:(a))*a`): Java leaves the group as a repetition it gave back set it;
+- a group that can match nothing repeated in a group repeated (`(?:a(?:b*)*){2}`), which Harmony stops repeating early;
 - groups repeated within each other more than 3 deep (`((((a)*b)+c)*d)*`): the compiler's take 2, and each level deeper
   multiplies the backtracking and stack Harmony takes where its repetition of groups is least like Java's;
-- `(?-U)` and `(?-u)`, which turn off what the patterns always have on;
+- `(?-U)` and `(?-u)`, which turn off what the patterns always have on, and `(?c)`, after which Java reads each class and
+  `\p{…}` by graphemes;
 - and a pattern written as more than 2,000,000 characters (each `\b` is some 30,000: a thousand of them took 1.2 GB and
   two seconds to compile).
 

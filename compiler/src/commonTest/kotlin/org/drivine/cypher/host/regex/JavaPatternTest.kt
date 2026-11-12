@@ -68,10 +68,11 @@ class JavaPatternTest {
         assertFailsWith<IllegalArgumentException> { call(HostFunctions.regexp, "(", "a") }
         assertFailsWith<IllegalArgumentException> { call(HostFunctions.regexp, "\\p{Nope}", "a") }
         for (construct in listOf("\\G" to "\\Ga", "\\X" to "\\X", "\\R" to "a\\Rb", "\\N{…}" to "\\N{LATIN SMALL LETTER A}", "\\b{g}" to "\\b{g}",
-            "(?-U)" to "(?-U)a", "(?-u)" to "(?-u)a", "a back reference" to "(a)\\1", "a back reference" to "(?<y>a)\\k<y>", "a lookbehind" to "(?<=a)b",
+            "(?-U)" to "(?-U)a", "(?-u)" to "(?-u)a", "(?c)" to "(?c)[a]", "a back reference" to "(a)\\1", "a back reference" to "(?<y>a)\\k<y>", "a lookbehind" to "(?<=a)b",
             "a lookbehind" to "(?<!a)b", "an atomic group" to "(?>a+)b", "a possessive quantifier" to "a*+", "a possessive quantifier" to "(a?){1,2}+b",
-            "a quantifier on what has no width" to "^*a", "a quantifier on what has no width" to "(?=a)+a", "a quantifier on a quantifier" to "a{2}{3}",
-            "a lazy quantifier on a group but *? and ??" to "(bc)+?",
+            "a quantifier on what has no width" to "^*a", "a quantifier on what has no width" to "(?=a)+a", "a quantifier on what has no width" to "b()*", "a quantifier on a quantifier" to "a{2}{3}",
+            "a lazy quantifier on a group but *? and ??" to "(?:bc)+?",
+            "a capturing group in a repeated group of fixed length" to "(?:(a))*a", "a group that can match nothing, repeated in a repeated group" to "(?:a(?:b*)*){2}",
             "groups repeated within each other more than ${HarmonyRewrite.MAX_NESTED} deep" to "((((a)*b)+c)*d)*",
             "a lookahead holding a quantifier" to "a(?=b+)", "a lookahead holding a group" to "a(?=(b))", "a lookahead holding an anchor but \$ and \\z" to "a(?=\\b)",
             // Each \b is written as some 30,000 characters off the JVM: a pattern of a few thousand would take gigabytes.

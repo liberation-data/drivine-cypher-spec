@@ -44,6 +44,21 @@ internal object JavaClasses {
         return named("posix", name.uppercase(), caseInsensitive) ?: named("property", name, caseInsensitive)
     }
 
+    /**
+     * Whether Java's predicate for `\p{name}` is BMP-only (a BmpCharPredicate), which leaves Pattern's hasSupplementary
+     * unset ([HarmonyRewrite.Rewritten.supplementary]): CharPredicates.forProperty's ASCII, L1 and ASCII POSIX classes, where
+     * [property] reaches them, as no Unicode name of the same comes first.
+     */
+    fun bmp(name: String): Boolean {
+        val equals = name.indexOf('=')
+        if (equals >= 0) return name.substring(0, equals).lowercase().let { it == "gc" || it == "general_category" } && name.substring(equals + 1) in BMP
+        if (name.startsWith("In")) return false
+        if (name.startsWith("Is")) return set("unicode:" + name.substring(2).uppercase()) == null && name.substring(2) in BMP
+        return set("posix:" + name.uppercase()) == null && name in BMP
+    }
+
+    private val BMP = setOf("ASCII", "L1", "Alnum", "Alpha", "Blank", "Cntrl", "Digit", "Graph", "Lower", "Print", "Punct", "Space", "Upper", "XDigit")
+
     private fun script(name: String): List<IntRange>? = if (' ' in name || '+' in name) null else set("script:" + name.uppercase())
 
     /** A block's names hold spaces, which the table writes as `+`: no name Java takes holds a `+`. */

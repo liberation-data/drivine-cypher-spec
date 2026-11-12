@@ -18,8 +18,46 @@ internal class HarmonyPattern(java: String) : JavaPattern {
     private fun groups(match: MatchResult): List<MatchGroup?> =
         if (rewritten.hidden.isEmpty()) match.groups.toList() else match.groups.filterIndexed { i, _ -> i !in rewritten.hidden }
 
-    /** The match from [start], the engine reading [text] through [StackRoom.guarded]. */
-    private fun find(text: String, start: Int): MatchResult? = regex.find(StackRoom.guarded(text, rewritten), start)
+    /**
+     * The match from [start], the engine reading [text] through [StackRoom.guarded], at the places Java's search tries, read
+     * as Java reads them. Java's search tries [start], and from there each character where its pattern has no supplementary
+     * characters (Pattern.Start), or each code point (StartS, [HarmonyRewrite.Rewritten.supplementary]); Harmony's tries
+     * each character. Between the halves of a pair Java reads each half as a lone surrogate (`(?=\D)` matches there, and
+     * `[^\p{So}]?` and `.` take the low half), but Harmony takes no half of a pair alone, and matches there what takes no
+     * character (`(?!\D)` in "😀"). So a place between halves that Java tries is tried here with the high half read as
+     * U+0000 ([Unpaired]), which what looks back at it (`\b`, `$`, `(?m)^`) takes, as Java takes a lone high surrogate, for
+     * no word character and no line break; and a match Harmony finds at one that Java doesn't try, or tries and fails, is
+     * passed over.
+     */
+    private fun find(text: String, start: Int): MatchResult? {
+        val read = StackRoom.guarded(text, rewritten)
+        var from = start
+        while (true) {
+            val match = if (splits(text, from)) halves(read, from) ?: regex.find(read, from + 1) else regex.find(read, from)
+            val first = match?.range?.first ?: text.length
+            if (!rewritten.supplementary) for (at in from + 1..first) if (splits(text, at)) halves(read, at)?.let { return it }
+            if (match == null || first == from || !splits(text, first)) return match
+            from = first + 1
+        }
+    }
+
+    /** The match at [at], between the halves of a pair of [read], as Java reads it there. */
+    private fun halves(read: CharSequence, at: Int): MatchResult? = regex.matchAt(Unpaired(read, at - 1), at)
+
+    /** Whether [at] is between the two halves of a pair in [text]. */
+    private fun splits(text: String, at: Int) = at in 1 until text.length && text[at - 1].isHighSurrogate() && text[at].isLowSurrogate()
+
+    /** [text] with the character at [at] read as U+0000. */
+    private class Unpaired(private val text: CharSequence, private val at: Int) : CharSequence {
+        override val length: Int get() = text.length
+
+        override fun get(index: Int): Char = if (index == at) '\u0000' else text[index]
+
+        override fun subSequence(startIndex: Int, endIndex: Int): CharSequence =
+            if (at in startIndex until endIndex) toString().substring(startIndex, endIndex) else text.subSequence(startIndex, endIndex)
+
+        override fun toString(): String = text.toString().let { it.substring(0, at) + '\u0000' + it.substring(at + 1) }
+    }
 
     override fun count(text: String): Int = matches(text).count()
 

@@ -361,6 +361,24 @@ object Regexes {
         // Groups repeated within each other, to the depth HarmonyRewrite takes and past it.
         "((a|b)*c)*" to "nested repeated groups", "(((a)*b)+c)*" to "nested repeated groups", "((((a)*b)+c)*d)*" to "nested repeated groups",
         "(?:(?:(?:a|bc)+d)?e)*f" to "nested repeated groups",
+        // A search after an empty match that starts between a pair's halves, where Java reads each half alone.
+        "(?=\\D)" to "empty match before a pair", "(?!\\D)" to "empty match before a pair", "[^\\p{So}]?" to "empty match before a pair",
+        "\\B" to "empty match before a pair",
+        // A lookaround the rest of the pattern passes through, then fails: Harmony keeps one state for every lookaround.
+        "(?:\\b(a)\\b|a)" to "group after lookarounds", "(?:(?=a)(a)(?=x)|a)" to "group after lookarounds", "(a?(?=a|\$))*8" to "repeated group after lookarounds",
+        "(a?(?!b))*8" to "repeated group after lookarounds", "(?:a?()\\b())*8" to "repeated group after lookarounds",
+        // Groups with no width repeated, which Java repeats otherwise, and (?c), which reads classes by graphemes.
+        "b()*" to "repeated group with no width", "b(\\Z){0,2}" to "repeated group with no width", "(\\b)*a" to "repeated group with no width",
+        "(a{0})*b" to "repeated group with no width", "(?c)[^a]" to "(?c) class", "(?c)\\p{L}" to "(?c) property",
+        // A capturing group in a group Java repeats at a fixed length, and a group that can match nothing repeated in a repeated group.
+        "(?:(a))*a" to "group in a fixed-length repetition", "(?:(a)(?!b))*a" to "group in a fixed-length repetition", "(?:(a)b){2}|a" to "group in a fixed-length repetition",
+        "(?:a(?:b*)*){2}" to "repeated empty group repeated", "(?:a(\\w*){2}|x){2}" to "repeated empty group repeated",
+        // Searches that pass between a pair's halves, which Java tries only where its pattern has no supplementary characters.
+        "\\B." to "match between a pair's halves", "(?!.)" to "match between a pair's halves", "\\B\\w*" to "match between a pair's halves",
+        // A run of literals under (?i), which Java reads as one slice, its ß taking ẞ too.
+        "(?i)ß ß" to "(?i) slice", "(?i)a\u1E9E" to "(?i) slice",
+        // A code point past the BMP that Harmony misreads, last in a group of flags.
+        "(?m:\uD800\uDC26)" to "astral misread", "(?s:a|\uD800\uDC26)" to "astral misread",
     )
 
     /** The spec's directory, and the oracle's (corpus.jsonl and mutants.jsonl already written there). */
