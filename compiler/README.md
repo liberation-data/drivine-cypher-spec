@@ -544,6 +544,12 @@ where it crashed from 949; groups nested 12,200 deep crashed compiling on 8 MiB,
 in a row (`a?` …) crashed, and are refused from 8,200.
 Kotlin/Wasm's overflow is a `RangeError` its host's JavaScript catches, and isn't checked.
 
+**A known limit: long texts and `$`, `\Z`, `\b`, `\B`.** The rewrite writes these with lookbehinds, and Harmony takes
+time proportional to the text for a lookbehind at each place it tries one, so on native and wasm a pattern holding one
+takes time quadratic in the text's length: a `\b` replace takes 1.9 s over 10,000 characters and 33 s over 40,000. A
+text of a chunk's length is fine (a full-text search's term, replaced over 1,420 characters, 182 µs). Until #204 is
+fixed, a library keeps its own regular expression functions rather than registering these.
+
 A process keeps the 256 patterns used last (`JavaPatterns`), for every connection: a pattern rewritten for Harmony takes a
 millisecond or more to compile, its classes written out, where a find takes about a microsecond. `RegexOracleTest` checks
 every target against Java's answers (`regex.json`, see [Checks](#checks)), both ways where it can: `JavaPatterns`, as the
