@@ -24,16 +24,20 @@ object DecimalRound {
 
     /**
      * [unscaled] × 10^-[scale] to [places] places. Places at or past [scale] change nothing, as `setScale` would only write
-     * more zeros, and are not written out, so a precision of a billion places is no billion digits.
+     * more zeros, and are not written out, so a precision of a billion places is no billion digits. Nor is 10^-[places]
+     * where it is past the number's digits: the number is less than half of it, so rounds to 0 or to it.
      */
     private fun round(unscaled: BigInteger, scale: Long, places: Long, mode: RoundingMode): Double {
         if (places >= scale) return double(unscaled, scale)
-        val divisor = BigInteger.TEN.pow(scale - places)
-        val (quotient, remainder) = unscaled.divrem(divisor).let { it.quotient to it.remainder }
+        val (quotient, remainder, half) = if (places < scale - unscaled.abs().toString().length) {
+            Triple(BigInteger.ZERO, unscaled, -1)
+        } else {
+            val divisor = BigInteger.TEN.pow(scale - places)
+            val (quotient, remainder) = unscaled.divrem(divisor).let { it.quotient to it.remainder }
+            Triple(quotient, remainder, (remainder.abs() * 2).compareTo(divisor))
+        }
         if (remainder.isZero()) return double(quotient, places)
         val negative = unscaled.isNegative
-        val twice = remainder.abs() * 2
-        val half = twice.compareTo(divisor)
         val away = when (mode) {
             RoundingMode.UP -> true
             RoundingMode.DOWN -> false
@@ -48,9 +52,15 @@ object DecimalRound {
         return double(rounded, places)
     }
 
-    /** [unscaled] × 10^-[scale] as the nearest double, as `BigDecimal.doubleValue` gives it: no negative zero. */
-    private fun double(unscaled: BigInteger, scale: Long): Double =
-        if (unscaled.isZero()) 0.0 else DoubleParse.parseOrNull("${unscaled}E${-scale}")!!
+    /**
+     * [unscaled] × 10^-[scale] as the nearest double, as `BigDecimal.doubleValue` gives it: no negative zero, and an
+     * infinity past 10^400, which no double reaches (and where -[scale] could overflow).
+     */
+    private fun double(unscaled: BigInteger, scale: Long): Double = when {
+        unscaled.isZero() -> 0.0
+        scale < -400 -> if (unscaled.isNegative) Double.NEGATIVE_INFINITY else Double.POSITIVE_INFINITY
+        else -> DoubleParse.parseOrNull("${unscaled}E${-scale}")!!
+    }
 
     /**
      * Java's text of a double (`2.345`, `1.0E10`, `-1.5E-7`) as `BigDecimal(String)` reads it: its digits as a whole

@@ -24,7 +24,12 @@ class DecimalRoundFuzzTest {
                 2 -> (random.nextInt(-2000, 2000) + 0.5) / 10.0.pow(random.nextInt(0, 4))
                 else -> random.nextDouble(-1e6, 1e6)
             }
-            val places = random.nextLong(-20, 25)
+            // Near the number's own places, about them, or far below them, where the result is 0, 1E400 or more.
+            val places = when (random.nextInt(4)) {
+                0 -> BigDecimal.valueOf(x).scale() - random.nextLong(0, 20)
+                1 -> random.nextLong(-450, -300)
+                else -> random.nextLong(-20, 25)
+            }
             val mode = modes.random(random)
             assertEquals(java(BigDecimal.valueOf(x), places, mode), DecimalRound.of(x, places, mode), "round($x, $places, $mode)")
             val n = if (random.nextBoolean()) random.nextLong() else random.nextLong(-10_000, 10_000)

@@ -56,6 +56,33 @@ class DecimalRoundTest {
     }
 
     @Test
+    fun `a precision far below the number's digits rounds to zero or to one of its place at once`() {
+        // Java's setScale would write out 10^1000000000 first; the answer is plain: zero or the place's own 1.
+        assertEquals(0.0, round(2.5, -1_000_000_000, HALF_UP))
+        assertEquals(Double.POSITIVE_INFINITY, round(2.5, -1_000_000_000, UP))
+        assertEquals(Double.NEGATIVE_INFINITY, round(-2.5, -1_000_000_000, FLOOR))
+        assertEquals(0.0, round(-2.5, -1_000_000_000, CEILING))
+        assertEquals(1.0E20, round(2.5, -20, CEILING))
+        assertEquals(Double.POSITIVE_INFINITY, round(2.5, -400, UP))
+        assertEquals(0.0, DecimalRound.of(Long.MAX_VALUE, -1_000_000_000, HALF_EVEN))
+        // Past Int's range too, where -places overflows a Long.
+        assertEquals(0.0, round(2.5, Long.MIN_VALUE, HALF_UP))
+        assertEquals(Double.POSITIVE_INFINITY, round(2.5, Long.MIN_VALUE, UP))
+        assertEquals(Double.NEGATIVE_INFINITY, DecimalRound.of(-1L, Long.MIN_VALUE, UP))
+        assertEquals(0.0, round(Double.MIN_VALUE, Long.MIN_VALUE, DOWN))
+        assertFailsWith<ArithmeticException> { round(2.5, Long.MIN_VALUE, UNNECESSARY) }
+    }
+
+    @Test
+    fun `Long's extremes round as Java's do`() {
+        assertEquals(Long.MIN_VALUE.toDouble(), DecimalRound.of(Long.MIN_VALUE, -1, HALF_UP))
+        assertEquals(-1.0E19, DecimalRound.of(Long.MIN_VALUE, -18, UP))
+        assertEquals(-9.0E18, DecimalRound.of(Long.MIN_VALUE, -18, DOWN))
+        assertEquals(1.0E19, DecimalRound.of(Long.MAX_VALUE, -18, CEILING))
+        assertEquals(Long.MIN_VALUE.toDouble(), DecimalRound.of(Long.MIN_VALUE, Long.MAX_VALUE, UNNECESSARY))
+    }
+
+    @Test
     fun `places past the number's own change nothing and are not written out`() {
         assertEquals(2.5, round(2.5, 1_000_000_000, HALF_UP))
         assertEquals(5.0, DecimalRound.of(5L, 1, UP))
