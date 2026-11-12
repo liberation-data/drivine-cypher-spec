@@ -837,6 +837,7 @@ internal class SchemaProgram(
         } else if (existing != null) {
             return if (store.matchesShape(existing, spec)) {
                 if (spec != SchemaMarker.CONSTRAINT) keepForm(spec, form)
+                clearLeftover(spec)
                 EnsureResult.AlreadyMatching(existing)
             } else {
                 log(LogLevel.WARN, CONSTRAINT_MANAGER, "Constraint drift on ${spec.label}${spec.properties}: existing $existing does not match requested $spec")
@@ -920,6 +921,34 @@ internal class SchemaProgram(
         ddl(store.ddl.dropConstraint(existing.catalogItem))
         log(LogLevel.INFO, CONSTRAINT_MANAGER, "Dropped $engine ${spec.kind} on ${spec.label}${spec.properties}")
         return true
+    }
+
+    /**
+     * Where the constraint [spec], found as made, has beside its own index the unique index a recreate builds first, left by
+     * one cut off between its build and its swap: a unique index that may be of another shape, as one a newer version
+     * built, which would go on refusing writes the constraint allows. Dropped, said at `INFO`, where the store's swap
+     * needs it not to be there ([SqlStoreDdl.dropsLeftoverOnEnsure]); on Oracle, where a recreate in another session may
+     * be between its drop and its rename, kept, and said once at `WARN` with what drops it (drivine-cypher-spec#161).
+     */
+    private fun clearLeftover(spec: ConstraintSpec) {
+        val sql = store.ddl as? SqlStoreDdl ?: return
+        val schema = store as? SqlStoreSchema ?: return
+        val recreation = sql.recreation(spec)
+        if (!schema.leftover(listings[sql.listConstraintsQuery()].orEmpty(), recreation.temporary)) return
+        if (sql.dropsLeftoverOnEnsure) {
+            ddl(recreation.leftover)
+            log(
+                LogLevel.INFO, CONSTRAINT_MANAGER,
+                "Dropped $engine index ${recreation.temporary} beside ${recreation.name} for ${spec.kind} on ${spec.label}${spec.properties}: " +
+                    "a recreate built it first and never swapped it in, and left standing it would go on refusing writes",
+            )
+        } else {
+            log(
+                LogLevel.WARN, CONSTRAINT_MANAGER,
+                "$engine ${spec.kind} on ${spec.label}${spec.properties} has ${recreation.temporary} beside ${recreation.name}, the index a recreate of it builds first: " +
+                    "that recreate was cut off, or is still running. It is kept, and refuses writes as it was built to. $remake",
+            )
+        }
     }
 
     /**

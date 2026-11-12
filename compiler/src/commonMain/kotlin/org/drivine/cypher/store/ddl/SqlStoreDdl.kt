@@ -301,6 +301,17 @@ abstract class SqlStoreDdl(val name: String, final override val engine: String, 
     abstract fun recreation(spec: ConstraintSpec): UniqueRecreation
 
     /**
+     * Whether a unique index a recreate built first under [temporaryName], and left beside the constraint's own, may be dropped
+     * by an ensure that finds it ([recreation]'s `leftover`): true where the store's swap needs no such index to be there to
+     * leave the constraint with one. Postgres's swap is one block, which rolls back whole, the old index kept, where the
+     * index to rename is gone; SQLite's makes the index again under its name and drops the one built first only if it is
+     * there. Oracle's drops the old index and then renames, so dropping the one a recreate in another session built first,
+     * between the two, would leave the constraint with no index: there it is kept, and said (drivine-cypher-spec#161).
+     */
+    open val dropsLeftoverOnEnsure: Boolean
+        get() = true
+
+    /**
      * What records [item]'s record as made in [CURRENT_FORM] as the object [objectName], under [item]'s name, and changes
      * nothing else (its aliases are kept): for a uniqueness constraint made again in its place ([recreation]), whose
      * record is left as one made anew would be. Safe to run again.

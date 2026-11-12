@@ -116,6 +116,9 @@ abstract class SqlStoreSchema internal constructor() : StoreSchema {
      * own index by where it lists the properties in another order than [spec] (whose index then still stands, the
      * recreate cut off before its swap).
      */
+    /** Whether [rows] list an index under [temporary], the name a recreate builds a unique index under first. */
+    fun leftover(rows: List<Any?>, temporary: String): Boolean = StoreObject.read(rows)[temporary]?.isIndex == true
+
     fun cutOff(spec: SchemaItemSpec, rows: List<Any?>, name: String, temporary: String, recorded: String? = null): Boolean {
         val objects = StoreObject.read(rows)
         objects[name]?.let { standing -> if (standing.isIndex || !indexesNamedApart) return false }
