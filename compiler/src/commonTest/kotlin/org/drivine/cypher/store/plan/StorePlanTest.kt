@@ -64,10 +64,10 @@ class StorePlanTest {
     private val cases: List<JsonNode> = plans["cases"]!!.toList()
 
     @Test
-    fun theCasesAreTheDesignsCasesOneToThirtyAndTheItemCalls() {
+    fun theCasesAreTheDesignsCasesOneToThirtyOneAndTheItemCalls() {
         val names = cases.map { it["case"]!!.textValue()!! }
         val numbers = names.filter { it.first().isDigit() }.map { it.takeWhile(Char::isDigit).toInt() }.distinct().sorted()
-        assertEquals((1..30).toList(), numbers)
+        assertEquals((1..31).toList(), numbers)
         assertEquals(listOf("item"), names.filterNot { it.first().isDigit() })
         assertEquals(names.distinct(), names, "each case once")
     }
@@ -153,14 +153,22 @@ class StorePlanTest {
     private fun storeCase(name: String): JsonNode = store["cases"]!!.firstOrNull { it["name"]!!.textValue() == name } ?: fail("store.yaml has no case $name")
 
     /**
-     * The DDL [execute] names on [id]: a `store.yaml` case's create, drop or dropUnnamed, the marker's, or a statement given
-     * whole.
+     * The DDL [execute] names on [id]: a `store.yaml` case's create, drop or dropUnnamed, or a step of its `recreate`
+     * (`leftover`, `build`, `swap`, `finish`, `remade`), the marker's, or a statement given whole.
      */
     private fun ddl(id: String, execute: JsonNode): List<PlanAction.Execute> {
         fun ddl(statements: List<DdlStatement>) = statements.map { PlanAction.Execute(it, purpose = Purpose.DDL) }
         execute["create"]?.let { return ddl(prefix(id) + storeCase(it.textValue()!!)["stores"]!![id]!!["create"]!!.map(::statement)) }
         execute["drop"]?.let { return ddl(storeCase(it.textValue()!!)["stores"]!![id]!!["drop"]!!.map(::statement)) }
         execute["dropUnnamed"]?.let { return ddl(storeCase(it.textValue()!!)["stores"]!![id]!!["dropUnnamed"]!!.map(::statement)) }
+        // A uniqueness constraint made again in its place (drivine-cypher-spec#135 §4), as its case's `recreate` pins it.
+        for (step in listOf("leftover", "build", "swap", "finish")) {
+            execute[step]?.let { return ddl(storeCase(it.textValue()!!)["stores"]!![id]!!["recreate"]!![step]!!.map(::statement)) }
+        }
+        execute["remade"]?.let {
+            val remade = storeCase(it.textValue()!!)["stores"]!![id]!!["recreate"]!!["remade"]!!.textValue()!!
+            return listOf(PlanAction.Execute(DdlStatement.Text(remade), purpose = Purpose.ALIASES))
+        }
         execute["statement"]?.let { statement ->
             val purpose = execute["purpose"]?.textValue()?.let(Purpose::valueOf) ?: return ddl(listOf(DdlStatement.Text(statement.textValue()!!)))
             return listOf(PlanAction.Execute(DdlStatement.Text(statement.textValue()!!), purpose = purpose))
@@ -195,7 +203,10 @@ class StorePlanTest {
         query["sample"]?.let { sample ->
             val spec = spec(sample["spec"]!!)
             val limit = sample["limit"]!!.longValue()
-            val pinned = store["schema"]!!["samples"]!!.firstOrNull { spec(it["spec"]!!) == spec && it["limit"]!!.longValue() == limit }
+            val refilled = sample["refilled"]?.booleanValue() ?: false
+            val pinned = store["schema"]!!["samples"]!!.firstOrNull {
+                spec(it["spec"]!!) == spec && it["limit"]!!.longValue() == limit && (it["refilled"]?.booleanValue() ?: false) == refilled
+            }
                 ?: fail("store.yaml samples no $spec with the limit $limit")
             return PlanAction.Query(pinned["stores"]!![id]!!.textValue()!!, purpose = Purpose.SAMPLE, delayMillis = delay)
         }

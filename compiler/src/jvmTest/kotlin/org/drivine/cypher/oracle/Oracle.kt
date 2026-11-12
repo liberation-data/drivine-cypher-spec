@@ -14,7 +14,8 @@ import java.time.format.DateTimeFormatter
  *
  * - `corpus.jsonl`: every statement in the spec's files, compiled for Postgres, Oracle and SQLite, and a few with typed
  *   parameters, Oracle's graph options, and on Oracle with `oracleRowsAsText` each statement whose SQL it changes and
- *   [ROWS_AS_TEXT_WRITES], and with `oracleReencodeJson` each statement whose SQL it changes: each line `{"request": …, "answer": …}`, both JSON text, the answer as [CompileJson] gives it on the JVM.
+ *   [ROWS_AS_TEXT_WRITES], with `oracleReencodeJson` each statement whose SQL it changes, and with `oracleReadsAsText`
+ *   each statement whose SQL it changes: each line `{"request": …, "answer": …}`, both JSON text, the answer as [CompileJson] gives it on the JVM.
  *   A statement whose SQL embeds the moment it was compiled at, as SQLite's does of `datetime()` and the like, is left
  *   out: no two runs give it alike. It is found by its SQL holding that moment, so no list of statements is kept.
  * - `doubles.txt`: doubles as Java writes them (`T<tab>bits<tab>text`) and texts as Java reads them
@@ -30,6 +31,11 @@ import java.time.format.DateTimeFormatter
  *   for each target's `TypedValuesGoldenTest`.
  * - `host.json`: the spec's `host.yaml`, as JSON likewise: the host functions' cases, its sort keys and its reads of the store
  *   layout's tags. See [HostSpecJson], `HostSpecTest` and `ValueLayoutTest`.
+ * - `regex.json`: Java's answers for the regular expressions SQLite's host functions see, for each target's
+ *   `RegexOracleTest`. See [Regexes].
+ * - `host-temporal.json`: Java's answers for SQLite's temporal host functions, `drivine_temporal`, `drivine_trunc` and
+ *   `drivine_to_char`, in the forms the module's port gives them, for each target's `HostTemporalOracleTest`; host.yaml's
+ *   steps of them are checked against it first. See [HostTemporals].
  * - `search-golden.json`: drivine4j's full-text search statements, the module's golden (`src/commonTest/resources`), for
  *   each target's `FullTextSearchGoldenTest`. Its requests are in `corpus.jsonl` too, as [CompileJson] answers them.
  *
@@ -62,6 +68,10 @@ object Oracle {
         File(out, "plans.json").writeText(json.writeValueAsString(yaml.readTree(File(spec, "plans.yaml"))))
         // The host's functions and readers, for each target's HostSpecTest and ValueLayoutTest.
         HostSpecJson.write(spec, out)
+        // Java's answers for the regular expressions SQLite's host functions see, for each target's RegexOracleTest (#108).
+        Regexes.write(spec, out)
+        // Java's answers for SQLite's temporal host functions, for each target's HostTemporalOracleTest (#108).
+        HostTemporals.write(spec, out)
         // drivine4j's full-text search statements, for each target's FullTextSearchGoldenTest.
         File(out, "search-golden.json").writeBytes(searchGolden())
         // The store layout's typed values compiled, for each target's TypedValuesGoldenTest.
@@ -114,6 +124,11 @@ object Oracle {
         for ((cypher, parameters) in statements + TYPED.map { (cypher, parameters) -> Mutants.Statement(cypher, parameters) }) {
             val again = request("oracle", cypher, parameters, REENCODED)
             if (CompileJson.compile(again) != CompileJson.compile(request("oracle", cypher, parameters))) add(again)
+        }
+        // Oracle's reads as text (#198): each spec statement whose SQL the option changes, every one that only reads.
+        for ((cypher, parameters) in statements) {
+            val text = request("oracle", cypher, parameters, READS_AS_TEXT)
+            if (CompileJson.compile(text) != CompileJson.compile(request("oracle", cypher, parameters))) add(text)
         }
         // Full-text searches: each of the golden's requests, and searches that are no request.
         addAll(searchRequests())
@@ -252,6 +267,9 @@ object Oracle {
 
     /** The graph of Oracle's values encoded again: see [corpusRequests]. */
     private val REENCODED: Map<String, Any?> = mapOf("name" to "g", "oracleReencodeJson" to true)
+
+    /** The graph of Oracle's reads as text: see [corpusRequests]. */
+    private val READS_AS_TEXT: Map<String, Any?> = mapOf("name" to "g", "oracleReadsAsText" to true)
 
     /** Writes that return rows the spec's statements have no form of, for Oracle's rows as text: a long text given, many rows. */
     private val ROWS_AS_TEXT_WRITES: List<Pair<String, Map<String, Any?>>> = listOf(

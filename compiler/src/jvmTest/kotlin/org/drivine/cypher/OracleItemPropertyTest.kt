@@ -272,9 +272,9 @@ class OracleItemPropertyTest {
         val written = compiled("UNWIND \$ts AS t MATCH (n:Doc {id: t.id}) SET n.b = 1 RETURN t.a")
         // The carried value's key by its whole path from the row, its kind tested first.
         assertTrue(Regex("""CASE WHEN JSON_VALUE\((r\d+)\.item, '\$\.(v\d+)\.a\.type\(\)'\) = 'string' THEN .*ELSE JSON_QUERY\(\1\.item, '\$\.\2\.a' RETURNING JSON\) END AS c1""").containsMatchIn(written), written)
-        // Tested, sorted, nested in an item, or matched by a pattern, as it was.
-        val other = compiled("UNWIND \$ts AS t WITH t WHERE t.b = 1 RETURN size(t.a) ORDER BY t.c")
-        assertTrue(!other.contains("SERIALIZE"), other)
+        // Tested, sorted, nested in an item, or matched by a pattern, as it was: the query, after the function a sort declares (drivine4j#205).
+        val other = compiled("UNWIND \$ts AS t WITH t WHERE t.b = 1 RETURN size(t.a) ORDER BY t.c").substringAfterLast("\nEND;\n")
+        assertTrue(other.startsWith("SELECT") && !other.contains("SERIALIZE"), other)
         // A member of a list an item is, read so too (#670).
         val listed = compiled("UNWIND \$ts AS t WITH t RETURN [t.a]")
         assertTrue(listed.contains("JSON_ARRAY(${read("w3.c1")} NULL ON NULL RETURNING JSON) AS c1"), listed)

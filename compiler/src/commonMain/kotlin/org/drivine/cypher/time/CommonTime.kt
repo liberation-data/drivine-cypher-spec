@@ -71,7 +71,8 @@ object CommonTime {
                 else -> return LocalDate(checkYear(year + 1L), 1, (dom - length).toInt())
             }
         }
-        val epochDay = date.toEpochDays() + days
+        // Math.addExact, as Java's: a sum past a long's range fails, rather than wrapping back into the range.
+        val epochDay = date.toEpochDays().let { from -> (from + days).also { if (((from xor it) and (days xor it)) < 0) throw ArithmeticException("long overflow") } }
         if (epochDay !in MIN_EPOCH_DAY..MAX_EPOCH_DAY) {
             throw TemporalException("Invalid value for EpochDay (valid values $MIN_EPOCH_DAY - $MAX_EPOCH_DAY): $epochDay")
         }
@@ -83,7 +84,7 @@ object CommonTime {
     private const val MAX_EPOCH_DAY = 365241780471L
 
     /** The days of [month] in [year]. */
-    private fun lengthOfMonth(year: Int, month: Int) = when (month) { 2 -> if (lengthOfYear(year) == 366) 29 else 28; 4, 6, 9, 11 -> 30; else -> 31 }
+    internal fun lengthOfMonth(year: Int, month: Int) = when (month) { 2 -> if (lengthOfYear(year) == 366) 29 else 28; 4, 6, 9, 11 -> 30; else -> 31 }
 
     /** The Monday of ISO week 1 of [year]. */
     fun isoWeekOne(year: Int): LocalDate {
@@ -107,7 +108,9 @@ object CommonTime {
         val date = Regex("^(-?[0-9]{4,})-([0-9]{2})-([0-9]{2})").find(local)
         if (date != null) {
             val (y, m, d) = date.destructured
-            val year = y.toInt(); val month = m.toInt(); val day = d.toInt()
+            // A year past an int's range is past java.time's too, which refuses it reading it (JavaTime gives any text here).
+            val year = y.toIntOrNull() ?: return "Text '$local' could not be parsed at index 0"
+            val month = m.toInt(); val day = d.toInt()
             if (month !in 1..12) return refused("Invalid value for MonthOfYear (valid values 1 - 12): $month")
             if (day !in 1..31) return refused("Invalid value for DayOfMonth (valid values 1 - 28/31): $day")
             val last = lengthOfMonth(year, month)

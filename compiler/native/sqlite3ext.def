@@ -5,3 +5,45 @@
 headers = sqlite3ext.h
 headerFilter = sqlite3ext.h sqlite3.h
 package = org.drivine.sqlite.ext
+#
+# Beside them, two of the calling thread's stack, which the regular expressions on Kotlin/Native read so that
+# kotlin.text.Regex's recursion fails its statement before it would overflow the stack and end the host's process (see
+# README.md, "Regular expressions"): its lowest address, and an address in the caller's frame. The stack grows down on
+# every target built.
+---
+#if defined(_WIN32)
+#include <windows.h>
+WINBASEAPI VOID WINAPI GetCurrentThreadStackLimits(PULONG_PTR LowLimit, PULONG_PTR HighLimit);
+#else
+#include <pthread.h>
+#if !defined(__APPLE__)
+extern int pthread_getattr_np(pthread_t thread, pthread_attr_t *attributes);
+#endif
+#endif
+#include <stdint.h>
+
+/* The lowest address of the calling thread's stack; 0 where the platform gives none. */
+static uint64_t drivine_stack_low(void) {
+#if defined(__APPLE__)
+    pthread_t self = pthread_self();
+    return (uint64_t) ((uintptr_t) pthread_get_stackaddr_np(self) - pthread_get_stacksize_np(self));
+#elif defined(_WIN32)
+    ULONG_PTR low = 0, high = 0;
+    GetCurrentThreadStackLimits(&low, &high);
+    return (uint64_t) low;
+#else
+    pthread_attr_t attributes;
+    void *address = 0;
+    size_t size = 0;
+    if (pthread_getattr_np(pthread_self(), &attributes) != 0) return 0;
+    if (pthread_attr_getstack(&attributes, &address, &size) != 0) address = 0;
+    pthread_attr_destroy(&attributes);
+    return (uint64_t) (uintptr_t) address;
+#endif
+}
+
+/* An address in this call's frame: in the caller's stack, just past the caller's own frame. */
+static uint64_t drivine_stack_here(void) {
+    volatile char here = 0;
+    return (uint64_t) (uintptr_t) &here;
+}

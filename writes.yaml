@@ -932,7 +932,7 @@ cases:
         rows: [[1, true]]
 
   - name: "A map parameter keyed with $"
-    description: "A write reads a map parameter with a key that begins with $, such as extended JSON's $numberDouble, as the map it is, alone or beside a float that is a whole number."
+    description: "A write reads a map parameter with a key that begins with $, such as extended JSON's $numberDouble, as the map it is, alone or beside a float that is a whole number, which it writes as the float it is."
     steps:
       - cypher: "CREATE (n:CyWrite {id: 1}) RETURN $m"
         parameters: {m: {$numberDouble: "1"}}
@@ -941,6 +941,15 @@ cases:
         cypher: "CREATE (n:CyWrite {id: 2, f: $f}) RETURN $l"
         parameters: {f: 2.0, l: {$numberLong: "5"}}
         rows: [{$numberLong: "5"}]
+      - note: "And the float is written as the float it is (#200)."
+        only: [neo4j, sql]
+        cypher: "MATCH (n:CyWrite {id: 2}) RETURN toString(n.f)"
+        rows: ["2.0"]
+      - note: "A float past a long's range beside a map keyed with $ is written as a float too (#200)."
+        only: [neo4j, sql]
+        cypher: "CREATE (n:CyWrite {id: 3, j: $x, m: $m.k}) RETURN [toString(n.j), n.m]"
+        parameters: {x: 1.0e+20, m: {$k: "a", k: "b"}}
+        rows: [["1.0E20", "b"]]
 
   - name: "One clock for a statement's writes"
     description: "Every row a statement writes reads the same moment from the clock."
@@ -1408,7 +1417,7 @@ cases:
         rows: [2]
 
   - name: "A stored empty text searched for and measured"
-    description: "A stored empty text starts with, ends with and holds the empty text, and no other; its size is 0. Oracle's empty text is null as SQL text (drivine4j#416)."
+    description: "A stored empty text starts with, ends with and holds the empty text, and no other; its size is 0, and the text functions make the empty text of it. Oracle's empty text is null as SQL text (drivine4j#416)."
     steps:
       - cypher: "CREATE (:CyWrite {k: 0, name: 'ab'}), (:CyWrite {k: 1, name: ''}), (:CyWrite {k: 2, name: 'xy'}), (:CyWrite {k: 3, name: 5})"
       - only: [neo4j, sql]
@@ -1437,6 +1446,10 @@ cases:
         only: [neo4j, sql]
         cypher: "MATCH (a:CyWrite {k: 1}) SET a.s = size(a.name), a.c = 'ab' CONTAINS a.name RETURN [a.s, a.c]"
         rows: [[0, true]]
+      - note: "Made from it by the text functions and +, read by the property's own path on Oracle."
+        only: [neo4j, sql]
+        cypher: "MATCH (a:CyWrite {k: 1}) RETURN [a.name + a.name, toUpper(a.name), trim(a.name), reverse(a.name), left(a.name, 1), substring(a.name, 0), replace(a.name, 'x', 'y'), toString(a.name), split(a.name, ',')]"
+        rows: [["", "", "", "", "", "", "", "", [""]]]
 
   - name: "A walk of 1,100 hops"
     description: "A variable-length relationship or a quantified path pattern walks a chain of 1,100 relationships, its path's nodes and relationships each in order. Oracle held a walk's ids as text of 4,000 bytes at most, and failed past them (ORA-01489, drivine4j#177)."

@@ -54,6 +54,12 @@ enum class Store(val id: String) {
  *   `NJS-126` (oracle/node-oracledb#1796). For a host on a thin driver, reading or writing; JDBC reads version 2, so
  *   drivine4j leaves it false. With [oracleRowsAsText] a write's rows are text already, and its reads still need this.
  *   A statement that returns nothing, and every statement on the other stores, is compiled alike either way.
+ * @param oracleReadsAsText on Oracle, whether a statement that only reads gives each row's value as its text in Oracle's
+ *   extended JSON, a `CLOB` in the column `result`, in place of `JSON`: `JSON_SERIALIZE(… RETURNING CLOB EXTENDED)`, as
+ *   [oracleRowsAsText] gives a write's rows. A whole number keeps its digits and a float is marked as one, for a host whose
+ *   driver reads a `JSON` value's numbers through a double: node-oracledb's thin mode does, so 9007199254740993 came back
+ *   9007199254740992 (#198). The rows keep their order. drivine4j leaves it false, as JDBC keeps a number's digits. A
+ *   statement that writes, one compiled typed, and every statement on the other stores, is compiled alike either way.
  */
 data class GraphOptions(
     val name: String,
@@ -62,6 +68,7 @@ data class GraphOptions(
     val indexedProperties: Set<Pair<String, String>> = emptySet(),
     val oracleRowsAsText: Boolean = false,
     val oracleReencodeJson: Boolean = false,
+    val oracleReadsAsText: Boolean = false,
 )
 
 /** What compiling a statement gives: the SQL, or the compiler's refusal of the statement. */
@@ -141,7 +148,7 @@ object CypherCompiler {
     fun compile(store: Store, graph: GraphOptions, cypher: String, parameters: Map<String, Any?>, typed: Boolean): CompileResult {
         val compiler: SqlCypherCompiler = when (store) {
             Store.POSTGRES -> PostgresCypherCompiler(graph.name)
-            Store.ORACLE -> OracleCypherCompiler(graph.name, graph.nullsEqualStored, graph.eraStored, graph.indexedProperties, encoder = null, rowsAsText = graph.oracleRowsAsText, reencodeJson = graph.oracleReencodeJson)
+            Store.ORACLE -> OracleCypherCompiler(graph.name, graph.nullsEqualStored, graph.eraStored, graph.indexedProperties, encoder = null, rowsAsText = graph.oracleRowsAsText, reencodeJson = graph.oracleReencodeJson, readsAsText = graph.oracleReadsAsText)
             Store.SQLITE -> SqliteCypherCompiler(graph.name)
         }
         val compiled = try {

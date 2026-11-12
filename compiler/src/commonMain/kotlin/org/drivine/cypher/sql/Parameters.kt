@@ -22,7 +22,10 @@ class Parameters(
     /** The bound whole number at a marker, or with [inObject] the parameter of a name, as the store's number. */
     private val asCount: (String) -> String,
     private val inObject: Boolean = false,
-    /** The JSON text a value is bound as: the store's, see [SqlCypherCompiler.parameterText]. */
+    /**
+     * The JSON text a value is bound as, with [inObject] the map of all the parameters: the store's, see
+     * [SqlCypherCompiler.parameterText] and [SqlCypherCompiler.parametersText].
+     */
     private val text: (Any?) -> String,
     /**
      * The value at a path of keys in a parameter that is a map, read straight from the text it is bound as: given the

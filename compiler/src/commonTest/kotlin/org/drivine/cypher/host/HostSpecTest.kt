@@ -2,8 +2,6 @@ package org.drivine.cypher.host
 
 import org.drivine.cypher.json.CypherJson
 import org.drivine.cypher.json.JsonNode
-import org.drivine.cypher.json.ObjectNode
-import org.drivine.cypher.json.parseDouble
 import org.drivine.cypher.number.oracleFile
 import org.drivine.cypher.number.target
 import kotlin.test.Test
@@ -14,8 +12,8 @@ import kotlin.test.assertTrue
 
 /**
  * The spec's host.yaml (as host.json, `./gradlew jvmOracle`), over the module's own host functions ([HostFunctions]), called
- * as SQLite calls them, on every target: each `function` step of a function the module implements gives its `result`, or
- * its values ascend. A function host.yaml calls that the module doesn't implement yet is in [PENDING], and [PENDING] holds
+ * as SQLite calls them, on every target: each `function` step of a function the module implements gives its `result`, fails
+ * with its `error`, or its values ascend. A function host.yaml calls that the module doesn't implement yet is in [PENDING], and [PENDING] holds
  * nothing else; each function the module implements has a step. A `read` step pins each library's row reader, not the
  * module's, and a `key` step a temporal value's sort key, which `ValueLayoutTest` checks: each is passed over. The cases' `pairs` are checked by each library's runner (drivine4j's HostSpecTest), which
  * compiles them. The SQLite extension's check (check/extension-native.py) runs the same steps through SQL, on the
@@ -25,19 +23,24 @@ class HostSpecTest {
 
     private companion object {
         /**
-         * The keys of each kind of step, beside its optional `note`: a function's result, its order, a read, and a temporal
-         * value's sort key (`ValueLayoutTest` checks it, over `Temporals.key`).
+         * The keys of each kind of step, beside its optional `note`: a function's result, its failure, its order, a read, and
+         * a temporal value's sort key (`ValueLayoutTest` checks it, over `Temporals.key`).
          */
-        val SHAPES = setOf(setOf("function", "args", "result"), setOf("function", "ascending"), setOf("read", "value"), setOf("key", "result"))
+        val SHAPES = setOf(
+            setOf("function", "args", "result"), setOf("function", "args", "error"), setOf("function", "ascending"), setOf("read", "value"), setOf("key", "result"),
+        )
 
         /** Drivine's functions, and `regexp`, which SQLite calls, as `regexp(pattern, text)`, for `text REGEXP pattern`. */
         val FUNCTION = Regex("drivine_[a-z_]+|regexp")
 
-        /** The functions host.yaml calls that are not yet ported from drivine4j (#108): each batch takes its own out. */
-        val PENDING = setOf(
-            "drivine_equal", "drivine_add", "drivine_list_order", "drivine_sort_key", "drivine_round",
-            "regexp", "drivine_regex_group", "drivine_regexp_replace",
-        )
+        /** The functions host.yaml calls that are not yet ported from drivine4j (#108): a port takes its own out. All are ported now. */
+        val PENDING = emptySet<String>()
+
+        /**
+         * The note of a step held until the store's timestamps keep nine digits (layout 2): it is run, and must fail, so
+         * the hold comes off when it passes. Matched within the note, as check/extension-native.py matches it.
+         */
+        const val HELD = "drivine4j#421 (layout 2)"
     }
 
     private val cases: List<JsonNode> = CypherJson.readTree(oracleFile("host.json"))["cases"]!!.toList()
@@ -46,15 +49,18 @@ class HostSpecTest {
     fun `each function step of a function the module implements gives what host_yaml says`() {
         var steps = 0
         var reads = 0
+        val held = mutableListOf<String>()
         for (case in cases) {
             for ((index, step) in case["steps"]!!.withIndex()) {
                 val where = "${case["name"]!!.textValue()}, step ${index + 1}"
                 val outcome = check(step, where)
                 if (outcome == Outcome.RAN) steps++
                 if (outcome == Outcome.READ) reads++
+                if (outcome == Outcome.HELD) held += where
             }
         }
         println("HostSpecTest on $target: $steps function steps of ${HostFunctions.all.size} functions ran; $reads reads are each library's.")
+        println("HostSpecTest on $target: held for layout 2, and failing as they should: ${held.joinToString("; ").ifEmpty { "none" }}.")
         assertTrue(steps > 0, "No function step ran")
     }
 
@@ -99,8 +105,16 @@ class HostSpecTest {
         assertContains(assertFails { check(nanAscending, "nanAscending") }.message!!, "can't be given NaN")
         val truth = CypherJson.readTree("""{"function": "drivine_float_text", "args": [true], "result": "1.0"}""")
         assertContains(assertFails { check(truth, "truth") }.message!!, "No SQL value of")
-        val pending = CypherJson.readTree("""{"function": "drivine_equal", "args": ["1", "1"], "result": 1}""")
-        assertEquals(Outcome.PENDING, check(pending, "pending"))
+        val fails = CypherJson.readTree("""{"function": "drivine_round", "args": [2.5, 0, "UNNECESSARY"], "error": "Rounding necessary"}""")
+        assertEquals(Outcome.RAN, check(fails, "fails"))
+        val gives = CypherJson.readTree("""{"function": "drivine_float_text", "args": [1.0], "error": "x"}""")
+        assertContains(assertFails { check(gives, "gives") }.message!!, "gave no error")
+        val otherError = CypherJson.readTree("""{"function": "drivine_round", "args": [2.5, 0, "UNNECESSARY"], "error": "no such"}""")
+        assertContains(assertFails { check(otherError, "otherError") }.message!!, "Rounding necessary")
+        val untexted = CypherJson.readTree("""{"function": "drivine_round", "args": [2.5, 0, "UNNECESSARY"], "error": 1}""")
+        assertContains(assertFails { check(untexted, "untexted") }.message!!, "error is a text, not 1")
+        val pending = CypherJson.readTree("""{"function": "drivine_pending", "args": ["local", "x"], "result": null}""")
+        assertEquals(Outcome.PENDING, check(pending, "pending", setOf("drivine_pending")))
         val read = CypherJson.readTree("""{"read": {"store": "sqlite", "nonFinite": false, "column": "1"}, "value": 1, "note": "n"}""")
         assertEquals(Outcome.READ, check(read, "read"))
         val failing = HostFunction("drivine_failing", 1, deterministic = true) { _, _, result -> result.error("no") }
@@ -118,6 +132,42 @@ class HostSpecTest {
     }
 
     @Test
+    fun `the functions of JSON values take an empty text and JSON's null as no value and fail on a text that is no JSON`() {
+        // As drivine4j's do: Jackson reads a text of nothing but JSON's whitespace as a missing node, which is no value.
+        for ((step, where) in listOf(
+            """{"function": "drivine_equal", "args": ["", "1"], "result": null}""" to "equal",
+            """{"function": "drivine_add", "args": [" ", "[1]"], "result": "[null,1]"}""" to "add",
+            """{"function": "drivine_canonical", "args": ["\n"], "result": "\n"}""" to "canonical",
+            """{"function": "drivine_sort_key", "args": ["\t"], "result": null}""" to "sortKey",
+            """{"function": "drivine_sort_key", "args": ["null"], "result": null}""" to "sortKeyNull",
+            """{"function": "drivine_list_order", "args": ["null", "[1]"], "result": null}""" to "listOrderNull",
+            """{"function": "drivine_list_order", "args": ["[1]", "\r"], "result": null}""" to "listOrderEmpty",
+        )) assertEquals(Outcome.RAN, check(CypherJson.readTree(step), where))
+        for (function in listOf("drivine_equal", "drivine_add", "drivine_canonical", "drivine_sort_key", "drivine_list_order")) {
+            val args = if (function == "drivine_canonical" || function == "drivine_sort_key") """["[1"]""" else """["[1", "[1]"]"""
+            assertFails { check(CypherJson.readTree("""{"function": "$function", "args": $args, "result": null}"""), function) }
+        }
+    }
+
+    @Test
+    fun `drivine_round rounds a whole number and reads a float precision as SQLite does where host_yaml pins neither`() {
+        for ((args, result) in listOf(
+            """[15, -1, "HALF_EVEN"]""" to "20.0",
+            """[-15, -1, "HALF_DOWN"]""" to "-10.0",
+            """[9223372036854775807, -18, "CEILING"]""" to "1.0E19",
+            """[2.345, 2.9, "HALF_UP"]""" to "2.35",
+            """[2.5, -9223372036854775808, "UP"]""" to """{"${'$'}float": "Infinity"}""",
+            """[2.5, 0, "UNNECESSARY"]""" to null,
+        )) {
+            val step = CypherJson.readTree("""{"function": "drivine_round", "args": $args, "result": ${result ?: "3.0"}}""")
+            if (result != null) assertEquals(Outcome.RAN, check(step, args))
+            else assertContains(assertFails { check(step, args) }.message!!, "Rounding necessary")
+        }
+        val unknown = CypherJson.readTree("""{"function": "drivine_round", "args": [2.5, 0, "half_up"], "result": 3.0}""")
+        assertContains(assertFails { check(unknown, "unknown") }.message!!, "no rounding mode is named half_up")
+    }
+
+    @Test
     fun `values ascend as SQLite orders them`() {
         assertTrue(sqliteOrder(null, 1L) < 0)
         assertTrue(sqliteOrder(1L, 1.5) < 0)
@@ -128,20 +178,61 @@ class HostSpecTest {
         assertTrue(sqliteOrder("Infinity", "-Infinity") > 0)
     }
 
-    private enum class Outcome { RAN, PENDING, READ }
+    @Test
+    fun `a step held for layout 2 must fail and is listed and one that passes fails the run`() {
+        val heldFailing = CypherJson.readTree("""{"note": "x $HELD", "function": "drivine_float_text", "args": [1.0], "result": "1"}""")
+        assertEquals(Outcome.HELD, check(heldFailing, "heldFailing"))
+        val heldErring = CypherJson.readTree("""{"note": "$HELD", "function": "drivine_round", "args": [2.5, 0, "UNNECESSARY"], "result": 3.0}""")
+        assertEquals(Outcome.HELD, check(heldErring, "heldErring"))
+        val heldPassing = CypherJson.readTree("""{"note": "$HELD", "function": "drivine_float_text", "args": [1.0], "result": "1.0"}""")
+        assertContains(assertFails { check(heldPassing, "heldPassing") }.message!!, "and passing: take the hold off")
+        val heldWrongError = CypherJson.readTree("""{"note": "$HELD", "function": "drivine_float_text", "args": [1.0], "error": "x"}""")
+        assertEquals(Outcome.HELD, check(heldWrongError, "heldWrongError"))
+        // A step the runner can't run is no hold.
+        val heldUnreadable = CypherJson.readTree("""{"note": "$HELD", "function": "drivine_float_text", "args": [true], "result": "1.0"}""")
+        assertContains(assertFails { check(heldUnreadable, "heldUnreadable") }.message!!, "No SQL value of")
+        // Nor is a step of an error whose argument the runner can't hand over as SQLite would: its failure is the runner's.
+        val heldUnreadableError = CypherJson.readTree("""{"note": "$HELD", "function": "drivine_temporal", "args": ["add_months", "2024-01-31T00:00:00.000000", 2.5], "error": "x"}""")
+        assertContains(assertFails { check(heldUnreadableError, "heldUnreadableError") }.message!!, "No step reads the text of the float")
+        val otherNote = CypherJson.readTree("""{"note": "drivine4j#421", "function": "drivine_float_text", "args": [1.0], "result": "1"}""")
+        assertFails { check(otherNote, "otherNote") }
+        val heldPending = CypherJson.readTree("""{"note": "$HELD", "function": "drivine_pending", "args": ["local", "x"], "result": null}""")
+        assertEquals(Outcome.PENDING, check(heldPending, "heldPending", setOf("drivine_pending")))
+    }
+
+    private enum class Outcome { RAN, PENDING, READ, HELD }
 
     /** Runs [step], of a shape the spec's README gives. */
-    private fun check(step: JsonNode, where: String): Outcome {
-        val keys = step.fieldNames() - "note"
+    private fun check(step: JsonNode, where: String, pending: Set<String> = PENDING): Outcome {
+        val keys = step.keys() - "note"
         require(keys in SHAPES) { "$where: a step has the keys of one of $SHAPES, and an optional note, not $keys" }
         if ("read" in keys || "key" in keys) return Outcome.READ
         val name = step["function"]!!.textValue()!!
         require(name.matches(FUNCTION)) { "$where: $name is no function of Drivine's" }
         val functions = HostFunctions.all.filter { it.name == name }
         if (functions.isEmpty()) {
-            require(name in PENDING) { "$where: $name is neither implemented nor pending" }
+            require(name in pending) { "$where: $name is neither implemented nor pending" }
             return Outcome.PENDING
         }
+        if (step["note"]?.textValue()?.contains(HELD) != true) {
+            run(step, name, functions, where)
+            return Outcome.RAN
+        }
+        // Held: it must fail, by an assertion or as the function fails, but not as the runner can't run it.
+        val failed = try {
+            run(step, name, functions, where)
+            false
+        } catch (e: AssertionError) {
+            true
+        } catch (e: HostFailure) {
+            true
+        }
+        if (!failed) throw AssertionError("$where: held for layout 2 ($HELD), and passing: take the hold off")
+        return Outcome.HELD
+    }
+
+    /** Runs the function step [step] of [name], one of [functions]: throws where it doesn't give what the step says. */
+    private fun run(step: JsonNode, name: String, functions: List<HostFunction>, where: String) {
         val ascending = step["ascending"]
         if (ascending != null) {
             val values = ascending.map(::expanded)
@@ -156,9 +247,15 @@ class HostSpecTest {
         } else {
             val args = step["args"]!!.map(::expanded)
             refuseNaN(args, where)
-            assertEquals(expanded(step["result"]!!), call(functions, args, where), "$where: $name$args")
+            val error = step["error"]?.let { it.textValue() ?: throw IllegalArgumentException("$where: error is a text, not ${CypherJson.writeValueAsString(it)}") }
+            if (error == null) assertEquals(expanded(step["result"]!!), call(functions, args, where), "$where: $name$args")
+            else {
+                // An argument the runner can't hand over (Unreadable) is the step's failure to run, never the function's error.
+                val failure = runCatching { call(functions, args, where) }.exceptionOrNull()?.also { if (it is Unreadable) throw it }
+                    ?: throw AssertionError("$where: $name$args fails with \"$error\", but gave no error")
+                assertContains(failure.message!!, error, message = "$where: $name$args")
+            }
         }
-        return Outcome.RAN
     }
 
     /** SQLite binds a NaN as NULL (check/extension-native.py refuses it too): the function would be given null. */
@@ -166,24 +263,9 @@ class HostSpecTest {
         require(values.none { it is Double && it.isNaN() }) { "$where: SQLite can't be given NaN as an argument" }
 
     /** The function of [functions] that takes [args], called as SQLite calls it: its result, or why it failed. */
-    private fun call(functions: List<HostFunction>, args: List<Any?>, where: String): Any? {
-        val function = functions.firstOrNull { it.arity == args.size || it.arity == -1 }
-            ?: error("$where: ${functions.first().name} takes ${functions.joinToString(" or ") { "${it.arity} argument${if (it.arity == 1) "" else "s"}" }}, not ${args.size}")
-        val result = Captured()
-        function.body.call(Given(args), args.size, result)
-        result.failed?.let { error("$where: ${function.name} failed: $it") }
-        return result.value
-    }
+    private fun call(functions: List<HostFunction>, args: List<Any?>, where: String): Any? = callHost(functions, args, where)
 
-    /** A value of the spec's files as a SQL value: a text, a whole number (a Long), a float (a Double), or null. */
-    private fun expanded(node: JsonNode): Any? = when {
-        node.isNull -> null
-        node.isTextual -> node.textValue()
-        node.isIntegralNumber -> node.longValue()
-        node.isNumber -> node.doubleValue()
-        node.isObject && node.fieldNames() == setOf("\$float") -> parseDouble(node["\$float"]!!.textValue() ?: error("No float $node"))
-        else -> error("No SQL value of $node")
-    }
+    private fun expanded(node: JsonNode): Any? = sqlValue(node)
 
     /** SQLite's order of two values: null first, then numbers by value, then texts by their UTF-8 bytes (BINARY). */
     private fun sqliteOrder(a: Any?, b: Any?): Int {
@@ -206,66 +288,5 @@ class HostSpecTest {
             }
             else -> error("No order of $a")
         }
-    }
-
-    private fun JsonNode.fieldNames(): Set<String> = (this as? ObjectNode)?.fieldNames()?.asSequence()?.toSet() ?: emptySet()
-
-    /** A call's arguments, as SQLite would hand them over: each read of another type converted, as SQLite converts it. */
-    private class Given(private val values: List<Any?>) : HostArgs {
-        override fun type(i: Int) = when (values[i]) {
-            null -> SqlType.NULL
-            is Long -> SqlType.INTEGER
-            is Double -> SqlType.FLOAT
-            is String -> SqlType.TEXT
-            else -> SqlType.BLOB
-        }
-
-        override fun long(i: Int): Long = when (val v = values[i]) {
-            null -> 0L
-            is Long -> v
-            is Double -> v.toLong()
-            // SQLite reads a text's leading number, as Kotlin does not ('12abc' is 12): no step reads one so.
-            is String -> error("No step reads the whole number of the text $v")
-            else -> error("No whole number of $v")
-        }
-
-        override fun int(i: Int): Int = long(i).toInt()
-
-        override fun double(i: Int): Double = when (val v = values[i]) {
-            null -> 0.0
-            is Long -> v.toDouble()
-            is Double -> v
-            // SQLite reads a text's leading number, and no infinity ('Infinity' is 0.0), as Kotlin does not: no step reads one so.
-            is String -> error("No step reads the float of the text $v")
-            else -> error("No float of $v")
-        }
-
-        override fun text(i: Int): String? = when (val v = values[i]) {
-            null -> null
-            is String -> v
-            is Long -> v.toString()
-            // SQLite writes a float's text its own way (1.0/3 as 0.33333333333333332): no step reads one so, and a guess here would pass a wrong one.
-            else -> error("No step reads the text of the float $v")
-        }
-
-        override fun text16(i: Int): String? = text(i)
-
-        override fun blob(i: Int): ByteArray? = text(i)?.encodeToByteArray()
-    }
-
-    /** A call's result: its value, as the spec writes one, or why it failed. */
-    private class Captured : HostResult {
-        var value: Any? = null
-        var failed: String? = null
-
-        override fun nullValue() { value = null }
-        override fun long(value: Long) { this.value = value }
-        override fun int(value: Int) { this.value = value.toLong() }
-        // SQLite's sqlite3_result_double writes NaN as NULL, so the function gives null.
-        override fun double(value: Double) { this.value = if (value.isNaN()) null else value }
-        override fun text(value: String) { this.value = value }
-        override fun text16(value: String) { this.value = value }
-        override fun blob(value: ByteArray) { this.value = value }
-        override fun error(message: String) { failed = message }
     }
 }

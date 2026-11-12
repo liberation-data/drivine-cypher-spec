@@ -527,6 +527,32 @@ ${made.entries.joinToString("\n") { (function, making) ->
 
     override fun dropConstraint(item: CatalogItem): List<DdlStatement> = forgotten(item)
 
+    /**
+     * The unique index built under [temporaryName] while the old one stands, waiting out another session's lock as the
+     * constraint's own index is made ([waitingOutBusy]), then the old one dropped and it renamed into its place. Oracle
+     * refuses a second index over the expressions of one there (`ORA-01408`): an old index made as this version makes it
+     * refuses the build so, and a schema manager then drops it and makes it again, as before.
+     */
+    override fun recreation(spec: ConstraintSpec): UniqueRecreation = when (spec) {
+        is UniquenessConstraintSpec -> {
+            val name = objectName(UNIQUE, listOf(spec.label) + spec.properties)
+            val temporary = temporaryName(name)
+            val expressions = spec.properties.joinToString(", ") { OracleSql.unique("n", spec.label, spec.properties, it) }
+            UniqueRecreation(
+                name = name,
+                temporary = temporary,
+                leftover = listOf(DdlStatement.Text(droppedIndex(temporary))),
+                build = listOf(DdlStatement.Text(statement(busyWaiting("CREATE UNIQUE INDEX $temporary ON $nodes n ($expressions)")))),
+                swap = listOf(droppedIndex(name), "ALTER INDEX $temporary RENAME TO $name").map { DdlStatement.Text(it) },
+                finish = listOf(DdlStatement.Text("ALTER INDEX $temporary RENAME TO $name")),
+                remade = remade(CatalogItem(spec.kind, spec.label, spec.properties, spec.effectiveName), name),
+            )
+        }
+    }
+
+    override fun remade(item: CatalogItem, objectName: String): String =
+        statement("UPDATE $catalog SET name = ${item.name?.let(::literal) ?: "name"}, object_name = ${literal(objectName)}, details = JSON_MERGEPATCH(details, '{\"$FORM\": $CURRENT_FORM}') WHERE ${recordOf(item)}")
+
     /** Whether the labelled index the record `c` names is there. */
     private val labelledThere = "EXISTS (SELECT 1 FROM user_indexes l WHERE l.index_name = UPPER(JSON_VALUE(c.details, '$.labelled')))"
 

@@ -43,8 +43,33 @@ abstract class TemporalSql(protected val shared: (List<String>, (List<String>) -
     /** [timestamp] [months] later, a day past the month's end its last day. */
     abstract fun addMonths(timestamp: String, months: String): String
 
-    /** [timestamp] [days] and [seconds] later, numbers each. */
+    /** [timestamp] [days] and [seconds] later, numbers each. Where the store's time is [exactTime], [seconds] is whole. */
     abstract fun addTime(timestamp: String, days: String, seconds: String): String
+
+    /**
+     * Whether the store works out time in whole numbers alone (SQLite, whose functions Drivine registers): a duration
+     * added as whole seconds and nanoseconds ([addExactTime]), the time between two timestamps as whole seconds and the
+     * nanoseconds past them ([exactBetween]), and a clock's seconds as nanoseconds ([nanosOfMinute]). [Temporals] then
+     * never reads a float of seconds, which loses the fraction's last digits in binary (`22.14199996`, drivine4j#418),
+     * and never a count of nanoseconds, which a 64-bit integer holds for only ±292 years. A store with SQL's own
+     * arithmetic of exact decimals (Postgres, Oracle) works out [secondsBetween] and `extract(SECOND)` instead.
+     */
+    open val exactTime: Boolean = false
+
+    /** Where [exactTime]: [timestamp] [days], [seconds] and [nanos] later, whole numbers each, the nanoseconds any number of them. */
+    open fun addExactTime(timestamp: String, days: String, seconds: String, nanos: String): String =
+        throw UnsupportedOperationException("This store adds a number of seconds: see addTime.")
+
+    /**
+     * Where [exactTime]: the whole seconds from [from] to [to], floored, and the nanoseconds past them, from 0 to
+     * 999,999,999, whole numbers each, so their sum is the exact time between them.
+     */
+    open fun exactBetween(from: String, to: String): Pair<String, String> =
+        throw UnsupportedOperationException("This store works out the seconds between two timestamps: see secondsBetween.")
+
+    /** Where [exactTime]: the nanoseconds of the minute of [timestamp], its seconds and their fraction, a whole number. */
+    open fun nanosOfMinute(timestamp: String): String =
+        throw UnsupportedOperationException("This store extracts a timestamp's SECOND: see extract.")
 
     /** The whole months from [from] to [to], as a calendar counts them: negative where [to] is before. */
     abstract fun monthsBetween(from: String, to: String): String
@@ -60,6 +85,9 @@ abstract class TemporalSql(protected val shared: (List<String>, (List<String>) -
 
     /** The name of the function that cuts a number's fraction off, as `TRUNC` does. */
     open val trunc = "TRUNC"
+
+    /** The number [number] rounded down to a whole number, as `FLOOR` does. */
+    open fun floor(number: String) = "FLOOR($number)"
 
     /** The timestamp of the epoch, 1970-01-01 at midnight. */
     open val epoch = "TIMESTAMP '1970-01-01 00:00:00'"

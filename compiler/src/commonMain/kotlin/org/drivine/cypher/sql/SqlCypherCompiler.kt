@@ -254,7 +254,7 @@ abstract class SqlCypherCompiler(
     private fun compiled(query: Query, parameters: Map<String, Any?>): CompiledCypher {
         // A variable used as two kinds, or made where it is bound already, is refused for that, before what is not compiled yet.
         VariableKinds.check(query)
-        // An aggregate in a WHERE too.
+        // An aggregate in a WHERE, or in the ORDER BY of a projection that neither aggregates nor is DISTINCT, too.
         Aggregates(::isAggregate, ::children).check(query)
         val given = parameters.values.any { holdsNonFinite(it) }
         val writes = query.unions.isEmpty() && query.clauses.any(::writes)
@@ -271,7 +271,7 @@ abstract class SqlCypherCompiler(
         // A procedure takes its parameters as one object, and reads each from it.
         val writer = Writer(
             Parameters(
-                parameters, { name, _ -> nullIfJsonNull(propertyOf(PARAMS, name)) }, { number(propertyOf(PARAMS, it)) }, inObject = true, text = ::parameterText,
+                parameters, { name, _ -> nullIfJsonNull(propertyOf(PARAMS, name)) }, { number(propertyOf(PARAMS, it)) }, inObject = true, text = ::parametersText,
                 asPath = parameterPath?.let { read -> { name, _, keys, value -> read(PARAMS, null, listOf(name) + keys, value) } },
             )
         )
@@ -444,8 +444,17 @@ abstract class SqlCypherCompiler(
      */
     protected open val parameterPath: ((marker: String, text: String?, keys: List<String>, value: Any?) -> String)? = null
 
-    /** The JSON text a parameter's [value] is bound as. */
+    /**
+     * The JSON text a parameter's [value] is bound as, in a statement that only reads: one that writes binds them all at
+     * once, see [parametersText].
+     */
     protected open fun parameterText(value: Any?): String = CypherJson.writeValueAsString(value, encoder = encoder)
+
+    /**
+     * The JSON text a statement that writes binds all its [parameters] as, one map: as [parameterText] writes a value,
+     * unless the store writes the map otherwise (Oracle, see its own).
+     */
+    protected open fun parametersText(parameters: Any?): String = parameterText(parameters)
 
     /** The parameter bound as [marker], a whole number, as one. */
     protected abstract fun parameterCount(marker: String): String
@@ -492,6 +501,23 @@ abstract class SqlCypherCompiler(
      * A store whose empty text reads as null answers for one otherwise: see Oracle's.
      */
     protected open fun searchedTexts(a: String, b: String, search: (List<String>) -> String): String = texts(a, b, body = search)
+
+    /**
+     * A function that makes a text, or [empty], of the texts of the JSON values [jsons] and the counts [counts]: [body] over
+     * the texts, as [texts] reads them. A store whose empty text reads as null, so [body] gives null where it makes an empty
+     * text, gives [empty] there instead, where each text is one and each count is not null: where [whereFirstEmpty], only where
+     * the first text is empty. [counts] reads them as [countOf] does beside the first text's length, which is not null there,
+     * so a count out of range still fails. Where [guarded], a store whose [body] may give a text where one of the texts is
+     * null, as Oracle's `REPLACE` does, gives null there. See Oracle's (#416).
+     */
+    protected open fun madeText(
+        vararg jsons: String,
+        counts: (String) -> List<String> = { emptyList() },
+        empty: Any = "",
+        whereFirstEmpty: Boolean = false,
+        guarded: Boolean = false,
+        body: (List<String>) -> String,
+    ): String = texts(*jsons, body = body)
 
     /** The JSON [json] as a condition, where it is `true` or `false`. */
     protected abstract fun boolOf(json: String): String
@@ -624,9 +650,6 @@ abstract class SqlCypherCompiler(
 
     /** The value of the JSON map [json] at the key the JSON [key] holds, a text an expression gives (`m[k]`). */
     protected abstract fun keyed(json: String, key: String): String
-
-    /** Whether the JSON map [props] holds every entry of the JSON map [map]. */
-    protected abstract fun containsAll(props: String, map: String): String
 
     /** Whether the labels [labels], a JSON list, hold [label]. */
     protected abstract fun hasLabel(labels: String, label: String): String
@@ -904,6 +927,9 @@ abstract class SqlCypherCompiler(
 
     /** What an order sorts the JSON value [json] by where the statement makes it a list ([Value.Json.list]): as [sortKey] where the store orders lists as Cypher does. */
     protected open fun listSortKey(json: String) = sortKey(json)
+
+    /** The terms an order sorts the JSON list [json] by, the first deciding: [listSortKey] alone, unless a store's key may tie where the lists differ. */
+    protected open fun listSortKeys(json: String): List<String> = listOf(listSortKey(json))
 
     /** The term [term] of an `ORDER BY`, ascending or [descending]: null after every value ascending, and before them descending. */
     protected open fun orderTerm(term: String, descending: Boolean) = if (descending) "$term DESC" else term
@@ -2399,7 +2425,10 @@ abstract class SqlCypherCompiler(
             }
         )
 
-        /** A pattern's properties: each key equal to its value, or every key of a parameter's map. [labels] are its node's, where it is a node. */
+        /**
+         * A pattern's properties: each key equal to its value. [labels] are its node's, where it is a node. A parameter's map is
+         * refused, as Neo4j refuses it in a pattern it matches: only CREATE takes one, and CREATE makes its pattern elsewhere.
+         */
         private fun propertiesMatch(props: String, properties: Expression, scope: Map<String, Value>, labels: List<String> = emptyList()): String = when (properties) {
             is Expression.MapLiteral -> properties.entries.joinToString(" AND ") { (key, value) ->
                 // A property holds no null, as a graph engine stores none in a list.
@@ -2410,7 +2439,11 @@ abstract class SqlCypherCompiler(
                     of = IndexedProperty(props, key, labels, givenRowsScalar(value, scope)),
                 )
             }
-            else -> containsAll(props, comparable(json(expression(properties, scope))))
+            is Expression.Parameter -> throw CompilerException(
+                "A parameter's map gives a pattern its properties only in CREATE, as in Cypher: match each one, as in " +
+                    "MATCH (n) WHERE n.k = \$${properties.name}.k, or (n {k: \$${properties.name}.k}).",
+            )
+            else -> error("A pattern's properties are a map or a parameter, not $properties.")
         }
 
         // ----- A statement that writes -----
@@ -3038,7 +3071,7 @@ abstract class SqlCypherCompiler(
 
         /**
          * The query a `WITH` or a `RETURN` makes of [select]: its items as columns, grouped where it
-         * aggregates, then ordered, skipped and limited. Rows it does not order, group or keep distinct
+         * aggregates, or is `DISTINCT` and orders by an aggregate ([groupsRows]), then ordered, skipped and limited. Rows it does not order, group or keep distinct
          * stay in the order [select] reads them, as a graph engine keeps them. With [statement], it is the statement's own last
          * `RETURN`, or one of its `UNION`'s, not a subquery's: it names the statement's columns ([returned]), and where the
          * statement is compiled [typed], gives its nodes and relationships tagged ([output]), and its `result` as the host's
@@ -3058,7 +3091,7 @@ abstract class SqlCypherCompiler(
                 },
             )
             // Before aggregatesFirst, which names each variable it groups by as an item of its own.
-            requireExplicitGrouping(items, projection.orderBy, select.scope.keys)
+            requireExplicitGrouping(items, projection.orderBy, select.scope.keys, projection.distinct)
             anewFirst(select, projection, items)?.let { (made, kept) -> return project(made, kept, final, statement) }
             casesFirst(select, projection, items)?.let { (cased, kept) -> return project(cased, kept, final, statement) }
             // After casesFirst, which refuses what it must of an aggregate's CASE before working it out first.
@@ -3074,7 +3107,7 @@ abstract class SqlCypherCompiler(
             }
             rowOrder = orderOf(select)
             val compiled = items.map { item -> item.name to aggregating(item.expression) { item(item.expression, select) } }
-            val aggregating = items.any { contains(it.expression, ::isAggregate) }
+            val aggregating = groupsRows(projection, items)
             // Where rows are compared (DISTINCT, GROUP BY), each item is compared as [compared] has it.
             val compared = projection.distinct || aggregating
             val columns = compiled.mapIndexed { i, (_, value) -> "c${i + 1}" to (if (compared) compared(value) else value) }
@@ -3185,7 +3218,7 @@ abstract class SqlCypherCompiler(
             }.joinToString("\n")
             // What sorts a term in the query that reads this one: worked out there, of the column carried out, or that column.
             // Each is named for the query after it, which sorts by them in turn: the last by the term's column, any before it,
-            // where its kind comes ([openSortKey]), by that column with a number after it.
+            // where its kind comes ([openSortKey]) or a list's key ([listSortKeys]), by that column with a number after it.
             fun sortedBy(column: String): List<Pair<String, String>> =
                 (after[column] ?: sorted[column]?.invoke("$name.$column") ?: listOf("$name.$column")).let { terms ->
                     terms.mapIndexed { i, term -> (if (i == terms.lastIndex) column else "${column}_${i + 1}") to term }
@@ -3543,14 +3576,22 @@ abstract class SqlCypherCompiler(
         }
 
         /**
-         * Where a projection that aggregates would group by an item whose SQL holds a subquery, which Oracle
+         * Whether a projection of [items] groups its rows, by the items that don't aggregate: where an item aggregates, or where it
+         * is DISTINCT and orders by an aggregate, so the aggregate is worked out over each row's group, as Neo4j works it out; not
+         * grouped, the query aggregated all its rows into one (drivine4j#439).
+         */
+        private fun groupsRows(projection: Projection, items: List<Projection.Item>) = items.any { contains(it.expression, ::isAggregate) } ||
+            projection.distinct && projection.orderBy.any { contains(it.expression, ::isAggregate) }
+
+        /**
+         * Where a projection that groups ([groupsRows]) would group by an item whose SQL holds a subquery, which Oracle
          * groups by no subquery, or a parameter, each mention of which the driver binds as a marker of its own,
          * so the item in the select list is not the one grouped by, the rows [select] reads with each such item
          * worked out first, in a `WITH *` of its own, and the projection with those items read from there, as
          * variables a group is keyed by; null where there is none.
          */
         private fun heldFirst(select: Select, projection: Projection, items: List<Projection.Item>): Pair<Select, Projection>? {
-            if (items.none { contains(it.expression, ::isAggregate) }) return null
+            if (!groupsRows(projection, items)) return null
             // A variable is held already: one a WITH carries in flight is grouped by its column, though it is read whole.
             val held = items.filter { item ->
                 item.expression !is Expression.Variable && !contains(item.expression, ::isAggregate) && (
@@ -3747,10 +3788,11 @@ abstract class SqlCypherCompiler(
          * graph engine would have to group by without being told. A key is an item that does not aggregate, and Neo4j reads
          * one there only where it is a variable or a variable's property ([isPlainKey]): `x.a + count(*)` beside `x.a`, but
          * not `toUpper(p.name) + count(*)` beside `toUpper(p.name)`; in a pattern's parts, only where it is a variable. So too
-         * a term of [orderBy] that aggregates, beside items that aggregate, and names a variable of [scope] outside an item's
-         * name and an item that does not aggregate, whatever that item is, as Neo4j takes them.
+         * a term of [orderBy] that aggregates, beside items that aggregate or where the projection is [distinct], and names a
+         * variable of [scope] outside an item's name and an item that does not aggregate, whatever that item is, as Neo4j takes
+         * them.
          */
-        private fun requireExplicitGrouping(items: List<Projection.Item>, orderBy: List<Projection.SortItem>, scope: Set<String>) {
+        private fun requireExplicitGrouping(items: List<Projection.Item>, orderBy: List<Projection.SortItem>, scope: Set<String>, distinct: Boolean) {
             val grouping = items.filterNot { contains(it.expression, ::isAggregate) }
             val grouped = grouping.map { it.expression }.toSet()
             val keys = grouped.filter(::isPlainKey).toSet()
@@ -3764,7 +3806,8 @@ abstract class SqlCypherCompiler(
                     )
                 }
             }
-            if (grouping.size == items.size) return
+            // One that is DISTINCT groups by its items where it orders by an aggregate (drivine4j#439), as one that aggregates does.
+            if (grouping.size == items.size && !distinct) return
             val names = items.map { it.name }.toSet()
             orderBy.filter { contains(it.expression, ::isAggregate) }.forEach { sort ->
                 // Not less the variables an item is: one an item renames, named in an order term's pattern, is a new variable of the
@@ -3815,10 +3858,37 @@ abstract class SqlCypherCompiler(
             }
         }
 
-        /** A `SKIP` or `LIMIT`: a whole number, or a parameter bound to one. */
+        /**
+         * A `SKIP` or `LIMIT`: a whole number of 0 or more, written or bound to a parameter. Neo4j refuses any other, a float
+         * such as 2.0 among them, so one is refused here rather than taken as it was, as no limit or the whole of a float (#420).
+         */
         private fun count(expression: Expression): String = when (expression) {
-            is Expression.Literal -> (expression.value as? Long)?.toString() ?: throw CompilerException("SKIP and LIMIT take a whole number, not ${org.drivine.cypher.text.JavaText.of(expression.value)}.")
-            is Expression.Parameter -> parameters.count(expression.name)
+            is Expression.Literal -> when (val value = expression.value) {
+                // The least whole number is read as one literal: see [CypherReader].
+                is Long -> value.takeIf { it >= 0 }?.toString() ?: throw CompilerException("SKIP and LIMIT take a whole number of 0 or more, not $value, as in Neo4j.")
+                else -> throw CompilerException("SKIP and LIMIT take a whole number, not ${org.drivine.cypher.text.JavaText.of(value)}.")
+            }
+            // `-1` is a negated number.
+            is Expression.Unary -> {
+                val negated = known(expression)?.takeIf { it is Number } ?: unsupported("SKIP or LIMIT of an expression")
+                // `-0` is 0, which Neo4j takes.
+                if (negated == 0L) "0"
+                else throw CompilerException("SKIP and LIMIT take a whole number of 0 or more, not -${org.drivine.cypher.text.JavaText.of(negated)}, as in Neo4j.")
+            }
+            is Expression.Parameter -> {
+                val value = parameters.value(expression.name)
+                // A Short or a Byte is an integer as the store binds it (see [CypherJson]), and as Neo4j's driver sends it.
+                val whole = (value as? Number)?.takeIf { it is Long || it is Int || it is Short || it is Byte }?.toLong()
+                if (whole == null || whole < 0) {
+                    val described = when (value) {
+                        null -> "null"
+                        is Number -> org.drivine.cypher.text.JavaText.of(value)
+                        else -> givenKind(expression, emptyMap())?.noun ?: "of another kind"
+                    }
+                    throw CompilerException("SKIP and LIMIT take a whole number of 0 or more, and $${expression.name} is $described, as in Neo4j.")
+                }
+                parameters.count(expression.name)
+            }
             else -> unsupported("SKIP or LIMIT of an expression")
         }
 
@@ -4178,7 +4248,10 @@ abstract class SqlCypherCompiler(
             return Value.Bool("EXISTS (${(listOf(inner.head("1")) + inner.from() + listOfNotNull(inner.whereClause())).joinToString(" ")})")
         }
 
-        /** An index written, or bound to a parameter, is known: a text is the property of that name, a number an item. */
+        /**
+         * The value [index] is where it is written, a number negated or bound to a parameter, else null: as an index, a text is
+         * the property of that name and a number an item. A `SKIP` or `LIMIT` ([count]) and a parameter's kind ([givenKind]) read it too.
+         */
         private fun known(index: Expression): Any? = when (index) {
             is Expression.Literal -> index.value
             is Expression.Parameter -> parameters.value(index.name)
@@ -4246,7 +4319,7 @@ abstract class SqlCypherCompiler(
          * Refuses [index], `subject[index]`, where the statement writes its subject as a value that is no list or map, or its
          * index as a value of a kind its subject is not indexed by ([knownKind]): a list by an integer, a map by a text. As
          * Neo4j refuses it; where the subject's kind is left open, it is compiled as before. An index given as a parameter is of
-         * its value's kind ([known]): the statement is compiled for each call, and its SQL is already made by that value, a
+         * its value's kind ([givenKind]): the statement is compiled for each call, and its SQL is already made by that value, a
          * text read as a property and a number as an item, so one of the other kind would be read as neither.
          */
         private fun indexOfKind(index: Expression.Index, scope: Map<String, Value>) {
@@ -4256,8 +4329,35 @@ abstract class SqlCypherCompiler(
                 Value.Known.MAP -> Value.Known.TEXT
                 else -> throw CompilerException("${subject.noun.replaceFirstChar(Char::uppercase)} is not a list or a map, and is indexed as one, as in Neo4j.")
             }
-            val kind = knownKind(index.index, scope) ?: (index.index as? Expression.Parameter)?.let { Value.Known.of(known(it)) } ?: return
+            val kind = givenKind(index.index, scope) ?: return
             if (kind != by) throw CompilerException("${subject.noun.replaceFirstChar(Char::uppercase)} is indexed by ${by.noun}, not ${kind.noun}, as in Neo4j.")
+        }
+
+        /**
+         * The kind of [expression] where the statement makes it ([knownKind]) or a parameter gives it: a parameter's is its
+         * value's, as the statement is compiled for each call. Null where it is left open, or null.
+         */
+        private fun givenKind(expression: Expression, scope: Map<String, Value>): Value.Known? = knownKind(expression, scope)
+            ?: (expression as? Expression.Parameter)?.let { parameter ->
+                when (val value = known(parameter)) {
+                    is List<*> -> Value.Known.LIST
+                    is Map<*, *> -> Value.Known.MAP
+                    else -> Value.Known.of(value)
+                }
+            }
+
+        /**
+         * Refuses [binary], `-`, `*`, `/`, `%` or `^`, where a side is known to be a text, a truth value, a list or a map
+         * ([givenKind]): Neo4j refuses it when it plans the statement, where the SQL gave null (#420). A temporal value, of
+         * no such kind, is taken where the store takes it, as `date - duration` and `duration * 2`.
+         */
+        private fun numbersOfKind(binary: Expression.Binary, scope: Map<String, Value>) {
+            listOf(binary.left, binary.right).forEach { side ->
+                val kind = givenKind(side, scope) ?: return@forEach
+                if (kind != Value.Known.INTEGER && kind != Value.Known.FLOAT) {
+                    throw CompilerException("${NUMERIC_SYMBOLS[binary.operator]} takes numbers, not ${kind.noun}, as in Neo4j.")
+                }
+            }
         }
 
         /** Refuses [expression], an operand of [operator], where its kind is known ([knownKind]) to be other than a truth value, as Neo4j refuses it. */
@@ -4667,6 +4767,8 @@ abstract class SqlCypherCompiler(
             val written = function.arguments.single()
             // A text the statement writes is worked out here, as the store would work it out.
             if (written is Expression.Literal && written.value is String) {
+                // An offset with seconds, which Neo4j takes, is refused as such, not as no value of the kind (drivine4j#424).
+                Regex("[+-][0-9]{2}:[0-9]{2}:[0-9]{2}$").find(written.value as String)?.let { unsupported("The offset with seconds '${it.value}'") }
                 val canonical = try {
                     Temporals.canonical(written.value as String, kind) ?: throw CompilerException("'${written.value}' is no ${function.name}.")
                 } catch (e: NumberFormatException) {
@@ -4687,20 +4789,25 @@ abstract class SqlCypherCompiler(
                 fields.keys.firstOrNull { it !in known }?.let { unsupported("${function.name}() of a map with $it") }
                 val numbers = fields.filterKeys { it != "timezone" }.mapValues { number(comparable(json(it.value))) }
                 if (kind == Temporal.DURATION) return of(temporals.duration(numbers))
-                val timezone = fields["timezone"]?.let { text(comparable(json(it))) }
-                // A zone by name, which no store's text holds yet, is refused rather than given as null, or on SQLite failing as
-                // the statement runs: so a value made from such a moment, `time({time: other})`, is refused too (#508).
-                val zone = (written.entries.firstOrNull { it.first == "timezone" }?.second as? Expression.Literal)?.value as? String
-                if (zone != null && CommonTime.offsetId(zone) == null && CommonTime.isRegion(zone)) unsupported("The time zone '$zone'")
+                // A zone the statement writes or a parameter gives is read here: one by name, which no store's text holds yet,
+                // an offset with seconds, and a text that is no zone are refused rather than given as null, or on SQLite failing
+                // as the statement runs, so a value made from such a moment, `time({time: other})`, is refused too (#508,
+                // drivine4j#424); an offset is given as its id, `+02:00` for `+02:00:00`, which every store's text reads. One an
+                // expression gives fails the statement where it is no offset the store reads.
+                val zoneWritten = written.entries.firstOrNull { it.first == "timezone" }?.second
+                val zoneGiven = zoneWritten?.takeIf { it is Expression.Literal || it is Expression.Parameter }?.let { given(it) } as? String
+                val zoneJson = fields["timezone"]?.let { comparable(json(it)) }
+                val timezone = zoneGiven?.let { "'${offset(it)}'" } ?: zoneJson?.let { text(it) }
+                val guard = zoneGuard(function, zoneWritten, zoneJson)
                 if (fields.keys.any { it in Temporals.CALENDAR_FIELDS }) {
                     val date = calendarDate(function, written)
                     if (date != null) {
                         val day = mapOf("year" to "${date.year}", "month" to "${date.month.number}", "day" to "${date.day}")
-                        return of(temporals.of(numbers - Temporals.CALENDAR_FIELDS + day, timezone, kind))
+                        return of(guard(temporals.of(numbers - Temporals.CALENDAR_FIELDS + day, timezone, kind)))
                     }
-                    return of(temporals.ofCalendar(numbers, timezone, kind))
+                    return of(guard(temporals.ofCalendar(numbers, timezone, kind)))
                 }
-                return of(temporals.of(numbers, timezone, kind))
+                return of(guard(temporals.of(numbers, timezone, kind)))
             }
             val given = arguments.single() as? Value.Json ?: throw CompilerException("${function.name}() takes a text or a map of its fields.")
             return when {
@@ -4791,7 +4898,8 @@ abstract class SqlCypherCompiler(
          * no temporal value or is of a kind that hasn't what it is to give, fields of two calendars, a date of its fields that
          * is not whole (a year, a month and a day; a week and a day of the week; an ordinal day; a quarter and a day of the
          * quarter) beside a value that gives the time, a field of the time without the one above it where no value gives the
-         * time, and a number written that is not whole or past its field's range. A zone by name is refused.
+         * time, and a number written that is not whole or past its field's range. A zone by name, or an offset with seconds, is
+         * refused as [zone] refuses it, or where an expression gives it fails as [zoneGuard] has it.
          */
         private fun fromTemporal(kind: Temporal, function: Expression.Function, written: Expression.MapLiteral, scope: Map<String, Value>): String {
             val name = function.name
@@ -4852,32 +4960,108 @@ abstract class SqlCypherCompiler(
                     else -> throw CompilerException("$name() takes a whole number for $key, not ${if (literal is String) "'$literal'" else org.drivine.cypher.text.JavaText.of(literal)}.")
                 }
             }
+            val zoneRead = entries["timezone"]?.takeUnless { it is Expression.Parameter && given(it) is String }
+            val zoneJson = zoneRead?.takeUnless { it is Expression.Literal }?.let { comparable(json(expression(it, scope))) }
             val timezone = entries["timezone"]?.let { value ->
                 when {
                     value == Expression.Literal(null) -> throw CompilerException("$name() takes a time zone, not null.")
                     value is Expression.Literal -> (value.value as? String)?.let { zone(it) } ?: throw CompilerException("$name() takes a time zone, not ${org.drivine.cypher.text.JavaText.of(value.value)}.")
-                    else -> text(comparable(json(expression(value, scope))))
+                    value is Expression.Parameter && given(value) is String -> zone(given(value) as String)
+                    else -> text(zoneJson!!)
                 }
             }
+            val guard = zoneGuard(function, zoneRead, zoneJson)
             // A date of fields written as numbers alone is worked out here, as a map of them is (see calendarDate).
             if (date == null && calendar != null && calendar.first != "a month") {
                 calendarDate(function, Expression.MapLiteral(written.entries.filter { (key, _) -> key == "year" || key in Temporals.CALENDAR_FIELDS }))?.let { day ->
                     fields = fields - Temporals.CALENDAR_FIELDS + mapOf("year" to "${day.year}", "month" to "${day.month.number}", "day" to "${day.day}")
                 }
             }
-            return temporals.over(date, time, fields, timezone, kind)
+            return guard(temporals.over(date, time, fields, timezone, kind))
+        }
+
+        /**
+         * `date.statement()`, `datetime.transaction()` or `localtime.realtime()` and the rest, of [function]: the moment the
+         * statement runs, however it is asked for, as one statement is one moment here. Given a time zone, the moment there,
+         * as `datetime({datetime: …, timezone: …})` moves it, then of the function's kind; given null, null, as in Neo4j
+         * (liberation-data/drivine4j#425). A zone the statement writes or a parameter gives is read here, so one that is
+         * none, or one by name, which no store's text holds yet, is refused as [zone] refuses it; one an expression gives is
+         * refused, where it could give null in place of the moment.
+         */
+        private fun now(function: Expression.Function, scope: Map<String, Value>): Value {
+            val kind = Temporal.ofFunction(function.name.lowercase().substringBefore('.'))!!
+            if (function.arguments.isEmpty()) return tagged(kind, temporals.now(kind))
+            if (function.arguments.size != 1) throw CompilerException("${function.name}() takes a time zone, or nothing.")
+            val written = function.arguments.single()
+            if (written !is Expression.Literal && written !is Expression.Parameter) unsupported("${function.name}() of a time zone an expression gives")
+            val given = given(written) ?: return expression(Expression.Literal(null), scope)
+            val text = given as? String ?: throw CompilerException("${function.name}() takes a time zone, a text, or nothing.")
+            zone(text)
+            val moment = Expression.Function("datetime", false, listOf(Expression.MapLiteral(listOf(
+                "datetime" to Expression.Function("datetime.${function.name.substringAfter('.')}", false, emptyList()),
+                "timezone" to Expression.Literal(text),
+            ))))
+            return expression(if (kind == Temporal.DATE_TIME) moment else Expression.Function(kind.function, false, listOf(moment)), scope)
         }
 
         /**
          * The offset's text the time zone [zone] written gives a value, as Neo4j takes one: `Z`, or an offset written `+01:00`.
-         * A zone by name, which no store's text holds yet, is refused; any other text fails.
+         * A zone by name or an offset with seconds, which no store's text holds yet, is refused (see [offset]); any other
+         * text fails.
          */
         private fun zone(zone: String): String {
+            val id = offset(zone)
+            if (!Regex("Z|[+-][0-9]{2}:[0-9]{2}").matches(zone)) throw CompilerException("'$zone' is no time zone.")
+            return "'$id'"
+        }
+
+        /**
+         * The offset the zone [zone] is, as `CommonTime.offsetId` writes it. A zone by name, which no store's text holds yet,
+         * and an offset with seconds, which no store's text or Oracle's TIMESTAMP WITH TIME ZONE holds, are refused, as is a
+         * text that is no zone (drivine4j#424).
+         */
+        private fun offset(zone: String): String {
             val id = CommonTime.offsetId(zone)
-            return when {
-                id != null && Regex("Z|[+-][0-9]{2}:[0-9]{2}").matches(zone) -> "'$id'"
-                id == null && CommonTime.isRegion(zone) -> unsupported("The time zone '$zone'")
-                else -> throw CompilerException("'$zone' is no time zone.")
+            if (id == null) {
+                if (CommonTime.isRegion(zone)) unsupported("The time zone '$zone'")
+                throw CompilerException("'$zone' is no time zone.")
+            }
+            if (id.count { it == ':' } == 2) unsupported("The offset with seconds '$zone'")
+            return id
+        }
+
+        /**
+         * What a temporal value [function] makes in the time zone [written] is passed through, its JSON being [zone]. A
+         * zone the statement writes, or a parameter gives, as a text is read with [offset] here, and the value is as it is;
+         * one written, or a parameter that gives, as no text is refused. A zone an expression gives, which the store reads as the statement
+         * runs, fails the statement where it is given and is no offset the store's text reads, as a zone by name or an
+         * offset with seconds is, or as a value that is no text is, rather than give null in its place (drivine4j#424): the
+         * zone is tested, not the value's null, which a field that is null makes too.
+         */
+        private fun zoneGuard(function: Expression.Function, written: Expression?, zone: String?): (String) -> String {
+            if (written == null || zone == null || written is Expression.Literal) {
+                when (val value = (written as? Expression.Literal)?.value) {
+                    null -> {}
+                    is String -> offset(value)
+                    else -> throw CompilerException("${function.name}() takes a time zone, not ${org.drivine.cypher.text.JavaText.of(value)}.")
+                }
+                return { it }
+            }
+            if (written is Expression.Parameter) {
+                when (val given = given(written)) {
+                    null -> return { it }
+                    is String -> { offset(given); return { it } }
+                    else -> throw CompilerException("${function.name}() takes a time zone, not ${org.drivine.cypher.text.JavaText.of(given)}.")
+                }
+            }
+            val read = literal(temporalSql.regex("^${Temporal.OFFSET}"))
+            return { made ->
+                shared(made, zone) { (value, x) ->
+                    shared(text(x)) { (z) ->
+                        "CASE WHEN ${isJsonNull(x)} OR $z IS NOT NULL AND ${temporalSql.matches(z, read)} THEN $value " +
+                            "ELSE ${text(scalar(failure(ZONE_NOT_COMPILED, "COALESCE($z, ${typeOf(x)})")))} END"
+                    }
+                }
             }
         }
 
@@ -5035,6 +5219,7 @@ abstract class SqlCypherCompiler(
             if (binary.operator == Operator.IN) knownKind(binary.right, scope)?.takeIf { it != Value.Known.LIST }?.let { kind ->
                 throw CompilerException("IN takes a list, not ${kind.noun}, as in Neo4j.")
             }
+            if (binary.operator in NUMERIC_ONLY) numbersOfKind(binary, scope)
             // An id in a list written or given, where the row must pass that, is tested by its key beside: see [idKey]. A list
             // read from the store or worked out may be no list, whose items no store's elements of it would read as Cypher does.
             val written = binary.right is Expression.ListLiteral || (binary.right as? Expression.Parameter)?.let { parameterTree(it.name)?.isArray } == true
@@ -5960,11 +6145,12 @@ abstract class SqlCypherCompiler(
                 }
                 "split" -> {
                     if (arguments.size != 2) throw CompilerException("split() takes a text and a separator.")
-                    Value.Json(texts(*arguments.map { comparable(json(it)) }.toTypedArray()) { (text, separator) -> split(text, separator) }, list = true, texts = true)
+                    // An empty text is one empty text, as in Cypher; split by an empty separator, it isn't (#416).
+                    Value.Json(madeText(*arguments.map { comparable(json(it)) }.toTypedArray(), empty = listOf(""), whereFirstEmpty = true) { (text, separator) -> split(text, separator) }, list = true, texts = true)
                 }
                 "reverse" -> Value.Json(shared(comparable(json(one()))) { (x) ->
                     val e = alias("e")
-                    "CASE ${reversedKind(x)} WHEN 'string' THEN ${texts(x) { (t) -> reversedText(t) }} " +
+                    "CASE ${reversedKind(x)} WHEN 'string' THEN ${madeText(x) { (t) -> reversedText(t) }} " +
                         "WHEN 'array' THEN (SELECT ${comparable(Value.Json(aggregateList(item(e), "${itemNo(e)} DESC"), ordered = true))} FROM ${elementsOf(one(), x, e)}) END"
                 }, items = itemsOf(one()), itemItems = itemItemsOf(one()), list = isList(one()), itemLists = holdsLists(one()), text = isText(one()), texts = holdsTexts(one()),
                     temporals = holdsTemporals(one()))
@@ -5974,11 +6160,17 @@ abstract class SqlCypherCompiler(
                 }, items = itemsOf(one()), itemItems = itemItemsOf(one()), list = isList(one()), itemLists = holdsLists(one()), texts = holdsTexts(one()),
                     temporals = holdsTemporals(one()))
                 // A text is read as Cypher reads it, its case and the spaces around it aside; a number is true but for 0.
-                "toboolean" -> Value.Json(shared(comparable(json(one()))) { (x) ->
+                "toboolean" -> {
+                    // Neo4j takes a truth value, an integer or a text, and refuses another kind it knows (#420).
+                    function.arguments.singleOrNull()?.let { givenKind(it, scope) }?.takeIf { it in setOf(Value.Known.LIST, Value.Known.MAP, Value.Known.FLOAT) }?.let { kind ->
+                        throw CompilerException("toBoolean() takes a truth value, an integer or a text, not ${kind.noun}, as in Neo4j.")
+                    }
+                    Value.Json(shared(comparable(json(one()))) { (x) ->
                     "CASE WHEN ${typeOf(x)} = 'boolean' THEN $x " +
                         "WHEN ${typeOf(x)} = 'number' THEN CASE WHEN ${number(x)} = 0 THEN ${literalJson(false)} ELSE ${literalJson(true)} END " +
                         "WHEN LOWER(TRIM(${text(x)})) = 'true' THEN ${literalJson(true)} WHEN LOWER(TRIM(${text(x)})) = 'false' THEN ${literalJson(false)} END"
-                })
+                    })
+                }
                 "isempty" -> Value.Json(shared(comparable(json(one()))) { (x) ->
                     val size = function("size", x)!!
                     boolJson("CASE WHEN ${typeOf(x)} = 'object' THEN ${jsonEquals(x, literalJson(emptyMap<String, Any>()))} WHEN ${typeOf(x)} IN ('array', 'string') THEN ${number(size)} = 0 END")
@@ -6004,12 +6196,14 @@ abstract class SqlCypherCompiler(
                 "e", "pi" -> if (arguments.isEmpty()) Value.Json(literalJson(if (name == "e") kotlin.math.E else kotlin.math.PI))
                     else throw CompilerException("${function.name}() takes no argument.")
                 "sign" -> Value.Json(scalar(signOf(number(comparable(json(one()))))))
-                "ltrim", "rtrim" -> Value.Json(texts(comparable(json(one()))) { (t) -> scalar("${name.uppercase()}($t)") }, text = true)
+                "ltrim", "rtrim" -> Value.Json(madeText(comparable(json(one()))) { (t) -> scalar("${name.uppercase()}($t)") }, text = true)
                 "randomuuid" -> if (arguments.isEmpty()) Value.Json(scalar(uuid())) else throw CompilerException("randomUUID() takes no argument.")
                 // A position is counted from 0, as Cypher counts it, and SQL from 1.
                 "substring" -> {
                     if (arguments.size !in 2..3) throw CompilerException("substring() takes a text, a start and a length.")
-                    Value.Json(texts(comparable(json(arguments[0]))) { read ->
+                    Value.Json(madeText(comparable(json(arguments[0])), counts = { length ->
+                        listOfNotNull(countOf(function, 1, "start", arguments, length), if (arguments.size == 3) countOf(function, 2, "length", arguments, length) else null)
+                    }) { read ->
                         scalar(shared(read.single()) { (text) ->
                             val start = countOf(function, 1, "start", arguments, text)
                             val length = if (arguments.size == 3) ", ${countOf(function, 2, "length", arguments, text)}" else ""
@@ -6021,7 +6215,7 @@ abstract class SqlCypherCompiler(
                 }
                 "left", "right" -> {
                     if (arguments.size != 2) throw CompilerException("${function.name}() takes a text and a length.")
-                    Value.Json(texts(comparable(json(arguments[0]))) { read ->
+                    Value.Json(madeText(comparable(json(arguments[0])), counts = { listOf(countOf(function, 1, "length", arguments, it)) }) { read ->
                         scalar(shared(read.single()) { (text) ->
                             val count = countOf(function, 1, "length", arguments, text)
                             if (name == "left") "SUBSTR($text, 1, $count)" else rightText(text, count)
@@ -6032,15 +6226,14 @@ abstract class SqlCypherCompiler(
                     if (arguments.size != 3) throw CompilerException("replace() takes a text, what to replace, and what with.")
                     // How long what to replace, and what with, are, in bytes, where the statement gives them.
                     val (searchBytes, replacementBytes) = function.arguments.drop(1).map { (given(it) as? String)?.let(org.drivine.cypher.text.JavaText::utf8)?.size }
-                    Value.Json(texts(*arguments.map { comparable(json(it)) }.toTypedArray()) { (text, search, replacement) ->
+                    Value.Json(madeText(*arguments.map { comparable(json(it)) }.toTypedArray(), guarded = true) { (text, search, replacement) ->
                         scalar(replaceText(text, search, replacement, searchBytes, replacementBytes))
                     }, text = true)
                 }
                 "date", "localtime", "time", "localdatetime", "datetime", "duration" -> temporal(Temporal.ofFunction(name)!!, function, arguments, scope)
                 "timestamp" -> if (arguments.isEmpty()) Value.Json(scalar(temporals.field(temporals.now(Temporal.DATE_TIME), Temporal.DATE_TIME, "epochMillis")!!.sql))
                     else throw CompilerException("timestamp() takes no argument.")
-                // The moment the statement runs, however it is asked for: one statement is one moment here.
-                in TEMPORAL_NOW -> Temporal.ofFunction(name.substringBefore('.'))!!.let { kind -> tagged(kind, temporals.now(kind)) }
+                in TEMPORAL_NOW -> now(function, scope)
                 in TEMPORAL_TRUNCATE -> {
                     val to = Temporal.ofFunction(name.substringBefore('.'))!!
                     if (arguments.size < 2) throw CompilerException("${function.name}() takes a unit and a value.")
@@ -6338,7 +6531,8 @@ abstract class SqlCypherCompiler(
          * What [sortable] sorts [value] by, in two: the value as a column carries it, and the terms that sort it, of that column.
          * A value whose kind the statement leaves open sorts as [openSortKey] has it, where its kind comes first; one it makes a
          * truth value, a temporal value, a text, a list or a node is of one kind, and sorts by one term alone: a zoned value or a
-         * list of them by its moments, another list by [listSortKey], any other by [sortKey].
+         * list of them by its moments, another list by [listSortKeys] (on Oracle a key, and the list where the key may tie), any
+         * other by [sortKey].
          */
         private fun sortTerm(value: Value): Pair<String, (String) -> List<String>> = when {
             value is Value.Bool -> value.sql to { listOf(it) }
@@ -6352,7 +6546,7 @@ abstract class SqlCypherCompiler(
             value is Value.Json && value.itemLists && value.itemItems != null && value.itemItems != Temporal.DURATION ->
                 comparable(value) to { listOf(momentsKey(it, value.itemItems, depth = 2)) }
             // A list the statement makes sorts as Cypher sorts lists, item by item; any other value as the store sorts its JSON.
-            isList(value) -> comparable(json(value)) to { listOf(listSortKey(it)) }
+            isList(value) -> comparable(json(value)) to { listSortKeys(it) }
             // A text has no tag whose key it is sorted by.
             isText(value) -> comparable(json(value)) to { listOf(textSortKey(it)) }
             value !is Value.Json || value.temporal != null -> comparable(json(value)) to { listOf(sortKey(it)) }
@@ -6495,6 +6689,12 @@ abstract class SqlCypherCompiler(
 
         /** What `round()` fails with, as Neo4j fails it, a precision below 0 or past [MAX_COUNT]. */
         const val PRECISION_OUT_OF_RANGE = "round() takes a precision from 0 to 2147483647, as in Neo4j."
+
+        /**
+         * What a statement fails with where a time zone an expression gives is no offset a store's text reads (drivine4j#424),
+         * named by its text, or by its kind where it is no text.
+         */
+        const val ZONE_NOT_COMPILED = "A time zone that is not Z or an offset of hours and minutes (+hh:mm), such as a zone by name, an offset with seconds, '+01' or a value that is no text, is not compiled to SQL yet:"
 
         /**
          * The greatest start or length `substring()`, `left()` and `right()` take, and the greatest precision `round()`
@@ -6666,6 +6866,12 @@ abstract class SqlCypherCompiler(
 
         /** The operators of arithmetic, whose value is a number where both operands are: see [Value.Json.known]. */
         val ARITHMETIC = setOf(Operator.ADD, Operator.SUBTRACT, Operator.MULTIPLY, Operator.DIVIDE, Operator.MODULO, Operator.POWER)
+
+        /** The arithmetic that takes numbers alone, and temporal values where the store does: `+` puts texts and lists together too. */
+        val NUMERIC_ONLY = ARITHMETIC - Operator.ADD
+
+        /** How the statement writes each of [NUMERIC_ONLY], for a refusal to name it. */
+        val NUMERIC_SYMBOLS = mapOf(Operator.SUBTRACT to "-", Operator.MULTIPLY to "*", Operator.DIVIDE to "/", Operator.MODULO to "%", Operator.POWER to "^")
 
         /** The operators that compare two values: equal or not, and in order. */
         val COMPARISONS = setOf(

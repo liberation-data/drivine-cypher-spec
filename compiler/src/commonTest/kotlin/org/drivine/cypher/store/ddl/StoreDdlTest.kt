@@ -140,6 +140,93 @@ class StoreDdlTest {
         assertTrue(checked > 0, "store.yaml pins no form")
     }
 
+    /**
+     * drivine-cypher-spec#135 §4: each SQL store's safe recreate of a uniqueness constraint is pinned, with the form its
+     * record then says and a digest of its statements (`leftover`, `build`, `swap`, `finish`, then `remade`), as a create is. The
+     * index it leaves is the one the create makes, built under another name first and put in its place: the build is the
+     * create's unique index under [SqlStoreDdl.temporaryName], without its `IF NOT EXISTS`, and SQLite's swap makes the
+     * create's index under its own name, so the form stays the create's.
+     */
+    @Test
+    fun eachSqlStoresUniqueRecreateIsPinnedAndLeavesTheIndexItsCreateMakes() {
+        var checked = 0
+        for (case in store["cases"]!!) {
+            val name = case["name"]!!.textValue()!!
+            val made = spec(case["spec"]!!).made()
+            for ((id, ddl) in stores) {
+                val expected = case["stores"]!![id]!!["recreate"]
+                if (made !is ConstraintSpec || ddl !is SqlStoreDdl) {
+                    assertEquals(null, expected, "$name on $id: no recreate of its own")
+                    continue
+                }
+                expected ?: fail("$name on $id: its recreate isn't pinned")
+                val recreation = ddl.recreation(made)
+                fun texts(statements: List<DdlStatement>) = statements.map { (it as DdlStatement.Text).statement }
+                assertEquals(texts(expected["leftover"]!!), texts(recreation.leftover), "$name on $id: leftover")
+                assertEquals(texts(expected["build"]!!), texts(recreation.build), "$name on $id: build")
+                assertEquals(texts(expected["swap"]!!), texts(recreation.swap), "$name on $id: swap")
+                assertEquals(texts(expected["finish"]!!), texts(recreation.finish), "$name on $id: finish")
+                assertEquals(expected["remade"]!!.textValue(), recreation.remade, "$name on $id: remade")
+                assertEquals(SqlStoreDdl.CURRENT_FORM.toLong(), expected["form"]?.longValue(), "$name on $id: the form its record says")
+                val statements = texts(recreation.leftover + recreation.build + recreation.swap + recreation.finish) + recreation.remade
+                assertEquals(expected["digest"]?.textValue(), digest(statements), "$name on $id: its recreate is not the form ${SqlStoreDdl.CURRENT_FORM} it is pinned to")
+
+                // What it leaves is what the create makes.
+                val create = texts(ddl.createConstraint(made))
+                val unique = create.single { "CREATE UNIQUE INDEX IF NOT EXISTS ${recreation.name} " in it }
+                assertEquals(unique.replace("IF NOT EXISTS ${recreation.name} ", "${recreation.temporary} "), texts(recreation.build).single(), "$name on $id: the build is the create's index")
+                assertEquals(recreation.name + SqlStoreDdl.TEMPORARY, recreation.temporary, "$name on $id: the name built under first")
+                if (ddl is SqliteDdl) {
+                    assertEquals(unique.replace("IF NOT EXISTS ", ""), texts(recreation.swap)[1], "$name on $id: the index made again under its name")
+                    assertEquals(texts(recreation.swap).drop(1), texts(recreation.finish), "$name on $id: the swap's end, which finishes one cut off")
+                } else {
+                    // Oracle's swap ends with it; Postgres's block does.
+                    val rename = texts(recreation.finish).single()
+                    assertTrue(texts(recreation.swap).last().let { it == rename || "    $rename;\nEND" in it }, "$name on $id: the rename, which finishes one cut off")
+                }
+                // The record is left as one made anew: under the item's name, as the index under its own.
+                assertTrue("name = ${ddl.recreation(made).name.let { "'${made.effectiveName.replace("'", "''")}'" }}" in recreation.remade, "$name on $id: remade names the record as the item")
+                checked++
+            }
+        }
+        assertEquals(18, checked, "six constraints on three SQL stores")
+    }
+
+    /**
+     * The name a unique index is built under first fits within the store's longest name, and is never a name Drivine
+     * gives: [SqlStoreDdl.objectName] leaves two characters, but for a graph whose name is as long as one may be, whose
+     * `uq` names are one character longer, where the name built under first is cut by one.
+     */
+    @Test
+    fun theNameAUniqueIndexIsBuiltUnderFirstFitsTheStoresNames() {
+        val makers: List<Triple<String, Int, (String) -> SqlStoreDdl>> = listOf(
+            Triple("Postgres", PostgresDdl.MAX_OBJECT_NAME) { g -> PostgresDdl(g) },
+            Triple("Oracle", OracleDdl.MAX_OBJECT_NAME) { g -> OracleDdl(g) },
+            Triple("SQLite", SqliteDdl.MAX_OBJECT_NAME) { g -> SqliteDdl(g) },
+        )
+        for ((engine, max, make) in makers) {
+            // The longest name a graph may have, and one shorter.
+            val longest = max - ("_v__".length + 8 + "_t".length)
+            for (graph in listOf("g" + "x".repeat(longest - 1), "g" + "x".repeat(longest - 2), "drivine")) {
+                val ddl = make(graph)
+                for (parts in listOf(listOf("Person", "email"), listOf("Membership", "tenantId", "userId"), listOf("P".repeat(80), "q"))) {
+                    val name = ddl.objectName("uq", parts)
+                    val temporary = ddl.temporaryName(name)
+                    assertTrue(temporary.length <= max, "$engine, $graph, $parts: $temporary is at most $max long")
+                    assertTrue(temporary.endsWith("_r") && !temporary.equals(name, ignoreCase = true), "$engine, $graph, $parts: $temporary is a name of its own")
+                    val expected = if (name.length + 2 <= max) name + "_r" else name.dropLast(1) + "_r"
+                    assertEquals(expected, temporary, "$engine, $graph, $parts")
+                }
+            }
+            assertEquals("drivine_uq_Personemail_5482a751_r", make("drivine").temporaryName("drivine_uq_Personemail_5482a751"), engine)
+        }
+        // At the longest a graph's name may be, a `uq` name with a hash of eight digits is one short of the store's longest.
+        val longest = PostgresDdl("g" + "x".repeat(PostgresDdl.MAX_OBJECT_NAME - 15))
+        val full = longest.objectName("uq", listOf("Person", "email"))
+        assertEquals(PostgresDdl.MAX_OBJECT_NAME - 1, full.length, full)
+        assertEquals(full.dropLast(1) + "_r", longest.temporaryName(full))
+    }
+
     private fun digest(statements: List<String>): String =
         Sha256.digest(statements.joinToString("\u0000").encodeToByteArray()).joinToString("") { (it.toInt() and 0xff).toString(16).padStart(2, '0') }
 

@@ -136,8 +136,6 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
 
     override fun keyed(json: String, key: String) = "($json -> ('$.' || json_quote(${escapedKey("($key ->> '$')")})))"
 
-    override fun containsAll(props: String, map: String) = "${SqliteFunctions.CONTAINS}($props, $map)"
-
     /** The test a partial index over the label's nodes is made with: see [SqliteSql.hasLabel]. */
     override fun hasLabel(labels: String, label: String) = SqliteSql.holdsLabel(labels, label)
 
@@ -575,7 +573,7 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
      * The whole of the text matches, as `=~` asks: `REGEXP` finds a match anywhere. It ends at `\z`, the text's end,
      * where Java's `$` would match before a line break that ends the text too.
      */
-    override fun matches(text: String, pattern: String) = "($text REGEXP ('^(?:' || $pattern || ')\\z'))"
+    override fun matches(text: String, pattern: String) = "($text REGEXP (${literal(MATCHES_BEFORE)} || $pattern || ${literal(MATCHES_AFTER)}))"
 
     override fun split(text: String, separator: String) = "${SqliteFunctions.SPLIT}($text, $separator)"
 
@@ -687,7 +685,7 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
     /** The path of the key [key] of a map, as SQLite's JSON functions read one: a key of any characters, in quotes. */
     private fun path(key: String) = literal("$.${SqliteSql.quoted(key)}")
 
-    private companion object {
+    internal companion object {
         /**
          * The most bytes of a statement SQLite takes, `SQLITE_LIMIT_SQL_LENGTH`, on a connection xerial's sqlite-jdbc opens
          * (3.53.2.1): it refuses a longer one with SQLITE_TOOBIG, "statement too long". The sqlite3 shell's and Python's take 1,000,000,000.
@@ -722,6 +720,10 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
          * text too, and JavaScript's does not.
          */
         const val DECIMAL_TEXT = """^$ASCII_SPACE*[+-]?([0-9]+\.?[0-9]*|\.[0-9]+)([eE][+-]?[0-9]+)?$ASCII_SPACE*\z"""
+
+        /** What [matches] puts around a pattern, so it matches the whole text, to its end: `^(?:` and `)\z`. */
+        const val MATCHES_BEFORE = "^(?:"
+        const val MATCHES_AFTER = ")\\z"
 
         /** A whole number, with ASCII's spaces around it, which `CAST` reads as itself, as Neo4j's `toInteger` does. */
         const val WHOLE_TEXT = """^$ASCII_SPACE*[+-]?[0-9]+$ASCII_SPACE*\z"""

@@ -89,8 +89,12 @@ It takes `reencodeJson` too, false where left out, the Kotlin form of the reques
 [Oracle's documents encoded again](#oracles-documents-encoded-again)). JDBC reads every OSON version, so drivine4j leaves it
 false; the hosts on thin drivers, python-oracledb's and node-oracledb's, set it.
 
+It takes `readsAsText` too, false where left out, the Kotlin form of the request's `oracleReadsAsText` (see
+[Oracle's reads as text](#oracles-reads-as-text)). JDBC keeps a number's digits, so drivine4j leaves it false.
+
 A host with no Kotlin types calls `CompileJson.compile(request)`, JSON text in and out. The wasm build exports it as
-`compile`, and the shared library as `drivine_compile`:
+`compile`, and the shared library as `drivine_compile`. Each also exports the SQLite host functions' version the
+compiled SQL needs, `hostVersion()` and `drivine_host_version()`: see [The host functions' version](#the-host-functions-version).
 
 ```json
 {"store": "oracle",
@@ -100,9 +104,9 @@ A host with no Kotlin types calls `CompileJson.compile(request)`, JSON text in a
 ```
 
 `store` is `postgres`, `oracle` or `sqlite`. `graph` has the graph's `name`; the rest of it is Oracle's, and may be left
-out: `nullsEqualStored` and `eraStored` (true where left out), `indexedProperties`, `oracleRowsAsText` and `oracleReencodeJson` (false
-where left out, see [Oracle's rows as text](#oracles-rows-as-text) and
-[Oracle's documents encoded again](#oracles-documents-encoded-again)). `typed`, false where left out, asks for the rows' nodes and
+out: `nullsEqualStored` and `eraStored` (true where left out), `indexedProperties`, `oracleRowsAsText`, `oracleReencodeJson` and
+`oracleReadsAsText` (false where left out, see [Oracle's rows as text](#oracles-rows-as-text),
+[Oracle's documents encoded again](#oracles-documents-encoded-again) and [Oracle's reads as text](#oracles-reads-as-text)). `typed`, false where left out, asks for the rows' nodes and
 relationships tagged and for the columns: see [Columns and typed rows](#columns-and-typed-rows). The answer is one of:
 
 - `{"sql": …, "parameters": {…}, "setup": […], "warnings": […], "nonFinite": false}`, and on Oracle
@@ -270,6 +274,30 @@ sets both. A statement that returns nothing, and every statement on the other st
 option is temporary: a host sets it until its thin driver reads OSON version 2 (oracle/python-oracledb#622,
 oracle/node-oracledb#1796), then drops it, and it goes from the module with them.
 
+### Oracle's reads as text
+
+A statement that reads returns a row of `JSON` each. node-oracledb's thin mode reads a `JSON` value's numbers through a
+double, so a whole number past 2^53 loses its last digits: 9007199254740993 comes back 9007199254740992 (#198).
+
+So a host whose driver does that sets `"oracleReadsAsText": true` in `graph` (`GraphOptions.oracleReadsAsText` in Kotlin).
+A statement that only reads then returns each row's value as its text in Oracle's extended JSON, a `CLOB` in the column
+`result`, in the read's order:
+
+```sql
+SELECT JSON_SERIALIZE(cy_r.result RETURNING CLOB EXTENDED) AS result FROM (
+    SELECT cy_q.result, ROWNUM AS cy_n FROM (
+        <the read>
+    ) cy_q
+) cy_r
+ORDER BY cy_r.cy_n
+```
+
+A hint the read starts with, and the functions it declares before it (`WITH FUNCTION …`), still start the statement. The
+text is the extended JSON of [Oracle's rows as text](#oracles-rows-as-text): a whole number in full, and a float marked as
+one, `{"$numberDouble": 2}`. A statement that writes, one compiled typed, and every statement on the other stores, is
+compiled alike either way. With `oracleReencodeJson` too, the value encoded again is the one serialized. A host on
+node-oracledb sets it; drivine4j's JDBC keeps a number's digits, and leaves it false.
+
 ### The parser's caches
 
 ANTLR keeps what it learns of the grammar as it parses, its DFA states and the prediction contexts they share, for the
@@ -298,6 +326,7 @@ hold to.
 ```js
 const { compile } = require('@liberation-data/drivine-cypher-compiler');      // or: import { compile } from '@liberation-data/drivine-cypher-compiler'
 const answer = JSON.parse(compile(JSON.stringify({ store: 'sqlite', graph: { name: 'g' }, cypher: 'RETURN 1' })));
+const { hostVersion } = require('@liberation-data/drivine-cypher-compiler');  // what SELECT drivine_host_version() must give
 ```
 
 The CommonJS entry (`npm/index.cjs`) loads the wasm synchronously. Kotlin/Wasm writes only an ES module loader, with a
@@ -344,6 +373,7 @@ library alone, the same bytes from the same libraries; `python/check_wheel.py` c
 ```c
 char *drivine_compile(const char *request);   /* NUL-terminated UTF-8 JSON in, and out */
 void drivine_free(char *answer);              /* frees what drivine_compile gave */
+int drivine_host_version(void);               /* the host functions' version the compiled SQL needs */
 ```
 
 A NULL request is answered as an empty one, with `{"error": …}`. `drivine_compile` gives NULL only where it can't allocate
@@ -363,19 +393,75 @@ and macOS, that the library imports no `sqlite3_` symbol and exports only the C 
 ```c
 int sqlite3_drivinecypher_init(sqlite3 *db, char **errorMessage, const sqlite3_api_routines *routines);
 void drivine_gc_collect(void);   /* collects now: see below */
+int drivine_host_version(void);  /* the host functions' version the compiled SQL needs: see below */
 ```
 
 SQLite derives the entry point's name from the file's (`libdrivinecypher` or `drivinecypher`), so a host loads it by
-path alone. The host functions come in batches, ported from drivine4j's: each is common code
+path alone. The host functions are ported from drivine4j's: each is common code
 (`org.drivine.cypher.host.HostFunctions`), which the extension registers and a host on the JVM can call from its own
-registrations, and each comes with the spec's `host.yaml` cases that pin it. So far it registers:
+registrations, and each comes with the spec's `host.yaml` cases that pin it. A function of JSON values fails its statement
+on a text that is no JSON, and takes an empty one as no value, as drivine4j's do. It registers every function `host.yaml` pins:
 
 | Function | What it gives |
 |---|---|
 | `drivine_float_text(real)` | the float as Java writes a double, as Cypher's `toString` gives it (`2.0`, `1.0E7`, `Infinity`), where SQLite's own text has 17 digits; null of null. Deterministic. |
+| `drivine_equal(a, b)` | 1 or 0, whether the JSON values are equal as Cypher compares them (`1` equal to `1.0`, maps by their entries in any order, NaN equal to nothing); null where either is no value or a null in them decides. Deterministic. |
+| `drivine_add(a, b)` | Cypher's `a + b` of the JSON values, as JSON text: numbers summed (a whole number where both are, past a long's range too), lists joined or an item added, texts and numbers written together; null where Cypher adds no such two. Deterministic. |
+| `drivine_canonical(json)` | the JSON text with each map in it, at any depth, its keys in order, so two maps of the same entries group together; JSON's null as given, null of null. Deterministic. |
+| `drivine_sort_key(json)` | of a JSON list, a text that orders, as SQLite orders text, as Cypher orders lists; of any other value its JSON text as given, null of null. Deterministic. |
+| `drivine_list_order(a, b)` | -1, 0 or 1, where the JSON list `a` comes beside the list `b` in a comparison (`<`, `>=` …); null where either is no list or the pair that decides isn't ordered. Deterministic. |
+| `drivine_round(number, precision, mode)` | the number rounded to as many decimal places by the mode (`HALF_UP`, `HALF_EVEN` … as Java names them), in decimal as Neo4j rounds, so 2.345 to 2 places `HALF_UP` is 2.35; a float. An infinity is itself; null where the number or the precision is. Deterministic. |
+| `regexp(pattern, text)` | 1 where the regular expression matches somewhere in the text, 0 where it matches nowhere; null where either is null. SQLite calls it for `text REGEXP pattern`. The pattern is Java's: see [Regular expressions](#regular-expressions). Deterministic. |
+| `drivine_regex_group(text, pattern, group)` | the text the group of that number matches where the pattern first matches (0 the whole match), as Postgres's `regexp_match` gives it; null where it matches nowhere, the group takes no part or is past the pattern's, or the text or pattern is null. A null group is 0; a negative one fails the statement. Deterministic. |
+| `drivine_regexp_replace(text, pattern, replacement)` | the text with each match replaced, `\1` in the replacement naming a group as Postgres's and Oracle's do, anything else itself; null where any is null. A match whose replacement names a group the pattern hasn't fails the statement, as Java's does. Deterministic. |
+| `drivine_temporal(operation, …)` | what compiled SQL works out of a timestamp, the text of a wall clock to the microsecond (`2024-03-15T10:30:00.000000`), as java.time works it out, by its operation: `local(text, kind)` and `utc(text, kind)`, the wall clock an ISO text of a kind (`DATE_TIME` …) reads, its offset (`Z`, `±hh:mm` or `±hhmm`; one with seconds is none) left out or moved to UTC; `extract(timestamp, field)`, `YEAR`, `MONTH`, `DAY`, `HOUR`, `MINUTE` or `NANOSECOND_OF_MINUTE` (no `SECOND`); `day_of_week(timestamp)`; `add_months(timestamp, months)`; `add_time(timestamp, days, seconds, nanos)`, added as Java's `plusDays`, `plusSeconds` and `plusNanos` add them; `months_between(from, to)`; `seconds_between(from, to)`, whole seconds, floored, and `nanos_between(from, to)`, the nanoseconds past them, 0 to 999,999,999, so the two are exact over the whole range of years; `truncate(timestamp, unit)`. Whole numbers each, but for the timestamps; a count given as a float or a text is read as a decimal rounded half away from zero. A timestamp it writes keeps the microsecond, cut, never rounded. Null where an argument after the operation is null; a text that is no temporal value fails the statement, naming it. Deterministic. |
+| `drivine_trunc(number)` | the number with its fraction cut off, a whole number where one holds it, as Postgres's and Oracle's `TRUNC` give it; a float within two units of its last place of a whole number is that whole number (SQLite's binary misses `33.001 * 1e6` by that much); past a whole number's range, the float. Null of null. Deterministic. |
+| `drivine_to_char(value, pattern)` | a timestamp in a pattern of `YYYY`, `MM`, `DD`, `HH24`, `MI`, `SS`, `IYYY`, `IW`, `DDD` and quoted text, its year signed before 0 (`-0044`), or a number in an `FM` pattern (`FM0000`, `FM9999999999990.999999999`), rounded half away from zero, as Postgres's and Oracle's `to_char` write those compiled SQL writes; null where either is null. Deterministic. |
+| `drivine_host_version()` | the version of these functions' forms, `SqliteFunctions.HOST_VERSION`, which a host checks: see below. Deterministic. |
 | `drivine_extension_version()` | the module's version, as it was built (`-Pcompiler.version`, the Maven form: `0.36.0`, `0.36.0-rc.1`), so a host can check it loaded the library it meant to. Deterministic. |
 | `drivine_gc_collect()` | NULL, having collected: see below. Direct-only. |
 | `drivine_gc_heap()`, `drivine_gc_heap(bytes)` | the GC's floor, in bytes; given bytes, it sets the floor first, and 0 restores the runtime's own. Direct-only. |
+
+#### The host functions' version
+
+The compiled SQL calls the host functions in the forms the spec's `host.yaml` pins, which change now and then
+(`drivine_temporal`'s `add_time` took a float of seconds before version 1). `SqliteFunctions.HOST_VERSION` is the version
+of the forms the compiler's SQL calls, bumped with each change to them, in the same change as their `host.yaml` steps;
+`drivine_host_version()` gives the version of the functions registered. A host that registers the functions itself
+(drivine4j on xerial, the TypeScript and Python libraries) checks the two agree once on each connection, right after
+registering, so a stale copy fails on connecting rather than mid-statement: `HostCheck.SQL` is the statement to run, and
+`HostCheck.verify(reported)` throws where its answer (null where SQLite has no such function, as with drivine4j's older
+functions) is not the compiler's. A host with no Kotlin types reads the compiler's version from `drivine_host_version()`
+in C or `hostVersion()` in wasm, and words the failure as `HostCheck` does:
+
+```text
+SQLite's drivine_ functions are version 0, the compiler needs 1: register the module's host functions
+SQLite has no drivine_host_version(): its drivine_ functions are older than version 1, the compiler's: register the module's host functions
+```
+
+The extension registers the module's own functions, so on a connection that loaded it the two always agree.
+
+#### Temporal functions without java.time
+
+`drivine_temporal`, `drivine_trunc` and `drivine_to_char` are drivine4j's, ported onto kotlinx-datetime's values alone
+(`org.drivine.cypher.host.time`): java.time's ISO parsers' acceptance (a year of four digits, or signed with more; `T` or
+`t`; a fraction of up to nine digits, or none after the point), its calendar arithmetic (`plusMonths`, `plusSeconds`,
+`plusNanos`, `ChronoUnit.MONTHS.between`, `Duration.between`, the ISO week-based year) with its range checks and
+messages, and java.math's `BigDecimal` reading, `HALF_UP` and `stripTrailingZeros`, are written out in common code, as
+kotlinx-datetime's own parse and arithmetic check and word otherwise. A decimal is held as its digits and its scale,
+never as a power of ten, so a stored text of an exponent near ±2^31 (`1e2147483647`) is answered, or fails with
+java.math's message (`BigInteger would overflow supported range`, `Underflow`), at once, where Java can take
+minutes; a whole number's wrapped low 64 bits are worked out of the digits alone. The JVM writes java.time's answers
+to 120,000 calls or so (`host-temporal.json`, `org.drivine.cypher.oracle.HostTemporals`): every edge year from -999,999,999 to 999,999,999,
+ISO-week turns, the texts of every temporal kind with and without offsets (those of real zones' transitions among them),
+and floats and decimal texts for `drivine_trunc` and `drivine_to_char`. `HostTemporalOracleTest` checks each on every
+target, its result exactly and of its type, or its failure, and `jvmOracle` checks `host.yaml`'s steps of them against
+java.time first. A step noted `drivine4j#421 (layout 2)` needs nine-digit timestamps, and must fail until they are the store's.
+
+On SQLite the compiler reads no float of seconds: a duration is added as whole seconds and nanoseconds read from its text,
+`duration.between`, `epochSeconds` and `epochMillis` are worked out of `seconds_between` and `nanos_between`, and a
+clock's `second`, `millisecond`, `microsecond` and `nanosecond` of `NANOSECOND_OF_MINUTE`, whole numbers each
+(`TemporalSql.exactTime`). Postgres's and Oracle's SQL is unchanged.
 
 A direct-only function changes the process's state, so SQLite lets only the host's own statements call it, never a
 trigger or view of the database's. A function that throws fails its statement with its message (`drivine_gc_heap: the
@@ -431,6 +517,104 @@ through SQL, the throwing ones too, and then the C API by ctypes from the same p
 `function` step of the spec's `host.yaml` whose function the extension registers (`./gradlew hostSpecJson` writes the
 file as JSON, in `build/host`), and names those it doesn't register yet. CI runs it on Linux x64 and macOS, and the
 release runs it on each platform's installed wheel, Windows and Linux arm64 too, without `host.yaml`.
+
+### Regular expressions
+
+The regular expression functions read a pattern as drivine4j's do: Java's, compiled with `UNICODE_CHARACTER_CLASS`, with a
+POSIX class (`[:alnum:]`, `[:alpha:]`, `[:digit:]`, `[:space:]`, `[:upper:]`, `[:lower:]`, `[:punct:]`) read as Java names it
+(`\p{Alnum}` …), so a full-text search's expressions, written for Postgres, read the same. `org.drivine.cypher.host.regex`:
+
+- On the JVM, `java.util.regex` itself.
+- On Kotlin/Native and Kotlin/Wasm, `kotlin.text.Regex`, which on both is the stdlib's own engine (a port of Apache
+  Harmony's), not JavaScript's `RegExp` on wasm. It reads Java's syntax, but its classes are ASCII's, its case-insensitivity
+  and some of its constructs aren't Java's, and it has bugs with code points past the BMP. So there the functions take a
+  fixed grammar, the part of Java's that is simple and that `HarmonyRewrite` makes Harmony match exactly, and refuse the
+  rest by name.
+
+**Native and wasm take**, each matching as Java's does:
+
+- literals and escapes (`\t`, `\n`, `\xNN`, `\x{…}`, `\uNNNN`, `\0`…, `\cX`, a backslash before punctuation, `\Q…\E`);
+- classes, `[…]`, nested, negated and intersected as Java reads them, POSIX's (`[:alnum:]` …), `\p{…}` and `\P{…}` by every
+  name Java knows, `\w`, `\d`, `\s`, `\h`, `\v` and their negations, and `.`: each written out as the code points Java's
+  holds with `UNICODE_CHARACTER_CLASS`, from tables gen/Generate.java writes on the pinned JDK (`RegexTables`);
+- greedy and lazy quantifiers (`*`, `+`, `?`, `{n}`, `{n,}`, `{n,m}`, and each with `?`) on one of those;
+- greedy quantifiers on a group, and `*?` and `??` on one;
+- capturing, named and non-capturing groups, and alternatives;
+- `^`, `$`, `\b`, `\B`, `\A`, `\z` and `\Z`;
+- the inline flags `(?i)`, `(?s)`, `(?m)`, `(?x)`, `(?d)`, `(?u)` and `(?U)`, alone or as `(?i:…)`;
+- and one lookahead: `(?=…)` or `(?!…)` of literals, classes, alternatives, `$` and `\z` alone, unquantified, as a
+  full-text search's `(?=$|[^[:alnum:]_])` is.
+
+Every pattern the compiler, a full-text search and `host.yaml` write is inside it: `DrivinePatternsTest` builds each from
+the compiler's own constants and functions and compiles it on every target, and `RegexOracleTest` fails where any the
+compiler writes over the corpus is refused.
+
+**Native and wasm refuse**, failing the statement with the construct's name (`regexp: a lookbehind is not supported on
+this platform; rewrite the pattern without it.`):
+
+- a lookbehind, and any lookahead but the one above (`a lookahead holding a quantifier`, `… a group`, `… an anchor but $
+  and \z`);
+- a back reference, `\1` or `\k<name>`;
+- a possessive quantifier, and an atomic group, `(?>…)`;
+- `\G`, `\X`, `\R`, `\N{…}` and `\b{g}`;
+- a quantifier on what has no width (`^*`, `\b{2}`, `(?=a)+`, and a group of nothing else, `(\b)*` or `()+`, which Java
+  repeats otherwise), and a quantifier on a quantifier (`a{2}{3}`, which Java reads);
+- a lazy quantifier on a group but `*?` and `??` (`(bc)+?`), which Harmony counts wrongly;
+- a capturing group in a group repeated (by any quantifier but `?`) whose length can't vary, with no alternative and no
+  quantifier but `{n}` in it (`(?:(a))*a`): Java leaves the group as a repetition it gave back set it;
+- a group that can match nothing, under any quantifier (`?` and `{1}` too), in a group repeated (`(?:a(?:b*)*){2}`,
+  `(?:a(?:b*)?)+`), which Harmony stops repeating early;
+- groups repeated within each other more than 3 deep (`((((a)*b)+c)*d)*`): the compiler's take 2, and each level deeper
+  multiplies the backtracking and stack Harmony takes where its repetition of groups is least like Java's;
+- `(?-U)` and `(?-u)`, which turn off what the patterns always have on, and `(?c)`, after which Java reads each class and
+  `\p{…}` by graphemes;
+- and a pattern written as more than 2,000,000 characters (each `\b` is some 35,000: 30 million characters took 1.2 GB and
+  two seconds to compile).
+
+This is a documented limit of native and wasm alone: on the JVM the functions keep the whole of `java.util.regex`. The
+comments in `HarmonyRewrite` and `HarmonyPattern` name the Kotlin 2.2.20 bugs each workaround within the grammar is for,
+and `HarmonyBugsTest` fails once Kotlin fixes one, so its workaround can come out.
+
+**The stack.** Harmony's engine recurses: as it compiles, into each group and along each node, and as it matches, for each
+node it passes and again for each repetition of a group, so `(a|b)*` recurses once a character. Java's does too, and throws
+`StackOverflowError` where its thread's stack runs out (measured on JDK 21: `(a|b)*` over about 770 characters on a 512 KiB
+stack, 7,800 on 1 MiB, 73,000 on 8 MiB); on Kotlin/Native an overflow is a crash that ends the host's process. So on
+Kotlin/Native (`StackRoom`) the module compiles a pattern only where the thread has stack left for the pattern's longest
+path through Harmony's nodes, 1 KiB a node (4 KiB in a debug binary) and 64 KiB more. Only a group repeated (`*`, `+`,
+`{n,}`, `{n,m}` with m over 1) takes more stack for a longer text, a path for each repetition: a quantifier on one
+character, `.`, `\w` and a class, greedy or lazy, loops, and so do alternatives and lookaheads outside such a group. So
+where the pattern repeats a group and the text is longer than the stack left covers at a path a character, or where it
+repeats none and the stack doesn't cover the path once for each lookahead nested, the text is read through a check at each
+character that the stack keeps that much, a check that made a full-text search's replace over 1,400 characters 984 µs
+where it is 179 µs without; past it the statement fails (`regexp: the regular expression takes more of this thread's
+stack than is left on this platform, …`). Measured on macOS arm64's release library, through SQLite: `(a|b)*` answers
+over 29,694 characters on the main thread's 8 MiB, where it crashed from 29,772, and 818 on a Python thread of 512 KiB,
+where it crashed from 949; groups nested 12,200 deep crashed compiling on 8 MiB, and are refused from 7,800; 20,300 nodes
+in a row (`a?` …) crashed, and are refused from 8,200.
+Kotlin/Wasm's overflow is a `RangeError` its host's JavaScript catches, and isn't checked.
+
+**Long texts and `$`, `\Z`, `\b`, `\B`.** These look at the character before a place, and Harmony's lookbehind takes time
+proportional to how far into the text it is tried, as it looks for its body ending there from each place back to the
+text's start: a pattern written with one takes time quadratic in the text's length. So `HarmonyRewrite` writes them with
+a lookbehind that holds at the code point before wherever it is tried, found at once, and captures what it reads there
+in a group of its own, which a back reference after it reads. Measured on macOS arm64's release library, through SQLite,
+before (#204) and now:
+
+| Call | Text | Before | Now |
+|---|---|---|---|
+| `\b` replace | 10,000 chars | 1.06 s | 12 ms |
+| `\b` replace | 40,000 chars | 16.8 s | 39 ms |
+| `graph$` replace | 700,000 chars | 6.5 s | 11 ms |
+| a full-text search's term, replace | 2.1M chars | 46 s | 0.22 s |
+
+`LongTextAnchorsTest` fails on every target where a `\b` replace over 40,000 characters or a `$` over 700,000 takes over
+5 s: about ten times what a debug test binary takes now, and well under the 133 s and 47 s it took before.
+
+A process keeps the 256 patterns used last (`JavaPatterns`), for every connection: a pattern rewritten for Harmony takes a
+millisecond or more to compile, its classes written out, where a find takes about a microsecond. `RegexOracleTest` checks
+every target against Java's answers (`regex.json`, see [Checks](#checks)), both ways where it can: `JavaPatterns`, as the
+functions compile a pattern there, and the rewrite, which on the JVM runs on `java.util.regex` without
+`UNICODE_CHARACTER_CLASS`, so the JVM checks the rewrite's tables too.
 
 `HostSpecTest`, in the common tests, runs the same steps on every target (the JVM, native and wasm), calling the module's
 code as SQLite would. A function `host.yaml` calls that the module doesn't implement yet is on its `PENDING` list, which
@@ -536,7 +720,8 @@ The JVM is the oracle. `./gradlew jvmOracle` writes, into `build/oracle`:
   `schema.yaml`), compiled for Postgres, Oracle and SQLite, and some with parameters the spec has no form for (whole
   floats, temporal values, bytes, `$` keys) and Oracle's graph options, and on Oracle with `oracleRowsAsText` each of
   those statements whose SQL it changes (every write that returns rows), and two writes of its own, of a long text and of
-  many rows, and with `oracleReencodeJson` each of those statements whose SQL it changes (every one that returns rows).
+  many rows, with `oracleReencodeJson` each of those statements whose SQL it changes (every one that returns rows), and
+  with `oracleReadsAsText` each of those statements whose SQL it changes (every one that only reads).
   Last, compiled typed: `results.yaml`'s statements, and each other statement whose SQL typed changes (one
   that returns a node or a relationship), on Oracle with `oracleRowsAsText` too where that changes it, and with
   `oracleReencodeJson`. Each request and the JVM's answer. A statement whose SQL embeds the moment it was compiled, as SQLite's
@@ -561,6 +746,13 @@ The JVM is the oracle. `./gradlew jvmOracle` writes, into `build/oracle`:
 - `host.json`: the spec's `host.yaml` as JSON, which `HostSpecTest` reads on every target: the `function` steps the
   module's host functions (`org.drivine.cypher.host.HostFunctions`) must give. `./gradlew hostSpecJson` writes it alone,
   into `build/host`, for `nativeExtensionCheck`.
+- `regex.json`: Java's answers for the regular expressions SQLite's functions see, which `RegexOracleTest` reads on every
+  target (see [Regular expressions](#regular-expressions)): each pattern the compiler writes on SQLite over the corpus and
+  the mutants, each a full-text search gives, each of `host.yaml`'s, and users' `=~` patterns written and wrapped as `=~`
+  wraps them, over texts of many scripts, code points past the BMP and every line break; whether each is found, its first
+  match's groups, its count and every match replaced, or Java's refusal; and what `(?i)` takes for each code point with a
+  case. `RegexOracleTest` fails on any other answer, on any refusal but the platform's named ones, and on any refusal of a
+  pattern the compiler, a full-text search or `host.yaml` gives.
 - `search-golden.json`: drivine4j's full-text search statements (see [Full-text search](#full-text-search)), which
   `FullTextSearchGoldenTest` reads on every target. Its requests are in `corpus.jsonl` too.
 - `standins-<name>.txt`: what Java gives where the module stands in for it, worked out by Java's own API on the pinned

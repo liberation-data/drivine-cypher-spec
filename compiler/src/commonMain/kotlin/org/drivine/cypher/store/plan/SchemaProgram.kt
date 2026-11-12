@@ -1,14 +1,17 @@
 package org.drivine.cypher.store.plan
 
 import org.drivine.cypher.CompilerException
+import org.drivine.cypher.store.ddl.CatalogItem
 import org.drivine.cypher.store.ddl.DdlStatement
 import org.drivine.cypher.store.ddl.FalkorDbDdl
 import org.drivine.cypher.store.ddl.SqlStoreDdl
+import org.drivine.cypher.store.ddl.UniqueRecreation
 import org.drivine.cypher.store.ddl.unsupportedTextIndex
 import org.drivine.cypher.store.marker.MarkerInventory
 import org.drivine.cypher.store.marker.MarkerStatements
 import org.drivine.cypher.store.marker.SchemaMarker
 import org.drivine.cypher.store.schema.ItemForm
+import org.drivine.cypher.store.schema.SqlStoreSchema
 import org.drivine.cypher.store.schema.StoreError
 import org.drivine.cypher.store.schema.StoreSchema
 import org.drivine.cypher.store.schema.catalogItem
@@ -21,6 +24,7 @@ import org.drivine.schema.SchemaItemKind
 import org.drivine.schema.SchemaItemSpec
 import org.drivine.schema.SchemaMode
 import org.drivine.schema.TextIndexSpec
+import org.drivine.schema.UniquenessConstraintSpec
 import org.drivine.schema.VectorIndexSpec
 import org.drivine.schema.lowercased
 import org.drivine.schema.made
@@ -72,6 +76,9 @@ internal class SchemaProgram(
      * applied; the item's own, for one of the public calls.
      */
     private var remake = "Call recreate() to make it again."
+
+    /** What finishes a recreate of an item cut off, or still running, for the line that says it is kept as it is: as [remake]. */
+    private var finish = "Call recreate() to finish it."
 
     /** The names a mismatch has been said of: each once a plan, though a recreate after it reads it again. */
     private val mismatchesSaid = mutableSetOf<String>()
@@ -245,6 +252,7 @@ internal class SchemaProgram(
 
         val build = Build(request.buildTimeoutMillis, run.unbuilt)
         remake = "SchemaManager.recreateAll(${owner?.let { "\"$it\"" } ?: "null"}) makes it again."
+        finish = "SchemaManager.recreateAll(${owner?.let { "\"$it\"" } ?: "null"}) finishes it."
         for (spec in toApply) {
             // A co-owned item is never dropped by one owner's version change, only by an explicit recreate. A runtime item
             // marked stale missed its owner's recreate, and is recreated now.
@@ -836,6 +844,22 @@ internal class SchemaProgram(
             }
         }
 
+        // Only the index a recreate builds first stands, of the constraint's shape, which holds the data unique: the recreate
+        // was cut off after it dropped the old one, or, in another session, is between its drop and its rename. Kept and
+        // used as it is: finishing it here would race that session's rename, which would then find nothing to rename.
+        val sql = store.ddl as? SqlStoreDdl
+        if (existing == null && sql != null && store is SqlStoreSchema) {
+            val recreation = sql.recreation(spec)
+            if (store.cutOff(spec, listings[sql.listConstraintsQuery()].orEmpty(), recreation.name, recreation.temporary)) {
+                log(
+                    LogLevel.WARN, CONSTRAINT_MANAGER,
+                    "$engine ${spec.kind} on ${spec.label}${spec.properties} is held by ${recreation.temporary}, the index a recreate of it builds first, and nothing stands " +
+                        "under ${recreation.name}: that recreate was cut off, or is still running. It is kept and used as it is. $finish",
+                )
+                return EnsureResult.AlreadyMatching(SchemaItemInfo.fromSpec(spec))
+            }
+        }
+
         // A store (FalkorDB) whose constraint needs an exact-match index over its properties made first; one not built is thrown.
         if (store.constraintsRequireBackingIndex) {
             ensureIndex(RangeIndexSpec(spec.label, spec.properties), Build(PlanRequest.DEFAULT_BUILD_TIMEOUT_MILLIS, null))
@@ -889,38 +913,214 @@ internal class SchemaProgram(
 
     /** `ConstraintManager.drop`, a constraint whose build failed too. */
     private fun dropConstraint(spec: ConstraintSpec): Boolean {
-        val existing = findConstraint(spec) ?: return false
+        val existing = findConstraint(spec) ?: return dropCutOff(spec)
+        // On a SQL store, what a recreate left under the name it builds under first goes too: it would go on refusing keys
+        // for a constraint no one declares.
+        (store.ddl as? SqlStoreDdl)?.let { sql -> ddl(sql.recreation(spec.made()).leftover) }
         ddl(store.ddl.dropConstraint(existing.catalogItem))
         log(LogLevel.INFO, CONSTRAINT_MANAGER, "Dropped $engine ${spec.kind} on ${spec.label}${spec.properties}")
         return true
     }
 
-    /** `ConstraintManager.recreate`: the constraint made again keeps the aliases its record kept. */
+    /**
+     * Where only the index a cut-off recreate built first holds [spec] on a SQL store ([SqlStoreSchema.cutOff]), and so no
+     * record is listed: that index is dropped, and the record forgotten, as it is what Drivine made of the constraint, and
+     * left standing would go on refusing a key the data repeats. False where it isn't so.
+     */
+    private fun dropCutOff(spec: ConstraintSpec): Boolean {
+        val sql = store.ddl as? SqlStoreDdl ?: return false
+        val schema = store as? SqlStoreSchema ?: return false
+        val made = spec.made()
+        val recreation = sql.recreation(made)
+        if (!schema.cutOff(made, listings[sql.listConstraintsQuery()].orEmpty(), recreation.name, recreation.temporary)) return false
+        ddl(recreation.leftover)
+        ddl(sql.dropConstraint(CatalogItem(made.kind, made.label, made.properties, made.effectiveName)))
+        log(
+            LogLevel.INFO, CONSTRAINT_MANAGER,
+            "Dropped $engine ${spec.kind} on ${spec.label}${spec.properties}, held by ${recreation.temporary}, the index a recreate of it that was cut off built first",
+        )
+        return true
+    }
+
+    /**
+     * `ConstraintManager.recreate`. On a SQL store, made again in its place ([recreateInPlace]); on a graph engine, which
+     * renames nothing and on Neo4j refuses a second constraint over the same schema, dropped and then made, as drivine4j
+     * makes it, so data it refuses leaves it with none.
+     */
     private fun recreateConstraint(spec: ConstraintSpec, violationSampleSize: Int, replaceBlockingIndex: Boolean): EnsureResult {
         requireConstrainable(spec.made())
-        // The record, and its aliases, as found before anything under the item's names is dropped (see recreateMadeIndex).
-        val found = findConstraint(spec)
-        val aliases = if (found != null && store.ddl is SqlStoreDdl) {
-            val rows = listingRows(store.ddl.listConstraintsQuery()).orEmpty()
-            rows.firstNotNullOfOrNull { row ->
-                store.parseConstraintRows(listOf(row)).firstOrNull { store.matchesIdentity(it, spec.made()) }?.let { store.aliasesOf(row) }
-            }.orEmpty()
-        } else {
-            emptyList()
-        }
-        val cleared = clearMismatched(spec.made(), found) { findConstraint(spec) }
-        cleared.drift?.let { return it }
-        val existing = cleared.existing ?: found
-        if (existing != null) ddl(store.ddl.dropConstraint(existing.catalogItem))
+        val ddl = store.ddl
+        if (ddl is SqlStoreDdl) return recreateInPlace(spec, ddl, violationSampleSize)
+        val existing = findConstraint(spec)
+        if (existing != null) ddl(ddl.dropConstraint(existing.catalogItem))
         // The copies are filled in again too, where a write that bypassed Drivine left one out of step.
         fillIn(spec) { true }
         return when (val result = ensureMadeConstraint(spec.made(), violationSampleSize, replaceBlockingIndex)) {
-            is EnsureResult.Created -> {
-                if (aliases.isNotEmpty()) alias(result.info, aliases)
-                EnsureResult.Recreated(existing, result.info)
-            }
+            is EnsureResult.Created -> EnsureResult.Recreated(existing, result.info)
             else -> result
         }
+    }
+
+    /**
+     * A uniqueness constraint made again on a SQL store so that data it refuses never leaves it with no index
+     * (drivine-cypher-spec#135 §4, [SqlStoreDdl.recreation]): a unique index left by a recreate that stopped short is
+     * dropped; the lowercased copies are filled in again, a copy the old index refuses being a key the data repeats,
+     * sampled as the fill lowercases it; the unique index is built anew under a name of its own while the old one
+     * stands, and where the data refuses it, the old index and its record are kept and the violation reported; it is
+     * then swapped into the old one's place; and the constraint's `create` runs, finding it made, and its record is made
+     * as one made anew would be, keeping its aliases. A recreate cut off after its old index was dropped, only the one
+     * built first standing, is finished instead ([finishCutOff]).
+     *
+     * Another index under a name of the constraint's that isn't its unique index (Oracle's index over the property of
+     * every node) is dropped first, by its name, as an index's is: it holds nothing unique. What stands under the unique
+     * index's own name, an index Drivine didn't make there, is what the swap drops. Oracle builds no second index over
+     * the expressions of one there (`ORA-01408`), which an index made as this version makes it is (a plain index over
+     * them it builds beside, and the data refuses it, or not): it is dropped first and made again, as drivine4j made it,
+     * said at `INFO` where it was of this version's form, which held the data unique, and at `WARN` where it wasn't.
+     */
+    private fun recreateInPlace(spec: ConstraintSpec, ddl: SqlStoreDdl, violationSampleSize: Int): EnsureResult {
+        val made = spec.made()
+        val recreation = ddl.recreation(made)
+        val found = findConstraint(spec)
+        val rows = listings[ddl.listConstraintsQuery()].orEmpty()
+        // A record over the properties in another order than declared names its own index, under the name that order
+        // gives: it is dropped by its record, and forgotten, once the new one is in place, and its aliases carried over.
+        val reordered = found?.takeIf { it.properties != made.properties }
+        val aliases = if (reordered == null) emptyList() else rows.firstNotNullOfOrNull { row ->
+            store.parseConstraintRows(listOf(row)).firstOrNull { store.matchesIdentity(it, made) }?.let { store.aliasesOf(row) }
+        }.orEmpty()
+        val mismatches = (store as? SqlStoreSchema)?.mismatchesOf(made, rows).orEmpty()
+        // What isn't an index can't be dropped by its name, nor made over: the constraint stays drift.
+        mismatches.firstOrNull { !it.droppable }?.let { return mismatched(made, found, it) }
+        val inPlace = { name: String -> name.equals(recreation.name, ignoreCase = true) }
+        val replaced = mismatches.firstOrNull { inPlace(it.name) }
+        // Read before anything runs: the form of what the build may meet, without the other names' mismatches, dropped below,
+        // as the lines of what is dropped read it.
+        val others = mismatches.filterNot { inPlace(it.name) }.map { it.name.uppercase() }.toSet()
+        val kept = rows.filterNot { ((it as? Map<*, *>)?.get(SqlStoreSchema.OBJECT) as? String)?.uppercase() in others }
+        val form = store.formOf(made, kept)
+        for (other in mismatches.filterNot { inPlace(it.name) }) {
+            ddl(store.dropMismatched(other.name))
+            log(LogLevel.INFO, CONSTRAINT_MANAGER, droppedMismatch(made, other))
+        }
+
+        // A recreate cut off after the old index was dropped left only the one built first: put in its place, not dropped.
+        // The record's own index, where the record lists the properties in another order: one standing means the recreate was
+        // cut off before its swap, and the one built first is a leftover beside it, not the constraint's index.
+        val recorded = reordered?.let { ddl.recreation(UniquenessConstraintSpec(made.label, it.properties)).name }
+        if (finishCutOff(made, recreation, rows, recorded)) {
+            if (reordered != null) dropReordered(ddl, made, reordered)
+            return remake(made, recreation, found, violationSampleSize, aliases)
+        }
+
+        ddl(recreation.leftover)
+        // The copies are filled in again too, where a write that bypassed Drivine left one out of step. One the old index
+        // refuses is a key the data repeats, as the build would find it: sampled, and the old index and its record kept.
+        refill(spec)?.let { refused ->
+            if (store.isViolation(refused)) refilledViolation(spec, violationSampleSize)?.let { return it }
+            throw OwnerFailure(messageOf(refused))
+        }
+        try {
+            ddl(recreation.build)
+        } catch (refused: RawFailure) {
+            if (store.isViolation(refused.error)) return confirmedViolation(made, violationSampleSize) ?: throw refused
+            if (!store.isAlreadyIndexed(refused.error)) throw refused
+            // Over the expressions of the index there (Oracle builds a unique index beside one that isn't, over the same
+            // expressions, and refuses it only for the data): dropped first, and made again; by its record where that
+            // names it under the properties in another order.
+            val dropped = if (reordered == null) recreation.name else ddl.recreation(UniquenessConstraintSpec(made.label, reordered.properties)).name
+            ddl(if (reordered == null) store.dropMismatched(recreation.name) else ddl.dropConstraint(reordered.catalogItem))
+            val what = "Dropped $engine index $dropped of ${made.kind} on ${made.label}${made.properties} before making it again: " +
+                "Oracle builds no second index over the same expressions (ORA-01408), so the new one can't be built beside it."
+            val ours = replaced == null && form is ItemForm.Current
+            if (ours) {
+                // Made as this version makes it, it held the data unique: only a write in between could repeat a key.
+                log(
+                    LogLevel.INFO, CONSTRAINT_MANAGER,
+                    "$what It was made as this version makes it, so the data it held unique is unique still, but for a write in between",
+                )
+            } else {
+                log(
+                    LogLevel.WARN, CONSTRAINT_MANAGER,
+                    "$what It was ${formText(form, replaced)}, not made as this version makes it: where the data repeats a key, " +
+                        "${made.label}${made.properties} is left with no index until the constraint is made",
+                )
+            }
+            return remake(made, recreation, found, violationSampleSize, aliases)
+        }
+        ddl(recreation.swap)
+        replaced?.let { log(LogLevel.INFO, CONSTRAINT_MANAGER, droppedMismatch(made, it)) }
+        if (reordered != null) dropReordered(ddl, made, reordered)
+        return remake(made, recreation, found, violationSampleSize, aliases)
+    }
+
+    /** Drops the index of [reordered], the record of [spec] over its properties in another order, by the record, and forgets it, once [spec]'s is in place. */
+    private fun dropReordered(ddl: SqlStoreDdl, spec: ConstraintSpec, reordered: SchemaItemInfo) {
+        ddl(ddl.dropConstraint(reordered.catalogItem))
+        log(
+            LogLevel.INFO, CONSTRAINT_MANAGER,
+            "Dropped $engine ${spec.kind} on ${spec.label}${reordered.properties}, recorded over its properties in another order than declared, " +
+                "and forgot its record: it is made again over ${spec.label}${spec.properties}",
+        )
+    }
+
+    /** What [form], or [replaced] where it is one, says the index under the constraint's name was, for the line that says it was dropped. */
+    private fun formText(form: ItemForm, replaced: ItemForm.Mismatch?): String = when {
+        replaced != null -> "an index Drivine didn't make (${replaced.reason})"
+        form is ItemForm.Stale -> "of ${form.found}"
+        form is ItemForm.Newer -> "of form ${form.found}, a newer version's"
+        form is ItemForm.Mismatch -> "an index Drivine didn't make (${form.reason})"
+        else -> "of another form"
+    }
+
+    /**
+     * Where [rows] show a recreate of [spec] cut off after its old index was dropped, only the index it built first
+     * standing, of the constraint's shape ([SqlStoreSchema.cutOff]): it is put in its place ([UniqueRecreation.finish]),
+     * said at `INFO`, and true is given; false where they don't.
+     */
+    private fun finishCutOff(spec: ConstraintSpec, recreation: UniqueRecreation, rows: List<Any?>, recorded: String? = null): Boolean {
+        val schema = store as? SqlStoreSchema ?: return false
+        if (!schema.cutOff(spec, rows, recreation.name, recreation.temporary, recorded)) return false
+        ddl(recreation.finish)
+        log(
+            LogLevel.INFO, CONSTRAINT_MANAGER,
+            "Put $engine index ${recreation.temporary} in the place of ${recreation.name} for ${spec.kind} on ${spec.label}${spec.properties}, finishing a recreate that was cut off",
+        )
+        return true
+    }
+
+    /**
+     * Fills in again the lowercased copies [spec] is made over, where it ignores case, as [fillIn] does them all; the
+     * store's error where the fill fails, null where it ran.
+     */
+    private fun refill(spec: ConstraintSpec): StoreError? {
+        val properties = spec.lowercased.ifEmpty { return null }
+        return (io.run(PlanAction.FillLowerCopies(spec.label, properties)) as? PlanOutcome.Failed)?.error
+    }
+
+    /** The violation a refill the old index refused is, where the data, its keys lowercased, confirms one ([StoreSchema.sampleRefilledConflictsQuery]). */
+    private fun refilledViolation(spec: ConstraintSpec, limit: Int): EnsureResult.Violation? =
+        repeatedKeys(spec, limit, store.sampleRefilledConflictsQuery(spec, maxOf(limit, 1)))?.takeIf { it.isNotEmpty() }?.let { violation(spec.made(), it, limit) }
+
+    /**
+     * The constraint's own `create` once its unique index is in place, which makes what goes with it and records it where
+     * no record is, and then its record made this version's form's as [recreation]'s index, its aliases kept. Data that
+     * refuses the `create`, where the old index was dropped first, is a violation where the data confirms it.
+     */
+    private fun remake(spec: ConstraintSpec, recreation: UniqueRecreation, previous: SchemaItemInfo?, violationSampleSize: Int, aliases: List<String> = emptyList()): EnsureResult {
+        try {
+            ddl(store.ddl.createConstraint(spec))
+        } catch (refused: RawFailure) {
+            if (store.isViolation(refused.error)) return confirmedViolation(spec, violationSampleSize) ?: throw refused
+            throw refused
+        }
+        updateRecord(recreation.remade)
+        // The aliases of a record forgotten, as it was over the properties in another order, kept on the one made.
+        val sql = store.ddl as? SqlStoreDdl
+        if (aliases.isNotEmpty() && sql != null) updateRecord(sql.aliased(CatalogItem(spec.kind, spec.label, spec.properties, spec.effectiveName), aliases))
+        val created = findConstraint(spec) ?: SchemaItemInfo.fromSpec(spec)
+        log(LogLevel.INFO, CONSTRAINT_MANAGER, "Created $engine ${spec.kind} on ${spec.label}${spec.properties}")
+        return EnsureResult.Recreated(previous, created)
     }
 
     /**
@@ -969,9 +1169,9 @@ internal class SchemaProgram(
     private fun confirmedViolation(spec: ConstraintSpec, limit: Int): EnsureResult.Violation? =
         repeatedKeys(spec, limit)?.takeIf { it.isNotEmpty() }?.let { violation(spec, it, limit) }
 
-    /** The keys of [spec] that repeat in the data, [limit] of them at most and one at least; null where the data can't be read. */
-    private fun repeatedKeys(spec: ConstraintSpec, limit: Int): List<Map<String, Any?>>? {
-        val outcome = io.ask(PlanAction.Query(store.sampleConflictsQuery(spec, maxOf(limit, 1)), purpose = Purpose.SAMPLE))
+    /** The keys of [spec] that repeat in the data, [limit] of them at most and one at least, as [query] samples them; null where the data can't be read. */
+    private fun repeatedKeys(spec: ConstraintSpec, limit: Int, query: String = store.sampleConflictsQuery(spec, maxOf(limit, 1))): List<Map<String, Any?>>? {
+        val outcome = io.ask(PlanAction.Query(query, purpose = Purpose.SAMPLE))
         val rows = (outcome as? PlanOutcome.Rows)?.rows ?: return null
         return rows.filterIsInstance<Map<*, *>>().map { row -> row.entries.associate { (key, value) -> key.toString() to value } }
     }
@@ -1041,22 +1241,14 @@ internal class SchemaProgram(
             // One dropped already, and still there, can't be dropped.
             if (!form.droppable || !dropped.add(form.name.uppercase())) return Cleared(existing, mismatched(spec, existing, form))
             ddl(store.dropMismatched(form.name))
-            val line = "Dropped $engine index ${form.name}, an index Drivine didn't make under its name for ${spec.kind} on ${spec.label}${spec.properties}: it was ${form.reason}"
-            if (spec is ConstraintSpec) {
-                // The old index goes before the constraint is built, so a build the data refuses leaves no index at all:
-                // drivine-cypher-spec#135 §4 (PR E) builds the new unique index under a name of its own first, and then
-                // drops this one, and this line goes back to INFO.
-                log(
-                    LogLevel.WARN, CONSTRAINT_MANAGER,
-                    "$line. The old index is gone, and the constraint is made again in its place: where the data repeats a key, " +
-                        "${spec.label}${spec.properties} is left with no index until the constraint is made",
-                )
-            } else {
-                log(LogLevel.INFO, INDEX_MANAGER, line)
-            }
+            log(LogLevel.INFO, INDEX_MANAGER, droppedMismatch(spec, form))
             existing = find()
         }
     }
+
+    /** What is said of [form]'s index, dropped by its name before [spec] is made in its place. */
+    private fun droppedMismatch(spec: SchemaItemSpec, form: ItemForm.Mismatch): String =
+        "Dropped $engine index ${form.name}, an index Drivine didn't make under its name for ${spec.kind} on ${spec.label}${spec.properties}: it was ${form.reason}"
 
     /** What [clearMismatched] left: the item found once nothing else stands under its names, or the [drift] where something can't be dropped. */
     private class Cleared(val existing: SchemaItemInfo?, val drift: EnsureResult.Drift?)

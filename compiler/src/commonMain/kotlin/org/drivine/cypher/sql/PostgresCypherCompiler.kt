@@ -196,8 +196,6 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
 
     override fun keyed(json: String, key: String) = "$json -> ${escapedKey("($key #>> '{}')")}"
 
-    override fun containsAll(props: String, map: String) = "$props @> $map"
-
     /** The test a partial index over the label's nodes is made with: see [PostgresSql.holdsLabel]. */
     override fun hasLabel(labels: String, label: String) = PostgresSql.holdsLabel(labels, label, encoder)
 

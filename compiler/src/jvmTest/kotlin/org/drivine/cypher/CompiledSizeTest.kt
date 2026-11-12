@@ -26,6 +26,25 @@ class CompiledSizeTest {
     }
 
     @Test
+    fun `a duration's fraction of a second, floored, compiles to a statement that writes the duration's seconds twice, not eight times`() {
+        // drivine4j#418: SQLite's floor reads its number four times, and nanosecondsOfSecond floors twice; unbound, the
+        // seconds were written eight times, 9,200 characters where TRUNC had written 1,900.
+        compilers.forEach { compiler ->
+            val sql = compiler.compile("RETURN duration('PT-86399.9S').nanosecondsOfSecond").sql
+            assertTrue(sql.length < 3_000, "${compiler::class.simpleName}: ${sql.length} characters")
+        }
+    }
+
+    @Test
+    fun `a duration's field that reads no seconds binds nothing for them`() {
+        // drivine4j#418: SQLite's floor binds its number; built for every field, it bound the seconds of `years` in a
+        // subquery left unread, and the statement's subqueries were numbered with a gap where it had been.
+        val sql = SqliteCypherCompiler("g").compile("MATCH (c:Claim) RETURN duration(c.d).years").sql
+        val aliases = Regex("\\) sh([0-9]+)\\b").findAll(sql).map { it.groupValues[1].toInt() }.toSortedSet()
+        assertEquals((aliases.first()..aliases.last()).toSortedSet(), aliases, sql)
+    }
+
+    @Test
     fun `a duration added to a value read from the store compiles to a statement that grows with each addition, not exponentially`() {
         fun added(times: Int) = "MATCH (c:Claim) RETURN " + "(".repeat(times) + "c.day" + (1..times).joinToString("") { " + duration('P1D'))" }
         compilers.forEach { compiler ->
@@ -431,8 +450,9 @@ class CompiledSizeTest {
             // Beside a grouping key, with DISTINCT, as an order term, and beside a variable-length walk.
             "MATCH (n) RETURN n.k AS k, $texts AS t" to "MATCH (n) WITH n.k AS k, max(n.title) AS a, max(n.first) AS b, max(n.last) AS c RETURN k, a + ': ' + b + ' ' + c AS t",
             "MATCH (n) RETURN DISTINCT $texts" to "MATCH (n) $worked RETURN DISTINCT a + ': ' + b + ' ' + c",
-            "MATCH (n) RETURN n.k AS k ORDER BY $texts" to
-                "MATCH (n) WITH n.k AS k, max(n.title) AS a, max(n.first) AS b, max(n.last) AS c RETURN k ORDER BY a + ': ' + b + ' ' + c",
+            // Beside an item that aggregates: Neo4j refuses an aggregate in the ORDER BY of one that doesn't (#439).
+            "MATCH (n) RETURN n.k AS k, count(*) AS x ORDER BY $texts" to
+                "MATCH (n) WITH n.k AS k, count(*) AS x, max(n.title) AS a, max(n.first) AS b, max(n.last) AS c RETURN k, x ORDER BY a + ': ' + b + ' ' + c",
             // An order term that reads an item by its name, which ran the compiler out of memory.
             "MATCH (n) RETURN n.k AS k, count(*) AS c ORDER BY ${four("toString", "count(*) * 10 + size(k)")}" to
                 "MATCH (n) WITH n.k AS k, count(*) AS x RETURN k, x AS c ORDER BY ${four("toString", "x * 10 + size(k)")}",
@@ -449,8 +469,8 @@ class CompiledSizeTest {
             "MATCH (n)-[*1..3]->(m) RETURN ${four("toLower", "max(m.name)")}" to "MATCH (n)-[*1..3]->(m) WITH max(m.name) AS x RETURN ${four("toLower", "x")}",
             // An order term over an aggregate's result beside a walk is worked out first over the grouping WITH (see sortsFirst),
             // as it is over a WITH's column.
-            "MATCH (n)-[*1..3]->(m) RETURN n.k AS k ORDER BY ${four("toLower", "max(m.name)")}" to
-                "MATCH (n)-[*1..3]->(m) WITH n.k AS k, max(m.name) AS x RETURN k ORDER BY ${four("toLower", "x")}",
+            "MATCH (n)-[*1..3]->(m) RETURN n.k AS k, count(*) AS c ORDER BY ${four("toLower", "max(m.name)")}" to
+                "MATCH (n)-[*1..3]->(m) WITH n.k AS k, count(*) AS c, max(m.name) AS x RETURN k, c ORDER BY ${four("toLower", "x")}",
         )
         compilers.forEach { compiler ->
             statements.forEach { (over, first) ->

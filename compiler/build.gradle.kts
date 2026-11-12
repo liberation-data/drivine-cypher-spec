@@ -2,6 +2,7 @@ import com.strumenta.antlrkotlin.gradle.AntlrKotlinTask
 import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompilationTask
 import java.security.MessageDigest
+import java.time.Duration
 import java.util.Properties
 
 plugins {
@@ -74,7 +75,10 @@ val generateGrammar = tasks.register<AntlrKotlinTask>("generateGrammar") {
     outputDirectory = layout.buildDirectory.dir("generated/antlr/org/drivine/cypher/grammar").get().asFile
 }
 
-/** The zone ids of the pinned JDK, and the tables of powers the double text and parse use: see gen/Generate.java. */
+/**
+ * The zone ids of the pinned JDK, the tables of powers the double text and parse use, and its Unicode's tables for a full-text
+ * query and the regular expressions off the JVM: see gen/Generate.java.
+ */
 val generateTables = tasks.register<Exec>("generateTables") {
     val generator = layout.projectDirectory.file("gen/Generate.java")
     val out = layout.buildDirectory.dir("generated/tables")
@@ -85,7 +89,9 @@ val generateTables = tasks.register<Exec>("generateTables") {
         delete(out)
         executable(pinnedJava().absolutePath)
     }
-    args(generator.asFile.absolutePath, out.get().asFile.absolutePath, pinnedJdkVersion, pinnedTzdb)
+    // Character's tables of block and script names, which the regular expressions' tables read (gen/Generate.java). The
+    // heap held to what it needs, so a change that needs more fails here and not on a builder with less memory than this.
+    args("-Xmx512m", "--add-opens", "java.base/java.lang=ALL-UNNAMED", generator.asFile.absolutePath, out.get().asFile.absolutePath, pinnedJdkVersion, pinnedTzdb)
 }
 
 /** The module's version as the native library gives it (drivine_extension_version()): ModuleVersion.kt, from [version]. */
@@ -243,6 +249,12 @@ val jvmOracle = tasks.register<Exec>("jvmOracle") {
         args(listOf("-Xmx2g") + jvmArgs + listOf("-cp", classpath.asPath, "org.drivine.cypher.oracle.Oracle") + oracleArgs)
     }
 }
+
+/*
+ * A test that hangs fails its task within the hour, rather than stalling the run: a host function given a stored value
+ * must answer at once, and HostDecimalTimeTest's ceilings catch one that is slow but returns, not one that never does.
+ */
+tasks.withType<AbstractTestTask>().configureEach { timeout.set(Duration.ofMinutes(60)) }
 
 // The double fuzz on each target reads the JVM's answers.
 tasks.withType<Test>().configureEach {
