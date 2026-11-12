@@ -52,7 +52,7 @@ internal object JavaCase {
      * Latin-1 (ASCII's alone for ASCII), but for those whose case leaves Latin-1, which are taken as [single] takes them.
      */
     fun inClass(cp: Int): List<Int> {
-        if (cp >= 256 || cp in LATIN1_SINGLES) return single(cp)
+        if (!inBits(cp, caseInsensitive = true)) return single(cp)
         val cased = if (cp < 0x80) {
             listOf(cp, asciiUpper(cp), asciiLower(cp))
         } else {
@@ -60,6 +60,9 @@ internal object JavaCase {
         }
         return cased.filter { it < 256 }.distinct().sorted()
     }
+
+    /** Whether Pattern.bitsOrSingle holds [cp], a class's single member, in its BitClass, as it does Latin-1's but [LATIN1_SINGLES]. */
+    fun inBits(cp: Int, caseInsensitive: Boolean): Boolean = cp < 256 && !(caseInsensitive && cp in LATIN1_SINGLES)
 
     /** What a class's range takes beside its own code points (Pattern.CIRangeU): those whose upper case, or its lower case, is in it. */
     fun range(range: IntRange): List<Int> =

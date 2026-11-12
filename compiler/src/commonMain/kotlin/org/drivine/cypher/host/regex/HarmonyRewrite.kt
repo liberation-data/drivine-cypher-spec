@@ -14,7 +14,11 @@ import org.drivine.DrivineInternalApi
  *   holds ([JavaClasses]), and a name Java doesn't know refused as Java refuses it.
  * - Its case-insensitivity is not Java's ([JavaCase]): under `(?i)` each literal and class is written as the code points
  *   Java's takes, and Harmony is given no `(?i)`.
+ * - Its classes' nesting, intersections and negation are not Java's (`[[^a]b]`, `[^a&&b]`): each class is worked out here
+ *   as the set of code points Java's holds, and written as one class of ranges.
  * - Its `.` misses a match after a line break in a search (`.+` in "\na"): written as the class Java's `.` is.
+ * - Its `$` and `\Z` match between a `\r` and a `\n`, and a quantifier on a lookaround crashes it: each written so it
+ *   doesn't.
  * - It reads `(?x)`'s whitespace and comments otherwise: they are taken out here.
  * - It refuses `\x{…}`, and a back reference to a group the pattern never opens (which never matches in Java): written as
  *   the code point, and as `(?!)`.
@@ -28,7 +32,49 @@ import org.drivine.DrivineInternalApi
 internal object HarmonyRewrite {
 
     /** [java], written for kotlin.text.Regex on Kotlin/Native and Kotlin/Wasm; it throws where it can't be. */
-    fun rewrite(java: String): String = Writer(java).write()
+    fun rewrite(java: String): String = Writer(unquote(java)).write()
+
+    /**
+     * [p] with each `\Q…\E`'s characters written as literals, as Java's Pattern.RemoveQEQuoting writes them before it reads
+     * the pattern: a letter or a character past ASCII itself, a digit itself (`\x3` before the first, so no escape before
+     * the quote reads it), any other character after a backslash. So a quoted character is a literal of a run, or a class's
+     * range (`[\Qa\E-z]`), as it is in Java.
+     */
+    private fun unquote(p: String): String {
+        var i = 0
+        while (i < p.length - 1 && !(p[i] == '\\' && p[i + 1] == 'Q')) i += if (p[i] == '\\') 2 else 1
+        if (i >= p.length - 1) return p
+        val out = StringBuilder(p.substring(0, i))
+        i += 2
+        var quoted = true
+        var begin = true
+        while (i < p.length) {
+            val c = p[i++]
+            when {
+                c >= '\u0080' || c in 'a'..'z' || c in 'A'..'Z' -> out.append(c)
+                c in '0'..'9' -> out.append(if (begin) "\\x3" else "").append(c)
+                c != '\\' -> out.append(if (quoted) "\\" else "").append(c)
+                quoted -> if (p.getOrNull(i) == 'E') {
+                    i++
+                    quoted = false
+                } else {
+                    out.append("\\\\")
+                }
+                p.getOrNull(i) == 'Q' -> {
+                    i++
+                    quoted = true
+                    begin = true
+                    continue
+                }
+                else -> {
+                    out.append(c)
+                    if (i < p.length) out.append(p[i++])
+                }
+            }
+            begin = false
+        }
+        return out.toString()
+    }
 
     private class Flags(val i: Boolean = false, val s: Boolean = false, val m: Boolean = false, val x: Boolean = false, val d: Boolean = false) {
         fun with(flag: Char, on: Boolean): Flags = when (flag) {
@@ -47,6 +93,9 @@ internal object HarmonyRewrite {
     private class Writer(private val p: String) {
         private val out = StringBuilder()
         private val stack = ArrayDeque<Flags>()
+
+        /** What closes each group open, as [stack] holds its flags: `))` for a lookaround, written in a group of its own. */
+        private val closers = ArrayDeque<String>()
         private var flags = Flags()
         private var at = 0
 
@@ -58,9 +107,6 @@ internal object HarmonyRewrite {
          * or more a slice, which take different code points ([JavaCase]).
          */
         private val run = mutableListOf<Literal>()
-
-        /** The first code point past the BMP the class being written holds: see [characterClass]. */
-        private var firstAstral: Int? = null
 
         /** The smallest number of a back reference to a group not yet opened where it is, 0 where none is: see [backReference]. */
         private var forward = 0
@@ -76,7 +122,7 @@ internal object HarmonyRewrite {
             val c = p[at]
             if (flags.x && spaceOrComment(c)) {
                 // Java reads past them, within a run of literals too.
-                skipComment()
+                at = past(at)
                 return
             }
             if (c == '\\') {
@@ -102,7 +148,8 @@ internal object HarmonyRewrite {
                         out.append(quantifier.value)
                         at += quantifier.value.length
                     } else {
-                        // No quantifier: Java refuses it, as Harmony does.
+                        // Java refuses a { before anything but a digit; past the digit, (?x)'s whitespace, which is taken out.
+                        if (p.getOrNull(at + 1) !in '0'..'9') throw IllegalArgumentException("Illegal repetition")
                         flush()
                         out.append(c)
                         at++
@@ -118,7 +165,7 @@ internal object HarmonyRewrite {
                 }
                 ')' -> {
                     flush()
-                    out.append(')')
+                    out.append(closers.removeLastOrNull() ?: ")")
                     flags = stack.removeLastOrNull() ?: flags
                     at++
                 }
@@ -133,7 +180,12 @@ internal object HarmonyRewrite {
                     )
                     at++
                 }
-                '$', '^', '|' -> {
+                '$' -> {
+                    flush()
+                    out.append(dollar("$"))
+                    at++
+                }
+                '^', '|' -> {
                     flush()
                     out.append(c)
                     at++
@@ -178,25 +230,26 @@ internal object HarmonyRewrite {
         private fun spaceOrComment(c: Char) = c == ' ' || c in '\t'..'\r' || c == '#'
 
         /**
-         * Whitespace, or a comment to the line's end, as Pattern's isLineSeparator ends one: before a `\n`, or under no `(?d)`
-         * a `\r`, `\u0085`, `\u2028` or `\u2029`. The line break is left to be read, and so is a literal where it is no ASCII
+         * Under `(?x)`, past what Java's comments mode takes out at [from], as its `peek` and `read` read past it: whitespace,
+         * and a comment to the line's end, as Pattern's isLineSeparator ends one: before a `\n`, or under no `(?d)` a `\r`,
+         * `\u0085`, `\u2028` or `\u2029`. The line break is left to be read, and so is a literal where it is no ASCII
          * whitespace, as it is in Java (`(?x)a#c\u2028b` matches "a\u2028b").
          */
-        private fun skipComment() {
-            if (p[at] == '#') {
-                while (at < p.length && p[at] != '\n' && (flags.d || p[at] !in "\r\u0085\u2028\u2029")) at++
-            } else {
-                at++
+        private fun past(from: Int): Int {
+            var i = from
+            while (flags.x && i < p.length && spaceOrComment(p[i])) {
+                if (p[i] == '#') {
+                    while (i < p.length && p[i] != '\n' && (flags.d || p[i] !in "\r\u0085\u2028\u2029")) i++
+                } else {
+                    i++
+                }
             }
-        }
-
-        /** Under `(?x)`, past what Java's comments mode takes out at [at], as its `peek` reads past it. */
-        private fun skipSpaces() {
-            while (flags.x && at < p.length && spaceOrComment(p[at])) skipComment()
+            return i
         }
 
         private fun group() {
             stack.addLast(flags)
+            closers.addLast(")")
             if (p.getOrNull(at + 1) != '?') {
                 groups++
                 out.append('(')
@@ -205,13 +258,16 @@ internal object HarmonyRewrite {
             }
             val rest = p.substring(at, minOf(p.length, at + 4))
             when {
-                rest.startsWith("(?:") || rest.startsWith("(?=") || rest.startsWith("(?!") || rest.startsWith("(?>") -> {
+                rest.startsWith("(?:") || rest.startsWith("(?>") -> {
                     out.append(rest, 0, 3)
                     at += 3
                 }
-                rest.startsWith("(?<=") || rest.startsWith("(?<!") -> {
-                    out.append(rest, 0, 4)
-                    at += 4
+                // A lookaround in a group of its own: Harmony crashes on one quantified ((?=a)+), which Java reads.
+                rest.startsWith("(?=") || rest.startsWith("(?!") || rest.startsWith("(?<=") || rest.startsWith("(?<!") -> {
+                    val length = if (rest[2] == '<') 4 else 3
+                    out.append("(?:").append(rest, 0, length)
+                    closers[closers.lastIndex] = "))"
+                    at += length
                 }
                 rest.startsWith("(?<") -> {
                     groups++
@@ -225,26 +281,30 @@ internal object HarmonyRewrite {
 
         /** `(?flags)` or `(?flags:`, written with only what Harmony reads as Java does (`d`, `m`, `s`): `i` and `x` are done here. */
         private fun flagGroup() {
-            val match = FLAG_GROUP.matchAt(p, at)
-            if (match == null) {
-                // Neither Java nor Harmony reads it: left for Harmony to refuse.
-                out.append("(?")
-                at += 2
-                return
+            // The flags to the : or ), read as Java's addFlag reads them, past (?x)'s whitespace ((? i)); anything else Java refuses.
+            val read = StringBuilder("(?")
+            var i = at + 2
+            while (true) {
+                i = past(i)
+                val c = p.getOrNull(i++) ?: break
+                read.append(c)
+                if (c !in "idmsuxUc-") break
             }
+            val match = FLAG_GROUP.matchEntire(read) ?: throw IllegalArgumentException("Unknown inline modifier")
             val (on, off, end) = match.destructured
             if ('U' in off) throw UnsupportedPatternException("(?-U)")
             if ('u' in off) throw UnsupportedPatternException("(?-u)")
             var next = flags
             for (f in on) next = next.with(f, true)
             for (f in off) next = next.with(f, false)
-            at += match.value.length
+            at = i
             val kept = on.filter { it in "dms" }
             val keptOff = off.filter { it in "dms" }
             val written = if (kept.isEmpty() && keptOff.isEmpty()) "" else kept + (if (keptOff.isEmpty()) "" else "-$keptOff")
             if (end == ")") {
                 // Flags to the end of the enclosing group: no group of its own.
                 stack.removeLast()
+                closers.removeLast()
                 flags = next
                 if (written.isNotEmpty()) out.append("(?").append(written).append(')')
             } else {
@@ -261,8 +321,8 @@ internal object HarmonyRewrite {
                 at++
                 return
             }
-            classEscape(inClass = false)?.let { (text, consumed) ->
-                out.append(text)
+            classEscape()?.let { (ranges, consumed) ->
+                out.append(written(ranges))
                 at += consumed
                 return
             }
@@ -274,20 +334,12 @@ internal object HarmonyRewrite {
                     out.append(boundary(true))
                 }
                 'B' -> out.append(boundary(false))
+                'Z' -> out.append(dollar("\\Z"))
+                // Java's \R repeated takes \r\n whole each time, where Harmony's gives it back (\R{2} in "\r\n").
+                'R' -> out.append(if (p.getOrNull(past(at))?.let { it in "*+?{" } == true) "(?>\\r\\n|[\\n\\u000B\\f\\r\\u0085\\u2028\\u2029])" else "\\R")
                 'G' -> throw UnsupportedPatternException("\\G")
                 'X' -> throw UnsupportedPatternException("\\X")
                 'N' -> throw UnsupportedPatternException("\\N{…}")
-                'Q' -> {
-                    val end = p.indexOf("\\E", at).let { if (it < 0) p.length else it }
-                    // Java reads each quoted character as a literal of the run around it.
-                    var i = at
-                    while (i < end) {
-                        val cp = codePoint(p, i, end)
-                        i += if (cp > 0xFFFF) 2 else 1
-                        literal(Literal(cp, text(cp)))
-                    }
-                    at = if (end == p.length) end else end + 2
-                }
                 'k' -> {
                     if (flags.i) throw UnsupportedPatternException("a back reference under (?i)")
                     val end = p.indexOf('>', at).let { if (it < 0) at - 1 else it }
@@ -321,15 +373,40 @@ internal object HarmonyRewrite {
             if (at < p.length && p[at] in '0'..'9') out.append("(?:)")
         }
 
+        /** `$` or `\Z`: Java's never matches between a `\r` and a `\n`, where Harmony's does. Under `(?d)` only `\n` ends a line. */
+        private fun dollar(anchor: String) = if (flags.d) anchor else "(?:(?!(?<=\\r)\\n)$anchor)"
+
         /**
          * The escape at [at] that is a literal code point, as Java's `Pattern.escape` reads one, and [at] past it; null, [at]
          * left, where it is none: `\t`, `\n`, `\r`, `\f`, `\a`, `\e`, `\cX`, `\0` and octal digits, `\xNN`, `\x{…}`, `\uNNNN`
-         * (two of them a pair), and a backslash before any character that is not a letter or a digit.
+         * (two of them a pair), and a backslash before any character that is not a letter or a digit. Under `(?x)` Java reads
+         * the characters after `\c`, `\0`, `\x` and `\u` past whitespace and comments (`\x4 1` is `A`), as it reads the
+         * pattern's; so does this.
          */
         private fun charEscape(): Literal? {
             val e = p.getOrNull(at + 1) ?: return null
             val start = at
-            var end = at + 2
+            var i = at + 2
+
+            // Pattern's read() and peek(): the code point at i past (?x)'s whitespace, -1 at the end.
+            fun peek(): Int {
+                i = past(i)
+                return if (i < p.length) codePoint(p, i) else -1
+            }
+
+            fun read(): Int = peek().also { if (it >= 0) i += if (it > 0xFFFF) 2 else 1 }
+
+            // Four hexadecimal digits, as Pattern.uxxxx reads them.
+            fun u4(): Int? {
+                var value = 0
+                repeat(4) {
+                    val digit = hexDigit(read())
+                    if (digit < 0) return null
+                    value = value * 16 + digit
+                }
+                return value
+            }
+
             val cp: Int = when (e) {
                 't' -> 9
                 'n' -> 10
@@ -337,34 +414,55 @@ internal object HarmonyRewrite {
                 'f' -> 12
                 'a' -> 7
                 'e' -> 27
-                'c' -> {
-                    val control = p.getOrNull(at + 2) ?: return null
-                    end++
-                    control.code xor 64
-                }
+                'c' -> read().takeIf { it >= 0 }?.xor(64) ?: return null
                 '0' -> {
-                    val digits = OCTAL.matchAt(p, at + 2)?.value ?: return null
-                    end += digits.length
-                    digits.toInt(8)
+                    // Pattern.o: one or two octal digits, or three where the first is at most 3.
+                    val n = octal(read())
+                    if (n < 0) return null
+                    val afterN = i
+                    val m = octal(read())
+                    if (m < 0) {
+                        i = afterN
+                        n
+                    } else {
+                        val afterM = i
+                        val o = octal(read())
+                        if (o >= 0 && n <= 3) {
+                            n * 64 + m * 8 + o
+                        } else {
+                            i = afterM
+                            n * 8 + m
+                        }
+                    }
                 }
-                'x' -> if (p.getOrNull(at + 2) == '{') {
-                    val close = p.indexOf('}', at + 3)
-                    val value = (if (close < 0) null else hex(at + 3, close - at - 3)) ?: return null
-                    end = close + 1
-                    value
-                } else {
-                    val value = hex(at + 2, 2) ?: return null
-                    end += 2
-                    value
+                'x' -> {
+                    val n = read()
+                    if (hexDigit(n) >= 0) {
+                        val m = hexDigit(read())
+                        if (m < 0) return null
+                        hexDigit(n) * 16 + m
+                    } else if (n == '{'.code && hexDigit(peek()) >= 0) {
+                        var value = 0
+                        var c = read()
+                        while (hexDigit(c) >= 0) {
+                            value = value * 16 + hexDigit(c)
+                            if (value > 0x10FFFF) return null
+                            c = read()
+                        }
+                        if (c != '}'.code) return null
+                        value
+                    } else {
+                        return null
+                    }
                 }
                 'u' -> {
-                    val high = hex(at + 2, 4) ?: return null
-                    end += 4
-                    val low = if (high in 0xD800..0xDBFF && p.startsWith("\\u", end)) hex(end + 2, 4) else null
+                    val high = u4() ?: return null
+                    val afterHigh = i
+                    val low = if (high in 0xD800..0xDBFF && read() == '\\'.code && read() == 'u'.code) u4() else null
                     if (low != null && low in 0xDC00..0xDFFF) {
-                        end += 6
                         0x10000 + ((high - 0xD800) shl 10) + (low - 0xDC00)
                     } else {
+                        i = afterHigh
                         high
                     }
                 }
@@ -372,36 +470,24 @@ internal object HarmonyRewrite {
                 else -> if (e < '\u0080' && e.isLetterOrDigit()) {
                     return null
                 } else {
-                    codePoint(p, at + 1).also { if (it > 0xFFFF) end++ }
+                    codePoint(p, at + 1).also { i = at + 1 + if (it > 0xFFFF) 2 else 1 }
                 }
             }
-            at = end
-            // As written where Harmony reads it alike; \x{…}, a pair of \uNNNN and a character past ASCII, which it may not, as
-            // the code point.
-            return Literal(cp, if (e == 'x' || e == 'u' || cp >= 0x80) text(cp) else p.substring(start, end))
+            at = i
+            // As written where Harmony reads it alike; the escapes of a code point by number, and a character past ASCII, which
+            // it may not, as the code point.
+            return Literal(cp, if (e in "cux0" || cp >= 0x80) text(cp) else p.substring(start, i))
         }
 
-        /**
-         * The [digits] hexadecimal digits at [from] as a code point; null where they aren't, there are none, or it is past
-         * U+10FFFF. ASCII's alone, as Java reads them: Kotlin's `isDigit` and `toInt(16)` take other scripts' digits, and the
-         * latter a sign.
-         */
-        private fun hex(from: Int, digits: Int): Int? {
-            if (digits < 1 || from + digits > p.length) return null
-            var value = 0
-            for (i in from until from + digits) {
-                val c = p[i]
-                val digit = when (c) {
-                    in '0'..'9' -> c - '0'
-                    in 'a'..'f' -> c - 'a' + 10
-                    in 'A'..'F' -> c - 'A' + 10
-                    else -> return null
-                }
-                value = value * 16 + digit
-                if (value > 0x10FFFF) return null
-            }
-            return value
+        /** An ASCII hexadecimal digit's value, as Java reads one (Kotlin's `digitToInt` takes other scripts' digits); -1 of any other. */
+        private fun hexDigit(c: Int): Int = when (c) {
+            in '0'.code..'9'.code -> c - '0'.code
+            in 'a'.code..'f'.code -> c - 'a'.code + 10
+            in 'A'.code..'F'.code -> c - 'A'.code + 10
+            else -> -1
         }
+
+        private fun octal(c: Int): Int = if (c in '0'.code..'7'.code) c - '0'.code else -1
 
         /**
          * Refuses, as Java does, a `\u`, `\x`, `\0` or `\c` that [charEscape] couldn't read: Harmony reads other scripts' digits
@@ -425,11 +511,10 @@ internal object HarmonyRewrite {
         }
 
         /**
-         * A class escape at [at] (`\w`, `\p{L}` …), written out as Java reads it, case-insensitively where `(?i)` is in force:
-         * in a class its ranges alone, outside one a class of them. The text and how many characters of the pattern it took;
-         * null where [at] holds none.
+         * The class escape at [at] (`\w`, `\p{L}` …): the code points Java's holds, case-insensitively where `(?i)` is in force,
+         * and how many characters of the pattern it took; null where [at] holds none.
          */
-        private fun classEscape(inClass: Boolean): Pair<String, Int>? {
+        private fun classEscape(): Pair<List<IntRange>, Int>? {
             val e = p.getOrNull(at + 1) ?: return null
             val ranges: List<IntRange>
             val negative: Boolean
@@ -463,138 +548,129 @@ internal object HarmonyRewrite {
                 }
                 else -> return null
             }
-            val text = write(if (negative) complement(ranges) else ranges)
-            return (if (inClass) text else "[$text]") to consumed
+            return (if (negative) complement(ranges) else ranges) to consumed
+        }
+
+        /** A set of code points as a class Harmony reads as Java's, or a group that matches nothing where it is empty. */
+        private fun written(ranges: List<IntRange>): String = if (ranges.isEmpty()) "(?:(?!))" else "[${write(ranges)}]"
+
+        /**
+         * A class, `[…]`, worked out as the set of code points Java's holds ([clazz]) and written as one class of its ranges:
+         * Harmony's own nested classes, intersections and negation are not Java's (`[[^a]b]`, `[^a&&b]`).
+         */
+        private fun characterClass() {
+            at++
+            out.append(written(clazz(consume = true)))
         }
 
         /**
-         * A class, `[…]`: its escapes written out, `]` first as itself, as Java reads it there, ranges of code points past the
-         * BMP written as [write] writes Java's, and under `(?i)` each member as the code points Java takes for it.
+         * The class at [at], past its `[` (or an intersection's right side, which takes no `]` where it ends), read as
+         * Pattern.clazz reads it: `^` first, right after the `[`, the complement; each member ([member]) and nested class in a
+         * union; `&&` the intersection of what is before it with what is after it, to the class's end. Java keeps the members
+         * a BitClass holds (`bits`) apart from the others until an `&&` or the end, which its `]` alone, and `&&` after
+         * nothing, depend on.
          */
-        private fun characterClass() {
-            out.append('[')
-            at++
-            if (p.getOrNull(at) == '^') {
-                out.append('^')
-                at++
-            }
-            val outer = firstAstral
-            firstAstral = null
-            if (p.getOrNull(at) == ']') {
-                at++
-                member(Literal(']'.code, "\\]"))
-            }
-            var depth = 0
-            while (at < p.length) {
-                val c = p[at]
-                when {
-                    flags.x && spaceOrComment(c) -> skipComment()
-                    c == '\\' -> {
-                        val escaped = classEscape(inClass = true)
-                        if (escaped != null) {
-                            out.append(escaped.first)
-                            at += escaped.second
-                            continue
+        private fun clazz(consume: Boolean): List<IntRange> {
+            var prev: List<IntRange>? = null
+            var curr: List<IntRange>? = null
+            var bits: List<IntRange> = emptyList()
+            var hasBits = false
+            at = past(at)
+            val negative = p.getOrNull(at) == '^' && p.getOrNull(at - 1) == '['
+            if (negative) at++
+            while (true) {
+                at = past(at)
+                val c = p.getOrNull(at) ?: throw IllegalArgumentException("Unclosed character class")
+                if (c == '[') {
+                    at++
+                    val nested = clazz(consume = true)
+                    curr = nested
+                    prev = prev?.let { union(it, nested) } ?: nested
+                } else if (c == '&' && p.getOrNull(past(at + 1)) == '&') {
+                    at = past(at + 1) + 1
+                    var right: List<IntRange>? = null
+                    while (true) {
+                        at = past(at)
+                        val d = p.getOrNull(at) ?: throw IllegalArgumentException("Unclosed character class")
+                        if (d == ']' || d == '&') break
+                        val next = if (d == '[') {
+                            at++
+                            clazz(consume = true)
+                        } else {
+                            clazz(consume = false)
                         }
-                        when (p.getOrNull(at + 1)) {
-                            'Q' -> {
-                                val end = p.indexOf("\\E", at + 2).let { if (it < 0) p.length else it }
-                                var i = at + 2
-                                while (i < end) {
-                                    val cp = codePoint(p, i, end)
-                                    i += if (cp > 0xFFFF) 2 else 1
-                                    out.append(single(cp, text(cp)))
-                                }
-                                at = if (end == p.length) end else end + 2
-                            }
-                            'N' -> throw UnsupportedPatternException("\\N{…}")
-                            else -> {
-                                val literal = charEscape()
-                                if (literal != null) {
-                                    member(literal)
-                                } else {
-                                    // No escape Java reads in a class (\b, a letter of none): Harmony refuses it as Java does.
-                                    p.getOrNull(at + 1)?.let(::illegal)
-                                    out.append(p, at, minOf(p.length, at + 2))
-                                    at += 2
-                                }
-                            }
-                        }
+                        right = right?.let { union(it, next) } ?: next
                     }
-                    c == '[' -> {
-                        depth++
-                        out.append(c)
-                        at++
+                    if (hasBits) {
+                        if (prev == null) curr = bits
+                        prev = prev?.let { union(it, bits) } ?: bits
+                        hasBits = false
                     }
-                    c == '&' && p.getOrNull(at + 1) == '&' -> {
-                        out.append("&&")
-                        at += 2
+                    if (right != null) curr = right
+                    prev = if (prev == null) {
+                        right ?: throw IllegalArgumentException("Bad class syntax")
+                    } else {
+                        intersect(prev, curr ?: throw IllegalArgumentException("Bad intersection syntax"))
                     }
-                    c == ']' -> {
-                        if (depth == 0) {
-                            // Harmony's CharClass.add(start, end) marks no code point past the BMP (Kotlin 2.2.20): a class's
-                            // range of them matches nothing unless a code point past the BMP is in it alone too. The first one
-                            // the class holds is, again. Out when Kotlin fixes it.
-                            firstAstral?.let { out.append(text(it)) }
-                            firstAstral = outer
-                        }
-                        out.append(']')
-                        at++
-                        if (depth-- == 0) return
-                    }
-                    else -> {
-                        val cp = codePoint(p, at)
-                        at += if (cp > 0xFFFF) 2 else 1
-                        // A - that is no range is written escaped: after a class escape written out, or a member (?i) writes as
-                        // several, Harmony would read it as a range from the last code point written.
-                        member(Literal(cp, if (cp > 0xFFFF) astral(cp) else if (c == '-') "\\-" else c.toString()))
-                    }
-                }
-            }
-            // Unclosed: left as it is, for Harmony to refuse, as Java does.
-        }
-
-        /** A class's member, [first] (read already), and the range it begins where a `-` and another literal follow. */
-        private fun member(first: Literal) {
-            // Java's range reads past (?x)'s whitespace to the - and past it, but looks at the character after the - as it is.
-            skipSpaces()
-            if (p.getOrNull(at) == '-' && at + 1 < p.length && p[at + 1] != ']' && p[at + 1] != '[') {
-                val saved = at
-                at++
-                skipSpaces()
-                val last = if (at >= p.length) {
-                    null
-                } else if (p[at] == '\\') {
-                    charEscape()
+                } else if (c == ']' && (prev != null || hasBits)) {
+                    if (consume) at++
+                    val set = if (prev == null) bits else if (hasBits) union(prev, bits) else prev
+                    return if (negative) complement(set) else set
                 } else {
-                    val cp = codePoint(p, at)
-                    at += if (cp > 0xFFFF) 2 else 1
-                    Literal(cp, if (cp > 0xFFFF) astral(cp) else p[at - 1].toString())
+                    // A ] with nothing before it is itself, as is a single &.
+                    val (member, inBits) = member()
+                    if (inBits) {
+                        bits = union(bits, member)
+                        hasBits = true
+                        curr = null
+                    } else {
+                        curr = member
+                        prev = prev?.let { union(it, member) } ?: member
+                    }
                 }
-                if (last != null) {
-                    out.append(range(first, last))
-                    return
-                }
-                at = saved
             }
-            out.append(single(first.cp, first.text))
         }
 
-        /** A class's single member: itself, or under `(?i)` the code points Java takes for it in a class. */
-        private fun single(cp: Int, written: String): String {
-            if (cp > 0xFFFF && firstAstral == null) firstAstral = cp
-            if (!flags.i) return written
-            val takes = JavaCase.inClass(cp)
-            return if (takes.size == 1) written else takes.joinToString("") { text(it) }
+        /**
+         * The class's member at [at], as Pattern.range reads it: a class escape or property; or a code point, or the range it
+         * begins where a `-` follows and no `[` or `]` after it, under `(?i)` with the code points Java takes for each. Whether
+         * Java holds it in the class's BitClass, as it does a single code point of Latin-1's.
+         */
+        private fun member(): Pair<List<IntRange>, Boolean> {
+            val first = if (p[at] == '\\') {
+                classEscape()?.let { (ranges, consumed) ->
+                    at += consumed
+                    return ranges to false
+                }
+                literalInClass("Illegal/unsupported escape sequence")
+            } else {
+                codePoint(p, at).also { at += if (it > 0xFFFF) 2 else 1 }
+            }
+            // Java's range reads past (?x)'s whitespace to the - and past it, but looks at the character after the - as it is.
+            at = past(at)
+            if (p.getOrNull(at) == '-' && p.getOrNull(at + 1) != '[' && p.getOrNull(at + 1) != ']') {
+                at = past(at + 1)
+                val last = when {
+                    at >= p.length -> throw IllegalArgumentException("Unclosed character class")
+                    // A class escape there is no code point (\w), which Java refuses as a range's end.
+                    p[at] == '\\' -> literalInClass("Illegal character range")
+                    else -> codePoint(p, at).also { at += if (it > 0xFFFF) 2 else 1 }
+                }
+                if (last < first) throw IllegalArgumentException("Illegal character range")
+                val range = first..last
+                return (if (flags.i) union(listOf(range), JavaCase.range(range).map { it..it }) else listOf(range)) to false
+            }
+            val takes = if (flags.i) JavaCase.inClass(first) else listOf(first)
+            return normalize(takes.map { it..it }) to JavaCase.inBits(first, flags.i)
         }
 
-        /** A class's range: as Java's ranges are written ([write]), and under `(?i)` with the code points Java takes beside it. */
-        private fun range(first: Literal, last: Literal): String {
-            if (last.cp < first.cp) throw IllegalArgumentException("Illegal character range")
-            val range = first.cp..last.cp
-            if (range.last > 0xFFFF && firstAstral == null) firstAstral = maxOf(range.first, 0x10000)
-            val extra = if (flags.i) JavaCase.range(range).joinToString("") { text(it) } else ""
-            return write(listOf(range)) + extra
+        /** The escape at [at] in a class, a code point ([charEscape]); Java refuses any other there (`\b`, `\1`) with [refusal]. */
+        private fun literalInClass(refusal: String): Int {
+            charEscape()?.let { return it.cp }
+            val e = p.getOrNull(at + 1)
+            if (e == 'N') throw UnsupportedPatternException("\\N{…}")
+            e?.let(::illegal)
+            throw IllegalArgumentException(refusal)
         }
     }
 
@@ -642,14 +718,29 @@ internal object HarmonyRewrite {
 
     private fun misread(cp: Int) = cp > 0xFFFF && (cp and 0xFFFF) < 0x80 && !(cp and 0xFFFF).toChar().isLetterOrDigit()
 
-    /** The code point at [at] of [text], a pair's where a pair ends before [end]. */
-    private fun codePoint(text: String, at: Int, end: Int = text.length): Int =
-        if (text[at].isHighSurrogate() && at + 1 < end && text[at + 1].isLowSurrogate()) {
+    /** The code point at [at] of [text], a pair's where a pair begins there. */
+    private fun codePoint(text: String, at: Int): Int =
+        if (text[at].isHighSurrogate() && at + 1 < text.length && text[at + 1].isLowSurrogate()) {
             0x10000 + ((text[at].code - 0xD800) shl 10) + (text[at + 1].code - 0xDC00)
         } else {
             text[at].code
         }
 
+    /** [ranges] in order, those that overlap or meet joined. */
+    private fun normalize(ranges: List<IntRange>): List<IntRange> {
+        val out = mutableListOf<IntRange>()
+        for (range in ranges.sortedBy { it.first }) {
+            val last = out.lastOrNull()
+            if (last != null && range.first <= last.last + 1) out[out.lastIndex] = last.first..maxOf(last.last, range.last) else out += range
+        }
+        return out
+    }
+
+    private fun union(a: List<IntRange>, b: List<IntRange>): List<IntRange> = normalize(a + b)
+
+    private fun intersect(a: List<IntRange>, b: List<IntRange>): List<IntRange> = complement(union(complement(a), complement(b)))
+
+    /** The code points [ranges] (in order) doesn't hold. */
     private fun complement(ranges: List<IntRange>): List<IntRange> {
         val out = mutableListOf<IntRange>()
         var next = 0
@@ -662,8 +753,7 @@ internal object HarmonyRewrite {
     }
 
     private val QUANTIFIER = Regex("""\{[0-9]+(,[0-9]*)?\}""")
-    private val FLAG_GROUP = Regex("""\(\?([idmsuxU]*)(?:-([idmsuxU]*))?(:|\))""")
-    private val OCTAL = Regex("""[0-3][0-7]{2}|[0-7]{1,2}""")
+    private val FLAG_GROUP = Regex("""\(\?([idmsuxUc]*)(?:-([idmsuxUc]*))?(:|\))""")
 }
 
 /** A pattern holding [construct], which this platform's regular expressions can't match as Java's do. */

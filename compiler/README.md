@@ -481,8 +481,11 @@ POSIX class (`[:alnum:]`, `[:alpha:]`, `[:digit:]`, `[:space:]`, `[:upper:]`, `[
   and some of its constructs aren't Java's, and it has bugs with code points past the BMP. So `HarmonyRewrite` writes the
   pattern so it matches as Java's does: each class escape and property (`\w`, `\b`, `\p{L}`, `\p{IsLatin}`, `\p{InGreek}`,
   `\p{javaLowerCase}` …) as the ranges Java's holds, from tables gen/Generate.java writes on the pinned JDK
-  (`RegexTables`); under `(?i)`, each literal and class as the code points Java's case-insensitivity takes for it; `.` as
-  the class Java's is; and `(?x)`'s comments taken out. What it can't match as Java does it refuses, failing the statement
+  (`RegexTables`); each class, `[…]`, as one class of the code points Java's holds, its nested classes, intersections and
+  negation worked out as Java reads them (Harmony's aren't Java's: `[[^a]b]`, `[^a&&b]`); under `(?i)`, each literal and
+  class as the code points Java's case-insensitivity takes for it; `.` as the class Java's is; `$` and `\Z` so they don't
+  match between a `\r` and a `\n`; a lookaround in a group of its own, as Harmony crashes on one quantified (`(?=a)+`);
+  `\Q…\E` read first, as Java reads it; and `(?x)`'s comments taken out. What it can't match as Java does it refuses, failing the statement
   with the construct's name (`regexp: \G is not supported on this platform; rewrite the pattern without it.`): `\G`, `\X`,
   `\N{…}`, `\b{g}`, a back reference under `(?i)`, a back reference to a group the pattern opens only after it (`(?:\1b|(a))+`,
   which Java matches in a repetition), and `(?-U)` and `(?-u)`, which turn off what the patterns always have on. The comments in `HarmonyRewrite` and `HarmonyPattern` name the Kotlin 2.2.20 bugs each workaround is for, and

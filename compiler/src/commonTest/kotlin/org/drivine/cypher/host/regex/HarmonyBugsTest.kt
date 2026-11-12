@@ -19,7 +19,7 @@ class HarmonyBugsTest {
     fun `a class's range of code points past the BMP alone matches nothing`() {
         if (!harmony) return
         val emoji = "\uD83D\uDE00"
-        assertFalse(Regex("[\uD83D\uDE00-\uD83D\uDE02]").matches(emoji), "Fixed: take the single out of HarmonyRewrite.write and characterClass.")
+        assertFalse(Regex("[\uD83D\uDE00-\uD83D\uDE02]").matches(emoji), "Fixed: take the single out of HarmonyRewrite.write.")
         assertTrue(Regex("[\uD83D\uDE00-\uD83D\uDE02\uD83D\uDE00]").matches(emoji))
     }
 

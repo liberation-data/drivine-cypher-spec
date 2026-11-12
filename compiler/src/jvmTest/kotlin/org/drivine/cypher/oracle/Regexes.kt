@@ -215,6 +215,8 @@ object Regexes {
             "\uD83D\uDE4F\uD83D\uDE50", "\u01C5 \u01C4 \u01C6", "\u1E9E ß", "\u03A3 \u03C3 \u03C2", "a b\n#c", "LATIN"))
         // Texts of the patterns past the escapes and comments mode.
         addAll(listOf("١", "a\u001Cb", "a-c_e", "[-]"))
+        // Texts of the patterns past quantifiers, quoting, escapes under (?x), classes past the BMP and back references.
+        addAll(listOf("😀a", "a0", "aa0", "]b", "ae1", "\uD83D\uDE01", "a\uD83D\uDE01b", "{2}", "aaaaaa", "aba", "`J", "\uD83D\uDE40", "^", "Kelvin \u212A k", "\r\n"))
     }
 
     /** Users' `=~` patterns, each with the construct it exercises. */
@@ -291,6 +293,48 @@ object Regexes {
         // Hexadecimal escapes take ASCII's digits alone, and no sign.
         "\\x{0000041}" to "\\x{…} leading zeros", "\\x{+41}" to "\\x{…} signed", "\\x{}" to "\\x{…} empty", "\\x{110000}" to "\\x{…} past U+10FFFF",
         "\\u٣٣٣٣" to "\\uNNNN other digits", "\\x{٤١}" to "\\x{…} other digits", "(a)(b)(c)(d)(e)(f)(g)(h)(i)(j)(k)(l)(m)\\1٣" to "backreference, other digit",
+        // \Q…\E as Java reads it first: its characters literals of a class's range too.
+        "[\\Qa\\E-z]+" to "\\Q…\\E range", "[a-\\Qz\\E]+" to "\\Q…\\E range", "[\\Qa-z\\E]+" to "\\Q…\\E in a class", "a\\E" to "\\E alone",
+        "\\Qa\\E\\E" to "\\E alone", "(?i)\\Qab\\E+" to "\\Q…\\E quantified", "(?x)\\Qa#b\\E" to "\\Q…\\E under (?x)",
+        // Quantifiers: { before no digit, under (?x), on a lookaround or an anchor (Harmony crashes on a lookaround's), and \R's.
+        "(?x)a{ 2}" to "{ refused", "(?x)a{2 }" to "{n} under (?x)", "(?x)a{2 , 3}" to "{n,m} under (?x)", "x{a}" to "{ refused", "a{2}*" to "syntax error",
+        "a*?+" to "syntax error", "a{0}" to "{0}", "^*a" to "quantified ^", "\$?a" to "quantified $", "\\b+a" to "quantified \\b",
+        "(?=a)+a" to "quantified lookaround", "(?!a)*b" to "quantified lookaround", "(?<=a)?b" to "quantified lookaround",
+        "(?<=a)+b" to "quantified lookaround", "(?=a){0}a" to "quantified lookaround", "(?=a)*?a" to "quantified lookaround",
+        "(?=(a))*a" to "quantified lookaround", "(?=a){2,}a" to "quantified lookaround", "(?:(?=a))+a" to "quantified lookaround",
+        "(?:(?!a))*b" to "quantified lookaround", "(?:)+a" to "quantified empty group", "(\\b)+a" to "quantified \\b", "(?:^)*a" to "quantified ^",
+        "(?:a|(?=b))+" to "quantified lookaround", "^\\R{2}\$" to "\\R quantified", "\\R" to "\\R", "\\R+" to "\\R quantified",
+        // Flags: (?c), which Java reads and ignores, and flags read past (?x)'s whitespace.
+        "(?c)a" to "(?c)", "(?c)\u00e9" to "(?c)", "(?x)(? i)k" to "(?x) flags", "(?x)(? :a)" to "(?x) flags", "(?x)(? =a)" to "(?x) flags",
+        // Escapes read past (?x)'s whitespace, and \c of a code point past the BMP.
+        "(?x)(a)\\1 0" to "(?x) backreference", "(?x)(a)(b)(c)(d)(e)(f)(g)(h)(i)(j)\\1 0" to "(?x) backreference", "(?x)\\0 1 0 1" to "(?x) octal",
+        "(?x)\\x4 1" to "(?x) \\xNN", "(?x)\\c J" to "(?x) \\cX", "(?x)\\u 0041" to "(?x) \\uNNNN", "(?x)\\x{ 41 }" to "(?x) \\x{…}",
+        "\\c\uD83D\uDE00" to "\\cX astral", "\\0377" to "octal escape", "\\0400" to "octal escape", "\\8" to "backreference past the groups",
+        "\\uD83D" to "lone surrogate", "[\\uD83D]" to "lone surrogate", "\\uDE00" to "lone surrogate", "[\\uD83D\\uDE00]" to "surrogate pair escape",
+        // Named groups Java refuses.
+        "(?:\\k<a>b|(?<a>a))+" to "named group later", "(?<a_b>x)" to "named group syntax", "(?<a>x)(?<a>y)" to "named group twice",
+        // $ and \Z, which never match between \r and \n, and ^, with each flag.
+        "(?m)^" to "(?m)^", "(?m)\$" to "(?m)$", "^" to "^", "\$" to "$", "(?d)\$" to "(?d)$", "(?d)(?m)^" to "(?d)(?m)^", "(?d)(?m)\$" to "(?d)(?m)$",
+        "(?d)a\\Z" to "(?d)\\Z", "(?s)^.*\$" to "(?s)", "\\r\$" to "$ after \\r", "(?m)\\r\$" to "(?m)$ after \\r", "(?d)\\r\$" to "(?d)$ after \\r",
+        "\\r\\Z" to "\\Z after \\r",
+        // Classes as Java reads them: nested, negated, intersected, with code points past the BMP, a range's end, ^ and & read as themselves.
+        "[a-\\w]" to "class escape ending a range", "[a-\\d]" to "class escape ending a range", "[a-\\p{L}]" to "property ending a range",
+        "[\\1]" to "backreference in a class", "[a-c-e]+" to "- after a range",
+        "[^\uD83D\uDE00-\uD83D\uDE02]+" to "negated astral range", "[^\uD83D\uDE00]+" to "negated astral", "[x[^\uD83D\uDE00]]" to "nested negated astral",
+        "[\uD83D\uDE00-\uD83D\uDE02&&[a\uD83D\uDE01]]" to "astral intersection", "[\uD83D\uDE00-\uD83D\uDE02&&\uD83D\uDE01]" to "astral intersection",
+        "[^a-z&&[aeiou]]+" to "negated intersection", "[[^a]b]+" to "nested negated class", "[^[^a]]+" to "nested negated class", "[a&&]" to "&& at the end",
+        "[&&a]" to "&& first", "[a[]b]]" to "] first in a nested class", "[[]]" to "syntax error", "[a[^b]]+" to "nested negated class",
+        "[[^a]]+" to "nested negated class", "[[^a][^b]]+" to "nested negated class", "[^a&&b]+" to "negated intersection", "[^ab[c]]+" to "negated union",
+        "[^[a]]+" to "negated union", "[^a[b]]+" to "negated union", "[a-z&&[^aeiou]&&[^xyz]]+" to "intersections", "[[^a]&&[^b]]+" to "intersection",
+        "[[^a]&&b]+" to "intersection", "[^a-z&&[^aeiou]]+" to "negated intersection", "[\\w&&[^\\d]]+" to "intersection", "[^\\w&&[^\\d]]+" to "negated intersection",
+        "[a-c[^b]&&[ab]]+" to "intersection", "[[a-c]&&[^b]]+" to "intersection", "[^a-c[b]]+" to "negated union", "[[a][b]]+" to "union",
+        "(?x)[a& &b]+" to "(?x) &&", "(?x)[ &&a]" to "(?x) &&", "(?x)[ ^a]" to "(?x) ^ not first", "(?x)[ ]a]" to "(?x) ] first", "(?i)[^[k]]+" to "(?i) negated union",
+        "(?i)[^k]+" to "(?i) negated class", "(?i)\\P{Lu}" to "(?i) \\P{…}", "(?i)[^\\p{Lu}]" to "(?i) negated property", "(?i)\\P{Lower}" to "(?i) \\P{…}",
+        // Lookbehind, groups that take no part, empty alternatives.
+        "(?<=.)b" to "lookbehind", "(?<!.)b" to "lookbehind", "(?<=[^x])b" to "lookbehind", "(?<=a|bc)d" to "lookbehind", "(?<=\uD83D\uDE00)a" to "astral lookbehind",
+        "(a){0}\\1|b" to "backreference to no match", "(a)?\\1b" to "backreference to no match", "(a)|b\\1" to "backreference to no match",
+        "a|" to "empty alternative", "|a" to "empty alternative", "()" to "empty group", "(|a)+" to "empty alternative", "(?:(a)|b)+" to "repeated group",
+        "(a|(b))+" to "repeated group", "(?<=(a))b" to "group in a lookbehind", "(?=(a))a" to "group in a lookahead",
     )
 
     /** The spec's directory, and the oracle's (corpus.jsonl and mutants.jsonl already written there). */
