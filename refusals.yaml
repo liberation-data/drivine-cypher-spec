@@ -121,6 +121,8 @@ cases:
       - cypher: "RETURN time.statement($z)"
         parameters: {z: 1}
         error: "time.statement() takes a time zone, a text, or nothing."
+      - cypher: "RETURN datetime.statement('Z', 'Z')"
+        error: "datetime.statement() takes a time zone, or nothing."
 
   - name: "Temporal map not compiled yet"
     description: "A temporal value made from a map of fields the compiler doesn't handle yet is refused, naming what it is."
