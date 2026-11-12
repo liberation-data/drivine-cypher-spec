@@ -94,6 +94,41 @@ object PostgresSql {
         SimilarityFunction.EUCLIDEAN -> "vector_l2_ops"
     }
 
+    /** pgvector's operator for the distance [similarity] measures: the one the index [operators] makes answers. */
+    fun distance(similarity: SimilarityFunction): String = when (similarity) {
+        SimilarityFunction.COSINE -> "<=>"
+        SimilarityFunction.EUCLIDEAN -> "<->"
+    }
+
+    /**
+     * The score the graph engines give for a [distance] by [similarity]: in `[0, 1]`, higher the nearer. pgvector's cosine
+     * distance is `1 - cos`, so the score is `(1 + cos) / 2`; its Euclidean distance is `d`, so the score is `1 / (1 + d²)`,
+     * as on Oracle and the graph engines.
+     */
+    fun score(similarity: SimilarityFunction, distance: String): String = when (similarity) {
+        SimilarityFunction.COSINE -> "(2 - ($distance)) / 2"
+        SimilarityFunction.EUCLIDEAN -> "1 / (1 + ($distance) * ($distance))"
+    }
+
+    /** Whether the node [alias] carries every one of [labels], each a test of its own, so a partial index over any one answers it. */
+    fun hasLabels(alias: String, labels: List<String>): String {
+        require(labels.isNotEmpty()) { "A node is tested for one label or more." }
+        return labels.joinToString(" AND ") { hasLabel(alias, it) }
+    }
+
+    /** The texts of the JSON array bound as [parameter], as rows of one column: a string as itself, anything else as its JSON. */
+    fun textValues(parameter: String): String = "SELECT v.value #>> '{}' FROM jsonb_array_elements(CAST($parameter AS jsonb)) v"
+
+    /** A JSON object of [entries], each a key and the expression for its value, laid out under the key. */
+    fun jsonObject(entries: List<Pair<String, String>>): String =
+        entries.joinToString(",\n    ", "jsonb_build_object(\n    ", ")") { (key, value) -> "${literal(key)}, ${value.replace("\n", "\n    ")}" }
+
+    /** The JSON array of [value] over the rows a query reads, in [order]. */
+    fun arrayOf(value: String, order: String): String = "jsonb_agg($value ORDER BY $order)"
+
+    /** An empty JSON array. */
+    const val EMPTY_ARRAY: String = "'[]'::jsonb"
+
     /**
      * The text a full-text search reads of [alias]: its properties [keys], each as text, a space between them, in lower
      * case. A property it does not have is no text. The expression of a full-text index too (with an empty alias), so a

@@ -35,6 +35,8 @@ import java.time.format.DateTimeFormatter
  *   steps of them are checked against it first. See [HostTemporals].
  * - `search-golden.json`: drivine4j's full-text search statements, the module's golden (`src/commonTest/resources`), for
  *   each target's `FullTextSearchGoldenTest`. Its requests are in `corpus.jsonl` too, as [CompileJson] answers them.
+ * - `vector-golden.json`: drivine4j's vector search statements, the module's golden likewise, for each target's
+ *   `VectorSearchGoldenTest`. Its requests are in `corpus.jsonl` too.
  *
  *   Oracle <spec directory> <output directory> <fuzz count> <seed> <mutant count>
  */
@@ -71,6 +73,8 @@ object Oracle {
         HostTemporals.write(spec, out)
         // drivine4j's full-text search statements, for each target's FullTextSearchGoldenTest.
         File(out, "search-golden.json").writeBytes(searchGolden())
+        // drivine4j's vector search statements, for each target's VectorSearchGoldenTest.
+        File(out, "vector-golden.json").writeBytes(vectorGolden())
         println("jvmOracle: ${corpus.first} statements in the corpus (${corpus.second} left out, as they embed the clock); $doubles double cases.")
         println("jvmOracle: ${mutants.made} mutant requests, ${mutants.kept} of interest, ${mutants.written} of them in mutants.jsonl.")
         println("jvmOracle: stand-in cases ${standIns.entries.joinToString { (name, n) -> "$name $n" }}.")
@@ -127,6 +131,8 @@ object Oracle {
         }
         // Full-text searches: each of the golden's requests, and searches that are no request.
         addAll(searchRequests())
+        // Vector searches: each of the golden's requests, and searches that are no request.
+        addAll(vectorRequests())
         // Requests that are no request.
         addAll(listOf("", "[]", "{\"store\": \"neo4j\", \"graph\": {\"name\": \"g\"}, \"cypher\": \"RETURN 1\"}", "{\"store\": \"postgres\", \"cypher\": \"RETURN 1\"}"))
         // Compiled typed, last, so every request before is where it was: results.yaml's statements, and each other spec
@@ -166,6 +172,22 @@ object Oracle {
 
     /** The module's golden of drivine4j's full-text search statements, `src/commonTest/resources/search-golden.json`. */
     private fun searchGolden(): ByteArray = requireNotNull(Oracle::class.java.getResource("/search-golden.json")) { "No search-golden.json on the classpath." }.readBytes()
+
+    /** The module's golden of drivine4j's vector search statements, `src/commonTest/resources/vector-golden.json`. */
+    private fun vectorGolden(): ByteArray = requireNotNull(Oracle::class.java.getResource("/vector-golden.json")) { "No vector-golden.json on the classpath." }.readBytes()
+
+    /** Each vector search request of the golden, as JSON text, and those that are no request or that the module refuses. */
+    private fun vectorRequests(): List<String> =
+        json.readTree(vectorGolden())["entries"].map { ascii.writeValueAsString(it["request"]) } + listOf(
+            """{"store": "redis", "graph": {"name": "g"}, "vector": {"labels": ["A"], "property": "e", "similarity": "COSINE", "topK": 1, "size": 2}}""",
+            """{"store": "postgres", "graph": {"name": "g"}, "vector": {"labels": ["A"], "property": "e", "similarity": "DOT", "topK": 1, "size": 2}}""",
+            """{"store": "postgres", "graph": {"name": "g"}, "vector": {"labels": ["A"], "property": "e", "similarity": "COSINE", "topK": 1}}""",
+            """{"store": "postgres", "graph": {"name": "9g"}, "vector": {"labels": ["A"], "property": "e", "similarity": "COSINE", "topK": 1, "size": 2}}""",
+            """{"store": "oracle", "graph": {"name": "g"}, "vector": {"label": "A", "property": "e", "similarity": "EUCLIDEAN", "topK": -1, "size": 2}}""",
+            """{"store": "neo4j", "vector": {"labels": ["A"], "property": "e", "similarity": "COSINE", "topK": 1, "partitionLabel": "P", "index": {"name": "n"}}}""",
+            """{"store": "sqlite", "graph": {"name": "g"}, "vector": {"labels": ["A"], "property": "e", "similarity": "COSINE", "topK": 1, "among": {"ids": [1], "idProperty": "id"}}}""",
+            """{"store": "memgraph", "vector": [1]}""",
+        )
 
     /** Written with every character outside ASCII escaped, so a lone surrogate in a query is a request's as it is. */
     private val ascii = ObjectMapper().also { it.factory.enable(com.fasterxml.jackson.core.JsonGenerator.Feature.ESCAPE_NON_ASCII) }

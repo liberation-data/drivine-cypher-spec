@@ -36,7 +36,8 @@ import kotlin.io.encoding.ExperimentalEncodingApi
  * `{"error": "<message>"}` where the request is no request.
  *
  * A request with `search` or `searchIndex` in place of `cypher` is a full-text search, answered by [FullTextSearch]: see
- * [SearchJson]. A request that gives more than one of the three is an error.
+ * [SearchJson]. One with `vector` is a vector search, answered by [VectorSearch]: see [VectorJson]. A request that gives
+ * more than one of them is an error.
  *
  * Values, in the parameters given and those bound, are plain JSON, tagged only where JSON, or a host's reading of it, loses
  * what the SQL depends on:
@@ -86,12 +87,14 @@ object CompileJson {
         } catch (e: Exception) {
             return error(e.message ?: e.toString())
         }
-        // A full-text search, asked of the same entry: a request with "search" or "searchIndex" in place of "cypher".
-        // A request asks one thing: one that gives two would have the other read past as though it were not there.
-        if (listOf("cypher", "search", "searchIndex", "settings").count { tree.has(it) } > 1) {
-            return error("A request gives one of cypher, search, searchIndex and settings.")
+        // A full-text search, asked of the same entry: a request with "search" or "searchIndex" in place of "cypher", and a
+        // vector search, with "vector". A request asks one thing: one that gives two would have the other read past as though
+        // it were not there.
+        if (listOf("cypher", "search", "searchIndex", "vector", "settings").count { tree.has(it) } > 1) {
+            return error("A request gives one of cypher, search, searchIndex, vector and settings.")
         }
         if (tree.has("search") || tree.has("searchIndex")) return SearchJson.answer(tree)
+        if (tree.has("vector")) return VectorJson.answer(tree)
         if (tree.has("settings")) return settings(tree["settings"])
         val call = try {
             read(tree)
