@@ -237,7 +237,8 @@ object SqliteCypherValues {
             ValueLayout.isTag(node) -> {
                 val kind = ValueLayout.kindOf(node[ValueLayout.KIND]!!.textValue()!!)!!
                 out.append('2').append(TAG).append('0' + ValueLayout.ORDER.indexOf(kind))
-                textKey((node[ValueLayout.KEY] ?: node[ValueLayout.TEXT])!!.textValue()!!, out)
+                // A sort key that is no text, which only a tree a host gave could hold, is passed over for the text, as Oracle's is.
+                textKey((node[ValueLayout.KEY]?.takeIf { it.isTextual } ?: node[ValueLayout.TEXT])!!.textValue()!!, out)
             }
             node.isObject -> out.append('1').also { textKey(write(canonical(node)), out) }
             node.isArray -> out.append('2').also { list(node, out) }

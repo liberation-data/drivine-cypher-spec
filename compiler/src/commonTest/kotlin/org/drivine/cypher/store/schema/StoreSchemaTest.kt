@@ -123,6 +123,14 @@ class StoreSchemaTest {
     }
 
     @Test
+    fun oracleSamplesATemporalValueByItsTextWhichJsonValueAloneReadsAsNull() {
+        // Layout 2 holds a date as a tag, {"$t", "v", "s"}, an object JSON_VALUE reads as null: sampled so, a key of dates
+        // that repeats found no repeat, and the violation was thrown rather than reported.
+        val sampled = schemas.getValue("oracle").sampleConflictsQuery(UniquenessConstraintSpec("Event", listOf("day")), 10)
+        assertTrue("COALESCE(JSON_VALUE(n.props, '${'$'}.day.v'), JSON_VALUE(n.props, '${'$'}.day'))" in sampled, sampled)
+    }
+
+    @Test
     fun eachListingIsReadBackAsDrivine4jReadIt() {
         for (case in store["listings"]!!) {
             val name = case["name"]!!.textValue()

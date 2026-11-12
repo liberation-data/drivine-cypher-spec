@@ -4835,7 +4835,7 @@ cases:
                 - ["WARN", "SchemaManager", "  - DRIFT: UNIQUENESS_CONSTRAINT on Person[email] exists with a different shape: SchemaItemInfo(kind=UNIQUENESS_CONSTRAINT, label=Person, properties=[email], name=drivine_uq2_Personemail_5482a751, dimensions=null, similarity=null, analyzer=null, status=null, quantizationEnabled=null, hnswM=null, hnswEfConstruction=null)"]
   - case: "30f"
     name: "A plain index under a uniqueness constraint's name, with recreateOnDrift"
-    description: "drivine4j#770: a plain index under the constraint's name is drift; with recreateOnDrift it is dropped by its name, and the constraint made in its place."
+    description: "drivine4j#770: a plain index under the constraint's name is drift; with recreateOnDrift the constraint's unique index is built beside it first, then swapped in for it (#135 §4), the drop said at INFO."
     stores: ["postgres", "oracle", "sqlite"]
     catalogs:
       - {owner: null, version: null, items: ["Uniqueness constraint"]}
@@ -5023,7 +5023,7 @@ cases:
                 - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 0 already matching, 1 recreated, 0 needing attention"]
   - case: "30h"
     name: "A table under a uniqueness constraint's name"
-    description: "On Postgres and SQLite a table under the constraint's name is drift that no recreate drops, so with recreateOnDrift the owner still fails; Oracle names indexes apart from tables, so there the constraint is made beside it."
+    description: "On Postgres and SQLite a table under the constraint's name is drift that no recreate drops, so with recreateOnDrift the owner still fails, and a recreateAll fails it alike, nothing dropped or built; Oracle names indexes apart from tables, so there the constraint is made beside it, and recreateAll makes it in its place beside the table, as any other."
     stores: ["postgres", "sqlite", "oracle"]
     catalogs:
       - {owner: null, version: null, items: ["Uniqueness constraint"]}
@@ -5419,7 +5419,7 @@ cases:
                 - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 0 already matching, 1 recreated, 0 needing attention"]
   - case: "30m"
     name: "Another index under a uniqueness constraint's name, over its record of form 0, with recreateOnDrift"
-    description: "The constraint's record says form 0, and an index Drivine didn't make stands under its name. With recreateOnDrift the index is dropped by its name, the record, found before it was, is forgotten, and the item made again with a record of form 2."
+    description: "The constraint's record says form 0, and an index Drivine didn't make stands under its name. With recreateOnDrift the constraint's unique index is built beside it first, then swapped in for it (#135 §4), the drop said at INFO, and the record, kept, made form 2's."
     stores: ["postgres", "oracle", "sqlite"]
     catalogs:
       - {owner: null, version: null, items: ["Uniqueness constraint"]}
@@ -6206,7 +6206,7 @@ cases:
                 - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 0 already matching, 1 recreated, 0 needing attention"]
   - case: "31e"
     name: "A step after the build that fails"
-    description: "The store's error, thrown as any DDL's, the plan ended there. What each store is left with, as it listed it after: Postgres's swap, one block, refused at the rename (another session dropped the index built first), leaves the old index and its record; Postgres's record, its connection ended before it (a lost connection), leaves the new index in place and the record of form 0. SQLite's swap, refused at the index made again under its name (another connection writing), leaves only the index built first, which holds the data unique, under its own name, and the record not listed; its record, refused for the same, leaves the new index and the record of form 0. Oracle's swap refused at the drop (another session's open write, ORA-00054) leaves the old index and the new one beside it; at the rename, the new one alone under the name it was built under, and no record listed; its record (the catalog made read-only, ORA-12081) leaves the new index and no record. On Oracle the old index is one of another shape under the constraint's name, as Oracle builds no second index beside the module's own (ORA-01408). Where the old index still stands, the next recreate drops what was built first (31c); where only what was built first stands, the next enforce or recreate finishes the swap (31l)."
+    description: "The store's error, thrown as any DDL's, the plan ended there. What each store is left with, as it listed it after: Postgres's swap, one block, refused at the rename (another session dropped the index built first), leaves the old index and its record; Postgres's record, its connection ended before it (a lost connection), leaves the new index in place and the record of form 0. SQLite's swap, refused at the index made again under its name (another connection writing), leaves only the index built first, which holds the data unique, under its own name, and the record not listed; its record, refused for the same, leaves the new index and the record of form 0. Oracle's swap refused at the drop (another session's open write, ORA-00054) leaves the old index and the new one beside it; at the rename, the new one alone under the name it was built under, and no record listed; its record (the catalog made read-only, ORA-12081) leaves the new index and no record. On Oracle the old index is one of another shape under the constraint's name, as Oracle builds no second index beside the module's own (ORA-01408). Where the old index still stands, the next recreate drops what was built first (31c), as an enforce does on Postgres and SQLite (31x); where only what was built first stands, the next recreate finishes the swap, and an enforce keeps it (31l)."
     stores: ["postgres", "oracle", "sqlite"]
     catalogs:
       - {owner: null, version: null, items: ["Uniqueness constraint"]}

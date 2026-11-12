@@ -5713,9 +5713,9 @@ schema:
         oracle: |-
           SELECT JSON_OBJECT('properties' VALUE JSON_OBJECT('email' VALUE k0), 'count' VALUE MAX(c),
                              'nodes' VALUE JSON_ARRAYAGG(JSON_OBJECT('elementId' VALUE nid) ORDER BY nid RETURNING JSON) RETURNING JSON)
-          FROM (SELECT n.nid, JSON_VALUE(n.props, '$.email') AS k0, COUNT(*) OVER (PARTITION BY JSON_VALUE(n.props, '$.email')) AS c, ROW_NUMBER() OVER (PARTITION BY JSON_VALUE(n.props, '$.email') ORDER BY n.nid) AS r
+          FROM (SELECT n.nid, COALESCE(JSON_VALUE(n.props, '$.email.v'), JSON_VALUE(n.props, '$.email')) AS k0, COUNT(*) OVER (PARTITION BY COALESCE(JSON_VALUE(n.props, '$.email.v'), JSON_VALUE(n.props, '$.email'))) AS c, ROW_NUMBER() OVER (PARTITION BY COALESCE(JSON_VALUE(n.props, '$.email.v'), JSON_VALUE(n.props, '$.email')) ORDER BY n.nid) AS r
                 FROM drivine_node n
-                WHERE JSON_EXISTS(n.labels, '$[*]?(@ == "Person")') AND JSON_VALUE(n.props, '$.email') IS NOT NULL)
+                WHERE JSON_EXISTS(n.labels, '$[*]?(@ == "Person")') AND COALESCE(JSON_VALUE(n.props, '$.email.v'), JSON_VALUE(n.props, '$.email')) IS NOT NULL)
           WHERE c > 1 AND r <= 10
           GROUP BY k0
           FETCH FIRST 10 ROWS ONLY
@@ -5775,9 +5775,9 @@ schema:
         oracle: |-
           SELECT JSON_OBJECT('properties' VALUE JSON_OBJECT('tenantId' VALUE k0, 'userId' VALUE k1), 'count' VALUE MAX(c),
                              'nodes' VALUE JSON_ARRAYAGG(JSON_OBJECT('elementId' VALUE nid) ORDER BY nid RETURNING JSON) RETURNING JSON)
-          FROM (SELECT n.nid, JSON_VALUE(n.props, '$.tenantId') AS k0, JSON_VALUE(n.props, '$.userId') AS k1, COUNT(*) OVER (PARTITION BY JSON_VALUE(n.props, '$.tenantId'), JSON_VALUE(n.props, '$.userId')) AS c, ROW_NUMBER() OVER (PARTITION BY JSON_VALUE(n.props, '$.tenantId'), JSON_VALUE(n.props, '$.userId') ORDER BY n.nid) AS r
+          FROM (SELECT n.nid, COALESCE(JSON_VALUE(n.props, '$.tenantId.v'), JSON_VALUE(n.props, '$.tenantId')) AS k0, COALESCE(JSON_VALUE(n.props, '$.userId.v'), JSON_VALUE(n.props, '$.userId')) AS k1, COUNT(*) OVER (PARTITION BY COALESCE(JSON_VALUE(n.props, '$.tenantId.v'), JSON_VALUE(n.props, '$.tenantId')), COALESCE(JSON_VALUE(n.props, '$.userId.v'), JSON_VALUE(n.props, '$.userId'))) AS c, ROW_NUMBER() OVER (PARTITION BY COALESCE(JSON_VALUE(n.props, '$.tenantId.v'), JSON_VALUE(n.props, '$.tenantId')), COALESCE(JSON_VALUE(n.props, '$.userId.v'), JSON_VALUE(n.props, '$.userId')) ORDER BY n.nid) AS r
                 FROM drivine_node n
-                WHERE JSON_EXISTS(n.labels, '$[*]?(@ == "Membership")') AND JSON_VALUE(n.props, '$.tenantId') IS NOT NULL AND JSON_VALUE(n.props, '$.userId') IS NOT NULL)
+                WHERE JSON_EXISTS(n.labels, '$[*]?(@ == "Membership")') AND COALESCE(JSON_VALUE(n.props, '$.tenantId.v'), JSON_VALUE(n.props, '$.tenantId')) IS NOT NULL AND COALESCE(JSON_VALUE(n.props, '$.userId.v'), JSON_VALUE(n.props, '$.userId')) IS NOT NULL)
           WHERE c > 1 AND r <= 10
           GROUP BY k0, k1
           FETCH FIRST 10 ROWS ONLY
@@ -5837,9 +5837,9 @@ schema:
         oracle: |-
           SELECT JSON_OBJECT('properties' VALUE JSON_OBJECT('email' VALUE k0), 'count' VALUE MAX(c),
                              'nodes' VALUE JSON_ARRAYAGG(JSON_OBJECT('elementId' VALUE nid, 'uuid' VALUE i) ORDER BY nid RETURNING JSON) RETURNING JSON)
-          FROM (SELECT n.nid, JSON_VALUE(n.props, '$.email') AS k0, JSON_VALUE(n.props, '$.uuid') AS i, COUNT(*) OVER (PARTITION BY JSON_VALUE(n.props, '$.email')) AS c, ROW_NUMBER() OVER (PARTITION BY JSON_VALUE(n.props, '$.email') ORDER BY n.nid) AS r
+          FROM (SELECT n.nid, COALESCE(JSON_VALUE(n.props, '$.email.v'), JSON_VALUE(n.props, '$.email')) AS k0, JSON_VALUE(n.props, '$.uuid') AS i, COUNT(*) OVER (PARTITION BY COALESCE(JSON_VALUE(n.props, '$.email.v'), JSON_VALUE(n.props, '$.email'))) AS c, ROW_NUMBER() OVER (PARTITION BY COALESCE(JSON_VALUE(n.props, '$.email.v'), JSON_VALUE(n.props, '$.email')) ORDER BY n.nid) AS r
                 FROM drivine_node n
-                WHERE JSON_EXISTS(n.labels, '$[*]?(@ == "Person")') AND JSON_VALUE(n.props, '$.email') IS NOT NULL)
+                WHERE JSON_EXISTS(n.labels, '$[*]?(@ == "Person")') AND COALESCE(JSON_VALUE(n.props, '$.email.v'), JSON_VALUE(n.props, '$.email')) IS NOT NULL)
           WHERE c > 1 AND r <= 1
           GROUP BY k0
           FETCH FIRST 1 ROWS ONLY
@@ -5899,9 +5899,9 @@ schema:
         oracle: |-
           SELECT JSON_OBJECT('properties' VALUE JSON_OBJECT('email' VALUE k0), 'count' VALUE MAX(c),
                              'nodes' VALUE JSON_ARRAYAGG(JSON_OBJECT('elementId' VALUE nid) ORDER BY nid RETURNING JSON) RETURNING JSON)
-          FROM (SELECT n.nid, JSON_VALUE(n.props, '$.email') AS k0, COUNT(*) OVER (PARTITION BY JSON_VALUE(n.props, '$.email')) AS c, ROW_NUMBER() OVER (PARTITION BY JSON_VALUE(n.props, '$.email') ORDER BY n.nid) AS r
+          FROM (SELECT n.nid, COALESCE(JSON_VALUE(n.props, '$.email.v'), JSON_VALUE(n.props, '$.email')) AS k0, COUNT(*) OVER (PARTITION BY COALESCE(JSON_VALUE(n.props, '$.email.v'), JSON_VALUE(n.props, '$.email'))) AS c, ROW_NUMBER() OVER (PARTITION BY COALESCE(JSON_VALUE(n.props, '$.email.v'), JSON_VALUE(n.props, '$.email')) ORDER BY n.nid) AS r
                 FROM drivine_node n
-                WHERE JSON_EXISTS(n.labels, '$[*]?(@ == "Person")') AND JSON_VALUE(n.props, '$.email') IS NOT NULL)
+                WHERE JSON_EXISTS(n.labels, '$[*]?(@ == "Person")') AND COALESCE(JSON_VALUE(n.props, '$.email.v'), JSON_VALUE(n.props, '$.email')) IS NOT NULL)
           WHERE c > 1 AND r <= 3
           GROUP BY k0
           FETCH FIRST 3 ROWS ONLY
@@ -5965,9 +5965,9 @@ schema:
         oracle: |-
           SELECT JSON_OBJECT('properties' VALUE JSON_OBJECT('address.city' VALUE k0, 'o''name' VALUE k1), 'count' VALUE MAX(c),
                              'nodes' VALUE JSON_ARRAYAGG(JSON_OBJECT('elementId' VALUE nid, 'my id' VALUE i) ORDER BY nid RETURNING JSON) RETURNING JSON)
-          FROM (SELECT n.nid, JSON_VALUE(n.props, '$."address.city"') AS k0, JSON_VALUE(n.props, '$."o''name"') AS k1, JSON_VALUE(n.props, '$."my id"') AS i, COUNT(*) OVER (PARTITION BY JSON_VALUE(n.props, '$."address.city"'), JSON_VALUE(n.props, '$."o''name"')) AS c, ROW_NUMBER() OVER (PARTITION BY JSON_VALUE(n.props, '$."address.city"'), JSON_VALUE(n.props, '$."o''name"') ORDER BY n.nid) AS r
+          FROM (SELECT n.nid, COALESCE(JSON_VALUE(n.props, '$."address.city".v'), JSON_VALUE(n.props, '$."address.city"')) AS k0, COALESCE(JSON_VALUE(n.props, '$."o''name".v'), JSON_VALUE(n.props, '$."o''name"')) AS k1, JSON_VALUE(n.props, '$."my id"') AS i, COUNT(*) OVER (PARTITION BY COALESCE(JSON_VALUE(n.props, '$."address.city".v'), JSON_VALUE(n.props, '$."address.city"')), COALESCE(JSON_VALUE(n.props, '$."o''name".v'), JSON_VALUE(n.props, '$."o''name"'))) AS c, ROW_NUMBER() OVER (PARTITION BY COALESCE(JSON_VALUE(n.props, '$."address.city".v'), JSON_VALUE(n.props, '$."address.city"')), COALESCE(JSON_VALUE(n.props, '$."o''name".v'), JSON_VALUE(n.props, '$."o''name"')) ORDER BY n.nid) AS r
                 FROM drivine_node n
-                WHERE JSON_EXISTS(n.labels, '$[*]?(@ == "Person")') AND JSON_VALUE(n.props, '$."address.city"') IS NOT NULL AND JSON_VALUE(n.props, '$."o''name"') IS NOT NULL)
+                WHERE JSON_EXISTS(n.labels, '$[*]?(@ == "Person")') AND COALESCE(JSON_VALUE(n.props, '$."address.city".v'), JSON_VALUE(n.props, '$."address.city"')) IS NOT NULL AND COALESCE(JSON_VALUE(n.props, '$."o''name".v'), JSON_VALUE(n.props, '$."o''name"')) IS NOT NULL)
           WHERE c > 1 AND r <= 5
           GROUP BY k0, k1
           FETCH FIRST 5 ROWS ONLY

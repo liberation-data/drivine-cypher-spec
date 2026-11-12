@@ -99,6 +99,14 @@ class SqliteCypherValuesTest {
     }
 
     @Test
+    fun `a tag whose sort key is no text sorts by its text, as Oracle's list key does, and a tag is ordered beside no map`() {
+        fun key(text: String) = SqliteCypherValues.sortKey(json(text) as ArrayNode)
+        val t = "${'$'}t"
+        assertEquals(key("""[{"$t":"date","v":"2024-01-01"}]"""), key("""[{"$t":"date","v":"2024-01-01","s":1}]"""))
+        assertNull(order("""{"$t":"date","v":"2024-01-01","s":"10000020240101"}""", "{}"))
+    }
+
+    @Test
     fun `a canonical map's keys are in UTF-16 order on every target as drivine4j's are`() {
         // U+1F600 is a surrogate pair from U+D83D, which comes before U+FFFF in UTF-16 though after it as a code point.
         val map = json("{\"\\uffff\":1,\"\\ud83d\\ude00\":2,\"b\":3}")

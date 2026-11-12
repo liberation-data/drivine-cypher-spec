@@ -11,6 +11,7 @@ import org.drivine.cypher.store.ddl.DdlStatement
 import org.drivine.cypher.store.ddl.OracleDdl
 import org.drivine.cypher.store.ddl.PostgresDdl
 import org.drivine.cypher.store.ddl.SqlStoreDdl
+import org.drivine.cypher.store.ValueLayout
 import org.drivine.cypher.store.ddl.SqliteDdl
 import org.drivine.schema.ConstraintSpec
 import org.drivine.schema.SchemaItemInfo
@@ -669,7 +670,15 @@ class OracleSchema(override val ddl: OracleDdl) : SqlStoreSchema() {
      * nodes at most however many hold the key. A node's element id is its `nid`.
      */
     override fun sampleConflictsQuery(spec: ConstraintSpec, limit: Int): String =
-        sample(spec, SqlStoreDdl.storedKeys(spec.properties).map { "JSON_VALUE(n.props, ${OracleSql.path(it)})" }, limit)
+        sample(spec, SqlStoreDdl.storedKeys(spec.properties).map(::sampled), limit)
+
+    /**
+     * The property [key] of a node as a sample groups and gives it: a temporal value's tag (layout 2) by its canonical text
+     * `v`, which `JSON_VALUE` alone reads as null, so a key of dates that repeats would find no repeat, and the violation
+     * would be thrown, not reported; any other value as `JSON_VALUE` reads it.
+     */
+    private fun sampled(key: String) =
+        "COALESCE(JSON_VALUE(n.props, ${OracleSql.path(key, ".${ValueLayout.TEXT}")}), JSON_VALUE(n.props, ${OracleSql.path(key)}))"
 
     /** Each key lowercased as the copies are filled in, with `LOWER`. */
     override fun sampleRefilledConflictsQuery(spec: ConstraintSpec, limit: Int): String =
