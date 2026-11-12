@@ -36,6 +36,8 @@ import org.drivine.DrivineInternalApi
  *   as the set of code points Java's holds, and written as one class of ranges.
  * - Its `.` misses a match after a line break in a search (`.+` in "\na"): written as the class Java's `.` is.
  * - Its `$` and `\Z` match between a `\r` and a `\n`: each written so it doesn't.
+ * - Its lookbehind takes time proportional to how far into the text it is tried, so `$`, `\Z`, `\b` and `\B`, which look
+ *   at the code point before, are written with one that takes the same time anywhere: see [Writer.behind].
  * - It reads `(?x)`'s whitespace and comments otherwise: they are taken out here.
  * - It refuses `\x{…}`: written as the code point.
  * - Two bugs in Kotlin 2.2.20 with code points past the BMP in a pattern: see [astral] and [write].
@@ -90,8 +92,8 @@ internal object HarmonyRewrite {
 
     /**
      * The most characters a pattern is written as: each class is written out as the ranges Java's holds (`\w` some 7,500
-     * characters, `\b` 30,000), and Harmony takes about 40 bytes of memory and 60 ns to compile each (`\b` 1,000 times
-     * is 30 million, 1.2 GB and two seconds), where Java's takes none.
+     * characters, `\b` 35,000), and Harmony takes about 40 bytes of memory and 60 ns to compile each (30 million
+     * characters, a thousand `\b` as once written, took 1.2 GB and two seconds), where Java's takes none.
      */
     const val MAX_WRITTEN = 2_000_000
 
@@ -291,6 +293,10 @@ internal object HarmonyRewrite {
         /** Whether a group is written repeated more than once, so far ([Rewritten.deepens]). */
         private var deepens = false
 
+        /** The groups [behind] has written, and the name each is named by with its number after it: one no group of [p] begins with. */
+        private var behinds = 0
+        private val names = generateSequence("d") { it + "d" }.first { !p.contains("<$it") }
+
         /** The lookaheads open, whether each group open is one, and the most open at once, of [Rewritten.scans]. */
         private var scans = 0
         private val scanning = ArrayDeque<Boolean>()
@@ -342,13 +348,16 @@ internal object HarmonyRewrite {
             return Rewritten(out.toString(), maxOf(nodes, longest), deepestScans, hidden, supplementary, deepens)
         }
 
-        /** The group just opened is a lookahead; or with [open] false, one is written alone here (`\b`, `$`). */
+        /**
+         * The group just opened is a lookahead; or with [open] false, an anchor is written here (`\b`, `$`), whose lookbehind
+         * holds a lookahead ([behind]): two nested.
+         */
         private fun scan(open: Boolean = true) {
             if (open) {
                 scanning[scanning.lastIndex] = true
                 scans++
             }
-            deepestScans = maxOf(deepestScans, scans + if (open) 0 else 1)
+            deepestScans = maxOf(deepestScans, scans + if (open) 0 else 2)
         }
 
         /** Refuses an anchor in a lookahead but `$` and `\z`. */
@@ -734,8 +743,37 @@ internal object HarmonyRewrite {
             }
         }
 
-        /** `$` or `\Z`: Java's never matches between a `\r` and a `\n`, where Harmony's does. Under `(?d)` only `\n` ends a line. */
-        private fun dollar(anchor: String) = if (flags.d) anchor else "(?:(?!(?<=\\r)\\n)$anchor)$SNAPSHOT"
+        /**
+         * `$` or `\Z`: Java's never matches between a `\r` and a `\n`, where Harmony's does. So before a `\n`, but at the
+         * start, it is taken only where the character before is no `\r`, read through [behind]: `\r` or nothing captured,
+         * which the `\n` matches only where it is nothing. Under `(?d)` only `\n` ends a line.
+         */
+        private fun dollar(anchor: String): String {
+            if (flags.d) return anchor
+            // Any character before will do, a pair's low half alone too, as only a \r is looked for: Harmony's own `.`, short.
+            val (look, back) = behind("\\r?", "(?s:.)")
+            return "(?:$anchor(?:(?!\\n)|\\A|(?=\\n)$look$back))$SNAPSHOT"
+        }
+
+        /**
+         * A look at the code point before here, in time that doesn't grow with the text. Harmony's lookbehind (its
+         * LookBehindSets) looks for its body ending here from each place back to the text's start (AbstractSet.findBack,
+         * from here down to 0), so one that fails, or a negative one that holds, takes time proportional to how far into
+         * the text it is, and a pattern holding one takes time quadratic in the text's length (#204): `(?<=b)a` counted in
+         * 20,000 characters took 409 ms, in 10,000 102 ms, where `(?<=a)a` took 32 ms and 16 ms. So the lookbehind written
+         * here holds at the code point before here ([before], [ANY] where none is given), wherever it is, and finds it at
+         * once: Harmony takes no half of a pair alone in a class, so after a pair it is found at the pair's start, a place
+         * further. It captures [ahead], a lookahead's body read from that code point, in a group of its own
+         * ([Rewritten.hidden]), set there each time, to nothing where [ahead] takes nothing; and the back reference to the
+         * group, written after it, reads it. The group is named, as Harmony reads a back reference by number to one digit
+         * alone, by a name no group of Java's has ([names]). At the text's start nothing is before here, and the lookbehind
+         * fails, as Java's does.
+         */
+        private fun behind(ahead: String, before: String = ANY): Pair<String, String> {
+            hidden += ++harmonyGroups
+            val name = names + behinds++
+            return "(?<=(?=(?<$name>$ahead))$before)" to "\\k<$name>"
+        }
 
         /**
          * The escape at [at] that is a literal code point, as Java's `Pattern.escape` reads one, and [at] past it; null, [at]
@@ -865,10 +903,18 @@ internal object HarmonyRewrite {
             throw IllegalArgumentException("Illegal $kind escape sequence")
         }
 
-        /** `\b` or `\B` as lookarounds on Java's `\w`, which they are with UNICODE_CHARACTER_CLASS since JDK 19. */
+        /**
+         * `\b` or `\B` on Java's `\w`, which they are with UNICODE_CHARACTER_CLASS since JDK 19: whether the code points
+         * before and after here differ in being one. At the start, by the one after alone; elsewhere through [behind], which
+         * captures the code point before where they differ (and the one after, or the end), and nothing where they don't. The
+         * capture, where it isn't nothing, begins with a code point that is not the one after here, so the back reference
+         * matches here exactly where it is nothing: `\b` where it doesn't, `\B` where it does.
+         */
         private fun boundary(at: Boolean): String {
-            val w = "[${write(JavaClasses.escape('w'))}]"
-            return (if (at) "(?:(?<=$w)(?!$w)|(?<!$w)(?=$w))" else "(?:(?<=$w)(?=$w)|(?<!$w)(?!$w))") + SNAPSHOT
+            val w = written(JavaClasses.escape('w'))
+            val other = written(complement(JavaClasses.escape('w')))
+            val (look, back) = behind("$w(?:$other|\\z)|$other$w|")
+            return (if (at) "(?:\\A(?=$w)|$look(?!$back))" else "(?:\\A(?!$w)|$look(?=$back))") + SNAPSHOT
         }
 
         /**
@@ -1147,9 +1193,16 @@ internal object HarmonyRewrite {
     /** The nodes [SNAPSHOT] puts on the path. */
     private const val SNAPSHOT_NODES = 3
 
-    /** The nodes on the path of `$` or `\Z` written ([Writer.dollar]), and at most of any other escape (`\b`, [Writer.boundary]). */
-    private const val DOLLAR = 6 + SNAPSHOT_NODES
-    private const val BOUNDARY = 8 + SNAPSHOT_NODES
+    /**
+     * The nodes on the path of `$` or `\Z` written ([Writer.dollar]), and at most of any escape (`\b`, [Writer.boundary], 18;
+     * `\Z`, as `$`), as [Writer.closePath] counts a group's: two for the group and its end, and those of its longest
+     * alternative. A class holding a lone surrogate, as `\W` and [ANY] do, is two (a CompositeRangeSet calls the set it holds).
+     */
+    private const val DOLLAR = 19 + SNAPSHOT_NODES
+    private const val BOUNDARY = 19 + SNAPSHOT_NODES
+
+    /** Any one code point, a pair whole, as [Writer.behind] takes the one before a place. */
+    private val ANY = "[${write(listOf(0..0x10FFFF))}]"
 
     private val FLAG_GROUP = Regex("""\(\?([idmsuxUc]*)(?:-([idmsuxUc]*))?(:|\))""")
 }

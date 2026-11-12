@@ -368,6 +368,8 @@ object Regexes {
         // A lookaround the rest of the pattern passes through, then fails: Harmony keeps one state for every lookaround.
         "(?:\\b(a)\\b|a)" to "group after lookarounds", "(?:(?=a)(a)(?=x)|a)" to "group after lookarounds", "(a?(?=a|\$))*8" to "repeated group after lookarounds",
         "(a?(?!b))*8" to "repeated group after lookarounds", "(?:a?()\\b())*8" to "repeated group after lookarounds",
+        // Groups numbered and named beside $, \Z, \b and \B, which HarmonyRewrite writes with groups of its own.
+        "(\\w)\\B(\\w)\\b(\\W)?" to "groups beside anchors", "(?m)(a)\\r?\$(\\s)(\\w)?" to "groups beside anchors", "(?<d0>\\w)\\b(?<dd0>\\W)?\\Z" to "groups beside anchors",
         // Groups with no width repeated, which Java repeats otherwise, and (?c), which reads classes by graphemes.
         "b()*" to "repeated group with no width", "b(\\Z){0,2}" to "repeated group with no width", "(\\b)*a" to "repeated group with no width",
         "(a{0})*b" to "repeated group with no width", "(?c)[^a]" to "(?c) class", "(?c)\\p{L}" to "(?c) property",

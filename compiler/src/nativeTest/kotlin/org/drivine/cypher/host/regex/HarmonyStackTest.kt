@@ -110,7 +110,51 @@ class HarmonyStackTest {
         refused("[".repeat(20_000) + "a" + "]".repeat(20_000))
         refused("a?".repeat(50_000))
         refused("(?:)".repeat(50_000))
-        refused("\$".repeat(50_000))
+        // Each $ is written as some 70 characters (Writer.dollar), so 30,000 of them are more than the rewrite writes at all.
+        refused("\$".repeat(20_000))
+    }
+
+    @Test
+    fun `the path counted for each anchor written is no shorter than Harmony's nodes on it`() {
+        // Flags alone, as (?i) is written before an anchor, are no group and no node: \A one, (?:a) three.
+        assertEquals(4, harmonyNodes("(?i)\\A(?:a)"))
+        for (anchor in listOf("\$", "\\Z", "(?m)\$", "\\b", "\\B", "(?i)\\b")) {
+            val written = HarmonyRewrite.rewritten(anchor)
+            assertTrue(written.text.endsWith(SNAPSHOT), anchor)
+            val nodes = harmonyNodes(written.text.removeSuffix(SNAPSHOT)) + SNAPSHOT_NODES
+            assertTrue(written.path >= nodes, "$anchor: a path of ${written.path}, where Harmony has $nodes nodes")
+        }
+    }
+
+    @Test
+    fun `on a thread of a small stack anchors in a row are refused before they would overflow it`() {
+        val worker = Worker.start()
+        try {
+            val answers = worker.execute(TransferMode.SAFE, { }) {
+                // Each found first where it takes its longest path, through its lookbehind: not at the text's start.
+                listOf("\$" to "a\n", "\\b" to " a", "\\B" to "aa", "\\b\$" to "\na\n").map { (anchor, text) ->
+                    // The most in a row that compile, each count matched up to it: the last at the edge of the stack, or,
+                    // where a Worker's stack is large (glibc gives one 8 MiB, macOS 512 KiB), at the written length's
+                    // limit (`\b` past 57), which refuses too before any overflow.
+                    var n = 1
+                    while (true) {
+                        val found = try {
+                            JavaPatterns.compile(anchor.repeat(n)).find(text)?.first()
+                        } catch (e: StackRoomException) {
+                            break
+                        } catch (e: UnsupportedPatternException) {
+                            break
+                        }
+                        if (found != "") return@map "$anchor x$n: $found"
+                        n++
+                    }
+                    if (n > 1) "refused" else "$anchor refused alone"
+                }
+            }.result
+            assertEquals(List(4) { "refused" }, answers)
+        } finally {
+            worker.requestTermination().result
+        }
     }
 
     @Test
@@ -128,3 +172,98 @@ private fun repeatedGroups(n: Int) = listOf(
     "(?:\\w)*d", "(?i)(?:A)*d", "(?:a|b)*d", "(?:[ab]|c)*d", "(?:a(?=a|d))*d", "(?:a(?!b))*d", "(?:a\\b|a)*d",
     "(?:a\$|a)*d",
 ).map { it to "a".repeat(n) + "d" }
+
+/** HarmonyRewrite's SNAPSHOT, written after each anchor, and the nodes HarmonyRewrite counts it as. */
+private const val SNAPSHOT = "(?:|(?!))"
+private const val SNAPSHOT_NODES = 3
+
+/**
+ * Harmony's nodes on the longest path through [written], counted as HarmonyRewrite's Writer counts a group's (closePath):
+ * a group, a lookaround too, two (its set and its end) and those of its longest alternative; an empty alternative one (an
+ * EmptySet); a class one, or two where it holds a lone surrogate (a CompositeRangeSet, which calls the set it holds); any
+ * other token one, and a quantifier none.
+ */
+private fun harmonyNodes(written: String): Int {
+    val outer = ArrayDeque<Pair<Int, Int>>()
+    var nodes = 0
+    var longest = 0
+    var at = 0
+    fun alternative() = if (nodes == 0) 1 else nodes
+    while (at < written.length) {
+        when (val c = written[at]) {
+            '(' -> {
+                // Flags alone ((?i)) open no group.
+                val flags = written.indexOfAny(charArrayOf(':', '=', '!', '>', ')'), at)
+                if (written.getOrNull(at + 1) == '?' && written[flags] == ')') {
+                    at = flags + 1
+                    continue
+                }
+                outer.addLast(nodes to longest)
+                nodes = 0
+                longest = 0
+                at++
+                if (written.getOrNull(at) == '?') at = written.indexOfAny(charArrayOf(':', '=', '!', '>'), at) + 1
+            }
+            '|' -> {
+                longest = maxOf(longest, alternative())
+                nodes = 0
+                at++
+            }
+            ')' -> {
+                val inner = maxOf(longest, alternative()) + 2
+                outer.removeLast().let { (n, l) ->
+                    nodes = n + inner
+                    longest = l
+                }
+                at++
+            }
+            '[' -> {
+                val (end, surrogate) = classEnd(written, at)
+                nodes += if (surrogate) 2 else 1
+                at = end
+            }
+            '?', '*', '+' -> at++
+            else -> {
+                nodes++
+                at += when {
+                    c != '\\' -> 1
+                    written[at + 1] == 'k' -> written.indexOf('>', at) + 1 - at
+                    else -> 2
+                }
+            }
+        }
+    }
+    return maxOf(longest, nodes)
+}
+
+/** The index past the class that begins at [at] in [written], and whether it holds a code point from U+D800 to U+DFFF. */
+private fun classEnd(written: String, at: Int): Pair<Int, Boolean> {
+    var i = at + 1
+    var surrogate = false
+    var from: Int? = null
+    while (written[i] != ']') {
+        val cp: Int
+        when {
+            written.startsWith("\\u", i) -> {
+                cp = written.substring(i + 2, i + 6).toInt(16)
+                i += 6
+            }
+            written.startsWith("\\Q", i) -> {
+                val end = written.indexOf("\\E", i)
+                cp = written.substring(i + 2, end).let { if (it.length == 2) 0x10000 else it[0].code }
+                i = end + 2
+            }
+            written[i] == '-' -> {
+                i++
+                continue
+            }
+            else -> {
+                cp = if (written[i].isHighSurrogate()) 0x10000 else written[i].code
+                i += if (written[i].isHighSurrogate()) 2 else 1
+            }
+        }
+        surrogate = surrogate || cp in 0xD800..0xDFFF || (from != null && from <= 0xDFFF && cp >= 0xD800)
+        from = if (written.getOrNull(i) == '-') cp else null
+    }
+    return i + 1 to surrogate
+}

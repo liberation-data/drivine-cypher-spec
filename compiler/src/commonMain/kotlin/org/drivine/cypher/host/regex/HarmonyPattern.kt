@@ -14,7 +14,7 @@ internal class HarmonyPattern(java: String) : JavaPattern {
 
     override fun find(text: String): List<String?>? = find(text, 0)?.let { groups(it).map { group -> group?.value } }
 
-    /** The match's groups, Java's alone: without the groups the rewrite wraps around some of them ([HarmonyRewrite.Rewritten.hidden]). */
+    /** The match's groups, Java's alone: without the groups the rewrite adds ([HarmonyRewrite.Rewritten.hidden]). */
     private fun groups(match: MatchResult): List<MatchGroup?> =
         if (rewritten.hidden.isEmpty()) match.groups.toList() else match.groups.filterIndexed { i, _ -> i !in rewritten.hidden }
 
