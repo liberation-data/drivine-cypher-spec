@@ -1194,11 +1194,12 @@ internal object HarmonyRewrite {
     private const val SNAPSHOT_NODES = 3
 
     /**
-     * The nodes on the path of `$` or `\Z` written ([Writer.dollar]), and at most of any other escape (`\b`, [Writer.boundary]),
-     * as [Writer.closePath] counts a group's: two for the group and its end, and those of its longest alternative.
+     * The nodes on the path of `$` or `\Z` written ([Writer.dollar]), and at most of any escape (`\b`, [Writer.boundary], 18;
+     * `\Z`, as `$`), as [Writer.closePath] counts a group's: two for the group and its end, and those of its longest
+     * alternative. A class holding a lone surrogate, as `\W` and [ANY] do, is two (a CompositeRangeSet calls the set it holds).
      */
-    private const val DOLLAR = 15 + SNAPSHOT_NODES
-    private const val BOUNDARY = 16 + SNAPSHOT_NODES
+    private const val DOLLAR = 19 + SNAPSHOT_NODES
+    private const val BOUNDARY = 19 + SNAPSHOT_NODES
 
     /** Any one code point, a pair whole, as [Writer.behind] takes the one before a place. */
     private val ANY = "[${write(listOf(0..0x10FFFF))}]"
