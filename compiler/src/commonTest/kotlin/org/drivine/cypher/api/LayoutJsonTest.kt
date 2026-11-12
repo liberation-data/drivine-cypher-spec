@@ -84,6 +84,10 @@ class LayoutJsonTest {
         // Typed, a tag keeps its kind, without its key, and a map with a `$t` key of its own is told from a tag.
         val typed = answer("{\"read\": ${json("{\"d\":{\"\$t\":\"date\",\"v\":\"2024-01-01\",\"s\":\"10000020240101\"},\"m\":{\"\$\$t\":1}}")}, \"typed\": true}")
         assertEquals("{\"d\":{\"\$t\":\"date\",\"v\":\"2024-01-01\"},\"m\":{\"\$t\":\"map\",\"v\":{\"\$t\":1}}}", CypherJson.writeValueAsString(typed["value"]!!))
+        // The column is given as its text so a whole number past 2^53 comes back as the store gave it, not rounded.
+        assertEquals("{\"value\":[9007199254740993]}", CompileJson.compile("{\"read\": \"[9007199254740993]\"}"))
+        // typed given as null is typed left out: a tag is read as its text.
+        assertEquals("{\"value\":\"2024-01-01\"}", CompileJson.compile("{\"read\": ${json("{\"\$t\":\"date\",\"v\":\"2024-01-01\",\"s\":\"10000020240101\"}")}, \"typed\": null}"))
     }
 
     @Test
