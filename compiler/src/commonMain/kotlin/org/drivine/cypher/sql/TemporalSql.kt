@@ -61,6 +61,9 @@ abstract class TemporalSql(protected val shared: (List<String>, (List<String>) -
     /** The name of the function that cuts a number's fraction off, as `TRUNC` does. */
     open val trunc = "TRUNC"
 
+    /** The number [number] rounded down to a whole number, as `FLOOR` does. */
+    open fun floor(number: String) = "FLOOR($number)"
+
     /** The timestamp of the epoch, 1970-01-01 at midnight. */
     open val epoch = "TIMESTAMP '1970-01-01 00:00:00'"
 
