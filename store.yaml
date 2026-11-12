@@ -7298,7 +7298,7 @@ errors:
       sqlite: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
   - name: "Postgres: 23505 from the unique index built anew under the name it is built under first"
     causes:
-      - {sqlState: "23505", vendorCode: 0, message: "ERROR: could not create unique index \"drivine_uq_personemail_5482a751_r\"\n  Detail: Key ((props ->> 'email'::text))=(a@x) is duplicated."}
+      - {sqlState: "23505", vendorCode: 0, message: "ERROR: could not create unique index \"drivine_uq2_personemail_5482a751_r\"\n  Detail: Key ((props -> 'email'::text))=(\"a@x\") is duplicated."}
     stores:
       neo4j: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
       memgraph: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
@@ -7308,7 +7308,7 @@ errors:
       sqlite: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
   - name: "SQLite: UNIQUE constraint failed from the unique index built anew under the name it is built under first"
     causes:
-      - {sqlState: null, vendorCode: 19, message: "[SQLITE_CONSTRAINT_UNIQUE] A UNIQUE constraint failed (UNIQUE constraint failed: index 'drivine_uq_Personemail_5482a751_r')"}
+      - {sqlState: null, vendorCode: 19, message: "[SQLITE_CONSTRAINT_UNIQUE] A UNIQUE constraint failed (UNIQUE constraint failed: index 'drivine_uq2_Personemail_5482a751_r')"}
     stores:
       neo4j: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
       memgraph: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
@@ -7318,7 +7318,7 @@ errors:
       sqlite: {violation: true, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
   - name: "Postgres: 23505 from a refill of the lowercased copies the old unique index refuses"
     causes:
-      - {sqlState: "23505", vendorCode: 0, message: "ERROR: duplicate key value violates unique constraint \"drivine_uq_persondrivineloweremail_b3ad0b9b\"\n  Detail: Key ((props ->> '__drivine.lower.email'::text))=(ann@x) already exists."}
+      - {sqlState: "23505", vendorCode: 0, message: "ERROR: duplicate key value violates unique constraint \"drivine_uq2_persondrivineloweremail_b3ad0b9b\"\n  Detail: Key ((props -> '__drivine.lower.email'::text))=(\"ann@x\") already exists."}
     stores:
       neo4j: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
       memgraph: {violation: true, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
@@ -7328,8 +7328,8 @@ errors:
       sqlite: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
   - name: "Oracle: ORA-00001 from a refill of the lowercased copies the old unique index refuses"
     causes:
-      - {sqlState: "23000", vendorCode: 1, message: "ORA-00001: unique constraint (DRIVINE.DRIVINE_UQ_PERSONDRIVINELOWEREMAIL_B3AD0B9B) violated on table DRIVINE.DRIVINE_NODE columns (SYS_NC00009$)\nORA-03301: (ORA-00001 details) row with column values (SYS_NC00009$:'ann@x') already exists\nORA-06512: at line 5\n\nhttps://docs.oracle.com/error-help/db/ora-00001/"}
-      - {message: "ORA-00001: unique constraint (DRIVINE.DRIVINE_UQ_PERSONDRIVINELOWEREMAIL_B3AD0B9B) violated on table DRIVINE.DRIVINE_NODE columns (SYS_NC00009$)\nORA-03301: (ORA-00001 details) row with column values (SYS_NC00009$:'ann@x') already exists\nORA-06512: at line 5\n"}
+      - {sqlState: "23000", vendorCode: 1, message: "ORA-00001: unique constraint (DRIVINE.DRIVINE_UQ2_PERSONDRIVINELOWEREMAIL_B3AD0B9B) violated on table DRIVINE.DRIVINE_NODE columns (SYS_NC00012$, SYS_NC00013$)\nORA-03301: (ORA-00001 details) row with column values (SYS_NC00012$:'string', SYS_NC00013$:'ann@x') already exists\nORA-06512: at line 5\n\nhttps://docs.oracle.com/error-help/db/ora-00001/"}
+      - {message: "ORA-00001: unique constraint (DRIVINE.DRIVINE_UQ2_PERSONDRIVINELOWEREMAIL_B3AD0B9B) violated on table DRIVINE.DRIVINE_NODE columns (SYS_NC00012$, SYS_NC00013$)\nORA-03301: (ORA-00001 details) row with column values (SYS_NC00012$:'string', SYS_NC00013$:'ann@x') already exists\nORA-06512: at line 5\n"}
     stores:
       neo4j: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
       memgraph: {violation: true, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
@@ -7339,7 +7339,7 @@ errors:
       sqlite: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
   - name: "SQLite: UNIQUE constraint failed within the error of a refill of the lowercased copies the old unique index refuses"
     causes:
-      - {sqlState: null, vendorCode: 1, message: "[SQLITE_ERROR] SQL error or missing database (org.sqlite.SQLiteException: [SQLITE_CONSTRAINT_UNIQUE] A UNIQUE constraint failed (UNIQUE constraint failed: index 'drivine_uq_Persondrivineloweremail_b3ad0b9b'))"}
+      - {sqlState: null, vendorCode: 1, message: "[SQLITE_ERROR] SQL error or missing database (org.sqlite.SQLiteException: [SQLITE_CONSTRAINT_UNIQUE] A UNIQUE constraint failed (UNIQUE constraint failed: index 'drivine_uq2_Persondrivineloweremail_b3ad0b9b'))"}
     stores:
       neo4j: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
       memgraph: {violation: false, blockedByIndex: false, buildTimeout: false, alreadyIndexed: false}
