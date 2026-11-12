@@ -812,6 +812,9 @@ abstract class SqlCypherCompiler(
     /** What an order sorts the JSON value [json] by where the statement makes it a list ([Value.Json.list]): as [sortKey] where the store orders lists as Cypher does. */
     protected open fun listSortKey(json: String) = sortKey(json)
 
+    /** The terms an order sorts the JSON list [json] by, the first deciding: [listSortKey] alone, unless a store's key may tie where the lists differ. */
+    protected open fun listSortKeys(json: String): List<String> = listOf(listSortKey(json))
+
     /** The term [term] of an `ORDER BY`, ascending or [descending]: null after every value ascending, and before them descending. */
     protected open fun orderTerm(term: String, descending: Boolean) = if (descending) "$term DESC" else term
 
@@ -3084,7 +3087,7 @@ abstract class SqlCypherCompiler(
             }.joinToString("\n")
             // What sorts a term in the query that reads this one: worked out there, of the column carried out, or that column.
             // Each is named for the query after it, which sorts by them in turn: the last by the term's column, any before it,
-            // where its kind comes ([openSortKey]), by that column with a number after it.
+            // where its kind comes ([openSortKey]) or a list's key ([listSortKeys]), by that column with a number after it.
             fun sortedBy(column: String): List<Pair<String, String>> =
                 (after[column] ?: sorted[column]?.invoke("$name.$column") ?: listOf("$name.$column")).let { terms ->
                     terms.mapIndexed { i, term -> (if (i == terms.lastIndex) column else "${column}_${i + 1}") to term }
@@ -6200,7 +6203,8 @@ abstract class SqlCypherCompiler(
          * What [sortable] sorts [value] by, in two: the value as a column carries it, and the terms that sort it, of that column.
          * A value whose kind the statement leaves open sorts as [openSortKey] has it, where its kind comes first; one it makes a
          * truth value, a temporal value, a text, a list or a node is of one kind, and sorts by one term alone: a zoned value or a
-         * list of them by its moments, another list by [listSortKey], any other by [sortKey].
+         * list of them by its moments, another list by [listSortKeys] (on Oracle a key, and the list where the key may tie), any
+         * other by [sortKey].
          */
         private fun sortTerm(value: Value): Pair<String, (String) -> List<String>> = when {
             value is Value.Bool -> value.sql to { listOf(it) }
@@ -6212,7 +6216,7 @@ abstract class SqlCypherCompiler(
             value is Value.Json && value.itemLists && value.itemItems?.zoned == true ->
                 comparable(value) to { listOf(momentsKey(it, value.itemItems, depth = 2)) }
             // A list the statement makes sorts as Cypher sorts lists, item by item; any other value as the store sorts its JSON.
-            isList(value) -> comparable(json(value)) to { listOf(listSortKey(it)) }
+            isList(value) -> comparable(json(value)) to { listSortKeys(it) }
             value !is Value.Json || value.temporal != null || isText(value) -> comparable(json(value)) to { listOf(sortKey(it)) }
             mayBeJsonNull(value) -> comparable(json(value)) to { jsonNullSortKey(it) }
             else -> comparable(json(value)) to { openSortKey(it) }
