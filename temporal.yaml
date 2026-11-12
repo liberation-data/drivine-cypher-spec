@@ -181,6 +181,29 @@ cases:
         cypher: "RETURN [toString(duration({milliseconds: 1500})), toString(duration({seconds: 1, microseconds: 7})), toString(duration({nanoseconds: 1000}))]"
         rows: [["PT1.5S", "PT1.000007S", "PT0.000001S"]]
 
+  - name: "The current moment in a time zone, or of null"
+    description: "date.statement(), datetime.transaction(), localtime.realtime() and the rest give the moment in the time zone they are given, and null where they are given null (drivine4j#425)."
+    steps:
+      - note: "Given null, each gives null, as in Neo4j, not the moment."
+        cypher: |
+          RETURN [date.statement(null), date.transaction(null), date.realtime(null), localtime.statement(null), localtime.transaction(null),
+                  localtime.realtime(null), time.statement(null), time.transaction(null), time.realtime(null), localdatetime.statement(null),
+                  localdatetime.transaction(null), localdatetime.realtime(null), datetime.statement(null), datetime.transaction(null),
+                  datetime.realtime(null)]
+        rows: [[null, null, null, null, null, null, null, null, null, null, null, null, null, null, null]]
+      - note: "And given null by a parameter."
+        cypher: "RETURN datetime.transaction($z) IS NULL"
+        parameters: {z: null}
+        rows: [true]
+      - note: "Given a zone, the moment there. The clocks at -12:00 and +14:00 are 26 hours apart: a day and 2 hours, of which .hours gives the 2; the date at +14:00 is a day or two after the date at -12:00."
+        cypher: |
+          RETURN {offset: datetime.statement('+05:00').offset, time: time.transaction('-03:30').offset, given: datetime.realtime($z).offset,
+                  days: duration.inDays(date.realtime('-12:00'), date.realtime('+14:00')).days IN [1, 2],
+                  local: duration.between(localdatetime.statement('-12:00'), localdatetime.statement('+14:00')).hours,
+                  clock: duration.between(localtime.statement('-05:00'), localtime.statement('+05:00')).hours IN [10, -14]}
+        parameters: {z: "+01:00"}
+        rows: [{offset: "+05:00", time: "-03:30", given: "+01:00", days: true, local: 2, clock: true}]
+
   - name: "Week-year fields, duration parts and zoned inequality"
     description: "A moment gives its week-year and offset fields, a duration its parts of a larger unit, and zoned values at different offsets are unequal."
     steps:

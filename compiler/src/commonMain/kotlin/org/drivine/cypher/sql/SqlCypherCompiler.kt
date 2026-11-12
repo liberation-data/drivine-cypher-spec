@@ -4778,6 +4778,30 @@ abstract class SqlCypherCompiler(
         }
 
         /**
+         * `date.statement()`, `datetime.transaction()` or `localtime.realtime()` and the rest, of [function]: the moment the
+         * statement runs, however it is asked for, as one statement is one moment here. Given a time zone, the moment there,
+         * as `datetime({datetime: …, timezone: …})` moves it, then of the function's kind; given null, null, as in Neo4j
+         * (liberation-data/drivine4j#425). A zone the statement writes or a parameter gives is read here, so one that is
+         * none, or one by name, which no store's text holds yet, is refused as [zone] refuses it; one an expression gives is
+         * refused, where it could give null in place of the moment.
+         */
+        private fun now(function: Expression.Function, scope: Map<String, Value>): Value {
+            val kind = Temporal.ofFunction(function.name.lowercase().substringBefore('.'))!!
+            if (function.arguments.isEmpty()) return Value.Json(scalar(temporals.now(kind)), temporal = kind)
+            if (function.arguments.size != 1) throw CompilerException("${function.name}() takes a time zone, or nothing.")
+            val written = function.arguments.single()
+            if (written !is Expression.Literal && written !is Expression.Parameter) unsupported("${function.name}() of a time zone an expression gives")
+            val given = given(written) ?: return expression(Expression.Literal(null), scope)
+            val text = given as? String ?: throw CompilerException("${function.name}() takes a time zone, a text, or nothing.")
+            zone(text)
+            val moment = Expression.Function("datetime", false, listOf(Expression.MapLiteral(listOf(
+                "datetime" to Expression.Function("datetime.${function.name.substringAfter('.')}", false, emptyList()),
+                "timezone" to Expression.Literal(text),
+            ))))
+            return expression(if (kind == Temporal.DATE_TIME) moment else Expression.Function(kind.function, false, listOf(moment)), scope)
+        }
+
+        /**
          * The offset's text the time zone [zone] written gives a value, as Neo4j takes one: `Z`, or an offset written `+01:00`.
          * A zone by name, which no store's text holds yet, is refused; any other text fails.
          */
@@ -5926,8 +5950,7 @@ abstract class SqlCypherCompiler(
                 "date", "localtime", "time", "localdatetime", "datetime", "duration" -> temporal(Temporal.ofFunction(name)!!, function, arguments, scope)
                 "timestamp" -> if (arguments.isEmpty()) Value.Json(scalar(temporals.field(temporals.now(Temporal.DATE_TIME), Temporal.DATE_TIME, "epochMillis")!!.sql))
                     else throw CompilerException("timestamp() takes no argument.")
-                // The moment the statement runs, however it is asked for: one statement is one moment here.
-                in TEMPORAL_NOW -> Value.Json(scalar(temporals.now(Temporal.ofFunction(name.substringBefore('.'))!!)), temporal = Temporal.ofFunction(name.substringBefore('.')))
+                in TEMPORAL_NOW -> now(function, scope)
                 in TEMPORAL_TRUNCATE -> {
                     val to = Temporal.ofFunction(name.substringBefore('.'))!!
                     if (arguments.size < 2) throw CompilerException("${function.name}() takes a unit and a value.")
