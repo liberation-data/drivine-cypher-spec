@@ -160,10 +160,12 @@ internal object StackRoom {
 
     /**
      * [text] as the engine reads it for [pattern]: on Kotlin/Native, checking as it reads that the stack keeps the
-     * pattern's reserve, where the thread hasn't stack enough for the most the engine can take. A group repeats only past a
-     * character, so the engine takes at most the pattern's path for each character and the end, and again in each
-     * lookaround it nests: that fitting, the text is read as it is, as a check at each read costs about
-     * half the time of a short match.
+     * pattern's reserve, where the thread hasn't stack enough for the most the engine can take; [text] itself where it has.
+     * The engine takes the pattern's path, and again in each lookaround it nests. Where the pattern repeats a group
+     * ([HarmonyRewrite.Rewritten.deepens]) it takes that again for each repetition, and a group repeats only past a
+     * character, so at most once for each character and the end; where it repeats none, it takes no more for a longer text.
+     * That fitting, the text is read as it is, as a check at each read costs more than the match: a full-text search's
+     * replace over 1,400 characters took 984 µs read through it, and takes 179 µs.
      */
     fun guarded(text: String, pattern: HarmonyRewrite.Rewritten): CharSequence {
         val low = stackLow()
@@ -171,7 +173,8 @@ internal object StackRoom {
         val reserve = reserve(pattern.path)
         val left = stackHere() - low
         if (left < reserve) throw StackRoomException()
-        val most = (text.length + 1.0) * (pattern.scans + 1) * pattern.path * stackBytesPerNode() + reserve
+        val repetitions = if (pattern.deepens) text.length + 1.0 else 1.0
+        val most = repetitions * (pattern.scans + 1) * pattern.path * stackBytesPerNode() + reserve
         return if (most <= left) text else Guarded(text, low + reserve)
     }
 

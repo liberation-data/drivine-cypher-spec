@@ -7,7 +7,11 @@ import kotlin.native.concurrent.Worker
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
+import kotlin.test.assertNotSame
+import kotlin.test.assertSame
+import kotlin.test.assertTrue
 
 /**
  * kotlin.text.Regex's recursion, which on Kotlin/Native would overflow the stack and end the host's process, refused before
@@ -29,6 +33,34 @@ class HarmonyStackTest {
     }
 
     @Test
+    fun `each kind of group written repeated over a long text is refused where the stack would run out`() {
+        for ((pattern, text) in repeatedGroups(300_000)) {
+            assertTrue(HarmonyRewrite.rewritten(pattern).deepens, pattern)
+            refused(pattern, text)
+        }
+    }
+
+    @Test
+    fun `a pattern that repeats no group reads a long text as it is with no check at each read`() {
+        val text = "a graph ".repeat(125_000)
+        val patterns = listOf(
+            "(^|[^[:alnum:]_])graph(?=\$|[^[:alnum:]_])", "(?i)\\bGRAPH\\b", ".*?h", "\\w+\$", "(?:a)?(?:x|a*)b??", "[^\\x{0}-\\x{10FFFF}]?",
+        )
+        for (pattern in patterns) {
+            val rewritten = HarmonyRewrite.rewritten(pattern)
+            assertFalse(rewritten.deepens, pattern)
+            assertSame<CharSequence>(text, StackRoom.guarded(text, rewritten), pattern)
+        }
+        assertEquals(2_000, JavaPatterns.compile("(^|[^[:alnum:]_])graph(?=\$|[^[:alnum:]_])").count(text.take(16_000)))
+        // A group repeated is read through the check where the text is long, and not where it is short.
+        val repeated = HarmonyRewrite.rewritten("(?:a|b)*")
+        assertNotSame<CharSequence>(text, StackRoom.guarded(text, repeated))
+        assertSame<CharSequence>("ab", StackRoom.guarded("ab", repeated))
+        // A class with nothing in it is written as a group, and repeated as one.
+        assertTrue(HarmonyRewrite.rewritten("[^\\x{0}-\\x{10FFFF}]*").deepens)
+    }
+
+    @Test
     fun `on a thread of a small stack too`() {
         val worker = Worker.start()
         try {
@@ -42,6 +74,30 @@ class HarmonyStackTest {
                 }
             }.result
             assertEquals(listOf("refused", "100"), answers)
+        } finally {
+            worker.requestTermination().result
+        }
+    }
+
+    @Test
+    fun `on a thread of a small stack a long text is matched where the pattern repeats no group and refused where it repeats one`() {
+        val worker = Worker.start()
+        try {
+            val answers = worker.execute(TransferMode.SAFE, { }) {
+                val text = "a".repeat(300_000) + "d"
+                val plain = listOf(".*?d", "a*d", "\\w+?d", "(?i)A+d", "(a+)d", "(?:x|a*)d", "a*(?=d)d").map { pattern ->
+                    JavaPatterns.compile(pattern).find(text)?.first()?.length.toString()
+                }
+                val repeated = repeatedGroups(300_000).map { (pattern, long) ->
+                    try {
+                        JavaPatterns.compile(pattern).find(long)?.first()?.length.toString()
+                    } catch (e: StackRoomException) {
+                        "refused"
+                    }
+                }
+                plain + repeated
+            }.result
+            assertEquals(List(7) { "300001" } + List(repeatedGroups(1).size) { "refused" }, answers)
         } finally {
             worker.requestTermination().result
         }
@@ -65,3 +121,10 @@ class HarmonyStackTest {
         }
     }
 }
+
+/** Each written group repeated over [n] characters, as each crashed a release library on 512 KiB unguarded: a, b or c, then d. */
+private fun repeatedGroups(n: Int) = listOf(
+    "(a)*d", "(?:a)*d", "(?<n>a)*d", "(a)*?d", "(?:a)*?d", "(?:a)+d", "(?:a){2,}d", "(?:a){0,2000000}d", "(?:.)*d",
+    "(?:\\w)*d", "(?i)(?:A)*d", "(?:a|b)*d", "(?:[ab]|c)*d", "(?:a(?=a|d))*d", "(?:a(?!b))*d", "(?:a\\b|a)*d",
+    "(?:a\$|a)*d",
+).map { it to "a".repeat(n) + "d" }

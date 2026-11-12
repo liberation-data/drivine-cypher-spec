@@ -59,8 +59,25 @@ internal object HarmonyRewrite {
      * Pattern has supplementary characters ([supplementary]), as its hasSupplementary says: a code point past the BMP or a
      * surrogate in the pattern, or a class, property or single literal whose predicate isn't BMP-only. Then Java's search
      * moves past a pair whole (StartS), and otherwise tries each character, between a pair's halves too (Start).
+     *
+     * And whether the stack Harmony takes grows with the text ([deepens]): whether what is written repeats a group, anything
+     * in parentheses, more than once (`*`, `+`, `*?`, `{n,}`, or `{n,m}` with m over 1). Harmony repeats a group by recursion
+     * (GroupQuantifierSet, which the group's end calls again), so the frames of the group's path pile up once a repetition:
+     * `(a)*`, `(?:a)*` (written in a hidden group), `(?:.)*`, `(?:a|b)*` and `(?:a(?=a))*` over 100,000 characters each
+     * crashed a release library on a 512 KiB thread before [StackRoom] guarded them. A quantifier on one character, greedy or
+     * lazy, loops (LeafQuantifierSet, FixedLengthQuantifierSet and their reluctant kinds): on a literal, a code point past
+     * the BMP, or a class, which `.`, `\w`, `\p{…}` and the literals of `(?i)` are written as. So does Harmony's search from
+     * each start. Those, and alternatives, lookaheads, `\b`, `$` and [SNAPSHOT] outside a repeated group, and a group's `?`
+     * and `??`, matched 300,000 characters and more on 512 KiB unguarded.
      */
-    class Rewritten(val text: String, val path: Int, val scans: Int, val hidden: Set<Int> = emptySet(), val supplementary: Boolean = true)
+    class Rewritten(
+        val text: String,
+        val path: Int,
+        val scans: Int,
+        val hidden: Set<Int> = emptySet(),
+        val supplementary: Boolean = true,
+        val deepens: Boolean = true,
+    )
 
     /** [java], written as [rewrite] writes it, with its path. */
     fun rewritten(java: String): Rewritten {
@@ -271,6 +288,9 @@ internal object HarmonyRewrite {
         private var longest = 0
         private val outer = ArrayDeque<Int>()
 
+        /** Whether a group is written repeated more than once, so far ([Rewritten.deepens]). */
+        private var deepens = false
+
         /** The lookaheads open, whether each group open is one, and the most open at once, of [Rewritten.scans]. */
         private var scans = 0
         private val scanning = ArrayDeque<Boolean>()
@@ -319,7 +339,7 @@ internal object HarmonyRewrite {
             flush()
             while (outer.isNotEmpty()) closePath()
             node(0)
-            return Rewritten(out.toString(), maxOf(nodes, longest), deepestScans, hidden, supplementary)
+            return Rewritten(out.toString(), maxOf(nodes, longest), deepestScans, hidden, supplementary, deepens)
         }
 
         /** The group just opened is a lookahead; or with [open] false, one is written alone here (`\b`, `$`). */
@@ -463,6 +483,8 @@ internal object HarmonyRewrite {
                 if (atom.repeatsEmpty && (quantifier.max ?: 2) > 1) throw UnsupportedPatternException("a group that can match nothing, repeated in a repeated group")
             }
             atom = atom.quantified(quantifier, group = last == Last.GROUP)
+            // What Harmony repeats as a group: a group, or a class with nothing in it, written as one (written).
+            if ((last == Last.GROUP || out.endsWith(NOTHING)) && (quantifier.max ?: 2) > 1) deepens = true
             if (last == Last.GROUP) groupQuantified(from, quantifier) else out.append(quantifier.text).append(quantifier.mark ?: "")
             last = Last.QUANTIFIED
         }
@@ -895,7 +917,7 @@ internal object HarmonyRewrite {
         }
 
         /** A set of code points as a class Harmony reads as Java's, or a group that matches nothing where it is empty. */
-        private fun written(ranges: List<IntRange>): String = if (ranges.isEmpty()) "(?:(?!))" else "[${write(ranges)}]"
+        private fun written(ranges: List<IntRange>): String = if (ranges.isEmpty()) NOTHING else "[${write(ranges)}]"
 
         /**
          * A class, `[…]`, worked out as the set of code points Java's holds ([clazz]) and written as one class of its ranges:
@@ -1118,6 +1140,9 @@ internal object HarmonyRewrite {
      * the state there.
      */
     private const val SNAPSHOT = "(?:|(?!))"
+
+    /** A class that holds nothing, as Harmony is given it: a group that matches nothing. */
+    private const val NOTHING = "(?:(?!))"
 
     /** The nodes [SNAPSHOT] puts on the path. */
     private const val SNAPSHOT_NODES = 3

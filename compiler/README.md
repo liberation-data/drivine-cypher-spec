@@ -531,13 +531,17 @@ node it passes and again for each repetition of a group, so `(a|b)*` recurses on
 `StackOverflowError` where its thread's stack runs out (measured on JDK 21: `(a|b)*` over about 770 characters on a 512 KiB
 stack, 7,800 on 1 MiB, 73,000 on 8 MiB); on Kotlin/Native an overflow is a crash that ends the host's process. So on
 Kotlin/Native (`StackRoom`) the module compiles a pattern only where the thread has stack left for the pattern's longest
-path through Harmony's nodes, 1 KiB a node (4 KiB in a debug binary) and 64 KiB more, and where the text is longer than
-that stack covers at a path a character, reads it through a check at each character that the stack keeps that much; past
-it the statement fails (`regexp: the regular expression takes more of this thread's stack than is left on this platform,
-…`). Measured on macOS arm64's release library, through SQLite: `(a|b)*` answers over 29,694 characters on the main
-thread's 8 MiB, where it crashed from 29,772, and 818 on a Python thread of 512 KiB, where it crashed from 949; groups
-nested 12,200 deep crashed compiling on 8 MiB, and are refused from 7,800; 20,300 nodes in a row (`a?` …) crashed, and are
-refused from 8,200.
+path through Harmony's nodes, 1 KiB a node (4 KiB in a debug binary) and 64 KiB more. Only a group repeated (`*`, `+`,
+`{n,}`, `{n,m}` with m over 1) takes more stack for a longer text, a path for each repetition: a quantifier on one
+character, `.`, `\w` and a class, greedy or lazy, loops, and so do alternatives and lookaheads outside such a group. So
+where the pattern repeats a group and the text is longer than the stack left covers at a path a character, or where it
+repeats none and the stack doesn't cover the path once for each lookahead nested, the text is read through a check at each
+character that the stack keeps that much, a check that made a full-text search's replace over 1,400 characters 984 µs
+where it is 179 µs without; past it the statement fails (`regexp: the regular expression takes more of this thread's
+stack than is left on this platform, …`). Measured on macOS arm64's release library, through SQLite: `(a|b)*` answers
+over 29,694 characters on the main thread's 8 MiB, where it crashed from 29,772, and 818 on a Python thread of 512 KiB,
+where it crashed from 949; groups nested 12,200 deep crashed compiling on 8 MiB, and are refused from 7,800; 20,300 nodes
+in a row (`a?` …) crashed, and are refused from 8,200.
 Kotlin/Wasm's overflow is a `RangeError` its host's JavaScript catches, and isn't checked.
 
 A process keeps the 256 patterns used last (`JavaPatterns`), for every connection: a pattern rewritten for Harmony takes a
