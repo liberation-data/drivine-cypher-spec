@@ -74,7 +74,10 @@ val generateGrammar = tasks.register<AntlrKotlinTask>("generateGrammar") {
     outputDirectory = layout.buildDirectory.dir("generated/antlr/org/drivine/cypher/grammar").get().asFile
 }
 
-/** The zone ids of the pinned JDK, and the tables of powers the double text and parse use: see gen/Generate.java. */
+/**
+ * The zone ids of the pinned JDK, the tables of powers the double text and parse use, and its Unicode's tables for a full-text
+ * query and the regular expressions off the JVM: see gen/Generate.java.
+ */
 val generateTables = tasks.register<Exec>("generateTables") {
     val generator = layout.projectDirectory.file("gen/Generate.java")
     val out = layout.buildDirectory.dir("generated/tables")
@@ -85,8 +88,9 @@ val generateTables = tasks.register<Exec>("generateTables") {
         delete(out)
         executable(pinnedJava().absolutePath)
     }
-    // Character's tables of block and script names, which the regular expressions' tables read (gen/Generate.java).
-    args("--add-opens", "java.base/java.lang=ALL-UNNAMED", generator.asFile.absolutePath, out.get().asFile.absolutePath, pinnedJdkVersion, pinnedTzdb)
+    // Character's tables of block and script names, which the regular expressions' tables read (gen/Generate.java). The
+    // heap held to what it needs, so a change that needs more fails here and not on a builder with less memory than this.
+    args("-Xmx512m", "--add-opens", "java.base/java.lang=ALL-UNNAMED", generator.asFile.absolutePath, out.get().asFile.absolutePath, pinnedJdkVersion, pinnedTzdb)
 }
 
 /** The module's version as the native library gives it (drivine_extension_version()): ModuleVersion.kt, from [version]. */

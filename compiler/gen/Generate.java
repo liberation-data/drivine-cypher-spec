@@ -384,21 +384,21 @@ public class Generate {
         // Scripts and blocks, by every name their forName takes (upper case), from Character's own tables of names.
         Map<String, Character.UnicodeScript> scriptNames = new TreeMap<>(field(Character.UnicodeScript.class, "aliases"));
         for (Character.UnicodeScript script : Character.UnicodeScript.values()) scriptNames.put(script.name(), script);
-        Map<Character.UnicodeScript, boolean[]> scripts = new LinkedHashMap<>();
-        Map<Character.UnicodeBlock, boolean[]> blocks = new LinkedHashMap<>();
+        // Each code point's script and block, and the ranges of each worked out once, for all its names: a table of
+        // code points for each at once would take a gigabyte of heap.
+        Character.UnicodeScript[] scriptOf = new Character.UnicodeScript[0x110000];
+        Character.UnicodeBlock[] blockOf = new Character.UnicodeBlock[0x110000];
         for (int cp = 0; cp < 0x110000; cp++) {
-            scripts.computeIfAbsent(Character.UnicodeScript.of(cp), s -> new boolean[0x110000])[cp] = true;
-            Character.UnicodeBlock block = Character.UnicodeBlock.of(cp);
-            if (block != null) blocks.computeIfAbsent(block, b -> new boolean[0x110000])[cp] = true;
+            scriptOf[cp] = Character.UnicodeScript.of(cp);
+            blockOf[cp] = Character.UnicodeBlock.of(cp);
         }
+        Map<Object, String> held = new java.util.HashMap<>();
         for (Map.Entry<String, Character.UnicodeScript> entry : scriptNames.entrySet()) {
-            boolean[] in = scripts.get(entry.getValue());
-            name.accept("script:" + entry.getKey(), ranges(in == null ? new boolean[0x110000] : in));
+            name.accept("script:" + entry.getKey(), held.computeIfAbsent(entry.getValue(), s -> ranges(where(scriptOf, s))));
         }
         Map<String, Character.UnicodeBlock> blockNames = field(Character.UnicodeBlock.class, "map");
         for (Map.Entry<String, Character.UnicodeBlock> entry : new TreeMap<>(blockNames).entrySet()) {
-            boolean[] in = blocks.get(entry.getValue());
-            name.accept("block:" + entry.getKey(), ranges(in == null ? new boolean[0x110000] : in));
+            name.accept("block:" + entry.getKey(), held.computeIfAbsent(entry.getValue(), b -> ranges(where(blockOf, b))));
         }
         // Character.toUpperCase and toLowerCase of each code point either changes, which case-insensitive matching reads.
         StringBuilder caseMap = new StringBuilder();
@@ -437,6 +437,13 @@ public class Generate {
             + "    /** `cp:upper:lower` in hexadecimal, Character.toUpperCase and toLowerCase of each code point either changes. */\n"
             + "    val CASE_MAP: String =\n" + chunks(caseMap.toString()) + "\n"
             + "}\n";
+    }
+
+    /** The code points [at] gives [value]. */
+    private static boolean[] where(Object[] at, Object value) {
+        boolean[] in = new boolean[at.length];
+        for (int cp = 0; cp < at.length; cp++) in[cp] = at[cp] == value;
+        return in;
     }
 
     private static String[] concat(String[] a, String[] b) {

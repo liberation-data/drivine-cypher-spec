@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory
 import org.drivine.cypher.host.regex.DrivinePatterns
 import org.drivine.cypher.search.TextQuery
+import org.drivine.cypher.sql.SqliteCypherCompiler
 import java.io.File
 import java.util.regex.Matcher
 import java.util.regex.Pattern
@@ -69,7 +70,7 @@ object Regexes {
         }
         for ((pattern, label) in USER) {
             add(pattern, "user", label)
-            add("^(?:$pattern)\\z", "user=~", label)
+            add(DrivinePatterns.matched(pattern), "user=~", label)
         }
         val hostTexts = host.mapNotNull { step -> (if (step["function"].textValue() == "regexp") step["args"][1] else step["args"][0]).textValue() }
         val texts = (TEXTS + hostTexts).distinct()
@@ -126,8 +127,8 @@ object Regexes {
             for (pattern in SqliteSqlPatterns.of(all)) patterns.putIfAbsent(pattern, request["cypher"].textValue())
         }
         // =~'s pieces around a user's pattern are measured whole, around users' patterns (USER).
-        patterns.remove("^(?:")
-        patterns.remove(")\\z")
+        patterns.remove(SqliteCypherCompiler.MATCHES_BEFORE)
+        patterns.remove(SqliteCypherCompiler.MATCHES_AFTER)
         // A pattern as a nested statement's JSON holds it, its backslashes doubled, is no pattern a host is given.
         return patterns.filterKeys { pattern -> pattern.replace("\\\\", "\\").let { it == pattern || it !in patterns } }
     }
