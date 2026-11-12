@@ -4582,6 +4582,8 @@ abstract class SqlCypherCompiler(
             val written = function.arguments.single()
             // A text the statement writes is worked out here, as the store would work it out.
             if (written is Expression.Literal && written.value is String) {
+                // An offset with seconds, which Neo4j takes, is refused as such, not as no value of the kind (drivine4j#424).
+                Regex("[+-][0-9]{2}:[0-9]{2}:[0-9]{2}$").find(written.value as String)?.let { unsupported("The offset with seconds '${it.value}'") }
                 val canonical = try {
                     Temporals.canonical(written.value as String, kind) ?: throw CompilerException("'${written.value}' is no ${function.name}.")
                 } catch (e: NumberFormatException) {
@@ -4602,20 +4604,25 @@ abstract class SqlCypherCompiler(
                 fields.keys.firstOrNull { it !in known }?.let { unsupported("${function.name}() of a map with $it") }
                 val numbers = fields.filterKeys { it != "timezone" }.mapValues { number(comparable(json(it.value))) }
                 if (kind == Temporal.DURATION) return of(temporals.duration(numbers))
-                val timezone = fields["timezone"]?.let { text(comparable(json(it))) }
-                // A zone by name, which no store's text holds yet, is refused rather than given as null, or on SQLite failing as
-                // the statement runs: so a value made from such a moment, `time({time: other})`, is refused too (#508).
-                val zone = (written.entries.firstOrNull { it.first == "timezone" }?.second as? Expression.Literal)?.value as? String
-                if (zone != null && CommonTime.offsetId(zone) == null && CommonTime.isRegion(zone)) unsupported("The time zone '$zone'")
+                // A zone the statement writes or a parameter gives is read here: one by name, which no store's text holds yet,
+                // an offset with seconds, and a text that is no zone are refused rather than given as null, or on SQLite failing
+                // as the statement runs, so a value made from such a moment, `time({time: other})`, is refused too (#508,
+                // drivine4j#424); an offset is given as its id, `+02:00` for `+02:00:00`, which every store's text reads. One an
+                // expression gives fails the statement where it is no offset the store reads.
+                val zoneWritten = written.entries.firstOrNull { it.first == "timezone" }?.second
+                val zoneGiven = zoneWritten?.takeIf { it is Expression.Literal || it is Expression.Parameter }?.let { given(it) } as? String
+                val zoneJson = fields["timezone"]?.let { comparable(json(it)) }
+                val timezone = zoneGiven?.let { "'${offset(it)}'" } ?: zoneJson?.let { text(it) }
+                val guard = zoneGuard(function, zoneWritten, zoneJson)
                 if (fields.keys.any { it in Temporals.CALENDAR_FIELDS }) {
                     val date = calendarDate(function, written)
                     if (date != null) {
                         val day = mapOf("year" to "${date.year}", "month" to "${date.month.number}", "day" to "${date.day}")
-                        return of(temporals.of(numbers - Temporals.CALENDAR_FIELDS + day, timezone, kind))
+                        return of(guard(temporals.of(numbers - Temporals.CALENDAR_FIELDS + day, timezone, kind)))
                     }
-                    return of(temporals.ofCalendar(numbers, timezone, kind))
+                    return of(guard(temporals.ofCalendar(numbers, timezone, kind)))
                 }
-                return of(temporals.of(numbers, timezone, kind))
+                return of(guard(temporals.of(numbers, timezone, kind)))
             }
             val given = arguments.single() as? Value.Json ?: throw CompilerException("${function.name}() takes a text or a map of its fields.")
             val text = text(comparable(given))
@@ -4700,7 +4707,8 @@ abstract class SqlCypherCompiler(
          * no temporal value or is of a kind that hasn't what it is to give, fields of two calendars, a date of its fields that
          * is not whole (a year, a month and a day; a week and a day of the week; an ordinal day; a quarter and a day of the
          * quarter) beside a value that gives the time, a field of the time without the one above it where no value gives the
-         * time, and a number written that is not whole or past its field's range. A zone by name is refused.
+         * time, and a number written that is not whole or past its field's range. A zone by name, or an offset with seconds, is
+         * refused as [zone] refuses it, or where an expression gives it fails as [zoneGuard] has it.
          */
         private fun fromTemporal(kind: Temporal, function: Expression.Function, written: Expression.MapLiteral, scope: Map<String, Value>): String {
             val name = function.name
@@ -4761,20 +4769,24 @@ abstract class SqlCypherCompiler(
                     else -> throw CompilerException("$name() takes a whole number for $key, not ${if (literal is String) "'$literal'" else org.drivine.cypher.text.JavaText.of(literal)}.")
                 }
             }
+            val zoneRead = entries["timezone"]?.takeUnless { it is Expression.Parameter && given(it) is String }
+            val zoneJson = zoneRead?.takeUnless { it is Expression.Literal }?.let { comparable(json(expression(it, scope))) }
             val timezone = entries["timezone"]?.let { value ->
                 when {
                     value == Expression.Literal(null) -> throw CompilerException("$name() takes a time zone, not null.")
                     value is Expression.Literal -> (value.value as? String)?.let { zone(it) } ?: throw CompilerException("$name() takes a time zone, not ${org.drivine.cypher.text.JavaText.of(value.value)}.")
-                    else -> text(comparable(json(expression(value, scope))))
+                    value is Expression.Parameter && given(value) is String -> zone(given(value) as String)
+                    else -> text(zoneJson!!)
                 }
             }
+            val guard = zoneGuard(function, zoneRead, zoneJson)
             // A date of fields written as numbers alone is worked out here, as a map of them is (see calendarDate).
             if (date == null && calendar != null && calendar.first != "a month") {
                 calendarDate(function, Expression.MapLiteral(written.entries.filter { (key, _) -> key == "year" || key in Temporals.CALENDAR_FIELDS }))?.let { day ->
                     fields = fields - Temporals.CALENDAR_FIELDS + mapOf("year" to "${day.year}", "month" to "${day.month.number}", "day" to "${day.day}")
                 }
             }
-            return temporals.over(date, time, fields, timezone, kind)
+            return guard(temporals.over(date, time, fields, timezone, kind))
         }
 
         /**
@@ -4803,14 +4815,62 @@ abstract class SqlCypherCompiler(
 
         /**
          * The offset's text the time zone [zone] written gives a value, as Neo4j takes one: `Z`, or an offset written `+01:00`.
-         * A zone by name, which no store's text holds yet, is refused; any other text fails.
+         * A zone by name or an offset with seconds, which no store's text holds yet, is refused (see [offset]); any other
+         * text fails.
          */
         private fun zone(zone: String): String {
+            val id = offset(zone)
+            if (!Regex("Z|[+-][0-9]{2}:[0-9]{2}").matches(zone)) throw CompilerException("'$zone' is no time zone.")
+            return "'$id'"
+        }
+
+        /**
+         * The offset the zone [zone] is, as `CommonTime.offsetId` writes it. A zone by name, which no store's text holds yet,
+         * and an offset with seconds, which no store's text or Oracle's TIMESTAMP WITH TIME ZONE holds, are refused, as is a
+         * text that is no zone (drivine4j#424).
+         */
+        private fun offset(zone: String): String {
             val id = CommonTime.offsetId(zone)
-            return when {
-                id != null && Regex("Z|[+-][0-9]{2}:[0-9]{2}").matches(zone) -> "'$id'"
-                id == null && CommonTime.isRegion(zone) -> unsupported("The time zone '$zone'")
-                else -> throw CompilerException("'$zone' is no time zone.")
+            if (id == null) {
+                if (CommonTime.isRegion(zone)) unsupported("The time zone '$zone'")
+                throw CompilerException("'$zone' is no time zone.")
+            }
+            if (id.count { it == ':' } == 2) unsupported("The offset with seconds '$zone'")
+            return id
+        }
+
+        /**
+         * What a temporal value [function] makes in the time zone [written] is passed through, its JSON being [zone]. A
+         * zone the statement writes, or a parameter gives, as a text is read with [offset] here, and the value is as it is;
+         * one written, or a parameter that gives, as no text is refused. A zone an expression gives, which the store reads as the statement
+         * runs, fails the statement where it is given and is no offset the store's text reads, as a zone by name or an
+         * offset with seconds is, or as a value that is no text is, rather than give null in its place (drivine4j#424): the
+         * zone is tested, not the value's null, which a field that is null makes too.
+         */
+        private fun zoneGuard(function: Expression.Function, written: Expression?, zone: String?): (String) -> String {
+            if (written == null || zone == null || written is Expression.Literal) {
+                when (val value = (written as? Expression.Literal)?.value) {
+                    null -> {}
+                    is String -> offset(value)
+                    else -> throw CompilerException("${function.name}() takes a time zone, not ${org.drivine.cypher.text.JavaText.of(value)}.")
+                }
+                return { it }
+            }
+            if (written is Expression.Parameter) {
+                when (val given = given(written)) {
+                    null -> return { it }
+                    is String -> { offset(given); return { it } }
+                    else -> throw CompilerException("${function.name}() takes a time zone, not ${org.drivine.cypher.text.JavaText.of(given)}.")
+                }
+            }
+            val read = literal(temporalSql.regex("^${Temporal.OFFSET}"))
+            return { made ->
+                shared(made, zone) { (value, x) ->
+                    shared(text(x)) { (z) ->
+                        "CASE WHEN ${isJsonNull(x)} OR $z IS NOT NULL AND ${temporalSql.matches(z, read)} THEN $value " +
+                            "ELSE ${text(scalar(failure(ZONE_NOT_COMPILED, "COALESCE($z, ${typeOf(x)})")))} END"
+                    }
+                }
             }
         }
 
@@ -6386,6 +6446,12 @@ abstract class SqlCypherCompiler(
 
         /** What `round()` fails with, as Neo4j fails it, a precision below 0 or past [MAX_COUNT]. */
         const val PRECISION_OUT_OF_RANGE = "round() takes a precision from 0 to 2147483647, as in Neo4j."
+
+        /**
+         * What a statement fails with where a time zone an expression gives is no offset a store's text reads (drivine4j#424),
+         * named by its text, or by its kind where it is no text.
+         */
+        const val ZONE_NOT_COMPILED = "A time zone that is not Z or an offset of hours and minutes (+hh:mm), such as a zone by name, an offset with seconds, '+01' or a value that is no text, is not compiled to SQL yet:"
 
         /**
          * The greatest start or length `substring()`, `left()` and `right()` take, and the greatest precision `round()`
