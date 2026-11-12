@@ -3170,6 +3170,11 @@ cases:
         cypher: "UNWIND [[$t, 2], ['a' + $t, 1], [1, 0]] AS xs RETURN xs[1] ORDER BY xs"
         parameters: {t: {$repeat: "x", times: 40000}}
         rows: [1, 2, 0]
+      - note: "Such a text is read as itself, not as its JSON, whose quote would sort it before 'a'."
+        only: [neo4j, sql]
+        cypher: "UNWIND [[$t], ['a']] AS xs RETURN size(xs[0]) ORDER BY xs"
+        parameters: {t: {$repeat: "x", times: 40000}}
+        rows: [1, 40000]
       - note: "A list collected sorts so too."
         cypher: "UNWIND [1, 2] AS g UNWIND (CASE g WHEN 1 THEN [5] ELSE ['a'] END) AS v WITH g, collect(v) AS c RETURN g ORDER BY c"
         rows: [2, 1]
