@@ -753,6 +753,14 @@ cases:
         only: [neo4j, sql]
         note: "Neo4j: 22000. A text that is no time zone."
         error: true
+      - cypher: "UNWIND [1] AS z RETURN datetime({year: 2024, month: 1, day: 1, timezone: z})"
+        only: [neo4j, sql]
+        note: "A time zone an expression gives that is no text fails, rather than give null (drivine4j#424)."
+        error: true
+      - cypher: "UNWIND [1] AS z RETURN datetime({date: date('2024-03-15'), timezone: z})"
+        only: [sql]
+        note: "And beside another value."
+        error: true
       - note: "A zone by name an expression gives, which no SQL store's text holds, fails the statement there rather than give null; Neo4j gives the moment in that zone (drivine4j#424)."
         only: [sql]
         cypher: "UNWIND ['Europe/Stockholm'] AS z RETURN datetime({year: 2024, month: 1, day: 1, timezone: z})"
