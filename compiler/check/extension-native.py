@@ -7,7 +7,7 @@ the same process, so one image serves both.
 
 With host.json (the spec's host.yaml as `./gradlew hostSpecJson` writes it), each `function` step of host.yaml whose
 function the extension registers is called through SQL, as SQLite calls it for a compiled statement, and must give its
-`result`, or its values ascend; the functions it doesn't register yet are named. HostSpecTest runs the same steps on the
+`result`, fail with its `error`, or its values ascend; the functions it doesn't register yet are named. HostSpecTest runs the same steps on the
 module's code directly, on every target.
 
 In place of the library, `--installed` checks the installed Python package drivine-cypher-compiler's library instead,
@@ -94,6 +94,15 @@ def host_steps(connection, host):
                         before = connection.execute(f"SELECT {name}(?) < {name}(?)", (a, b)).fetchall()[0][0]
                         if before != 1:
                             report(f"{where}: {name}({a!r}) before {name}({b!r})", False, f"got {before!r}")
+                elif "error" in step:
+                    args = [sql_value(v) for v in step["args"]]
+                    refuse_nan(args)
+                    try:
+                        got = connection.execute(f"SELECT {name}({', '.join('?' for _ in args)})", args).fetchall()[0][0]
+                        report(f"{where}: {name}{tuple(args)!r}", False, f"gave {got!r}, expected it to fail with {step['error']!r}")
+                    except apsw.Error as e:
+                        if step["error"] not in str(e):
+                            report(f"{where}: {name}{tuple(args)!r}", False, f"failed with {e}, expected {step['error']!r}")
                 else:
                     args = [sql_value(v) for v in step["args"]]
                     refuse_nan(args)

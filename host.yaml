@@ -518,3 +518,75 @@ cases:
         value: [{$float: "Infinity"}, {$float: "-Infinity"}]
       - read: {store: "sqlite", nonFinite: false, column: '[1,2.0,"NaN"]'}
         value: [1, 2.0, "NaN"]
+
+  - name: "drivine_temporal"
+    description: "drivine_temporal(operation, …) works out what SQLite can't of a timestamp, the text of a wall clock to the microsecond (2024-03-15T10:30:00.000000), by its operation: add_time(timestamp, days, nanos) so many days and nanoseconds later; seconds_between(from, to) the nanoseconds from one to the other, a whole number; extract(timestamp, 'NANOSECOND_OF_MINUTE') its nanoseconds into the minute; local(text, kind) and utc(text, kind) the wall clock an ISO text of a temporal kind reads, its offset left out or moved to UTC. A timestamp keeps the microsecond: a finer part is cut, never rounded. Null where an argument is. The steps here pin what drivine4j#418, #421 and #424 fix; a step noted drivine4j#421 (layout 2) needs a timestamp of nine digits, and is held until it is the store's."
+    pairs:
+      temporal.yaml: ["Adding durations", "duration.between", "Fields of a date, time and moment"]
+    steps:
+      - function: "drivine_temporal"
+        args: ["add_time", "2024-03-15T10:30:00.000000", 1, 1500000000]
+        result: "2024-03-16T10:30:01.500000"
+      - note: "Nanoseconds finer than the timestamp's microsecond are cut, not rounded."
+        function: "drivine_temporal"
+        args: ["add_time", "2024-03-15T10:30:00.000000", 0, 1999]
+        result: "2024-03-15T10:30:00.000001"
+      - function: "drivine_temporal"
+        args: ["add_time", "2024-03-15T00:00:00.000000", 0, -1]
+        result: "2024-03-14T23:59:59.999999"
+      - note: "Three days of nanoseconds, past a 32-bit integer's range."
+        function: "drivine_temporal"
+        args: ["add_time", "2024-03-15T00:00:00.000000", 0, 259200000000000]
+        result: "2024-03-18T00:00:00.000000"
+      - function: "drivine_temporal"
+        args: ["add_time", null, 1, 1]
+        result: null
+      - note: "drivine4j#421 (layout 2): a nanosecond is kept."
+        function: "drivine_temporal"
+        args: ["add_time", "2024-03-15T10:30:00.000000000", 0, 1]
+        result: "2024-03-15T10:30:00.000000001"
+      - note: "drivine4j#418: whole nanoseconds, so a fraction of a second comes out exact, not 22.14199996."
+        function: "drivine_temporal"
+        args: ["seconds_between", "2024-03-15T10:30:00.000000", "2024-03-15T10:30:22.142000"]
+        result: 22142000000
+      - function: "drivine_temporal"
+        args: ["seconds_between", "2024-03-15T10:30:22.142000", "2024-03-15T10:30:00.000000"]
+        result: -22142000000
+      - function: "drivine_temporal"
+        args: ["seconds_between", "1970-01-01T00:00:00.000000", "2024-03-15T10:30:00.000000"]
+        result: 1710498600000000000
+      - function: "drivine_temporal"
+        args: ["seconds_between", "2024-03-15T10:30:00.000000", null]
+        result: null
+      - function: "drivine_temporal"
+        args: ["extract", "2024-03-15T10:30:22.142000", "NANOSECOND_OF_MINUTE"]
+        result: 22142000000
+      - function: "drivine_temporal"
+        args: ["extract", "2024-03-15T10:30:00.000001", "NANOSECOND_OF_MINUTE"]
+        result: 1000
+      - note: "drivine4j#421 (layout 2)."
+        function: "drivine_temporal"
+        args: ["extract", "2024-03-15T10:30:59.999999999", "NANOSECOND_OF_MINUTE"]
+        result: 59999999999
+      - note: "drivine4j#424: an offset with seconds, which the compiler refuses in a text but passes on from a map's timezone (time({hour: 12, timezone: '+02:05:59'})), fails here rather than being misread as hours and minutes."
+        function: "drivine_temporal"
+        args: ["utc", "10:00:00+02:05:59", "TIME"]
+        error: "'10:00:00+02:05:59' is no temporal value"
+      - note: "An offset of hours and minutes is read, as before."
+        function: "drivine_temporal"
+        args: ["utc", "10:00:00+02:05", "TIME"]
+        result: "1970-01-01T07:55:00.000000"
+      - function: "drivine_temporal"
+        args: ["local", "2024-03-15T10:00:00+02:05:59", "DATE_TIME"]
+        error: "'2024-03-15T10:00:00+02:05:59' is no temporal value"
+      - function: "drivine_temporal"
+        args: ["local", "2024-03-15T10:00:00+02:05", "DATE_TIME"]
+        result: "2024-03-15T10:00:00.000000"
+      - note: "drivine4j#421 (layout 2): a text's nanoseconds are kept."
+        function: "drivine_temporal"
+        args: ["local", "2024-03-15T10:30:00.123456789", "LOCAL_DATE_TIME"]
+        result: "2024-03-15T10:30:00.123456789"
+      - note: "drivine4j#421 (layout 2)."
+        function: "drivine_temporal"
+        args: ["utc", "2024-03-15T10:30:00.123456789+01:00", "DATE_TIME"]
+        result: "2024-03-15T09:30:00.123456789"
