@@ -478,26 +478,48 @@ POSIX class (`[:alnum:]`, `[:alpha:]`, `[:digit:]`, `[:space:]`, `[:upper:]`, `[
 - On the JVM, `java.util.regex` itself.
 - On Kotlin/Native and Kotlin/Wasm, `kotlin.text.Regex`, which on both is the stdlib's own engine (a port of Apache
   Harmony's), not JavaScript's `RegExp` on wasm. It reads Java's syntax, but its classes are ASCII's, its case-insensitivity
-  and some of its constructs aren't Java's, and it has bugs with code points past the BMP. So `HarmonyRewrite` writes the
-  pattern so it matches as Java's does: each class escape and property (`\w`, `\b`, `\p{L}`, `\p{IsLatin}`, `\p{InGreek}`,
-  `\p{javaLowerCase}` …) as the ranges Java's holds, from tables gen/Generate.java writes on the pinned JDK
-  (`RegexTables`); each class, `[…]`, as one class of the code points Java's holds, its nested classes, intersections and
-  negation worked out as Java reads them (Harmony's aren't Java's: `[[^a]b]`, `[^a&&b]`); under `(?i)`, each literal and
-  class as the code points Java's case-insensitivity takes for it; `.` as the class Java's is; `$` and `\Z` so they don't
-  match between a `\r` and a `\n`; a lookaround in a group of its own, as Harmony crashes on one quantified (`(?=a)+`);
-  `\Q…\E` read first, as Java reads it; and `(?x)`'s comments taken out. A quantifier on what has no width (`^{2}`,
-  `\B{1,2}+`) is written as Java repeats it, once or optionally; a non-capturing group repeated in a capturing group of its
-  own, hidden from the match's groups, as Harmony repeats one at the same place until the stack overflows (`(?:b|)*a` in
-  "b"); a group's `??` as `(?:|…)`, as Harmony's counts wrongly; and each lookbehind's length measured as Java's `TreeInfo` measures it, so one Java finds unbounded is refused
-  as Java refuses it (`(?<=(?:ab)*)`, a back reference in one), and one whose maximum overflows never matches, as in Java
-  (`(?<=a+b+)`). What it can't match as Java does it refuses, failing the statement
-  with the construct's name (`regexp: \G is not supported on this platform; rewrite the pattern without it.`): `\G`, `\X`,
-  `\N{…}`, `\b{g}`, a back reference under `(?i)`, a back reference to a group the pattern opens only after it (`(?:\1b|(a))+`,
-  which Java matches in a repetition), `(?-U)` and `(?-u)`, which turn off what the patterns always have on, a lazy
-  quantifier on a group but `*?` and `??` (`(bc)+?`) and a possessive one (`(a?){1,2}+`), which Harmony counts wrongly, a lookbehind whose maximum length overflows to where Java's answer
-  depends on where in the text it is, and a pattern written as more than 2,000,000 characters (each `\b` is some 30,000:
-  a thousand of them took 1.2 GB and two seconds to compile). The comments in `HarmonyRewrite` and `HarmonyPattern` name the Kotlin 2.2.20 bugs each workaround is for, and
-  `HarmonyBugsTest` fails once Kotlin fixes one, so its workaround can come out.
+  and some of its constructs aren't Java's, and it has bugs with code points past the BMP. So there the functions take a
+  fixed grammar, the part of Java's that is simple and that `HarmonyRewrite` makes Harmony match exactly, and refuse the
+  rest by name.
+
+**Native and wasm take**, each matching as Java's does:
+
+- literals and escapes (`\t`, `\n`, `\xNN`, `\x{…}`, `\uNNNN`, `\0`…, `\cX`, a backslash before punctuation, `\Q…\E`);
+- classes, `[…]`, nested, negated and intersected as Java reads them, POSIX's (`[:alnum:]` …), `\p{…}` and `\P{…}` by every
+  name Java knows, `\w`, `\d`, `\s`, `\h`, `\v` and their negations, and `.`: each written out as the code points Java's
+  holds with `UNICODE_CHARACTER_CLASS`, from tables gen/Generate.java writes on the pinned JDK (`RegexTables`);
+- greedy and lazy quantifiers (`*`, `+`, `?`, `{n}`, `{n,}`, `{n,m}`, and each with `?`) on one of those;
+- greedy quantifiers on a group, and `*?` and `??` on one;
+- capturing, named and non-capturing groups, and alternatives;
+- `^`, `$`, `\b`, `\B`, `\A`, `\z` and `\Z`;
+- the inline flags `(?i)`, `(?s)`, `(?m)`, `(?x)`, `(?d)`, `(?u)`, `(?U)` and `(?c)`, alone or as `(?i:…)`;
+- and one lookahead: `(?=…)` or `(?!…)` of literals, classes, alternatives, `$` and `\z` alone, unquantified, as a
+  full-text search's `(?=$|[^[:alnum:]_])` is.
+
+Every pattern the compiler, a full-text search and `host.yaml` write is inside it: `DrivinePatternsTest` builds each from
+the compiler's own constants and functions and compiles it on every target, and `RegexOracleTest` fails where any the
+compiler writes over the corpus is refused.
+
+**Native and wasm refuse**, failing the statement with the construct's name (`regexp: a lookbehind is not supported on
+this platform; rewrite the pattern without it.`):
+
+- a lookbehind, and any lookahead but the one above (`a lookahead holding a quantifier`, `… a group`, `… an anchor but $
+  and \z`);
+- a back reference, `\1` or `\k<name>`;
+- a possessive quantifier, and an atomic group, `(?>…)`;
+- `\G`, `\X`, `\R`, `\N{…}` and `\b{g}`;
+- a quantifier on what has no width (`^*`, `\b{2}`, `(?=a)+`), and a quantifier on a quantifier (`a{2}{3}`, which Java
+  reads);
+- a lazy quantifier on a group but `*?` and `??` (`(bc)+?`), which Harmony counts wrongly;
+- groups repeated within each other more than 3 deep (`((((a)*b)+c)*d)*`): the compiler's take 2, and each level deeper
+  multiplies the backtracking and stack Harmony takes where its repetition of groups is least like Java's;
+- `(?-U)` and `(?-u)`, which turn off what the patterns always have on;
+- and a pattern written as more than 2,000,000 characters (each `\b` is some 30,000: a thousand of them took 1.2 GB and
+  two seconds to compile).
+
+This is a documented limit of native and wasm alone: on the JVM the functions keep the whole of `java.util.regex`. The
+comments in `HarmonyRewrite` and `HarmonyPattern` name the Kotlin 2.2.20 bugs each workaround within the grammar is for,
+and `HarmonyBugsTest` fails once Kotlin fixes one, so its workaround can come out.
 
 **The stack.** Harmony's engine recurses: as it compiles, into each group and along each node, and as it matches, for each
 node it passes and again for each repetition of a group, so `(a|b)*` recurses once a character. Java's does too, and throws
@@ -648,7 +670,8 @@ The JVM is the oracle. `./gradlew jvmOracle` writes, into `build/oracle`:
   the mutants, each a full-text search gives, each of `host.yaml`'s, and users' `=~` patterns written and wrapped as `=~`
   wraps them, over texts of many scripts, code points past the BMP and every line break; whether each is found, its first
   match's groups, its count and every match replaced, or Java's refusal; and what `(?i)` takes for each code point with a
-  case. `RegexOracleTest` fails on any other answer, and on any refusal but the platform's named ones.
+  case. `RegexOracleTest` fails on any other answer, on any refusal but the platform's named ones, and on any refusal of a
+  pattern the compiler, a full-text search or `host.yaml` gives.
 - `search-golden.json`: drivine4j's full-text search statements (see [Full-text search](#full-text-search)), which
   `FullTextSearchGoldenTest` reads on every target. Its requests are in `corpus.jsonl` too.
 - `standins-<name>.txt`: what Java gives where the module stands in for it, worked out by Java's own API on the pinned

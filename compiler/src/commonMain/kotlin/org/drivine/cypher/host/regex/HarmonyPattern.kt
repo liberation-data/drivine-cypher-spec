@@ -124,7 +124,7 @@ internal object StackRoom {
      * [text] as the engine reads it for [pattern]: on Kotlin/Native, checking as it reads that the stack keeps the
      * pattern's reserve, where the thread hasn't stack enough for the most the engine can take. A group repeats only past a
      * character, so the engine takes at most the pattern's path for each character and the end, and again in each
-     * lookaround or atomic group it nests: that fitting, the text is read as it is, as a check at each read costs about
+     * lookaround it nests: that fitting, the text is read as it is, as a check at each read costs about
      * half the time of a short match.
      */
     fun guarded(text: String, pattern: HarmonyRewrite.Rewritten): CharSequence {

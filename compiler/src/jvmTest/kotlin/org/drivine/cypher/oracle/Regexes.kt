@@ -3,6 +3,7 @@ package org.drivine.cypher.oracle
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory
+import org.drivine.cypher.host.regex.DrivinePatterns
 import org.drivine.cypher.search.TextQuery
 import java.io.File
 import java.util.regex.Matcher
@@ -58,6 +59,9 @@ object Regexes {
         }
         compilerPatterns(out).forEach { (pattern, cypher) -> add(pattern, "compiler", null, cypher) }
         searchPatterns(out).forEach { (pattern, query) -> add(pattern, "search", null, query) }
+        // The compiler's and a full-text search's patterns from their own constants, as DrivinePatternsTest checks the grammar of.
+        DrivinePatterns.compiler.forEach { (name, pattern) -> add(pattern, "compiler", null, name) }
+        DrivinePatterns.search.forEach { (name, pattern) -> add(pattern, "search", null, name) }
         for (step in host) {
             val args = step["args"]
             val pattern = (if (step["function"].textValue() == "regexp") args[0] else args[1]).textValue() ?: continue
@@ -337,14 +341,6 @@ object Regexes {
         "(a){0}\\1|b" to "backreference to no match", "(a)?\\1b" to "backreference to no match", "(a)|b\\1" to "backreference to no match",
         "a|" to "empty alternative", "|a" to "empty alternative", "()" to "empty group", "(|a)+" to "empty alternative", "(?:(a)|b)+" to "repeated group",
         "(a|(b))+" to "repeated group", "(?<=(a))b" to "group in a lookbehind", "(?=(a))a" to "group in a lookahead",
-        // Lookbehinds' lengths as Java measures them: refused where unbounded, never matched where the maximum overflows.
-        "(?<=(a)\\1)b" to "lookbehind length", "(a)(?<!\\1)b" to "lookbehind length", "(?<=\\1)a" to "lookbehind length",
-        "(?<=(?:ab)*)c" to "lookbehind length", "(?<=(?:a|b)+)c" to "lookbehind length", "(?<=(a|b){2})c" to "lookbehind length",
-        "(?<=(?:ab){0,5})c" to "lookbehind length", "(?<=x(?:a|bc){1,3})d" to "lookbehind length", "(?<=\\R+)a" to "lookbehind length",
-        "(?<=\\R{1,3})a" to "lookbehind length", "(?<=a+b+)c" to "lookbehind length", "(?<!a+b+)c" to "lookbehind length",
-        "(?<=a+b)c" to "lookbehind length", "(?<=a+b+cd)e" to "lookbehind length", "(?<=(?=a+)a)b" to "lookbehind length",
-        "(?<=a{1,}b{1,})c" to "lookbehind length", "(?<=xa*?)c" to "lookbehind length", "(?<=(?:ab)*+)c" to "lookbehind length",
-        "(?<=(?>a+)+)c" to "lookbehind length", "(?<=(?:a+)?)c" to "lookbehind length",
         // Non-capturing groups repeated, which Harmony repeats at one place until the stack overflows.
         "(?:b|)*a" to "repeated empty alternative", "(?:|)*a" to "repeated empty alternative", "(?:(|))*a" to "repeated empty alternative",
         "(?:a*|)*a" to "repeated empty alternative", "(?:b|){3,}a" to "repeated empty alternative", "(?i:|)*a" to "repeated empty alternative",
@@ -354,7 +350,17 @@ object Regexes {
         "\\z{2,}?" to "quantified \\z", "(?=a){1,2}+a" to "quantified lookaround", "\\2+?" to "quantified backreference past the groups",
         "\\2*a" to "quantified backreference past the groups", "(a?){1,2}+b" to "possessive group", "(?:a?){1,2}+" to "possessive group",
         "(bc)??d" to "lazy group", "(?:bc)??d" to "lazy group", "(bc)*?d" to "lazy group", "(bc)+?" to "lazy group", "(?:bc){2}?" to "lazy group",
-        "\\R+?" to "\\R lazy", "\\R{2,}?" to "\\R lazy", "()?+?" to "syntax error", "(a)*+?" to "syntax error",
+        "()?+?" to "syntax error", "(a)*+?" to "syntax error",
+        // The lookaheads HarmonyRewrite takes, of literals, classes, alternatives, $ and \z, as a full-text search's, and those it refuses.
+        "a(?=b|c)" to "lookahead", "a(?!\\z)" to "lookahead", "a(?=\$|[^[:alnum:]_])" to "lookahead", "a(?![^a]|\$)" to "lookahead",
+        "(?i)k(?=\\w|\$)" to "lookahead", "a(?=.)" to "lookahead", "a(?=b+)" to "lookahead quantified within", "a(?=(?:b))" to "lookahead group within",
+        "a(?=\\b)" to "lookahead anchor within", "(?!^)a" to "lookahead anchor within", "a(?=(?i)b)" to "lookahead flags within",
+        // Quantifiers on quantifiers, which Java reads as one atom's.
+        "a{2}{3}" to "stacked quantifiers", "a*{2}" to "stacked quantifiers", "(?:ab)?{2}" to "stacked quantifiers", "(?x)a{1 0}" to "{n} under (?x)",
+        "a{2,x}" to "syntax error", "a{2" to "syntax error", "a{99999999999}" to "syntax error", "(?i)*a" to "syntax error", "a(?i)*" to "syntax error",
+        // Groups repeated within each other, to the depth HarmonyRewrite takes and past it.
+        "((a|b)*c)*" to "nested repeated groups", "(((a)*b)+c)*" to "nested repeated groups", "((((a)*b)+c)*d)*" to "nested repeated groups",
+        "(?:(?:(?:a|bc)+d)?e)*f" to "nested repeated groups",
     )
 
     /** The spec's directory, and the oracle's (corpus.jsonl and mutants.jsonl already written there). */

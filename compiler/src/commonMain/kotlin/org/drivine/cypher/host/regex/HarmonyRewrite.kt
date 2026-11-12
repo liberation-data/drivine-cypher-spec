@@ -7,7 +7,24 @@ import org.drivine.DrivineInternalApi
  * `kotlin.text.Regex` on Kotlin/Native and Kotlin/Wasm so that it matches what Java's does ([HarmonyPattern]). Both
  * targets' `Regex` is the stdlib's own engine (`nativeWasmMain/kotlin/text/regex`, a port of Apache Harmony's), not the
  * platform's: it reads Java's syntax, but not as Java does with `UNICODE_CHARACTER_CLASS`, and has bugs of its own
- * (measured against Java in #108; `RegexOracleTest` checks every target against Java's answers):
+ * (measured against Java in #108; `RegexOracleTest` checks every target against Java's answers).
+ *
+ * It takes a fixed grammar, the part of Java's that is simple and that Harmony can be made to match exactly, and refuses
+ * the rest by name ([UnsupportedPatternException]):
+ *
+ * - literals and escapes; classes, `[…]`, POSIX's, `\p{…}`, `\w`, `\d`, `\s` and the others; `.`;
+ * - greedy and lazy quantifiers on one of those; greedy quantifiers on a group, and `*?` and `??`;
+ * - capturing, named and non-capturing groups, and alternatives;
+ * - `^`, `$`, `\b`, `\B`, `\A`, `\z`, `\Z`, and the inline flags `(?i)`, `(?s)`, `(?m)`, `(?x)`, `(?d)`, `(?u)`, `(?U)`, `(?c)`;
+ * - a lookahead, `(?=…)` or `(?!…)`, of literals, classes, alternatives, `$` and `\z` alone, unquantified: a full-text
+ *   search's `(?=$|[^[:alnum:]_])` (TextQuery.lookingAhead).
+ *
+ * Refused: a lookbehind, any other lookahead, a back reference (`\1`, `\k<name>`), a possessive quantifier, an atomic group,
+ * `\G`, `\X`, `\R`, `\N{…}`, `\b{g}`, `(?-U)` and `(?-u)`, a quantifier on what has no width (`^*`, `\b{2}`, `(?=a)+`), a
+ * quantifier on a quantifier (`a{2}{3}`), a lazy quantifier on a group but `*?` and `??`, groups repeated within each other
+ * more than [MAX_NESTED] deep, and a pattern written as more than [MAX_WRITTEN] characters.
+ *
+ * Within that grammar, Harmony is written so it reads as Java does:
  *
  * - Its class escapes (`\w`, `\d`, `\s`, `\b`) and POSIX classes (`\p{Alnum}` …) are ASCII's, its general categories
  *   (`\p{L}` …) wrong past the BMP, and it knows few of Java's property names: each is written out as the ranges Java's
@@ -17,23 +34,12 @@ import org.drivine.DrivineInternalApi
  * - Its classes' nesting, intersections and negation are not Java's (`[[^a]b]`, `[^a&&b]`): each class is worked out here
  *   as the set of code points Java's holds, and written as one class of ranges.
  * - Its `.` misses a match after a line break in a search (`.+` in "\na"): written as the class Java's `.` is.
- * - Its `$` and `\Z` match between a `\r` and a `\n`, and a quantifier on a lookaround crashes it: each written so it
- *   doesn't.
+ * - Its `$` and `\Z` match between a `\r` and a `\n`: each written so it doesn't.
  * - It reads `(?x)`'s whitespace and comments otherwise: they are taken out here.
- * - It refuses `\x{…}`, and a back reference to a group the pattern never opens (which never matches in Java): written as
- *   the code point, and as `(?!)`.
+ * - It refuses `\x{…}`: written as the code point.
  * - Two bugs in Kotlin 2.2.20 with code points past the BMP in a pattern: see [astral] and [write].
- * - Its repetition of what has no width, its lazy repetition of a group, and its repetition of a
- *   non-capturing group (which can overflow the stack) aren't Java's: see [Writer.zeroWidthQuantified],
- *   [Writer.groupQuantified] and [Writer]'s wrap.
- * - It measures no lookbehind's length as Java does: [Behind] does, refusing what Java refuses.
- *
- * What it can't make match as Java's does, it refuses by name ([UnsupportedPatternException]): `\G`, `\X`, `\N{…}`,
- * `\b{g}`, a back reference under `(?i)` (Java folds each code point of it, Harmony its own way), a back reference to a
- * group the pattern opens only after it (which Harmony refuses, and Java matches in a repetition), and `(?-U)` and `(?-u)`,
- * which turn off what drivine4j's patterns always have on; a lazy quantifier on a group but `*?` and `??`; a possessive
- * quantifier on a group; and a pattern
- * written as more than [MAX_WRITTEN] characters.
+ * - Its lazy repetition of a group, and its repetition of a non-capturing group (which can overflow the stack), aren't
+ *   Java's: see [Writer.groupQuantified] and [Writer]'s wrap.
  */
 internal object HarmonyRewrite {
 
@@ -42,8 +48,8 @@ internal object HarmonyRewrite {
 
     /**
      * [java] written for kotlin.text.Regex ([text]), for [StackRoom]: the most of Harmony's nodes on a path through it
-     * ([path]), and how deep its lookarounds and atomic groups nest at most ([scans]), each of which Harmony matches in
-     * frames of its own above those of the path that reaches it.
+     * ([path]), and how deep its lookaheads nest at most ([scans]), each of which Harmony matches in frames of its own above
+     * those of the path that reaches it; and the capturing groups Harmony has that Java's hasn't ([hidden]).
      */
     class Rewritten(val text: String, val path: Int, val scans: Int, val hidden: Set<Int> = emptySet())
 
@@ -62,6 +68,13 @@ internal object HarmonyRewrite {
      * is 30 million, 1.2 GB and two seconds), where Java's takes none.
      */
     const val MAX_WRITTEN = 2_000_000
+
+    /**
+     * How deep groups repeated within each other may be: `((a)*)*` is two. The compiler's patterns take two (a time's
+     * `(:[0-9]{2}([.][0-9]+)?)?`); each level deeper multiplies the backtracking Harmony does and the frames it takes for
+     * each character, where its repetition of groups is the part of it least like Java's.
+     */
+    const val MAX_NESTED = 3
 
     /**
      * [p] with each `\Q…\E`'s characters written as literals, as Java's Pattern.RemoveQEQuoting writes them before it reads
@@ -119,6 +132,22 @@ internal object HarmonyRewrite {
     /** A literal code point, and how it is written where nothing need be made of it. */
     private class Literal(val cp: Int, val text: String)
 
+    /** A quantifier: [max] null where it has none (`*`, `+`, `{n,}`), and [mark] the `?` or `+` after it that makes it lazy or possessive. */
+    private class Quantifier(val min: Int, val max: Int?, val mark: Char?) {
+        /** As Harmony reads it, greedy. */
+        val text: String = when {
+            min == 0 && max == null -> "*"
+            min == 1 && max == null -> "+"
+            min == 0 && max == 1 -> "?"
+            max == null -> "{$min,}"
+            max == min -> "{$min}"
+            else -> "{$min,$max}"
+        }
+    }
+
+    /** What the atom just written is, for a quantifier after it. */
+    private enum class Last { NONE, SINGLE, ZERO, GROUP, QUANTIFIED }
+
     /**
      * [wrap]: the groups, by the order they open in, to write in a capturing group of their own, which [Rewritten.hidden]
      * names: each non-capturing group that is repeated. Harmony's NonCapturingJointSet keeps where the group began in the
@@ -136,40 +165,38 @@ internal object HarmonyRewrite {
         private val openings = ArrayDeque<Int>()
         private val starts = ArrayDeque<Int>()
 
-        /**
-         * Where in [out] the atom just written begins, where it is one of no width (`^`, `\b`, a lookaround) ([zeroAt]) or a
-         * group ([groupAt]); else -1.
-         */
-        private var zeroAt = -1
+        /** What the atom just written is, and where it is a group, where in [out] it begins and how deep the groups repeated in it nest. */
+        private var last = Last.NONE
         private var groupAt = -1
+        private var groupNested = 0
 
-        /** Whether the group just written is `\R`'s, which holds no capturing group, so may be written twice. */
-        private var line = false
+        /** How deep the groups repeated in the group open nest, so far; of each group around it, the same, saved as it opened. */
+        private var nested = 0
+        private val outerNested = ArrayDeque<Int>()
 
-        /** Harmony's capturing groups so far, Java's and wraps; each Java group's number in Harmony's; and the wraps'. */
+        /** Harmony's capturing groups so far, Java's and wraps; and the wraps'. */
         private var harmonyGroups = 0
-        private val harmonyNumbers = mutableListOf(0)
         private val hidden = mutableSetOf<Int>()
 
         private val out = StringBuilder()
         private val stack = ArrayDeque<Flags>()
 
-        /** What closes each group open, as [stack] holds its flags: `))` for a lookaround, written in a group of its own. */
+        /** What closes each group open, as [stack] holds its flags: `))` for a lookahead, written in a group of its own. */
         private val closers = ArrayDeque<String>()
+
+        /** What kind each group open is: `(` non-capturing, `c` capturing, `=` a lookahead. */
+        private val kinds = ArrayDeque<Char>()
         private var flags = Flags()
         private var at = 0
 
-        /** The capturing groups opened so far, as Java counts them for a back reference. */
-        private var groups = 0
+        /** Whether a lookahead is open, whose body takes only literals, classes, alternatives, `$` and `\z`. */
+        private var ahead = false
 
         /**
          * The literals read since the last other token under `(?i)`, which Java reads as one atom: one alone is a single, two
          * or more a slice, which take different code points ([JavaCase]).
          */
         private val run = mutableListOf<Literal>()
-
-        /** The smallest number of a back reference to a group not yet opened where it is, 0 where none is: see [backReference]. */
-        private var forward = 0
 
         /**
          * Harmony's nodes on the longest path through the pattern written so far, as [StackRoom] counts them: in the group
@@ -180,30 +207,13 @@ internal object HarmonyRewrite {
         private var longest = 0
         private val outer = ArrayDeque<Int>()
 
-        /** The lookarounds and atomic groups open, whether each group open is one, and the most open at once, of [Rewritten.scans]. */
+        /** The lookaheads open, whether each group open is one, and the most open at once, of [Rewritten.scans]. */
         private var scans = 0
         private val scanning = ArrayDeque<Boolean>()
         private var deepestScans = 0
 
-        /**
-         * For each group open, the lookbehind whose length Java measures the tokens in it for ([Behind]): the group's own where
-         * it is a lookbehind, none in a lookahead, else its enclosing group's. And what kind each group is: `(` a group, `>` an
-         * atomic group, `=` a lookahead, `<` a lookbehind.
-         */
-        private val behinds = ArrayDeque<Behind?>()
-        private val kinds = ArrayDeque<Char>()
-
-        /** Whether the last token was a quantifier, so a `?` or `+` after it is its lazy or possessive mark. */
-        private var quantified = false
-
-        /** [token] to the lookbehind measuring where it is. */
-        private fun java(token: Behind.Token) {
-            behinds.lastOrNull()?.tokens?.add(token)
-            quantified = token is Behind.Quantifier
-        }
-
-        /** A group of [kind] opened, measured by [behind]. */
-        private fun opened(kind: Char, behind: Behind?) {
+        /** A group of [kind] opened. */
+        private fun opened(kind: Char) {
             openings.addLast(opens)
             starts.addLast(out.length)
             if (opens++ in wrap) {
@@ -211,7 +221,6 @@ internal object HarmonyRewrite {
                 hidden += ++harmonyGroups
             }
             kinds.addLast(kind)
-            behinds.addLast(behind)
         }
 
         /** [n] more nodes on the path: a node a token is in Harmony, or the few one written as a lookaround is. */
@@ -226,6 +235,8 @@ internal object HarmonyRewrite {
             outer.addLast(longest)
             nodes = 0
             longest = 0
+            outerNested.addLast(nested)
+            nested = 0
         }
 
         /** The group's path closed: its longest alternative, and the group itself, on its enclosing alternative's path. */
@@ -235,18 +246,19 @@ internal object HarmonyRewrite {
             val inner = maxOf(nodes, longest) + 2
             longest = outer.removeLast()
             nodes = outer.removeLast() + inner
+            groupNested = nested
+            nested = maxOf(outerNested.removeLast(), nested)
         }
 
         fun write(): Rewritten {
             while (at < p.length) atom()
             flush()
-            if (forward in 1..groups) throw UnsupportedPatternException("a back reference to a later group")
             while (outer.isNotEmpty()) closePath()
             node(0)
             return Rewritten(out.toString(), maxOf(nodes, longest), deepestScans, hidden)
         }
 
-        /** The group just opened is a lookaround or an atomic group; or with [open] false, one is written alone here (`\b`). */
+        /** The group just opened is a lookahead; or with [open] false, one is written alone here (`\b`, `$`). */
         private fun scan(open: Boolean = true) {
             if (open) {
                 scanning[scanning.lastIndex] = true
@@ -255,6 +267,14 @@ internal object HarmonyRewrite {
             deepestScans = maxOf(deepestScans, scans + if (open) 0 else 1)
         }
 
+        /** Refuses an anchor in a lookahead but `$` and `\z`. */
+        private fun anchor() {
+            if (ahead) throw UnsupportedPatternException("a lookahead holding an anchor but \$ and \\z")
+        }
+
+        /** Whether a quantifier begins at [i]: `*`, `+`, `?`, or a `{` and a digit, as Java's closure reads one. */
+        private fun quantifierAt(i: Int) = p.getOrNull(i)?.let { it in "*+?" || it == '{' && p.getOrNull(i + 1) in '0'..'9' } == true
+
         private fun atom() {
             val c = p[at]
             if (flags.x && spaceOrComment(c)) {
@@ -262,16 +282,7 @@ internal object HarmonyRewrite {
                 at = past(at)
                 return
             }
-            val zero = zeroAt
-            val group = groupAt
-            val twice = line
-            zeroAt = -1
-            groupAt = -1
-            line = false
-            if (c in "*+?" || c == '{' && QUANTIFIER.matchAt(p, at) != null) {
-                if (zero >= 0) return zeroWidthQuantified(zero)
-                if (group >= 0) return groupQuantified(group, twice)
-            }
+            if (quantifierAt(at)) return quantified()
             if (c == '\\') {
                 val literal = charEscape()
                 if (literal != null) {
@@ -282,72 +293,18 @@ internal object HarmonyRewrite {
                 }
                 return
             }
+            flush()
+            last = Last.SINGLE
             when (c) {
-                '*', '+', '?' -> {
-                    flushQuantified()
-                    if (quantified && c != '*') {
-                        (behinds.lastOrNull()?.tokens?.lastOrNull() as? Behind.Quantifier)?.mark = c
-                        quantified = false
-                    } else {
-                        java(Behind.Quantifier(if (c == '+') 1 else 0, if (c == '?') 1 else Behind.MAX_REPS))
-                    }
-                    out.append(c)
-                    node()
-                    at++
-                }
-                '{' -> {
-                    val quantifier = QUANTIFIER.matchAt(p, at)
-                    if (quantifier != null) {
-                        flushQuantified()
-                        val bounds = quantifier.value.trim('{', '}').split(',')
-                        val min = bounds[0].toIntOrNull() ?: Behind.MAX_REPS
-                        val max = if (bounds.size == 1) min else bounds[1].takeIf { it.isNotEmpty() }?.let { it.toIntOrNull() ?: Behind.MAX_REPS }
-                        java(Behind.Quantifier(min, max ?: Behind.MAX_REPS, open = max == null))
-                        out.append(quantifier.value)
-                        node()
-                        at += quantifier.value.length
-                    } else {
-                        // Java refuses a { before anything but a digit; past the digit, (?x)'s whitespace, which is taken out.
-                        if (p.getOrNull(at + 1) !in '0'..'9') throw IllegalArgumentException("Illegal repetition")
-                        flush()
-                        out.append(c)
-                        at++
-                    }
-                }
-                '[' -> {
-                    flush()
-                    characterClass()
-                }
+                // Java's closure refuses a { before anything but a digit.
+                '{' -> throw IllegalArgumentException("Illegal repetition")
+                '[' -> characterClass()
                 '(' -> {
-                    flush()
                     group()
+                    last = Last.NONE
                 }
-                ')' -> {
-                    flush()
-                    val closer = closers.removeLastOrNull() ?: ")"
-                    val kind = kinds.removeLastOrNull()
-                    val opening = openings.removeLastOrNull()
-                    val start = starts.removeLastOrNull()
-                    if (kind == '(' && p.getOrNull(past(at + 1))?.let { it in "*+?" || it == '{' && QUANTIFIER.matchAt(p, past(at + 1)) != null } == true) {
-                        wrapping += opening!!
-                    }
-                    val behind = behinds.removeLastOrNull()
-                    if (kind == '(' || kind == 'c' || kind == '>') java(Behind.Close)
-                    // A lookbehind Java's never matches: a positive one fails, and a negative one holds.
-                    val never = kind == '<' && behind!!.never()
-                    if (never && !behind!!.negative) out.insert(behind.at, "(?!)")
-                    out.append(if (never && behind!!.negative) ")|)" else closer)
-                    if (opening in wrap) out.append(')')
-                    if (kind == '=' || kind == '<') zeroAt = start!!
-                    if (kind == '(' || kind == 'c' || kind == '>') groupAt = start!!
-                    quantified = false
-                    flags = stack.removeLastOrNull() ?: flags
-                    closePath()
-                    at++
-                }
+                ')' -> close()
                 '.' -> {
-                    flush()
-                    java(Behind.Leaf.CHAR)
                     node()
                     out.append(
                         when {
@@ -359,25 +316,21 @@ internal object HarmonyRewrite {
                     at++
                 }
                 '$' -> {
-                    flush()
-                    java(Behind.Leaf.ZERO)
-                    zeroAt = out.length
+                    last = Last.ZERO
                     out.append(dollar("$"))
                     node(DOLLAR)
                     scan(open = false)
                     at++
                 }
                 '^' -> {
-                    flush()
-                    java(Behind.Leaf.ZERO)
-                    zeroAt = out.length
+                    anchor()
+                    last = Last.ZERO
                     out.append(c)
                     node()
                     at++
                 }
                 '|' -> {
-                    flush()
-                    java(Behind.Alternative)
+                    last = Last.NONE
                     out.append(c)
                     longest = maxOf(longest, nodes)
                     nodes = 0
@@ -391,83 +344,108 @@ internal object HarmonyRewrite {
             }
         }
 
-        /**
-         * The quantifier at [at], of the atom of no width written at [from]: as Java repeats one, which matches it once and
-         * stops, as it makes no progress. Harmony's repetition of one (`^{2}`, `^++`, `\B{1,2}+`, `$+?` …) isn't Java's: so
-         * with no minimum it is written `?` (`??` lazy), and with one, not at all.
-         */
-        private fun zeroWidthQuantified(from: Int) {
-            val quantifier = quantifier()
-            if (quantifier.min == 0) {
-                out.insert(from, "(?:")
-                out.append(if (quantifier.mark == '?') ")??" else ")?")
-            }
-        }
-
-        /**
-         * The quantifier at [at], of the group written at [from]. Harmony's lazy repetition of a group counts its repetitions
-         * wrongly, as it doesn't count back one that fails (`(bc)+?` in "xbc" finds an empty match, `(?:bc){2}?` matches one
-         * `bc`): `*?` counts none, and `??` is written as the alternatives it is, `(?:|…)`; any other is refused. Its
-         * possessive one stops at an empty repetition before the minimum, where Java counts it (`(a?){1,2}+` in "b"), and
-         * the same greedy one in an atomic group, `(?>(a?){1,2})b`, misses Java's match in "tab" from the second character
-         * (Kotlin 2.2.20): refused.
-         */
-        private fun groupQuantified(from: Int, twice: Boolean) {
-            val written = at
-            val quantifier = quantifier()
-            val text = p.substring(written, at).filterNot { flags.x && spaceOrComment(it) }.let { if (quantifier.mark != null) it.dropLast(1) else it }
-            when (quantifier.mark) {
-                '+' -> throw UnsupportedPatternException("a possessive quantifier on a group")
-                '?' -> when {
-                    quantifier.min == 0 && quantifier.max == 1 -> {
-                        out.insert(from, "(?:|")
-                        out.append(')')
-                    }
-                    quantifier.min == 0 && quantifier.open -> out.append("*?")
-                    // \R+?, \R{2,}?: \R as many times as the minimum, then as many more as it takes.
-                    twice && quantifier.open -> {
-                        val atom = out.substring(from)
-                        out.append('{').append(quantifier.min).append('}').append(atom).append("*?")
-                    }
-                    else -> throw UnsupportedPatternException("a lazy quantifier on a group but *? and ??")
-                }
-                else -> out.append(text)
-            }
-        }
-
-        /** The quantifier at [at], read past (with its lazy or possessive mark), as a token of the lookbehind measuring. */
-        private fun quantifier(): Behind.Quantifier {
-            val c = p[at]
-            val min: Int
-            val max: Int
-            var open = false
-            if (c == '{') {
-                val bounds = QUANTIFIER.matchAt(p, at)!!.value.also { at += it.length }.trim('{', '}').split(',')
-                min = bounds[0].toIntOrNull() ?: Behind.MAX_REPS
-                open = bounds.size == 2 && bounds[1].isEmpty()
-                max = if (bounds.size == 1) min else if (open) Behind.MAX_REPS else bounds[1].toIntOrNull() ?: Behind.MAX_REPS
+        /** The group open closed, at [at]. */
+        private fun close() {
+            val kind = kinds.removeLastOrNull() ?: throw IllegalArgumentException("Unmatched closing ')'")
+            val closer = closers.removeLast()
+            val opening = openings.removeLast()
+            val start = starts.removeLast()
+            if (kind == '(' && quantifierAt(past(at + 1))) wrapping += opening
+            out.append(closer)
+            if (opening in wrap) out.append(')')
+            if (kind == '=') {
+                ahead = false
+                last = Last.ZERO
             } else {
-                at++
-                min = if (c == '+') 1 else 0
-                max = if (c == '?') 1 else Behind.MAX_REPS
-                open = c != '?'
+                last = Last.GROUP
+                groupAt = start
+            }
+            flags = stack.removeLast()
+            closePath()
+            at++
+        }
+
+        /** The quantifier at [at], of the atom just written. */
+        private fun quantified() {
+            // Java refuses a quantifier with no atom before it, or after another but the { of a quantifier.
+            if (last == Last.NONE || last == Last.QUANTIFIED) throw IllegalArgumentException("Dangling meta character '${p[at]}'")
+            if (ahead) throw UnsupportedPatternException("a lookahead holding a quantifier")
+            // Harmony's repetition of what has no width isn't Java's (`^{2}`, `$+?`, and a quantified lookaround crashes it).
+            if (last == Last.ZERO) throw UnsupportedPatternException("a quantifier on what has no width")
+            if (last == Last.SINGLE) flushQuantified()
+            val from = groupAt
+            val quantifier = quantifier()
+            if (quantifier.mark == '+') throw UnsupportedPatternException("a possessive quantifier")
+            if (last == Last.GROUP) groupQuantified(from, quantifier) else out.append(quantifier.text).append(quantifier.mark ?: "")
+            last = Last.QUANTIFIED
+        }
+
+        /**
+         * The quantifier of the group written at [from]. Harmony's lazy repetition of a group counts its repetitions wrongly,
+         * as it doesn't count back one that fails (`(bc)+?` in "xbc" finds an empty match, `(?:bc){2}?` matches one `bc`):
+         * `*?` counts none, and `??` is written as the alternatives it is, `(?:|…)`; any other is refused.
+         */
+        private fun groupQuantified(from: Int, quantifier: Quantifier) {
+            val nesting = groupNested + 1
+            if (nesting > MAX_NESTED) throw UnsupportedPatternException("groups repeated within each other more than $MAX_NESTED deep")
+            nested = maxOf(nested, nesting)
+            when {
+                quantifier.mark == null -> out.append(quantifier.text)
+                quantifier.min == 0 && quantifier.max == 1 -> {
+                    out.insert(from, "(?:|")
+                    out.append(')')
+                }
+                quantifier.min == 0 && quantifier.max == null -> out.append("*?")
+                else -> throw UnsupportedPatternException("a lazy quantifier on a group but *? and ??")
+            }
+        }
+
+        /**
+         * The quantifier at [at], read past with its lazy or possessive mark, as Java's closure and curly read it: under `(?x)`,
+         * a `{` takes its first digit right after it, and whitespace and comments anywhere after that.
+         */
+        private fun quantifier(): Quantifier {
+            val c = p[at++]
+            val min: Int
+            var max: Int?
+            when (c) {
+                '*' -> { min = 0; max = null }
+                '+' -> { min = 1; max = null }
+                '?' -> { min = 0; max = 1 }
+                else -> {
+                    min = number()
+                    max = min
+                    if (p.getOrNull(at) == ',') {
+                        at = past(at + 1)
+                        max = if (p.getOrNull(at) == '}') null else number()
+                    }
+                    if (p.getOrNull(at) != '}') throw IllegalArgumentException("Unclosed counted closure")
+                    at++
+                    if (max != null && max < min) throw IllegalArgumentException("Illegal repetition range")
+                }
             }
             val mark = p.getOrNull(past(at))?.takeIf { it == '?' || it == '+' }
             if (mark != null) at = past(at) + 1
-            // Java refuses a quantifier after it, which the group it is written as here would take.
-            if (p.getOrNull(past(at))?.let { it in "*+?" || it == '{' && QUANTIFIER.matchAt(p, past(at)) != null } == true) {
-                throw IllegalArgumentException("Dangling meta character")
-            }
-            val quantifier = Behind.Quantifier(min, max, open).also { it.mark = mark }
-            java(quantifier)
-            quantified = false
+            // Java reads a {n} after it as another quantifier, of the quantified atom; anything else Java refuses ([quantified]).
+            if (p.getOrNull(past(at)) == '{' && quantifierAt(past(at))) throw UnsupportedPatternException("a quantifier on a quantifier")
             node()
-            return quantifier
+            return Quantifier(min, max, mark)
+        }
+
+        /** The digits at [at], read past (?x)'s whitespace after each, as Java's curly reads them; none is 0. */
+        private fun number(): Int {
+            var n = 0L
+            while (p.getOrNull(at) in '0'..'9') {
+                n = n * 10 + (p[at] - '0')
+                if (n > Int.MAX_VALUE) throw IllegalArgumentException("Illegal repetition range")
+                at = past(at + 1)
+            }
+            return n.toInt()
         }
 
         /** A literal outside a class: written now, or under `(?i)` kept for its run. */
         private fun literal(literal: Literal) {
-            java(Behind.Leaf.CHAR)
+            last = Last.SINGLE
             node()
             if (flags.i) run += literal else out.append(literal.text)
         }
@@ -501,14 +479,14 @@ internal object HarmonyRewrite {
         /**
          * Under `(?x)`, past what Java's comments mode takes out at [from], as its `peek` and `read` read past it: whitespace,
          * and a comment to the line's end, as Pattern's isLineSeparator ends one: before a `\n`, or under no `(?d)` a `\r`,
-         * `\u0085`, `\u2028` or `\u2029`. The line break is left to be read, and so is a literal where it is no ASCII
-         * whitespace, as it is in Java (`(?x)a#c\u2028b` matches "a\u2028b").
+         * `\u0085`, ` ` or ` `. The line break is left to be read, and so is a literal where it is no ASCII
+         * whitespace, as it is in Java (`(?x)a#c b` matches "a b").
          */
         private fun past(from: Int): Int {
             var i = from
             while (flags.x && i < p.length && spaceOrComment(p[i])) {
                 if (p[i] == '#') {
-                    while (i < p.length && p[i] != '\n' && (flags.d || p[i] !in "\r\u0085\u2028\u2029")) i++
+                    while (i < p.length && p[i] != '\n' && (flags.d || p[i] !in "\r\u0085  ")) i++
                 } else {
                     i++
                 }
@@ -517,44 +495,38 @@ internal object HarmonyRewrite {
         }
 
         private fun group() {
+            if (ahead) throw UnsupportedPatternException("a lookahead holding a group")
             stack.addLast(flags)
             closers.addLast(")")
             openPath()
-            val behind = behinds.lastOrNull()
             if (p.getOrNull(at + 1) != '?') {
-                java(Behind.Open(atomic = false))
-                opened('c', behind)
-                groups++
-                harmonyNumbers += ++harmonyGroups
+                opened('c')
+                harmonyGroups++
                 out.append('(')
                 at++
                 return
             }
             val rest = p.substring(at, minOf(p.length, at + 4))
             when {
-                rest.startsWith("(?:") || rest.startsWith("(?>") -> {
-                    if (rest[2] == '>') scan()
-                    java(Behind.Open(atomic = rest[2] == '>'))
-                    opened(rest[2].takeIf { it == '>' } ?: '(', behind)
-                    out.append(rest, 0, 3)
+                rest.startsWith("(?:") -> {
+                    opened('(')
+                    out.append("(?:")
                     at += 3
                 }
-                // A lookaround in a group of its own: Harmony crashes on one quantified ((?=a)+), which Java reads.
-                rest.startsWith("(?=") || rest.startsWith("(?!") || rest.startsWith("(?<=") || rest.startsWith("(?<!") -> {
-                    val length = if (rest[2] == '<') 4 else 3
+                rest.startsWith("(?>") -> throw UnsupportedPatternException("an atomic group")
+                rest.startsWith("(?<=") || rest.startsWith("(?<!") -> throw UnsupportedPatternException("a lookbehind")
+                // A lookahead in a group of its own: Harmony crashes on a lookaround quantified ((?=a)+), and in a group repeated.
+                rest.startsWith("(?=") || rest.startsWith("(?!") -> {
                     scan()
-                    java(Behind.Leaf.ZERO)
-                    val lookbehind = rest[2] == '<'
-                    opened(if (lookbehind) '<' else '=', if (lookbehind) Behind(out.length + 3, negative = rest[3] == '!') else null)
-                    out.append("(?:").append(rest, 0, length)
+                    opened('=')
+                    ahead = true
+                    out.append("(?:").append(rest, 0, 3)
                     closers[closers.lastIndex] = "))"
-                    at += length
+                    at += 3
                 }
                 rest.startsWith("(?<") -> {
-                    java(Behind.Open(atomic = false))
-                    opened('c', behind)
-                    groups++
-                    harmonyNumbers += ++harmonyGroups
+                    opened('c')
+                    harmonyGroups++
                     val end = p.indexOf('>', at).let { if (it < 0) p.length - 1 else it }
                     out.append(p, at, end + 1)
                     at = end + 1
@@ -586,7 +558,7 @@ internal object HarmonyRewrite {
             val keptOff = off.filter { it in "dms" }
             val written = if (kept.isEmpty() && keptOff.isEmpty()) "" else kept + (if (keptOff.isEmpty()) "" else "-$keptOff")
             if (end == ")") {
-                // Flags to the end of the enclosing group: no group of its own.
+                // Flags to the end of the enclosing group: no group of its own, and no atom for a quantifier, as in Java.
                 stack.removeLast()
                 closers.removeLast()
                 closePath()
@@ -594,8 +566,7 @@ internal object HarmonyRewrite {
                 if (written.isNotEmpty()) out.append("(?").append(written).append(')')
             } else {
                 flags = next
-                java(Behind.Open(atomic = false))
-                opened('(', behinds.lastOrNull())
+                opened('(')
                 out.append("(?").append(written).append(':')
             }
         }
@@ -608,24 +579,25 @@ internal object HarmonyRewrite {
                 at++
                 return
             }
+            last = Last.SINGLE
             classEscape()?.let { (ranges, consumed) ->
-                java(Behind.Leaf.CHAR)
                 out.append(written(ranges))
                 node()
                 at += consumed
                 return
             }
+            when (e) {
+                'G' -> throw UnsupportedPatternException("\\G")
+                'X' -> throw UnsupportedPatternException("\\X")
+                'R' -> throw UnsupportedPatternException("\\R")
+                'N' -> throw UnsupportedPatternException("\\N{…}")
+                'k', in '1'..'9' -> throw UnsupportedPatternException("a back reference")
+            }
             at += 2
             node(BOUNDARY)
             scan(open = false)
-            java(
-                when (e) {
-                    'R' -> Behind.Leaf.LINE
-                    'k', in '1'..'9' -> Behind.Leaf.BACK_REFERENCE
-                    else -> Behind.Leaf.ZERO
-                },
-            )
-            if (e in "bBZAz") zeroAt = out.length
+            if (e in "bBAZz") last = Last.ZERO
+            if (e in "bBAZ") anchor()
             when (e) {
                 'b' -> {
                     // \b{g} alone: Java reads any other \b{ as \b and a quantifier, or refuses it.
@@ -634,50 +606,12 @@ internal object HarmonyRewrite {
                 }
                 'B' -> out.append(boundary(false))
                 'Z' -> out.append(dollar("\\Z"))
-                // Java's \R repeated takes \r\n whole each time, where Harmony's gives it back (\R{2} in "\r\n").
-                'R' -> if (p.getOrNull(past(at))?.let { it in "*+?{" } == true) {
-                    groupAt = out.length
-                    line = true
-                    out.append("(?>\\r\\n|[\\n\\u000B\\f\\r\\u0085\\u2028\\u2029])")
-                } else {
-                    out.append("\\R")
-                }
-                'G' -> throw UnsupportedPatternException("\\G")
-                'X' -> throw UnsupportedPatternException("\\X")
-                'N' -> throw UnsupportedPatternException("\\N{…}")
-                'k' -> {
-                    if (flags.i) throw UnsupportedPatternException("a back reference under (?i)")
-                    val end = p.indexOf('>', at).let { if (it < 0) at - 1 else it }
-                    out.append("\\k").append(p, at, end + 1)
-                    at = end + 1
-                }
-                in '1'..'9' -> backReference(e)
+                'A', 'z' -> out.append('\\').append(e)
                 else -> {
                     illegal(e)
                     out.append('\\').append(e)
                 }
             }
-        }
-
-        /**
-         * A back reference, as Java reads one: more digits while there are that many groups so far. One to a group not yet
-         * opened, which Harmony refuses, is `(?!)`: it never matches in Java where the pattern never opens that group; where
-         * it opens it later, a repetition can match it (`(?:\1b|(a))+` in "aab"), so [write] refuses it.
-         */
-        private fun backReference(first: Char) {
-            var n = first.digitToInt()
-            while (at < p.length && p[at] in '0'..'9' && n * 10 + p[at].digitToInt() <= groups) n = n * 10 + p[at++].digitToInt()
-            if (n > groups) {
-                if (forward == 0 || n < forward) forward = n
-                // No width, as it never matches: repeated as Java repeats it ([zeroWidthQuantified]).
-                zeroAt = out.length
-                out.append("(?!)")
-                return
-            }
-            if (flags.i) throw UnsupportedPatternException("a back reference under (?i)")
-            out.append('\\').append(harmonyNumbers[n])
-            // A digit after it is itself, where Harmony would read it as more of the number.
-            if (at < p.length && p[at] in '0'..'9') out.append("(?:)")
         }
 
         /** `$` or `\Z`: Java's never matches between a `\r` and a `\n`, where Harmony's does. Under `(?d)` only `\n` ends a line. */
@@ -866,7 +800,6 @@ internal object HarmonyRewrite {
          * Harmony's own nested classes, intersections and negation are not Java's (`[[^a]b]`, `[^a&&b]`).
          */
         private fun characterClass() {
-            java(Behind.Leaf.CHAR)
             at++
             out.append(written(clazz(consume = true)))
             node()
@@ -1067,263 +1000,10 @@ internal object HarmonyRewrite {
     private const val DOLLAR = 6
     private const val BOUNDARY = 8
 
-    private val QUANTIFIER = Regex("""\{[0-9]+(,[0-9]*)?\}""")
     private val FLAG_GROUP = Regex("""\(\?([idmsuxUc]*)(?:-([idmsuxUc]*))?(:|\))""")
 }
 
-/** A pattern holding [construct], which this platform's regular expressions can't match as Java's do. */
+/** A pattern holding [construct], which this platform's regular expressions don't take: see HarmonyRewrite's grammar. */
 @DrivineInternalApi
 class UnsupportedPatternException(val construct: String) :
     IllegalArgumentException("$construct is not supported on this platform; rewrite the pattern without it.")
-
-/**
- * A lookbehind's length as Java measures it (Pattern.group0, `head.study(info)`): its tokens, as the Writer reads them,
- * built into Java's nodes as Pattern builds them, each node's `study` as Java's, in Java's int arithmetic. Java refuses a
- * lookbehind whose length it finds unbounded ("Look-behind group does not have an obvious maximum length": a back reference
- * in it, a group repeated whose contents vary, `(?:ab)*` whose maximum overflows), and never matches one whose maximum it
- * finds below its minimum (`(?<=a+b+)`, where two maxima of 2^31 - 1 overflow); Harmony matches each. Within those, Java's
- * lookbehind matches as Harmony's does. [at] is where in the pattern written the lookbehind's group begins.
- */
-internal class Behind(val at: Int, val negative: Boolean) {
-
-    sealed interface Token
-
-    /** A node of one character (CharProperty), of a line break (`\R`), a back reference, or of none (an anchor, a lookaround). */
-    enum class Leaf : Token { CHAR, LINE, BACK_REFERENCE, ZERO }
-
-    class Open(val atomic: Boolean) : Token
-
-    object Close : Token
-
-    object Alternative : Token
-
-    /**
-     * `*`, `+`, `?` or `{n,m}`, [open] where it has no maximum written (`*`, `+`, `{n,}`), and [mark] the `?` or `+` after it
-     * that makes it lazy or possessive.
-     */
-    class Quantifier(val min: Int, val max: Int, val open: Boolean = max == MAX_REPS) : Token {
-        var mark: Char? = null
-    }
-
-    val tokens = mutableListOf<Token>()
-
-    /** Whether Java's never matches; it throws as Java does where Java refuses the lookbehind. */
-    fun never(): Boolean {
-        position = 0
-        val tail = Node()
-        val head = Node().also { it.next = expression(tail) }
-        val info = Info()
-        head.study(info)
-        if (!info.valid) throw IllegalArgumentException("Look-behind group does not have an obvious maximum length")
-        // Java's Behind tries each start from i - min back to i - max (no further back than 0), in int arithmetic.
-        if (info.max >= 0) return info.max < info.min
-        // A maximum overflowed past 2^31 - 1: i - max overflows too, to below 0, where i is at least k, else it is past i.
-        val k = info.max.toLong() - Int.MIN_VALUE
-        if (k <= info.min) return false
-        if (k >= 1L shl 30) return true
-        throw UnsupportedPatternException("a lookbehind whose maximum length overflows")
-    }
-
-    /** Pattern.TreeInfo. */
-    private class Info {
-        var min = 0
-        var max = 0
-        var valid = true
-        var deterministic = true
-
-        fun reset() {
-            min = 0
-            max = 0
-            valid = true
-            deterministic = true
-        }
-    }
-
-    /** Pattern.Node, and those of its subclasses a lookbehind's study meets, each by its own `study`. */
-    private open class Node {
-        var next: Node? = null
-
-        open fun study(info: Info): Boolean = next?.study(info) ?: info.deterministic
-    }
-
-    private class CharNode(val line: Boolean) : Node() {
-        override fun study(info: Info): Boolean {
-            info.min++
-            info.max += if (line) 2 else 1
-            return super.study(info)
-        }
-    }
-
-    private class BackReference : Node() {
-        override fun study(info: Info): Boolean {
-            info.valid = false
-            return super.study(info)
-        }
-    }
-
-    private class Ques(private val atom: Node, private val independent: Boolean) : Node() {
-        override fun study(info: Info): Boolean {
-            val min = info.min
-            atom.study(info)
-            if (!independent) {
-                info.min = min
-                info.deterministic = false
-            }
-            return super.study(info)
-        }
-    }
-
-    private class CharGreedy(private val cmin: Int) : Node() {
-        override fun study(info: Info): Boolean {
-            info.min += cmin
-            if (info.valid) info.max += MAX_REPS
-            info.deterministic = false
-            return super.study(info)
-        }
-    }
-
-    /** Curly and GroupCurly, whose study is one. */
-    private class Curly(private val atom: Node, private val cmin: Int, private val cmax: Int) : Node() {
-        override fun study(info: Info): Boolean {
-            val minL = info.min
-            val maxL = info.max
-            val maxV = info.valid
-            val detm = info.deterministic
-            info.reset()
-            atom.study(info)
-            var temp = info.min * cmin + minL
-            if (temp < minL) temp = 0xFFFFFFF
-            info.min = temp
-            if (maxV && info.valid) {
-                temp = info.max * cmax + maxL
-                info.max = temp
-                if (temp < maxL) info.valid = false
-            } else {
-                info.valid = false
-            }
-            info.deterministic = if (info.deterministic && cmin == cmax) detm else false
-            return super.study(info)
-        }
-    }
-
-    private class Loop : Node() {
-        override fun study(info: Info): Boolean {
-            info.valid = false
-            info.deterministic = false
-            return false
-        }
-    }
-
-    private class BranchConn : Node() {
-        override fun study(info: Info): Boolean = info.deterministic
-    }
-
-    private class Branch(private val atoms: List<Node?>, private val conn: BranchConn) : Node() {
-        override fun study(info: Info): Boolean {
-            var minL = info.min
-            var maxL = info.max
-            var maxV = info.valid
-            var minL2 = Int.MAX_VALUE
-            var maxL2 = -1
-            for (atom in atoms) {
-                info.reset()
-                atom?.study(info)
-                minL2 = minOf(minL2, info.min)
-                maxL2 = maxOf(maxL2, info.max)
-                maxV = maxV && info.valid
-            }
-            minL += minL2
-            maxL += maxL2
-            info.reset()
-            conn.next?.study(info)
-            info.min += minL
-            info.max += maxL
-            info.valid = info.valid && maxV
-            info.deterministic = false
-            return false
-        }
-    }
-
-    private var position = 0
-
-    /** Pattern.expr: the alternatives to a [Close] or the end, as one chain whose last node's next is [end]. */
-    private fun expression(end: Node): Node {
-        val alternatives = mutableListOf<Node?>()
-        val conn = BranchConn().also { it.next = end }
-        while (true) {
-            val (head, tail) = sequence() ?: (null to null)
-            alternatives += head
-            val more = tokens.getOrNull(position) == Alternative
-            if (!more && alternatives.size == 1) {
-                tail?.next = end
-                return head ?: end
-            }
-            tail?.next = conn
-            if (!more) return Branch(alternatives, conn)
-            position++
-        }
-    }
-
-    /** Pattern.sequence: the atoms to an [Alternative], a [Close] or the end, each with its quantifier; null where none. */
-    private fun sequence(): Pair<Node, Node>? {
-        var head: Node? = null
-        var tail: Node? = null
-        while (position < tokens.size && tokens[position] != Alternative && tokens[position] != Close) {
-            val (first, last) = atom()
-            if (head == null) head = first else tail!!.next = first
-            tail = last
-        }
-        return head?.let { it to tail!! }
-    }
-
-    /** An atom and its quantifier, as Pattern.closure and group0 build them. */
-    private fun atom(): Pair<Node, Node> {
-        when (val token = tokens[position++]) {
-            is Open -> {
-                val tail = Node()
-                val head = Node().also { it.next = expression(tail) }
-                if (tokens.getOrNull(position) == Close) position++
-                val quantifier = quantifier()
-                if (token.atomic) return closure(Ques(head, independent = true), quantifier)
-                if (quantifier == null) return head to tail
-                if (quantifier.min == 0 && quantifier.max == 1) {
-                    if (quantifier.mark == '+') return Ques(head, independent = false).let { it to it }
-                    val conn = BranchConn()
-                    tail.next = conn
-                    return Branch(if (quantifier.mark == '?') listOf(null, head) else listOf(head, null), conn) to conn
-                }
-                if (quantifier.mark == '+') return Curly(head, quantifier.min, quantifier.max).let { it to it }
-                val node = if (head.study(Info())) Curly(head, quantifier.min, quantifier.max) else Loop()
-                return node to node
-            }
-            is Leaf -> {
-                val node = when (token) {
-                    Leaf.CHAR -> CharNode(line = false)
-                    Leaf.LINE -> CharNode(line = true)
-                    Leaf.BACK_REFERENCE -> BackReference()
-                    Leaf.ZERO -> Node()
-                }
-                return closure(node, quantifier())
-            }
-            // A quantifier with nothing before it, or a close: Java and Harmony refuse the pattern.
-            else -> return Node().let { it to it }
-        }
-    }
-
-    private fun quantifier(): Quantifier? = (tokens.getOrNull(position) as? Quantifier)?.also { position++ }
-
-    /** Pattern.closure and curly of an atom that is no group. */
-    private fun closure(atom: Node, quantifier: Quantifier?): Pair<Node, Node> {
-        val node = when {
-            quantifier == null -> atom
-            quantifier.min == 0 && quantifier.max == 1 -> Ques(atom, independent = false)
-            quantifier.open && quantifier.mark == null && atom is CharNode && !atom.line -> CharGreedy(quantifier.min)
-            else -> Curly(atom, quantifier.min, quantifier.max)
-        }
-        return node to node
-    }
-
-    companion object {
-        const val MAX_REPS = 0x7FFFFFFF
-    }
-}

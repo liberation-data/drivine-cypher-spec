@@ -67,11 +67,15 @@ class JavaPatternTest {
     fun `a pattern Java refuses fails and what this platform can't match as Java does is refused by name`() {
         assertFailsWith<IllegalArgumentException> { call(HostFunctions.regexp, "(", "a") }
         assertFailsWith<IllegalArgumentException> { call(HostFunctions.regexp, "\\p{Nope}", "a") }
-        for (construct in listOf("\\G" to "\\Ga", "\\X" to "\\X", "\\N{…}" to "\\N{LATIN SMALL LETTER A}", "\\b{g}" to "\\b{g}", "(?-U)" to "(?-U)a", "(?-u)" to "(?-u)a",
-            "a back reference under (?i)" to "(?i)(a)\\1", "a back reference to a later group" to "(?:\\1b|(a))+",
+        for (construct in listOf("\\G" to "\\Ga", "\\X" to "\\X", "\\R" to "a\\Rb", "\\N{…}" to "\\N{LATIN SMALL LETTER A}", "\\b{g}" to "\\b{g}",
+            "(?-U)" to "(?-U)a", "(?-u)" to "(?-u)a", "a back reference" to "(a)\\1", "a back reference" to "(?<y>a)\\k<y>", "a lookbehind" to "(?<=a)b",
+            "a lookbehind" to "(?<!a)b", "an atomic group" to "(?>a+)b", "a possessive quantifier" to "a*+", "a possessive quantifier" to "(a?){1,2}+b",
+            "a quantifier on what has no width" to "^*a", "a quantifier on what has no width" to "(?=a)+a", "a quantifier on a quantifier" to "a{2}{3}",
+            "a lazy quantifier on a group but *? and ??" to "(bc)+?",
+            "groups repeated within each other more than ${HarmonyRewrite.MAX_NESTED} deep" to "((((a)*b)+c)*d)*",
+            "a lookahead holding a quantifier" to "a(?=b+)", "a lookahead holding a group" to "a(?=(b))", "a lookahead holding an anchor but \$ and \\z" to "a(?=\\b)",
             // Each \b is written as some 30,000 characters off the JVM: a pattern of a few thousand would take gigabytes.
-            "a pattern written as more than ${HarmonyRewrite.MAX_WRITTEN} characters" to "\\b".repeat(100),
-            "a lazy quantifier on a group but *? and ??" to "(bc)+?", "a possessive quantifier on a group" to "(a?){1,2}+b")) {
+            "a pattern written as more than ${HarmonyRewrite.MAX_WRITTEN} characters" to "\\b".repeat(100))) {
             if (target == "jvm") {
                 call(HostFunctions.regexp, construct.second, "a")
             } else {

@@ -22,7 +22,7 @@ class HarmonyStackTest {
     @Test
     fun `a group repeated over a long text fails its statement where the stack would run out`() {
         // Each repetition of a group recurses: about 30,000 of (a|b)* on a release binary's 8 MiB, and fewer than 1,000 on 512 KiB.
-        for (pattern in listOf("(a|b)*", "(?:a|b)*\$", "(?=(a|b)*\$)", "(?>(a|b)*)", "(?:(?=a)a)*", "(?:.|\\n)*", "(?i)(?:a|b)*")) {
+        for (pattern in listOf("(a|b)*", "(?:a|b)*\$", "(?:x|(a|b)*)\$", "(?:(?=a)a)*", "(?:.|\\n)*", "(?i)(?:a|b)*")) {
             refused(pattern, "a".repeat(100_000))
         }
         assertEquals(100, JavaPatterns.compile("(a|b)*").find("a".repeat(100))?.first()?.length)
@@ -51,7 +51,6 @@ class HarmonyStackTest {
     fun `a pattern nested or long enough that compiling it would overflow the stack is refused`() {
         refused("(".repeat(20_000) + "a" + ")".repeat(20_000))
         refused("(?:".repeat(20_000) + "a" + ")".repeat(20_000))
-        refused("(?=".repeat(20_000) + "a" + ")".repeat(20_000))
         refused("[".repeat(20_000) + "a" + "]".repeat(20_000))
         refused("a?".repeat(50_000))
         refused("(?:)".repeat(50_000))
@@ -61,7 +60,7 @@ class HarmonyStackTest {
     @Test
     fun `a long text is matched where the pattern repeats no group`() {
         val text = "a".repeat(1_000_000) + "b"
-        for (pattern in listOf(".*b", "a*b", "[ab]+", "(?:a*)*b", "\\w+", "(a+)\\1*")) {
+        for (pattern in listOf(".*b", "a*b", "[ab]+", "(?:a*)*b", "\\w+", "(a+)b")) {
             assertNotNull(JavaPatterns.compile(pattern).find(text), pattern)
         }
     }

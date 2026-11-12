@@ -5,13 +5,16 @@ import org.drivine.cypher.json.JsonNode
 import org.drivine.cypher.number.oracleFile
 import org.drivine.cypher.number.target
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
  * Every target's regular expressions against Java's answers (`regex.json`, written by the JVM: see
  * `org.drivine.cypher.oracle.Regexes`), as SQLite's host functions use them: whether each pattern is found in each text,
  * the groups of its first match, how many times it matches, and every match replaced; and what case-insensitive matching
- * takes. Each pattern must give Java's answers, or be refused by one of [REFUSED]'s names off the JVM.
+ * takes. Each pattern must give Java's answers, or be refused by one of [REFUSED]'s names off the JVM: never one the
+ * compiler, a full-text search or host.yaml gives (the grammar HarmonyRewrite takes holds each), and each name of
+ * [REFUSED] must refuse some pattern, so a refusal no pattern meets any longer is taken out.
  *
  * Two ways: [JavaPatterns], as the host functions compile a pattern on this target (java.util.regex on the JVM), and
  * [HarmonyPattern], the rewrite for kotlin.text.Regex that Kotlin/Native and Kotlin/Wasm run, which on the JVM runs on
@@ -23,10 +26,10 @@ class RegexOracleTest {
     private val texts: List<String> = oracle["texts"]!!.map { it.textValue()!! }
 
     @Test
-    fun `each pattern matches as Java's does through JavaPatterns`() = check("JavaPatterns") { JavaPatterns.compile(it) }
+    fun `each pattern matches as Java's does through JavaPatterns`() = check("JavaPatterns", refuses = target != "jvm") { JavaPatterns.compile(it) }
 
     @Test
-    fun `each pattern matches as Java's does through the rewrite for kotlin_text_Regex`() = check("HarmonyPattern") { HarmonyPattern(JavaPatterns.java(it)) }
+    fun `each pattern matches as Java's does through the rewrite for kotlin_text_Regex`() = check("HarmonyPattern", refuses = true) { HarmonyPattern(JavaPatterns.java(it)) }
 
     @Test
     fun `case-insensitive matching takes the code points Java's takes through JavaPatterns`() = caseFold("JavaPatterns") { JavaPatterns.compile(it) }
@@ -34,7 +37,7 @@ class RegexOracleTest {
     @Test
     fun `case-insensitive matching takes the code points Java's takes through the rewrite`() = caseFold("HarmonyPattern") { HarmonyPattern(JavaPatterns.java(it)) }
 
-    private fun check(way: String, compile: (String) -> JavaPattern) {
+    private fun check(way: String, refuses: Boolean, compile: (String) -> JavaPattern) {
         val differences = mutableListOf<String>()
         val refusals = mutableMapOf<String, Int>()
         var agreed = 0
@@ -44,7 +47,13 @@ class RegexOracleTest {
             val compiled = try {
                 compile(pattern)
             } catch (e: UnsupportedPatternException) {
-                if (javaError == null && e.construct in REFUSED) refusals[e.construct] = (refusals[e.construct] ?: 0) + 1 else if (javaError == null) differences += "${show(pattern)}: refused, ${e.message}"
+                val ours = case["sources"]!!.map { it.textValue() }.filter { it in OURS }
+                when {
+                    javaError != null -> {}
+                    ours.isNotEmpty() -> differences += "${show(pattern)}: refused, ${e.message}, where ${ours.joinToString()} gives it"
+                    e.construct in REFUSED -> refusals[e.construct] = (refusals[e.construct] ?: 0) + 1
+                    else -> differences += "${show(pattern)}: refused, ${e.message}"
+                }
                 continue
             } catch (e: Throwable) {
                 if (javaError == null) differences += "${show(pattern)}: refused (${e.message?.lineSequence()?.first()}), where Java compiles it" else agreed++
@@ -73,6 +82,7 @@ class RegexOracleTest {
         }
         println("RegexOracleTest on $target through $way: ${oracle["patterns"]!!.size()} patterns over ${texts.size} texts, $agreed as Java's, refused $refusals.")
         assertTrue(differences.isEmpty(), "$way on $target: ${differences.size} answers differ from Java's:\n" + differences.take(30).joinToString("\n"))
+        if (refuses) assertEquals(emptySet(), REFUSED - refusals.keys, "$way on $target: refusals no pattern of regex.json meets")
     }
 
     private fun caseFold(way: String, compile: (String) -> JavaPattern) {
@@ -106,8 +116,13 @@ class RegexOracleTest {
 
     private companion object {
         /** What a target whose regular expressions are not Java's refuses by name: see HarmonyRewrite. */
-        val REFUSED = setOf("\\G", "\\X", "\\N{…}", "\\b{g}", "(?-U)", "(?-u)", "a back reference under (?i)", "a back reference to a later group",
-            "a lazy quantifier on a group but *? and ??", "a possessive quantifier on a group")
+        val REFUSED = setOf("\\G", "\\X", "\\R", "\\N{…}", "\\b{g}", "(?-U)", "(?-u)", "a back reference", "a lookbehind", "an atomic group",
+            "a possessive quantifier", "a quantifier on what has no width", "a quantifier on a quantifier", "a lazy quantifier on a group but *? and ??",
+            "groups repeated within each other more than ${HarmonyRewrite.MAX_NESTED} deep", "a lookahead holding a quantifier", "a lookahead holding a group",
+            "a lookahead holding an anchor but \$ and \\z")
+
+        /** The sources of the patterns Drivine writes itself (Regexes.write), none of which may be refused. */
+        val OURS = setOf("compiler", "search", "host")
 
         /** [value], short, its characters outside printable ASCII escaped. */
         fun show(value: Any?): String {
