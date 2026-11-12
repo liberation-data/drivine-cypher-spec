@@ -94,6 +94,15 @@ def host_steps(connection, host):
                         before = connection.execute(f"SELECT {name}(?) < {name}(?)", (a, b)).fetchall()[0][0]
                         if before != 1:
                             report(f"{where}: {name}({a!r}) before {name}({b!r})", False, f"got {before!r}")
+                elif "error" in step:
+                    args = [sql_value(v) for v in step["args"]]
+                    refuse_nan(args)
+                    try:
+                        got = connection.execute(f"SELECT {name}({', '.join('?' for _ in args)})", args).fetchall()[0][0]
+                        report(f"{where}: {name}{tuple(args)!r}", False, f"gave {got!r}, expected it to fail with {step['error']!r}")
+                    except apsw.Error as e:
+                        if step["error"] not in str(e):
+                            report(f"{where}: {name}{tuple(args)!r}", False, f"failed with {e}, expected {step['error']!r}")
                 else:
                     args = [sql_value(v) for v in step["args"]]
                     refuse_nan(args)

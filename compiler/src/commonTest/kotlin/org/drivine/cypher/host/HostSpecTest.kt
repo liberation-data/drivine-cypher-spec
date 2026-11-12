@@ -25,13 +25,13 @@ class HostSpecTest {
 
     private companion object {
         /** The keys of each kind of step, beside its optional `note`: a function's result, its order, and a read. */
-        val SHAPES = setOf(setOf("function", "args", "result"), setOf("function", "ascending"), setOf("read", "value"))
+        val SHAPES = setOf(setOf("function", "args", "result"), setOf("function", "args", "error"), setOf("function", "ascending"), setOf("read", "value"))
 
         /** Drivine's functions, and `regexp`, which SQLite calls, as `regexp(pattern, text)`, for `text REGEXP pattern`. */
         val FUNCTION = Regex("drivine_[a-z_]+|regexp")
 
         /** The functions host.yaml calls that are not yet ported from drivine4j (#108): a port takes its own out. */
-        val PENDING = setOf("regexp", "drivine_regex_group", "drivine_regexp_replace")
+        val PENDING = setOf("regexp", "drivine_regex_group", "drivine_regexp_replace", "drivine_temporal")
     }
 
     private val cases: List<JsonNode> = CypherJson.readTree(oracleFile("host.json"))["cases"]!!.toList()
@@ -93,6 +93,12 @@ class HostSpecTest {
         assertContains(assertFails { check(nanAscending, "nanAscending") }.message!!, "can't be given NaN")
         val truth = CypherJson.readTree("""{"function": "drivine_float_text", "args": [true], "result": "1.0"}""")
         assertContains(assertFails { check(truth, "truth") }.message!!, "No SQL value of")
+        val fails = CypherJson.readTree("""{"function": "drivine_round", "args": [2.5, 0, "UNNECESSARY"], "error": "Rounding necessary"}""")
+        assertEquals(Outcome.RAN, check(fails, "fails"))
+        val gives = CypherJson.readTree("""{"function": "drivine_float_text", "args": [1.0], "error": "x"}""")
+        assertContains(assertFails { check(gives, "gives") }.message!!, "gave no error")
+        val otherError = CypherJson.readTree("""{"function": "drivine_round", "args": [2.5, 0, "UNNECESSARY"], "error": "no such"}""")
+        assertContains(assertFails { check(otherError, "otherError") }.message!!, "Rounding necessary")
         val pending = CypherJson.readTree("""{"function": "regexp", "args": ["a", "a"], "result": 1}""")
         assertEquals(Outcome.PENDING, check(pending, "pending"))
         val read = CypherJson.readTree("""{"read": {"store": "sqlite", "nonFinite": false, "column": "1"}, "value": 1, "note": "n"}""")
@@ -186,7 +192,13 @@ class HostSpecTest {
         } else {
             val args = step["args"]!!.map(::expanded)
             refuseNaN(args, where)
-            assertEquals(expanded(step["result"]!!), call(functions, args, where), "$where: $name$args")
+            val error = step["error"]?.textValue()
+            if (error == null) assertEquals(expanded(step["result"]!!), call(functions, args, where), "$where: $name$args")
+            else {
+                val failure = runCatching { call(functions, args, where) }.exceptionOrNull()
+                    ?: throw AssertionError("$where: $name$args fails with \"$error\", but gave no error")
+                assertContains(failure.message!!, error, message = "$where: $name$args")
+            }
         }
         return Outcome.RAN
     }
