@@ -31,7 +31,7 @@ class HostSpecTest {
         val FUNCTION = Regex("drivine_[a-z_]+|regexp")
 
         /** The functions host.yaml calls that are not yet ported from drivine4j (#108): a port takes its own out. */
-        val PENDING = setOf("drivine_round", "regexp", "drivine_regex_group", "drivine_regexp_replace")
+        val PENDING = setOf("regexp", "drivine_regex_group", "drivine_regexp_replace")
     }
 
     private val cases: List<JsonNode> = CypherJson.readTree(oracleFile("host.json"))["cases"]!!.toList()
@@ -93,7 +93,7 @@ class HostSpecTest {
         assertContains(assertFails { check(nanAscending, "nanAscending") }.message!!, "can't be given NaN")
         val truth = CypherJson.readTree("""{"function": "drivine_float_text", "args": [true], "result": "1.0"}""")
         assertContains(assertFails { check(truth, "truth") }.message!!, "No SQL value of")
-        val pending = CypherJson.readTree("""{"function": "drivine_round", "args": [1.5, 0, "UP"], "result": 2.0}""")
+        val pending = CypherJson.readTree("""{"function": "regexp", "args": ["a", "a"], "result": 1}""")
         assertEquals(Outcome.PENDING, check(pending, "pending"))
         val read = CypherJson.readTree("""{"read": {"store": "sqlite", "nonFinite": false, "column": "1"}, "value": 1, "note": "n"}""")
         assertEquals(Outcome.READ, check(read, "read"))
@@ -127,6 +127,24 @@ class HostSpecTest {
             val args = if (function == "drivine_canonical" || function == "drivine_sort_key") """["[1"]""" else """["[1", "[1]"]"""
             assertFails { check(CypherJson.readTree("""{"function": "$function", "args": $args, "result": null}"""), function) }
         }
+    }
+
+    @Test
+    fun `drivine_round rounds a whole number and reads a float precision as SQLite does where host_yaml pins neither`() {
+        for ((args, result) in listOf(
+            """[15, -1, "HALF_EVEN"]""" to "20.0",
+            """[-15, -1, "HALF_DOWN"]""" to "-10.0",
+            """[9223372036854775807, -18, "CEILING"]""" to "1.0E19",
+            """[2.345, 2.9, "HALF_UP"]""" to "2.35",
+            """[2.5, -9223372036854775808, "UP"]""" to """{"${'$'}float": "Infinity"}""",
+            """[2.5, 0, "UNNECESSARY"]""" to null,
+        )) {
+            val step = CypherJson.readTree("""{"function": "drivine_round", "args": $args, "result": ${result ?: "3.0"}}""")
+            if (result != null) assertEquals(Outcome.RAN, check(step, args))
+            else assertContains(assertFails { check(step, args) }.message!!, "Rounding necessary")
+        }
+        val unknown = CypherJson.readTree("""{"function": "drivine_round", "args": [2.5, 0, "half_up"], "result": 3.0}""")
+        assertContains(assertFails { check(unknown, "unknown") }.message!!, "no rounding mode is named half_up")
     }
 
     @Test
