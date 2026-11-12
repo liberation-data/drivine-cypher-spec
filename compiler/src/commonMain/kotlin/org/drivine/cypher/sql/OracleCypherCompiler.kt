@@ -184,9 +184,14 @@ class OracleCypherCompiler(
         return CypherJson.writeValueAsString(tree, encoder = encoder)
     }
 
-    /** Whether [node] holds a map with a key that starts with `$`, as extended JSON's keys do. */
+    /**
+     * Whether [node] holds a map with a key that starts with one `$`, as extended JSON's keys do. A user's key that starts
+     * with `$` is held with one more ([org.drivine.cypher.store.ValueLayout.escape]), which Oracle's extended JSON reads as
+     * the key it is, so in layout 2 no parameter holds one (drivine-cypher-spec#202): this is for a host's encoder that
+     * gives a tree with one of its own.
+     */
     private fun keyedAsExtended(node: JsonNode): Boolean =
-        (node is ObjectNode && node.fieldNames().asSequence().any { it.startsWith("$") }) || node.any(::keyedAsExtended)
+        (node is ObjectNode && node.fieldNames().asSequence().any { it.startsWith("$") && !it.startsWith("$$") }) || node.any(::keyedAsExtended)
 
     /**
      * [node] with each float in it written as extended JSON's double, calling [doubled] for each. A
