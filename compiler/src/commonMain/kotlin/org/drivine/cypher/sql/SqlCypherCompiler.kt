@@ -4839,14 +4839,18 @@ abstract class SqlCypherCompiler(
         /**
          * What a temporal value [function] makes in the time zone [written] is passed through, its SQL text being [zone]. A
          * zone the statement writes, or a parameter gives, as a text is read with [offset] here, and the value is as it is;
-         * a parameter that gives no text is refused. A zone an expression gives, which the store reads as the statement
+         * one written, or a parameter that gives, as no text is refused. A zone an expression gives, which the store reads as the statement
          * runs, fails the statement where it is given and is no offset the store's text reads, as a zone by name or an
          * offset with seconds is, rather than give null in its place (drivine4j#424): its text is tested, not the value's
          * null, which a field that is null makes too.
          */
         private fun zoneGuard(function: Expression.Function, written: Expression?, zone: String?): (String) -> String {
             if (written == null || zone == null || written is Expression.Literal) {
-                ((written as? Expression.Literal)?.value as? String)?.let { offset(it) }
+                when (val value = (written as? Expression.Literal)?.value) {
+                    null -> {}
+                    is String -> offset(value)
+                    else -> throw CompilerException("${function.name}() takes a time zone, not ${org.drivine.cypher.text.JavaText.of(value)}.")
+                }
                 return { it }
             }
             if (written is Expression.Parameter) {

@@ -148,6 +148,9 @@ cases:
       - cypher: "RETURN datetime({year: 2024, month: 1, day: 1, timezone: $z})"
         parameters: {z: 1}
         error: "datetime() takes a time zone, not 1."
+      - note: "And one written, which gave null."
+        cypher: "RETURN datetime({year: 2024, month: 1, day: 1, timezone: 1})"
+        error: "datetime() takes a time zone, not 1."
 
   - name: "Temporal map not compiled yet"
     description: "A temporal value made from a map of fields the compiler doesn't handle yet is refused, naming what it is."
