@@ -106,7 +106,8 @@ class RegexOracleTest {
 
     private companion object {
         /** What a target whose regular expressions are not Java's refuses by name: see HarmonyRewrite. */
-        val REFUSED = setOf("\\G", "\\X", "\\N{…}", "\\b{g}", "(?-U)", "(?-u)", "a back reference under (?i)", "a back reference to a later group")
+        val REFUSED = setOf("\\G", "\\X", "\\N{…}", "\\b{g}", "(?-U)", "(?-u)", "a back reference under (?i)", "a back reference to a later group",
+            "a lazy quantifier on a group but *? and ??", "a possessive quantifier on a group")
 
         /** [value], short, its characters outside printable ASCII escaped. */
         fun show(value: Any?): String {

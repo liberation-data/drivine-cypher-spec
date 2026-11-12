@@ -68,7 +68,10 @@ class JavaPatternTest {
         assertFailsWith<IllegalArgumentException> { call(HostFunctions.regexp, "(", "a") }
         assertFailsWith<IllegalArgumentException> { call(HostFunctions.regexp, "\\p{Nope}", "a") }
         for (construct in listOf("\\G" to "\\Ga", "\\X" to "\\X", "\\N{…}" to "\\N{LATIN SMALL LETTER A}", "\\b{g}" to "\\b{g}", "(?-U)" to "(?-U)a", "(?-u)" to "(?-u)a",
-            "a back reference under (?i)" to "(?i)(a)\\1", "a back reference to a later group" to "(?:\\1b|(a))+")) {
+            "a back reference under (?i)" to "(?i)(a)\\1", "a back reference to a later group" to "(?:\\1b|(a))+",
+            // Each \b is written as some 30,000 characters off the JVM: a pattern of a few thousand would take gigabytes.
+            "a pattern written as more than ${HarmonyRewrite.MAX_WRITTEN} characters" to "\\b".repeat(100),
+            "a lazy quantifier on a group but *? and ??" to "(bc)+?", "a possessive quantifier on a group" to "(a?){1,2}+b")) {
             if (target == "jvm") {
                 call(HostFunctions.regexp, construct.second, "a")
             } else {

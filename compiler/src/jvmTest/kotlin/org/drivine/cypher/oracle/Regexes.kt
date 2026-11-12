@@ -217,6 +217,8 @@ object Regexes {
         addAll(listOf("١", "a\u001Cb", "a-c_e", "[-]"))
         // Texts of the patterns past quantifiers, quoting, escapes under (?x), classes past the BMP and back references.
         addAll(listOf("😀a", "a0", "aa0", "]b", "ae1", "\uD83D\uDE01", "a\uD83D\uDE01b", "{2}", "aaaaaa", "aba", "`J", "\uD83D\uDE40", "^", "Kelvin \u212A k", "\r\n"))
+        // Texts of the patterns past lookbehinds' lengths, repeated groups and their quantifiers.
+        addAll(listOf("bcbcd", "abcd", "abcbcd", "xbc", "bbbbb", "ac", "aac", "\r\n\r\n", "x\nb"))
     }
 
     /** Users' `=~` patterns, each with the construct it exercises. */
@@ -335,6 +337,24 @@ object Regexes {
         "(a){0}\\1|b" to "backreference to no match", "(a)?\\1b" to "backreference to no match", "(a)|b\\1" to "backreference to no match",
         "a|" to "empty alternative", "|a" to "empty alternative", "()" to "empty group", "(|a)+" to "empty alternative", "(?:(a)|b)+" to "repeated group",
         "(a|(b))+" to "repeated group", "(?<=(a))b" to "group in a lookbehind", "(?=(a))a" to "group in a lookahead",
+        // Lookbehinds' lengths as Java measures them: refused where unbounded, never matched where the maximum overflows.
+        "(?<=(a)\\1)b" to "lookbehind length", "(a)(?<!\\1)b" to "lookbehind length", "(?<=\\1)a" to "lookbehind length",
+        "(?<=(?:ab)*)c" to "lookbehind length", "(?<=(?:a|b)+)c" to "lookbehind length", "(?<=(a|b){2})c" to "lookbehind length",
+        "(?<=(?:ab){0,5})c" to "lookbehind length", "(?<=x(?:a|bc){1,3})d" to "lookbehind length", "(?<=\\R+)a" to "lookbehind length",
+        "(?<=\\R{1,3})a" to "lookbehind length", "(?<=a+b+)c" to "lookbehind length", "(?<!a+b+)c" to "lookbehind length",
+        "(?<=a+b)c" to "lookbehind length", "(?<=a+b+cd)e" to "lookbehind length", "(?<=(?=a+)a)b" to "lookbehind length",
+        "(?<=a{1,}b{1,})c" to "lookbehind length", "(?<=xa*?)c" to "lookbehind length", "(?<=(?:ab)*+)c" to "lookbehind length",
+        "(?<=(?>a+)+)c" to "lookbehind length", "(?<=(?:a+)?)c" to "lookbehind length",
+        // Non-capturing groups repeated, which Harmony repeats at one place until the stack overflows.
+        "(?:b|)*a" to "repeated empty alternative", "(?:|)*a" to "repeated empty alternative", "(?:(|))*a" to "repeated empty alternative",
+        "(?:a*|)*a" to "repeated empty alternative", "(?:b|){3,}a" to "repeated empty alternative", "(?i:|)*a" to "repeated empty alternative",
+        "(?:(b)|)*\\1a" to "repeated empty alternative", "(?:a?a?)*b" to "repeated group",
+        // Quantifiers on what has no width, on groups lazy and possessive, and on \R lazy.
+        "^{2}a" to "quantified ^", "^++a" to "quantified ^", "a\\B{1,2}+b" to "quantified \\B", "\$+?" to "quantified $", "\\A{2}a" to "quantified \\A",
+        "\\z{2,}?" to "quantified \\z", "(?=a){1,2}+a" to "quantified lookaround", "\\2+?" to "quantified backreference past the groups",
+        "\\2*a" to "quantified backreference past the groups", "(a?){1,2}+b" to "possessive group", "(?:a?){1,2}+" to "possessive group",
+        "(bc)??d" to "lazy group", "(?:bc)??d" to "lazy group", "(bc)*?d" to "lazy group", "(bc)+?" to "lazy group", "(?:bc){2}?" to "lazy group",
+        "\\R+?" to "\\R lazy", "\\R{2,}?" to "\\R lazy", "()?+?" to "syntax error", "(a)*+?" to "syntax error",
     )
 
     /** The spec's directory, and the oracle's (corpus.jsonl and mutants.jsonl already written there). */

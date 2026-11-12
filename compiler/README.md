@@ -485,11 +485,33 @@ POSIX class (`[:alnum:]`, `[:alpha:]`, `[:digit:]`, `[:space:]`, `[:upper:]`, `[
   negation worked out as Java reads them (Harmony's aren't Java's: `[[^a]b]`, `[^a&&b]`); under `(?i)`, each literal and
   class as the code points Java's case-insensitivity takes for it; `.` as the class Java's is; `$` and `\Z` so they don't
   match between a `\r` and a `\n`; a lookaround in a group of its own, as Harmony crashes on one quantified (`(?=a)+`);
-  `\Q…\E` read first, as Java reads it; and `(?x)`'s comments taken out. What it can't match as Java does it refuses, failing the statement
+  `\Q…\E` read first, as Java reads it; and `(?x)`'s comments taken out. A quantifier on what has no width (`^{2}`,
+  `\B{1,2}+`) is written as Java repeats it, once or optionally; a non-capturing group repeated in a capturing group of its
+  own, hidden from the match's groups, as Harmony repeats one at the same place until the stack overflows (`(?:b|)*a` in
+  "b"); a group's `??` as `(?:|…)`, as Harmony's counts wrongly; and each lookbehind's length measured as Java's `TreeInfo` measures it, so one Java finds unbounded is refused
+  as Java refuses it (`(?<=(?:ab)*)`, a back reference in one), and one whose maximum overflows never matches, as in Java
+  (`(?<=a+b+)`). What it can't match as Java does it refuses, failing the statement
   with the construct's name (`regexp: \G is not supported on this platform; rewrite the pattern without it.`): `\G`, `\X`,
   `\N{…}`, `\b{g}`, a back reference under `(?i)`, a back reference to a group the pattern opens only after it (`(?:\1b|(a))+`,
-  which Java matches in a repetition), and `(?-U)` and `(?-u)`, which turn off what the patterns always have on. The comments in `HarmonyRewrite` and `HarmonyPattern` name the Kotlin 2.2.20 bugs each workaround is for, and
+  which Java matches in a repetition), `(?-U)` and `(?-u)`, which turn off what the patterns always have on, a lazy
+  quantifier on a group but `*?` and `??` (`(bc)+?`) and a possessive one (`(a?){1,2}+`), which Harmony counts wrongly, a lookbehind whose maximum length overflows to where Java's answer
+  depends on where in the text it is, and a pattern written as more than 2,000,000 characters (each `\b` is some 30,000:
+  a thousand of them took 1.2 GB and two seconds to compile). The comments in `HarmonyRewrite` and `HarmonyPattern` name the Kotlin 2.2.20 bugs each workaround is for, and
   `HarmonyBugsTest` fails once Kotlin fixes one, so its workaround can come out.
+
+**The stack.** Harmony's engine recurses: as it compiles, into each group and along each node, and as it matches, for each
+node it passes and again for each repetition of a group, so `(a|b)*` recurses once a character. Java's does too, and throws
+`StackOverflowError` where its thread's stack runs out (measured on JDK 21: `(a|b)*` over about 770 characters on a 512 KiB
+stack, 7,800 on 1 MiB, 73,000 on 8 MiB); on Kotlin/Native an overflow is a crash that ends the host's process. So on
+Kotlin/Native (`StackRoom`) the module compiles a pattern only where the thread has stack left for the pattern's longest
+path through Harmony's nodes, 1 KiB a node (4 KiB in a debug binary) and 64 KiB more, and where the text is longer than
+that stack covers at a path a character, reads it through a check at each character that the stack keeps that much; past
+it the statement fails (`regexp: the regular expression takes more of this thread's stack than is left on this platform,
+…`). Measured on macOS arm64's release library, through SQLite: `(a|b)*` answers over 29,694 characters on the main
+thread's 8 MiB, where it crashed from 29,772, and 818 on a Python thread of 512 KiB, where it crashed from 949; groups
+nested 12,200 deep crashed compiling on 8 MiB, and are refused from 7,800; 20,300 nodes in a row (`a?` …) crashed, and are
+refused from 8,200.
+Kotlin/Wasm's overflow is a `RangeError` its host's JavaScript catches, and isn't checked.
 
 A process keeps the 256 patterns used last (`JavaPatterns`), for every connection: a pattern rewritten for Harmony takes a
 millisecond or more to compile, its classes written out, where a find takes about a microsecond. `RegexOracleTest` checks

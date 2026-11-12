@@ -24,3 +24,10 @@ private class JvmPattern(private val pattern: Pattern) : JavaPattern {
 internal actual class PatternLock actual constructor() {
     actual fun <T> locked(block: () -> T): T = synchronized(this) { block() }
 }
+
+/** None checked: the JVM's overflow is an error, and HarmonyPattern runs here only in the tests. */
+internal actual fun stackLow(): Long = 0
+
+internal actual fun stackHere(): Long = 0
+
+internal actual fun stackBytesPerNode(): Long = 0
