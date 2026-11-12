@@ -13,8 +13,8 @@ import kotlin.test.assertTrue
 /**
  * On Oracle, with `readsAsText` (`GraphOptions.oracleReadsAsText`), a statement that only reads gives each row's value as
  * its extended JSON text, a `CLOB`, in place of `JSON`, so a host whose driver reads a `JSON` value's numbers through a
- * double keeps a whole number's digits (#198). Its rows are numbered in the statement's order and given in it; a hint the
- * statement starts with starts it still. A write, a typed compile and the other stores compile as before.
+ * double keeps a whole number's digits (#198). Its rows are numbered in the statement's order and given in it; the functions
+ * the statement declares, and a hint it starts with, start it still. A write, a typed compile and the other stores compile as before.
  */
 class OracleReadsAsTextTest {
 
@@ -32,6 +32,9 @@ class OracleReadsAsTextTest {
         "MATCH (a:Big) MATCH (b:Big) WHERE a = b RETURN a.n",
         "CALL db.labels() YIELD label RETURN label",
         "UNWIND \$xs AS x RETURN x",
+        "UNWIND [3, 1, 2] AS o RETURN reduce(s = 0, x IN range(1, o) | s + x) AS r ORDER BY r DESC",
+        "MATCH (p:Person)-[:ACTED_IN]->(m) RETURN p.name, size(reduce(s = p.name, t IN collect(m.title) | s + t)) AS r ORDER BY p.name",
+        "UNWIND [[1, 2], [1]] AS l RETURN l ORDER BY l",
     )
 
     @Test
@@ -39,12 +42,14 @@ class OracleReadsAsTextTest {
         for (cypher in reads) {
             val plain = sql(cypher, false, mapOf("xs" to listOf(1, 2)))
             val text = sql(cypher, true, mapOf("xs" to listOf(1, 2)))
-            val hint = Regex("""^SELECT (/\*\+.*?\*/) """).find(plain)
+            val declarations = if (plain.startsWith("WITH\nFUNCTION ")) plain.substring(0, plain.lastIndexOf("\nEND;\n") + 6) else ""
+            val read = plain.removePrefix(declarations)
+            val hint = Regex("""^SELECT (/\*\+.*?\*/) """).find(read)
             val head = if (hint == null) "SELECT" else "SELECT ${hint.groupValues[1]}"
-            val inner = if (hint == null) plain else "SELECT " + plain.substring(hint.range.last + 1)
+            val inner = if (hint == null) read else "SELECT " + read.substring(hint.range.last + 1)
             val numbered = "SELECT cy_q.result, ROWNUM AS cy_n FROM (\n${inner.prependIndent("    ")}\n) cy_q"
             assertEquals(
-                "$head JSON_SERIALIZE(cy_r.result RETURNING CLOB EXTENDED) AS result FROM (\n${numbered.prependIndent("    ")}\n) cy_r\nORDER BY cy_r.cy_n",
+                declarations + "$head JSON_SERIALIZE(cy_r.result RETURNING CLOB EXTENDED) AS result FROM (\n${numbered.prependIndent("    ")}\n) cy_r\nORDER BY cy_r.cy_n",
                 text,
                 cypher,
             )
@@ -56,6 +61,24 @@ class OracleReadsAsTextTest {
         val text = sql("MATCH (a:Big) MATCH (b:Big) WHERE a = b RETURN a.n", true)
         assertTrue(text.startsWith("SELECT /*+ NO_JSON_TABLE_TRANSFORM"), text)
         assertEquals(1, Regex("""/\*\+""").findAll(text).count(), text)
+    }
+
+    @Test
+    fun `the functions a read declares start the statement still, before its hint, as Oracle refuses them in a subquery`() {
+        for (cypher in listOf(
+            "UNWIND [3, 1, 2] AS o RETURN reduce(s = 0, x IN range(1, o) | s + x) AS r",
+            "UNWIND [[1, 2], [1]] AS l RETURN l ORDER BY l",
+            "MATCH (p:Person)-[:ACTED_IN]->(m) RETURN p.name, size(reduce(s = p.name, t IN collect(m.title) | s + t)) AS r ORDER BY p.name",
+        )) {
+            val text = sql(cypher, true)
+            assertTrue(text.startsWith("WITH\nFUNCTION "), text)
+            assertEquals(1, Regex("""\bWITH\n""").findAll(text).count(), text)
+            val read = text.substring(text.lastIndexOf("\nEND;\n") + 6)
+            assertTrue(read.startsWith("SELECT ") && read.substringBefore("\n").contains("JSON_SERIALIZE(cy_r.result"), read)
+            assertEquals(Regex("""/\*\+""").findAll(sql(cypher, false)).count(), Regex("""/\*\+""").findAll(text).count(), text)
+        }
+        val hinted = sql("MATCH (p:Person)-[:ACTED_IN]->(m) RETURN p.name, size(reduce(s = p.name, t IN collect(m.title) | s + t)) AS r ORDER BY p.name", true)
+        assertTrue(hinted.substring(hinted.lastIndexOf("\nEND;\n") + 6).startsWith("SELECT /*+ NO_JSON_TABLE_TRANSFORM"), hinted)
     }
 
     @Test

@@ -1642,18 +1642,23 @@ class OracleCypherCompiler(
     }
 
     /**
-     * The read [query], as [readAsText] gives it: each row's value, its `result`, given as its text in Oracle's extended JSON, as a `CLOB`:
+     * The read [query] with each row's value, its `result`, given as its text in Oracle's extended JSON, as a `CLOB`:
      * `JSON_SERIALIZE(… RETURNING CLOB EXTENDED)`, as a write's rows are with [rowsAsText]. A whole number keeps its
      * digits, and a float is marked as one (`{"${'$'}numberDouble": 2}`), where a host's driver reads a `JSON` value's
      * numbers through a double of its own: node-oracledb does (liberation-data/drivine-cypher-spec#198). The rows are
      * numbered in [query]'s order and given in it. A hint [query] starts with is the statement's, so it starts the
-     * statement still. Not where the statement is compiled typed, whose rows hold more columns than `result`.
+     * statement still. The functions [query] declares before it (`WITH FUNCTION …`, a `reduce`'s) start it still too: Oracle
+     * refuses them in a subquery (ORA-32034). Not where the statement is compiled typed, whose rows hold more columns than
+     * `result`.
      */
     private fun readAsText(query: String): String {
-        val hint = LEADING_HINT.find(query)
-        val (head, inner) = if (hint == null) "SELECT" to query else "SELECT ${hint.groupValues[1]}" to "SELECT " + query.substring(hint.range.last + 1)
+        val declared = if (query.startsWith("WITH\nFUNCTION ")) query.lastIndexOf(DECLARED_END) + DECLARED_END.length else 0
+        val read = query.substring(declared)
+        val hint = LEADING_HINT.find(read)
+        val (head, inner) = if (hint == null) "SELECT" to read else "SELECT ${hint.groupValues[1]}" to "SELECT " + read.substring(hint.range.last + 1)
         val numbered = "SELECT cy_q.result, ROWNUM AS cy_n FROM (\n${indent(inner)}\n) cy_q"
-        return "$head JSON_SERIALIZE(cy_r.result RETURNING CLOB EXTENDED) AS result FROM (\n${indent(numbered)}\n) cy_r\nORDER BY cy_r.cy_n"
+        return query.substring(0, declared) +
+            "$head JSON_SERIALIZE(cy_r.result RETURNING CLOB EXTENDED) AS result FROM (\n${indent(numbered)}\n) cy_r\nORDER BY cy_r.cy_n"
     }
 
     /**
@@ -2033,6 +2038,9 @@ class OracleCypherCompiler(
     companion object {
         /** A hint a query starts with: `SELECT /*+ … */ `. */
         private val LEADING_HINT = Regex("""^SELECT (/\*\+.*?\*/) """)
+
+        /** How the last function a query declares before it ends (see [readAsText]): its `END;`, on a line of its own. */
+        private const val DECLARED_END = "\nEND;\n"
 
         /**
          * Whether every statement holds its lists of ids as JSON ([idsAsJson]), whatever its walks' bounds: for tests only, so
