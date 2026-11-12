@@ -407,6 +407,9 @@ on a text that is no JSON, and takes an empty one as no value, as drivine4j's do
 | `drivine_sort_key(json)` | of a JSON list, a text that orders, as SQLite orders text, as Cypher orders lists; of any other value its JSON text as given, null of null. Deterministic. |
 | `drivine_list_order(a, b)` | -1, 0 or 1, where the JSON list `a` comes beside the list `b` in a comparison (`<`, `>=` …); null where either is no list or the pair that decides isn't ordered. Deterministic. |
 | `drivine_round(number, precision, mode)` | the number rounded to as many decimal places by the mode (`HALF_UP`, `HALF_EVEN` … as Java names them), in decimal as Neo4j rounds, so 2.345 to 2 places `HALF_UP` is 2.35; a float. An infinity is itself; null where the number or the precision is. Deterministic. |
+| `regexp(pattern, text)` | 1 where the regular expression matches somewhere in the text, 0 where it matches nowhere; null where either is null. SQLite calls it for `text REGEXP pattern`. The pattern is Java's: see [Regular expressions](#regular-expressions). Deterministic. |
+| `drivine_regex_group(text, pattern, group)` | the text the group of that number matches where the pattern first matches (0 the whole match), as Postgres's `regexp_match` gives it; null where it matches nowhere, the group takes no part or is past the pattern's, or the text or pattern is null. A null group is 0; a negative one fails the statement. Deterministic. |
+| `drivine_regexp_replace(text, pattern, replacement)` | the text with each match replaced, `\1` in the replacement naming a group as Postgres's and Oracle's do, anything else itself; null where any is null. A match whose replacement names a group the pattern hasn't fails the statement, as Java's does. Deterministic. |
 | `drivine_extension_version()` | the module's version, as it was built (`-Pcompiler.version`, the Maven form: `0.36.0`, `0.36.0-rc.1`), so a host can check it loaded the library it meant to. Deterministic. |
 | `drivine_gc_collect()` | NULL, having collected: see below. Direct-only. |
 | `drivine_gc_heap()`, `drivine_gc_heap(bytes)` | the GC's floor, in bytes; given bytes, it sets the floor first, and 0 restores the runtime's own. Direct-only. |
@@ -465,6 +468,31 @@ through SQL, the throwing ones too, and then the C API by ctypes from the same p
 `function` step of the spec's `host.yaml` whose function the extension registers (`./gradlew hostSpecJson` writes the
 file as JSON, in `build/host`), and names those it doesn't register yet. CI runs it on Linux x64 and macOS, and the
 release runs it on each platform's installed wheel, Windows and Linux arm64 too, without `host.yaml`.
+
+### Regular expressions
+
+The regular expression functions read a pattern as drivine4j's do: Java's, compiled with `UNICODE_CHARACTER_CLASS`, with a
+POSIX class (`[:alnum:]`, `[:alpha:]`, `[:digit:]`, `[:space:]`, `[:upper:]`, `[:lower:]`, `[:punct:]`) read as Java names it
+(`\p{Alnum}` …), so a full-text search's expressions, written for Postgres, read the same. `org.drivine.cypher.host.regex`:
+
+- On the JVM, `java.util.regex` itself.
+- On Kotlin/Native and Kotlin/Wasm, `kotlin.text.Regex`, which on both is the stdlib's own engine (a port of Apache
+  Harmony's), not JavaScript's `RegExp` on wasm. It reads Java's syntax, but its classes are ASCII's, its case-insensitivity
+  and some of its constructs aren't Java's, and it has bugs with code points past the BMP. So `HarmonyRewrite` writes the
+  pattern so it matches as Java's does: each class escape and property (`\w`, `\b`, `\p{L}`, `\p{IsLatin}`, `\p{InGreek}`,
+  `\p{javaLowerCase}` …) as the ranges Java's holds, from tables gen/Generate.java writes on the pinned JDK
+  (`RegexTables`); under `(?i)`, each literal and class as the code points Java's case-insensitivity takes for it; `.` as
+  the class Java's is; and `(?x)`'s comments taken out. What it can't match as Java does it refuses, failing the statement
+  with the construct's name (`regexp: \G is not supported on this platform; rewrite the pattern without it.`): `\G`, `\X`,
+  `\N{…}`, `\b{g}`, a back reference under `(?i)`, and `(?-U)` and `(?-u)`, which turn off what the patterns always have
+  on. The comments in `HarmonyRewrite` and `HarmonyPattern` name the Kotlin 2.2.20 bugs each workaround is for, and
+  `HarmonyBugsTest` fails once Kotlin fixes one, so its workaround can come out.
+
+A process keeps the 256 patterns used last (`JavaPatterns`), for every connection: a pattern rewritten for Harmony takes a
+millisecond or more to compile, its classes written out, where a find takes about a microsecond. `RegexOracleTest` checks
+every target against Java's answers (`regex.json`, see [Checks](#checks)), both ways where it can: `JavaPatterns`, as the
+functions compile a pattern there, and the rewrite, which on the JVM runs on `java.util.regex` without
+`UNICODE_CHARACTER_CLASS`, so the JVM checks the rewrite's tables too.
 
 `HostSpecTest`, in the common tests, runs the same steps on every target (the JVM, native and wasm), calling the module's
 code as SQLite would. A function `host.yaml` calls that the module doesn't implement yet is on its `PENDING` list, which
@@ -590,6 +618,12 @@ The JVM is the oracle. `./gradlew jvmOracle` writes, into `build/oracle`:
 - `host.json`: the spec's `host.yaml` as JSON, which `HostSpecTest` reads on every target: the `function` steps the
   module's host functions (`org.drivine.cypher.host.HostFunctions`) must give. `./gradlew hostSpecJson` writes it alone,
   into `build/host`, for `nativeExtensionCheck`.
+- `regex.json`: Java's answers for the regular expressions SQLite's functions see, which `RegexOracleTest` reads on every
+  target (see [Regular expressions](#regular-expressions)): each pattern the compiler writes on SQLite over the corpus and
+  the mutants, each a full-text search gives, each of `host.yaml`'s, and users' `=~` patterns written and wrapped as `=~`
+  wraps them, over texts of many scripts, code points past the BMP and every line break; whether each is found, its first
+  match's groups, its count and every match replaced, or Java's refusal; and what `(?i)` takes for each code point with a
+  case. `RegexOracleTest` fails on any other answer, and on any refusal but the platform's named ones.
 - `search-golden.json`: drivine4j's full-text search statements (see [Full-text search](#full-text-search)), which
   `FullTextSearchGoldenTest` reads on every target. Its requests are in `corpus.jsonl` too.
 - `standins-<name>.txt`: what Java gives where the module stands in for it, worked out by Java's own API on the pinned

@@ -85,7 +85,8 @@ val generateTables = tasks.register<Exec>("generateTables") {
         delete(out)
         executable(pinnedJava().absolutePath)
     }
-    args(generator.asFile.absolutePath, out.get().asFile.absolutePath, pinnedJdkVersion, pinnedTzdb)
+    // Character's tables of block and script names, which the regular expressions' tables read (gen/Generate.java).
+    args("--add-opens", "java.base/java.lang=ALL-UNNAMED", generator.asFile.absolutePath, out.get().asFile.absolutePath, pinnedJdkVersion, pinnedTzdb)
 }
 
 /** The module's version as the native library gives it (drivine_extension_version()): ModuleVersion.kt, from [version]. */
