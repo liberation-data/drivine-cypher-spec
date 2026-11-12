@@ -14,8 +14,8 @@ import kotlin.test.assertTrue
 
 /**
  * The spec's host.yaml (as host.json, `./gradlew jvmOracle`), over the module's own host functions ([HostFunctions]), called
- * as SQLite calls them, on every target: each `function` step of a function the module implements gives its `result`, or
- * its values ascend. A function host.yaml calls that the module doesn't implement yet is in [PENDING], and [PENDING] holds
+ * as SQLite calls them, on every target: each `function` step of a function the module implements gives its `result`, fails
+ * with its `error`, or its values ascend. A function host.yaml calls that the module doesn't implement yet is in [PENDING], and [PENDING] holds
  * nothing else; each function the module implements has a step. A `read` step pins each library's row reader, not the
  * module's, and is passed over. The cases' `pairs` are checked by each library's runner (drivine4j's HostSpecTest), which
  * compiles them. The SQLite extension's check (check/extension-native.py) runs the same steps through SQL, on the
@@ -24,14 +24,14 @@ import kotlin.test.assertTrue
 class HostSpecTest {
 
     private companion object {
-        /** The keys of each kind of step, beside its optional `note`: a function's result, its order, and a read. */
-        val SHAPES = setOf(setOf("function", "args", "result"), setOf("function", "ascending"), setOf("read", "value"))
+        /** The keys of each kind of step, beside its optional `note`: a function's result, its failure, its order, and a read. */
+        val SHAPES = setOf(setOf("function", "args", "result"), setOf("function", "args", "error"), setOf("function", "ascending"), setOf("read", "value"))
 
         /** Drivine's functions, and `regexp`, which SQLite calls, as `regexp(pattern, text)`, for `text REGEXP pattern`. */
         val FUNCTION = Regex("drivine_[a-z_]+|regexp")
 
         /** The functions host.yaml calls that are not yet ported from drivine4j (#108): a port takes its own out. */
-        val PENDING = setOf("regexp", "drivine_regex_group", "drivine_regexp_replace")
+        val PENDING = setOf("regexp", "drivine_regex_group", "drivine_regexp_replace", "drivine_temporal")
     }
 
     private val cases: List<JsonNode> = CypherJson.readTree(oracleFile("host.json"))["cases"]!!.toList()
@@ -93,6 +93,14 @@ class HostSpecTest {
         assertContains(assertFails { check(nanAscending, "nanAscending") }.message!!, "can't be given NaN")
         val truth = CypherJson.readTree("""{"function": "drivine_float_text", "args": [true], "result": "1.0"}""")
         assertContains(assertFails { check(truth, "truth") }.message!!, "No SQL value of")
+        val fails = CypherJson.readTree("""{"function": "drivine_round", "args": [2.5, 0, "UNNECESSARY"], "error": "Rounding necessary"}""")
+        assertEquals(Outcome.RAN, check(fails, "fails"))
+        val gives = CypherJson.readTree("""{"function": "drivine_float_text", "args": [1.0], "error": "x"}""")
+        assertContains(assertFails { check(gives, "gives") }.message!!, "gave no error")
+        val otherError = CypherJson.readTree("""{"function": "drivine_round", "args": [2.5, 0, "UNNECESSARY"], "error": "no such"}""")
+        assertContains(assertFails { check(otherError, "otherError") }.message!!, "Rounding necessary")
+        val untexted = CypherJson.readTree("""{"function": "drivine_round", "args": [2.5, 0, "UNNECESSARY"], "error": 1}""")
+        assertContains(assertFails { check(untexted, "untexted") }.message!!, "error is a text, not 1")
         val pending = CypherJson.readTree("""{"function": "regexp", "args": ["a", "a"], "result": 1}""")
         assertEquals(Outcome.PENDING, check(pending, "pending"))
         val read = CypherJson.readTree("""{"read": {"store": "sqlite", "nonFinite": false, "column": "1"}, "value": 1, "note": "n"}""")
@@ -186,7 +194,13 @@ class HostSpecTest {
         } else {
             val args = step["args"]!!.map(::expanded)
             refuseNaN(args, where)
-            assertEquals(expanded(step["result"]!!), call(functions, args, where), "$where: $name$args")
+            val error = step["error"]?.let { it.textValue() ?: throw IllegalArgumentException("$where: error is a text, not ${CypherJson.writeValueAsString(it)}") }
+            if (error == null) assertEquals(expanded(step["result"]!!), call(functions, args, where), "$where: $name$args")
+            else {
+                val failure = runCatching { call(functions, args, where) }.exceptionOrNull()
+                    ?: throw AssertionError("$where: $name$args fails with \"$error\", but gave no error")
+                assertContains(failure.message!!, error, message = "$where: $name$args")
+            }
         }
         return Outcome.RAN
     }
