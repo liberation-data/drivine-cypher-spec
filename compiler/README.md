@@ -519,7 +519,7 @@ this platform; rewrite the pattern without it.`):
   multiplies the backtracking and stack Harmony takes where its repetition of groups is least like Java's;
 - `(?-U)` and `(?-u)`, which turn off what the patterns always have on, and `(?c)`, after which Java reads each class and
   `\p{…}` by graphemes;
-- and a pattern written as more than 2,000,000 characters (each `\b` is some 30,000: a thousand of them took 1.2 GB and
+- and a pattern written as more than 2,000,000 characters (each `\b` is some 35,000: 30 million characters took 1.2 GB and
   two seconds to compile).
 
 This is a documented limit of native and wasm alone: on the JVM the functions keep the whole of `java.util.regex`. The
@@ -544,11 +544,22 @@ where it crashed from 949; groups nested 12,200 deep crashed compiling on 8 MiB,
 in a row (`a?` …) crashed, and are refused from 8,200.
 Kotlin/Wasm's overflow is a `RangeError` its host's JavaScript catches, and isn't checked.
 
-**A known limit: long texts and `$`, `\Z`, `\b`, `\B`.** The rewrite writes these with lookbehinds, and Harmony takes
-time proportional to the text for a lookbehind at each place it tries one, so on native and wasm a pattern holding one
-takes time quadratic in the text's length: a `\b` replace takes 1.9 s over 10,000 characters and 33 s over 40,000. A
-text of a chunk's length is fine (a full-text search's term, replaced over 1,420 characters, 182 µs). Until #204 is
-fixed, a library keeps its own regular expression functions rather than registering these.
+**Long texts and `$`, `\Z`, `\b`, `\B`.** These look at the character before a place, and Harmony's lookbehind takes time
+proportional to how far into the text it is tried, as it looks for its body ending there from each place back to the
+text's start: a pattern written with one takes time quadratic in the text's length. So `HarmonyRewrite` writes them with
+a lookbehind that holds at the code point before wherever it is tried, found at once, and captures what it reads there
+in a group of its own, which a back reference after it reads. Measured on macOS arm64's release library, through SQLite,
+before (#204) and now:
+
+| Call | Text | Before | Now |
+|---|---|---|---|
+| `\b` replace | 10,000 chars | 1.06 s | 12 ms |
+| `\b` replace | 40,000 chars | 16.8 s | 39 ms |
+| `graph$` replace | 700,000 chars | 6.5 s | 11 ms |
+| a full-text search's term, replace | 2.1M chars | 46 s | 0.22 s |
+
+`LongTextAnchorsTest` fails on every target where a `\b` replace over 40,000 characters or a `$` over 700,000 takes over
+5 s: about ten times what a debug test binary takes now, and well under the 133 s and 47 s it took before.
 
 A process keeps the 256 patterns used last (`JavaPatterns`), for every connection: a pattern rewritten for Harmony takes a
 millisecond or more to compile, its classes written out, where a find takes about a microsecond. `RegexOracleTest` checks

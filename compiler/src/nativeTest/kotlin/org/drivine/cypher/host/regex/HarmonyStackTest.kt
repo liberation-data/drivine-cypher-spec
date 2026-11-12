@@ -110,7 +110,8 @@ class HarmonyStackTest {
         refused("[".repeat(20_000) + "a" + "]".repeat(20_000))
         refused("a?".repeat(50_000))
         refused("(?:)".repeat(50_000))
-        refused("\$".repeat(50_000))
+        // Each $ is written as some 70 characters (Writer.dollar), so 30,000 of them are more than the rewrite writes at all.
+        refused("\$".repeat(20_000))
     }
 
     @Test
