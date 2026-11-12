@@ -133,12 +133,16 @@ class HarmonyStackTest {
             val answers = worker.execute(TransferMode.SAFE, { }) {
                 // Each found first where it takes its longest path, through its lookbehind: not at the text's start.
                 listOf("\$" to "a\n", "\\b" to " a", "\\B" to "aa", "\\b\$" to "\na\n").map { (anchor, text) ->
-                    // The most in a row that compile, each count matched up to it: the last at the edge of the stack.
+                    // The most in a row that compile, each count matched up to it: the last at the edge of the stack, or,
+                    // where a Worker's stack is large (glibc gives one 8 MiB, macOS 512 KiB), at the written length's
+                    // limit (`\b` past 57), which refuses too before any overflow.
                     var n = 1
                     while (true) {
                         val found = try {
                             JavaPatterns.compile(anchor.repeat(n)).find(text)?.first()
                         } catch (e: StackRoomException) {
+                            break
+                        } catch (e: UnsupportedPatternException) {
                             break
                         }
                         if (found != "") return@map "$anchor x$n: $found"
