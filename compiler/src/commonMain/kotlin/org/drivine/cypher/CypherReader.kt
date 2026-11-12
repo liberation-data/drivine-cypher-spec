@@ -95,7 +95,10 @@ object CypherReader {
      */
     private fun standalone(call: OC_StandaloneCallContext): Query {
         val invocation = call.oC_ExplicitProcedureInvocation()
-        val procedure = procedure(invocation?.oC_ProcedureName() ?: call.oC_ImplicitProcedureInvocation()!!.oC_ProcedureName())
+        val procedure = procedure(
+            invocation?.oC_ProcedureName() ?: call.oC_ImplicitProcedureInvocation()!!.oC_ProcedureName(),
+            invocation?.oC_Expression().orEmpty(),
+        )
         val items = call.oC_YieldItems()
         // As Neo4j refuses it: a WHERE filters rows a clause after it reads.
         if (items?.oC_Where() != null) {
@@ -111,7 +114,7 @@ object CypherReader {
      */
     private fun inQuery(call: OC_InQueryCallContext): Clause {
         val invocation = call.oC_ExplicitProcedureInvocation()
-        val procedure = procedure(invocation.oC_ProcedureName())
+        val procedure = procedure(invocation.oC_ProcedureName(), invocation.oC_Expression())
         // As Neo4j refuses it: within a query, what a procedure gives is named.
         val items = call.oC_YieldItems()
             ?: throw CompilerException("A CALL of a procedure within a query names what it yields, as in Cypher: CALL ${procedure.qualifiedName}() YIELD ${procedure.field}.")
@@ -119,9 +122,13 @@ object CypherReader {
         return Clause.Call(false, procedure.query(invocation.oC_Expression().map(::expression), yields(items), where), importsAll = true)
     }
 
-    /** The procedure a call names, or the call refused where the compiler does not take it. */
-    private fun procedure(name: OC_ProcedureNameContext): Procedure {
-        val qualified = name.oC_Namespace().oC_SymbolicName().joinToString("") { symbolic(it) + "." } + symbolic(name.oC_SymbolicName())
+    /**
+     * The procedure a call names, with [arguments], or the call refused where the compiler does not take it: by name where
+     * a SQL store never will ([VectorCypher]).
+     */
+    private fun procedure(name: OC_ProcedureNameContext, arguments: List<OC_ExpressionContext>): Procedure {
+        val qualified = name.oC_ProcedureNamespace().oC_SchemaName().joinToString("") { name(it) + "." } + symbolic(name.oC_SymbolicName())
+        VectorCypher.refusal(qualified) { arguments.getOrNull(1)?.let(::expression) }?.let { throw CompilerException(it) }
         return Procedure.named(qualified) ?: refuse("A procedure call (CALL)")
     }
 
@@ -559,8 +566,10 @@ object CypherReader {
         context.oC_ParenthesizedExpression() != null -> expression(context.oC_ParenthesizedExpression()!!.oC_Expression())
         context.oC_FunctionInvocation() != null -> context.oC_FunctionInvocation().let { function ->
             val namespace = function!!.oC_FunctionName().oC_Namespace().oC_SymbolicName().joinToString("") { symbolic(it) + "." }
+            val name = namespace + symbolic(function!!.oC_FunctionName().oC_SymbolicName())
+            VectorCypher.functionRefusal(name)?.let { throw CompilerException(it) }
             Expression.Function(
-                namespace + symbolic(function!!.oC_FunctionName().oC_SymbolicName()),
+                name,
                 function!!.DISTINCT() != null,
                 function!!.oC_Expression().map(::expression),
             )
