@@ -7774,3 +7774,15 @@ columns:
         drivine_uq2_Personemail_5482a751:
           - "COALESCE ( props ->> '$.\"email\".\"$t\"' , CASE json_type ( props , '$.\"email\"' ) WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'null' THEN NULL ELSE json_type ( props , '$.\"email\"' ) END )"
           - "COALESCE ( props ->> '$.\"email\".s' , props ->> '$.\"email\".v' , props ->> '$.\"email\"' )"
+doubleKeys:
+  description: "On Oracle, a range index's and a uniqueness constraint's key of a binary double that is no whole number, `'d' || TO_CHAR(d)`, as Oracle writes each of these doubles: 17 significant digits or fewer, which tell any two doubles apart. Captured from Oracle 23.26 (gvenzl/oracle-free:23-faststart) through `SELECT 'd' || TO_CHAR(TO_BINARY_DOUBLE(:double)) FROM dual`, so a change to Oracle's default format fails here rather than leave a store with two keys for one value."
+  oracle:
+    - {double: "1.5", key: "d1.5E+000"}
+    - {double: "-1.5", key: "d-1.5E+000"}
+    - {double: "0.1", key: "d1.0000000000000001E-001"}
+    - {double: "0.3333333333333333", key: "d3.3333333333333331E-001"}
+    - {double: "123456789.123", key: "d1.23456789123E+008"}
+    - {double: "1E300", key: "d1.0000000000000001E+300"}
+    - {double: "1.7976931348623157E308", key: "d1.7976931348623157E+308"}
+    - {double: "2.2250738585072014E-308", key: "d2.2250738585072014E-308"}
+    - {double: "4.9E-324", key: "d4.9406564584124654E-324"}
