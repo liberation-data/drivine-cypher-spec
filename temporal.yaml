@@ -199,10 +199,10 @@ cases:
         cypher: |
           RETURN {offset: datetime.statement('+05:00').offset, time: time.transaction('-03:30').offset, given: datetime.realtime($z).offset,
                   days: duration.inDays(date.realtime('-12:00'), date.realtime('+14:00')).days IN [1, 2],
-                  local: localdatetime.statement('Z') = localdatetime(datetime.statement('Z')),
-                  clock: localtime.statement('Z') = localtime(datetime.statement('Z'))}
+                  local: duration.between(localdatetime.statement('-12:00'), localdatetime.statement('+14:00')).hours,
+                  clock: duration.between(localtime.statement('-05:00'), localtime.statement('+05:00')).hours IN [10, -14]}
         parameters: {z: "+01:00"}
-        rows: [{offset: "+05:00", time: "-03:30", given: "+01:00", days: true, local: true, clock: true}]
+        rows: [{offset: "+05:00", time: "-03:30", given: "+01:00", days: true, local: 26, clock: true}]
 
   - name: "Week-year fields, duration parts and zoned inequality"
     description: "A moment gives its week-year and offset fields, a duration its parts of a larger unit, and zoned values at different offsets are unequal."
