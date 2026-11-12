@@ -147,7 +147,7 @@ class OracleCypherCompiler(
      * value that holds a map with a key as extended JSON's are, `{"${'$'}numberLong": "5"}`, which `JSON(… EXTENDED)` would read as
      * the value it writes: such a value is written as JSON is, its floats that are whole numbers read as whole numbers. A
      * statement that writes binds all its parameters as one text, and reads as extended JSON only those of them with such
-     * a double in them: see [propertyOf].
+     * a double in them: see [propertyOf], and [parametersText] for one where a parameter holds such a key.
      */
     override fun parameterText(value: Any?): String {
         val tree = CypherJson.valueToTree(value, encoder)
@@ -157,6 +157,26 @@ class OracleCypherCompiler(
         // A procedure's parameters are one map: those of its entries with a double in them are read as extended JSON.
         if (doubled && written is ObjectNode) extendedParameters += written.properties().filter { keyedAsExtended(it.value) }.map { it.key }
         return CypherJson.writeValueAsString(written, encoder = encoder).also { if (doubled) extended += it }
+    }
+
+    /**
+     * A statement's parameters, one map, as [parameterText] writes them, but where one of them holds a map with a key as
+     * extended JSON's are (`${'$'}k`): the map can't then be read as extended JSON whole, which would read that key as
+     * the value it writes, so each other parameter that holds a float that is a whole number, or past a long's range, is
+     * written as extended JSON's double and read so on its own (see [propertyOf]). Before, the map was written as JSON
+     * is, so such a float was read as a whole number: `1e20` was stored as `100000000000000000000` (#200). A float in the
+     * parameter that holds such a key is still written as JSON is: that parameter is read as JSON.
+     */
+    override fun parametersText(parameters: Any?): String {
+        val tree = CypherJson.valueToTree(parameters, encoder)
+        if (tree !is ObjectNode || !keyedAsExtended(tree)) return parameterText(parameters)
+        for ((key, value) in tree.properties().toList()) {
+            if (keyedAsExtended(value)) continue
+            var doubled = false
+            tree.set<JsonNode>(key, doubles(value) { doubled = true })
+            if (doubled) extendedParameters += key
+        }
+        return CypherJson.writeValueAsString(tree, encoder = encoder)
     }
 
     /** Whether [node] holds a map with a key that starts with `$`, as extended JSON's keys do. */
