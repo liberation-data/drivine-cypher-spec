@@ -36,7 +36,8 @@ import kotlin.io.encoding.ExperimentalEncodingApi
  * `{"error": "<message>"}` where the request is no request.
  *
  * A request with `search` or `searchIndex` in place of `cypher` is a full-text search, answered by [FullTextSearch]: see
- * [SearchJson]. A request that gives more than one of the three is an error.
+ * [SearchJson]. One with `read`, `temporalKey` or `layout` asks the store layout's questions: a column's value read, a
+ * temporal value's sort key, a graph's layout judged; see [LayoutJson]. A request that gives more than one kind is an error.
  *
  * Values, in the parameters given and those bound, are plain JSON, tagged only where JSON, or a host's reading of it, loses
  * what the SQL depends on:
@@ -88,10 +89,13 @@ object CompileJson {
         }
         // A full-text search, asked of the same entry: a request with "search" or "searchIndex" in place of "cypher".
         // A request asks one thing: one that gives two would have the other read past as though it were not there.
-        if (listOf("cypher", "search", "searchIndex", "settings").count { tree.has(it) } > 1) {
-            return error("A request gives one of cypher, search, searchIndex and settings.")
+        val kinds = listOf("cypher", "search", "searchIndex", "settings") + LayoutJson.KINDS
+        if (kinds.count { tree.has(it) } > 1) {
+            return error("A request gives one of ${kinds.dropLast(1).joinToString()} and ${kinds.last()}.")
         }
         if (tree.has("search") || tree.has("searchIndex")) return SearchJson.answer(tree)
+        // The store layout's questions, asked of the same entry: see LayoutJson.
+        if (LayoutJson.KINDS.any { tree.has(it) }) return LayoutJson.answer(tree)
         if (tree.has("settings")) return settings(tree["settings"])
         val call = try {
             read(tree)

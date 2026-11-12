@@ -321,6 +321,33 @@ asked, so a statement set too large for the cap shows in the log. The answer to 
 are made anew depends on what the process compiled before, which the corpus check's byte-for-byte comparison can't
 hold to.
 
+### The store layout's questions
+
+A library on store layout 2 (#161) asks the module three things besides a statement, each through the JSON entry as a request
+of its own, so the three libraries read rows, key a temporal value and judge a graph alike. In Kotlin they are
+`ValueLayout.read`, `Temporals.key` and `StoreLayout.verdict`.
+
+```json
+{"read": "{\"d\":{\"$t\":\"date\",\"v\":\"2024-01-01\",\"s\":\"10000020240101\"},\"$$k\":1}", "typed": false}
+{"temporalKey": {"kind": "datetime", "v": "2024-03-15T10:30:00.500+02:00"}}
+{"layout": {"engine": "POSTGRES", "graph": "g", "stamps": [{"layout": null}], "foreignNodes": false, "objects": [{"name": "drivine_uq_Personemail_8e5a9c3b", "type": "INDEX"}]}}
+```
+
+- **`read`** takes a column of a compiled statement's rows as the store gave it, its JSON text, so the host's JSON reader
+  never rounds its numbers first. The answer is `{"value": …}`: each temporal value's tag read as its text, and each map's
+  keys unescaped (`$$k` read as `$k`), at any depth. With `"typed": true`, a tag is instead `{"$t": kind, "v": text}`, and a
+  map with a `$t` key of its own is `{"$t": "map", "v": …}`. `host.yaml`'s reads pin it.
+- **`temporalKey`** gives the sort key `s` of a temporal value's canonical text: `{"key": "…"}`, or null for a duration. A
+  host writes it into a tag of its own (`{"$t", "v", "s"}`) where it builds a stored value itself. `host.yaml`'s keys pin it.
+- **`layout`** judges a graph by its stamps' layouts (as `readStamps` gives them), whether it holds a node other than
+  Drivine's own (`foreignNodes`), and the objects `layoutObjects` listed. The answer is one of:
+  - `{"verdict": "current"}`: use the graph;
+  - `{"verdict": "stamp", "drops": [...], "parameters": {...}}`: run the drops, then `restampLayout` with the parameters,
+    then read the stamps back and ask again;
+  - `{"verdict": "refuse", "message": "…"}`: throw the message.
+
+  `marker.yaml`'s `storeLayout` pins it.
+
 ### npm
 
 ```js

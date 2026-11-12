@@ -286,8 +286,8 @@ class CompileJsonTest {
                 "{\"settings\": {\"other\": 1}}" to "give no other",
                 "{\"settings\": 3}" to "settings are a JSON object",
                 "{\"settings\": null}" to "settings are a JSON object",
-                "{\"settings\": {}, \"cypher\": \"RETURN 1\"}" to "one of cypher, search, searchIndex and settings",
-                "{\"settings\": {}, \"search\": {}}" to "one of cypher, search, searchIndex and settings",
+                "{\"settings\": {}, \"cypher\": \"RETURN 1\"}" to "one of cypher, search, searchIndex, settings, read, temporalKey and layout",
+                "{\"settings\": {}, \"search\": {}}" to "one of cypher, search, searchIndex, settings, read, temporalKey and layout",
             )) {
                 val answer = CompileJson.compile(request)
                 assertTrue(answer.startsWith("{\"error\":") && error in answer, "$request: $answer")
