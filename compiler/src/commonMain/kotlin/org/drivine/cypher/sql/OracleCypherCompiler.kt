@@ -952,7 +952,9 @@ class OracleCypherCompiler(
     override fun element(json: String, index: String) = shared(json, index) { (list, i) ->
         readsByPlace = true
         val at = "JSON_VALUE($i, '$' RETURNING NUMBER)"
-        listItem(list, "'\$[\$i]'", " PASSING CASE WHEN $at < 0 THEN JSON_VALUE($list, '\$.size()' RETURNING NUMBER) + $at ELSE $at END AS \"i\"")
+        // Strict: lax `$[0]` of a map is the map, as a lax path reads any value as a list of one (drivine4j#698), where strict
+        // reads it as no item, null, as the other stores read it. An index past the list's end is null either way.
+        listItem(list, "'strict \$[\$i]'", " PASSING CASE WHEN $at < 0 THEN JSON_VALUE($list, '\$.size()' RETURNING NUMBER) + $at ELSE $at END AS \"i\"")
     }
 
     /**
