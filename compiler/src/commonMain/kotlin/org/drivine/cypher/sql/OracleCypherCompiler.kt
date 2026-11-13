@@ -1778,13 +1778,16 @@ class OracleCypherCompiler(
     override fun called(query: String) =
         "SELECT /*+ NO_MERGE${if (DISTINCT_SELECT.containsMatchIn(query)) " NO_DECORRELATE" else ""} */ * FROM (\n${indent(query)}\n)"
 
+    /** A fragment's term [sql] with its reads routed as a statement's are: see [finished]. */
+    override fun finishedTerm(sql: String) = OracleLongReads.routed(sql)
+
     /**
      * Each read of a stored value as JSON left off the CLOB route is routed it: a long text property read as a direct member of
      * a list or a map, or as a nested property, is routed the CLOB way on Oracle, to avoid an Oracle server defect
      * (drivine4j#670). See [OracleLongReads].
      */
     override fun finished(compiled: CompiledCypher): CompiledCypher {
-        val routed = OracleLongReads.routed(compiled.sql)
+        val routed = finishedTerm(compiled.sql)
         return compiled.copy(sql = if (readsAsText && !procedural && !typed) readAsText(routed) else routed)
     }
 
@@ -1806,6 +1809,27 @@ class OracleCypherCompiler(
         val numbered = "SELECT cy_q.result, ROWNUM AS cy_n FROM (\n${indent(inner)}\n) cy_q"
         return query.substring(0, declared) +
             "$head JSON_SERIALIZE(cy_r.result RETURNING CLOB EXTENDED) AS result FROM (\n${indent(numbered)}\n) cy_r\nORDER BY cy_r.cy_n"
+    }
+
+    /**
+     * A fragment's hints: `NO_JSON_TABLE_TRANSFORM` always, and [NO_FEEDBACK] where a term tests a node's labels as one read by
+     * its key, as [planned] gives a statement. [planned] hints a statement against Oracle's JSON table transformation where a
+     * comparison reads a property by its own path, an item of a list is read by its place, or the graph's tables are read
+     * twice or more: a fragment is a part of the library's query, whose FROM the module doesn't see, and which reads the graph's
+     * tables beside the fragment's own reads, so it is hinted whatever it reads. The cost is a rewrite Oracle doesn't make,
+     * which a statement that compares a property forgoes too; without it Oracle 23 may give a comparison the wrong truth.
+     */
+    override fun fragmentHints(terms: List<String>): List<String> {
+        val text = terms.joinToString("\n")
+        return listOfNotNull(NO_JSON_TABLE_TRANSFORM, NO_FEEDBACK.takeIf { keyed.any { it in text } })
+    }
+
+    override fun startHints(): Any? = (readsCompared to readsByPlace).also { readsCompared = false; readsByPlace = false }
+
+    override fun endHints(saved: Any?) {
+        val (compared, byPlace) = saved as Pair<*, *>
+        readsCompared = compared as Boolean
+        readsByPlace = byPlace as Boolean
     }
 
     /**

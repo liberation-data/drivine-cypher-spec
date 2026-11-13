@@ -190,8 +190,8 @@ FullTextSearch.plan(store, graph, SearchRequest(labels, properties, query, index
      never clash with the library's own; each is written `$_cy_ft<n>` in the statement, as the compiler writes its own.
 
 Over JSON it is the same entry, `CompileJson.compile` (`compile`, `drivine_compile`): a request with `search` in place of
-`cypher` is a search, and one that gives more than one of `cypher`, `search`, `searchIndex`, `vector`, `settings`, `read`,
-`temporalKey` and `layout` is an error.
+`cypher` is a search, and one that gives more than one of `cypher`, `search`, `searchIndex`, `vector`, `settings`,
+`fragment`, `read`, `temporalKey` and `layout` is an error.
 
 ```json
 {"store": "postgres", "graph": {"name": "g"},
@@ -461,6 +461,33 @@ of its own, so the three libraries read rows, key a temporal value and judge a g
   - `{"verdict": "refuse", "message": "…"}`: throw the message.
 
   `marker.yaml`'s `storeLayout` pins it.
+
+### Fragments
+
+A library's object manager writes its own SQL, and asks for the parts of it that compare, sort or bind a value: a Cypher expression over rows of that SQL, compiled as a statement's would be, so each library's filters and orders hold values as the compiler does on each store. In Kotlin, `SqlCypherCompiler.condition(cypher, variables, parameters)`, `value(...)` and `order(cypher, descending, ...)` give a `SqlFragment`: its `terms`, one for a condition or a value and the order's in their order, and the `parameters` they bind. Through the JSON entry, `fragment` in place of `cypher`:
+
+```json
+{"store": "oracle", "graph": {"name": "g", "indexedProperties": [["Person", "name"]]},
+ "fragment": {"condition": "n.name = $p", "variables": {"n": {"node": "people_", "labels": ["Person"]}}},
+ "parameters": {"p": "Ada"}}
+```
+
+- `fragment` gives one of `condition`, `value` or `order`, an order with `descending` (false where left out), and `variables`: each a row of the library's SQL, `{"node": "<alias>", "labels": [...]}` or `{"relationship": "<alias>"}`. An alias ends with `_`, as none the compiler gives its own rows does, so a subquery the fragment writes doesn't take the library's row for one of its own (`n1`, `x`): another is refused. A node's columns are the table of nodes' (`nid`, `labels`, `props`, `stamp`); a relationship's, the table of relationships'.
+- A node's `labels` are those the library matched it by. An equality of its property with a value is then written with the index of that label and property, where the store's indexes are a label's: Oracle's, for the properties the graph's `indexedProperties` names. Postgres's and SQLite's indexes answer it without them.
+- The answer is `{"terms": [...], "parameters": {...}, "nonFinite": false, "hints": [...]}`, on Oracle with `storedFunctions` as a statement's answer has it. `hints` are the optimizer hints the library's query that holds the terms puts in its outermost `SELECT` (`SELECT /*+ … */`), on Oracle, `NO_JSON_TABLE_TRANSFORM` always, as a statement that compares a property, reads a list item by its place or reads the graph's tables twice is planned with it, and the library's query reads them beside the fragment's own reads, in a FROM the module doesn't see (without it Oracle 23 may give a comparison the wrong truth, or lose a row's label tests, #415); and `OPT_PARAM('_optimizer_use_feedback' 'false')` where a term tests a node's labels as one read by its key. None on Postgres and SQLite. A library puts in each it is given, as given. A `condition`'s term is for a `WHERE` to keep rows by: it may be false where Cypher's truth is null, as neither keeps the row, so a library never negates it in SQL, and writes `NOT` in the Cypher instead. A `value` is for the library's SQL to group or bind within it, not a column to read back (a statement's columns are, and Oracle re-encodes them as it returns them), nor to compare with SQL's operators, which compare as SQL does and not as Cypher does (temporal values, kinds): a `condition` compares. `typed` beside `fragment` is an error. `nonFinite` is a statement's: where it is true, a value the fragment gives may hold NaN or an infinity as a statement's rows do (`{"$numberDouble": "NaN"}`), and the library reads it back as it reads those. Each parameter `$p` is bound as `_cy_p`, to its JSON text: a library binds them beside its own, under those names, so it names the parameters of two fragments of one statement apart. `{"refusal": …}` is the compiler's refusal of the expression; a fragment that would call a function a statement declares before it is refused, as SQL a library writes declares none, and so is one that aggregates, as that SQL groups no rows for it, and one that calls `randomUUID()` within it (`toUpper(randomUUID())`), which a statement calls first, as a column of each row, so no subquery worked out once gives every row the same UUID: `randomUUID()` alone is called for each row.
+
+**The forms a fragment takes** are those the three libraries' object managers write their filters, orders and seeks in, and no other (`FragmentForms`):
+
+- a literal, a parameter, a list of values, a variable, its property and a property of that (a temporal value's field, `n.born.year`), and a label test (`n:A:B`);
+- `=`, `<>`, `<`, `<=`, `>`, `>=`, `IN` (of a list given, or a stored list's, `$v IN n.list`), `STARTS WITH`, `ENDS WITH`, `CONTAINS`, `=~`, `IS NULL`, `IS NOT NULL`;
+- `AND`, `OR`, `XOR`, `NOT`; `+`, `-`, `*`, `/`, a negation; `CASE`;
+- `toLower`, `toUpper`, `toString`, `toFloat`, `toInteger`, `coalesce`, `exp`, `floor`, `abs`, `size`, `labels`;
+- `any`, `all`, `none` over a list;
+- `EXISTS { pattern [WHERE …] }` of one pattern that starts at a node bound already (the library's row, or one an enclosing pattern or quantifier binds), written bare, through nodes and relationships, a variable length among them unnamed, with properties of these forms; or `EXISTS { MATCH pattern [WHERE …] }`; no other subquery.
+
+Anything else is refused by name: `The fragment API doesn't take <form>: …`. What a library writes around its fragments (a seek's chain of terms, a group, an aggregate, a view's projection, a collection's sort) stays its own SQL, with fragments within it.
+
+The spec's `fragments.yaml` pins each case's terms on each store and the rows Neo4j gives for it, and its `table` puts each condition form in each place a library puts one (alone, under `NOT`, beside `OR`, `AND`-ed) and each value form in an order both ways, with the rows Neo4j gives and each store's terms' digests: the module's `FragmentsTest` holds every target to the terms, and each library's runner its store to the rows.
 
 ### npm
 
