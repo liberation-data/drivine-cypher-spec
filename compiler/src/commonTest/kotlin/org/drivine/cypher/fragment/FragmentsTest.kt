@@ -280,6 +280,26 @@ class FragmentsTest {
         )
     }
 
+    /**
+     * Oracle's labelled index answers an equality the row must pass to be kept, as a pattern's properties do, and no other: its
+     * test is null, not false, for a value it doesn't hold, a stored list or a long text, so under a `NOT`, beside an `OR` or
+     * in a value it would drop rows Cypher keeps. `NOT (n.name = 'Ada')` keeps a node whose name is a list in Cypher.
+     */
+    @Test
+    fun theLabelledIndexAnswersOnlyAnEqualityTheRowMustPass() {
+        val labelled = mapOf("n" to FragmentVariable.Node("people_", listOf("Person")))
+        val plain = mapOf("n" to FragmentVariable.Node("people_"))
+        // A compiler each, as the names a compiler gives its shared values count on across what it compiles.
+        fun oracle() = OracleCypherCompiler("g", indexedProperties = setOf("Person" to "name"))
+        fun uses(term: String) = term.contains("JSON_EXISTS(people_.labels")
+        assertTrue(uses(oracle().condition("n.name = 'Ada'", labelled).sql), "a conjunct of its own")
+        assertTrue(uses(oracle().condition("n.name = 'Ada' AND n.age > 1", labelled).sql), "a conjunct among others")
+        for (unkept in listOf("NOT (n.name = 'Ada')", "n.name = 'Ada' OR n.age > 1", "n.name <> 'Ada'", "(n.name = 'Ada') = false")) {
+            assertEquals(oracle().condition(unkept, plain).sql, oracle().condition(unkept, labelled).sql, unkept)
+        }
+        assertEquals(oracle().value("n.name = 'Ada'", plain).sql, oracle().value("n.name = 'Ada'", labelled).sql, "a value")
+    }
+
     private companion object {
         val STORES = listOf("postgres", "oracle", "sqlite")
     }

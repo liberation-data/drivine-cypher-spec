@@ -1628,7 +1628,9 @@ abstract class SqlCypherCompiler(
 
         /**
          * The property [expression] reads, where it is one of a fragment's node whose labels the library gave ([labelsOf]),
-         * as a pattern's properties name it to an index: null in a statement, which names its own in its patterns.
+         * as a pattern's properties name it to an index: null in a statement, which names its own in its patterns. Asked only of
+         * an `=` the row must pass to be kept, as a pattern's properties are: the index's test is null, not false, for a value
+         * it doesn't hold (a list, a long text), which under a `NOT`, an `OR` or in a value would keep or drop the wrong rows.
          */
         private fun indexedOf(expression: Expression, value: Expression, scope: Map<String, Value>): IndexedProperty? {
             if (labelsOf.isEmpty()) return null
@@ -5647,7 +5649,7 @@ abstract class SqlCypherCompiler(
                     val plain = plain(binary.left, binary.right, left, right, scope)
                     val equal = (if (plain) null else givenItemwise(binary.left, left, binary.right, right))
                         ?: equality(
-                            left, right, binary.right, plain, stored(binary.left, scope), of = indexedOf(binary.left, binary.right, scope),
+                            left, right, binary.right, plain, stored(binary.left, scope), of = if (conjunct && binary.operator == Operator.EQUALS) indexedOf(binary.left, binary.right, scope) else null,
                             scalarRows = givenRowsScalar(binary.right, scope), leftWritten = binary.left,
                         )
                     val keyed = if (conjunct && binary.operator == Operator.EQUALS) idEquality(binary, left, right, scope) else null
