@@ -91,8 +91,8 @@ object StoreLayout {
         if (stampRows.isEmpty() && engine in SQL_ENGINES && sql != null) {
             val old = oldObjects(sql, objects)
             val ours = ownObjects(sql, objects)
-            // Values beside both layouts' objects can't be told apart. An empty graph can: on Postgres the library's prepare
-            // has made the lock table before the objects are listed, and an earlier layout's are dropped as below.
+            // Values beside both layouts' objects can't be told apart. An empty graph has nothing to lose: an earlier layout's
+            // are dropped as below, whatever of this layout's stands beside them.
             if (foreignNodes && old.isNotEmpty() && ours.isNotEmpty()) {
                 return Verdict.Refuse(
                     "The graph '$graph' on $store has no store stamp, and holds objects of store layout $own (${ours.joinToString()}) and of an earlier layout " +

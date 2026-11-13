@@ -269,7 +269,7 @@ class StoreMarkerTest {
             assertEquals("${graph}_lock2", ddl.lock, "$name: the lock table the case names is the store's")
             // As the graph stands after the setup: no stamp, a node of the application's, and no object of this layout's.
             val verdict = StoreLayout.verdict(StoreStamp.engine(ddl), graph, emptyList(), true, emptyList(), ddl)
-            assertTrue(verdict is StoreLayout.Verdict.Refuse, "$name: $verdict")
+            assertEquals(StoreLayout.Verdict.Refuse(case["refuse"]!!.textValue()!!.replace("{graph}", graph)), verdict, name)
             checked++
         }
         assertEquals(3, checked, "a case for each SQL store")
