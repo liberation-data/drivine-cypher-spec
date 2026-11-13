@@ -2281,7 +2281,7 @@ class OracleCypherCompiler(
         const val ROWS_AS_TEXT = "rows:json"
 
         /** A property as [propertyOf] reads it, its properties and its path, a literal whose quotes are doubled: see [propertyRead]. */
-        val PROPERTY_READ = Regex("""JSON_QUERY\((.+), ('\$(?:[^']|'')*') RETURNING JSON\)""")
+        val PROPERTY_READ = Regex("""JSON_QUERY\((.+), ('\$[^']*(?:''[^']*)*') RETURNING JSON\)""")
 
         /**
          * A float [literalJson] writes: see [written]. Not NaN, written for an item of a list the statement is given, which is
@@ -2381,7 +2381,7 @@ class OracleCypherCompiler(
          * A test of a column of labels, `n1.labels`, as [hasLabel] writes it, `JSON_EXISTS(n1.labels, '$[*]?(@ == "X")')`,
          * and the label, written as JSON writes a string and then as SQL quotes one: see [deletedIds].
          */
-        private val INDEXED_LABEL = Regex("""JSON_EXISTS\(([\w.]+\.labels), '\$\[\*\]\?\(@ == "((?:[^"\\]|\\.)*)"\)'\)""")
+        private val INDEXED_LABEL = Regex("""JSON_EXISTS\(([\w.]+\.labels), '\$\[\*\]\?\(@ == "([^"\\]*(?:\\.[^"\\]*)*)"\)'\)""")
 
         /** A query, or a subquery of one, that keeps its rows distinct, hinted or not: see [called]. */
         private val DISTINCT_SELECT = Regex("""\bSELECT (?:/\*\+ .*? \*/ )?DISTINCT\b""")

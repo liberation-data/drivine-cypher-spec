@@ -34,14 +34,14 @@ internal object SqliteSqlPatterns {
     }
 
     /** A pattern given `REGEXP` as a SQL text. */
-    private val OPERAND = Regex("""REGEXP '((?:[^']|'')*)'""")
+    private val OPERAND = Regex("""REGEXP '([^']*+(?:''[^']*+)*+)'""")
 
     /** The pieces `=~` puts around a user's pattern: see `SqliteCypherCompiler.matches`. */
-    private val MATCHES = Regex("""REGEXP \('((?:[^']|'')*)' \|\| .*? \|\| '(\)(?:[^']|'')*)'\)""")
+    private val MATCHES = Regex("""REGEXP \('([^']*+(?:''[^']*+)*+)' \|\| .*? \|\| '(\)[^']*+(?:''[^']*+)*+)'\)""")
 
     /** A call of a regular expression function Drivine registers, whose second argument, a SQL text, is a pattern. */
     private val FUNCTION = Regex("""(drivine_regex_group|drivine_regexp_replace|drivine_regexp_count)\(""")
 
     /** A SQL text. */
-    private val LITERAL = Regex("""'((?:[^']|'')*)'""")
+    private val LITERAL = Regex("""'([^']*+(?:''[^']*+)*+)'""")
 }

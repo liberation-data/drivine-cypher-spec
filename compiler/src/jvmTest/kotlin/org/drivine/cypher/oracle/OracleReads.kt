@@ -65,8 +65,8 @@ object OracleReads {
     fun unsafe(sql: String) = reads(sql).filterNot { it.safe }
 
     private val STORED = Regex("""\b[A-Za-z_]\w*\.(?:\w+_)?props\b|\b[A-Za-z_]\w*\.item\b|\bcy_(?:row|context|caller\d+|saved\d+|gathered\d+)\b""")
-    private val READ_PATH = Regex("""('\$(?:[^']|'')*') RETURNING JSON""")
-    private val KEY_PATH = Regex("""'\$(?:\.(?:[A-Za-z_]\w*|"(?:[^"'\\]|\\.|'')*"))+'""")
+    private val READ_PATH = Regex("""('\$[^']*+(?:''[^']*+)*+') RETURNING JSON""")
+    private val KEY_PATH = Regex("""'\$(?:\.(?:[A-Za-z_]\w*|"[^"'\\]*+(?:(?:\\.|'')[^"'\\]*+)*+"))+'""")
     private val WORD = Regex("""[A-Za-z_][\w$]*""")
 
     /** [sql] with each run of white space outside its literals one space: a key's own spaces are kept. */

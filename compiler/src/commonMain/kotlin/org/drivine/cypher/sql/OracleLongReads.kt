@@ -129,10 +129,10 @@ internal object OracleLongReads {
 
     /** A base read as an item is: one that may hold a map with a key as extended JSON's are, as a parameter a `reduce()` step's context holds may. */
     private val ITEM = Regex("""[A-Za-z_]\w*\.item|cy_(?:row|context|caller\d+|saved\d+|gathered\d+)""")
-    private val READ_PATH = Regex("""('\$(?:[^']|'')*') RETURNING JSON""")
+    private val READ_PATH = Regex("""('\$[^']*(?:''[^']*)*') RETURNING JSON""")
     /** A key of a path in its quotes, `"a[b"`, as a key path has one. */
-    private val QUOTED_KEY = Regex(""""(?:[^"'\\]|\\.|'')*"""")
-    private val KEY_PATH = Regex("""'\$(?:\.(?:[A-Za-z_]\w*|"(?:[^"'\\]|\\.|'')*"))+'""")
+    private val QUOTED_KEY = Regex(""""[^"'\\]*(?:(?:\\.|'')[^"'\\]*)*"""")
+    private val KEY_PATH = Regex("""'\$(?:\.(?:[A-Za-z_]\w*|"[^"'\\]*(?:(?:\\.|'')[^"'\\]*)*"))+'""")
 
     /** [sql] with each run of white space outside its literals one space: a key's own spaces are kept. */
     private fun normal(sql: String) = sql.split('\'').mapIndexed { i, part -> if (i % 2 == 0) part.replace(SPACE, " ") else part }.joinToString("'").trim()

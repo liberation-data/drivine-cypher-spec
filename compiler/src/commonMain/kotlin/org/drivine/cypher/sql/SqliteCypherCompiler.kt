@@ -163,14 +163,14 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
      * with the value's: a string's text, or a truth value's JSON.
      */
     override fun indexedEquality(property: String, value: String, of: IndexedProperty?): String? =
-        Regex("""^\(([\w.]+) -> ('(?:[^']|'')*')\)$""").matchEntire(property)?.let {
+        Regex("""^\(([\w.]+) -> ('[^']*(?:''[^']*)*')\)$""").matchEntire(property)?.let {
             val (props, path) = it.groupValues[1] to it.groupValues[2]
             shared(value) { (x) -> "${SqliteSql.indexClass(props, path)} = ${SqliteSql.valueClass(x)} AND ${SqliteSql.indexKey(props, path)} = ${SqliteSql.valueKey(x)}" }
         }
 
     /** The property's class and key beside the kind's word and the value's key, a subquery of its own where it is long. */
     override fun indexedTagEquality(property: String, kind: Temporal, key: String, of: IndexedProperty?): String? =
-        Regex("""^\(([\w.]+) -> ('(?:[^']|'')*')\)$""").matchEntire(property)?.let {
+        Regex("""^\(([\w.]+) -> ('[^']*(?:''[^']*)*')\)$""").matchEntire(property)?.let {
             val (props, path) = it.groupValues[1] to it.groupValues[2]
             "${SqliteSql.indexClass(props, path)} = '${kind.function}' AND ${SqliteSql.indexKey(props, path)} = ${if (binds(key)) "(SELECT $key)" else key}"
         }

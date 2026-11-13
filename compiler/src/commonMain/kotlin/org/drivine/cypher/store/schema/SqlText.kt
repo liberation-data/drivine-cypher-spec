@@ -79,5 +79,5 @@ internal object SqlText {
     }.getOrNull()
 
     /** A SQL literal's body, quotes doubled, as a pattern's group. */
-    const val LITERAL = "((?:[^']|'')*)"
+    const val LITERAL = "([^']*(?:''[^']*)*)"
 }

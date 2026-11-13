@@ -883,7 +883,7 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
         private const val JSON_LIST = "jsonb_array_elements("
 
         /** A property read, `(n1.props -> 'name')`: the row's column, and the key. */
-        private val PROPERTY_READ = Regex("""^\(([\w.]+) -> ('(?:[^']|'')*')\)$""")
+        private val PROPERTY_READ = Regex("""^\(([\w.]+) -> ('[^']*(?:''[^']*)*')\)$""")
 
         /**
          * The characters of a text in a list that [codePoints] orders by their code points: at most 4 bytes each, 32 bits, which

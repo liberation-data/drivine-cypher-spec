@@ -16,7 +16,7 @@ class SqliteTextFloatTest {
     private fun sql(cypher: String, parameters: Map<String, Any?> = emptyMap()) = SqliteCypherCompiler("g").compile(cypher, parameters).sql
 
     /** The patterns the statement's text is matched with, in turn. */
-    private fun patterns(sql: String) = Regex("""REGEXP '((?:[^']|'')*)'""").findAll(sql).map { it.groupValues[1].replace("''", "'") }.toList()
+    private fun patterns(sql: String) = Regex("""REGEXP '([^']*+(?:''[^']*+)*+)'""").findAll(sql).map { it.groupValues[1].replace("''", "'") }.toList()
 
     /** Which of [patterns] [text] matches first, as drivine4j's `REGEXP` reads them, with Unicode's classes, and as plain Java does. */
     private fun first(patterns: List<String>, text: String): Int {
