@@ -5180,27 +5180,38 @@ abstract class SqlCypherCompiler(
         }
 
         /**
+         * Whether [value], written as [written], can't be a tag of a temporal value, so that [temporalRefused] need not test it as the
+         * statement runs. A closed set; every other side is tested, though a test costs: beside a walk on Oracle, a side tested
+         * was worked out again, and a statement took twice as long, past the store's PGA limit (drivine4j#809). It can't where:
+         * - its kind is known when compiling ([untemporal]): a value written, a parameter given as no temporal value, a function
+         *   that gives a float, arithmetic of known numbers, a `CASE` of one known kind, a variable bound to one, a text or a list
+         *   the statement makes, a truth value, a node or a relationship;
+         * - it is `count(*)`, a `COUNT` subquery, or a function that gives a number ([NUMBER_FUNCTIONS]);
+         * - it is a field of a temporal value the statement makes, by a function of a temporal kind or in its namespace
+         *   (`datetime(b.at).minute`, `duration.between(a, b).days`): a number or a text, as no field of a temporal value is one.
+         * A field of a value of open kind, `n.m.d`, may be a map's entry that is a tag, so it is tested.
+         */
+        private fun tagFree(value: Value, written: Expression): Boolean = untemporal(value, written) || when (written) {
+            Expression.CountStar -> true
+            is Expression.Subquery -> written.kind == Expression.Subquery.Kind.COUNT
+            is Expression.Function -> written.name.lowercase() in NUMBER_FUNCTIONS
+            is Expression.Property -> written.subject.let { it is Expression.Function && it.name.lowercase().substringBefore('.') in TEMPORAL_FUNCTION_NAMES }
+            else -> false
+        }
+
+        /**
          * [arithmetic], the generic `+`, `-`, `*` or `/` of [binary]'s sides [x] and [y], where the statement knows neither to be a
          * temporal value: as the statement runs, a side that is one, a tag a property holds (`n.d1 + n.d2`, `n.d * 2`), fails by
          * name, where the generic arithmetic gave null (drivine4j#418). Temporal arithmetic is written only where a side is known
          * to be temporal; on two sides read from the store it is not compiled yet. A `+` refuses only a tag beside a tag or a
          * number: beside a text a temporal value is its text, and beside a list an item, as before, so beside a side known to be
-         * a text or a list it is not tested. A side known to be no temporal value, a number or a text written or given, is not
-         * tested. The kind named is the tag's on either side: the other may be a number (`n.n * n.d`).
+         * a text or a list it is not tested. A side that can't be a tag ([tagFree]) is not tested. The kind named is the tag's on
+         * either side: the other may be a number (`n.n * n.d`).
          */
         private fun temporalRefused(binary: Expression.Binary, left: Value, right: Value, x: String, y: String, arithmetic: () -> String): String {
             val sides = listOf(left, right).map { (it as? Value.Json)?.temporal != null }
             if (sides.any { it }) return arithmetic()
-            // A function that gives a number, `size(n.l) * 2`, `count(*) + 1`, or a COUNT subquery, gives no temporal value; nor does
-            // a field of a temporal value the statement makes, `datetime(b.at).minute`, which is a number or a text. Tested beside a
-            // walk, such a field was worked out again for the test, and Oracle took twice as long, past its PGA limit (drivine4j#809).
-            fun number(written: Expression) =
-                written == Expression.CountStar || written is Expression.Subquery && written.kind == Expression.Subquery.Kind.COUNT ||
-                    written is Expression.Function && written.name.lowercase() in NUMBER_FUNCTIONS ||
-                    written is Expression.Property && written.subject.let { subject ->
-                        subject is Expression.Function && subject.name.lowercase().substringBefore('.') in TEMPORAL_FUNCTION_NAMES
-                    }
-            val open = listOf(!untemporal(left, binary.left) && !number(binary.left), !untemporal(right, binary.right) && !number(binary.right))
+            val open = listOf(!tagFree(left, binary.left), !tagFree(right, binary.right))
             // Of a `+`, a side beside a text or a list is no sum of tags or of a tag and a number.
             val besideTextOrList = listOf(right to binary.right, left to binary.left).map { (value, written) ->
                 binary.operator == Operator.ADD && (isText(value) || isList(value) || given(written).let { it is String || it is List<*> })
