@@ -87,10 +87,11 @@ object StoreLayout {
             )
         }
         val sql = ddl as? SqlStoreDdl
-        // No stamp at all: a new graph, or one whose stamp a clear deleted, told by what the store holds.
-        if (stampRows.isEmpty() && engine in SQL_ENGINES && sql != null) {
-            val old = oldObjects(sql, objects)
-            val ours = ownObjects(sql, objects)
+        // No stamp at all: a new graph, or one whose stamp a clear deleted, told by what the store holds. Without [ddl] no
+        // object is known as either layout's: an empty graph is still new, not re-stamped by a restamp that finds no stamp.
+        if (stampRows.isEmpty() && engine in SQL_ENGINES) {
+            val old = sql?.let { oldObjects(it, objects) }.orEmpty()
+            val ours = sql?.let { ownObjects(it, objects) }.orEmpty()
             // Values beside both layouts' objects can't be told apart. An empty graph has nothing to lose: an earlier layout's
             // are dropped as below, whatever of this layout's stands beside them.
             if (foreignNodes && old.isNotEmpty() && ours.isNotEmpty()) {

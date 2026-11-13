@@ -317,7 +317,7 @@ reads:
 versions:
   - {versions: ["v2", null, "v1"], token: "v1|v2"}
 storeStamp: {label: "DrivineStore", keyProperty: "key", key: "singleton", constraint: {...}, parameters: [...], restampParameters: ["key", "layout"], stores: {...}}
-storeLayout: {cases: [{name: "...", store: "postgres", stamps: [{layout: null}], foreignNodes: false, objects: [...], verdict: {stamp: {drops: [...]}}}]}
+storeLayout: {cases: [{name: "...", store: "postgres", stamps: [{layout: null}], foreignNodes: false, objects: [...], verdict: {stamp: {drops: [...], assign: false}}}], firstConnection: [{name: "...", store: "postgres", setup: [...], refused: true, refuse: "...", absent: ["{graph}_lock2"]}]}
 nodeStamps: {property: "__drivine.stamp", token: 16, separator: ":", neverStamped: "-", tokens: [...], stamps: [...]}
 ```
 

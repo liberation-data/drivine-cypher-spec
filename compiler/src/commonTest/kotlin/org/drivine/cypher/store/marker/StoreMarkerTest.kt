@@ -253,6 +253,18 @@ class StoreMarkerTest {
     }
 
     /**
+     * A SQL store's graph with no stamp, judged without the store's DDL, so no object is known as either layout's: empty, it
+     * is new, as with the DDL, and not a re-stamp, whose restamp finds no stamp and would be refused when asked again.
+     */
+    @Test
+    fun aGraphWithNoStampJudgedWithoutItsDdlIsNewWhenEmptyAndRefusedHoldingValues() {
+        for (engine in StoreLayout.SQL_ENGINES) {
+            assertEquals(StoreLayout.Verdict.Current, StoreLayout.verdict(engine, graph, emptyList(), false), engine)
+            assertTrue(StoreLayout.verdict(engine, graph, emptyList(), true) is StoreLayout.Verdict.Refuse, engine)
+        }
+    }
+
+    /**
      * Each `firstConnection` case, which a library's runner sets up on its store: a graph holding values, with no stamp and
      * nothing of this layout's, which the verdict refuses before anything is made. The module can't run the order; it checks
      * that the state each case sets up is one it refuses, and that the lock table it names is the store's.
