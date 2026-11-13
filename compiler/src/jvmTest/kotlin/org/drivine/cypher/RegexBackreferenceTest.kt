@@ -20,14 +20,11 @@ class RegexBackreferenceTest {
 
     private val compilers = listOf(PostgresCypherCompiler("g"), OracleCypherCompiler("g"), SqliteCypherCompiler("g"))
 
-    /** The forms answered: `\1` to `\8`, no digit after, to a group closed before it that takes part in every match. */
+    /** The forms answered: `\1` to `\8`, no digit after, to a simple group closed before it that takes part in every match. */
     private val allowed = listOf(
-        "(A).*\\1.*", "(a)\\1", "(a)\\1\\1", "(a)(b)\\2\\1", "((a)b)\\2", "((a)b)\\1", "(?i)(a)\\1", "(a)\\\\\\1",
-        "(a|b)\\1", "(a)(?:b|c)\\1", "(a)+\\1", "(a){2}\\1", "(a)(b)(c)(d)(e)(f)(g)(h)\\8", "()\\1", "(a)\\1?", "(a)\\1x",
+        "(A).*\\1.*", "(a)\\1", "(a)\\1\\1", "(a)(b)\\2\\1", "((a)b)\\2", "(?i)(a)\\1", "(a)\\\\\\1", "(a)(?:b|c)\\1",
+        "(a)(b)(c)(d)(e)(f)(g)(h)\\8", "()\\1", "(a)\\1?", "(a)\\1x", "([ab])\\1", "(a)[]\\]]\\1", "(?i-x)(a)\\1", "(?<x>a)\\1",
     )
-
-    /** Repeated groups that must match a character, which the stores repeat as Java does, and one that may match nothing, not repeated. */
-    private val repeatedAllowed = listOf("(a?b)+\\1", "(a{1,2})+\\1", "([ab])+\\1", "(\\.|a)+\\1", "(?:(a)b)+\\1", "(a?){1}\\1", "(a*)\\1")
 
     /** Each form refused, and what the message names. */
     private val refused = mapOf(
@@ -35,33 +32,27 @@ class RegexBackreferenceTest {
         "(a)(b)(c)(d)(e)(f)(g)(h)(i)\\9" to "past \\8", "(a)(b)(c)(d)(e)(f)(g)(h)(i)(j)\\10" to "past \\8",
         "(a)\\10" to "with a digit after it",
         "(a)\\2" to "hasn't closed", "\\1(a)" to "hasn't closed", "(a\\1)" to "hasn't closed",
-        "(a)|\\1" to "may take no part", "(a)?\\1" to "may take no part", "(a)*\\1" to "may take no part", "(?:(a)|b)\\1" to "may take no part",
-        "((a)|b)\\2" to "may take no part", "(?=(a))\\1" to "may take no part", "(a){0,2}\\1" to "may take no part", "x|(a)\\1" to "may take no part",
-        // Postgres reads no backreference in a lookaround, and numbers no group there: Java's second group here is its first.
-        "(a)(?=\\1)a" to "in a lookaround", "(a)(?!b\\1)a" to "in a lookaround", "(?=(a))(a)\\2" to "past a group in a lookaround",
-        "(?<=(a))(a)\\2" to "past a group in a lookaround",
+        // A group that holds a quantifier, an alternative or a group, or is repeated: each engine captures its own way there.
+        "(a|b)\\1" to "holds a quantifier", "(a+)\\1" to "holds a quantifier", "((a)b)\\1" to "holds a quantifier",
+        "(a)+\\1" to "holds a quantifier", "(a){2}\\1" to "holds a quantifier", "(a)?\\1" to "holds a quantifier",
+        "(a?)+b\\1" to "holds a quantifier", "(a|b)+\\1" to "holds a quantifier",
+        // A group in an alternative or a repeated group may take no part in a match.
+        "(a)|\\1" to "in an alternative or a repeated group", "x|(a)\\1" to "in an alternative or a repeated group",
+        "(?:(a)|b)\\1" to "in an alternative or a repeated group", "(?:(a)b)+\\1" to "in an alternative or a repeated group",
+        // Postgres reads no backreference in a lookaround, and numbers no group there.
+        "(a)(?=\\1)a" to "lookaround", "(?=(a))(a)\\2" to "lookaround", "(?<=(a))(a)\\2" to "lookaround",
         // Java reads (?x)(a) ?\1 as (a)?\1: a space may stand between a group and its quantifier.
         "(?x)(a) ?\\1" to "flag x", "(?ix)(a)\\1" to "flag x", "(a)(?x:b)\\1" to "flag x",
-        // A group repeated that may match nothing, which engines repeat each their own way: Java matches aba to (a?)+b\1, and
-        // Tcl's engine, which Postgres's comes from, doesn't.
-        "(a?)+b\\1" to "repeated that may match nothing", "(a?){2}\\1" to "repeated that may match nothing",
-        "(a|)+\\1" to "repeated that may match nothing", "(?:(a*)b)+\\1" to "repeated that may match nothing",
-        "(a{0,2}){2}\\1" to "repeated that may match nothing", "(\\b)+\\1" to "repeated that may match nothing", "((?:a?))+\\1" to "repeated that may match nothing",
-        "((?i)a?)+\\1" to "repeated that may match nothing", "((?=a))+\\1" to "repeated that may match nothing",
         // Java reads acc as [[a](b)](c)\1, where Postgres reads the class as [[a], and (b) as the first group.
-        "[[a](b)](c)\\1" to "holds (, ) or |", "[\\](b)](c)\\1" to "holds (, ) or |", "(a)[|]\\1" to "holds (, ) or |",
+        "[[a](b)](c)\\1" to "class within a class",
     )
 
     @Test
     fun `the forms answered are read as such, and each other form is refused by what it is`() {
-        (allowed + repeatedAllowed).forEach { assertNull(Patterns.refusal(it), it) }
+        allowed.forEach { assertNull(Patterns.refusal(it), it) }
         refused.forEach { (pattern, why) -> assertTrue(Patterns.refusal(pattern).orEmpty().contains(why), "$pattern: ${Patterns.refusal(pattern)}") }
         // Escaped, quoted and \c's character are no backreference.
         listOf("(a)\\\\1", "\\Q\\1\\E", "\\c\\1", "a").forEach { assertFalse(Patterns.holdsBackreference(it), it) }
-        // A class's first ], and an escaped one, leave the class as Java does.
-        assertNull(Patterns.refusal("(a)[]\\]]\\1"))
-        // x turned off, or a named group called x, is no flag x.
-        listOf("(?i-x)(a)\\1", "(?<x>a)\\1").forEach { assertNull(Patterns.refusal(it), it) }
     }
 
     @Test
