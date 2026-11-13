@@ -1,8 +1,11 @@
 package org.drivine.cypher
 
+import org.drivine.cypher.json.TemporalValue
 import org.drivine.cypher.sql.OracleCypherCompiler
 import org.drivine.cypher.sql.PostgresCypherCompiler
+import org.drivine.cypher.sql.SqlCypherCompiler
 import org.drivine.cypher.sql.SqliteCypherCompiler
+import org.drivine.cypher.sql.Temporal
 import org.drivine.cypher.sql.TemporalArithmeticFunction
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
@@ -171,6 +174,44 @@ class TemporalArithmeticStoredTest {
         val oracle = forms.getValue("oracle")
         assertTrue("IF tx IS NULL OR ty IS NULL OR tx = 'null' OR ty = 'null' THEN" in oracle, oracle)
         assertTrue("RAISE_APPLICATION_ERROR(-20418, '${TemporalArithmeticFunction.UNDEFINED} ' || cy_op || ', ' || COALESCE(kx, tx) || ' and ' || COALESCE(ky, ty));" in oracle)
+    }
+
+    /**
+     * The function holds one body for each pair of kinds, compiled for a sample value of each (`TemporalArithmeticFunction`), so
+     * it is right for every stored value only while the SQL depends on the kinds alone: values far from the samples, BC, with
+     * nanoseconds, an offset, every part of a duration negated, and other whole numbers, compile to the same SQL.
+     */
+    @Test
+    fun `the SQL a body is compiled from depends on the kinds alone, not on the values given`() {
+        val samples = mapOf(
+            Temporal.DATE to ("2024-01-31" to "-0044-03-15"), Temporal.LOCAL_TIME to ("10:00:00" to "23:59:59.123456789"),
+            Temporal.TIME to ("10:00:00Z" to "01:02:03.5-05:30"), Temporal.LOCAL_DATE_TIME to ("2024-01-01T10:00:00" to "-0001-12-31T23:59:59.999"),
+            Temporal.DATE_TIME to ("2024-01-01T10:00:00Z" to "1999-12-31T23:59:59.000000001+14:00"), Temporal.DURATION to ("P1D" to "-P1Y2M3W4DT5H6M7.5S"),
+        )
+        val stores = listOf({ PostgresCypherCompiler("g") }, { OracleCypherCompiler("g", true, true) })
+        fun sql(compiler: SqlCypherCompiler, operator: String, x: Any, y: Any) = compiler.compile("RETURN \$x $operator \$y AS r", mapOf("x" to x, "y" to y)).sql
+        stores.forEach { compiler ->
+            listOf("+", "-").forEach { operator ->
+                Temporal.entries.forEach { kind ->
+                    val (sample, other) = samples.getValue(kind)
+                    val (duration, otherDuration) = samples.getValue(Temporal.DURATION)
+                    assertEquals(
+                        sql(compiler(), operator, TemporalValue(kind, sample), TemporalValue(Temporal.DURATION, duration)),
+                        sql(compiler(), operator, TemporalValue(kind, other), TemporalValue(Temporal.DURATION, otherDuration)),
+                        "${compiler()::class.simpleName} $kind $operator duration",
+                    )
+                }
+            }
+            listOf("*", "/").forEach { operator ->
+                listOf(3L, -7L, 1L).forEach { number ->
+                    assertEquals(
+                        sql(compiler(), operator, TemporalValue(Temporal.DURATION, "P1D"), 2L),
+                        sql(compiler(), operator, TemporalValue(Temporal.DURATION, "-P1Y2M3W4DT5H6M7.5S"), number),
+                        "${compiler()::class.simpleName} duration $operator $number",
+                    )
+                }
+            }
+        }
     }
 
     @Test
