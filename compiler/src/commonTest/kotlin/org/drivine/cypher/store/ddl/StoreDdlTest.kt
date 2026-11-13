@@ -66,14 +66,50 @@ class StoreDdlTest {
         "sqlite" to sqlite.ddl,
     )
 
+    /**
+     * The generated functions' pins (`store.yaml`'s `generated`): what each marker stands for, by its digest; the Postgres DDL's
+     * digest at its [PostgresDdl.VERSION], which must change with it; and each Oracle function's version comment. A store made
+     * before runs the DDL again on Postgres only when [PostgresDdl.VERSION] changes, and on Oracle makes a function again only
+     * when its version does, so a body changed without them reaches no store made before (#251, drivine4j#418).
+     */
+    @Test
+    fun theGeneratedFunctionsAreTheFormsTheirDigestsPinAndChangeOnlyWithTheirStoresVersions() {
+        val generated = store["generated"]!!
+        val bump = "On Postgres, bump PostgresDdl.VERSION (now ${PostgresDdl.VERSION}) so a store made before runs the DDL again, " +
+            "and pin its digest in store.yaml's generated.postgresVersions; on Oracle a function's version comment (-- drivine:<hash>) " +
+            "is its version and changes with its body: pin each in generated.oracleVersions. Then pin the new digests in generated.digests."
+        GeneratedFunctions.FORMS.forEach { form ->
+            assertEquals(generated["digests"]!![form]?.textValue(), GeneratedFunctions.digest(form, graph), "The generated function's $form form changed. $bump")
+        }
+        val postgresDigest = GeneratedFunctions.hex(postgres.ddl.joinToString("\u0000"))
+        val pinned = generated["postgresVersions"]!![PostgresDdl.VERSION]?.textValue()
+            ?: fail("store.yaml's generated.postgresVersions pins no digest for ${PostgresDdl.VERSION}: pin $postgresDigest.")
+        assertEquals(pinned, postgresDigest, "The Postgres DDL changed, and PostgresDdl.VERSION didn't: a store made at ${PostgresDdl.VERSION} would keep the old. Bump the token. $bump")
+        val versions = generated["oracleVersions"]!!
+        oracle.versions.forEach { (function, version) ->
+            assertEquals(versions[function]?.textValue(), version, "The Oracle function $function changed: its version is now $version. $bump")
+        }
+        assertEquals(versions.size(), oracle.versions.size, "store.yaml's generated.oracleVersions pins a function the store no longer keeps. $bump")
+        // A marker stands for what the store's block sends, byte for byte.
+        assertTrue(GeneratedFunctions.text("postgresEnsuring", graph) in postgres.ensuring)
+        assertTrue(GeneratedFunctions.text("oracleClob", graph) in oracle.ensuring)
+        assertTrue(GeneratedFunctions.text("postgres", graph) in postgres.ddl && GeneratedFunctions.text("oracle", graph) in oracle.functions)
+        // The block's form is the function's, its lines indented within it.
+        assertEquals(
+            GeneratedFunctions.text("postgres", graph).lines().map(String::trim), GeneratedFunctions.text("postgresEnsuring", graph).lines().map(String::trim),
+        )
+    }
+
     @Test
     fun tablesAndProbeAreDrivine4js() {
         val tables = store["tables"]!!
-        assertEquals(texts(tables["postgres"]!!["ddl"]!!), postgres.ddl, "postgres ddl")
-        assertEquals(tables["postgres"]!!["ensuring"]!!.textValue(), postgres.ensuring, "postgres ensuring")
-        assertEquals(texts(tables["oracle"]!!["ddl"]!!), oracle.ddl, "oracle ddl")
-        assertEquals(texts(tables["oracle"]!!["functions"]!!), oracle.functions, "oracle functions")
-        assertEquals(tables["oracle"]!!["ensuring"]!!.textValue(), oracle.ensuring, "oracle ensuring")
+        // A generated function is held by its marker, which the module expands (GeneratedFunctions).
+        fun expanded(node: JsonNode) = GeneratedFunctions.expand(node.textValue()!!)
+        assertEquals(tables["postgres"]!!["ddl"]!!.map(::expanded), postgres.ddl, "postgres ddl")
+        assertEquals(expanded(tables["postgres"]!!["ensuring"]!!), postgres.ensuring, "postgres ensuring")
+        assertEquals(tables["oracle"]!!["ddl"]!!.map(::expanded), oracle.ddl, "oracle ddl")
+        assertEquals(tables["oracle"]!!["functions"]!!.map(::expanded), oracle.functions, "oracle functions")
+        assertEquals(expanded(tables["oracle"]!!["ensuring"]!!), oracle.ensuring, "oracle ensuring")
         assertEquals(texts(tables["sqlite"]!!["ddl"]!!), sqlite.ddl, "sqlite ddl")
         assertEquals(tables["sqlite"]!!["made"]!!.textValue(), sqlite.made, "sqlite made")
         assertEquals(tables["sqlite"]!!["file"]!!.textValue(), SqliteDdl.FILE, "sqlite file")

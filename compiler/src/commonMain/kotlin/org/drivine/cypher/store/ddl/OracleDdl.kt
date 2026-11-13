@@ -143,16 +143,29 @@ class OracleDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
      */
     val temporalArithmetic: String = TemporalArithmeticFunction.name(name)
 
-    /** Each function the store keeps beside the graph's tables, by name, and what makes it: safe to run again. */
-    private val made: Map<String, String> = linkedMapOf(
+    /** Each function the store keeps beside the graph's tables, by name, and its text, as `CREATE OR REPLACE` makes it. */
+    private val texts: Map<String, String> = linkedMapOf(
         nullsEqual to OracleCypherCompiler.nullsEqualFunction(nullsEqual),
         era to OracleCypherCompiler.eraFunction(era),
         eraDate to OracleCypherCompiler.eraDateFunction(eraDate),
         temporalKey to OracleCypherCompiler.temporalKeyFunction(temporalKey),
         temporalArithmetic to TemporalArithmeticFunction.oracle(name),
-    ).mapValues { (_, function) -> "CREATE OR REPLACE $function" }
+    )
 
-    /** What makes [nullsEqual], [era] and [eraDate]: safe to run again. */
+    /**
+     * Each function's version, by name: the first twelve hex digits of the SHA-256 of its text. Its first line ends with it,
+     * `-- drivine:<version>`, which Oracle keeps in `user_source`, so [ensuring] makes again a function whose body an earlier
+     * version made otherwise (#251): a body changes wherever the compiler's own changes, as [temporalArithmetic]'s does.
+     */
+    val versions: Map<String, String> = texts.mapValues { (_, text) -> version(text) }
+
+    /** Each function, by name, and what makes it: safe to run again. */
+    private val made: Map<String, String> = texts.mapValues { (function, text) ->
+        val line = text.substringBefore('\n')
+        "CREATE OR REPLACE $line $VERSION_MARK${versions.getValue(function)}" + text.removePrefix(line)
+    }
+
+    /** What makes each function the store keeps, [nullsEqual], [era], [eraDate], [temporalKey] and [temporalArithmetic]: safe to run again. */
     val functions: List<String> = made.values.toList()
 
     /**
@@ -167,8 +180,8 @@ class OracleDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
      * Oracle's DDL does not wait for a lock unless the session is told to, and telling it would outlast
      * the block on a pooled connection.
      *
-     * Each of the [functions] is made where it is not there, or not valid, so a store an earlier version made gains those it
-     * lacks. A user who may not make a function (`ORA-01031`: making one takes `CREATE PROCEDURE`, which the `RESOURCE` role
+     * Each of the [functions] is made where it is not there, not valid, or not of its version ([versions]), so a store an
+     * earlier version made gains those it lacks, and those whose body has changed since. A user who may not make a function (`ORA-01031`: making one takes `CREATE PROCEDURE`, which the `RESOURCE` role
      * grants) still has the store made: a statement then calls none of those it lacks (see `GraphOptions.nullsEqualStored`).
      */
     val ensuring: String = """
@@ -210,7 +223,9 @@ class OracleDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
             END IF;
 ${made.entries.joinToString("\n") { (function, making) ->
             listOf(
-                "SELECT COUNT(*) INTO v_made FROM user_objects WHERE object_type = 'FUNCTION' AND object_name = '${function.uppercase()}' AND status = 'VALID';",
+                "SELECT COUNT(*) INTO v_made FROM user_objects o WHERE o.object_type = 'FUNCTION' AND o.object_name = '${function.uppercase()}' AND o.status = 'VALID'" +
+                    " AND EXISTS (SELECT 1 FROM user_source s WHERE s.name = o.object_name AND s.type = 'FUNCTION' AND s.line = 1" +
+                    " AND INSTR(s.text, '$VERSION_MARK${versions.getValue(function)}') > 0);",
                 "IF v_made = 0 THEN",
                 "    BEGIN EXECUTE IMMEDIATE ${OracleSql.clob(making)}; EXCEPTION WHEN e_denied THEN NULL; END;",
                 "END IF;",
@@ -653,6 +668,13 @@ ${made.entries.joinToString("\n") { (function, making) ->
 
     override fun listConstraintsQuery(): String = listed(literal(SchemaItemKind.UNIQUENESS_CONSTRAINT.name), listOf(UNIQUE, SHARED))
     companion object {
+        /** What a function's first line ends with, before its version: see [versions]. */
+        const val VERSION_MARK = "-- drivine:"
+
+        /** The version of a function of the text [text]: the first twelve hex digits of its SHA-256. */
+        fun version(text: String): String =
+            org.drivine.cypher.json.Sha256.digest(text.encodeToByteArray()).take(6).joinToString("") { (it.toInt() and 0xff).toString(16).padStart(2, '0') }
+
         /** The store's name, for what is said of a graph name it cannot take. */
         const val ENGINE = "Oracle"
 

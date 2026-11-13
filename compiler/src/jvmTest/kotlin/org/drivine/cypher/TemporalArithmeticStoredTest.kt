@@ -9,15 +9,22 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
- * drivine4j#418: `+`, `-`, `*` and `/` of a temporal value whose kind the statement doesn't know, a tag read from the store,
- * fails by name as the statement runs, where the generic arithmetic gave null. What each store gives is the spec's, in
- * `temporal.yaml` ("Arithmetic on temporal values read from the store"): this is what each is given.
+ * drivine4j#418: `+`, `-`, `*` and `/` of a temporal value whose kind the statement doesn't know, a tag read from the store, is
+ * worked out as the statement runs by the store's function of temporal arithmetic, where the generic arithmetic gave null; on
+ * an Oracle store without it, it fails by name. What each store gives is the spec's, in `temporal.yaml` ("Arithmetic on
+ * temporal values read from the store"): this is what each is given.
  */
-class TemporalArithmeticRefusedTest {
+class TemporalArithmeticStoredTest {
 
     private val compilers = listOf(PostgresCypherCompiler("g"), OracleCypherCompiler("g"), SqliteCypherCompiler("g"))
 
     private val refusal = "compiled to SQL yet (drivine4j#418)"
+
+    /** An Oracle store without the function of temporal arithmetic, as one made by an earlier version is. */
+    private val refusing = OracleCypherCompiler("g", true, true, emptySet(), null, false, false, false, false)
+
+    /** Whether [sql] tests a side for a tag: it calls the store's function there, or fails by name. */
+    private fun tested(sql: String) = "_temporal_arithmetic('" in sql || refusal in sql
 
     /**
      * The whole rule, by the form of a side (`tagFree`): each form, beside a number in `form - 1`, and whether it is tested for a
@@ -49,7 +56,7 @@ class TemporalArithmeticRefusedTest {
             compilers.forEach { compiler ->
                 val cypher = "MATCH p = (n:T)-->() WITH p, n, n.d AS v, n.m AS date, 1 AS w RETURN $form - 1"
                 val sql = compiler.compile(cypher, mapOf("i" to 2, "m" to mapOf("d" to "x"))).sql
-                assertEquals(tested, refusal in sql, "${compiler::class.simpleName} $form: ${if (tested) "tested" else "skipped"} expected:\n$sql")
+                assertEquals(tested, tested(sql), "${compiler::class.simpleName} $form: ${if (tested) "tested" else "skipped"} expected:\n$sql")
             }
         }
     }
@@ -59,7 +66,7 @@ class TemporalArithmeticRefusedTest {
         listOf("n.d1 + n.d2", "n.d1 - n.d2", "n.at + n.d", "n.at - n.d", "n.d * 2", "n.d / 2", "2 * n.d").forEach { expression ->
             compilers.forEach { compiler ->
                 val sql = compiler.compile("MATCH (n:T) RETURN $expression", emptyMap()).sql
-                assertTrue(refusal in sql, "${compiler::class.simpleName} $expression:\n$sql")
+                assertTrue(tested(sql), "${compiler::class.simpleName} $expression:\n$sql")
             }
         }
     }
@@ -77,7 +84,7 @@ class TemporalArithmeticRefusedTest {
         ).forEach { cypher ->
             compilers.forEach { compiler ->
                 val sql = compiler.compile(cypher, mapOf("a" to 2, "b" to 3)).sql
-                assertFalse(refusal in sql, "${compiler::class.simpleName} $cypher:\n$sql")
+                assertFalse(tested(sql), "${compiler::class.simpleName} $cypher:\n$sql")
             }
         }
     }
@@ -85,13 +92,13 @@ class TemporalArithmeticRefusedTest {
     @Test
     fun `a plus tests a tag beside a tag or a number only, as a temporal value beside a text is its text and beside a list an item`() {
         val sql = PostgresCypherCompiler("g").compile("MATCH (n:T) RETURN n.a + n.b", emptyMap()).sql
-        assertTrue("jsonb_typeof" in sql && "= 'number'" in sql && refusal in sql, sql)
+        assertTrue("jsonb_typeof" in sql && "= 'number'" in sql && tested(sql), sql)
         // A side known to be a number: only the other is tested.
         val one = PostgresCypherCompiler("g").compile("MATCH (n:T) RETURN n.a + 1", emptyMap()).sql
-        assertTrue(refusal in one, one)
+        assertTrue(tested(one), one)
         // A field of a value the statement doesn't make temporal may be a map's entry, a tag: still tested.
         val field = PostgresCypherCompiler("g").compile("MATCH (n:T) RETURN n.m.d * 2", emptyMap()).sql
-        assertTrue(refusal in field, field)
+        assertTrue(tested(field), field)
     }
 
     @Test
@@ -99,16 +106,38 @@ class TemporalArithmeticRefusedTest {
         listOf("n.name + 'x'", "'x' + n.name", "n.a + [1]", "[1] + n.a", "n.a + \$s", "n.a + \$l").forEach { expression ->
             compilers.forEach { compiler ->
                 val sql = compiler.compile("MATCH (n:T) RETURN $expression", mapOf("s" to "x", "l" to listOf(1))).sql
-                assertFalse(refusal in sql, "${compiler::class.simpleName} $expression:\n$sql")
+                assertFalse(tested(sql), "${compiler::class.simpleName} $expression:\n$sql")
             }
         }
     }
 
     @Test
-    fun `the refusal names the tag's kind on either side, where the other side may be a number`() {
-        compilers.forEach { compiler ->
-            val sql = compiler.compile("MATCH (n:T) RETURN n.a * n.d", emptyMap()).sql
-            assertTrue(refusal in sql && "COALESCE(" in sql, "${compiler::class.simpleName}:\n$sql")
+    fun `each store works it out by its function, told the operator, and an Oracle store without it fails by name`() {
+        val calls = mapOf(PostgresCypherCompiler("g") to "g_temporal_arithmetic('", OracleCypherCompiler("g") to "g_temporal_arithmetic('",
+            SqliteCypherCompiler("g") to "drivine_temporal_arithmetic('")
+        listOf("+", "-", "*", "/").forEach { operator ->
+            calls.forEach { (compiler, call) ->
+                val sql = compiler.compile("MATCH (n:T) RETURN n.a $operator n.b", emptyMap()).sql
+                assertTrue("$call$operator', " in sql && refusal !in sql, "${compiler::class.simpleName} $operator:\n$sql")
+            }
+            val sql = refusing.compile("MATCH (n:T) RETURN n.a $operator n.b", emptyMap()).sql
+            assertTrue(refusal in sql && "_temporal_arithmetic(" !in sql, "Oracle without the function, $operator:\n$sql")
         }
+    }
+
+    @Test
+    fun `an Oracle statement says it calls the function, so a host whose store lacks it compiles again without`() {
+        val calling = OracleCypherCompiler("g").also { it.compile("MATCH (n:T) RETURN n.a - n.b", emptyMap()) }
+        assertTrue(calling.callsStoredTemporalArithmetic)
+        val known = OracleCypherCompiler("g").also { it.compile("MATCH (n:T) RETURN n.a - 1, duration('P1D') * 2", emptyMap()) }
+        assertTrue(known.callsStoredTemporalArithmetic)
+        val none = OracleCypherCompiler("g").also { it.compile("MATCH (n:T) RETURN duration('P1D') * 2, size(n.l) + 1", emptyMap()) }
+        assertFalse(none.callsStoredTemporalArithmetic)
+    }
+
+    @Test
+    fun `the refusal names the tag's kind on either side, where the other side may be a number`() {
+        val sql = refusing.compile("MATCH (n:T) RETURN n.a * n.d", emptyMap()).sql
+        assertTrue(refusal in sql && "COALESCE(" in sql, sql)
     }
 }

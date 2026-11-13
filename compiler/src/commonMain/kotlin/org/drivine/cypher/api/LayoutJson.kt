@@ -1,5 +1,6 @@
 package org.drivine.cypher.api
 
+import org.drivine.cypher.store.ddl.GeneratedFunctions
 import org.drivine.DrivineInternalApi
 import org.drivine.cypher.json.ArrayNode
 import org.drivine.cypher.json.CypherJson
@@ -13,7 +14,7 @@ import org.drivine.cypher.store.ddl.SqliteDdl
 import org.drivine.cypher.store.marker.StoreLayout
 
 /**
- * The store layout's three questions for a host with no Kotlin types, asked of the JSON entry ([CompileJson]) as a request
+ * The store layout's questions for a host with no Kotlin types, asked of the JSON entry ([CompileJson]) as a request
  * of its own in place of a statement (liberation-data/drivine-cypher-spec#161). Each is the module's own answer, so the three
  * libraries read rows, key a temporal value and judge a graph's layout alike, as drivine4j does through the Kotlin types:
  *
@@ -34,18 +35,22 @@ import org.drivine.cypher.store.marker.StoreLayout
  *   run the drops, then the restamp with the parameters, or where `assign`, the stamp's `assignIfAbsent` with its own
  *   parameters, as the graph has no stamp to give the layout, then read the stamps, list the objects again, and ask again; or
  *   `{"verdict": "refuse", "message": "…"}`.
+ * - `{"expand": "<a statement of store.yaml's>"}`: [GeneratedFunctions.expand], each marker of a generated function in it
+ *   (`<TemporalArithmeticFunction.postgres(drivine)>`) written out as the module makes it, as a runner of `store.yaml` reads
+ *   the statements it compares. Answered `{"text": "…"}`.
  */
 @DrivineInternalApi
 internal object LayoutJson {
 
     /** The request kinds this answers, each the key a request gives in place of `cypher`. */
-    val KINDS = listOf("read", "temporalKey", "layout")
+    val KINDS = listOf("read", "temporalKey", "layout", "expand")
 
     /** The answer to [tree], a request that gives one of [KINDS]. */
     fun answer(tree: ObjectNode): String = try {
         when {
             tree.has("read") -> read(tree)
             tree.has("temporalKey") -> temporalKey(tree["temporalKey"])
+            tree.has("expand") -> expand(tree["expand"])
             else -> layout(tree["layout"])
         }
     } catch (e: Exception) {
@@ -64,6 +69,11 @@ internal object LayoutJson {
             throw IllegalArgumentException("A read request's column is no JSON: ${e.message}")
         }
         return "{\"value\":${CypherJson.writeValueAsString(ValueLayout.read(value, typed?.booleanValue() ?: false))}}"
+    }
+
+    private fun expand(given: JsonNode?): String {
+        val text = given?.takeIf { it.isTextual }?.textValue() ?: throw IllegalArgumentException("An expand request gives the statement as a text.")
+        return "{\"text\":${CypherJson.writeValueAsString(GeneratedFunctions.expand(text))}}"
     }
 
     private fun temporalKey(given: JsonNode?): String {

@@ -1,5 +1,6 @@
 package org.drivine.cypher.store.plan
 
+import org.drivine.cypher.store.ddl.GeneratedFunctions
 import org.drivine.cypher.json.CypherJson
 import org.drivine.cypher.json.JsonNode
 import org.drivine.cypher.json.ObjectNode
@@ -144,7 +145,7 @@ class StorePlanTest {
     private fun prefix(id: String): List<DdlStatement> {
         val tables = store["tables"]!![id] ?: return emptyList()
         val made = tables["ensuring"]?.let { listOf(it) } ?: tables["ddl"]!!.toList()
-        return made.map { DdlStatement.Text(it.textValue()!!) }
+        return made.map { DdlStatement.Text(GeneratedFunctions.expand(it.textValue()!!)) }
     }
 
     private fun statement(node: JsonNode): DdlStatement =
@@ -179,7 +180,7 @@ class StorePlanTest {
                 val prepare = markerStore(id)["prepare"]!!.textValue()!!
                 val tables = store["tables"]!![id]!!
                 val text = if (prepare.startsWith("ddl[")) tables["ddl"]!![prepare.removePrefix("ddl[").removeSuffix("]").toInt()]!! else tables[prepare]!!
-                listOf(PlanAction.Execute(DdlStatement.Text(text.textValue()!!), purpose = Purpose.PREPARE))
+                listOf(PlanAction.Execute(DdlStatement.Text(GeneratedFunctions.expand(text.textValue()!!)), purpose = Purpose.PREPARE))
             }
             "deleteAllButNewest" -> listOf(
                 PlanAction.Execute(DdlStatement.Text(markerStore(id)["deleteAllButNewest"]!!.textValue()!!), mapOf("scope" to execute["scope"]!!.textValue()), Purpose.MARKER),
