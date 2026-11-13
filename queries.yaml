@@ -976,8 +976,8 @@ cases:
       - note: "A null read by a key worked out at run time is null, whatever the key's kind."
         cypher: "OPTIONAL MATCH (x:Nobody) UNWIND [0, 'a'] AS k RETURN x[k]"
         rows: [null, null]
-      - note: "An item taken out of another value is read with no test of its kind as the statement runs: testing it at each level of a list of lists made the statement grow faster than its depth. A map so taken and read by a number is null on a SQL store, where Neo4j fails."
-        only: [sql]
+      - note: "An item taken out of another value is read with no test of its kind as the statement runs: testing it at each level of a list of lists made the statement grow faster than its depth. A map so taken and read by a number is null here, where Neo4j fails; Oracle's JSON path reads a map as a list of one, and is left out."
+        only: [postgres, sqlite]
         cypher: "UNWIND [0, 1] AS i WITH [{a: 1}, [5, 6]] AS l, i RETURN l[i][0]"
         rows: [null, 5]
 

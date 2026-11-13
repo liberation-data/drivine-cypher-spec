@@ -441,7 +441,7 @@ class OracleItemPropertyTest {
         for (shape in shapes) {
             val sql = OracleCypherCompiler("g").compile("MATCH (n:Doc) $shape").sql
             // Each read of the item is its kind's, its text's, and in the ELSE, its JSON's.
-            val (kinds, texts, all) = listOf("[\$i].type()' PASSING ", "RETURNING CLOB), 'strict \$[\$i]' PASSING ", "[\$i]' PASSING ").map { Regex.escape(it).toRegex().findAll(sql).count() }
+            val (kinds, texts, all) = listOf("[\$i].type()' PASSING ", "RETURNING CLOB), '\$[\$i]' PASSING ", "[\$i]' PASSING ").map { Regex.escape(it).toRegex().findAll(sql).count() }
             assertTrue(kinds > 0 && texts == kinds && all == 2 * kinds, "$shape: $sql")
             assertTrue(Regex(Regex.escape("ELSE JSON_QUERY(")).findAll(sql).count() >= kinds, "$shape: $sql")
             // The node's label test stays.
