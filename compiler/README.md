@@ -247,12 +247,15 @@ searched once however often it is given, as drivine4j's `loadNearestAmong` searc
 
 `plan` gives a `VectorPlan`, or a `Refusal` of a graph name the store can't take:
 
-- On a SQL store a nearest search's `sql` is one `SELECT` of the ranked candidates, `nid` and `score`: the nearest
+- On a SQL store a nearest search's `sql` is one `SELECT` of the ranked candidates, each node's row (`nid`, `labels`,
+  `props` and `stamp`) and its `score`: the nearest
   `searchK` (or `topK`) nodes of the root's labels, through Postgres's HNSW index or Oracle's side table and its vector
   index, or measured one by one (and on SQLite always so, by the library's `drivine_similarity`). By cosine, a node whose
   embedding has no length, all zeros, is left out, as Neo4j's cosine index leaves it out (#160). The search reads the
-  embedding by the expression the module's DDL makes the index over, so the index answers it. The library joins the
-  candidates back to its node table by `nid` for its projection, and adds what `FullTextSearch`'s candidates are given:
+  embedding by the expression the module's DDL makes the index over, so the index answers it. The library reads its
+  projection from the candidates' own columns, with no second join of its node table: on Oracle 23.26 such a join, on
+  `nid` to a view that reads the node table, is eliminated with any filter on it where a `JSON_VALUE` index is made, and a
+  bound filter crashed the server (ORA-07445), a written one was dropped (#160). It adds what `FullTextSearch`'s candidates are given:
   its threshold (`score >= threshold`), its predicates, the view's required relationships, `ORDER BY score DESC, nid`,
   and where `searchK` was given its `LIMIT topK`.
 - On a graph engine a nearest search's `cypher` is its head: the index's `CALL` (Neo4j's `db.index.vector.queryNodes`,
@@ -288,7 +291,7 @@ JSON), each a `VectorIndexSpec` found by its name, or by `<label>_<property>_vec
 is refused, as Neo4j refuses one that does not exist, and so is an index named by anything but a string, as the store's
 table and expression are read when the statement is compiled. As the first clause the candidates are the statement's
 source; after other rows, a join for each row (a `LATERAL` join on Postgres and Oracle, `json_each` on SQLite), so the
-vector may be read from the row. Each candidate is joined to the node table, bound as `node` and its score as `score`,
+vector may be read from the row. Each candidate's own row is bound as `node`, with no second join of the node table, and its score as `score`,
 best first, ties by the node's id; a `WHERE` after the `YIELD`, and the clauses after it, filter those `k`, as Neo4j
 filters what its index found. `k` is a whole number from 1 to 2147483647, written or given as a parameter (bound, not
 written). A vector written or given is refused before the statement runs where Neo4j fails it: null, not a list of
