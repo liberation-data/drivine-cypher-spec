@@ -27,6 +27,7 @@ import org.drivine.cypher.store.ddl.StoreDdl
  * | absent or older | some | [Verdict.Refuse]: names the graph, its layout and this one's, and the reload |
  * | above the library's own | any, none among them | [Verdict.Refuse]: written by a later Drivine, to be upgraded |
  * | several, of different layouts | any | [Verdict.Refuse] |
+ * | none | any, and a later layout's generated names (`g_ix3_…`) | [Verdict.Refuse]: made by a later Drivine, to be upgraded |
  * | none | none, and no earlier layout's object | [Verdict.Current]: a new graph, or one cleared; the stamp is assigned as ever |
  * | none | none, and an earlier layout's objects | [Verdict.Stamp]: those dropped, whatever of this layout's stands beside them, then asked again |
  * | none | some, and the store's objects show this layout made it and no earlier one did | [Verdict.Stamp] with [Verdict.Stamp.assign]: a graph of this layout whose stamp a clear deleted (`MATCH (n) DETACH DELETE n` deletes Drivine's own nodes too), stamped again |
@@ -96,6 +97,13 @@ object StoreLayout {
         if (stampRows.isEmpty() && engine in SQL_ENGINES) {
             val old = sql?.let { oldObjects(it, objects) }.orEmpty()
             val ours = sql?.let { ownObjects(it, objects) }.orEmpty()
+            // A later layout's names: refused whatever the graph holds, as a later layout's stamp is, not taken for new or for layout 1.
+            val later = sql?.let { s -> objects.mapNotNull { row -> (row["name"] as? String)?.let { generatedLayout(generated(s), it) } } }.orEmpty().maxOrNull()
+            if (later != null && later > own) {
+                return Verdict.Refuse(
+                    "The graph '$graph' on $store was written in store layout $later by a later version of Drivine, and this version reads layout $own only: upgrade Drivine to use it.",
+                )
+            }
             // Values beside both layouts' objects can't be told apart. An empty graph has nothing to lose: an earlier layout's
             // are dropped as below, whatever of this layout's stands beside them.
             if (foreignNodes && old.isNotEmpty() && ours.isNotEmpty()) {
