@@ -350,6 +350,7 @@ class FragmentsTest {
             "n.name = rtrim(${'$'}p)" to mapOf("p" to "Ada "),
             "n.name = toString(${'$'}n)" to mapOf("n" to 7L),
             "n.name = toString(${'$'}b)" to mapOf("b" to true),
+            "n.name = toString(${'$'}p)" to mapOf("p" to "Ada"),
             "n.name = coalesce(${'$'}q, ${'$'}p)" to mapOf("q" to null, "p" to "Ada"),
             "n.name = coalesce(null, toLower(${'$'}p))" to mapOf("p" to "Ada"),
             // A number and a truth value worked out, a literal's text, and a parameter's key's.
@@ -389,6 +390,10 @@ class FragmentsTest {
             "n.name = trim(${'$'}p)" to mapOf("p" to "   "),
             "n.name = coalesce(${'$'}l, ${'$'}p)" to mapOf("l" to listOf(1L), "p" to "Ada"),
             "n.name = coalesce(${'$'}q, ${'$'}p)" to mapOf("q" to null, "p" to ""),
+            "n.name = toString(${'$'}p)" to mapOf("p" to ""),
+            // A function worked() doesn't know, and one given a value of a kind it takes no text of.
+            "n.name = reverse(${'$'}p)" to mapOf("p" to "Ada"),
+            "n.name = toLower(${'$'}n)" to mapOf("n" to 7L),
             // Oracle's TRIM, LTRIM and RTRIM take off spaces alone: a tab is left, and the text it leaves is past 4,000 bytes.
             "n.name = trim(${'$'}p)" to mapOf("p" to "Ada" + "\t".repeat(4000)),
             "n.name = ltrim(${'$'}p)" to mapOf("p" to "\t".repeat(4000) + "Ada"),

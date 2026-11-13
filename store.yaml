@@ -2088,8 +2088,7 @@ cases:
           - "COALESCE(props ->> '$.\"name\".s', props ->> '$.\"name\".v', props ->> '$.\"name\"')"
           - "instr(labels, '\"Person\"') > 0"
     reads:
-      - note: "A text the statement works out from its parameters, of a function that gives no list or map, is read through the index as a given one is (#238)."
-        cypher: "MATCH (n:Person {name: toUpper($x)}) RETURN n"
+      - cypher: "MATCH (n:Person {name: toUpper($x)}) RETURN n"
         parameters: {x: "ada"}
         indexedProperties:
           - ["Person", "name"]
