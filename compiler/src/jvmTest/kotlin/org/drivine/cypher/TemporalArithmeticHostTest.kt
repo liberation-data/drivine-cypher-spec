@@ -51,6 +51,40 @@ class TemporalArithmeticHostTest {
 
     private val numbers = listOf("2", "3", "-1", "0.5", "1.5", "2.5", "-7", "10")
 
+    /**
+     * The cases where the inline SQLite SQL is wrong, and the host function gives Neo4j's answer: each fails this test where it
+     * starts to match, so the list shrinks as the builder is fixed, and the test is back to all alike.
+     * - A year past 9999, which the inline SQL writes without its `+` (`10000-01-01`), where the canonical text, and Neo4j's,
+     *   has it: liberation-data/drivine-cypher-spec#263.
+     * - A duration scaled by a number the inline SQL works out in SQLite's doubles, which writes `.800000002S` where the answer
+     *   is exact (liberation-data/drivine-cypher-spec#262), and splits its seconds before rounding them, so `59M60S` or a `0S`
+     *   of a rounding's hair (liberation-data/drivine-cypher-spec#261).
+     */
+    private val known = setOf(
+        "date('9999-12-01') + duration('P1M')",
+        "duration('P1M') + date('9999-12-01')",
+        "date('9999-12-01') + duration('P1Y')",
+        "duration('P1Y') + date('9999-12-01')",
+        "date('9999-12-01') - duration('-P1M2DT3H')",
+        "date('9999-12-01') + duration('P1M2DT3H')",
+        "duration('P1M2DT3H') + date('9999-12-01')",
+        "date('9999-12-01') - duration('-P2M1DT30M')",
+        "date('9999-12-01') + duration('P1Y2M3DT4H5M6.789S')",
+        "duration('P1Y2M3DT4H5M6.789S') + date('9999-12-01')",
+        "date('9999-12-01') - duration('-P1Y2M3W4DT5H6M7.5S')",
+        "duration('P1Y') / 2.5",
+        "duration('P1W') / 3",
+        "duration('P1W') / 1.5",
+        "duration('P1W') / 2.5",
+        "duration('P1W') / 10",
+        "duration('P1Y2M3DT4H5M6.789S') / 3",
+        "duration('P1Y2M3DT4H5M6.789S') / 1.5",
+        "duration('P1Y2M3DT4H5M6.789S') / 2.5",
+        "duration('-P1Y2M3W4DT5H6M7.5S') / 3",
+        "duration('-P1Y2M3W4DT5H6M7.5S') / 1.5",
+        "duration('-P1Y2M3W4DT5H6M7.5S') / 2.5",
+    )
+
     @Test
     fun `the host function gives what the inline SQL gives, for each operator and pair of kinds`() {
         val cases = mutableListOf<Triple<String, String, String>>()
@@ -73,9 +107,12 @@ class TemporalArithmeticHostTest {
         val differ = cases.mapNotNull { (op, x, y) ->
             val inline = inline("$x $op $y")
             val host = host(op, x, y)
-            if (inline == host) null else "$x $op $y: inline $inline, host $host"
+            val alike = inline == host
+            val expected = "$x $op $y" !in known
+            if (alike == expected) null else if (alike) "$x $op $y: alike, but listed as known" else "$x $op $y: inline $inline, host $host"
         }
-        assertTrue(differ.isEmpty(), "${differ.size} of ${cases.size} differ, such as:\n${differ.take(25).joinToString("\n")}")
+        assertTrue(differ.isEmpty(), "${differ.size} of ${cases.size} unlike the list, such as:\n${differ.take(25).joinToString("\n")}")
+        assertTrue(known.all { k -> cases.any { (op, x, y) -> "$x $op $y" == k } }, "a known case is no longer generated")
         assertTrue(cases.size > 2000, "${cases.size}")
     }
 
