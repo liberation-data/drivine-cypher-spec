@@ -202,13 +202,21 @@ object VectorSearch {
     // Measured by cosine, an embedding all of zeros has no direction, and its distance is NaN: Neo4j leaves it out of a cosine
     // index, so a search never finds it (vector.yaml, "Only the index's nodes"). Postgres's HNSW index leaves it out too, but
     // a search without one, Oracle's and SQLite's, measured it, and NaN sorted first. Each is left out here, on a cosine
-    // search; a euclidean one measures it, as Neo4j does.
+    // search, a nearest search's candidates and a search among ids' roots alike; a euclidean one measures it, as Neo4j does.
 
     /** Whether the embedding under [key] of [alias], of [dimensions], has a length, on a cosine search; null on another. */
     private fun postgresLength(request: VectorRequest, alias: String, key: String, dimensions: Int): String? =
         if (request.similarity != SimilarityFunction.COSINE) null
         // Read only where it is a list of the size, as the cast fails on any other value.
         else "CASE WHEN ${PostgresSql.holdsEmbedding(alias, key, dimensions)} THEN vector_norm(${PostgresSql.embedding(alias, key, dimensions)}) > 0 END"
+
+    /**
+     * Whether the embedding under [key] of [alias], a list of any size, has a length, on a cosine search; null on another: a
+     * search among ids leaves such a root out, as a seed and as a neighbour, where no index is made to read it by its size.
+     */
+    private fun postgresAnyLength(request: VectorRequest, alias: String, key: String): String? =
+        if (request.similarity != SimilarityFunction.COSINE) null
+        else "CASE WHEN jsonb_typeof(${PostgresSql.value(alias, key)}) = 'array' THEN vector_norm(${PostgresSql.embedding(alias, key)}) > 0 END"
 
     /** Whether the embedding [embedding], read as a vector, has a length, on a cosine search; null on another. */
     private fun oracleLength(request: VectorRequest, embedding: String): String? =
@@ -271,7 +279,8 @@ object VectorSearch {
         val embedded = dimensions?.let { PostgresSql.holdsEmbedding("c", key, it) } ?: "jsonb_typeof(${PostgresSql.value("c", key)}) = 'array'"
         val members = Query(
             "c.nid, $id AS id, c.props", Table(ddl.nodes, "c"),
-            listOf(PostgresSql.hasLabels("c", request.labels), embedded, "$id IN (${PostgresSql.textValues(scope.bound(among.ids))})"),
+            listOf(PostgresSql.hasLabels("c", request.labels), embedded, "$id IN (${PostgresSql.textValues(scope.bound(among.ids))})") +
+                listOfNotNull(postgresAnyLength(request, "c", key)),
         )
         val nearest = if (dimensions == null) {
             val distance = "${PostgresSql.embedding("o", key)} ${PostgresSql.distance(request.similarity)} ${PostgresSql.embedding("s", key)}"
@@ -350,6 +359,7 @@ object VectorSearch {
             listOfNotNull(
                 OracleSql.hasLabels("c", request.labels), OracleSql.hasProperty("c", key), "$id IN (${OracleSql.textValues(scope.bound(among.ids))})",
                 embeddings?.let { "c.nid IN (SELECT e.nid FROM $it e)" },
+                oracleLength(request, OracleSql.embedding("c", key)),
             ),
         )
         val metric = OracleSql.metric(request.similarity)
@@ -399,7 +409,8 @@ object VectorSearch {
         val id = SqliteSql.property("c", stored(among.idProperty))
         val members = Query(
             "c.nid, $id AS id, c.props", Table(ddl.nodes, "c"),
-            listOf(SqliteSql.hasLabels("c", request.labels), "${SqliteSql.type("c", key)} = 'array'", "$id IN (${SqliteSql.textValues(scope.bound(among.ids))})"),
+            listOf(SqliteSql.hasLabels("c", request.labels), "${SqliteSql.type("c", key)} = 'array'", "$id IN (${SqliteSql.textValues(scope.bound(among.ids))})") +
+                listOfNotNull(sqliteLength(request, "c", key)),
         )
         val scored = Query(
             "s.nid AS seed, o.nid, o.id, ${SqliteSql.score("o", key, request.similarity, SqliteSql.value("s", key))} AS score",

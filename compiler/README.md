@@ -301,8 +301,8 @@ cosine and Euclidean, with and without a partition and `searchK`, for roots of o
 quote, a backslash and a backtick in them. Only the parameters' names were changed, and the query vector's binding left
 out, and on the graph engines a name with a quote, a backslash or a backtick, which drivine4j writes raw, is written
 escaped (#217): 84 of the golden's entries were edited for it by a script. And the 168 SQL entries of a nearest search
-by cosine were edited by a script to leave out a stored embedding of no length, as Neo4j's cosine index does (#160),
-which drivine4j at that commit does not. No other entry was edited. `VectorSearchGoldenTest` checks
+by cosine were edited by a script to leave out a stored embedding of no length, as Neo4j's cosine index does, and the
+40 of a search among ids by cosine to leave out a root with one (#160), which drivine4j at that commit does not. No other entry was edited. `VectorSearchGoldenTest` checks
 `plan`, and the JSON request, against each on every target, putting back the candidates' columns drivine4j selects beside
 `nid` before it compares, as `FullTextSearchGoldenTest` does.
 

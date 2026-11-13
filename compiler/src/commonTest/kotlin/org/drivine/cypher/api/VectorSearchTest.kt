@@ -65,6 +65,20 @@ class VectorSearchTest {
     }
 
     @Test
+    fun aCosineSearchAmongIdsLeavesOutARootWhoseEmbeddingHasNoLengthAndAEuclideanOneKeepsIt() {
+        // Its NaN score sorted first; as a seed it has no direction to search by, and Neo4j's cosine index never yields it.
+        val lengths = mapOf(SearchStore.POSTGRES to "vector_norm(", SearchStore.ORACLE to "VECTOR_NORM(", SearchStore.SQLITE to "e.value <> 0")
+        for ((store, length) in lengths) for (dimensions in listOf(3, null)) {
+            val among = VectorAmong(listOf("a", "b"), "id")
+            val cosine = plan(store, request(SimilarityFunction.COSINE, dimensions = dimensions).copy(among = among, size = null)).sql!!
+            val euclidean = plan(store, request(SimilarityFunction.EUCLIDEAN, dimensions = dimensions).copy(among = among, size = null)).sql!!
+            // In the roots searched among: the statement's first query, which each root's search reads.
+            assertTrue(cosine.substringAfter("WITH members AS").substringBefore("SELECT s.").contains(length), "$store, index of $dimensions, by cosine:\n$cosine")
+            assertTrue(!euclidean.contains(length), "$store, index of $dimensions, euclidean:\n$euclidean")
+        }
+    }
+
+    @Test
     fun anOracleSearchThroughTheIndexReadsTheSideTableTheDdlMakesWithItsMetric() {
         for (similarity in SimilarityFunction.entries) for (label in listOf("Doc", "Do'c\\x")) {
             val spec = VectorIndexSpec(label, "embedding", 3, similarity)
