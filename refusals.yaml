@@ -612,7 +612,7 @@ cases:
         error: "pi() takes no argument."
 
   - name: "Procedure"
-    description: "A procedure other than db.labels() and db.relationshipTypes() is refused, as is one of them called as Neo4j refuses it."
+    description: "A procedure other than db.labels(), db.relationshipTypes() and db.index.vector.queryNodes() (see vector.yaml) is refused, as is one of them called as Neo4j refuses it."
     steps:
       - cypher: "CALL db.indexes()"
         error: "A procedure call (CALL) is Cypher, and is not compiled to SQL yet."
