@@ -18,7 +18,7 @@ internal object Patterns {
     /** What a backreference the stores answer is, said where one is refused. */
     private const val ANSWERED = "the SQL stores answer a backreference as Java does only where it is \\1 to \\8, with no digit after it, " +
         "outside a character class, to a simple group that closed before it: one that holds no quantifier, alternative or group, " +
-        "is not repeated, and is in no alternative or repeated group, in a pattern with no lookaround, no class within a class and no flag x."
+        "is not repeated, and is in no alternative or repeated group, in a pattern with no group of its own syntax but a leading flag group, (?i), no class within a class and no flag x."
 
     /**
      * Why the SQL stores can't answer [pattern]'s backreferences as Java does, or null where they can, or it writes none. A
@@ -48,7 +48,7 @@ internal object Patterns {
                 number > 8 -> "past \\8"
                 digitAfter -> "with a digit after it"
                 read.flagX -> "in a pattern with the flag x"
-                read.lookaround -> "in a pattern with a lookaround"
+                read.construct -> "in a pattern with a group of its own syntax, (?…), but for a leading flag group: Oracle reads none, and Postgres numbers no group in a lookaround"
                 read.classInClass -> "in a pattern with a class within a class"
                 group == null || number !in closed -> "to a group that hasn't closed before it"
                 !group.simple -> "to a group that holds a quantifier, an alternative or a group, or is repeated"
@@ -78,10 +78,13 @@ internal object Patterns {
 
     /** What [scan] reads of a pattern. */
     private class Read(
-        val found: List<Backreference>, val groups: List<Group>, val flagX: Boolean, val lookaround: Boolean, val classInClass: Boolean,
+        val found: List<Backreference>, val groups: List<Group>, val flagX: Boolean, val construct: Boolean, val classInClass: Boolean,
     )
 
     /** A flag group that turns `x` on: `(?x)`, `(?ix)`, `(?x:…)`, not `(?i-x)`. */
+    /** A leading flag group as Oracle's `=~` takes it off the pattern, `(?i)`: letters alone. */
+    private val LEADING_FLAGS = Regex("""\(\?[a-z]+\)""")
+
     private val FLAG_X = Regex("""\(\?[a-zA-Z]*x[a-zA-Z]*(-[a-zA-Z]*)?[:)]""")
 
     /**
@@ -95,7 +98,7 @@ internal object Patterns {
         val closed = mutableSetOf<Int>()
         val found = mutableListOf<Backreference>()
         val stack = ArrayDeque(listOf(Open(null)))
-        var lookaround = false
+        var construct = false
         var classInClass = false
         var depth = 0
         var i = 0
@@ -136,7 +139,8 @@ internal object Patterns {
                 depth > 0 -> {}
                 c == '(' -> {
                     stack.last().nested = true
-                    if (listOf("?=", "?!", "?<=", "?<!").any { pattern.startsWith(it, i + 1) }) lookaround = true
+                    // A group of its own syntax, a lookaround or (?:…) among them, but for a leading flag group, which Oracle takes off.
+                    if (pattern.startsWith("?", i + 1) && !(i == 0 && LEADING_FLAGS.matchesAt(pattern, 0))) construct = true
                     val named = pattern.startsWith("?<", i + 1) && pattern.getOrNull(i + 3)?.isLetter() == true
                     val group = if (!pattern.startsWith("?", i + 1) || named) Group().also(groups::add) else null
                     stack.addLast(Open(group))
@@ -161,6 +165,6 @@ internal object Patterns {
             i++
         }
         if (stack.first().alternated) stack.first().held.forEach { it.always = false }
-        return Read(found, groups, FLAG_X.containsMatchIn(pattern), lookaround, classInClass)
+        return Read(found, groups, FLAG_X.containsMatchIn(pattern), construct, classInClass)
     }
 }

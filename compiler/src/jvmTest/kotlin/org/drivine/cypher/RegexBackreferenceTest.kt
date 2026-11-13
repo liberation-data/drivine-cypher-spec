@@ -22,10 +22,10 @@ class RegexBackreferenceTest {
 
     /** The forms answered: `\1` to `\8`, no digit after, to a simple group closed before it that takes part in every match. */
     private val allowed = listOf(
-        "(A).*\\1.*", "(a)\\1", "(a)\\1\\1", "(a)(b)\\2\\1", "((a)b)\\2", "(?i)(a)\\1", "(a)\\\\\\1", "(a)(?:b|c)\\1",
-        "(a)(b)(c)(d)(e)(f)(g)(h)\\8", "()\\1", "(a)\\1?", "(a)\\1x", "([ab])\\1", "(a)[]\\]]\\1", "(?i-x)(a)\\1", "(?<x>a)\\1",
-        // A quantifier's character in a class is none, and a group held in one that captures nothing, unrepeated, takes part.
-        "([+*?{|])\\1", "(?:(a))\\1",
+        "(A).*\\1.*", "(a)\\1", "(a)\\1\\1", "(a)(b)\\2\\1", "((a)b)\\2", "(?i)(a)\\1", "(a)\\\\\\1",
+        "(a)(b)(c)(d)(e)(f)(g)(h)\\8", "()\\1", "(a)\\1?", "(a)\\1x", "([ab])\\1", "(a)[]\\]]\\1",
+        // A quantifier's character in a class is none.
+        "([+*?{|])\\1",
     )
 
     /** Each form refused, and what the message names. */
@@ -37,14 +37,16 @@ class RegexBackreferenceTest {
         // A group that holds a quantifier, an alternative or a group, or is repeated: each engine captures its own way there.
         "(a|b)\\1" to "holds a quantifier", "(a+)\\1" to "holds a quantifier", "((a)b)\\1" to "holds a quantifier",
         "(a)+\\1" to "holds a quantifier", "(a){2}\\1" to "holds a quantifier", "(a)?\\1" to "holds a quantifier",
-        "(a?)+b\\1" to "holds a quantifier", "(a|b)+\\1" to "holds a quantifier", "((?i)a)\\1" to "holds a quantifier",
+        "(a?)+b\\1" to "holds a quantifier", "(a|b)+\\1" to "holds a quantifier", "((?i)a)\\1" to "own syntax",
         // A group in an alternative or a repeated group may take no part in a match.
         "(a)|\\1" to "in an alternative or a repeated group", "x|(a)\\1" to "in an alternative or a repeated group",
-        "(?:(a)|b)\\1" to "in an alternative or a repeated group", "(?:(a)b)+\\1" to "in an alternative or a repeated group",
+        "(?:(a)|b)\\1" to "own syntax", "(?:(a)b)+\\1" to "own syntax",
         // Postgres reads no backreference in a lookaround, and numbers no group there.
         "(a)(?=\\1)a" to "lookaround", "(?=(a))(a)\\2" to "lookaround", "(?<=(a))(a)\\2" to "lookaround",
         // Java reads (?x)(a) ?\1 as (a)?\1: a space may stand between a group and its quantifier.
         "(?x)(a) ?\\1" to "flag x", "(?ix)(a)\\1" to "flag x", "(a)(?x:b)\\1" to "flag x",
+        // Oracle reads no group of its own syntax: (?:x) matches nothing there, so a backreference beside one is refused.
+        "(a)(?:b|c)\\1" to "own syntax", "(?:(a))\\1" to "own syntax", "(?<x>a)\\1" to "own syntax", "(?i-x)(a)\\1" to "own syntax",
         // Java reads acc as [[a](b)](c)\1, where Postgres reads the class as [[a], and (b) as the first group.
         "[[a](b)](c)\\1" to "class within a class",
     )
