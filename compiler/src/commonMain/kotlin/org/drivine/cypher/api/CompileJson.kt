@@ -29,18 +29,18 @@ import kotlin.io.encoding.ExperimentalEncodingApi
  * ```
  *
  * `store` is `postgres`, `oracle` or `sqlite`. `graph` is [GraphOptions]: `name`, and on Oracle `nullsEqualStored`,
- * `eraStored` (true where left out), `indexedProperties` (`[["Person", "name"], …]`), `oracleRowsAsText`,
+ * `eraStored` (true where left out), `temporalArithmeticStored` (true where left out), `indexedProperties` (`[["Person", "name"], …]`), `oracleRowsAsText`,
  * `oracleReencodeJson` and `oracleReadsAsText` (false where left out). `parameters` may be left out. With `"typed": true` (false where left out),
  * the rows' nodes and relationships are tagged with their labels and type: see [org.drivine.cypher.sql.ColumnKind].
  *
  * The answer is [Compiled] (`sql`, `parameters`, `setup`, `warnings`, `nonFinite`, and on Oracle `storedFunctions`:
- * `{"nullsEqual": …, "era": …}`, and with `typed` `columns`: `[{"name": "p", "kind": "node"}, …]`), `{"refusal": "<message>"}` where the compiler refuses the statement, or
+ * `{"nullsEqual": …, "era": …, "temporalArithmetic": …}`, and with `typed` `columns`: `[{"name": "p", "kind": "node"}, …]`), `{"refusal": "<message>"}` where the compiler refuses the statement, or
  * `{"error": "<message>"}` where the request is no request.
  *
  * A request with `search` or `searchIndex` in place of `cypher` is a full-text search, answered by [FullTextSearch]: see
  * [SearchJson]. One with `vector` is a vector search, answered by [VectorSearch]: see [VectorJson]. One with `read`,
- * `temporalKey` or `layout` asks the store layout's questions: a column's value read, a temporal value's sort key, a
- * graph's layout judged; see [LayoutJson]. One with `fragment` asks for a part of a statement a library writes itself, a
+ * `temporalKey`, `layout` or `expand` asks the store layout's questions: a column's value read, a temporal value's sort key, a
+ * graph's layout judged, a statement of `store.yaml` with its generated functions written out; see [LayoutJson]. One with `fragment` asks for a part of a statement a library writes itself, a
  * condition, a value or an order's terms: see [FragmentJson]. A request that gives more than one kind is an error.
  *
  * Values, in the parameters given and those bound, are plain JSON, tagged only where JSON, or a host's reading of it, loses
@@ -118,7 +118,7 @@ object CompileJson {
                 append(",\"setup\":"); TypedJson.write(result.setup, this)
                 append(",\"warnings\":"); TypedJson.write(result.warnings, this)
                 append(",\"nonFinite\":").append(result.nonFinite)
-                result.storedFunctions?.let { append(",\"storedFunctions\":{\"nullsEqual\":").append(it.nullsEqual).append(",\"era\":").append(it.era).append('}') }
+                result.storedFunctions?.let { append(",\"storedFunctions\":{\"nullsEqual\":").append(it.nullsEqual).append(",\"era\":").append(it.era).append(",\"temporalArithmetic\":").append(it.temporalArithmetic).append('}') }
                 // Only where asked, so an answer to a request without it is byte for byte as before.
                 if (call.typed) {
                     append(",\"columns\":[")
@@ -179,6 +179,7 @@ object CompileJson {
             oracleReencodeJson = flag(graph, "oracleReencodeJson", default = false),
             oracleReadsAsText = flag(graph, "oracleReadsAsText", default = false),
             vectorIndexes = vectorIndexes,
+            temporalArithmeticStored = flag(graph, "temporalArithmeticStored"),
         )
     }
 

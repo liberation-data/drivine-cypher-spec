@@ -131,6 +131,15 @@ abstract class SqlCypherCompiler(
      */
     protected open fun calledFunctions(sql: String): List<String> = emptyList()
 
+    /**
+     * The call of the store's function that works out [operator], `+`, `-`, `*` or `/`, of the JSON [x] and [y] where either may
+     * be a tag of a temporal value read from the store, to the tag it gives (drivine4j#418); null where the store has none, as
+     * SQLite, and an Oracle store made by an earlier version, or by a user who may not make a function: such arithmetic then
+     * fails by name as the statement runs. Its body is the compiler's own temporal arithmetic, written for each pair of kinds
+     * ([TemporalArithmeticFunction]).
+     */
+    protected open fun storedArithmetic(operator: String, x: String, y: String): String? = null
+
     /** [compiled] with the functions it calls declared before it. */
     private fun withFunctions(compiled: CompiledCypher): CompiledCypher {
         val all = functions + calledFunctions(compiled.sql).filter { it !in functions }
@@ -5209,12 +5218,13 @@ abstract class SqlCypherCompiler(
 
         /**
          * [arithmetic], the generic `+`, `-`, `*` or `/` of [binary]'s sides [x] and [y], where the statement knows neither to be a
-         * temporal value: as the statement runs, a side that is one, a tag a property holds (`n.d1 + n.d2`, `n.d * 2`), fails by
-         * name, where the generic arithmetic gave null (drivine4j#418). Temporal arithmetic is written only where a side is known
-         * to be temporal; on two sides read from the store it is not compiled yet. A `+` refuses only a tag beside a tag or a
+         * temporal value: as the statement runs, a side that is one, a tag a property holds (`n.d1 + n.d2`, `n.d * 2`), is worked
+         * out by the store's function of temporal arithmetic ([storedArithmetic]), where the generic arithmetic gave null
+         * (drivine4j#418); where the store keeps none, on SQLite and on an Oracle store without it, it fails by name. Temporal
+         * arithmetic is written inline only where a side is known to be temporal. A `+` tests only a tag beside a tag or a
          * number: beside a text a temporal value is its text, and beside a list an item, as before, so beside a side known to be
-         * a text or a list it is not tested. A side that can't be a tag ([tagFree]) is not tested. The kind named is the tag's on
-         * either side: the other may be a number (`n.n * n.d`).
+         * a text or a list it is not tested. A side that can't be a tag ([tagFree]) is not tested. The kind a failure names is the
+         * tag's on either side: the other may be a number (`n.n * n.d`).
          */
         private fun temporalRefused(binary: Expression.Binary, left: Value, right: Value, x: String, y: String, arithmetic: () -> String): String {
             val sides = listOf(left, right).map { (it as? Value.Json)?.temporal != null }
@@ -5235,8 +5245,11 @@ abstract class SqlCypherCompiler(
             } else {
                 tag.filterIndexed { i, _ -> open[i] }.joinToString(" OR ")
             }
-            val kind = if (open[0] && open[1]) "COALESCE(${tagKind(x)}, ${tagKind(y)})" else if (open[0]) tagKind(x) else tagKind(y)
-            return "CASE WHEN $test THEN ${scalar(textFailure(TEMPORAL_ARITHMETIC, kind))} ELSE ${arithmetic()} END"
+            val worked = storedArithmetic(OPERATOR_WORDS.getValue(binary.operator), x, y) ?: run {
+                val kind = if (open[0] && open[1]) "COALESCE(${tagKind(x)}, ${tagKind(y)})" else if (open[0]) tagKind(x) else tagKind(y)
+                scalar(textFailure(TEMPORAL_ARITHMETIC, kind))
+            }
+            return "CASE WHEN $test THEN $worked ELSE ${arithmetic()} END"
         }
 
         /**
@@ -7485,6 +7498,9 @@ abstract class SqlCypherCompiler(
 
         /** The operators of arithmetic, whose value is a number where both operands are: see [Value.Json.known]. */
         val ARITHMETIC = setOf(Operator.ADD, Operator.SUBTRACT, Operator.MULTIPLY, Operator.DIVIDE, Operator.MODULO, Operator.POWER)
+
+        /** The operators a store's function of temporal arithmetic is called with, by the text it is told each by: see [storedArithmetic]. */
+        val OPERATOR_WORDS = mapOf(Operator.ADD to "+", Operator.SUBTRACT to "-", Operator.MULTIPLY to "*", Operator.DIVIDE to "/")
 
         /** The arithmetic that takes numbers alone, and temporal values where the store does: `+` puts texts and lists together too. */
         val NUMERIC_ONLY = ARITHMETIC - Operator.ADD

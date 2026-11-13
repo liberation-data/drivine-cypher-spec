@@ -66,14 +66,96 @@ class StoreDdlTest {
         "sqlite" to sqlite.ddl,
     )
 
+    /**
+     * The generated functions' pins (`store.yaml`'s `generated`): what each marker stands for, by its digest; the Postgres DDL's
+     * digest at its [PostgresDdl.VERSION], which must change with it; and each Oracle function's version comment. A store made
+     * before runs the DDL again on Postgres only when [PostgresDdl.VERSION] changes, and on Oracle makes a function again only
+     * when its version does, so a body changed without them reaches no store made before (#251, drivine4j#418).
+     */
+    @Test
+    fun theGeneratedFunctionsAreTheFormsTheirDigestsPinAndChangeOnlyWithTheirStoresVersions() {
+        val generated = store["generated"]!!
+        val bump = "On Postgres, bump PostgresDdl.VERSION (now ${PostgresDdl.VERSION}) so a store made before runs the DDL again, " +
+            "and pin its digest in store.yaml's generated.postgresVersions; on Oracle a function's version comment (-- drivine:<hash>) " +
+            "is its version and changes with its body: pin each in generated.oracleVersions. Then pin the new digests in generated.digests."
+        GeneratedFunctions.FORMS.forEach { form ->
+            assertEquals(generated["digests"]!![form]?.textValue(), GeneratedFunctions.digest(form, graph), "The generated function's $form form changed. $bump")
+        }
+        val postgresDigest = GeneratedFunctions.hex(postgres.ddl.joinToString("\u0000"))
+        val pinned = generated["postgresVersions"]!![PostgresDdl.VERSION]?.textValue()
+            ?: fail("store.yaml's generated.postgresVersions pins no digest for ${PostgresDdl.VERSION}: pin $postgresDigest.")
+        assertEquals(pinned, postgresDigest, "The Postgres DDL changed, and PostgresDdl.VERSION didn't: a store made at ${PostgresDdl.VERSION} would keep the old. Bump the token. $bump")
+        val versions = generated["oracleVersions"]!!
+        oracle.versions.forEach { (function, version) ->
+            assertEquals(versions[function]?.textValue(), version, "The Oracle function $function changed: its version is now $version. $bump")
+        }
+        assertEquals(versions.size(), oracle.versions.size, "store.yaml's generated.oracleVersions pins a function the store no longer keeps. $bump")
+        // A marker stands for what the store's block sends, byte for byte.
+        assertTrue(GeneratedFunctions.text("postgresEnsuring", graph) in postgres.ensuring)
+        assertTrue(GeneratedFunctions.text("oracleClob", graph) in oracle.ensuring)
+        assertTrue(GeneratedFunctions.text("postgres", graph) in postgres.ddl && GeneratedFunctions.text("oracle", graph) in oracle.functions)
+        // The block's form is the function's, its lines indented within it.
+        assertEquals(
+            GeneratedFunctions.text("postgres", graph).lines().map(String::trim), GeneratedFunctions.text("postgresEnsuring", graph).lines().map(String::trim),
+        )
+    }
+
+    /** [GeneratedFunctions.marked] writes each statement the module makes as `store.yaml` holds it: the clob form before the text it quotes. */
+    @Test
+    fun eachGeneratedFunctionIsMarkedAsStoreYamlHoldsIt() {
+        val tables = store["tables"]!!
+        val held = listOf(tables["postgres"]!!["ensuring"]!!, tables["oracle"]!!["ensuring"]!!) + tables["postgres"]!!["ddl"]!!.toList() +
+            tables["oracle"]!!["functions"]!!.toList()
+        val made = listOf(postgres.ensuring, oracle.ensuring) + postgres.ddl + oracle.functions
+        assertEquals(held.map { it.textValue()!! }, made.map { GeneratedFunctions.marked(it, graph) })
+    }
+
+    /**
+     * Oracle keeps a function's text from `FUNCTION` on, so the version comment ends its first line in `user_source`, outside
+     * any literal, and [OracleDdl.ensuring] makes again each function whose line 1 lacks it (#251).
+     */
+    @Test
+    fun eachOracleFunctionsFirstLineEndsWithTheVersionEnsuringLooksFor() {
+        oracle.versions.entries.zip(oracle.functions).forEach { (entry, function) ->
+            val (name, version) = entry
+            val first = function.lines().first()
+            assertTrue(first.startsWith("CREATE OR REPLACE FUNCTION $name(") && first.endsWith(" ${OracleDdl.VERSION_MARK}$version"), first)
+            assertEquals(0, first.count { it == '\'' } % 2, "$name's version comment is in a literal: $first")
+            assertEquals(1, Regex("--").findAll(first).count(), first)
+            assertEquals(OracleDdl.version(function.replace(" ${OracleDdl.VERSION_MARK}$version\n", "\n").removePrefix("CREATE OR REPLACE ")), version, name)
+            assertTrue(
+                "o.object_name = '${name.uppercase()}' AND o.status = 'VALID' AND EXISTS (SELECT 1 FROM user_source s WHERE s.name = o.object_name " +
+                    "AND s.type = 'FUNCTION' AND s.line = 1 AND INSTR(s.text, '${OracleDdl.VERSION_MARK}$version') > 0);" in oracle.ensuring,
+                name,
+            )
+        }
+    }
+
+    /** [org.drivine.cypher.store.OracleSql.clob]: a text that fits one literal is one, a longer one pieces each well within a PL/SQL literal's 32,767 bytes. */
+    @Test
+    fun aClobLiteralIsInPiecesAPlSqlLiteralHolds() {
+        val clob = org.drivine.cypher.store.OracleSql::clob
+        assertEquals("'${"a".repeat(8_000)}'", clob("a".repeat(8_000)))
+        assertEquals("TO_CLOB('${"a".repeat(8_000)}') || TO_CLOB('a')", clob("a".repeat(8_001)))
+        // Quotes doubled within each piece, and a character of three bytes, still within the limit; the pieces put together are the text.
+        for (text in listOf("'".repeat(16_001), "€'".repeat(8_001))) {
+            val pieces = clob(text).removePrefix("TO_CLOB('").removeSuffix("')").split("') || TO_CLOB('")
+            assertEquals(3, pieces.size)
+            assertTrue(pieces.all { it.encodeToByteArray().size + 2 <= 32_767 })
+            assertEquals(text, pieces.joinToString("") { it.replace("''", "'") })
+        }
+    }
+
     @Test
     fun tablesAndProbeAreDrivine4js() {
         val tables = store["tables"]!!
-        assertEquals(texts(tables["postgres"]!!["ddl"]!!), postgres.ddl, "postgres ddl")
-        assertEquals(tables["postgres"]!!["ensuring"]!!.textValue(), postgres.ensuring, "postgres ensuring")
-        assertEquals(texts(tables["oracle"]!!["ddl"]!!), oracle.ddl, "oracle ddl")
-        assertEquals(texts(tables["oracle"]!!["functions"]!!), oracle.functions, "oracle functions")
-        assertEquals(tables["oracle"]!!["ensuring"]!!.textValue(), oracle.ensuring, "oracle ensuring")
+        // A generated function is held by its marker, which the module expands (GeneratedFunctions).
+        fun expanded(node: JsonNode) = GeneratedFunctions.expand(node.textValue()!!)
+        assertEquals(tables["postgres"]!!["ddl"]!!.map(::expanded), postgres.ddl, "postgres ddl")
+        assertEquals(expanded(tables["postgres"]!!["ensuring"]!!), postgres.ensuring, "postgres ensuring")
+        assertEquals(tables["oracle"]!!["ddl"]!!.map(::expanded), oracle.ddl, "oracle ddl")
+        assertEquals(tables["oracle"]!!["functions"]!!.map(::expanded), oracle.functions, "oracle functions")
+        assertEquals(expanded(tables["oracle"]!!["ensuring"]!!), oracle.ensuring, "oracle ensuring")
         assertEquals(texts(tables["sqlite"]!!["ddl"]!!), sqlite.ddl, "sqlite ddl")
         assertEquals(tables["sqlite"]!!["made"]!!.textValue(), sqlite.made, "sqlite made")
         assertEquals(tables["sqlite"]!!["file"]!!.textValue(), SqliteDdl.FILE, "sqlite file")
@@ -243,6 +325,26 @@ class StoreDdlTest {
         val full = longest.objectName("uq", listOf("Person", "email"))
         assertEquals(PostgresDdl.MAX_OBJECT_NAME - 2, full.length, full)
         assertEquals(full + "_r", longest.temporaryName(full))
+    }
+
+    /**
+     * Each function the store keeps is named within the store's longest name for the longest graph name it takes: Oracle
+     * refuses a longer one (`ORA-00972`), failing the block that makes the store, and Postgres cuts it short.
+     */
+    @Test
+    fun eachFunctionTheStoreKeepsIsNamedWithinTheStoresNamesForTheLongestGraph() {
+        val longest = { max: Int -> "g" + "x".repeat(max - ("_uq2__".length + 8 + "_t".length) - 1) }
+        val function = Regex("""CREATE OR REPLACE FUNCTION (\w+)""")
+        val made = mapOf(
+            "Postgres" to (PostgresDdl.MAX_OBJECT_NAME to PostgresDdl(longest(PostgresDdl.MAX_OBJECT_NAME)).ddl),
+            "Oracle" to (OracleDdl.MAX_OBJECT_NAME to OracleDdl(longest(OracleDdl.MAX_OBJECT_NAME)).functions),
+        )
+        for ((engine, statements) in made) {
+            val (max, texts) = statements
+            val functions = texts.flatMap { text -> function.findAll(text).map { it.groupValues[1] } }
+            assertTrue(functions.any { it.endsWith(org.drivine.cypher.sql.TemporalArithmeticFunction.name("")) }, "$engine: $functions")
+            functions.forEach { assertTrue(it.length <= max, "$engine: $it is ${it.length} long, past $max") }
+        }
     }
 
     private fun digest(statements: List<String>): String =

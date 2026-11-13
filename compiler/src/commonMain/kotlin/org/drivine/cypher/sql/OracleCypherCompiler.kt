@@ -34,6 +34,9 @@ import org.drivine.cypher.store.ddl.SqlStoreDdl
  * beside the graph's tables, [nullsEqualName]: see [nullsEqual].
  * @param eraStored whether a text or a timestamp whose year may be BC is renumbered by the functions the store keeps beside
  * the graph's tables, [eraName] and [eraDateName]: see [OracleTemporalSql.era].
+ * @param temporalArithmeticStored whether `+`, `-`, `*` and `/` of a temporal value read from the store are worked out by the
+ * function the store keeps beside the graph's tables, [TemporalArithmeticFunction.name]: where it is not, they fail by name
+ * as the statement runs (drivine4j#418).
  */
 class OracleCypherCompiler(
     graph: String,
@@ -65,9 +68,22 @@ class OracleCypherCompiler(
      * constructors leave it.
      */
     private val readsAsText: Boolean,
+    temporalArithmeticStored: Boolean,
 ) : SqlCypherCompiler(graph, encoder) {
 
     override val searchStore = org.drivine.cypher.api.SearchStore.ORACLE
+
+    // The constructor with readsAsText and without temporalArithmeticStored, kept so that what was compiled against it still links.
+    constructor(
+        graph: String,
+        nullsEqualStored: Boolean,
+        eraStored: Boolean,
+        indexedProperties: Set<Pair<String, String>>,
+        encoder: CypherEncoder?,
+        rowsAsText: Boolean,
+        reencodeJson: Boolean,
+        readsAsText: Boolean,
+    ) : this(graph, nullsEqualStored, eraStored, indexedProperties, encoder, rowsAsText, reencodeJson, readsAsText, true)
 
     // The constructor with reencodeJson and without readsAsText, kept so that what was compiled against it still links.
     constructor(
@@ -127,6 +143,20 @@ class OracleCypherCompiler(
      */
     var callsStoredEra = false
         private set
+
+    /** The function the store keeps that works out temporal arithmetic of a value read from it, where it keeps one: see [storedArithmetic]. */
+    private val storedTemporalArithmetic = if (temporalArithmeticStored) TemporalArithmeticFunction.name(graph) else null
+
+    /**
+     * Whether the statement compiled calls [TemporalArithmeticFunction.name]'s function, which a store made by an earlier
+     * version, or by a user who may not make a function, does not have: compiled again with `temporalArithmeticStored = false`,
+     * it calls none, and such arithmetic fails by name as it runs.
+     */
+    var callsStoredTemporalArithmetic = false
+        private set
+
+    override fun storedArithmetic(operator: String, x: String, y: String) =
+        storedTemporalArithmetic?.let { name -> callsStoredTemporalArithmetic = true; "$name('$operator', $x, $y)" }
 
     override fun literalJson(value: Any?) =
         if (value is Double) "JSON_SCALAR(TO_BINARY_DOUBLE(${literal(org.drivine.cypher.json.jvmDoubleText(value))}))"

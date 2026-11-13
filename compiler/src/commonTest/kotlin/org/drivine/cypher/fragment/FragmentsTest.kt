@@ -82,7 +82,7 @@ class FragmentsTest {
             "{\"store\": \"postgres\", $graph, \"fragment\": {\"condition\": \"true\", \"variables\": {\"n\": {\"relationship\": \"r\", \"labels\": []}}}}" to "A fragment's variable n is a relationship, which has no labels.",
             "{\"store\": \"postgres\", $graph, \"fragment\": {\"condition\": \"true\", \"variables\": {\"n\": {\"node\": \"r\", \"labels\": \"L\"}}}}" to "A fragment's variable n gives its labels as a list.",
             "{\"store\": \"postgres\", $graph, \"fragment\": {\"condition\": \"true\", \"variables\": {\"n\": {\"node\": \"r\", \"labels\": [1]}}}}" to "A fragment's variable n gives its labels as texts.",
-            "{\"store\": \"postgres\", $graph, \"cypher\": \"RETURN 1\", \"fragment\": {\"condition\": \"true\"}}" to "A request gives one of cypher, search, searchIndex, vector, settings, fragment, read, temporalKey and layout.",
+            "{\"store\": \"postgres\", $graph, \"cypher\": \"RETURN 1\", \"fragment\": {\"condition\": \"true\"}}" to "A request gives one of cypher, search, searchIndex, vector, settings, fragment, read, temporalKey, layout and expand.",
         )) {
             assertEquals(message, CypherJson.readTree(CompileJson.compile(request))["error"]?.textValue(), request)
         }
@@ -131,6 +131,20 @@ class FragmentsTest {
         val answer = ask(true, "\"order\": \"n.born + \$d\"")
         assertTrue((answer["terms"] as ArrayNode).any { "g_temporal_key(" in it.textValue()!! }, "$answer")
         assertEquals(true, answer["storedFunctions"]?.get("era")?.booleanValue(), "$answer")
+    }
+
+    @Test
+    fun aFragmentSaysItCallsTheStoresTemporalArithmeticAsAStatementDoes() {
+        // drivine4j#418: arithmetic of a value read from the store calls the store's function, where the graph keeps one.
+        fun ask(stored: Boolean) = CypherJson.readTree(CompileJson.compile(
+            "{\"store\": \"oracle\", \"graph\": {\"name\": \"g\", \"temporalArithmeticStored\": $stored}, " +
+                "\"fragment\": {\"value\": \"n.a - n.b\", \"variables\": {\"n\": {\"node\": \"people_\"}}}}",
+        ))
+        for (stored in listOf(true, false)) {
+            val answer = ask(stored)
+            assertEquals(stored, (answer["terms"] as ArrayNode).any { "g_temporal_arith('-', " in it.textValue()!! }, "$answer")
+            assertEquals(stored, answer["storedFunctions"]?.get("temporalArithmetic")?.booleanValue(), "$answer")
+        }
     }
 
     @Test

@@ -105,7 +105,7 @@ internal object FragmentJson {
         append(",\"parameters\":"); TypedJson.write(fragment.parameters, this, 2)
         append(",\"nonFinite\":").append(fragment.nonFinite)
         append(",\"hints\":"); TypedJson.write(fragment.hints, this)
-        stored?.let { append(",\"storedFunctions\":{\"nullsEqual\":").append(it.nullsEqual).append(",\"era\":").append(it.era).append('}') }
+        stored?.let { append(",\"storedFunctions\":{\"nullsEqual\":").append(it.nullsEqual).append(",\"era\":").append(it.era).append(",\"temporalArithmetic\":").append(it.temporalArithmetic).append('}') }
         append('}')
     }.toString()
 }

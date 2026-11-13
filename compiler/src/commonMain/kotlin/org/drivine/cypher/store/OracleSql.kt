@@ -12,6 +12,16 @@ import org.drivine.schema.SimilarityFunction
 object OracleSql {
     fun literal(text: String): String = "'${text.replace("'", "''")}'"
 
+    /**
+     * [text] as a `CLOB` literal, in pieces a PL/SQL string literal holds (32,767 bytes at most): a function's DDL that
+     * `EXECUTE IMMEDIATE` runs may be longer, as the graph's function of temporal arithmetic is. A text that fits is [literal].
+     */
+    fun clob(text: String): String =
+        if (text.length <= CLOB_PIECE) literal(text) else text.chunked(CLOB_PIECE).joinToString(" || ") { "TO_CLOB(${literal(it)})" }
+
+    /** The characters each piece of [clob] holds: a quarter of a PL/SQL literal's bytes, as a character may take four. */
+    private const val CLOB_PIECE = 8_000
+
     /** One step of a JSON path: a key, quoted when it must be, so a key with a dot in it is one key. */
     fun step(key: String): String =
         if (PLAIN_KEY.matches(key) && key !in JSON_WORDS) key else "\"${key.replace("\\", "\\\\").replace("\"", "\\\"")}\""
