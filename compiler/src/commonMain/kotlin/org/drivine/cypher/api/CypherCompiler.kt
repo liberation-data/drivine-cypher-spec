@@ -8,6 +8,7 @@ import org.drivine.cypher.sql.ResultColumn
 import org.drivine.cypher.sql.PostgresCypherCompiler
 import org.drivine.cypher.sql.SqlCypherCompiler
 import org.drivine.cypher.sql.SqliteCypherCompiler
+import org.drivine.schema.VectorIndexSpec
 
 /** A store Drivine compiles Cypher to SQL for. */
 enum class Store(val id: String) {
@@ -60,6 +61,9 @@ enum class Store(val id: String) {
  *   driver reads a `JSON` value's numbers through a double: node-oracledb's thin mode does, so 9007199254740993 came back
  *   9007199254740992 (#198). The rows keep their order. drivine4j leaves it false, as JDBC keeps a number's digits. A
  *   statement that writes, one compiled typed, and every statement on the other stores, is compiled alike either way.
+ * @param vectorIndexes the graph's vector indexes, as its catalog records them: what `db.index.vector.queryNodes` searches by
+ *   name, its label, property, dimensions and similarity, as a SQL store keeps no index a statement can name
+ *   (liberation-data/drivine-cypher-spec#160). An index not given is refused as Neo4j refuses one that does not exist.
  */
 data class GraphOptions(
     val name: String,
@@ -69,6 +73,7 @@ data class GraphOptions(
     val oracleRowsAsText: Boolean = false,
     val oracleReencodeJson: Boolean = false,
     val oracleReadsAsText: Boolean = false,
+    val vectorIndexes: List<VectorIndexSpec> = emptyList(),
 )
 
 /** What compiling a statement gives: the SQL, or the compiler's refusal of the statement. */
@@ -151,6 +156,7 @@ object CypherCompiler {
             Store.ORACLE -> OracleCypherCompiler(graph.name, graph.nullsEqualStored, graph.eraStored, graph.indexedProperties, encoder = null, rowsAsText = graph.oracleRowsAsText, reencodeJson = graph.oracleReencodeJson, readsAsText = graph.oracleReadsAsText)
             Store.SQLITE -> SqliteCypherCompiler(graph.name)
         }
+        compiler.vectorIndexes = graph.vectorIndexes
         val compiled = try {
             compiler.compile(cypher, parameters, typed)
         } catch (e: Exception) {

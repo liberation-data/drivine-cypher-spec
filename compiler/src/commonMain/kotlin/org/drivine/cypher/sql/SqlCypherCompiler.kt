@@ -22,6 +22,12 @@ import org.drivine.cypher.json.CypherEncoder
 import org.drivine.cypher.json.CypherJson
 import org.drivine.cypher.store.ValueLayout
 import org.drivine.cypher.store.Stamps
+import org.drivine.schema.SimilarityFunction
+import org.drivine.schema.VectorIndexSpec
+import org.drivine.cypher.api.SearchStore
+import org.drivine.cypher.api.VectorIndex
+import org.drivine.cypher.api.VectorRequest
+import org.drivine.cypher.api.VectorSearch
 import org.drivine.schema.ddl.SchemaDdl
 import org.drivine.schema.ddl.SchemaDdlResult
 
@@ -60,6 +66,33 @@ abstract class SqlCypherCompiler(
     // The constructor drivine4j's compiler had, kept so that what was compiled against it still links.
     constructor(graph: String) : this(graph, null)
 
+
+    /**
+     * The graph's vector indexes, which `db.index.vector.queryNodes` searches by name: see `GraphOptions.vectorIndexes`.
+     * Set before [compile]; none by default, so every search is refused as of an index that does not exist.
+     */
+    var vectorIndexes: List<VectorIndexSpec> = emptyList()
+
+    /** The store the shared module writes a vector search's candidates for: see [VectorSearch.candidates]. */
+    protected abstract val searchStore: SearchStore
+
+    /**
+     * The JSON [json], a vector search's query vector, as [VectorSearch.candidates] reads it on this store, failing the
+     * statement as it runs where it is null, of another size than [index]'s or, measured by cosine, of no length, as Neo4j
+     * fails it: a vector worked out by the statement, which is not checked before it runs.
+     */
+    protected open fun queryVector(json: String, index: VectorIndexSpec): String =
+        throw CompilerException("A vector search (db.index.vector.queryNodes) is not compiled to SQL on this store yet.")
+
+    /**
+     * A query vector written in the statement, its [coordinates], as [VectorSearch.candidates] reads it on this store: the
+     * text of a JSON array, which pgvector, Oracle's `TO_VECTOR` and SQLite's similarity function each read.
+     */
+    protected open fun writtenVector(coordinates: List<Double>): String =
+        literal(coordinates.joinToString(", ", "[", "]") { org.drivine.cypher.text.JavaText.of(it) })
+
+    /** The graph's name, which a vector search's candidates name its tables by: see [VectorSearch.candidates]. */
+    private val graphName = graph
 
     protected val nodes = "${graph}_node"
     protected val edges = "${graph}_edge"
@@ -1478,6 +1511,7 @@ abstract class SqlCypherCompiler(
                     clause.where?.let { filtered(select, it) } ?: select
                 } else with(select, clause, outer)
             is Clause.Call -> anewCall(select, clause)
+            is Clause.VectorSearch -> vectorSearch(select, clause)
             else -> error("${clause::class.simpleName} reads nothing")
         }
 
@@ -1771,6 +1805,112 @@ abstract class SqlCypherCompiler(
                 select.bind(variable, if (call.optional && returned is Value.Json) returned.copy(rowKeys = null, tagText = null, tagKey = null, inflight = null, inflightItems = null) else returned)
             }
             projected.order.forEach { (column, descending) -> select.order += lateralColumn(name, column, json = false) to descending }
+        }
+
+        /**
+         * `CALL db.index.vector.queryNodes(index, k, vector) YIELD node, score`: the [Clause.VectorSearch.k] nodes of the index
+         * nearest the vector, each joined to the row as its node and score, best first, its ties by the node's id (Neo4j's
+         * order among ties is not stable). The candidates are the shared module's ([VectorSearch.candidates]), through the
+         * index where the store has one, so what the clause's `WHERE` and the clauses after it filter are those k, as Neo4j
+         * filters what its index found. A vector that is null, of another size than the index's or, measured by cosine, of
+         * no length fails the statement, as Neo4j fails it: before it runs where the vector is written or given, and as it
+         * runs otherwise.
+         */
+        private fun vectorSearch(select: Select, search: Clause.VectorSearch): Select {
+            val index = vectorIndexes.firstOrNull { it.effectiveName == search.index }
+                ?: throw CompilerException("The index '${search.index}' does not exist, as Neo4j says of a vector index the graph has not made.")
+            redeclared(listOfNotNull(search.node, search.score), select.bound.keys)
+            val k = neighbours(search.k)
+            // A vector written or given is known before the statement runs, null among them, so it is checked now.
+            val given = if (search.vector is Expression.Literal || search.vector is Expression.Parameter || searchGiven(search.vector) != null) {
+                checkedVector(searchGiven(search.vector), index)
+            } else null
+            // A vector written in the statement is written as the store reads one; one given or worked out is checked as it runs.
+            val vector = if (given != null && search.vector !is Expression.Parameter) writtenVector(given)
+            else queryVector(json(expression(search.vector, select.scope)).sql, index)
+            val request = VectorRequest(
+                labels = listOf(index.label), property = index.property, similarity = index.similarity, topK = 1,
+                size = index.dimensions, index = VectorIndex(dimensions = index.dimensions),
+            )
+            val candidates = VectorSearch.candidates(searchStore, graphName, request, vector, k)
+            val name = alias("v")
+            val columns = listOf("nid" to false, "labels" to true, "props" to true, "stamp" to false, "score" to false)
+            // The first rows of the select are the search's own; after others, a lateral join reads each row's, and a store reads
+            // what such a join gives its own way ([lateralColumn]).
+            val joined = select.sources.isNotEmpty()
+            if (joined) select.join(lateral(candidates, name, optional = false, columns)) else select.source("(\n${indent(candidates)}\n) $name")
+            fun column(column: String) = if (joined) lateralColumn(name, column, json = false) else "$name.$column"
+            // The node is read from the candidates' own columns: a second join of the node table to them on nid loses a filter
+            // on it on Oracle (see VectorSearch's ROW).
+            search.node?.let { select.bind(it, Value.Node(column("nid"), column("labels"), column("props"), column("stamp"))) }
+            val score = column("score")
+            search.score?.let { select.bind(it, Value.Json(scalar(score))) }
+            select.order += score to true
+            select.order += column("nid") to false
+            return search.where?.let { filtered(select, it) } ?: select
+        }
+
+        /**
+         * The number of neighbours a vector search asks for: a whole number from 1 to 2147483647, written or given, as Neo4j
+         * fails a search for any other (22N03) and refuses a float before it runs (22NB1).
+         */
+        private fun neighbours(k: Expression): String {
+            val value = searchGiven(k)
+            val whole = (value as? Number)?.takeIf { it is Long || it is Int || it is Short || it is Byte }?.toLong()
+            return when {
+                k !is Expression.Literal && k !is Expression.Parameter && !(k is Expression.Unary && value != null) ->
+                    unsupported("A vector search whose number of neighbours is an expression")
+                whole == null -> throw CompilerException("db.index.vector.queryNodes() takes a whole number of neighbours, not ${describedGiven(k, value)}, as in Neo4j.")
+                whole !in 1..Int.MAX_VALUE -> throw CompilerException("db.index.vector.queryNodes() takes a number of neighbours from 1 to 2147483647, not $whole, as in Neo4j.")
+                k is Expression.Parameter -> parameters.count(k.name)
+                else -> whole.toString()
+            }
+        }
+
+        /** The value [expression] is where it is written or given as a parameter, or null where the statement works it out. */
+        private fun searchGiven(expression: Expression): Any? = when (expression) {
+            is Expression.Literal -> expression.value
+            is Expression.Parameter -> parameters.value(expression.name)
+            is Expression.ListLiteral -> expression.items.map { searchGiven(it) ?: return null }
+            is Expression.Unary -> (searchGiven(expression.operand) as? Number)?.takeIf { expression.operator == Expression.Unary.Operator.NEGATE }?.let {
+                when (it) { is Long -> -it; is Int -> -it.toLong(); is Double -> -it; else -> null }
+            }
+            else -> null
+        }
+
+        /** [value], given for [expression], as a message names it. */
+        private fun describedGiven(expression: Expression, value: Any?): String = when {
+            value == null && expression is Expression.Parameter -> "\$${expression.name}, which is null"
+            value == null -> "null"
+            value is Number -> org.drivine.cypher.text.JavaText.of(value)
+            value is String -> "'$value'"
+            else -> "that"
+        }
+
+        /**
+         * The query vector [value], written or given, refused as Neo4j fails it: null (22N06), not a list of numbers, of another
+         * size than [index]'s (51N65), or of no length where the index measures by cosine (22NBG). A list given is any the
+         * store binds as one ([CypherJson]): an array too, as a JVM caller gives an embedding, a `float[]`.
+         */
+        private fun checkedVector(value: Any?, index: VectorIndexSpec): List<Double> {
+            val list = when (value) {
+                is Iterable<*> -> value.toList()
+                is Array<*> -> value.asList()
+                is FloatArray -> value.asList()
+                is DoubleArray -> value.asList()
+                is IntArray -> value.asList()
+                is LongArray -> value.asList()
+                else -> null
+            } ?: throw CompilerException("db.index.vector.queryNodes() takes its vector as a list of numbers, not ${if (value == null) "null" else "that"}, as in Neo4j.")
+            val numbers = list.map { (it as? Number)?.toDouble() ?: throw CompilerException("db.index.vector.queryNodes() takes its vector as a list of numbers, as in Neo4j: its coordinates must be finite.") }
+            if (numbers.any { !it.isFinite() }) throw CompilerException("db.index.vector.queryNodes() takes a vector whose coordinates are finite, as in Neo4j.")
+            if (numbers.size != index.dimensions) {
+                throw CompilerException("The index '${index.effectiveName}' is of vectors of ${index.dimensions} dimensions, and the query vector has ${numbers.size}, as Neo4j fails it.")
+            }
+            if (index.similarity == SimilarityFunction.COSINE && numbers.all { it == 0.0 }) {
+                throw CompilerException("The index '${index.effectiveName}' measures by cosine, which a vector of no length has none of, as Neo4j fails it.")
+            }
+            return numbers
         }
 
         /**
@@ -7406,6 +7546,10 @@ abstract class SqlCypherCompiler(
                     }
                     is Clause.Delete -> clause.expressions.forEach(::expression)
                     is Clause.Call -> { query(clause.query); clause.imports?.forEach(::text) }
+                    is Clause.VectorSearch -> {
+                        text(clause.index); expression(clause.k); expression(clause.vector); expression(clause.where)
+                        clause.node?.let(::text); clause.score?.let(::text)
+                    }
                     is Clause.Foreach -> { text(clause.variable); expression(clause.list); bind(clause.variable, clause.list, true); clauses(clause.clauses) }
                     is Clause.Return -> projection(clause.projection)
                 }

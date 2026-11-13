@@ -50,11 +50,12 @@ class VectorSpecTest {
         .enable(DeserializationFeature.USE_LONG_FOR_INTS)
         .readValue(requireNotNull(VectorSpecTest::class.java.getResource("/cypher/vector.yaml")) { "No spec file cypher/vector.yaml" })
 
+    /** Each SQL store's compiler, given the spec's indexes, as a library gives its catalog's (`GraphOptions.vectorIndexes`). */
     private val compilers: Map<String, SqlCypherCompiler> = mapOf(
         "postgres" to PostgresCypherCompiler("g"),
         "oracle" to OracleCypherCompiler("g"),
         "sqlite" to SqliteCypherCompiler("g"),
-    )
+    ).onEach { (_, compiler) -> compiler.vectorIndexes = spec.indexes.map(Index::spec) }
 
     private val stores = setOf("neo4j", "sql") + compilers.keys
 
@@ -128,7 +129,8 @@ class VectorSpecTest {
             // A word Cypher keeps names a part of any procedure's namespace, not only the refused one's.
             "CALL db.create.somethingElse()" to notCompiled,
             "CALL db.CREATE.setNodeVectorProperty()" to notCompiled,
-            "CALL db.index.vector.queryNodes('chunk_cos', 'k', [1.0, 0.0, 0.0])" to notCompiled,
+            "CALL db.index.vector.queryNodes('chunk_cos', 'k', [1.0, 0.0, 0.0])" to
+                "db.index.vector.queryNodes() takes a whole number of neighbours, not 'k', as in Neo4j.",
             "CALL db.index.vector.querynodes('chunk_cos', 1.5, [1.0, 0.0, 0.0])" to notCompiled,
         ).forEach { (cypher, message) ->
             compilers.forEach { (store, compiler) ->

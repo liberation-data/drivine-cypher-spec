@@ -7,8 +7,8 @@ import org.drivine.cypher.ast.Expression
  * compiled (liberation-data/drivine-cypher-spec#160): what needs a vector index on relationships, or Neo4j's VECTOR
  * type, neither of which a SQL store has, the procedure that sets an embedding, which a SET does, and a call of
  * `db.index.vector.queryNodes` with a number of neighbours written as a float, `1.5` or `2.0`, as Neo4j refuses it before
- * it runs (22NB1). The search itself, `db.index.vector.queryNodes` with a whole number or a parameter, is refused as any
- * procedure call is until it is compiled.
+ * it runs (22NB1). The search itself, `db.index.vector.queryNodes` with a whole number or a parameter, is read to
+ * [org.drivine.cypher.ast.Clause.VectorSearch] and compiled.
  */
 internal object VectorCypher {
 

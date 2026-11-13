@@ -30,7 +30,8 @@ import org.drivine.schema.SimilarityFunction
 data class VectorIndex(val dimensions: Int? = null, val name: String? = null)
 
 /**
- * A search among ids: for each root among [ids] that holds the embedding, its nearest among the others.
+ * A search among ids: for each root among [ids] that holds the embedding, its nearest among the others. By cosine, on a SQL
+ * store, a root whose embedding has no length, all zeros, is left out, as a seed and as a neighbour.
  *
  * @param ids the roots' ids, as the text each is found by; a repeat is dropped, as drivine4j's `loadNearestAmong` drops it.
  * @param idProperty the property the root's id is stored under.
@@ -81,9 +82,10 @@ sealed interface VectorResult
 /**
  * A vector search as a statement.
  *
- * @param sql on a SQL store, a nearest search's ranked candidates, one `SELECT` of `nid` and `score`: the nearest
- *   [VectorRequest.searchK] (or `topK`) nodes, each scored as the graph engines score it, in `[0, 1]`, higher the nearer. The
- *   library joins them back to its node table by `nid` for its projection, and adds its threshold (`score >= threshold`), its
+ * @param sql on a SQL store, a nearest search's ranked candidates, one `SELECT` of each node's row, `nid`, `labels`, `props`
+ *   and `stamp`, and its `score`: the nearest [VectorRequest.searchK] (or `topK`) nodes, each scored as the graph engines
+ *   score it, in `[0, 1]`, higher the nearer. The library reads its projection from those columns, with no second join of its
+ *   node table (on Oracle that join loses a filter on it: see `ROW`), and adds its threshold (`score >= threshold`), its
  *   predicates, the view's required relationships, `ORDER BY score DESC, nid` and, where `searchK` was given, its `LIMIT topK`.
  *   A search among ids is the whole statement: one row a root, `result`, the document `{seed, near}`, `near` its neighbours
  *   as `{id, score}`, best first.
@@ -149,25 +151,36 @@ object VectorSearch {
                 }
                 VectorPlan(sql = sql, cypher = null, parameters = scope.bindings(), vector = null, labelCheck = null, indexK = amongK(request))
             } else {
-                val size = request.size!!
                 val vector = scope.reserved()
                 val nearest = request.searchK ?: request.topK
-                val through = request.index.dimensions == size
-                val sql = when (store) {
-                    SearchStore.POSTGRES -> {
-                        val ddl = PostgresDdl(graph.name)
-                        if (through) postgresThrough(ddl, request, size, vector, nearest, scope) else postgresTo(ddl, request, size, vector, nearest, scope)
-                    }
-                    SearchStore.ORACLE -> {
-                        val ddl = OracleDdl(graph.name)
-                        if (through) oracleThrough(ddl, request, vector, nearest, scope) else oracleTo(ddl, request, size, vector, nearest, scope)
-                    }
-                    else -> sqliteTo(SqliteDdl(graph.name), request, size, vector, nearest, scope)
-                }
+                val sql = candidates(store, graph.name, request, "\$$vector", scope.bound(nearest))
                 VectorPlan(sql = sql, cypher = null, parameters = scope.bindings(), vector = vector, labelCheck = null, indexK = nearest)
             }
         } catch (e: IllegalArgumentException) {
             Refusal(e.message ?: e.toString())
+        }
+    }
+
+    /**
+     * A nearest search's candidates on the SQL store [store], over the graph [graph]: one `SELECT` of each node's row and its `score`, the
+     * [k] nodes nearest the query vector [vector], best first, through the index where [VectorRequest.index]'s dimensions are
+     * [VectorRequest.size], else measuring every node of that size. [vector] and [k] are SQL: the parameters [plan] binds,
+     * or what a compiled statement reads (`db.index.vector.queryNodes`, liberation-data/drivine-cypher-spec#160). On
+     * Postgres [vector] is a text pgvector reads as a vector; on Oracle one `TO_VECTOR` reads; on SQLite a JSON array.
+     */
+    internal fun candidates(store: SearchStore, graph: String, request: VectorRequest, vector: String, k: String): String {
+        val size = request.size!!
+        val through = request.index.dimensions == size
+        return when (store) {
+            SearchStore.POSTGRES -> {
+                val ddl = PostgresDdl(graph)
+                if (through) postgresThrough(ddl, request, size, vector, k) else postgresTo(ddl, request, size, vector, k)
+            }
+            SearchStore.ORACLE -> {
+                val ddl = OracleDdl(graph)
+                if (through) oracleThrough(ddl, request, vector, k) else oracleTo(ddl, request, size, vector, k)
+            }
+            else -> sqliteTo(SqliteDdl(graph), request, size, vector, k)
         }
     }
 
@@ -187,19 +200,50 @@ object VectorSearch {
      */
     private fun amongK(request: VectorRequest): Int = request.searchK ?: (request.topK + 1)
 
+    // ----- A stored embedding of no length -----
+    //
+    // Measured by cosine, an embedding all of zeros has no direction, and its distance is NaN: Neo4j leaves it out of a cosine
+    // index, so a search never finds it (vector.yaml, "Only the index's nodes"). Postgres's HNSW index leaves it out too, but
+    // a search without one, Oracle's and SQLite's, measured it, and NaN sorted first. Each is left out here, on a cosine
+    // search, a nearest search's candidates and a search among ids' roots alike; a euclidean one measures it, as Neo4j does.
+
+    /** Whether the embedding under [key] of [alias], of [dimensions], has a length, on a cosine search; null on another. */
+    private fun postgresLength(request: VectorRequest, alias: String, key: String, dimensions: Int): String? =
+        if (request.similarity != SimilarityFunction.COSINE) null
+        // Read only where it is a list of the size, as the cast fails on any other value.
+        else "CASE WHEN ${PostgresSql.holdsEmbedding(alias, key, dimensions)} THEN vector_norm(${PostgresSql.embedding(alias, key, dimensions)}) > 0 END"
+
+    /**
+     * Whether the embedding under [key] of [alias], a list of any size, has a length, on a cosine search; null on another: a
+     * search among ids leaves such a root out, as a seed and as a neighbour, where no index is made to read it by its size.
+     */
+    private fun postgresAnyLength(request: VectorRequest, alias: String, key: String): String? =
+        if (request.similarity != SimilarityFunction.COSINE) null
+        else "CASE WHEN jsonb_typeof(${PostgresSql.value(alias, key)}) = 'array' THEN vector_norm(${PostgresSql.embedding(alias, key)}) > 0 END"
+
+    /** Whether the embedding [embedding], read as a vector, has a length, on a cosine search; null on another. */
+    private fun oracleLength(request: VectorRequest, embedding: String): String? =
+        if (request.similarity != SimilarityFunction.COSINE) null else "VECTOR_NORM($embedding) > 0"
+
+    /** Whether the embedding under [key] of [alias] holds a number other than 0, on a cosine search; null on another. */
+    private fun sqliteLength(request: VectorRequest, alias: String, key: String): String? =
+        if (request.similarity != SimilarityFunction.COSINE) null
+        else "EXISTS (SELECT 1 FROM json_each(${SqliteSql.column(alias, "props")}, ${SqliteSql.path(key)}) e WHERE e.value <> 0)"
+
     // ----- Postgres: drivine4j's PostgresSelect nearestTo, nearestThrough and nearestAmong -----
 
     /**
      * Every node of the root's labels, and the partition's, that holds an embedding of the vector's size is measured, so the
      * answer is exact: pgvector refuses to measure two sizes.
      */
-    private fun postgresTo(ddl: PostgresDdl, request: VectorRequest, size: Int, vector: String, nearest: Int, scope: SearchParameters): String {
+    private fun postgresTo(ddl: PostgresDdl, request: VectorRequest, size: Int, vector: String, k: String): String {
         val key = stored(request.property)
-        val distance = "${PostgresSql.embedding("c", key)} ${PostgresSql.distance(request.similarity)} CAST(\$$vector AS vector)"
-        val has = listOf(PostgresSql.hasLabels("c", request.labels + listOfNotNull(request.partitionLabel)), PostgresSql.holdsEmbedding("c", key, size))
+        val distance = "${PostgresSql.embedding("c", key)} ${PostgresSql.distance(request.similarity)} CAST($vector AS vector)"
+        val has = listOf(PostgresSql.hasLabels("c", request.labels + listOfNotNull(request.partitionLabel)), PostgresSql.holdsEmbedding("c", key, size)) +
+            listOfNotNull(postgresLength(request, "c", key, size))
         return Query(
-            "c.nid, ${PostgresSql.score(request.similarity, distance)} AS score",
-            Table(ddl.nodes, "c"), has, listOf("ORDER BY score DESC, c.nid", "LIMIT ${scope.bound(nearest)}"),
+            "$ROW, ${PostgresSql.score(request.similarity, distance)} AS score",
+            Table(ddl.nodes, "c"), has, listOf("ORDER BY score DESC, c.nid", "LIMIT $k"),
         ).text()
     }
 
@@ -208,17 +252,18 @@ object VectorSearch {
      * approximately, and they are then tested for the root's own labels. The search reads the embedding as the index is made
      * over it, and names what the index holds, so the index answers it.
      */
-    private fun postgresThrough(ddl: PostgresDdl, request: VectorRequest, dimensions: Int, vector: String, nearest: Int, scope: SearchParameters): String {
+    private fun postgresThrough(ddl: PostgresDdl, request: VectorRequest, dimensions: Int, vector: String, k: String): String {
         val key = stored(request.property)
-        val distance = "${PostgresSql.embedding("s", key, dimensions)} ${PostgresSql.distance(request.similarity)} CAST(\$$vector AS vector($dimensions))"
+        val distance = "${PostgresSql.embedding("s", key, dimensions)} ${PostgresSql.distance(request.similarity)} CAST($vector AS vector($dimensions))"
         val indexed = Query(
             "s.nid, $distance AS distance", Table(ddl.nodes, "s"),
-            listOf(PostgresSql.hasLabel("s", indexLabel(request)), PostgresSql.holdsEmbedding("s", key, dimensions)),
-            listOf("ORDER BY distance", "LIMIT ${scope.bound(nearest)}"),
+            listOf(PostgresSql.hasLabel("s", indexLabel(request)), PostgresSql.holdsEmbedding("s", key, dimensions)) +
+                listOfNotNull(postgresLength(request, "s", key, dimensions)),
+            listOf("ORDER BY distance", "LIMIT $k"),
         )
         // drivine4j's text, trimmed of its indent as drivine4j trims it: its lines keep what of it the nested query's don't have.
         return """
-            SELECT c.nid, ${PostgresSql.score(request.similarity, "k.distance")} AS score
+            SELECT $ROW, ${PostgresSql.score(request.similarity, "k.distance")} AS score
             FROM ${indexed.nested()} k
             JOIN ${ddl.nodes} c ON c.nid = k.nid
             WHERE ${PostgresSql.hasLabels("c", request.labels)}
@@ -237,7 +282,8 @@ object VectorSearch {
         val embedded = dimensions?.let { PostgresSql.holdsEmbedding("c", key, it) } ?: "jsonb_typeof(${PostgresSql.value("c", key)}) = 'array'"
         val members = Query(
             "c.nid, $id AS id, c.props", Table(ddl.nodes, "c"),
-            listOf(PostgresSql.hasLabels("c", request.labels), embedded, "$id IN (${PostgresSql.textValues(scope.bound(among.ids))})"),
+            listOf(PostgresSql.hasLabels("c", request.labels), embedded, "$id IN (${PostgresSql.textValues(scope.bound(among.ids))})") +
+                listOfNotNull(postgresAnyLength(request, "c", key)),
         )
         val nearest = if (dimensions == null) {
             val distance = "${PostgresSql.embedding("o", key)} ${PostgresSql.distance(request.similarity)} ${PostgresSql.embedding("s", key)}"
@@ -272,17 +318,17 @@ object VectorSearch {
      * Every node of the root's labels, and the partition's, that holds an embedding of the vector's size is measured, read
      * through the property graph: exact. A node with another size is left out, as Oracle refuses to measure two sizes.
      */
-    private fun oracleTo(ddl: OracleDdl, request: VectorRequest, size: Int, vector: String, nearest: Int, scope: SearchParameters): String {
+    private fun oracleTo(ddl: OracleDdl, request: VectorRequest, size: Int, vector: String, k: String): String {
         val key = stored(request.property)
-        val score = OracleSql.score(request.similarity, "VECTOR_DISTANCE(${OracleSql.embedding("c", key)}, TO_VECTOR(\$$vector), ${OracleSql.metric(request.similarity)})")
+        val score = OracleSql.score(request.similarity, "VECTOR_DISTANCE(${OracleSql.embedding("c", key)}, TO_VECTOR($vector), ${OracleSql.metric(request.similarity)})")
         val has = listOf(
             OracleSql.hasLabels("c", request.labels + listOfNotNull(request.partitionLabel), scanned = true),
             OracleSql.hasProperty("c", key),
             OracleSql.holdsEmbedding("c", key, size),
-        ).joinToString(" AND ")
+        ).plus(listOfNotNull(oracleLength(request, OracleSql.embedding("c", key)))).joinToString(" AND ")
         return Query(
-            "c.nid, $score AS score", GraphTable(ddl.name, OracleSql.node("c", has), OracleSql.NODE_COLUMNS, "c"),
-            tail = listOf("ORDER BY score DESC, c.nid", "FETCH FIRST ${scope.bound(nearest)} ROWS ONLY"),
+            "$ROW, $score AS score", GraphTable(ddl.name, OracleSql.node("c", has), OracleSql.NODE_COLUMNS, "c"),
+            tail = listOf("ORDER BY score DESC, c.nid", "FETCH FIRST $k ROWS ONLY"),
         ).text()
     }
 
@@ -290,12 +336,12 @@ object VectorSearch {
      * Through the vector index over the side table of the index's label's embeddings ([OracleDdl.vectors]), which holds those
      * of its size: the index gives its nearest, approximately, and they are then tested for the root's own labels.
      */
-    private fun oracleThrough(ddl: OracleDdl, request: VectorRequest, vector: String, nearest: Int, scope: SearchParameters): String {
+    private fun oracleThrough(ddl: OracleDdl, request: VectorRequest, vector: String, k: String): String {
         val embeddings = ddl.vectors(indexLabel(request), request.property)
-        val distance = "VECTOR_DISTANCE(s.embedding, TO_VECTOR(\$$vector), ${OracleSql.metric(request.similarity)})"
+        val distance = "VECTOR_DISTANCE(s.embedding, TO_VECTOR($vector), ${OracleSql.metric(request.similarity)})"
         return """
-            SELECT c.nid, ${OracleSql.score(request.similarity, "k.distance")} AS score
-            FROM (SELECT s.nid, $distance AS distance FROM $embeddings s ORDER BY distance FETCH APPROX FIRST ${scope.bound(nearest)} ROWS ONLY) k
+            SELECT $ROW, ${OracleSql.score(request.similarity, "k.distance")} AS score
+            FROM (SELECT s.nid, $distance AS distance FROM $embeddings s${oracleLength(request, "s.embedding")?.let { " WHERE $it" } ?: ""} ORDER BY distance FETCH APPROX FIRST $k ROWS ONLY) k
             JOIN ${ddl.nodes} c ON c.nid = k.nid
             WHERE ${OracleSql.hasLabels("c", request.labels)}
         """.trimIndent()
@@ -316,6 +362,7 @@ object VectorSearch {
             listOfNotNull(
                 OracleSql.hasLabels("c", request.labels), OracleSql.hasProperty("c", key), "$id IN (${OracleSql.textValues(scope.bound(among.ids))})",
                 embeddings?.let { "c.nid IN (SELECT e.nid FROM $it e)" },
+                oracleLength(request, OracleSql.embedding("c", key)),
             ),
         )
         val metric = OracleSql.metric(request.similarity)
@@ -345,12 +392,13 @@ object VectorSearch {
      * SQLite has no vector index: every node of the root's labels, and the partition's, that holds an embedding of the vector's
      * size is measured by the library's [org.drivine.cypher.store.SqliteFunctions.SIMILARITY], so the answer is exact.
      */
-    private fun sqliteTo(ddl: SqliteDdl, request: VectorRequest, size: Int, vector: String, nearest: Int, scope: SearchParameters): String {
+    private fun sqliteTo(ddl: SqliteDdl, request: VectorRequest, size: Int, vector: String, k: String): String {
         val key = stored(request.property)
-        val has = listOf(SqliteSql.hasLabels("c", request.labels + listOfNotNull(request.partitionLabel)), SqliteSql.holdsEmbedding("c", key, size))
+        val has = listOf(SqliteSql.hasLabels("c", request.labels + listOfNotNull(request.partitionLabel)), SqliteSql.holdsEmbedding("c", key, size)) +
+            listOfNotNull(sqliteLength(request, "c", key))
         return Query(
-            "c.nid, ${SqliteSql.score("c", key, request.similarity, "\$$vector")} AS score",
-            Table(ddl.nodes, "c"), has, listOf("ORDER BY score DESC, c.nid", "LIMIT ${scope.bound(nearest)}"),
+            "$ROW, ${SqliteSql.score("c", key, request.similarity, vector)} AS score",
+            Table(ddl.nodes, "c"), has, listOf("ORDER BY score DESC, c.nid", "LIMIT $k"),
         ).text()
     }
 
@@ -364,7 +412,8 @@ object VectorSearch {
         val id = SqliteSql.property("c", stored(among.idProperty))
         val members = Query(
             "c.nid, $id AS id, c.props", Table(ddl.nodes, "c"),
-            listOf(SqliteSql.hasLabels("c", request.labels), "${SqliteSql.type("c", key)} = 'array'", "$id IN (${SqliteSql.textValues(scope.bound(among.ids))})"),
+            listOf(SqliteSql.hasLabels("c", request.labels), "${SqliteSql.type("c", key)} = 'array'", "$id IN (${SqliteSql.textValues(scope.bound(among.ids))})") +
+                listOfNotNull(sqliteLength(request, "c", key)),
         )
         val scored = Query(
             "s.nid AS seed, o.nid, o.id, ${SqliteSql.score("o", key, request.similarity, SqliteSql.value("s", key))} AS score",
@@ -490,6 +539,15 @@ object VectorSearch {
     /** drivine4j's `indexedNodeLabelCheck`: that [alias] has every one of [labels], or null where they are the index's [label] alone. */
     private fun labelCheck(alias: String, labels: List<String>, label: String): String? =
         if (labels.isEmpty() || labels == listOf(label)) null else alias + labels.joinToString("") { ":${CypherNames.quoted(it)}" }
+
+    /**
+     * What a nearest search's candidates select of each node: its row, beside its score, so the library and a compiled
+     * statement read the node from them, and join the node table no second time. On Oracle 23.26 a second join of the node
+     * table on `nid`, the first read through an inline view, is eliminated with the filter on it where an index over a
+     * `JSON_VALUE` of its properties is made: a bound value crashed the server process (ORA-07445 [kkocfbMarkBindFroCB]),
+     * and a literal one was dropped, every candidate kept (liberation-data/drivine-cypher-spec#160).
+     */
+    private const val ROW = "c.nid, c.labels, c.props, c.stamp"
 
     private const val MEMBERS = "members"
     private const val RANKED = "ranked"

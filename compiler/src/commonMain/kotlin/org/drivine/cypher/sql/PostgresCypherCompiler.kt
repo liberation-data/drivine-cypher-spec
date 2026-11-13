@@ -32,6 +32,8 @@ import org.drivine.cypher.json.sha256
  */
 class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCompiler(graph, encoder) {
 
+    override val searchStore = org.drivine.cypher.api.SearchStore.POSTGRES
+
     // The constructor drivine4j's compiler had, kept so that what was compiled against it still links.
     constructor(graph: String) : this(graph, null)
 
@@ -793,6 +795,23 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
     override fun roundTo(number: String, precision: String, mode: RoundingMode) = super.roundTo(number, heldPlaces(precision), mode)
 
     private fun heldPlaces(precision: String) = shared(precision) { (p) -> "CASE WHEN $p > $MOST_PLACES THEN $MOST_PLACES ELSE $p END" }
+
+    /**
+     * The vector as pgvector reads it, its text: `[1.0, 0.0, 0.0]` as JSON writes a list is a vector's text. Where it is null,
+     * of another size than the index's, or of no length measured by cosine, the statement fails as it runs ([failure]); a
+     * list of anything but numbers fails as pgvector reads it.
+     */
+    override fun queryVector(json: String, index: org.drivine.schema.VectorIndexSpec): String {
+        val text = "CAST($json AS text)"
+        val vector = "CAST($text AS vector)"
+        val name = index.effectiveName
+        val noLength = if (index.similarity == org.drivine.schema.SimilarityFunction.COSINE) {
+            "WHEN vector_norm($vector) = 0 THEN CAST(${failure("The index '$name' measures by cosine, which a vector of no length has none of:", text)} AS text) "
+        } else ""
+        return "CASE WHEN ${isJsonNull(json)} THEN CAST(${failure("db.index.vector.queryNodes() takes its vector as a list of numbers, not", "'null'")} AS text) " +
+            "WHEN vector_dims($vector) <> ${index.dimensions} THEN CAST(${failure("The index '$name' is of vectors of ${index.dimensions} dimensions, and the query vector has", "vector_dims($vector)")} AS text) " +
+            noLength + "ELSE $text END"
+    }
 
     /**
      * A text that is no whole number, cast to one: Postgres fails with the text in its message. Joined by `concat`, which

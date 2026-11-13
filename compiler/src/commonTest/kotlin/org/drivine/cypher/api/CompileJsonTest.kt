@@ -146,6 +146,44 @@ class CompileJsonTest {
     }
 
     @Test
+    fun aGraphsVectorIndexesAreWhatAVectorSearchFindsByName() {
+        // liberation-data/drivine-cypher-spec#160: a SQL store keeps no index a statement can name, so the request gives them.
+        fun compile(graph: String, store: String = "postgres") = CompileJson.compile(
+            "{\"store\": \"$store\", \"graph\": $graph, " +
+                "\"cypher\": \"CALL db.index.vector.queryNodes('chunk_cos', 2, [1.0, 0.0, 0.0]) YIELD node, score RETURN node.id, score\"}",
+        )
+        val chunk = "{\"name\": \"chunk_cos\", \"label\": \"Chunk\", \"property\": \"embedding\", \"dimensions\": 3, \"similarity\": \"COSINE\"}"
+        for (store in listOf("postgres", "oracle", "sqlite")) {
+            val answer = compile("{\"name\": \"g\", \"vectorIndexes\": [$chunk]}", store)
+            assertTrue(answer.startsWith("{\"sql\":"), "$store: $answer")
+        }
+        val unknown = "{\"refusal\":\"The index 'chunk_cos' does not exist, as Neo4j says of a vector index the graph has not made.\"}"
+        assertEquals(unknown, compile("{\"name\": \"g\"}"))
+        assertEquals(unknown, compile("{\"name\": \"g\", \"vectorIndexes\": null}"))
+        // An index whose name is left out is found by the one the schema API gives it, <label>_<property>_vector.
+        val unnamed = chunk.replace("\"name\": \"chunk_cos\", ", "").replace("chunk_cos", "Chunk_embedding_vector")
+        assertTrue(
+            CompileJson.compile(
+                "{\"store\": \"sqlite\", \"graph\": {\"name\": \"g\", \"vectorIndexes\": [$unnamed]}, " +
+                    "\"cypher\": \"CALL db.index.vector.queryNodes('Chunk_embedding_vector', 2, [1.0, 0.0, 0.0]) YIELD node RETURN node\"}",
+            ).startsWith("{\"sql\":"),
+        )
+        val errors = mapOf(
+            "{\"Chunk\": 3}" to "A request's vectorIndexes are [{name, label, property, dimensions, similarity}, …].",
+            "[1]" to "A vector index is {name, label, property, dimensions, similarity}.",
+            "[${chunk.replace("\"label\": \"Chunk\", ", "")}]" to "A vector index names its label.",
+            "[${chunk.replace("\"property\": \"embedding\", ", "")}]" to "A vector index names its property.",
+            "[${chunk.replace("\"dimensions\": 3", "\"dimensions\": 3.0")}]" to "A vector index gives its dimensions as a whole number.",
+            "[${chunk.replace("\"dimensions\": 3", "\"dimensions\": 0")}]" to "A vector index gives its dimensions as a whole number.",
+            "[${chunk.replace("\"COSINE\"", "\"cosine\"")}]" to "A vector index gives its similarity as COSINE or EUCLIDEAN.",
+            "[${chunk.replace("\"chunk_cos\"", "1")}]" to "A vector index's name is a string, or left out.",
+        )
+        for ((indexes, message) in errors) {
+            assertEquals("{\"error\":\"$message\"}", compile("{\"name\": \"g\", \"vectorIndexes\": $indexes}"), indexes)
+        }
+    }
+
+    @Test
     fun oraclesRowsAsTextIsABooleanFalseWhereLeftOut() {
         fun write(graph: String, store: String = "oracle") =
             CompileJson.compile("{\"store\": \"$store\", \"graph\": $graph, \"cypher\": \"UNWIND [1, 2, 3] AS i CREATE (n:N {i: i}) RETURN n.i\"}")

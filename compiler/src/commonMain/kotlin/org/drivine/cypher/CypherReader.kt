@@ -95,6 +95,17 @@ object CypherReader {
      */
     private fun standalone(call: OC_StandaloneCallContext): Query {
         val invocation = call.oC_ExplicitProcedureInvocation()
+        vectorSearch(invocation?.oC_ProcedureName() ?: call.oC_ImplicitProcedureInvocation()!!.oC_ProcedureName())?.let {
+            if (invocation == null) throw CompilerException("$VECTOR_SEARCH() is called with its index, its number of neighbours and its vector, as in Cypher: CALL $VECTOR_SEARCH('chunks', 10, \$vector).")
+            val items = call.oC_YieldItems()
+            if (items?.oC_Where() != null) {
+                throw CompilerException("A CALL that is the whole statement takes no WHERE, as in Cypher: follow its YIELD with WITH or RETURN, as in CALL $VECTOR_SEARCH('chunks', 10, \$vector) YIELD node, score WHERE … RETURN node, score.")
+            }
+            val yields = items?.let(::yields) ?: VECTOR_FIELDS.map { it to it }
+            val search = vectorSearch(invocation.oC_Expression(), yields, null)
+            val returned = yields.map { (_, variable) -> Projection.Item(Expression.Variable(variable), variable) }
+            return Query(listOf(search, Clause.Return(Projection(false, false, returned, emptyList(), null, null))))
+        }
         val procedure = procedure(
             invocation?.oC_ProcedureName() ?: call.oC_ImplicitProcedureInvocation()!!.oC_ProcedureName(),
             invocation?.oC_Expression().orEmpty(),
@@ -114,6 +125,11 @@ object CypherReader {
      */
     private fun inQuery(call: OC_InQueryCallContext): Clause {
         val invocation = call.oC_ExplicitProcedureInvocation()
+        vectorSearch(invocation.oC_ProcedureName())?.let {
+            val items = call.oC_YieldItems()
+                ?: throw CompilerException("A CALL of a procedure within a query names what it yields, as in Cypher: CALL $VECTOR_SEARCH('chunks', 10, \$vector) YIELD node, score.")
+            return vectorSearch(invocation.oC_Expression(), yields(items), items.oC_Where()?.let { expression(it.oC_Expression()) })
+        }
         val procedure = procedure(invocation.oC_ProcedureName(), invocation.oC_Expression())
         // As Neo4j refuses it: within a query, what a procedure gives is named.
         val items = call.oC_YieldItems()
@@ -127,10 +143,40 @@ object CypherReader {
      * a SQL store never will ([VectorCypher]).
      */
     private fun procedure(name: OC_ProcedureNameContext, arguments: List<OC_ExpressionContext>): Procedure {
-        val qualified = name.oC_ProcedureNamespace().oC_SchemaName().joinToString("") { name(it) + "." } + symbolic(name.oC_SymbolicName())
+        val qualified = qualified(name)
         VectorCypher.refusal(qualified) { arguments.getOrNull(1)?.let(::expression) }?.let { throw CompilerException(it) }
         return Procedure.named(qualified) ?: refuse("A procedure call (CALL)")
     }
+
+    /** The procedure [name] names, where it is the vector search the compiler takes, `db.index.vector.queryNodes`; else null. */
+    private fun vectorSearch(name: OC_ProcedureNameContext): String? =
+        qualified(name).takeIf { it == VECTOR_SEARCH }
+
+    /**
+     * `db.index.vector.queryNodes(index, k, vector)` with [arguments], yielding [yields]: the index is named by a string, as a
+     * SQL store reads the table and the expression it searches when the statement is compiled.
+     */
+    private fun vectorSearch(arguments: List<OC_ExpressionContext>, yields: List<Pair<String, String>>, where: Expression?): Clause.VectorSearch {
+        if (arguments.size != 3) {
+            throw CompilerException("$VECTOR_SEARCH() takes its index's name, its number of neighbours and its vector, as in Cypher: CALL $VECTOR_SEARCH('chunks', 10, \$vector).")
+        }
+        val (index, k, vector) = arguments.map(::expression)
+        VectorCypher.refusal(VECTOR_SEARCH) { k }?.let { throw CompilerException(it) }
+        val name = (index as? Expression.Literal)?.value as? String
+            ?: throw CompilerException("$VECTOR_SEARCH() is compiled to SQL with its index named by a string, as in CALL $VECTOR_SEARCH('chunks', 10, \$vector): a SQL store reads the index's table when the statement is compiled.")
+        yields.forEach { (field, _) ->
+            if (field !in VECTOR_FIELDS) throw CompilerException("$VECTOR_SEARCH() yields node and score, not $field.")
+        }
+        yields.groupBy { (_, variable) -> variable }.entries.firstOrNull { it.value.size > 1 }?.let { (variable, _) ->
+            throw CompilerException("$VECTOR_SEARCH() yields $variable twice, as Neo4j refuses it: name each field it yields with a variable of its own.")
+        }
+        val bound = yields.toMap()
+        return Clause.VectorSearch(name, k, vector, bound["node"], bound["score"], where)
+    }
+
+    /** A procedure's name as Neo4j matches it: its namespace and its name, joined by dots, case and all. */
+    private fun qualified(name: OC_ProcedureNameContext): String =
+        name.oC_ProcedureNamespace().oC_SchemaName().joinToString("") { name(it) + "." } + symbolic(name.oC_SymbolicName())
 
     /** Each field a `YIELD` names, and the variable it is bound to: its own name, or the one after `AS`. */
     private fun yields(items: OC_YieldItemsContext): List<Pair<String, String>> = items.oC_YieldItem().map { item ->
@@ -725,3 +771,9 @@ object CypherReader {
     private fun refuse(construct: String): Nothing =
         throw CompilerException("$construct is Cypher, and is not compiled to SQL yet.")
 }
+
+/** Neo4j's vector search procedure, which the compiler reads to [Clause.VectorSearch]. */
+private const val VECTOR_SEARCH = "db.index.vector.queryNodes"
+
+/** What [VECTOR_SEARCH] yields, as Neo4j names its fields. */
+private val VECTOR_FIELDS = listOf("node", "score")

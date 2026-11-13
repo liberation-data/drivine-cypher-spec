@@ -40,6 +40,8 @@ import org.drivine.cypher.text.JavaText
  */
 class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCompiler(graph, encoder) {
 
+    override val searchStore = org.drivine.cypher.api.SearchStore.SQLITE
+
     // The constructor drivine4j's compiler had, kept so that what was compiled against it still links.
     constructor(graph: String) : this(graph, null)
 
@@ -70,6 +72,22 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
 
     /** Null as SQL's null, where `json_quote` writes it as JSON's. */
     override fun scalar(sql: String) = "NULLIF(json_quote($sql), 'null')"
+
+    /**
+     * The vector as the library's similarity function reads it, its JSON array. Where it is null, not a list of numbers, of
+     * another size than the index's, or of no length measured by cosine, the statement fails as it runs ([failure]).
+     */
+    override fun queryVector(json: String, index: org.drivine.schema.VectorIndexSpec): String {
+        val name = index.effectiveName
+        val noLength = if (index.similarity == org.drivine.schema.SimilarityFunction.COSINE) {
+            "WHEN NOT EXISTS (SELECT 1 FROM json_each($json) e WHERE e.value <> 0) THEN ${failure("The index '$name' measures by cosine, which a vector of no length has none of:", json)} "
+        } else ""
+        return "CASE WHEN ${isJsonNull(json)} THEN ${failure("db.index.vector.queryNodes() takes its vector as a list of numbers, not", "'null'")} " +
+            "WHEN json_type($json) <> 'array' OR EXISTS (SELECT 1 FROM json_each($json) e WHERE e.type NOT IN ('integer', 'real')) " +
+            "THEN ${failure("db.index.vector.queryNodes() takes its vector as a list of numbers, not", json)} " +
+            "WHEN json_array_length($json) <> ${index.dimensions} THEN ${failure("The index '$name' is of vectors of ${index.dimensions} dimensions, and the query vector has", "json_array_length($json)")} " +
+            noLength + "ELSE $json END"
+    }
 
     /** SQLite has no failing expression of its own: Drivine's function fails with the text. */
     override fun failure(message: String, value: String) = "${SqliteFunctions.FAIL}(${literal("$message ")} || $value)"

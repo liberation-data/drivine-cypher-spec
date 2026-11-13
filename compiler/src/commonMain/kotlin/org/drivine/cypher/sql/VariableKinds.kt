@@ -92,6 +92,13 @@ internal object VariableKinds {
                 is Clause.Set -> clause.items.forEach { set(it, current) }
                 is Clause.Remove -> {}
                 is Clause.Delete -> clause.expressions.forEach { expression(it, current) }
+                is Clause.VectorSearch -> {
+                    expression(clause.k, current)
+                    expression(clause.vector, current)
+                    clause.node?.let { current[it] = Kind.NODE }
+                    clause.score?.let { current[it] = Kind.FLOAT }
+                    clause.where?.let { expression(it, current) }
+                }
                 is Clause.Foreach -> {
                     expression(clause.list, current)
                     val inner = current.copy()

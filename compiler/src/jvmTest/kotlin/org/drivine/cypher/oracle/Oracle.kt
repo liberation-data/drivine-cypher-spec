@@ -111,7 +111,11 @@ object Oracle {
      */
     internal fun corpusRequests(spec: File): List<String> = buildList {
         val statements = statements(spec)
-        for ((cypher, parameters) in statements) for (store in STORES) add(request(store, cypher, parameters))
+        // A vector search is compiled given the graph's vector indexes, vector.yaml's, as a library gives its catalog's.
+        val searched = mapOf("name" to "g", "vectorIndexes" to vectorIndexes(spec))
+        for ((cypher, parameters) in statements) for (store in STORES) {
+            add(request(store, cypher, parameters, if ("queryNodes" in cypher) searched else mapOf("name" to "g")))
+        }
         for ((cypher, parameters) in TYPED) for (store in STORES) add(request(store, cypher, parameters))
         // Oracle's graph options.
         for (options in ORACLE_OPTIONS) {
@@ -236,6 +240,14 @@ object Oracle {
     /** Whether [answer] holds the moment it was compiled, between [before] and [after], as SQLite's SQL writes a moment. */
     private fun embedsClock(answer: String, before: LocalDateTime, after: LocalDateTime): Boolean =
         listOf(before, after).any { answer.contains("'" + SECONDS.format(it)) }
+
+    /** vector.yaml's indexes, as a request's `graph.vectorIndexes` gives them: `{name, label, property, dimensions, similarity}`. */
+    private fun vectorIndexes(spec: File): List<Map<String, Any?>> = yaml.readTree(File(spec, "vector.yaml"))["indexes"].map { index ->
+        linkedMapOf(
+            "name" to index["name"].textValue(), "label" to index["label"].textValue(), "property" to index["properties"][0].textValue(),
+            "dimensions" to index["options"]["dimensions"].intValue(), "similarity" to index["options"]["similarity"].textValue(),
+        )
+    }
 
     private fun request(store: String, cypher: String, parameters: Map<String, Any?>, graph: Map<String, Any?> = mapOf("name" to "g")): String =
         json.writeValueAsString(linkedMapOf("store" to store, "graph" to graph, "cypher" to cypher, "parameters" to parameters))

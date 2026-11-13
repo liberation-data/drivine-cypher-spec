@@ -67,6 +67,8 @@ class OracleCypherCompiler(
     private val readsAsText: Boolean,
 ) : SqlCypherCompiler(graph, encoder) {
 
+    override val searchStore = org.drivine.cypher.api.SearchStore.ORACLE
+
     // The constructor with reencodeJson and without readsAsText, kept so that what was compiled against it still links.
     constructor(
         graph: String,
@@ -2108,6 +2110,24 @@ class OracleCypherCompiler(
             "CASE WHEN ${kind(x)} = 'double' AND JSON_VALUE($x, '\$' RETURNING BINARY_DOUBLE) IS INFINITE " +
                 "THEN CASE WHEN NOT (${isJsonNull(zero)}) THEN $x END ELSE ${round(Value.Json(x)).sql} END"
         })
+
+    /**
+     * The vector as `TO_VECTOR` reads it, its JSON text, as a CLOB: `JSON_SERIALIZE` gives a `VARCHAR2(4000)` by default,
+     * which an embedding of a few hundred dimensions outgrows (ORA-40478), so each branch is a CLOB, as the stored embedding
+     * is read ([OracleSql.embedding]). Where it is null, no list, of another size than the index's, or of no length measured
+     * by cosine, the statement fails as it runs ([failure]); a list of anything but numbers fails as `TO_VECTOR` reads it.
+     */
+    override fun queryVector(json: String, index: org.drivine.schema.VectorIndexSpec): String {
+        val name = index.effectiveName
+        val size = "JSON_VALUE($json, '$.size()' RETURNING NUMBER)"
+        val noLength = if (index.similarity == org.drivine.schema.SimilarityFunction.COSINE) {
+            "WHEN NOT JSON_EXISTS($json, '$[*]?(@ != 0)') THEN TO_CLOB(TO_CHAR(${failure("The index '$name' measures by cosine, which a vector of no length has none of:", "JSON_SERIALIZE($json)")})) "
+        } else ""
+        return "CASE WHEN ${isJsonNull(json)} THEN TO_CLOB(TO_CHAR(${failure("db.index.vector.queryNodes() takes its vector as a list of numbers, not", "'null'")})) " +
+            "WHEN ${typeOf(json)} <> 'array' THEN TO_CLOB(TO_CHAR(${failure("db.index.vector.queryNodes() takes its vector as a list of numbers, not", "JSON_SERIALIZE($json)")})) " +
+            "WHEN $size <> ${index.dimensions} THEN TO_CLOB(TO_CHAR(${failure("The index '$name' is of vectors of ${index.dimensions} dimensions, and the query vector has", size)})) " +
+            noLength + "ELSE JSON_SERIALIZE($json RETURNING CLOB) END"
+    }
 
     /** A text that is no number, read as one: Oracle fails with ORA-01722, whose ORA-03302 detail gives the text. */
     override fun failure(message: String, value: String) = "TO_NUMBER(${literal("$message ")} || TO_CHAR($value))"

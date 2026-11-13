@@ -107,7 +107,10 @@ compiled SQL needs, `hostVersion()` and `drivine_host_version()`: see [The host 
 `store` is `postgres`, `oracle` or `sqlite`. `graph` has the graph's `name`; the rest of it is Oracle's, and may be left
 out: `nullsEqualStored` and `eraStored` (true where left out), `indexedProperties`, `oracleRowsAsText`, `oracleReencodeJson` and
 `oracleReadsAsText` (false where left out, see [Oracle's rows as text](#oracles-rows-as-text),
-[Oracle's documents encoded again](#oracles-documents-encoded-again) and [Oracle's reads as text](#oracles-reads-as-text)). `typed`, false where left out, asks for the rows' nodes and
+[Oracle's documents encoded again](#oracles-documents-encoded-again) and [Oracle's reads as text](#oracles-reads-as-text)). On every store,
+`vectorIndexes`, the graph's vector indexes as its catalog records them, `[{name, label, property, dimensions, similarity}, …]`
+(`GraphOptions.vectorIndexes`, `SqlCypherCompiler.vectorIndexes`), is what `db.index.vector.queryNodes` finds by name:
+see [Vector search in the module](#vector-search-in-the-module). `typed`, false where left out, asks for the rows' nodes and
 relationships tagged and for the columns: see [Columns and typed rows](#columns-and-typed-rows). The answer is one of:
 
 - `{"sql": …, "parameters": {…}, "setup": […], "warnings": […], "nonFinite": false}`, and on Oracle
@@ -244,11 +247,15 @@ searched once however often it is given, as drivine4j's `loadNearestAmong` searc
 
 `plan` gives a `VectorPlan`, or a `Refusal` of a graph name the store can't take:
 
-- On a SQL store a nearest search's `sql` is one `SELECT` of the ranked candidates, `nid` and `score`: the nearest
+- On a SQL store a nearest search's `sql` is one `SELECT` of the ranked candidates, each node's row (`nid`, `labels`,
+  `props` and `stamp`) and its `score`: the nearest
   `searchK` (or `topK`) nodes of the root's labels, through Postgres's HNSW index or Oracle's side table and its vector
-  index, or measured one by one (and on SQLite always so, by the library's `drivine_similarity`). The search reads the
-  embedding by the expression the module's DDL makes the index over, so the index answers it. The library joins the
-  candidates back to its node table by `nid` for its projection, and adds what `FullTextSearch`'s candidates are given:
+  index, or measured one by one (and on SQLite always so, by the library's `drivine_similarity`). By cosine, a node whose
+  embedding has no length, all zeros, is left out, as Neo4j's cosine index leaves it out (#160). The search reads the
+  embedding by the expression the module's DDL makes the index over, so the index answers it. The library reads its
+  projection from the candidates' own columns, with no second join of its node table: on Oracle 23.26 such a join, on
+  `nid` to a view that reads the node table, is eliminated with any filter on it where a `JSON_VALUE` index is made, and a
+  bound filter crashed the server (ORA-07445), a written one was dropped (#160). It adds what `FullTextSearch`'s candidates are given:
   its threshold (`score >= threshold`), its predicates, the view's required relationships, `ORDER BY score DESC, nid`,
   and where `searchK` was given its `LIMIT topK`.
 - On a graph engine a nearest search's `cypher` is its head: the index's `CALL` (Neo4j's `db.index.vector.queryNodes`,
@@ -260,6 +267,7 @@ searched once however often it is given, as drivine4j's `loadNearestAmong` searc
   is bound, so one statement serves every partition.
 - A search among ids is the whole statement on every store, one row a root, `{seed, near}` (the column `result` on a SQL
   store, `row` on a graph engine), `near` its `topK` neighbours as `{id, score}`, best first, none under the threshold.
+  By cosine, on a SQL store, a root whose embedding has no length is left out, as a seed and as a neighbour (#160).
 - `parameters` are named `_cy_vec1`, `_cy_vec2`, …, with the compiler's reserved prefix. The query vector is not among
   them: `vector` names the parameter the library binds it as, as it binds a list, so a long vector doesn't pass through
   the module. `indexK` is how many the index is asked for: `searchK`, or where it is left out `topK`, and among ids
@@ -275,17 +283,36 @@ Over JSON it is the same entry, `CompileJson.compile`: a request with `vector` i
 The answer is `{"sql": …, "parameters": {…}, "vector": …, "labelCheck": …, "indexK": …, "warnings": […]}`, with `cypher`
 in place of `sql` on a graph engine, or `{"refusal": …}`, or `{"error": …}` where the request is no request.
 
-drivine4j's statements are the module's byte for byte. `src/commonTest/resources/vector-golden.json` holds them, written by
+**Compiled Cypher.** The compiler compiles Neo4j's `CALL db.index.vector.queryNodes(index, k, vector) YIELD node, score`
+on each SQL store (liberation-data/drivine-cypher-spec#160) to the same candidates: `VectorSearch.candidates` writes them,
+given the vector and `k` as SQL, as the statement reads them. A SQL store keeps no index a statement can name, so the library
+gives the graph's vector indexes as its catalog records them: `GraphOptions.vectorIndexes` (`graph.vectorIndexes` over
+JSON), each a `VectorIndexSpec` found by its name, or by `<label>_<property>_vector` where it has none. An index not given
+is refused, as Neo4j refuses one that does not exist, and so is an index named by anything but a string, as the store's
+table and expression are read when the statement is compiled. As the first clause the candidates are the statement's
+source; after other rows, a join for each row (a `LATERAL` join on Postgres and Oracle, `json_each` on SQLite), so the
+vector may be read from the row. Each candidate's own row is bound as `node`, with no second join of the node table, and its score as `score`,
+best first, ties by the node's id; a `WHERE` after the `YIELD`, and the clauses after it, filter those `k`, as Neo4j
+filters what its index found. `k` is a whole number from 1 to 2147483647, written or given as a parameter (bound, not
+written). A vector written or given is refused before the statement runs where Neo4j fails it: null, not a list of
+numbers, of another size than the index's, or of no length on a cosine index; one the statement works out is checked
+as it runs, by each store's `queryVector`, which fails the statement with the same words. Measured by cosine, a stored
+embedding of no length is left out of every search, as Neo4j leaves it out of its index.
+
+drivine4j's statements are the module's byte for byte, but for the edits below. `src/commonTest/resources/vector-golden.json`
+holds them, written by
 drivine4j's own code (its selects' `nearestTo`, `nearestThrough` and `nearestAmong`, its grammars' `vectorSearchHead`
 and label check, and its planner's `planAmong`) at the commit it names: on each store, exact and through the index, by
 cosine and Euclidean, with and without a partition and `searchK`, for roots of one label and of two, and names with a
 quote, a backslash and a backtick in them. Only the parameters' names were changed, and the query vector's binding left
 out, and on the graph engines a name with a quote, a backslash or a backtick, which drivine4j writes raw, is written
 escaped (#217): 84 of the golden's entries were edited for it by a script. On Oracle the side table is named as store
-layout 2 names its objects, `<graph>_v2_…` for drivine4j's `<graph>_v_…`, edited in each entry that names it. No other
-edit was made. `VectorSearchGoldenTest` checks
-`plan`, and the JSON request, against each on every target, putting back the candidates' columns drivine4j selects beside
-`nid` before it compares, as `FullTextSearchGoldenTest` does.
+layout 2 names its objects, `<graph>_v2_…` for drivine4j's `<graph>_v_…`, edited in each entry that names it. And the 168
+SQL entries of a nearest search by cosine were edited by a script to leave out a stored embedding of no length, as
+Neo4j's cosine index does, and the 40 of a search among ids by cosine to leave out a root with one (#160), which drivine4j
+at that commit does not. No other edit was made. `VectorSearchGoldenTest` checks
+`plan`, and the JSON request, against each on every target, putting back on Oracle the document drivine4j selects beside
+each candidate's row before it compares.
 
 On a graph engine the index's name in the `CALL` (FalkorDB's label, and its property) is a Cypher string, its quotes and
 backslashes escaped (`CypherNames.string`), and each of the root's labels in a search among ids' `MATCH` an identifier,

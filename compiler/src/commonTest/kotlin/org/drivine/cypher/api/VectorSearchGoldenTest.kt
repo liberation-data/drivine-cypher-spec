@@ -115,18 +115,18 @@ class VectorSearchGoldenTest {
     }
 
     /**
-     * The module's ranked candidates, [sql], as drivine4j selects them: each candidate's columns beside its `nid` and score
-     * (drivine4j's `PostgresSql.columns`, `OracleSql.columns`, `SqliteSql.columns`), and on Oracle without its index the
-     * property graph's columns they read. Each is put back where drivine4j has it, and found there once.
+     * The module's ranked candidates, [sql], as drivine4j selects them: the module selects each node's row as drivine4j does,
+     * and on Oracle drivine4j also its document (`OracleSql.transform`, or the property graph's `doc` column without the
+     * index), which is put back where drivine4j has it, and found there once.
      */
     private fun projected(sql: String, store: SearchStore, request: VectorRequest): String = when (store) {
         SearchStore.ORACLE -> if (request.index.dimensions == request.size) {
-            sql.once("SELECT c.nid, ", "SELECT c.nid, c.labels, c.props, c.stamp, $ORACLE_DOC AS doc, ")
+            sql.once("SELECT c.nid, c.labels, c.props, c.stamp, ", "SELECT c.nid, c.labels, c.props, c.stamp, $ORACLE_DOC AS doc, ")
         } else {
-            sql.once("SELECT c.nid, ", "SELECT c.nid, c.labels, c.props, c.stamp, c.doc, ")
-                .once("COLUMNS (c.nid, c.props)) c", "COLUMNS (c.nid, c.labels, c.props, c.stamp, c.doc)) c")
+            sql.once("SELECT c.nid, c.labels, c.props, c.stamp, ", "SELECT c.nid, c.labels, c.props, c.stamp, c.doc, ")
+                .once("COLUMNS (c.nid, c.labels, c.props, c.stamp)) c", "COLUMNS (c.nid, c.labels, c.props, c.stamp, c.doc)) c")
         }
-        else -> sql.once("SELECT c.nid, ", "SELECT c.nid, c.labels, c.props, c.stamp, ")
+        else -> sql
     }
 
     /** [this] with [part] in place of [old], which it holds once. */

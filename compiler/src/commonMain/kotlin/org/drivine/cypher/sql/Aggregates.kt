@@ -43,6 +43,7 @@ internal class Aggregates(
             is Clause.Remove -> {}
             is Clause.Delete -> clause.expressions.forEach(::expression)
             is Clause.Call -> query(clause.query)
+            is Clause.VectorSearch -> { expression(clause.k); expression(clause.vector); where(clause.where) }
             is Clause.Foreach -> { expression(clause.list); clauses(clause.clauses) }
             is Clause.Return -> projection(clause.projection)
         }
