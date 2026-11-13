@@ -1719,19 +1719,19 @@ abstract class SqlCypherCompiler(
             )
             val candidates = VectorSearch.candidates(searchStore, graphName, request, vector, k)
             val name = alias("v")
-            val columns = listOf("nid" to false, "score" to false)
+            val columns = listOf("nid" to false, "labels" to true, "props" to true, "stamp" to false, "score" to false)
             // The first rows of the select are the search's own; after others, a lateral join reads each row's, and a store reads
             // what such a join gives its own way ([lateralColumn]).
             val joined = select.sources.isNotEmpty()
             if (joined) select.join(lateral(candidates, name, optional = false, columns)) else select.source("(\n${indent(candidates)}\n) $name")
             fun column(column: String) = if (joined) lateralColumn(name, column, json = false) else "$name.$column"
-            val row = alias("n")
-            select.join("JOIN $nodes $row ON $row.nid = ${column("nid")}")
-            search.node?.let { select.bind(it, Value.Node("$row.nid", "$row.labels", "$row.props", "$row.stamp")) }
+            // The node is read from the candidates' own columns: a second join of the node table to them on nid loses a filter
+            // on it on Oracle (see VectorSearch's ROW).
+            search.node?.let { select.bind(it, Value.Node(column("nid"), column("labels"), column("props"), column("stamp"))) }
             val score = column("score")
             search.score?.let { select.bind(it, Value.Json(scalar(score))) }
             select.order += score to true
-            select.order += "$row.nid" to false
+            select.order += column("nid") to false
             return search.where?.let { filtered(select, it) } ?: select
         }
 

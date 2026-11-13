@@ -46,6 +46,18 @@ class VectorSearchCompileTest {
     }
 
     @Test
+    fun `a hit is read from the candidates' own row, with no second join of the node table, and is filtered after them`() {
+        // On Oracle 23.26 a second join of the node table to the candidates on nid is eliminated with the filter on it, where a
+        // JSON_VALUE index of the property is made: a bound value crashed the server, a written one was dropped (#160).
+        val filtered = "$search('chunk_cos', 3, [1.0, 0.0, 0.0]) YIELD node, score WHERE node.id = \$id RETURN node.id, score"
+        for (compiler in compilers()) {
+            val sql = compiler.compile(filtered, mapOf("id" to "a")).sql
+            assertEquals(1, Regex("""\bg_node c\b""").findAll(sql).count(), "${compiler::class.simpleName}: the node table is read once, in the candidates:\n$sql")
+            assertTrue(!Regex("""JOIN g_node \w+ ON \w+\.nid = v\d+\.nid""").containsMatchIn(sql), "${compiler::class.simpleName}: no join back:\n$sql")
+        }
+    }
+
+    @Test
     fun `the first clause reads the candidates as a source, and one after other rows joins them for each row`() {
         val first = "$search('chunk_cos', 2, [1.0, 0.0, 0.0]) YIELD node, score RETURN node.id, score"
         val after = "MATCH (a:Author) $search('chunk_cos', 2, [1.0, 0.0, 0.0]) YIELD node, score RETURN a.name, node.id, score"
