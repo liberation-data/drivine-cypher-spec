@@ -31,6 +31,18 @@ class SqliteRowsJoinTest {
             // A write's query is held in its procedure as JSON text, where its line break is written `\n`.
             assertTrue(Regex("""AS u\d+( ON TRUE)?(\s|\\n)+CROSS JOIN g_node""").containsMatchIn(sql), "$cypher\n$sql")
         }
+        // A `WITH` of the rows, which SQLite merges into the query that reads it, keeps them read first: 5.7 s at 300 nodes
+        // and 40 rows, the rows read innermost, before; 0.04 s after. So does an OPTIONAL MATCH between, joined to the rows.
+        listOf(
+            "UNWIND \$rows AS row WITH row MATCH (a:Person {id: row.s}) MATCH (b:Person {id: row.d}) RETURN count(*)",
+            "UNWIND \$rows AS row WITH row WHERE row.s >= 0 WITH row MATCH (a:Person {id: row.s}) MATCH (b:Person {id: row.d}) RETURN count(*)",
+            "UNWIND \$rows AS row OPTIONAL MATCH (z:Person {id: 0}) MATCH (a:Person {id: row.s}) MATCH (b:Person {id: row.d}) RETURN count(*)",
+        ).forEach { cypher ->
+            val sql = sql(cypher)
+            assertEquals(1, Regex("""CROSS JOIN g_node""").findAll(sql).count(), "$cypher\n$sql")
+            assertTrue(Regex("""(\) w\d+|\) AS o\d+ ON TRUE)\s+CROSS JOIN g_node""").containsMatchIn(sql), "$cypher\n$sql")
+        }
+        assertFalse("CROSS JOIN" in sql("MATCH (x:Person) WITH x MATCH (a:Person {id: x.id}) RETURN count(*)"))
         // A relationship's pattern after the rows keeps its own joins reorderable, so its nodes aren't paired before it is read.
         val step = sql("UNWIND \$rows AS row MATCH (a:Person {id: row.s})-[:F]->(b:Person) RETURN count(*)")
         assertEquals(1, Regex("""CROSS JOIN""").findAll(step).count(), step)

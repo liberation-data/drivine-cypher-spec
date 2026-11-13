@@ -23,8 +23,9 @@ import org.drivine.cypher.text.JavaText
  *   rows are gathered as a JSON list of maps in a subquery, which may read the row it is in, and that list is joined
  *   with `json_each`, whose argument may read the row too. Each column is read back out of the map.
  * - **A list of ids** is text, each id between commas (`,1,2,`), as on Oracle.
- * - **Sources are joined with `JOIN … ON TRUE`**, never `CROSS JOIN`, which SQLite takes as an order it must keep
- *   ([crossJoin]): a step's two nodes would be paired before its relationship was read.
+ * - **Sources are joined with `JOIN … ON TRUE`**, not `CROSS JOIN`, which SQLite takes as an order it must keep
+ *   ([crossJoin]): a step's two nodes would be paired before its relationship was read. The one `CROSS JOIN` is the
+ *   source after an `UNWIND`'s rows, so they are read first ([rowsJoin]).
  * - **A relationship of either direction** is joined with an OR across its two directions, which SQLite probes by
  *   index, not read both ways round as on Postgres and Oracle ([undirectedBothWays]).
  *

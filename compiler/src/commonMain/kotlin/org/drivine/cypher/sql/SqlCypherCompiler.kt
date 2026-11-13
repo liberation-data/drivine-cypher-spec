@@ -1702,6 +1702,8 @@ abstract class SqlCypherCompiler(
             // subqueries that read a path's nodes and relationships by the ids in its columns read the first row's on every row (#537).
             val passesPath = projected.scope.values.any { it is Value.Path }
             next.source("(\n${indent(if (apart || passesPath) called(sql) else sql)}\n) $name")
+            // Rows an `UNWIND` read last are still read before what comes after a `WITH` of them: SQLite merges its query in.
+            next.afterRows = select.afterRows
             projected.scope.forEach { (variable, value) -> next.bind(variable, value.columnsOf(name)) }
             projected.order.forEach { (column, descending) -> next.order += "$name.$column" to descending }
             return with.where?.let { filtered(next, it) } ?: next
@@ -6760,7 +6762,10 @@ abstract class SqlCypherCompiler(
             labelTests[nid]?.forEach { where[it.at] = test(it.labels, it.all) }
         }
 
-        /** Whether the last source is the rows of an `UNWIND`, which the next is joined to by [rowsJoin]. */
+        /**
+         * Whether the rows of an `UNWIND` are the last source read, but for joins to them, or the last read by the `WITH` this
+         * part reads: the next source is joined by [rowsJoin].
+         */
         var afterRows = false
 
         fun source(text: String) {
