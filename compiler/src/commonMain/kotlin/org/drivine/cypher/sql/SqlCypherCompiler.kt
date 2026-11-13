@@ -5180,6 +5180,58 @@ abstract class SqlCypherCompiler(
         }
 
         /**
+         * Whether [value], written as [written], can't be a tag of a temporal value, so that [temporalRefused] need not test it as the
+         * statement runs. A closed set; every other side is tested, though a test costs: beside a walk on Oracle, a side tested
+         * was worked out again, and a statement took twice as long, past the store's PGA limit (drivine4j#809). It can't where:
+         * - its kind is known when compiling ([untemporal]): a value written, a parameter given as no temporal value, a function
+         *   that gives a float, arithmetic of known numbers, a `CASE` of one known kind, a variable bound to one, a text or a list
+         *   the statement makes, a truth value, a node or a relationship;
+         * - it is `count(*)`, a `COUNT` subquery, or a function that gives a number ([NUMBER_FUNCTIONS]);
+         * - it is a field of a temporal value the statement makes, by a function of a temporal kind ([Temporal.ofFunction]) or in its namespace
+         *   (`datetime(b.at).minute`, `duration.between(a, b).days`): a number or a text, as no field of a temporal value is one.
+         * A field of a value of open kind, `n.m.d`, may be a map's entry that is a tag, so it is tested.
+         */
+        private fun tagFree(value: Value, written: Expression): Boolean = untemporal(value, written) || when (written) {
+            Expression.CountStar -> true
+            is Expression.Subquery -> written.kind == Expression.Subquery.Kind.COUNT
+            is Expression.Function -> written.name.lowercase() in NUMBER_FUNCTIONS
+            is Expression.Property -> written.subject.let { it is Expression.Function && Temporal.ofFunction(it.name.lowercase().substringBefore('.')) != null }
+            else -> false
+        }
+
+        /**
+         * [arithmetic], the generic `+`, `-`, `*` or `/` of [binary]'s sides [x] and [y], where the statement knows neither to be a
+         * temporal value: as the statement runs, a side that is one, a tag a property holds (`n.d1 + n.d2`, `n.d * 2`), fails by
+         * name, where the generic arithmetic gave null (drivine4j#418). Temporal arithmetic is written only where a side is known
+         * to be temporal; on two sides read from the store it is not compiled yet. A `+` refuses only a tag beside a tag or a
+         * number: beside a text a temporal value is its text, and beside a list an item, as before, so beside a side known to be
+         * a text or a list it is not tested. A side that can't be a tag ([tagFree]) is not tested. The kind named is the tag's on
+         * either side: the other may be a number (`n.n * n.d`).
+         */
+        private fun temporalRefused(binary: Expression.Binary, left: Value, right: Value, x: String, y: String, arithmetic: () -> String): String {
+            val sides = listOf(left, right).map { (it as? Value.Json)?.temporal != null }
+            if (sides.any { it }) return arithmetic()
+            val open = listOf(!tagFree(left, binary.left), !tagFree(right, binary.right))
+            // Of a `+`, a side beside a text or a list is no sum of tags or of a tag and a number.
+            val besideTextOrList = listOf(right to binary.right, left to binary.left).map { (value, written) ->
+                binary.operator == Operator.ADD && (isText(value) || isList(value) || given(written).let { it is String || it is List<*> })
+            }
+            val tested = open.zip(besideTextOrList).map { (maybe, beside) -> maybe && !beside }
+            if (tested.none { it }) return arithmetic()
+            val tag = listOf(x, y).zip(open).map { (json, maybe) -> if (maybe) "${tagKind(json)} IS NOT NULL" else "FALSE" }
+            val test = if (binary.operator == Operator.ADD) {
+                listOf(0 to 1, 1 to 0).filter { (i, _) -> tested[i] }.joinToString(" OR ") { (i, j) ->
+                    val other = listOf(x, y)[j]
+                    "(${tag[i]} AND (${tag[j]} OR ${typeOf(other)} = 'number'))"
+                }
+            } else {
+                tag.filterIndexed { i, _ -> open[i] }.joinToString(" OR ")
+            }
+            val kind = if (open[0] && open[1]) "COALESCE(${tagKind(x)}, ${tagKind(y)})" else if (open[0]) tagKind(x) else tagKind(y)
+            return "CASE WHEN $test THEN ${scalar(textFailure(TEMPORAL_ARITHMETIC, kind))} ELSE ${arithmetic()} END"
+        }
+
+        /**
          * [add] of the JSON [x] and [y], the values [left] and [right]: where the statement makes one a temporal value, it is put
          * together with a text as its text, as Cypher writes it, and added to any other value, a list, as the value it is. [textLeft]
          * and [textRight] say the statement makes that side a text.
@@ -5719,7 +5771,7 @@ abstract class SqlCypherCompiler(
                     Value.Json(
                         sharedSum(a, b) { (x, y) ->
                             val given = (givenLeft ?: MadeText.takeIf { textLeft }) to (givenRight ?: MadeText.takeIf { textRight })
-                            addTagged(x, left, y, right, textLeft, textRight) { p, q -> add(p, q, given) }
+                            temporalRefused(binary, left, right, x, y) { addTagged(x, left, y, right, textLeft, textRight) { p, q -> add(p, q, given) } }
                         },
                         items = itemsOf(left)?.takeIf { it == itemsOf(right) }, itemItems = itemItemsOf(left)?.takeIf { it == itemItemsOf(right) },
                         temporals = hasTemporals(left) || hasTemporals(right),
@@ -5728,11 +5780,15 @@ abstract class SqlCypherCompiler(
                         texts = (holdsTexts(left) && (holdsTexts(right) || textRight)) || (textLeft && holdsTexts(right)),
                     )
                 }
-                Operator.SUBTRACT -> Value.Json(shared(a, b) { (x, y) -> arithmetic(x, y, "-") })
-                Operator.MULTIPLY -> Value.Json(shared(a, b) { (x, y) -> arithmetic(x, y, "*") })
+                Operator.SUBTRACT -> Value.Json(shared(a, b) { (x, y) -> temporalRefused(binary, left, right, x, y) { arithmetic(x, y, "-") } })
+                Operator.MULTIPLY -> Value.Json(shared(a, b) { (x, y) -> temporalRefused(binary, left, right, x, y) { arithmetic(x, y, "*") } })
                 // A whole number divided by one is a whole number, as in Cypher.
                 Operator.DIVIDE -> Value.Json(
-                    shared(a, divisor(binary, b)) { (x, y) -> "CASE WHEN ${integral(x)} AND ${integral(y)} THEN ${scalar(wholeQuotient(number(x), number(y)))} ELSE ${arithmetic(x, y, "/")} END" }
+                    shared(a, divisor(binary, b)) { (x, y) ->
+                        temporalRefused(binary, left, right, x, y) {
+                            "CASE WHEN ${integral(x)} AND ${integral(y)} THEN ${scalar(wholeQuotient(number(x), number(y)))} ELSE ${arithmetic(x, y, "/")} END"
+                        }
+                    }
                 )
                 Operator.MODULO -> Value.Json(remainder(a, divisor(binary, b)))
                 Operator.POWER -> Value.Json(scalar(float("power(${number(a)}, ${number(b)})")))
@@ -7230,6 +7286,9 @@ abstract class SqlCypherCompiler(
         /** Why a pattern of `=~` worked out as the statement runs is refused where it writes a backreference: see [Patterns.refusal]. */
         const val COMPUTED_BACKREFERENCE = "A regular expression worked out as the statement runs writes a backreference, which the SQL stores answer as Java does only in a pattern the statement gives, written or bound:"
 
+        /** Why `+`, `-`, `*` or `/` of a temporal value whose kind the statement doesn't know fails as it runs: see `temporalRefused`. */
+        const val TEMPORAL_ARITHMETIC = "Arithmetic on a temporal value read from the store, of a kind the statement doesn't know, isn't compiled to SQL yet (drivine4j#418):"
+
         /** What a list read by a text fails with, before its kind: see mapEntry. */
         const val TEXT_INDEX_OF_LIST = "A list is indexed by an integer, as in Neo4j, not a"
 
@@ -7412,6 +7471,9 @@ abstract class SqlCypherCompiler(
 
         /** The functions whose value, null aside, is a float, whatever they are given, as Neo4j types them: see [Value.Json.known]. */
         val FLOAT_FUNCTIONS = MATH_FUNCTIONS + setOf("tofloat", "tofloatornull", "round", "floor", "ceil", "atan2", "e", "pi", "rand")
+
+        /** The functions whose value is a number, or null: no temporal value, which `temporalRefused` need not test for. */
+        val NUMBER_FUNCTIONS = FLOAT_FUNCTIONS + setOf("count", "size", "length", "tointeger", "tointegerornull", "abs", "sign", "timestamp")
 
         /** The operators of arithmetic, whose value is a number where both operands are: see [Value.Json.known]. */
         val ARITHMETIC = setOf(Operator.ADD, Operator.SUBTRACT, Operator.MULTIPLY, Operator.DIVIDE, Operator.MODULO, Operator.POWER)
