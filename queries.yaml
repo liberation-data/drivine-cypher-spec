@@ -1055,6 +1055,11 @@ cases:
         cypher: "RETURN ['a9' =~ $p, 'aa' =~ $p, 'ab' =~ $two, $n =~ $p]"
         parameters: {p: "(a)\\9", two: "(a)\\2", n: null}
         rows: [[false, false, false, null]]
+      - note: "A backreference before its group closes, to a group that follows or that holds it, matches nothing, as in Java."
+        only: [neo4j, sql]
+        cypher: "RETURN ['aa' =~ $ahead, 'a' =~ $ahead, 'aa' =~ $inside]"
+        parameters: {ahead: "\\1(a)", inside: "(a\\1)"}
+        rows: [[false, false, false]]
       - note: "A ninth group's: Oracle names no ninth group of the pattern's, and refuses one."
         only: [neo4j, postgres, sqlite]
         cypher: "RETURN 'abcdefghii' =~ $nine"

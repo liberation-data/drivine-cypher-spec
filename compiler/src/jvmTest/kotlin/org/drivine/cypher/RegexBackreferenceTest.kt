@@ -89,6 +89,8 @@ class RegexBackreferenceTest {
         assertEquals(1, Patterns.groups("(a)(?:b)(?=c)"))
         assertEquals(2, Patterns.groups("(a)(?<n>b)[(]\\(\\Q(\\E"))
         assertTrue(Patterns.dangling("(a)\\2") && !Patterns.dangling("(a)\\1") && !Patterns.dangling("(a)[\\]\\2]"))
+        // A group that follows, or holds the backreference, hasn't closed before it.
+        assertTrue(Patterns.dangling("\\1(a)") && Patterns.dangling("(a\\1)") && !Patterns.dangling("((a)\\2)") && !Patterns.dangling("(?:(a))\\1"))
         listOf(PostgresCypherCompiler("g"), OracleCypherCompiler("g"), SqliteCypherCompiler("g")).forEach { compiler ->
             val sql = compiler.compile("RETURN 'a9' =~ \$p", mapOf("p" to "(a)\\9")).sql
             assertTrue("\"a^\"" in sql || "'a^'" in sql, "${compiler::class.simpleName}:\n$sql")
