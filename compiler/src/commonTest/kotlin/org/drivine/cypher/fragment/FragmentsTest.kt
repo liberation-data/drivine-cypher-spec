@@ -352,6 +352,11 @@ class FragmentsTest {
             "n.name = toString(${'$'}b)" to mapOf("b" to true),
             "n.name = coalesce(${'$'}q, ${'$'}p)" to mapOf("q" to null, "p" to "Ada"),
             "n.name = coalesce(null, toLower(${'$'}p))" to mapOf("p" to "Ada"),
+            // A number and a truth value worked out, a literal's text, and a parameter's key's.
+            "n.name = coalesce(${'$'}q, ${'$'}n)" to mapOf("q" to null, "n" to 7L),
+            "n.name = coalesce(${'$'}b)" to mapOf("b" to false),
+            "n.name = toUpper('ada')" to emptyMap(),
+            "n.name = toLower(${'$'}m.name)" to mapOf("m" to mapOf("name" to "ADA")),
         )
         for ((condition, parameters) in cases) assertTrue(bare(condition, parameters), "$condition $parameters")
     }
@@ -388,6 +393,9 @@ class FragmentsTest {
             "n.name = trim(${'$'}p)" to mapOf("p" to "Ada" + "\t".repeat(4000)),
             "n.name = ltrim(${'$'}p)" to mapOf("p" to "\t".repeat(4000) + "Ada"),
             "n.name = rtrim(${'$'}p)" to mapOf("p" to "Ada" + "\t".repeat(4000)),
+            // A parameter's key that is empty, or not there, which is null and so leaves the empty text after it.
+            "n.name = toLower(${'$'}m.name)" to mapOf("m" to mapOf("name" to "")),
+            "n.name = coalesce(${'$'}m.name, ${'$'}p)" to mapOf("m" to emptyMap<String, Any?>(), "p" to ""),
         )
         for ((condition, parameters) in cases) assertTrue(!bare(condition, parameters), "$condition $parameters")
     }
