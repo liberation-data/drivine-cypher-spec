@@ -542,24 +542,19 @@ abstract class SqlCypherCompiler(
     protected open fun matchedText(json: String, pattern: String): String = texts(json) { (x) -> matches(x, text(pattern)) }
 
     /**
-     * Refuses a pattern of `=~` that the statement gives, written or bound, where the store would read it otherwise than
-     * Java: a backreference in a character class, `[\1]`, which Java refuses ("Illegal/unsupported escape sequence"), where
-     * a store reads it as a character (#236). And one to a group that hasn't closed before it ([Patterns.dangling]) where
-     * the pattern can match without it, `(a)|\9`: Java matches the rest, where Postgres refuses the pattern, and asking it
-     * as a pattern that matches nothing, as a dangling one that must match is, would answer false. One beside a dangling one
-     * that must match, `\1?\2`, is not refused: Java matches nothing there either. A store that reads more refuses it here
-     * too: see Oracle's.
+     * Refuses a pattern of `=~` that the statement gives, written or bound, that writes a backreference the stores can't
+     * answer as Java does ([Patterns.refusal]): they hold the pattern to the whole text in a group of their own, and past the
+     * simplest forms each reads a backreference its own way (#236).
      */
-    protected open fun checkPattern(pattern: String) {
-        val backreferences = Patterns.backreferences(pattern)
-        if (backreferences.any { it.inClass }) throw CompilerException(
-            "The regular expression '$pattern' writes a backreference in a character class, which Java refuses: Illegal/unsupported escape sequence."
-        )
-        val dangling = backreferences.filter { !it.inClass && !it.closed }
-        if (dangling.isNotEmpty() && dangling.all { it.optional }) throw CompilerException(
-            "The regular expression '$pattern' writes a backreference to a group that hasn't closed before it, where the pattern can match without it, which the store can't read as Java does."
-        )
+    private fun checkPattern(pattern: String) {
+        Patterns.refusal(pattern)?.let { throw CompilerException(it) }
     }
+
+    /**
+     * Whether the pattern [text], worked out as the statement runs, writes a backreference ([Patterns.BACKREFERENCE]): it is
+     * refused then, as one the compiler can't read for its form.
+     */
+    protected abstract fun holdsBackreference(text: String): String
 
     /**
      * The pattern of the `=~` being compiled, where the statement gives it, written or bound, else null: a store that works
@@ -5602,14 +5597,13 @@ abstract class SqlCypherCompiler(
                 Operator.STARTS_WITH -> Value.Bool(searchedTexts(a, b) { texts -> shared(*texts.toTypedArray()) { (x, y) -> startsWith(x, y) } })
                 // A pattern is short: only the text is read as a long one where it is.
                 Operator.MATCHES -> {
-                    val given = (given(binary.right) as? String)?.also(::checkPattern)
-                    // A backreference to a group the pattern doesn't have matches nothing in Java, where Postgres refuses the
-                    // pattern: one given so is asked as a pattern that matches nothing, a character before the text's start
-                    // (#236), written with only what every library's regular expressions read alike (host.yaml's regexp).
-                    // A digit after a backreference is written apart from it, as Java reads it ([Patterns.digitsApart]).
-                    val asked = given?.let { if (Patterns.dangling(it)) Patterns.NO_MATCH else Patterns.digitsApart(it) }
-                    patternGiven = asked
-                    Value.Bool(matchedText(a, if (asked != given) literalJson(asked) else b))
+                    val given = (known(binary.right) as? String)?.also(::checkPattern)
+                    patternGiven = given
+                    // A pattern worked out as the statement runs is refused then where it writes a backreference (#236).
+                    val pattern = if (binary.right is Expression.Literal || binary.right is Expression.Parameter) b else shared(b) { (x) ->
+                        "CASE WHEN ${holdsBackreference(text(x))} THEN ${scalar(textFailure(COMPUTED_BACKREFERENCE, text(x)))} ELSE $x END"
+                    }
+                    Value.Bool(matchedText(a, pattern))
                 }
                 Operator.ENDS_WITH -> Value.Bool(searchedTexts(a, b) { texts -> shared(*texts.toTypedArray()) { (x, y) -> endsWith(x, y) } })
                 Operator.CONTAINS -> Value.Bool(searchedTexts(a, b) { (x, y) -> containsText(x, y) })
@@ -7004,6 +6998,9 @@ abstract class SqlCypherCompiler(
         const val NUMBER_KEY_OF_MAP = "A map, a node or a relationship is read by a text key, as in Neo4j, not a"
 
         /** What a list read by a text fails with, before its kind: see mapEntry. */
+        /** Why a pattern of `=~` worked out as the statement runs is refused where it writes a backreference: see [Patterns.refusal]. */
+        const val COMPUTED_BACKREFERENCE = "A regular expression worked out as the statement runs writes a backreference, which the SQL stores answer as Java does only in a pattern the statement gives, written or bound:"
+
         const val TEXT_INDEX_OF_LIST = "A list is indexed by an integer, as in Neo4j, not a"
 
         /** What `round()` fails with, as Neo4j fails it, a precision below 0 or past [MAX_COUNT]. */

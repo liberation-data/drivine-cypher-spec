@@ -1,157 +1,100 @@
 package org.drivine.cypher
 
 import org.drivine.cypher.sql.OracleCypherCompiler
+import org.drivine.cypher.sql.Patterns
 import org.drivine.cypher.sql.PostgresCypherCompiler
 import org.drivine.cypher.sql.SqliteCypherCompiler
-import org.drivine.cypher.sql.Patterns
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
- * #236: the group a store holds a pattern to the whole text in leaves the pattern's own groups their numbers, as a
- * backreference reads them. What each store gives is the spec's, in `queries.yaml` ("A regular expression with a
- * backreference"): this is what each is given.
+ * #236: the SQL stores answer a backreference of `=~` as Java does in a closed set of forms, and refuse every other by name
+ * ([Patterns.refusal]). What each store gives is the spec's, in `queries.yaml` ("A regular expression with a backreference"):
+ * this is what each is given.
  */
 class RegexBackreferenceTest {
 
-    private val cypher = "RETURN \$t =~ \$p"
-    private val parameters = mapOf("t" to "Ada founded Acme", "p" to "(A).*\\1.*")
+    private val compilers = listOf(PostgresCypherCompiler("g"), OracleCypherCompiler("g"), SqliteCypherCompiler("g"))
+
+    /** The forms answered: `\1` to `\8`, no digit after, to a group closed before it that takes part in every match. */
+    private val allowed = listOf(
+        "(A).*\\1.*", "(a)\\1", "(a)\\1\\1", "(a)(b)\\2\\1", "((a)b)\\2", "((a)b)\\1", "(?i)(a)\\1", "(a)\\\\\\1",
+        "(a|b)\\1", "(a)(?:b|c)\\1", "(a)+\\1", "(a){2}\\1", "(a)(b)(c)(d)(e)(f)(g)(h)\\8", "()\\1", "(a)\\1?", "(a)\\1x",
+    )
+
+    /** Each form refused, and what the message names. */
+    private val refused = mapOf(
+        "(a)[\\1]" to "in a character class", "(a)[\\]\\1]" to "in a character class",
+        "(a)(b)(c)(d)(e)(f)(g)(h)(i)\\9" to "past \\8", "(a)(b)(c)(d)(e)(f)(g)(h)(i)(j)\\10" to "past \\8",
+        "(a)\\10" to "with a digit after it",
+        "(a)\\2" to "hasn't closed", "\\1(a)" to "hasn't closed", "(a\\1)" to "hasn't closed",
+        "(a)|\\1" to "may take no part", "(a)?\\1" to "may take no part", "(a)*\\1" to "may take no part", "(?:(a)|b)\\1" to "may take no part",
+        "((a)|b)\\2" to "may take no part", "(?=(a))\\1" to "may take no part", "(a){0,2}\\1" to "may take no part", "x|(a)\\1" to "may take no part",
+    )
 
     @Test
-    fun `Postgres and SQLite hold the pattern in a group that captures nothing`() {
-        val postgres = PostgresCypherCompiler("g").compile(cypher, parameters).sql
-        assertTrue("\\\\A(?:\\3)\\\\Z" in postgres, postgres)
-        assertFalse("\\\\A(\\3)" in postgres, postgres)
-        val sqlite = SqliteCypherCompiler("g").compile(cypher, parameters).sql
-        assertTrue("^(?:" in sqlite, sqlite)
+    fun `the forms answered are read as such, and each other form is refused by what it is`() {
+        allowed.forEach { assertNull(Patterns.refusal(it), it) }
+        refused.forEach { (pattern, why) -> assertTrue(Patterns.refusal(pattern).orEmpty().contains(why), "$pattern: ${Patterns.refusal(pattern)}") }
+        // Escaped, quoted and \c's character are no backreference.
+        listOf("(a)\\\\1", "\\Q\\1\\E", "\\c\\1", "a").forEach { assertFalse(Patterns.holdsBackreference(it), it) }
+        // A class's first ], and an escaped one, leave the class as Java does.
+        assertNull(Patterns.refusal("(a)[]\\]]\\1"))
     }
 
     @Test
-    fun `Oracle numbers each backreference one more, from the highest down and twice over, where it matches and over the empty text`() {
-        val oracle = OracleCypherCompiler("g").compile(cypher, parameters).sql
-        // Each of \1 to \8 moved twice wherever the pattern is held: in matches, and in matchesEmpty.
+    fun `every store refuses a form it can't answer, written or bound, and answers one it can`() {
+        compilers.forEach { compiler ->
+            refused.keys.forEach { pattern ->
+                assertThrows<CompilerException>("${compiler::class.simpleName} $pattern") { compiler.compile("RETURN 'a' =~ \$p", mapOf("p" to pattern)) }
+            }
+            assertThrows<CompilerException> { compiler.compile("RETURN 'a' =~ '(a)\\\\2'", emptyMap()) }
+            allowed.forEach { pattern -> compiler.compile("RETURN 'a' =~ \$p", mapOf("p" to pattern)) }
+        }
+    }
+
+    @Test
+    fun `Postgres and SQLite hold the pattern in a group that captures nothing, and Oracle numbers the pattern's own one more`() {
+        val parameters = mapOf("p" to "(A).*\\1.*")
+        val postgres = PostgresCypherCompiler("g").compile("RETURN 'a' =~ \$p", parameters).sql
+        assertTrue("\\\\A(?:\\3)\\\\Z" in postgres, postgres)
+        assertTrue("^(?:" in SqliteCypherCompiler("g").compile("RETURN 'a' =~ \$p", parameters).sql)
+        val oracle = OracleCypherCompiler("g").compile("RETURN 'a' =~ \$p", parameters).sql
+        // Each of \1 to \8 moved twice where the pattern is held: in matches, and in matchesEmpty; the highest first, innermost.
         val moves = (1..8).map { n -> Regex(Regex.escape("\\\\$n', '\\1\\2\\\\${n + 1}')")).findAll(oracle).count() }
         assertTrue(moves.all { it == moves.first() } && moves.first() >= 4 && moves.first() % 2 == 0, "$moves:\n$oracle")
-        // The highest is moved first, so a lower one moved up is not moved again: its call is innermost, so its pattern is
-        // written first.
-        assertTrue(oracle.indexOf("\\\\8', ") < oracle.indexOf("\\\\1', "), "the highest is not moved innermost:\n$oracle")
-    }
-
-    @Test
-    fun `a backreference is a backslash no backslash escapes, then a digit, and one in a class is told apart`() {
-        fun read(pattern: String) = Patterns.backreferences(pattern).map { it.number to it.inClass }
-        assertEquals(listOf(1 to false), read("(a)\\1"))
-        assertEquals(listOf(1 to false), read("(a)\\\\\\1"), "three backslashes: an escaped one, then a backreference")
-        assertEquals(emptyList(), read("(a)\\\\\\\\1"), "four: two escaped backslashes, then a digit")
-        assertEquals(listOf(1 to true), read("(a)[\\1]"))
-        assertEquals(listOf(1 to false), read("(a)[]\\]]\\1"), "a class's first ] is in it, and an escaped ] too")
-        assertEquals(listOf(1 to true), read("(a)[\\]\\1]"), "an escaped ] leaves the class open")
-        assertEquals(listOf(1 to false), read("(a)[^]]\\1"))
-        assertEquals(emptyList(), read("(a)\\Q\\1\\E"), "quoted")
-        assertEquals(listOf(1 to false, 1 to false), read("(a)\\1\\1"))
-        assertEquals(listOf(1 to true), read("(a)[a[b]\\1]"), "a class in a class closes only itself")
-        assertEquals(listOf(1 to false), read("(a)[a[b]]\\1"))
-        assertEquals(listOf(1 to true), read("(a)[a&&[\\1]]"))
-        assertEquals(listOf(1 to true), read("(a)[\\Q]\\E\\1]"), "a ] quoted in a class leaves it open")
-        assertEquals(listOf(1 to false), read("(a)\\c[\\1"), "a control character's [ opens no class")
+        assertTrue(oracle.indexOf("\\\\8', ") < oracle.indexOf("\\\\1', "), oracle)
     }
 
     @Test
     fun `Oracle numbers nothing in a pattern the statement gives that writes no backreference`() {
-        listOf("RETURN \$t =~ 'A.*'", "RETURN \$t =~ \$p").forEach { cypher ->
-            val oracle = OracleCypherCompiler("g").compile(cypher, mapOf("t" to "Ada", "p" to "A.*")).sql
-            assertFalse("\\\\1', " in oracle || "Oracle names groups" in oracle, "$cypher:\n$oracle")
-        }
-        val written = OracleCypherCompiler("g").compile("RETURN \$t =~ '(A).*\\\\1'", mapOf("t" to "Ada")).sql
-        assertTrue("\\\\1', " in written, written)
-    }
-
-    @Test
-    fun `a backreference in a class is refused on every store, and Oracle refuses a ninth by name, given or written`() {
-        listOf(PostgresCypherCompiler("g"), OracleCypherCompiler("g"), SqliteCypherCompiler("g")).forEach { compiler ->
-            val refused = assertThrows<CompilerException> { compiler.compile("RETURN 'a1' =~ \$p", mapOf("p" to "(a)[\\1]")) }
-            assertTrue("character class" in refused.message.orEmpty(), refused.message)
-        }
-        val nine = "(a)(b)(c)(d)(e)(f)(g)(h)(i)\\9"
-        assertThrows<CompilerException> { OracleCypherCompiler("g").compile("RETURN 'a9' =~ '${nine.replace("\\", "\\\\")}'", emptyMap()) }
-        assertThrows<CompilerException> { OracleCypherCompiler("g").compile("RETURN 'a9' =~ \$p", mapOf("p" to nine)) }
-        PostgresCypherCompiler("g").compile("RETURN 'a9' =~ \$p", mapOf("p" to nine))
-        // One worked out as the statement runs is failed then.
-        val oracle = OracleCypherCompiler("g").compile("WITH '(a)' + \$n AS p RETURN 'aa' =~ p", mapOf("n" to "\\9")).sql
-        assertTrue("Oracle names groups" in oracle, oracle)
-    }
-
-    @Test
-    fun `a backreference to a group the pattern doesn't have is asked as a pattern that matches nothing, on every store`() {
-        assertEquals(1, Patterns.groups("(a)(?:b)(?=c)"))
-        assertEquals(2, Patterns.groups("(a)(?<n>b)[(]\\(\\Q(\\E"))
-        assertTrue(Patterns.dangling("(a)\\2") && !Patterns.dangling("(a)\\1") && !Patterns.dangling("(a)[\\]\\2]"))
-        // A group that follows, or holds the backreference, hasn't closed before it.
-        assertTrue(Patterns.dangling("\\1(a)") && Patterns.dangling("(a\\1)") && !Patterns.dangling("((a)\\2)") && !Patterns.dangling("(?:(a))\\1"))
-        listOf(PostgresCypherCompiler("g"), OracleCypherCompiler("g"), SqliteCypherCompiler("g")).forEach { compiler ->
-            val sql = compiler.compile("RETURN 'a9' =~ \$p", mapOf("p" to "(a)\\9")).sql
-            assertTrue("\"a^\"" in sql || "'a^'" in sql, "${compiler::class.simpleName}:\n$sql")
+        listOf("RETURN 'a' =~ 'A.*'", "RETURN 'a' =~ \$p").forEach { cypher ->
+            val sql = OracleCypherCompiler("g").compile(cypher, mapOf("p" to "A.*")).sql
+            assertFalse("\\\\1', '\\1\\2\\\\2'" in sql, sql)
         }
     }
 
     @Test
-    fun `a dangling backreference the pattern can match without is refused, where Java matches the rest, on every store`() {
-        // Java's answer for each is true: `(a)|\9`, `\1?(a)` and `(a\1)*` over "a", "a" and "", `(a|b\1)+` over "aba".
-        val optional = listOf("(a)|\\9", "\\1?(a)", "\\1*(a)", "\\1{0,2}(a)", "(a\\1)*", "(a|b\\1)+", "(a)(?!\\2)", "(?:x|\\2)(a)")
-        optional.forEach { pattern -> assertTrue(Patterns.backreferences(pattern).single().optional, pattern) }
-        listOf("(a)\\9", "\\1(a)", "(a\\1)+", "(a|b)\\2", "\\1{1,2}(a)").forEach { pattern ->
-            assertFalse(Patterns.backreferences(pattern).single().optional, pattern)
-        }
-        listOf(PostgresCypherCompiler("g"), OracleCypherCompiler("g"), SqliteCypherCompiler("g")).forEach { compiler ->
-            val refused = assertThrows<CompilerException> { compiler.compile("RETURN 'a' =~ \$p", mapOf("p" to "(a)|\\9")) }
-            assertTrue("can match without it" in refused.message.orEmpty(), refused.message)
-            // Beside one that must match, Java matches nothing either: `(a)\2?\3` over "a" is false.
-            val sql = compiler.compile("RETURN 'a' =~ \$p", mapOf("p" to "(a)\\2?\\3")).sql
-            assertTrue("\"a^\"" in sql || "'a^'" in sql, "${compiler::class.simpleName}:\n$sql")
+    fun `a pattern worked out as the statement runs is refused then where it writes a backreference, on every store`() {
+        compilers.forEach { compiler ->
+            listOf("WITH '(a)' + \$n AS p RETURN 'aa' =~ p", "RETURN 'aa' =~ \$m.p", "MATCH (n) RETURN n.name =~ n.pattern").forEach { cypher ->
+                val sql = compiler.compile(cypher, mapOf("n" to "\\1", "m" to mapOf("p" to "(a)\\1"))).sql
+                assertTrue("worked out as the statement runs writes a backreference" in sql, "${compiler::class.simpleName} $cypher:\n$sql")
+                assertTrue(Patterns.BACKREFERENCE in sql || Patterns.BACKREFERENCE.replace("'", "''") in sql, sql)
+            }
+            // A pattern written or bound carries no such test.
+            assertFalse("worked out as the statement runs" in compiler.compile("RETURN 'a' =~ \$p", mapOf("p" to "(a)\\1")).sql)
         }
     }
 
     @Test
-    fun `a backreference reads a second digit as Java does, where that many groups have opened before it`() {
-        val ten = "(a)(b)(c)(d)(e)(f)(g)(h)(i)(j)"
-        // Java: `\10` after ten groups is the tenth's, "abcdefghijj"; after one, the first's and a 0, "aa0".
-        assertEquals(10, Patterns.backreferences("$ten\\10").single().number)
-        assertEquals(1, Patterns.backreferences("(a)\\10").single().number)
-        assertEquals(11, Patterns.backreferences("$ten(k)\\11").single().number)
-        // The tenth group open at it: Java matches nothing; it is asked as NO_MATCH, so Postgres never reads it.
-        assertTrue(Patterns.dangling("(a)(b)(c)(d)(e)(f)(g)(h)(i)(j\\10)"))
-        // Oracle has no `\11` for the pattern's tenth group, held as its eleventh.
-        assertThrows<CompilerException> { OracleCypherCompiler("g").compile("RETURN 'abcdefghijj' =~ \$p", mapOf("p" to "$ten\\10")) }
-        PostgresCypherCompiler("g").compile("RETURN 'abcdefghijj' =~ \$p", mapOf("p" to "$ten\\10"))
-    }
-
-    @Test
-    fun `Oracle asks a ninth backreference whose group hasn't closed as a pattern that matches nothing, not refused`() {
-        val sql = OracleCypherCompiler("g").compile("RETURN 'a' =~ \$p", mapOf("p" to "(a)(b)(c)(d)(e)(f)(g)(h)\\9(i)")).sql
-        assertTrue(Patterns.NO_MATCH in sql, sql)
-    }
-
-    @Test
-    fun `a digit after a backreference is written in a class of its own, which Postgres reads as Java does, not as an octal escape`() {
-        val ten = "(a)(b)(c)(d)(e)(f)(g)(h)(i)(j)"
-        assertEquals("(a)\\1[0]", Patterns.digitsApart("(a)\\10"))
-        assertEquals("$ten\\10[0]0", Patterns.digitsApart("$ten\\1000"))
-        listOf("(a)\\1", "(a)\\\\10", "(a)\\Q\\10\\E", "(a)\\1a0").forEach { assertEquals(it, Patterns.digitsApart(it)) }
-        // Java: `(a)\10` over "aa0" is true. Postgres read `\10` as a backspace, there being no tenth group.
-        val sql = PostgresCypherCompiler("g").compile("RETURN 'aa0' =~ \$p", mapOf("p" to "(a)\\10")).sql
-        assertTrue("(a)\\\\1[0]" in sql, sql)
-        // A pattern no digit follows a backreference in is bound, as given.
-        assertFalse("(a)" in PostgresCypherCompiler("g").compile("RETURN 'aa' =~ \$p", mapOf("p" to "(a)\\1")).sql)
-    }
-
-    @Test
-    fun `a pattern given as a parameter's key is read as one given as a parameter`() {
-        listOf(PostgresCypherCompiler("g"), OracleCypherCompiler("g"), SqliteCypherCompiler("g")).forEach { compiler ->
-            val sql = compiler.compile("RETURN 'a9' =~ \$m.re", mapOf("m" to mapOf("re" to "(a)\\9"))).sql
-            assertTrue("\"a^\"" in sql || "'a^'" in sql, "${compiler::class.simpleName}:\n$sql")
-        }
+    fun `the test for a backreference finds one where no backslash escapes it`() {
+        val test = Regex(Patterns.BACKREFERENCE)
+        listOf("(a)\\1", "\\\\\\1", "x\\9").forEach { assertTrue(test.containsMatchIn(it), it) }
+        listOf("(a)\\\\1", "\\\\\\\\1", "\\0", "a").forEach { assertFalse(test.containsMatchIn(it), it) }
     }
 }

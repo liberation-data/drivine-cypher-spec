@@ -1,71 +1,81 @@
 package org.drivine.cypher.sql
 
-/** What a regular expression of Java's writes, as `=~` reads it, read from its text where the statement gives it. */
+/**
+ * The backreferences a regular expression of `=~` writes, read as Java reads them, and those of them the SQL stores answer as
+ * Java does (#236). The stores hold a pattern to the whole text in a group of their own, and each reads a backreference its
+ * own way past the simplest forms, so the forms they answer are a closed set, and every other is refused by name.
+ */
 internal object Patterns {
 
     /**
-     * A pattern of `=~` that matches no text: a character before the text's start. The SQL stores ask it in place of a
-     * pattern Java matches nothing with ([dangling]); on SQLite each library's regular expressions read it, so it is among
-     * the compiler's patterns the tests check on every target (`DrivinePatterns`).
+     * A pattern that finds a backreference, `\1` to `\9`, that no backslash escapes, as each store's regular expressions read
+     * it: a pattern worked out as the statement runs, which the compiler can't read, is refused then where it writes one
+     * (`SqlCypherCompiler.holdsBackreference`). On SQLite each library's regular expressions read it, so it is among the
+     * compiler's patterns the tests check on every target (`DrivinePatterns`).
      */
-    const val NO_MATCH = "a^"
+    const val BACKREFERENCE = """(^|[^\\])(\\\\)*\\[1-9]"""
 
     /**
-     * A backreference, `\1` and on: its number, whether it is written in a character class, whether its group has
-     * closed before it, as it must for Java to match it, and whether the pattern can match without it: in an alternative
-     * (`(a)|\9`), in a lookaround, or where a quantifier lets it, or a group that holds it, match no times (`\1?(a)`); and
-     * where its digits [end].
+     * Why the SQL stores can't answer [pattern]'s backreferences as Java does, or null where they can, or it writes none. A
+     * backreference is answered where it is `\1` to `\8`, outside a character class, with no digit after it, to a group that
+     * has closed before it and takes part in every match: one in no alternative, lookaround or quantifier that lets it match
+     * no times, nor in a group that is.
      */
-    data class Backreference(val number: Int, val inClass: Boolean, val closed: Boolean = false, val optional: Boolean = false, val end: Int = 0)
-
-    /**
-     * The groups [pattern] captures, as Java numbers them: each `(` that no backslash escapes, out of a class and a quote,
-     * that isn't `(?`, but for a named group, `(?<name>`.
-     */
-    fun groups(pattern: String): Int = scan(pattern).second
-
-    /**
-     * Whether [pattern] writes a backreference, out of a class, to a group that hasn't closed before it: one it doesn't have,
-     * one that follows (`\1(a)`) or one that holds it (`(a\1)`). Java's matches nothing there, where Postgres refuses the
-     * pattern.
-     */
-    fun dangling(pattern: String): Boolean = scan(pattern).first.any { !it.inClass && !it.closed }
-
-    /**
-     * Each backreference [pattern] writes, as Java reads it: a backslash that no backslash escapes, then a digit 1 to 9, and
-     * each digit after it while the number still names a group opened before it, so `\10` is the tenth group's where ten
-     * have opened, else the first's and a `0`. One quoted (`\Q…\E`) is none. A class is opened by `[` and closed by a `]`
-     * that isn't its first character, and may hold another, as Java's do.
-     */
-    fun backreferences(pattern: String): List<Backreference> = scan(pattern).first
-
-    /**
-     * [pattern] with the digit after each backreference, out of a class, written in a class of its own, `\1[0]`, which
-     * every store reads as Java does. Java reads `(a)\10` as the first group's and a `0`; Postgres reads all the digits as
-     * one number, and where no group has it, as an octal escape, `\10` a backspace (#236).
-     */
-    fun digitsApart(pattern: String): String =
-        backreferences(pattern).filter { !it.inClass && pattern.getOrNull(it.end) in '0'..'9' }.foldRight(pattern) { it, p ->
-            p.substring(0, it.end) + "[" + p[it.end] + "]" + p.substring(it.end + 1)
+    fun refusal(pattern: String): String? {
+        val (found, groups) = scan(pattern)
+        for (it in found) {
+            val why = when {
+                it.inClass -> "in a character class, which Java refuses"
+                it.number > 8 -> "past \\8"
+                it.digitAfter -> "with a digit after it"
+                it.number !in it.closed -> "to a group that hasn't closed before it"
+                !groups[it.number - 1].always -> "to a group that may take no part in a match: in an alternative, a lookaround, or under a quantifier that lets it match no times"
+                else -> null
+            }
+            if (why != null) {
+                return "The regular expression '$pattern' writes a backreference, \\${it.number}, $why: the SQL stores answer a " +
+                    "backreference as Java does only where it is \\1 to \\8, with no digit after it, to a group that closed before it and takes part in every match."
+            }
         }
+        return null
+    }
+
+    /** Whether [pattern] writes a backreference, as Java reads one. */
+    fun holdsBackreference(pattern: String): Boolean = scan(pattern).first.isNotEmpty()
+
+    /** A backreference: its number, whether it is in a character class, whether a digit follows it, and the groups closed before it. */
+    private class Backreference(val number: Int, val inClass: Boolean, val digitAfter: Boolean, val closed: Set<Int>)
 
     /**
-     * A group open as the pattern is read, the whole pattern the first: its number, null for one that captures nothing;
-     * whether it is a lookaround; whether it holds an alternative; and the backreferences it holds, by their place.
+     * A capturing group, and whether it takes part in every match, which is known once the pattern is read: none of it, nor
+     * any group that holds it, is in an alternative or a lookaround, or under a quantifier that lets it match no times.
      */
-    private class Group(val number: Int?, val lookaround: Boolean, var alternated: Boolean = false, val held: MutableList<Int> = mutableListOf())
+    private class Group {
+        var always = true
+    }
+
+    /** A group open as the pattern is read: the capturing group it is, if it captures; whether it alternates; what it holds. */
+    private class Open(val group: Group?, val parent: Open?, val lookaround: Boolean) {
+        var alternated = false
+        val held = mutableListOf<Group>()
+    }
 
     /** Whether a quantifier at [at] in [pattern] lets what it follows match no times: `?`, `*` or `{0`. */
     private fun none(pattern: String, at: Int) =
         pattern.getOrNull(at) == '?' || pattern.getOrNull(at) == '*' || Regex("""\{0+[,}]""").find(pattern, at)?.range?.first == at
 
-    private fun scan(pattern: String): Pair<List<Backreference>, Int> {
-        var groups = 0
-        // The groups open at each point; those closed, by number; and the backreferences the pattern can match without.
-        val open = ArrayDeque(listOf(Group(null, false)))
+    /**
+     * Each backreference [pattern] writes, and its capturing groups by number, read as Java reads them: a backslash that no
+     * backslash escapes, then a digit 1 to 9, and each digit after it while the number still names a group opened before it.
+     * One quoted (`\Q…\E`) is none, nor `\cX`'s character. A class is opened by `[` and closed by a `]` that isn't its first
+     * character, and may hold another, as Java's do.
+     */
+    private fun scan(pattern: String): Pair<List<Backreference>, List<Group>> {
+        val groups = mutableListOf<Group>()
         val closed = mutableSetOf<Int>()
-        val optional = mutableSetOf<Int>()
         val found = mutableListOf<Backreference>()
+        val top = Open(null, null, false)
+        var open = top
         var depth = 0
         var i = 0
         while (i < pattern.length) {
@@ -86,13 +96,10 @@ internal object Patterns {
                     if (next in '1'..'9') {
                         var number = next - '0'
                         i += 2
-                        // Java refuses one in a class ([SqlCypherCompiler.checkPattern]): the digits after it there are left.
-                        while (depth == 0 && pattern.getOrNull(i) in '0'..'9' && number * 10 + (pattern[i] - '0') <= groups) {
+                        while (depth == 0 && pattern.getOrNull(i) in '0'..'9' && number * 10 + (pattern[i] - '0') <= groups.size) {
                             number = number * 10 + (pattern[i++] - '0')
                         }
-                        if (depth == 0) open.last().held += found.size
-                        if (depth == 0 && none(pattern, i)) optional += found.size
-                        found += Backreference(number, depth > 0, number in closed, end = i)
+                        found += Backreference(number, depth > 0, pattern.getOrNull(i) in '0'..'9', closed.toSet())
                         continue
                     }
                     i += 2
@@ -101,14 +108,19 @@ internal object Patterns {
                 c == '(' && depth == 0 -> {
                     val named = pattern.startsWith("?<", i + 1) && pattern.getOrNull(i + 3)?.isLetter() == true
                     val lookaround = listOf("?=", "?!", "?<=", "?<!").any { pattern.startsWith(it, i + 1) }
-                    open.addLast(Group(if (!pattern.startsWith("?", i + 1) || named) ++groups else null, lookaround))
+                    val group = if (!pattern.startsWith("?", i + 1) || named) Group().also(groups::add) else null
+                    open = Open(group, open, lookaround)
                 }
-                c == '|' && depth == 0 -> open.last().alternated = true
-                c == ')' && depth == 0 && open.size > 1 -> {
-                    val group = open.removeLast()
-                    group.number?.let(closed::add)
-                    if (group.alternated || group.lookaround || none(pattern, i + 1)) optional += group.held
-                    open.last().held += group.held
+                c == '|' && depth == 0 -> open.alternated = true
+                c == ')' && depth == 0 && open.parent != null -> {
+                    val done = open
+                    open = done.parent!!
+                    done.group?.let { closed += groups.indexOf(it) + 1 }
+                    // An alternative in a group holds what's in it, not the group itself; a lookaround or a quantifier, both.
+                    if (done.alternated) done.held.forEach { it.always = false }
+                    val held = done.held + listOfNotNull(done.group)
+                    if (done.lookaround || none(pattern, i + 1)) held.forEach { it.always = false }
+                    open.held += held
                 }
                 c == '[' -> {
                     depth++
@@ -119,7 +131,7 @@ internal object Patterns {
             }
             i++
         }
-        if (open.first().alternated) optional += open.first().held
-        return found.mapIndexed { k, it -> if (k in optional) it.copy(optional = true) else it } to groups
+        if (top.alternated) top.held.forEach { it.always = false }
+        return found to groups
     }
 }

@@ -1936,30 +1936,17 @@ class OracleCypherCompiler(
      * [pattern] with each backreference that no backslash escapes, `\1` to `\8`, numbered one more: Oracle has no group that
      * captures nothing, so the group [matches] holds the pattern in is the first, and the pattern's own are numbered from the
      * second (#236). Each number is moved from the highest down, so none is moved twice; and twice over, as a backreference
-     * just after another, `(a)\1\1`, is not found until the one before it is. Oracle reads no backreference past `\9`, so a
-     * pattern's `\9` names a group it doesn't have. A pattern the statement gives that writes no backreference, as most
-     * don't, is left as it is: the sixteen calls would triple the SQL of each `=~`, and run for each row.
+     * just after another, `(a)\1\1`, is not found until the one before it is. Only a pattern the statement gives writes a
+     * backreference here: one past `\8`, or otherwise out of what the stores answer as Java does, is refused as it is
+     * compiled ([Patterns.refusal]), and one worked out as the statement runs is refused as it runs. A pattern that writes
+     * none, as most don't, is left as it is: the sixteen calls would triple the SQL of each `=~`.
      */
     private fun backreferencesShifted(pattern: String) =
-        if (patternGiven?.let(Patterns::backreferences)?.isEmpty() == true) pattern else shared(pattern) { (p) ->
-            val shifted = (8 downTo 1).fold(p) { x, n ->
-                (1..2).fold(x) { y, _ -> """REGEXP_REPLACE($y, '(^|[^\\])((\\\\)*)\\$n', '\1\2\\${n + 1}')""" }
-            }
-            // A pattern worked out as the statement runs, which [checkPattern] can't read, fails here.
-            """CASE WHEN REGEXP_LIKE($p, '(^|[^\\])((\\\\)*)\\9') THEN TO_CHAR(${textFailure(NINTH_BACKREFERENCE, p)}) ELSE $shifted END"""
+        if (patternGiven?.let(Patterns::holdsBackreference) != true) pattern else (8 downTo 1).fold(pattern) { x, n ->
+            (1..2).fold(x) { y, _ -> """REGEXP_REPLACE($y, '(^|[^\\])((\\\\)*)\\$n', '\1\2\\${n + 1}')""" }
         }
 
-    /**
-     * Refuses, besides what every store does, a pattern that writes a backreference to its ninth group or past, `\9` or, where
-     * ten have opened before it, `\10`, which [backreferencesShifted] can't number on.
-     */
-    override fun checkPattern(pattern: String) {
-        super.checkPattern(pattern)
-        // One whose group hasn't closed before it matches nothing, as `=~` asks it ([Patterns.dangling]).
-        if (Patterns.groups(pattern) >= 9 && Patterns.backreferences(pattern).any { it.number >= 9 && !it.inClass && it.closed }) {
-            throw CompilerException("$NINTH_BACKREFERENCE '$pattern'")
-        }
-    }
+    override fun holdsBackreference(text: String) = "REGEXP_LIKE($text, ${literal(Patterns.BACKREFERENCE)})"
 
     /**
      * The text as JSON writes it, with each separator as JSON writes it made the end of one string and the start of the next.
@@ -2233,8 +2220,6 @@ class OracleCypherCompiler(
     private fun kind(json: String) = "JSON_VALUE($json, '\$.type()')"
 
     companion object {
-        /** Why Oracle refuses a pattern of `=~` that writes `\\9`: see [backreferencesShifted]. */
-        const val NINTH_BACKREFERENCE = "Oracle names groups \\1 to \\9 only, and =~ holds the pattern in a group of its own, so the pattern's ninth group and those after it have no name there: a pattern that writes a backreference to one, \\9 or past, is refused:"
         /** A hint a query starts with: `SELECT /*+ … */ `. */
         private val LEADING_HINT = Regex("""^SELECT (/\*\+.*?\*/) """)
 
