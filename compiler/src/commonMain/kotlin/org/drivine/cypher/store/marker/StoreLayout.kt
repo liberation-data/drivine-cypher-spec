@@ -20,18 +20,29 @@ import org.drivine.cypher.store.ddl.StoreDdl
  * A library reads the stamps ([StoreStampStatements.readStamps]) and whether the graph holds a node other than Drivine's own,
  * the stamp and the schema marker ([StoreStampStatements.foreignNodes]), and asks [verdict]:
  *
- * | The stamps' layout | Nodes other than Drivine's | Verdict |
- * |---|---|---|
- * | the library's own | any | [Verdict.Current] |
- * | absent or older | none | [Verdict.Stamp]: the old layout's indexes dropped, then [StoreStampStatements.restampLayout]. Nothing is migrated |
- * | absent or older | some | [Verdict.Refuse]: names the graph, its layout and this one's, and the reload |
- * | above the library's own | any, none among them | [Verdict.Refuse]: written by a later Drivine, to be upgraded |
- * | several, of different layouts | any | [Verdict.Refuse] |
- * | none | any, and a later layout's generated names (`g_ix3_…`) | [Verdict.Refuse]: made by a later Drivine, to be upgraded |
- * | none | none, and no earlier layout's object | [Verdict.Current]: a new graph, or one cleared; the stamp is assigned as ever |
- * | none | none, and an earlier layout's objects | [Verdict.Stamp]: those dropped, whatever of this layout's stands beside them, then asked again |
- * | none | some, and the store's objects show this layout made it and no earlier one did | [Verdict.Stamp] with [Verdict.Stamp.assign]: a graph of this layout whose stamp a clear deleted (`MATCH (n) DETACH DELETE n` deletes Drivine's own nodes too), stamped again |
- * | none | some, and objects of this layout and an earlier one | [Verdict.Refuse], naming both |
+ * The verdict is the first row of this table that the graph meets, every graph meeting one (the module's `StoreLayoutTableTest`
+ * runs every combination of stamps, values, objects and [verdict]'s `ddl` through it). The stamps are those read; the values,
+ * whether the graph holds a node other than Drivine's own; the objects, those of the graph the store lists, known by the
+ * names a layout generates only where the library gives the store's DDL, and none on a graph engine:
+ *
+ * | # | Stamps | Values | Objects | Verdict |
+ * |---|---|---|---|---|
+ * | 1 | of two layouts or more | any | any | [Verdict.Refuse]: stamped by two versions at once |
+ * | 2 | of a later layout | any | any | [Verdict.Refuse]: written by a later Drivine, to be upgraded |
+ * | 3 | any | any | a later layout's (`g_ix3_…`) | [Verdict.Refuse]: made by a later Drivine, to be upgraded |
+ * | 4 | of this layout | any | any else | [Verdict.Current] |
+ * | 5 | of an earlier layout | none | any else | [Verdict.Stamp]: the earlier layout's objects dropped, then [StoreStampStatements.restampLayout]. Nothing is migrated |
+ * | 6 | of an earlier layout | some | any else | [Verdict.Refuse]: names its layout and this one, and the reload |
+ * | 7 | none, on a graph engine | any | none | [Verdict.Current]: a graph engine holds layout 1, its own, with a stamp or without |
+ * | 8 | none | none | none of an earlier layout's | [Verdict.Current]: new, or cleared; the stamp is assigned as ever |
+ * | 9 | none | none | an earlier layout's, whatever of this one's beside | [Verdict.Stamp]: those dropped, then asked again (the restamp finds no stamp, and changes nothing) |
+ * | 10 | none | some | this layout's and an earlier one's | [Verdict.Refuse]: naming both |
+ * | 11 | none | some | this layout's only | [Verdict.Stamp] with [Verdict.Stamp.assign]: a graph of this layout whose stamp a clear deleted (`MATCH (n) DETACH DELETE n` deletes Drivine's own nodes too), stamped again |
+ * | 12 | none | some | an earlier layout's only, or none | [Verdict.Refuse]: as layout 1's, as row 6 |
+ *
+ * Without the store's DDL no object is known as any layout's, and the rows read so: none is new where empty (8), and refused
+ * as layout 1's holding values (12). An earlier layout's objects beside a stamp of this layout (4) are the schema plan's: a
+ * record it holds of another form is made again by it, and none is the verdict's.
  *
  * This layout's objects are its lock table ([SqlStoreDdl.lock]), which only this layout makes, and the names it generates
  * ([SqlStoreDdl.objectName], `g_ix2_…`); an earlier layout's, the names it generated (`g_ix_…`, [oldObjects]).
@@ -92,41 +103,36 @@ object StoreLayout {
             )
         }
         val sql = ddl as? SqlStoreDdl
-        // No stamp at all: a new graph, or one whose stamp a clear deleted, told by what the store holds. Without [ddl] no
-        // object is known as either layout's: an empty graph is still new, not re-stamped by a restamp that finds no stamp.
-        if (stampRows.isEmpty() && engine in SQL_ENGINES) {
-            val old = sql?.let { oldObjects(it, objects) }.orEmpty()
-            val ours = sql?.let { ownObjects(it, objects) }.orEmpty()
-            // A later layout's names: refused whatever the graph holds, as a later layout's stamp is, not taken for new or for layout 1.
-            val later = sql?.let { s -> objects.mapNotNull { row -> (row["name"] as? String)?.let { generatedLayout(generated(s), it) } } }.orEmpty().maxOrNull()
-            if (later != null && later > own) {
-                return Verdict.Refuse(
-                    "The graph '$graph' on $store was written in store layout $later by a later version of Drivine, and this version reads layout $own only: upgrade Drivine to use it.",
-                )
-            }
-            // Values beside both layouts' objects can't be told apart. An empty graph has nothing to lose: an earlier layout's
-            // are dropped as below, whatever of this layout's stands beside them.
-            if (foreignNodes && old.isNotEmpty() && ours.isNotEmpty()) {
-                return Verdict.Refuse(
-                    "The graph '$graph' on $store has no store stamp, and holds objects of store layout $own (${ours.joinToString()}) and of an earlier layout " +
-                        "(${old.joinToString { it.first }}): two versions of Drivine made it. This version of Drivine reads layout $own only. " +
-                        "Reload it: export it with the Drivine version that wrote it and import it with this one; see the upgrade notes.",
-                )
-            }
-            if (!foreignNodes && old.isEmpty()) return Verdict.Current
-            if (foreignNodes && ours.isNotEmpty()) return Verdict.Stamp(emptyList(), StoreStamp.restampParameters(engine), assign = true)
-        }
-        val layout = layouts.singleOrNull() ?: GRAPH_ENGINE_LAYOUT
+        val names = objects.mapNotNull { it["name"] as? String }
+        // What the objects say, by the names each layout generates: known only on a store of [ddl], none on a graph engine.
+        val old = sql?.let { oldObjects(it, objects) }.orEmpty()
+        val ours = sql?.let { ownObjects(it, objects) }.orEmpty()
+        val later = sql?.let { s -> names.mapNotNull { generatedLayout(generated(s), it) } }.orEmpty().filter { it > own }.maxOrNull()
+        val stamped = layouts.singleOrNull()
+        fun upgrade(layout: Int) = Verdict.Refuse(
+            "The graph '$graph' on $store was written in store layout $layout by a later version of Drivine, and this version reads layout $own only: upgrade Drivine to use it.",
+        )
+        fun reload(layout: Int) = Verdict.Refuse(
+            "The graph '$graph' on $store was written in store layout $layout, and this version of Drivine reads layout $own only, which holds values otherwise. " +
+                "Reload it: export it with the Drivine version that wrote it and import it with this one; see the upgrade notes.",
+        )
+        // The rows of the table above, in its order: the first the graph meets is its verdict.
         return when {
-            layout == own -> Verdict.Current
-            layout > own -> Verdict.Refuse(
-                "The graph '$graph' on $store was written in store layout $layout by a later version of Drivine, and this version reads layout $own only: upgrade Drivine to use it.",
-            )
-            foreignNodes -> Verdict.Refuse(
-                "The graph '$graph' on $store was written in store layout $layout, and this version of Drivine reads layout $own only, which holds values otherwise. " +
+            stamped != null && stamped > own -> upgrade(stamped)
+            later != null -> upgrade(later)
+            stamped == own -> Verdict.Current
+            stamped != null && !foreignNodes -> Verdict.Stamp(sql?.let { drops(it, objects) }.orEmpty(), StoreStamp.restampParameters(engine))
+            stamped != null -> reload(stamped)
+            engine !in SQL_ENGINES -> Verdict.Current
+            !foreignNodes && old.isEmpty() -> Verdict.Current
+            !foreignNodes -> Verdict.Stamp(drops(sql!!, objects), StoreStamp.restampParameters(engine))
+            ours.isNotEmpty() && old.isNotEmpty() -> Verdict.Refuse(
+                "The graph '$graph' on $store has no store stamp, and holds objects of store layout $own (${ours.joinToString()}) and of an earlier layout " +
+                    "(${old.joinToString { it.first }}): two versions of Drivine made it. This version of Drivine reads layout $own only. " +
                     "Reload it: export it with the Drivine version that wrote it and import it with this one; see the upgrade notes.",
             )
-            else -> Verdict.Stamp((ddl as? SqlStoreDdl)?.let { drops(it, objects) }.orEmpty(), StoreStamp.restampParameters(engine))
+            ours.isNotEmpty() -> Verdict.Stamp(emptyList(), StoreStamp.restampParameters(engine), assign = true)
+            else -> reload(GRAPH_ENGINE_LAYOUT)
         }
     }
 
