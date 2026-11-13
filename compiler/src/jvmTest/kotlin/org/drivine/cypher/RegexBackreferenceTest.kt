@@ -96,4 +96,18 @@ class RegexBackreferenceTest {
             assertTrue("\"a^\"" in sql || "'a^'" in sql, "${compiler::class.simpleName}:\n$sql")
         }
     }
+
+    @Test
+    fun `a dangling backreference the pattern can match without is refused, where Java matches the rest, on every store`() {
+        // Java's answer for each is true: `(a)|\9`, `\1?(a)` and `(a\1)*` over "a", "a" and "", `(a|b\1)+` over "aba".
+        val optional = listOf("(a)|\\9", "\\1?(a)", "\\1*(a)", "\\1{0,2}(a)", "(a\\1)*", "(a|b\\1)+", "(a)(?!\\2)", "(?:x|\\2)(a)")
+        optional.forEach { pattern -> assertTrue(Patterns.backreferences(pattern).single().optional, pattern) }
+        listOf("(a)\\9", "\\1(a)", "(a\\1)+", "(a|b)\\2", "\\1{1,2}(a)").forEach { pattern ->
+            assertFalse(Patterns.backreferences(pattern).single().optional, pattern)
+        }
+        listOf(PostgresCypherCompiler("g"), OracleCypherCompiler("g"), SqliteCypherCompiler("g")).forEach { compiler ->
+            val refused = assertThrows<CompilerException> { compiler.compile("RETURN 'a' =~ \$p", mapOf("p" to "(a)|\\9")) }
+            assertTrue("can match without it" in refused.message.orEmpty(), refused.message)
+        }
+    }
 }

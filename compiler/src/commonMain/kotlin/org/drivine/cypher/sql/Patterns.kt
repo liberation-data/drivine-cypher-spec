@@ -4,10 +4,11 @@ package org.drivine.cypher.sql
 internal object Patterns {
 
     /**
-     * A backreference, `\1` to `\9`: its number, whether it is written in a character class, and whether its group has
-     * closed before it, as it must for Java to match it.
+     * A backreference, `\1` to `\9`: its number, whether it is written in a character class, whether its group has
+     * closed before it, as it must for Java to match it, and whether the pattern can match without it: in an alternative
+     * (`(a)|\9`), in a lookaround, or where a quantifier lets it, or a group that holds it, match no times (`\1?(a)`).
      */
-    data class Backreference(val number: Int, val inClass: Boolean, val closed: Boolean = false)
+    data class Backreference(val number: Int, val inClass: Boolean, val closed: Boolean = false, val optional: Boolean = false)
 
     /**
      * The groups [pattern] captures, as Java numbers them: each `(` that no backslash escapes, out of a class and a quote,
@@ -29,11 +30,22 @@ internal object Patterns {
      */
     fun backreferences(pattern: String): List<Backreference> = scan(pattern).first
 
+    /**
+     * A group open as the pattern is read, the whole pattern the first: its number, null for one that captures nothing;
+     * whether it is a lookaround; whether it holds an alternative; and the backreferences it holds, by their place.
+     */
+    private class Group(val number: Int?, val lookaround: Boolean, var alternated: Boolean = false, val held: MutableList<Int> = mutableListOf())
+
+    /** Whether a quantifier at [at] in [pattern] lets what it follows match no times: `?`, `*` or `{0`. */
+    private fun none(pattern: String, at: Int) =
+        pattern.getOrNull(at) == '?' || pattern.getOrNull(at) == '*' || Regex("""\{0+[,}]""").find(pattern, at)?.range?.first == at
+
     private fun scan(pattern: String): Pair<List<Backreference>, Int> {
         var groups = 0
-        // The groups open at each point, by number, null for one that captures nothing; and those closed.
-        val open = ArrayDeque<Int?>()
+        // The groups open at each point; those closed, by number; and the backreferences the pattern can match without.
+        val open = ArrayDeque(listOf(Group(null, false)))
         val closed = mutableSetOf<Int>()
+        val optional = mutableSetOf<Int>()
         val found = mutableListOf<Backreference>()
         var depth = 0
         var i = 0
@@ -52,15 +64,26 @@ internal object Patterns {
                         i += 3
                         continue
                     }
-                    if (next in '1'..'9') found += Backreference(next - '0', depth > 0, (next - '0') in closed)
+                    if (next in '1'..'9') {
+                        if (depth == 0) open.last().held += found.size
+                        if (depth == 0 && none(pattern, i + 2)) optional += found.size
+                        found += Backreference(next - '0', depth > 0, (next - '0') in closed)
+                    }
                     i += 2
                     continue
                 }
                 c == '(' && depth == 0 -> {
                     val named = pattern.startsWith("?<", i + 1) && pattern.getOrNull(i + 3)?.isLetter() == true
-                    if (!pattern.startsWith("?", i + 1) || named) open.addLast(++groups) else open.addLast(null)
+                    val lookaround = listOf("?=", "?!", "?<=", "?<!").any { pattern.startsWith(it, i + 1) }
+                    open.addLast(Group(if (!pattern.startsWith("?", i + 1) || named) ++groups else null, lookaround))
                 }
-                c == ')' && depth == 0 -> open.removeLastOrNull()?.let(closed::add)
+                c == '|' && depth == 0 -> open.last().alternated = true
+                c == ')' && depth == 0 && open.size > 1 -> {
+                    val group = open.removeLast()
+                    group.number?.let(closed::add)
+                    if (group.alternated || group.lookaround || none(pattern, i + 1)) optional += group.held
+                    open.last().held += group.held
+                }
                 c == '[' -> {
                     depth++
                     // A class's first character, `]` or `^]`, is itself.
@@ -70,6 +93,7 @@ internal object Patterns {
             }
             i++
         }
-        return found to groups
+        if (open.first().alternated) optional += open.first().held
+        return found.mapIndexed { k, it -> if (k in optional) it.copy(optional = true) else it } to groups
     }
 }

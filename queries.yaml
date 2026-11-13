@@ -1060,6 +1060,15 @@ cases:
         cypher: "RETURN ['aa' =~ $ahead, 'a' =~ $ahead, 'aa' =~ $inside]"
         parameters: {ahead: "\\1(a)", inside: "(a\\1)"}
         rows: [[false, false, false]]
+      - note: "One the pattern can match without, in an alternative or where a quantifier lets it match no times: Java matches the rest, which the SQL stores can't ask, so they refuse it."
+        only: [neo4j]
+        cypher: "RETURN ['a' =~ $or, 'a' =~ $maybe, 'aba' =~ $loop]"
+        parameters: {or: "(a)|\\9", maybe: "\\1?(a)", loop: "(a|b\\1)+"}
+        rows: [[true, true, true]]
+      - only: [sql]
+        cypher: "RETURN 'a' =~ $p"
+        parameters: {p: "(a)|\\9"}
+        error: true
       - note: "A ninth group's: Oracle names no ninth group of the pattern's, and refuses one."
         only: [neo4j, postgres, sqlite]
         cypher: "RETURN 'abcdefghii' =~ $nine"
