@@ -1929,7 +1929,9 @@ cases:
         rows: [[[0, 9, 9], [10]]]
       - note: "Of texts, by their code points, and beside a value of another kind."
         cypher: "CREATE (:CyWrite {id: 'f', l: ['b']}), (:CyWrite {id: 'g', l: ['a', 'z']}), (:CyWrite {id: 'h', l: 5})"
-      - cypher: "MATCH (n:CyWrite) WHERE n.id IN ['f', 'g', 'b'] RETURN n.id ORDER BY n.l"
+      - note: "Oracle puts a list of numbers first, as its JSON orders kinds (drivine4j#798)."
+        except: [oracle]
+        cypher: "MATCH (n:CyWrite) WHERE n.id IN ['f', 'g', 'b'] RETURN n.id ORDER BY n.l"
         rows: ["g", "f", "b"]
       - cypher: "MATCH (n:CyWrite) WHERE n.id IN ['f', 'g'] RETURN [min(n.l), max(n.l)]"
         rows: [[["a", "z"], ["b"]]]
