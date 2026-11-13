@@ -10,8 +10,8 @@ import kotlin.test.assertTrue
 
 /**
  * drivine4j#418: `+`, `-`, `*` and `/` of a temporal value whose kind the statement doesn't know, a tag read from the store, is
- * worked out as the statement runs by the store's function of temporal arithmetic, where the generic arithmetic gave null; on
- * an Oracle store without it, it fails by name. What each store gives is the spec's, in `temporal.yaml` ("Arithmetic on
+ * worked out as the statement runs by the store's function of temporal arithmetic on Postgres and Oracle, where the generic
+ * arithmetic gave null; on SQLite, which has none yet, and on an Oracle store without it, it fails by name. What each store gives is the spec's, in `temporal.yaml` ("Arithmetic on
  * temporal values read from the store"): this is what each is given.
  */
 class TemporalArithmeticStoredTest {
@@ -112,16 +112,18 @@ class TemporalArithmeticStoredTest {
     }
 
     @Test
-    fun `each store works it out by its function, told the operator, and an Oracle store without it fails by name`() {
-        val calls = mapOf(PostgresCypherCompiler("g") to "g_temporal_arithmetic('", OracleCypherCompiler("g") to "g_temporal_arithmetic('",
-            SqliteCypherCompiler("g") to "drivine_temporal_arithmetic('")
+    fun `Postgres and Oracle work it out by their function, told the operator, and SQLite and an Oracle store without it fail by name`() {
+        val calls = mapOf(PostgresCypherCompiler("g") to "g_temporal_arithmetic('", OracleCypherCompiler("g") to "g_temporal_arithmetic('")
         listOf("+", "-", "*", "/").forEach { operator ->
             calls.forEach { (compiler, call) ->
                 val sql = compiler.compile("MATCH (n:T) RETURN n.a $operator n.b", emptyMap()).sql
                 assertTrue("$call$operator', " in sql && refusal !in sql, "${compiler::class.simpleName} $operator:\n$sql")
             }
-            val sql = refusing.compile("MATCH (n:T) RETURN n.a $operator n.b", emptyMap()).sql
-            assertTrue(refusal in sql && "_temporal_arithmetic(" !in sql, "Oracle without the function, $operator:\n$sql")
+            // SQLite keeps no function yet, nor an Oracle store made before it.
+            listOf(refusing, SqliteCypherCompiler("g")).forEach { compiler ->
+                val sql = compiler.compile("MATCH (n:T) RETURN n.a $operator n.b", emptyMap()).sql
+                assertTrue(refusal in sql && "_temporal_arithmetic(" !in sql, "${compiler::class.simpleName} without the function, $operator:\n$sql")
+            }
         }
     }
 

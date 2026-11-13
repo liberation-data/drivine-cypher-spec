@@ -3,7 +3,7 @@ package org.drivine.cypher.sql
 import org.drivine.cypher.json.TemporalValue
 
 /**
- * The function each SQL store keeps, or registers, that works out `+`, `-`, `*` and `/` where a side is a temporal value read
+ * The function Postgres and Oracle keep that works out `+`, `-`, `*` and `/` where a side is a temporal value read
  * from the store, a tag whose kind the statement doesn't know (drivine4j#418). A compiled statement calls it where a side may
  * be such a tag (`SqlCypherCompiler.temporalRefused`): `<function>(operator, x, y)`, the operator as `+`, `-`, `*` or `/`, and
  * x and y as the JSON they are. It gives the tag the arithmetic makes, and fails by name for a pair of kinds Cypher doesn't add
@@ -18,11 +18,11 @@ import org.drivine.cypher.json.TemporalValue
  * A body changes wherever the inline arithmetic changes. A store made before keeps the function it was made with until it is
  * made again: on Postgres when `PostgresDdl.VERSION` changes, on Oracle when the function's version, a hash of its DDL,
  * changes (`OracleDdl.ensuring`).
+ *
+ * SQLite keeps no function, and has none yet: such arithmetic fails by name there as the statement runs, until a host function
+ * the libraries register works it out (drivine4j#418).
  */
 object TemporalArithmeticFunction {
-
-    /** The SQLite host function each library registers on its connections, as it does the module's others. */
-    const val HOST = "drivine_temporal_arithmetic"
 
     /** The function the store of the graph [graph] keeps. */
     fun name(graph: String) = "${graph}_temporal_arithmetic"

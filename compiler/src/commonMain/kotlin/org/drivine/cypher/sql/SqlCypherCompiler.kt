@@ -133,9 +133,9 @@ abstract class SqlCypherCompiler(
 
     /**
      * The call of the store's function that works out [operator], `+`, `-`, `*` or `/`, of the JSON [x] and [y] where either may
-     * be a tag of a temporal value read from the store, to the tag it gives (drivine4j#418); null where the store has none, as an
-     * Oracle store made by an earlier version, or by a user who may not make a function: such arithmetic then fails by name as
-     * the statement runs. Its body is the compiler's own temporal arithmetic, written for each pair of kinds
+     * be a tag of a temporal value read from the store, to the tag it gives (drivine4j#418); null where the store has none, as
+     * SQLite, and an Oracle store made by an earlier version, or by a user who may not make a function: such arithmetic then
+     * fails by name as the statement runs. Its body is the compiler's own temporal arithmetic, written for each pair of kinds
      * ([TemporalArithmeticFunction]).
      */
     protected open fun storedArithmetic(operator: String, x: String, y: String): String? = null
