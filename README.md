@@ -13,6 +13,7 @@ These files say what a statement in Drivine's flavour of Cypher gives on each st
 - `host.yaml`: what each library's own code does with the values compiled SQL hands it: the functions it registers on SQLite, and how it reads a column of a statement's rows. Read with no store. See [Host functions and readers](#host-functions-and-readers).
 - `search.yaml`: full-text search: the nodes a search finds on each store, over the graph the file's `graph` writes, and how closely each other store ranks a corpus, `search/docs-corpus.json`, as Neo4j's full-text index ranks it. See [Full-text search](#full-text-search).
 - `vector.yaml`: vector search in Cypher: the nodes `db.index.vector.queryNodes()` and Cypher 25's `SEARCH` find on each store, with their scores, over the graph the file's `graph` writes, and what `vector.similarity.cosine()` and `vector.similarity.euclidean()` give. See [Vector search](#vector-search).
+- `fragments.yaml`: the parts of a statement a library writes itself, its object manager's filters and orders, as the compiler's module gives them on each SQL store, and the rows Neo4j keeps or orders for each. See [Fragments](#fragments).
 - `results.yaml`: a statement's columns, and its values with their kinds kept, a node with its labels and a relationship with its type, as each library's call that gives them reads them (drivine4j#741), over the graph the file's `graph` writes. See [Columns and typed values](#columns-and-typed-values).
 - `cli/`: the `drivine` CLI's contract, which runs Cypher on every store and prints its results as cypher-shell does, and `cli.yaml`, the cases each build of it runs. See `cli/README.md`.
 - `model/`: the model file each library writes of an application's fragments, views and how they are stored, which Drivine Studio reads. See `model/README.md`.
@@ -571,6 +572,28 @@ cases:
 **What Neo4j gives.** A cosine index scores a node (1 + cos) / 2, from 1.0 for the same direction to 0.0 for the opposite; a euclidean index 1 / (1 + d²). A node is in an index if it has the index's label and its property is a list of numbers of the index's size, and on a cosine index not a list of zeros. A filter on what a search finds, a `WHERE` after its `YIELD`, or before or after `SEARCH`, is applied after the k nearest are found, so it may leave fewer than k. What a search finds is read on as any node is: matched out from, optionally, in `EXISTS { }`, and aggregated. The cases were recorded on Neo4j 2026.10.1 community, in Cypher 25, its default.
 
 **Refused.** Of Neo4j's vector search, a SQL store refuses by name what it has no counterpart of (see `refusals.yaml`): `db.index.vector.queryRelationships()`, as it makes no vector index on relationships; Neo4j's `VECTOR` type and its functions, `vector()`, `vector_distance()`, `vector_norm()` and `vector_dimension_count()`, as an embedding there is a list of numbers; `db.create.setNodeVectorProperty()`, for a `SET` of the list; and a `k` written as a float, `1.5` or `2.0`, as Neo4j refuses it. A search by `db.index.vector.queryNodes()` is compiled, and refuses before it runs what Neo4j fails: a `k` that is no whole number from 1 to 2147483647, an index the graph has not made, and a vector written or given that is null, of another size than the index's, or of no length on a cosine index.
+
+## Fragments
+
+A library's object manager writes its own SQL for a view or a fragment: the joins, the documents it reads back, the plan of a write. Where that SQL compares, sorts or binds a value, it asks the compiler's module for the part, as a Cypher expression over its own rows, so it compares a temporal value by its key, reads a key that begins with `$` as it is held, answers an equality through the store's index, and binds a value, as a compiled statement does (#161). In Kotlin these are `SqlCypherCompiler.condition`, `value` and `order`; through the JSON entry, a `fragment` request (see compiler/README.md, "Fragments").
+
+`fragments.yaml` pins them. Its nodes are `setup`'s, of the label Person, and each case is one expression over `n`, a row `people_` of the graph's table of nodes that the library matches by that label:
+
+```yaml
+- name: "A date before a date: a value of another kind is no date, and neither before nor after it"
+  condition: "n.born < $d"
+  parameters: {d: {"$temporal": "DATE", "text": "1900-01-01"}}
+  rows: ["p1"]
+  sql:
+    postgres:
+      - "CASE WHEN ... END"
+```
+
+- `condition`, `order` (with `descending`) or `value` is the expression; `parameters` are written as the JSON entry takes them.
+- `sql` is each store's terms, as the module gives them for the graph `graph`, with the file's `indexed` properties and `variables`. The module's `FragmentsTest` holds each target to them.
+- `rows` is what Neo4j gives for the same expression over `setup`'s nodes, by id: the nodes `MATCH (n:Person) WHERE <condition> RETURN n.id` keeps, or the order `MATCH (n:Person) RETURN n.id ORDER BY <order>, n.id` gives. A `value` has none.
+
+**A runner.** Each library's runner makes `setup`'s nodes on each SQL store, as a statement it compiles, and for each case asks for the fragment as its object manager does, then runs it in SQL of its own: `SELECT ... FROM <graph>_node people_ WHERE <Person among its labels> AND <condition>`, or `ORDER BY <the order's terms>, <its id>`, binding the fragment's parameters under the names it gives. The ids it keeps, or their order, are `rows`.
 
 ## Changing the spec
 

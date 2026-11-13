@@ -462,6 +462,22 @@ of its own, so the three libraries read rows, key a temporal value and judge a g
 
   `marker.yaml`'s `storeLayout` pins it.
 
+### Fragments
+
+A library's object manager writes its own SQL, and asks for the parts of it that compare, sort or bind a value: a Cypher expression over rows of that SQL, compiled as a statement's would be, so each library's filters and orders hold values as the compiler does on each store. In Kotlin, `SqlCypherCompiler.condition(cypher, variables, parameters)`, `value(...)` and `order(cypher, descending, ...)` give a `SqlFragment`: its `terms`, one for a condition or a value and the order's in their order, and the `parameters` they bind. Through the JSON entry, `fragment` in place of `cypher`:
+
+```json
+{"store": "oracle", "graph": {"name": "g", "indexedProperties": [["Person", "name"]]},
+ "fragment": {"condition": "n.name = $p", "variables": {"n": {"node": "people_", "labels": ["Person"]}}},
+ "parameters": {"p": "Ada"}}
+```
+
+- `fragment` gives one of `condition`, `value` or `order`, an order with `descending` (false where left out), and `variables`: each a row of the library's SQL, `{"node": "<alias>", "labels": [...]}` or `{"relationship": "<alias>"}`. A node's columns are the table of nodes' (`nid`, `labels`, `props`, `stamp`); a relationship's, the table of relationships'.
+- A node's `labels` are those the library matched it by. An equality of its property with a value is then written with the index of that label and property, where the store's indexes are a label's: Oracle's, for the properties the graph's `indexedProperties` names. Postgres's and SQLite's indexes answer it without them.
+- The answer is `{"terms": [...], "parameters": {...}}`, on Oracle with `storedFunctions` as a statement's answer has it. Each parameter `$p` is bound as `_cy_p`, to its JSON text: a library binds them beside its own, under those names, so it names the parameters of two fragments of one statement apart. `{"refusal": …}` is the compiler's refusal of the expression; a fragment that would call a function a statement declares before it is refused, as SQL a library writes declares none.
+
+The spec's `fragments.yaml` pins each store's terms, and the rows Neo4j gives for each case; each library's runner checks its store gives them.
+
 ### npm
 
 ```js
