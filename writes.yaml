@@ -1917,3 +1917,19 @@ cases:
       - note: "An integer or a null worked out for each row is read as any index is."
         cypher: "MATCH (n:CyWrite) WITH n ORDER BY n.i WITH collect(n) AS l UNWIND [1, null] AS k RETURN l[k].i AS i ORDER BY i"
         rows: [2, null]
+  - name: "Lists read from a property, ordered"
+    description: "A list read from a property, whose kind the statement leaves open, sorts and gives its least and greatest item by item, the shorter first only where one begins the other, as Neo4j has it. Postgres sorted them as jsonb sorts arrays, the shorter first, and SQLite's max read them as text (drivine4j#271)."
+    steps:
+      - cypher: "CREATE (:CyWrite {id: 'a', l: [1, 2]}), (:CyWrite {id: 'b', l: [3]}), (:CyWrite {id: 'c', l: [0, 9, 9]}), (:CyWrite {id: 'd', l: [10]}), (:CyWrite {id: 'e', l: [1]})"
+      - cypher: "MATCH (n:CyWrite) RETURN n.id ORDER BY n.l"
+        rows: ["c", "e", "a", "b", "d"]
+      - cypher: "MATCH (n:CyWrite) RETURN n.id ORDER BY n.l DESC"
+        rows: ["d", "b", "a", "e", "c"]
+      - cypher: "MATCH (n:CyWrite) RETURN [min(n.l), max(n.l)]"
+        rows: [[[0, 9, 9], [10]]]
+      - note: "Of texts, by their code points, and beside a value of another kind."
+        cypher: "CREATE (:CyWrite {id: 'f', l: ['b']}), (:CyWrite {id: 'g', l: ['a', 'z']}), (:CyWrite {id: 'h', l: 5})"
+      - cypher: "MATCH (n:CyWrite) WHERE n.id IN ['f', 'g', 'b'] RETURN n.id ORDER BY n.l"
+        rows: ["g", "f", "b"]
+      - cypher: "MATCH (n:CyWrite) WHERE n.id IN ['f', 'g'] RETURN [min(n.l), max(n.l)]"
+        rows: [[["a", "z"], ["b"]]]

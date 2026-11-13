@@ -312,7 +312,9 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
             "(CASE jsonb_typeof($x) WHEN 'object' THEN COALESCE($tag || COALESCE(${tagKey(x)}, ''), '1') WHEN 'array' THEN '2' WHEN 'string' THEN '3' || ${textOf(x)} " +
                 "WHEN 'boolean' THEN '4' WHEN 'number' THEN '5' END) COLLATE \"C\""
         }
-        val order = (if (ranked != null) listOf(ranked, value) else listOfNotNull(kindOrder(value), key)).joinToString(", ") { "$it $direction" }
+        // A list among them by its items, as [sortKey] orders one (drivine4j#271).
+        val within = if (ranked != null) shared(value) { (x) -> "CASE WHEN jsonb_typeof($x) = 'array' THEN CAST(${flatListKey(x)} AS jsonb) ELSE $x END" } else null
+        val order = (if (ranked != null) listOf(ranked, within!!) else listOfNotNull(kindOrder(value), key)).joinToString(", ") { "$it $direction" }
         return "(array_agg($value ORDER BY $order) FILTER (WHERE COALESCE(jsonb_typeof($value), 'null') <> 'null'))[1]"
     }
 
@@ -367,8 +369,20 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
     override fun sortKey(json: String) = shared(json) { (x) ->
         "ROW(CASE WHEN jsonb_typeof($x) = 'string' THEN '\"\"'::jsonb " +
             "WHEN ${tagKind(x)} IS NOT NULL THEN jsonb_build_object('k', ${tagRank(x, "0") { "$it" }}, 's', COALESCE($x -> 's', $x -> 'v')) " +
+            "WHEN jsonb_typeof($x) = 'array' THEN CAST(${flatListKey(x)} AS jsonb) " +
             "ELSE ${nullIfJsonNull(x)} END, ${codePointText(x)})"
     }
+
+    /**
+     * A list whose kind the statement leaves open, as one read from a property, as `jsonb` that orders as Cypher orders lists:
+     * as [listSortKey] writes it, each item where its kind comes, the item, and what follows it, read in one pass over its items,
+     * not walked: a property's list holds no list, and the walk the planner costs at thousands a row. An item that is a list is
+     * compared as `jsonb` compares it, the shorter first (drivine4j#271).
+     */
+    private fun flatListKey(list: String) =
+        "(SELECT COALESCE(string_agg('[' || ${itemRank("fe.item")} || ', ' || CASE jsonb_typeof(fe.item) " +
+            "WHEN 'string' THEN ${codePoints("(fe.item #>> '{}')")} ELSE CAST(fe.item AS text) END || ', ', '' ORDER BY fe.item_no), '') " +
+            "|| '[]' || repeat(']', COUNT(*)::int) FROM jsonb_array_elements($list) WITH ORDINALITY fe (item, item_no))"
 
     /** A text as [sortKey] sorts it, by its code points: a value the statement makes a text is no tag, so none is read apart. */
     override fun textSortKey(json: String) = shared(json) { (x) ->
