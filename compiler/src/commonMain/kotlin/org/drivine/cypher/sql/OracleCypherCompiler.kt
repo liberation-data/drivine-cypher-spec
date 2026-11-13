@@ -763,10 +763,17 @@ class OracleCypherCompiler(
     override fun indexedTagEquality(property: String, kind: Temporal, key: String, of: IndexedProperty?): String? =
         labelledHeld(of, listOf("'${kind.function}'", if (binds(key)) "(SELECT $key FROM dual)" else key))
 
-    /** The [value]'s class and key ([OracleSql.valueClass], [OracleSql.valueKey]) equal to the property's, as [labelledHeld] reads it. */
-    private fun labelledEquals(of: IndexedProperty?, value: String): String? =
-        if (labelledHeld(of, emptyList()) == null) null
-        else shared(value) { (x) -> labelledHeld(of, listOf(OracleSql.valueClass(x), OracleSql.valueKey(x)))!! }
+    /**
+     * The [value]'s class and key ([OracleSql.valueClass], [OracleSql.valueKey]) equal to the property's, as [labelledHeld] reads it.
+     * A long value, as `toLower($p)` is, is worked out in a query of its own beside each of the index's columns ([sharedBound]),
+     * which Oracle reads once, as it reads a bound value: [shared] around the whole comparison would put the columns inside
+     * that query, where no index is read, and a lookup by a lowercased copy read every node of the label (#238).
+     */
+    private fun labelledEquals(of: IndexedProperty?, value: String): String? {
+        if (labelledHeld(of, emptyList()) == null) return null
+        if (!binds(value)) return labelledHeld(of, listOf(OracleSql.valueClass(value), OracleSql.valueKey(value)))
+        return labelledHeld(of, listOf(sharedBound(value) { (x) -> OracleSql.valueClass(x) }, sharedBound(value) { (x) -> OracleSql.valueKey(x) }))
+    }
 
     /**
      * The class and the key [held] equal to the property [of] names, as each index a label of its node may have over it holds

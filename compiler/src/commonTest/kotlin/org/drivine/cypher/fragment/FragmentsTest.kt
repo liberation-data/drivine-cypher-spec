@@ -321,6 +321,21 @@ class FragmentsTest {
     }
 
     /**
+     * An equality with a value worked out from the parameters alone, as `toLower($p)` is, is read through Oracle's labelled index
+     * as one with a parameter is: each of the index's columns stands bare, compared with the value worked out in a query of its
+     * own, which Oracle reads once. Inside that query, as the whole comparison was, no index is read (#238).
+     */
+    @Test
+    fun aValueOfParametersAloneIsComparedWithTheIndexsColumnsBare() {
+        val labelled = mapOf("n" to FragmentVariable.Node("people_", listOf("Person")))
+        val sql = OracleCypherCompiler("g", indexedProperties = setOf("Person" to "name")).condition("n.name = toLower(${'$'}p)", labelled, mapOf("p" to "ADA")).sql
+        val column = sql.indexOf("CASE WHEN JSON_EXISTS(people_.labels")
+        assertTrue(column >= 0, sql)
+        assertTrue(column < sql.indexOf("(SELECT"), "the index's column outside any query: $sql")
+        assertTrue(sql.contains(" END = (SELECT "), "compared with the value worked out in a query of its own: $sql")
+    }
+
+    /**
      * `fragments.yaml`'s table: each form a fragment takes, each condition in each of its positions and each value as an order
      * both ways, compiled on each store to the terms whose digest the table pins, on every target. Each library's runner holds
      * each to Neo4j's rows on its store.

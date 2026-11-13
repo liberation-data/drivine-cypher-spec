@@ -5946,7 +5946,8 @@ abstract class SqlCypherCompiler(
                 given == null && (right as? Value.Json)?.temporal?.takeIf { it != Temporal.DURATION } != null ->
                     (right as Value.Json).let { tag -> indexedTagEquality(a, tag.temporal!!, tagKeyOf(tag), of) }
                         ?: if (written != null && !givenAsWritten(written)) indexedEqualityOfAny(a, b, of, true) else null
-                given == null && written != null && !givenAsWritten(written) -> indexedEqualityOfAny(a, b, of, of?.scalar == true || scalarRows)
+                // A text the statement works out, as toLower($p) is, is no list or map either (#238).
+                given == null && written != null && !givenAsWritten(written) -> indexedEqualityOfAny(a, b, of, of?.scalar == true || scalarRows || (right as? Value.Json)?.text == true)
                 else -> null
             }
             // Null is equal to nothing, itself included: the comparison is null, as in Cypher. A value the statement
@@ -7272,6 +7273,8 @@ abstract class SqlCypherCompiler(
 
         /** How long a value [shared] binds may be written where it is read, in characters. */
         const val SHARED_ABOVE = 200
+
+
 
         /** The functions of a temporal kind that give the moment the statement runs. */
         val TEMPORAL_NOW = listOf("date", "localtime", "time", "localdatetime", "datetime").flatMap { kind -> listOf("statement", "transaction", "realtime").map { "$kind.$it" } }
