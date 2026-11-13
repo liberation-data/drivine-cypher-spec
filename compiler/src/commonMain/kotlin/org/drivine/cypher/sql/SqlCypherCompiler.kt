@@ -5191,9 +5191,15 @@ abstract class SqlCypherCompiler(
         private fun temporalRefused(binary: Expression.Binary, left: Value, right: Value, x: String, y: String, arithmetic: () -> String): String {
             val sides = listOf(left, right).map { (it as? Value.Json)?.temporal != null }
             if (sides.any { it }) return arithmetic()
-            // A function that gives a number, `size(n.l) * 2`, `count(*) + 1`, gives no temporal value.
+            // A function that gives a number, `size(n.l) * 2`, `count(*) + 1`, or a COUNT subquery, gives no temporal value; nor does
+            // a field of a temporal value the statement makes, `datetime(b.at).minute`, which is a number or a text. Tested beside a
+            // walk, such a field was worked out again for the test, and Oracle took twice as long, past its PGA limit (drivine4j#809).
             fun number(written: Expression) =
-                written == Expression.CountStar || written is Expression.Function && written.name.lowercase() in NUMBER_FUNCTIONS
+                written == Expression.CountStar || written is Expression.Subquery && written.kind == Expression.Subquery.Kind.COUNT ||
+                    written is Expression.Function && written.name.lowercase() in NUMBER_FUNCTIONS ||
+                    written is Expression.Property && written.subject.let { subject ->
+                        subject is Expression.Function && subject.name.lowercase().substringBefore('.') in TEMPORAL_FUNCTION_NAMES
+                    }
             val open = listOf(!untemporal(left, binary.left) && !number(binary.left), !untemporal(right, binary.right) && !number(binary.right))
             // Of a `+`, a side beside a text or a list is no sum of tags or of a tag and a number.
             val besideTextOrList = listOf(right to binary.right, left to binary.left).map { (value, written) ->
@@ -7457,6 +7463,9 @@ abstract class SqlCypherCompiler(
 
         /** The functions whose value is a number, or null: no temporal value, which `temporalRefused` need not test for. */
         val NUMBER_FUNCTIONS = FLOAT_FUNCTIONS + setOf("count", "size", "length", "tointeger", "tointegerornull", "abs", "sign", "timestamp")
+
+        /** The functions, and the namespaces of functions (`datetime.fromepoch`, `duration.between`), whose value is a temporal value of a kind. */
+        val TEMPORAL_FUNCTION_NAMES = Temporal.entries.map { it.function }.toSet()
 
         /** The operators of arithmetic, whose value is a number where both operands are: see [Value.Json.known]. */
         val ARITHMETIC = setOf(Operator.ADD, Operator.SUBTRACT, Operator.MULTIPLY, Operator.DIVIDE, Operator.MODULO, Operator.POWER)

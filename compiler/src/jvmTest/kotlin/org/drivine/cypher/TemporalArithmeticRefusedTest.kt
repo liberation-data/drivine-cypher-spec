@@ -35,6 +35,9 @@ class TemporalArithmeticRefusedTest {
             "RETURN \$a * \$b", "RETURN [1] + [2]",
             // A function that gives a number.
             "MATCH (n:T) RETURN size(n.l) * 2", "MATCH (n:T) RETURN count(*) + 1", "MATCH (n:T) RETURN toInteger(n.a) - 1", "MATCH (n:T) RETURN 2 / abs(n.a)",
+            // A COUNT subquery, and a field of a temporal value the statement makes, namespaced or not: a number or a text (drivine4j#809).
+            "MATCH (n:T) RETURN COUNT { MATCH (m:T) } * 2", "MATCH (n:T) RETURN datetime(n.at).minute * 2",
+            "MATCH (n:T) RETURN date.truncate('month', n.at).day - 1", "MATCH (n:T) RETURN duration.between(n.a, n.b).days / 2",
         ).forEach { cypher ->
             compilers.forEach { compiler ->
                 val sql = compiler.compile(cypher, mapOf("a" to 2, "b" to 3)).sql
@@ -50,6 +53,9 @@ class TemporalArithmeticRefusedTest {
         // A side known to be a number: only the other is tested.
         val one = PostgresCypherCompiler("g").compile("MATCH (n:T) RETURN n.a + 1", emptyMap()).sql
         assertTrue(refusal in one, one)
+        // A field of a value the statement doesn't make temporal may be a map's entry, a tag: still tested.
+        val field = PostgresCypherCompiler("g").compile("MATCH (n:T) RETURN n.m.d * 2", emptyMap()).sql
+        assertTrue(refusal in field, field)
     }
 
     @Test
