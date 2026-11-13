@@ -1005,6 +1005,11 @@ cases:
         cypher: "RETURN [$e =~ $z, $e =~ $za, $e =~ $s, $e =~ $l, $e =~ $nl, $e =~ $ns]"
         parameters: {e: "", z: "\\z", za: "a?\\z", s: "(?s).*", l: "\\\\z", nl: "\\n", ns: "[^a]"}
         rows: [[true, true, true, false, false, false]]
+      - note: "\\z, the text's end, over a text that isn't empty: Postgres has no \\z of its own."
+        only: [neo4j, sql]
+        cypher: "RETURN [$a =~ $z, $ab =~ $z, $ab =~ $zb]"
+        parameters: {a: "a", ab: "ab", z: "a\\z", zb: "a.\\z"}
+        rows: [[true, false, true]]
       - note: "Java's ^ under (?m) never matches at the input's end, which in the empty text is its start. Postgres's does, so it gives true (liberation-data/drivine-cypher-spec#227)."
         only: [neo4j, oracle, sqlite]
         cypher: "RETURN $e =~ $m"
