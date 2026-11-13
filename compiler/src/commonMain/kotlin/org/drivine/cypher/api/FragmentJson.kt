@@ -20,7 +20,7 @@ import org.drivine.cypher.sql.SqlFragment
  *
  * `fragment` gives one of `condition` ([org.drivine.cypher.sql.SqlCypherCompiler.condition]), `value`, or `order`, with
  * `descending` (false where left out), each a Cypher expression; and `variables`, each a row of the library's SQL: `{"node":
- * "<alias>", "labels": […]}` or `{"relationship": "<alias>"}`, the alias ending with `_` ([FragmentVariable.row]). Answered `{"terms": […], "parameters": {…}}`, on Oracle with
+ * "<alias>", "labels": […]}` or `{"relationship": "<alias>"}`, the alias ending with `_` ([FragmentVariable.row]). Answered `{"terms": […], "parameters": {…}, "nonFinite": false, "hints": […]}`, on Oracle with
  * `storedFunctions` as a statement's answer has it, the parameters written as a statement's are; `{"refusal": …}` where the
  * compiler refuses the expression; `{"error": …}` where the request is no request.
  */
@@ -70,6 +70,8 @@ internal object FragmentJson {
         val descending = fragment["descending"]?.takeUnless { it.isNull }
         require(descending == null || descending.isBoolean) { "A fragment gives descending as true or false." }
         require(descending == null || part == "order") { "Only an order is descending." }
+        // A fragment is of the library's SQL, which reads its own rows back: typed is a statement's, and not read past.
+        require(!tree.has("typed")) { "A fragment request gives no typed: a fragment's values are read back by the library's own SQL." }
         val variables = when (val given = fragment["variables"]?.takeUnless { it.isNull }) {
             null -> emptyMap()
             is ObjectNode -> given.properties().associate { (name, variable) -> name to variable(name, variable) }
@@ -101,6 +103,8 @@ internal object FragmentJson {
     private fun written(fragment: SqlFragment, stored: StoredFunctions?) = StringBuilder().apply {
         append("{\"terms\":"); TypedJson.write(fragment.terms, this)
         append(",\"parameters\":"); TypedJson.write(fragment.parameters, this, 2)
+        append(",\"nonFinite\":").append(fragment.nonFinite)
+        append(",\"hints\":"); TypedJson.write(fragment.hints, this)
         stored?.let { append(",\"storedFunctions\":{\"nullsEqual\":").append(it.nullsEqual).append(",\"era\":").append(it.era).append('}') }
         append('}')
     }.toString()

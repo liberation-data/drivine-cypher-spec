@@ -347,6 +347,7 @@ abstract class SqlCypherCompiler(
         // seen though such a statement declared it already, and none it declares is left for the next statement.
         val declared = functions.toList()
         functions.clear()
+        val hinting = startHints()
         try {
             val writer = Writer(Parameters(parameters, ::parameterJson, ::parameterCount, text = ::parameterText, asPath = parameterPath))
             writer.labelsOf = variables.values.mapNotNull { variable -> (variable as? FragmentVariable.Node)?.let { "${it.row}.props" to it.labels } }.toMap()
@@ -361,12 +362,28 @@ abstract class SqlCypherCompiler(
             if (functions.isNotEmpty() || terms.any { calledFunctions(it).isNotEmpty() }) {
                 throw CompilerException("A fragment calls a function the store declares for a statement, which SQL a library writes doesn't declare: $cypher")
             }
-            return SqlFragment(terms, writer.parameters.values)
+            return SqlFragment(terms, writer.parameters.values, nonFinite, fragmentHints(terms))
         } finally {
             functions.clear()
             functions += declared
+            endHints(hinting)
         }
     }
+
+    /**
+     * What the statements compiled before left of what decides a fragment's hints ([fragmentHints]), set aside so a fragment's
+     * are its own: none here. [endHints] puts it back, so a statement compiled after is planned as it would have been.
+     */
+    protected open fun startHints(): Any? = null
+
+    /** Puts back what [startHints] set aside. */
+    protected open fun endHints(saved: Any?) {}
+
+    /**
+     * The optimizer hints the library's query that holds the fragment's [terms] carries in its outermost `SELECT`, as a
+     * statement that reads them would be planned ([planned]): none here.
+     */
+    protected open fun fragmentHints(terms: List<String>): List<String> = emptyList()
 
     /** A fragment's term [sql] after the last pass the store makes over a statement's text, as [finished] makes it: none here. */
     protected open fun finishedTerm(sql: String): String = sql

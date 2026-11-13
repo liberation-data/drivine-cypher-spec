@@ -139,6 +139,19 @@ class FragmentsTest {
     }
 
     @Test
+    fun aValueThatMayBeNaNOrAnInfinitySaysSoAsAStatementDoes() {
+        // Postgres's JSON holds no infinity: the value comes back as the statement's would, which the library reads by nonFinite.
+        for ((value, parameters) in listOf("n.a / 0.0" to emptyMap(), "n.a + \$f" to mapOf("f" to Double.NaN))) {
+            val statement = PostgresCypherCompiler("g").compile("MATCH (people_) RETURN ${value.replace("n.", "people_.")}", parameters)
+            assertTrue(statement.nonFinite, value)
+            assertEquals(statement.nonFinite, PostgresCypherCompiler("g").value(value, people, parameters).nonFinite, value)
+        }
+        assertEquals(false, PostgresCypherCompiler("g").value("n.a / 2.0", people).nonFinite)
+        val answer = CypherJson.readTree(CompileJson.compile("{\"store\": \"postgres\", \"graph\": {\"name\": \"g\"}, \"fragment\": {\"value\": \"n.a / 0.0\", \"variables\": {\"n\": {\"node\": \"people_\"}}}}"))
+        assertEquals(true, answer["nonFinite"]?.booleanValue(), "$answer")
+    }
+
+    @Test
     fun aRowNamedAsTheCompilerNamesItsOwnIsRefusedAsASubqueryWouldTakeItForOne() {
         // `n1` is the compiler's name for the node a subquery matches: the walk would be read from it to itself.
         val refused = assertFailsWith<CompilerException> { PostgresCypherCompiler("g").condition("EXISTS { (n)-->(m) }", mapOf("n" to FragmentVariable.Node("n1"))) }
@@ -177,6 +190,44 @@ class FragmentsTest {
             val unlabelled = OracleCypherCompiler("g", false, false, setOf("Person" to "name")).condition(within, mapOf("n" to FragmentVariable.Node("people_"))).sql
             assertEquals(unlabelled, labelled, within)
         }
+    }
+
+    /**
+     * A fragment says the hints its library's query carries in its outermost `SELECT` as the statement that compares so,
+     * `MATCH (p) WHERE <the condition> RETURN p`, is planned with them: on Oracle `NO_JSON_TABLE_TRANSFORM` where a comparison
+     * reads a property by its own path or an item of a list by its place, without which Oracle 23 gives such a comparison the
+     * wrong truth (`all(x IN [1] WHERE p.born > 1962) = true` was null for each person); none on Postgres and SQLite. A
+     * fragment's own reads decide it, not those of a statement compiled before on the compiler, and a statement compiled after
+     * is planned as on a compiler that compiled no fragment.
+     */
+    @Test
+    fun aFragmentSaysTheHintsItsLibrarysQueryCarriesAsTheStatementThatComparesSoIsPlannedWithThem() {
+        val variables = mapOf("p" to org.drivine.cypher.sql.FragmentVariable.Node("people_"))
+        val conditions = listOf(
+            "all(x IN [1] WHERE p.born > 1962) = true", "p.name = 'Ada'", "labels(p)[0] = 'Person'", "p.name IS NULL",
+            "EXISTS { (p)-->() }", "true",
+        )
+        val oracle = org.drivine.cypher.sql.OracleCypherCompiler("g")
+        var hinted = 0
+        for (condition in conditions.reversed() + conditions) {
+            val statement = org.drivine.cypher.sql.OracleCypherCompiler("g").compile("MATCH (p) WHERE $condition RETURN p").sql
+            val hints = oracle.condition(condition, variables).hints
+            assertEquals(statement.contains("NO_JSON_TABLE_TRANSFORM"), "NO_JSON_TABLE_TRANSFORM" in hints, "$condition: $hints, as\n$statement")
+            if (hints.isNotEmpty()) hinted++
+        }
+        assertTrue(hinted in 1 until conditions.size * 2, "some hinted and some not: $hinted")
+        // A statement compiled after the fragments is planned as on a compiler that compiled none.
+        assertEquals(org.drivine.cypher.sql.OracleCypherCompiler("g").compile("MATCH (p) RETURN p.name").sql, oracle.compile("MATCH (p) RETURN p.name").sql)
+        for (other in listOf(org.drivine.cypher.sql.PostgresCypherCompiler("g"), org.drivine.cypher.sql.SqliteCypherCompiler("g"))) {
+            for (condition in conditions) assertEquals(emptyList(), other.condition(condition, variables).hints, "${other::class.simpleName}: $condition")
+        }
+        // Through the JSON entry too, and typed beside a fragment is an error.
+        val json = CypherJson.readTree(CompileJson.compile("{\"store\": \"oracle\", \"graph\": {\"name\": \"g\"}, \"fragment\": {\"condition\": \"p.name = 'Ada'\", \"variables\": {\"p\": {\"node\": \"people_\"}}}}"))
+        assertEquals("[\"NO_JSON_TABLE_TRANSFORM\"]", CypherJson.writeValueAsString(json["hints"]))
+        assertEquals(
+            "A fragment request gives no typed: a fragment's values are read back by the library's own SQL.",
+            CypherJson.readTree(CompileJson.compile("{\"store\": \"oracle\", \"graph\": {\"name\": \"g\"}, \"typed\": true, \"fragment\": {\"condition\": \"true\"}}"))["error"]?.textValue(),
+        )
     }
 
     private companion object {
