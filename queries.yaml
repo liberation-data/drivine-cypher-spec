@@ -2688,11 +2688,9 @@ cases:
         cypher: "WITH $m AS m, 'a' AS k RETURN m[k]"
         parameters: {m: {}}
         rows: [null]
-      - note: "Only a map's entries are read: a list read by a text is null on a SQL store, and not its items' entries. Neo4j fails."
-        only: [sql]
+      - note: "Only a map's entries are read: a list read by a text fails, as in Neo4j, and not its items' entries read (drivine4j#698)."
         cypher: "UNWIND [[{a: 1}], {a: 2}] AS x WITH x, 'a' AS k RETURN x[k]"
-        unordered: true
-        rows: [null, 2]
+        error: true
       - cypher: "OPTIONAL MATCH (x:Nobody) WITH x, 'name' AS k RETURN x[k]"
         rows: [null]
       - cypher: "MATCH (p:Person) WITH p, 'name' AS k WHERE p[k] = 'Keanu' RETURN p.born"
