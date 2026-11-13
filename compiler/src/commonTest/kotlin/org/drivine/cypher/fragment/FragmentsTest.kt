@@ -115,6 +115,26 @@ class FragmentsTest {
     }
 
     @Test
+    fun aTemporalKeyOfASumIsRefusedWhereTheStatementDeclaresItAndCalledWhereTheStoreKeepsIt() {
+        // Oracle works out a key of a sum of a stored kind with a function a statement declares where the store keeps none
+        // (eraStored false), written in only once the statement is whole: the fragment's SQL would call a function no one declared.
+        for (fragment in listOf<(OracleCypherCompiler) -> Any>(
+            { it.order("n.born + duration('P1D')", false, people) },
+            { it.condition("n.born + duration('P1D') < date('2000-01-01')", people) },
+        )) {
+            val refused = assertFailsWith<CompilerException> { fragment(OracleCypherCompiler("g", false, false)) }
+            assertTrue(refused.message!!.startsWith("A fragment calls a function the store declares"), refused.message)
+        }
+        // Where the graph keeps the era's functions, the fragment calls the store's, and says so as a statement does.
+        val answer = CypherJson.readTree(CompileJson.compile(
+            "{\"store\": \"oracle\", \"graph\": {\"name\": \"g\", \"eraStored\": true}, \"fragment\": {\"order\": \"n.born + duration('P1D')\", " +
+                "\"variables\": {\"n\": {\"node\": \"people_\"}}}}",
+        ))
+        assertTrue((answer["terms"] as ArrayNode).any { "g_temporal_key(" in it.textValue()!! }, "$answer")
+        assertEquals(true, answer["storedFunctions"]?.get("era")?.booleanValue(), "$answer")
+    }
+
+    @Test
     fun aFragmentIsWrittenAsTheWhereOfAStatementThatReadsWouldBe() {
         // A float divided by zero works out an infinity, which Postgres's and SQLite's statements that read compile for.
         for (compiler in listOf(PostgresCypherCompiler("g"), SqliteCypherCompiler("g"))) {

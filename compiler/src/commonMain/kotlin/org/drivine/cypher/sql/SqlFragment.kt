@@ -18,8 +18,10 @@ import org.drivine.DrivineInternalApi
  * item by its place or reads the graph's tables twice is planned with it, and a library's query reads them beside the
  * fragment's own reads, in a FROM the module doesn't see; without it Oracle 23 may give a comparison the wrong truth or lose
  * a row's label tests (#415). And `OPT_PARAM('_optimizer_use_feedback' 'false')` where a term tests a node's labels as one
- * read by its key. None on Postgres and SQLite. A value is for the library's SQL to compare, group or bind
- * within it: a column read back as a statement's rows are is a statement's, which Oracle re-encodes as it returns it.
+ * read by its key. None on Postgres and SQLite. A condition's term is for a `WHERE` to keep rows by: it may be false where
+ * Cypher's truth is null, so a library never negates it in SQL, and writes `NOT` in the Cypher. A value is for the library's
+ * SQL to group or bind within it, not to compare with SQL's operators (a condition compares, as Cypher does), nor a column
+ * read back as a statement's rows are, which Oracle re-encodes as it returns it.
  */
 @DrivineInternalApi
 data class SqlFragment(
