@@ -108,6 +108,23 @@ class RegexBackreferenceTest {
         listOf(PostgresCypherCompiler("g"), OracleCypherCompiler("g"), SqliteCypherCompiler("g")).forEach { compiler ->
             val refused = assertThrows<CompilerException> { compiler.compile("RETURN 'a' =~ \$p", mapOf("p" to "(a)|\\9")) }
             assertTrue("can match without it" in refused.message.orEmpty(), refused.message)
+            // Beside one that must match, Java matches nothing either: `(a)\2?\3` over "a" is false.
+            val sql = compiler.compile("RETURN 'a' =~ \$p", mapOf("p" to "(a)\\2?\\3")).sql
+            assertTrue("\"a^\"" in sql || "'a^'" in sql, "${compiler::class.simpleName}:\n$sql")
         }
+    }
+
+    @Test
+    fun `a backreference reads a second digit as Java does, where that many groups have opened before it`() {
+        val ten = "(a)(b)(c)(d)(e)(f)(g)(h)(i)(j)"
+        // Java: `\10` after ten groups is the tenth's, "abcdefghijj"; after one, the first's and a 0, "aa0".
+        assertEquals(10, Patterns.backreferences("$ten\\10").single().number)
+        assertEquals(1, Patterns.backreferences("(a)\\10").single().number)
+        assertEquals(11, Patterns.backreferences("$ten(k)\\11").single().number)
+        // The tenth group open at it: Java matches nothing, where Postgres, counting the groups closed, reads `\1` and a 0.
+        assertTrue(Patterns.dangling("(a)(b)(c)(d)(e)(f)(g)(h)(i)(j\\10)"))
+        // Oracle has no `\11` for the pattern's tenth group, held as its eleventh.
+        assertThrows<CompilerException> { OracleCypherCompiler("g").compile("RETURN 'abcdefghijj' =~ \$p", mapOf("p" to "$ten\\10")) }
+        PostgresCypherCompiler("g").compile("RETURN 'abcdefghijj' =~ \$p", mapOf("p" to "$ten\\10"))
     }
 }

@@ -4,7 +4,7 @@ package org.drivine.cypher.sql
 internal object Patterns {
 
     /**
-     * A backreference, `\1` to `\9`: its number, whether it is written in a character class, whether its group has
+     * A backreference, `\1` and on: its number, whether it is written in a character class, whether its group has
      * closed before it, as it must for Java to match it, and whether the pattern can match without it: in an alternative
      * (`(a)|\9`), in a lookaround, or where a quantifier lets it, or a group that holds it, match no times (`\1?(a)`).
      */
@@ -24,9 +24,10 @@ internal object Patterns {
     fun dangling(pattern: String): Boolean = scan(pattern).first.any { !it.inClass && !it.closed }
 
     /**
-     * Each backreference [pattern] writes, as Java reads it: a backslash that no backslash escapes, then a digit 1 to 9. One
-     * quoted (`\Q…\E`) is none. A class is opened by `[` and closed by a `]` that isn't its first character, and may hold
-     * another, as Java's do.
+     * Each backreference [pattern] writes, as Java reads it: a backslash that no backslash escapes, then a digit 1 to 9, and
+     * each digit after it while the number still names a group opened before it, so `\10` is the tenth group's where ten
+     * have opened, else the first's and a `0`. One quoted (`\Q…\E`) is none. A class is opened by `[` and closed by a `]`
+     * that isn't its first character, and may hold another, as Java's do.
      */
     fun backreferences(pattern: String): List<Backreference> = scan(pattern).first
 
@@ -65,9 +66,16 @@ internal object Patterns {
                         continue
                     }
                     if (next in '1'..'9') {
+                        var number = next - '0'
+                        i += 2
+                        // Java refuses one in a class ([SqlCypherCompiler.checkPattern]): the digits after it there are left.
+                        while (depth == 0 && pattern.getOrNull(i) in '0'..'9' && number * 10 + (pattern[i] - '0') <= groups) {
+                            number = number * 10 + (pattern[i++] - '0')
+                        }
                         if (depth == 0) open.last().held += found.size
-                        if (depth == 0 && none(pattern, i + 2)) optional += found.size
-                        found += Backreference(next - '0', depth > 0, (next - '0') in closed)
+                        if (depth == 0 && none(pattern, i)) optional += found.size
+                        found += Backreference(number, depth > 0, number in closed)
+                        continue
                     }
                     i += 2
                     continue

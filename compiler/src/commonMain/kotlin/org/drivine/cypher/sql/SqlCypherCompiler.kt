@@ -546,15 +546,17 @@ abstract class SqlCypherCompiler(
      * Java: a backreference in a character class, `[\1]`, which Java refuses ("Illegal/unsupported escape sequence"), where
      * a store reads it as a character (#236). And one to a group that hasn't closed before it ([Patterns.dangling]) where
      * the pattern can match without it, `(a)|\9`: Java matches the rest, where Postgres refuses the pattern, and asking it
-     * as a pattern that matches nothing, as a dangling one that must match is, would answer false. A store that reads more
-     * refuses it here too: see Oracle's.
+     * as a pattern that matches nothing, as a dangling one that must match is, would answer false. One beside a dangling one
+     * that must match, `\1?\2`, is not refused: Java matches nothing there either. A store that reads more refuses it here
+     * too: see Oracle's.
      */
     protected open fun checkPattern(pattern: String) {
         val backreferences = Patterns.backreferences(pattern)
         if (backreferences.any { it.inClass }) throw CompilerException(
             "The regular expression '$pattern' writes a backreference in a character class, which Java refuses: Illegal/unsupported escape sequence."
         )
-        if (backreferences.any { !it.inClass && !it.closed && it.optional }) throw CompilerException(
+        val dangling = backreferences.filter { !it.inClass && !it.closed }
+        if (dangling.isNotEmpty() && dangling.all { it.optional }) throw CompilerException(
             "The regular expression '$pattern' writes a backreference to a group that hasn't closed before it, where the pattern can match without it, which the store can't read as Java does."
         )
     }

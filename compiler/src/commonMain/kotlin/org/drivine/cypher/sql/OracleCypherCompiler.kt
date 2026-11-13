@@ -1949,11 +1949,14 @@ class OracleCypherCompiler(
             """CASE WHEN REGEXP_LIKE($p, '(^|[^\\])((\\\\)*)\\9') THEN TO_CHAR(${textFailure(NINTH_BACKREFERENCE, p)}) ELSE $shifted END"""
         }
 
-    /** Refuses, besides what every store does, a pattern that writes `\9`, which [backreferencesShifted] can't number on. */
+    /**
+     * Refuses, besides what every store does, a pattern that writes a backreference to its ninth group or past, `\9` or, where
+     * ten have opened before it, `\10`, which [backreferencesShifted] can't number on.
+     */
     override fun checkPattern(pattern: String) {
         super.checkPattern(pattern)
         // One to a ninth group the pattern doesn't have matches nothing, as `=~` asks it ([Patterns.dangling]).
-        if (Patterns.groups(pattern) >= 9 && Patterns.backreferences(pattern).any { it.number == 9 && !it.inClass }) {
+        if (Patterns.groups(pattern) >= 9 && Patterns.backreferences(pattern).any { it.number >= 9 && !it.inClass }) {
             throw CompilerException("$NINTH_BACKREFERENCE '$pattern'")
         }
     }
@@ -2231,7 +2234,7 @@ class OracleCypherCompiler(
 
     companion object {
         /** Why Oracle refuses a pattern of `=~` that writes `\\9`: see [backreferencesShifted]. */
-        const val NINTH_BACKREFERENCE = "Oracle names groups \\1 to \\9 only, and =~ holds the pattern in a group of its own, so the pattern's ninth group has no name there: a pattern that writes \\9 is refused:"
+        const val NINTH_BACKREFERENCE = "Oracle names groups \\1 to \\9 only, and =~ holds the pattern in a group of its own, so the pattern's ninth group and those after it have no name there: a pattern that writes a backreference to one, \\9 or past, is refused:"
         /** A hint a query starts with: `SELECT /*+ … */ `. */
         private val LEADING_HINT = Regex("""^SELECT (/\*\+.*?\*/) """)
 
