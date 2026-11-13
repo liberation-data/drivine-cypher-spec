@@ -512,6 +512,13 @@ abstract class SqlCypherCompiler(
     protected open fun existsQuery(query: String) = query
 
     /**
+     * The query [query] of a subquery that a condition reads, as the store's planner is given it: the query of an `EXISTS (…)`
+     * or a `NOT EXISTS (…)`, of an `x IN (…)`, and the count a `COUNT { … }` or a quantifier compares. Each such subquery the
+     * compiler writes is given here. A store whose planner merges two of them wrongly keeps it from doing so: see Oracle's.
+     */
+    protected open fun predicateQuery(query: String) = query
+
+    /**
      * A `UNION`: each query's rows, in the order of the queries and each query's own order, as a graph engine
      * gives them; without `ALL`, each row once, where it is first given, but one whose item is NaN each time ([bareNaN]).
      */
@@ -3408,7 +3415,7 @@ abstract class SqlCypherCompiler(
             }
             fun ids(table: String) = targets.filter { it.second == table }.map { it.first }.distinct().ifEmpty { null }?.joinToString(" UNION ALL ") { variable ->
                 val r = alias("r")
-                "SELECT ${idOf(item(r), key(variable))} FROM ${elements(ROWS, r)}"
+                predicateQuery("SELECT ${idOf(item(r), key(variable))} FROM ${elements(ROWS, r)}")
             }
             deleteIds(ids(edges), ids(nodes), delete.detach)
         }
@@ -3418,13 +3425,14 @@ abstract class SqlCypherCompiler(
          * with their relationships where [detach]; without, the statement fails where one has a relationship still.
          */
         private fun deleteIds(relationships: String?, nodeIds: String?, detach: Boolean) {
-            relationships?.let { execute("DELETE FROM $edges WHERE eid IN ($it)") }
+            relationships?.let { execute("DELETE FROM $edges WHERE eid IN (${predicateQuery(it)})") }
             if (nodeIds == null) return
+            val ids = predicateQuery(nodeIds)
             if (!detach) {
-                step(ProcedureStep.Select(COUNT, "count(*)", " FROM $edges WHERE src IN ($nodeIds) OR dst IN ($nodeIds)"))
+                step(ProcedureStep.Select(COUNT, "count(*)", " FROM $edges WHERE src IN ($ids) OR dst IN ($ids)"))
                 branch("$COUNT > 0") { step(ProcedureStep.Raise("A node is deleted that still has relationships: delete them first, or DETACH DELETE it.")) }
             }
-            execute("DELETE FROM $nodes WHERE nid IN ($nodeIds)")
+            execute("DELETE FROM $nodes WHERE nid IN ($ids)")
         }
 
         /**
@@ -4577,9 +4585,9 @@ abstract class SqlCypherCompiler(
             is Expression.PatternPredicate -> exists(listOf(expression.pattern), null, scope)
             is Expression.Exists -> exists(expression.patterns, expression.where, scope)
             is Expression.Subquery -> when (expression.kind) {
-                Expression.Subquery.Kind.EXISTS -> Value.Bool("EXISTS (\n${indent(existsQuery(correlated(expression.query, scope, "EXISTS { … }", identified = false)))}\n)")
+                Expression.Subquery.Kind.EXISTS -> Value.Bool("EXISTS (\n${indent(predicateQuery(existsQuery(correlated(expression.query, scope, "EXISTS { … }", identified = false))))}\n)")
                 Expression.Subquery.Kind.COUNT ->
-                    Value.Json(scalar("(SELECT count(*) FROM (\n${indent(correlated(expression.query, scope, "COUNT { … }"))}\n) ${alias("q")})"))
+                    Value.Json(scalar("(${predicateQuery("SELECT count(*) FROM (\n${indent(correlated(expression.query, scope, "COUNT { … }"))}\n) ${alias("q")}")})"))
             }
             is Expression.Quantifier -> {
                 // Read by a WHERE for its truth alone, a quantifier that is null may be false, as neither keeps a row.
@@ -4588,7 +4596,7 @@ abstract class SqlCypherCompiler(
                 val name = alias("q")
                 fun quantified(from: String, item: Value, listNull: String): String {
                     val inner = scope + (expression.variable to item)
-                    fun exists(condition: String) = "EXISTS (SELECT 1 $from WHERE $condition)"
+                    fun exists(condition: String) = "EXISTS (${predicateQuery("SELECT 1 $from WHERE $condition")})"
                     val kind = expression.kind
                     val value = if (filter && kind != Expression.Quantifier.Kind.SINGLE) {
                         // any() is true where an item's condition is true, and all() where each one's is: each is kept where its condition
@@ -4612,7 +4620,7 @@ abstract class SqlCypherCompiler(
                             // Two items whose condition is true make single() false, whatever the others' are.
                             Expression.Quantifier.Kind.SINGLE -> "WHEN $t > 1 THEN 0 WHEN $u > 0 THEN NULL WHEN $t = 1 THEN 1 ELSE 0"
                         }
-                        "(SELECT CASE $counted END FROM (SELECT $condition AS v $from) $counts) = 1"
+                        "(${predicateQuery("SELECT CASE $counted END FROM (SELECT $condition AS v $from) $counts")}) = 1"
                     }
                     // Of a null list, null, as in Cypher, and its items are not read, where it may be one.
                     return if (present(expression.list)) value else "CASE WHEN NOT ($listNull) THEN $value END"
@@ -4664,7 +4672,7 @@ abstract class SqlCypherCompiler(
             val inner = Select(scope)
             patterns(inner, patterns)
             where?.let { filter(inner, it) }
-            return Value.Bool("EXISTS (${(listOf(inner.head("1")) + inner.from() + listOfNotNull(inner.whereClause())).joinToString(" ")})")
+            return Value.Bool("EXISTS (${predicateQuery((listOf(inner.head("1")) + inner.from() + listOfNotNull(inner.whereClause())).joinToString(" "))})")
         }
 
         /**
@@ -5982,7 +5990,7 @@ abstract class SqlCypherCompiler(
             comparedKeys.anchors += key
             val i = alias("k")
             val select = fewRows(i)?.let { "SELECT /*+ $it */ " } ?: "SELECT "
-            return "($key IN ($select${keyValue(item(i))} FROM ${elementsOf(list, comparable(list), i)}) AND $within)"
+            return "($key IN (${predicateQuery("$select${keyValue(item(i))} FROM ${elementsOf(list, comparable(list), i)}")}) AND $within)"
         }
 
         /**
@@ -6419,7 +6427,7 @@ abstract class SqlCypherCompiler(
             }
             /** Whether an item of the list [l], read as [i], is equal to the value [v], and [v] meets the store's test where it has one. */
             fun found(l: String, v: String, i: String): String {
-                val exists = "EXISTS (SELECT 1 FROM ${elementsOf(right, l, i)} WHERE ${matches(item(i), v)})"
+                val exists = "EXISTS (${predicateQuery("SELECT 1 FROM ${elementsOf(right, l, i)} WHERE ${matches(item(i), v)}")})"
                 return test?.let { "(${it(v)} AND $exists)" } ?: exists
             }
             val within = isFlat(right)
@@ -6449,7 +6457,7 @@ abstract class SqlCypherCompiler(
                 if (!present(binary.right)) cases += "WHEN ${isJsonNull(l)} THEN NULL"
                 // Null is compared with each item, and is in no empty list.
                 if (!present(binary.left)) cases += "WHEN ${isJsonNull(v)} THEN " +
-                    if (filled) "NULL" else "CASE WHEN EXISTS (SELECT 1 FROM ${elementsOf(right, l, j)}) THEN NULL ELSE FALSE END"
+                    if (filled) "NULL" else "CASE WHEN EXISTS (${predicateQuery("SELECT 1 FROM ${elementsOf(right, l, j)}")}) THEN NULL ELSE FALSE END"
                 // Beside items the statement gives, the answer where none is equal is known here (see givenItemsDecided): a
                 // stored text past 32 KB, taken out as JSON to read its nulls, closed Oracle's session (#475).
                 if (items != null && givenItemsDecided) {
@@ -6462,7 +6470,7 @@ abstract class SqlCypherCompiler(
                 if (!(within && whole)) {
                     val k = alias("i")
                     val undecided = if (id != null) isJsonNull(item(k)) else "(${nullableEquals(item(k), v, equals)}) IS NULL"
-                    cases += "WHEN EXISTS (SELECT 1 FROM ${elementsOf(right, l, k)} WHERE $undecided) THEN NULL"
+                    cases += "WHEN EXISTS (${predicateQuery("SELECT 1 FROM ${elementsOf(right, l, k)} WHERE $undecided")}) THEN NULL"
                 }
                 "CASE ${cases.joinToString(" ")} ELSE FALSE END"
             }

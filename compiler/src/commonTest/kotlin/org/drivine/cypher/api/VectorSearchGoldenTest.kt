@@ -22,6 +22,8 @@ import kotlin.test.assertTrue
  * (#217): a string in the `CALL` as [org.drivine.cypher.store.ddl.CypherNames.string], a root label in the among `MATCH` as
  * [org.drivine.cypher.store.ddl.CypherNames.identifier]. On store layout 2 (#161) Oracle's side table is named as layout 2
  * names its objects, `<graph>_v2_…` for drivine4j's `<graph>_v_…`: that name alone was changed in its answers.
+ * Oracle's subqueries an among search reads in a condition, its ids' and its side table's, carry `NO_COALESCE_SQ` in
+ * their own `SELECT`, as each such subquery the module writes does (drivine-cypher-spec#252): that hint alone was added.
  *
  * [VectorSearch.plan] gives each statement byte for byte, and its parameters, and so does [CompileJson.compile] for the
  * same request as JSON. On a SQL store drivine4j's nearest statement selects each candidate's columns beside its score: the

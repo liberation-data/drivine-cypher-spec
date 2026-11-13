@@ -74,7 +74,7 @@ class OracleCompareTextTest {
         assertTrue(empty.contains("THEN ${clobs(property("n1", clob = true), "JSON_VALUE(JSON('\"\"'), '\$' RETURNING CLOB)", "=")}") && !empty.contains("ELSE FALSE END"), empty)
         // Items each read as a VARCHAR2, written or given, are compared as JSON with the property, a plain equality, where it is
         // read as one too or is no text: tested once, beside the items, and not in each item's comparison (#475).
-        val tested = "(${property("n1")} IS NOT NULL OR NVL(JSON_VALUE(n1.props, '\$.t.type()'), 'null') <> 'string') AND EXISTS (SELECT 1 FROM "
+        val tested = "(${property("n1")} IS NOT NULL OR NVL(JSON_VALUE(n1.props, '\$.t.type()'), 'null') <> 'string') AND EXISTS (SELECT /*+ NO_COALESCE_SQ */ 1 FROM "
         val item = Regex("WHERE i\\d+\\.item = " + Regex.escape(OracleReads.routedRead("n1.props", "'\$.t'")) + "\\)")
         for (cypher in listOf("MATCH (n:Doc) WHERE n.t IN \$xs RETURN n", "MATCH (n:Doc) RETURN n.t IN \$xs", "MATCH (n:Doc) RETURN n.t IN ['a', 5, null, \$x]")) {
             val listed = sql(cypher, mapOf("xs" to listOf("a", "b"), "x" to "abc"))
