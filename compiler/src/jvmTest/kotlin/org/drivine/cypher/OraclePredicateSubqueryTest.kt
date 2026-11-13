@@ -66,6 +66,22 @@ class OraclePredicateSubqueryTest {
     }
 
     @Test
+    fun `the hint is written in a query's first hint comment, once, and a query that opens otherwise is read from one that holds it`() {
+        assertEquals("SELECT /*+ NO_COALESCE_SQ */ 1 FROM DUAL", OracleSql.uncoalesced("SELECT 1 FROM DUAL"))
+        val hinted = "SELECT /*+ CARDINALITY(i1 1) NO_COALESCE_SQ */ i1.v FROM t i1"
+        assertEquals(hinted, OracleSql.uncoalesced("SELECT /*+ CARDINALITY(i1 1) */ i1.v FROM t i1"))
+        assertEquals(hinted, OracleSql.uncoalesced(hinted))
+        // A hint comment of a query within it is not the query's own.
+        assertEquals(
+            "SELECT /*+ NO_COALESCE_SQ */ 1 FROM (SELECT /*+ NO_COALESCE_SQ */ 1 FROM DUAL) q",
+            OracleSql.uncoalesced("SELECT 1 FROM (SELECT /*+ NO_COALESCE_SQ */ 1 FROM DUAL) q"),
+        )
+        assertEquals("SELECT /*+ NO_COALESCE_SQ */ * FROM (\n    (SELECT 1 FROM DUAL)\n)", OracleSql.uncoalesced("(SELECT 1 FROM DUAL)"))
+        val with = OracleSql.uncoalesced("WITH w AS (SELECT 1 AS v FROM DUAL) SELECT v FROM w")
+        assertEquals(emptyList(), PredicateSubqueries.unhinted("SELECT 1 FROM DUAL WHERE EXISTS ($with) OR 1 IN ($with)"))
+    }
+
+    @Test
     fun `the check finds a subquery a condition reads without the hint, and not one read otherwise`() {
         val hinted = """
             SELECT n1.nid FROM g_node n1
