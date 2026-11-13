@@ -369,6 +369,9 @@ class StoreDdlTest {
         assertTrue("p_id jsonb" in ddl && "DROP FUNCTION IF EXISTS ${graph}_find(jsonb, text, text)" in ddl, ddl)
         // A ref or patch step of a library that sends no id is refused, rather than finding no node and reading as absent.
         assertTrue("IF p_id IS NULL THEN\n        RAISE EXCEPTION" in ddl, "a step without an id is refused:\n$ddl")
+        // An unlink names its targets by their ids' texts: a temporal target's id is read as its tag's text, `v`, both ways.
+        val unlinkRead = "COALESCE(t.props -> (v_shape ->> 'key') ->> 'v', t.props ->> (v_shape ->> 'key'))"
+        assertEquals(3, ddl.split(unlinkRead).size, "an unlink reads a temporal target's id as its v:\n$ddl")
     }
 
     @Test

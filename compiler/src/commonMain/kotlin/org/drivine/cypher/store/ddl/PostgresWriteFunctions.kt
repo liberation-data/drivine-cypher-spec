@@ -22,7 +22,7 @@ import org.drivine.cypher.store.LowerCopies
  *   temporal id is found as it was written. The query is written for the shape it is asked, so it is
  *   planned as a query over that label and property; it is prepared once a session for each shape, and
  *   not planned again for each node. Its name holds the store's version, as the other prepared queries' do.
- *   So each step that finds a node, `node`, `ref` and `patch`, carries `id`: one without it finds none.
+ *   So each step that finds a node, `node`, `ref` and `patch`, carries `id`: one without it is refused.
  * - `<graph>_owns(bag, key)` says whether a property bag owns a stored key.
  * - `<graph>_lowered(props, keys)` gives the properties with the lowercased copy of each of `keys`:
  *   see [LowerCopies].
@@ -31,6 +31,8 @@ import org.drivine.cypher.store.LowerCopies
  *   are taken from; `returns` is what to give back (`STAMPS`, `EACH_STAMP` or `COUNT`); `patched_if`,
  *   when it is given, is the query a `patch` step asks whether to write to the node it found: it counts
  *   the node whose `nid` is its parameter `$1`, if the node meets a predicate.
+ *   An `unlink` step names its targets by their ids' texts, `ids` and `held`: a temporal id by its tag's `v`,
+ *   any other as `->>` reads it.
  *
  * A stale root (the node is gone, or carries another stamp, or is there when the save may only make it)
  * is raised as [STALE] and gives no row; a node a `ref` step needs that is not there is raised as
