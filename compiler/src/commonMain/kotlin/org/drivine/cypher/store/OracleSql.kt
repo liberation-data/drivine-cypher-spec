@@ -187,6 +187,49 @@ object OracleSql {
     }
 
     /**
+     * The score the graph engines give for a [distance] by [similarity], measured by [metric]: in `[0, 1]`, higher the nearer.
+     * Oracle's cosine distance is `1 - cos`, so the score is `(1 + cos) / 2`; its squared Euclidean distance is `d²`, so the
+     * score is `1 / (1 + d²)`.
+     */
+    fun score(similarity: SimilarityFunction, distance: String): String = when (similarity) {
+        SimilarityFunction.COSINE -> "(2 - $distance) / 2"
+        SimilarityFunction.EUCLIDEAN -> "1 / (1 + $distance)"
+    }
+
+    /** Whether the node or relationship [alias] has the property [key] at all. The stamp ([Stamps.PROPERTY]) is a column of its own. */
+    fun hasProperty(alias: String, key: String): String =
+        if (key == Stamps.PROPERTY) "$alias.stamp IS NOT NULL" else "JSON_EXISTS($alias.props, ${path(key)})"
+
+    /**
+     * Whether the node [alias] carries every one of [labels]: with [scanned], the first as the index over labels answers it
+     * ([hasLabel]), for a statement that reads every node of it, and the rest, or every one without it, by their text
+     * ([carriesLabel]).
+     */
+    fun hasLabels(alias: String, labels: List<String>, scanned: Boolean = false): String {
+        require(labels.isNotEmpty()) { "A node is tested for one label or more." }
+        return labels.withIndex().joinToString(" AND ") { (i, label) -> if (scanned && i == 0) hasLabel(alias, label) else carriesLabel(alias, label) }
+    }
+
+    /** One node in a `GRAPH_TABLE`'s `MATCH`, named [variable], that meets [where]. */
+    fun node(variable: String, where: String): String = "($variable IS node WHERE $where)"
+
+    /** The columns a row of a node has in the property graph: those of the table, and the map the graph makes of them ([transform]). */
+    val NODE_COLUMNS: List<String> = listOf("nid", "labels", "props", "stamp", "doc")
+
+    /** The texts of the JSON array bound as [parameter], as rows of one column, `v`. */
+    fun textValues(parameter: String): String = "SELECT v FROM JSON_TABLE($parameter, '$[*]' COLUMNS (v VARCHAR2(4000) PATH '$'))"
+
+    /** A JSON object of [entries], each a key and the expression for its value, laid out under the key. */
+    fun jsonObject(entries: List<Pair<String, String>>): String =
+        entries.joinToString(",\n    ", "JSON_OBJECT(\n    ", "\n    RETURNING JSON)") { (key, value) -> "${literal(key)} VALUE ${value.replace("\n", "\n    ")}" }
+
+    /** The JSON array of [value] over the rows a query reads, in [order]. */
+    fun arrayOf(value: String, order: String): String = "JSON_ARRAYAGG($value ORDER BY $order RETURNING JSON)"
+
+    /** An empty JSON array. */
+    const val EMPTY_ARRAY: String = "JSON('[]')"
+
+    /**
      * The map a load returns for a node, put together from the columns of the row [alias] (`""` for the columns
      * themselves): its properties, with its labels under `labels` and its stamp under the property the graph engines store
      * it as. What the property graph's `doc` property is.

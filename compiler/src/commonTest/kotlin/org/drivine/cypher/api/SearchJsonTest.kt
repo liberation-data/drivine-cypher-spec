@@ -57,7 +57,7 @@ class SearchJsonTest {
             "{\"store\": \"postgres\", \"graph\": {\"name\": \"g\"}, \"cypher\": \"RETURN 1\", \"search\": $search}",
             "{\"store\": \"postgres\", \"graph\": {\"name\": \"g\"}, \"search\": $search, \"searchIndex\": {\"label\": \"A\", \"properties\": [\"t\"]}}",
         )
-        for (request in both) assertEquals(error("A request gives one of cypher, search, searchIndex, settings, read, temporalKey and layout."), CompileJson.compile(request), request)
+        for (request in both) assertEquals(error("A request gives one of cypher, search, searchIndex, vector, settings, read, temporalKey and layout."), CompileJson.compile(request), request)
         // Neither is a Cypher request that lacks its statement; a Cypher request alone is compiled.
         assertEquals(error("A request gives its statement as cypher."), CompileJson.compile("{\"store\": \"postgres\", \"graph\": {\"name\": \"g\"}}"))
         assertTrue(CompileJson.compile("{\"store\": \"postgres\", \"graph\": {\"name\": \"g\"}, \"cypher\": \"RETURN 1\"}").startsWith("{\"sql\":"))

@@ -1,6 +1,7 @@
 package org.drivine.cypher.store
 
 import org.drivine.DrivineInternalApi
+import org.drivine.schema.SimilarityFunction
 
 /**
  * The SQLite SQL the compiler writes that drivine4j's `org.drivine.backend.sqlite.SqliteSql` writes too, and the
@@ -103,4 +104,39 @@ object SqliteSql {
 
     /** The labels of a node that carries [label] alone, as a literal of the JSON array they are stored as. */
     fun labelArray(label: String): String = literal("[${quoted(label)}]")
+
+    /** Whether the node [alias] carries every one of [labels], each a test of its own. */
+    fun hasLabels(alias: String, labels: List<String>): String {
+        require(labels.isNotEmpty()) { "A node is tested for one label or more." }
+        return labels.joinToString(" AND ") { hasLabel(alias, it) }
+    }
+
+    /** The JSON of the property [key] of the node or relationship [alias], as text: `'"Ada"'` for a string. */
+    fun value(alias: String, key: String): String = "(${column(alias, "props")} -> ${path(key)})"
+
+    /** The JSON type of the property [key] of [alias], as SQLite names it (`'text'`, `'array'`…); null where there is none. */
+    fun type(alias: String, key: String): String = "json_type(${column(alias, "props")}, ${path(key)})"
+
+    /** Whether [alias] holds an embedding of [dimensions] under [key]: a search measures only those. */
+    fun holdsEmbedding(alias: String, key: String, dimensions: Int): String =
+        "${type(alias, key)} = 'array' AND json_array_length(${column(alias, "props")}, ${path(key)}) = $dimensions"
+
+    /**
+     * The score the graph engines give the embedding under [key] of [alias] against the vector [vector], by [similarity]: in
+     * `[0, 1]`, higher the nearer, as `PostgresSql.score` gives it, measured by the library's [SqliteFunctions.SIMILARITY].
+     */
+    fun score(alias: String, key: String, similarity: SimilarityFunction, vector: String): String =
+        "${SqliteFunctions.SIMILARITY}(${value(alias, key)}, $vector, ${literal(similarity.name)})"
+
+    /** The texts of the JSON array bound as [parameter], as rows of one column, each as a property is read as text ([propertyText]). */
+    fun textValues(parameter: String): String =
+        "SELECT (CASE v.type WHEN 'text' THEN v.value WHEN 'null' THEN NULL WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' " +
+            "WHEN 'integer' THEN json_quote(v.value) WHEN 'real' THEN json_quote(v.value) ELSE v.value END) FROM json_each($parameter) v"
+
+    /** A JSON object of [entries] whose values are put in as the SQL values they are, a text as a string, each laid out under its key. */
+    fun plainObject(entries: List<Pair<String, String>>): String =
+        entries.joinToString(",\n    ", "json_object(\n    ", ")") { (key, value) -> "${literal(key)}, ${value.replace("\n", "\n    ")}" }
+
+    /** The JSON array of [value] over the rows a query reads, in [order]. */
+    fun arrayOf(value: String, order: String): String = "json_group_array($value ORDER BY $order)"
 }

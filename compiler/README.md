@@ -70,7 +70,8 @@ each store's tables, the probe that finds them made, and its indexes, constraint
 and version token, and the node stamp's form, as the spec's `marker.yaml` pins them), the schema plan
 (`org.drivine.cypher.store.plan`: drivine4j's schema manager as a planner with no store, which gives a library each round
 of statements to run and decides from what the store gave back, as the spec's `plans.yaml` pins it), full-text search
-(`org.drivine.cypher.api.FullTextSearch`, see [Full-text search](#full-text-search)), and a few of the schema specs' and
+(`org.drivine.cypher.api.FullTextSearch`, see [Full-text search](#full-text-search)), vector search
+(`org.drivine.cypher.api.VectorSearch`, see [Vector search in the module](#vector-search-in-the-module)), and a few of the schema specs' and
 compilers' functions. The compiler classes are public and unmarked; the rest are public only so that drivine4j, built apart
 from the module, can call them, and are marked `@org.drivine.DrivineInternalApi`, an opt-in at the level of an error:
 drivine4j opts in module-wide, and any other caller that doesn't is refused at compile time. They may change or go in
@@ -184,7 +185,8 @@ FullTextSearch.plan(store, graph, SearchRequest(labels, properties, query, index
      never clash with the library's own; each is written `$_cy_ft<n>` in the statement, as the compiler writes its own.
 
 Over JSON it is the same entry, `CompileJson.compile` (`compile`, `drivine_compile`): a request with `search` in place of
-`cypher` is a search, and one that gives more than one of `cypher`, `search` and `searchIndex` is an error.
+`cypher` is a search, and one that gives more than one of `cypher`, `search`, `searchIndex`, `vector` and `settings` is an
+error.
 
 ```json
 {"store": "postgres", "graph": {"name": "g"},
@@ -215,6 +217,79 @@ its lower case is Java's `String.toLowerCase(Locale.ROOT)`, a final sigma among 
 (`org.drivine.cypher.text.CommonUnicode`, see [Building](#building)), which the stand-in fuzz checks on every target and the
 JVM's tests check against Java on every code point. Lengths are in characters (drivine4j#665 measures them in words), and the
 graph engines are given the query as it is (FalkorDB's own syntax is drivine4j#666).
+
+### Vector search in the module
+
+For #160. `org.drivine.cypher.api.VectorSearch` writes a vector search for each store, as drivine4j writes it: a library's
+`loadNearest`, the roots nearest a query vector, and `loadNearestAmong`, for each root among some ids its nearest among
+the others. It decides which way a store answers the search, through its vector index or by measuring every node, writes
+the statement that does, and scores it as the graph engines score it, the same on every store: for cosine `(1 + cos) / 2`,
+for Euclidean `1 / (1 + d²)`. It is pure, and marked `@DrivineInternalApi` as `FullTextSearch` is.
+
+```kotlin
+VectorSearch.plan(store, graph, VectorRequest(labels, property, similarity, topK, searchK, size, partitionLabel, index, among)): VectorResult   // VectorPlan or Refusal
+```
+
+`store` is a `SearchStore`. The request gives the root's `labels` (the index is on the first, or on `partitionLabel`, one
+index for each partition), the `property` its embedding is stored under, the index's `similarity` (`COSINE` or
+`EUCLIDEAN`), `topK`, and `searchK` where the index is asked for more than `topK`. On a nearest search on a SQL store it
+gives the query vector's `size`, as only embeddings of that size are measured. `index` is what the library found of the
+index in its catalog, the index of the label searched (`partitionLabel`'s, or the root's first): on Postgres and Oracle
+the `dimensions` it was made for, null where none is made, and on a graph
+engine its `name` where it isn't `<label>_<property>_vector`. A nearest search goes through the index only where it was
+made for the vector's size; a search among ids goes through any index made. `among` is `{ids, idProperty, threshold}`, each id
+searched once however often it is given, as drivine4j's `loadNearestAmong` searches them.
+
+`plan` gives a `VectorPlan`, or a `Refusal` of a graph name the store can't take:
+
+- On a SQL store a nearest search's `sql` is one `SELECT` of the ranked candidates, `nid` and `score`: the nearest
+  `searchK` (or `topK`) nodes of the root's labels, through Postgres's HNSW index or Oracle's side table and its vector
+  index, or measured one by one (and on SQLite always so, by the library's `drivine_similarity`). The search reads the
+  embedding by the expression the module's DDL makes the index over, so the index answers it. The library joins the
+  candidates back to its node table by `nid` for its projection, and adds what `FullTextSearch`'s candidates are given:
+  its threshold (`score >= threshold`), its predicates, the view's required relationships, `ORDER BY score DESC, nid`,
+  and where `searchK` was given its `LIMIT topK`.
+- On a graph engine a nearest search's `cypher` is its head: the index's `CALL` (Neo4j's `db.index.vector.queryNodes`,
+  Memgraph's `vector_search.search`, FalkorDB's `db.idx.vector.queryNodes`) and each hit as `alias` and its score as
+  `scoreAlias` (`n` and `_score` where left out). Memgraph's and FalkorDB's distances are made the score; Neo4j's score
+  is it already, and with `searchK` is measured afresh of each hit's embedding, as the index's own score orders a little
+  otherwise. `labelCheck` is the predicate a hit must meet to have every one of the root's labels, which the library
+  tests first, then its threshold, filters, projection and `LIMIT`. With a partition the index's name (FalkorDB's label)
+  is bound, so one statement serves every partition.
+- A search among ids is the whole statement on every store, one row a root, `{seed, near}` (the column `result` on a SQL
+  store, `row` on a graph engine), `near` its `topK` neighbours as `{id, score}`, best first, none under the threshold.
+- `parameters` are named `_cy_vec1`, `_cy_vec2`, …, with the compiler's reserved prefix. The query vector is not among
+  them: `vector` names the parameter the library binds it as, as it binds a list, so a long vector doesn't pass through
+  the module. `indexK` is how many the index is asked for: `searchK`, or where it is left out `topK`, and among ids
+  `topK + 1`, as the index finds the root itself first (drivine4j's `loadNearestAmong`).
+
+Over JSON it is the same entry, `CompileJson.compile`: a request with `vector` in place of `cypher`.
+
+```json
+{"store": "postgres", "graph": {"name": "g"},
+ "vector": {"labels": ["Doc"], "property": "embedding", "similarity": "COSINE", "size": 1536, "topK": 10, "index": {"dimensions": 1536}}}
+```
+
+The answer is `{"sql": …, "parameters": {…}, "vector": …, "labelCheck": …, "indexK": …, "warnings": […]}`, with `cypher`
+in place of `sql` on a graph engine, or `{"refusal": …}`, or `{"error": …}` where the request is no request.
+
+drivine4j's statements are the module's byte for byte. `src/commonTest/resources/vector-golden.json` holds them, written by
+drivine4j's own code (its selects' `nearestTo`, `nearestThrough` and `nearestAmong`, its grammars' `vectorSearchHead`
+and label check, and its planner's `planAmong`) at the commit it names: on each store, exact and through the index, by
+cosine and Euclidean, with and without a partition and `searchK`, for roots of one label and of two, and names with a
+quote, a backslash and a backtick in them. Only the parameters' names were changed, and the query vector's binding left
+out, and on the graph engines a name with a quote, a backslash or a backtick, which drivine4j writes raw, is written
+escaped (#217): 84 of the golden's entries were edited for it by a script, and no other. `VectorSearchGoldenTest` checks
+`plan`, and the JSON request, against each on every target, putting back the candidates' columns drivine4j selects beside
+`nid` before it compares, as `FullTextSearchGoldenTest` does.
+
+On a graph engine the index's name in the `CALL` (FalkorDB's label, and its property) is a Cypher string, its quotes and
+backslashes escaped (`CypherNames.string`), and each of the root's labels in a search among ids' `MATCH` an identifier,
+backtick-quoted where it is no plain one (`CypherNames.identifier`), whatever they hold, as a full-text search's are
+(liberation-data/drivine4j#767). A plain name is written as drivine4j writes it. drivine4j wrote them raw, so a name with a
+quote or a backtick gave a statement the engine couldn't read (#217). FalkorDB 6.0.3 reads no escaped backtick in a
+label, in a `CREATE` as in a search, so it can hold no such label (#174): a search that names one fails there with
+FalkorDB's own parser error, until #174 refuses it by name.
 
 ### Oracle's rows as text
 
@@ -787,6 +862,8 @@ The JVM is the oracle. `./gradlew jvmOracle` writes, into `build/oracle`:
   pattern the compiler, a full-text search or `host.yaml` gives.
 - `search-golden.json`: drivine4j's full-text search statements (see [Full-text search](#full-text-search)), which
   `FullTextSearchGoldenTest` reads on every target. Its requests are in `corpus.jsonl` too.
+- `vector-golden.json`: drivine4j's vector search statements (see [Vector search in the module](#vector-search-in-the-module)),
+  which `VectorSearchGoldenTest` reads on every target. Its requests are in `corpus.jsonl` too.
 - `standins-<name>.txt`: what Java gives where the module stands in for it, worked out by Java's own API on the pinned
   JDK (`StandIns`): `ZoneId.of`'s reading of a zone; a full-text query's classes of characters and its lower case; java.time's calendar dates, and its parse and text of a temporal
   value, with java.math's of a duration; `substring`, `Integer.parseInt(s, 16)` and `appendCodePoint` of a string

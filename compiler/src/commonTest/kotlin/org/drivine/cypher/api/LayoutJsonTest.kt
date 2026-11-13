@@ -115,7 +115,7 @@ class LayoutJsonTest {
             "{\"layout\": {\"engine\": \"POSTGRES\", \"graph\": \"g\", \"stamps\": [{\"layout\": 4294967298}], \"foreignNodes\": false}}" to "A layout request's stamp gives its layout as a whole number: 4294967298.",
             "{\"layout\": {\"engine\": \"POSTGRES\", \"graph\": \"g\", \"stamps\": [], \"foreignNodes\": false, \"objects\": {}}}" to "A layout request gives the objects as a list.",
             "{\"layout\": {\"engine\": \"POSTGRES\", \"graph\": \"g\", \"stamps\": [], \"foreignNodes\": false, \"objects\": [\"x\"]}}" to "A layout request's object is a map.",
-            "{\"read\": \"1\", \"cypher\": \"RETURN 1\"}" to "A request gives one of cypher, search, searchIndex, settings, read, temporalKey and layout.",
+            "{\"read\": \"1\", \"cypher\": \"RETURN 1\"}" to "A request gives one of cypher, search, searchIndex, vector, settings, read, temporalKey and layout.",
         )) {
             assertEquals(message, answer(request)["error"]?.textValue(), request)
         }
