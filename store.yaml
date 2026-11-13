@@ -1121,7 +1121,7 @@ tables:
           RETURN digits(y + 1000000000, 10) || digits(m, 2) || digits(d, 2) || digits(TRUNC(u / 3600), 2) || digits(MOD(TRUNC(u / 60), 60), 2) || digits(MOD(u, 60), 2) || f || digits(o + 64800, 6);
       END;'; EXCEPTION WHEN e_denied THEN NULL; END;
                   END IF;
-                  SELECT COUNT(*) INTO v_made FROM user_objects o WHERE o.object_type = 'FUNCTION' AND o.object_name = 'DRIVINE_TEMPORAL_ARITHMETIC' AND o.status = 'VALID' AND EXISTS (SELECT 1 FROM user_source s WHERE s.name = o.object_name AND s.type = 'FUNCTION' AND s.line = 1 AND INSTR(s.text, '-- drivine:31c45a0c1700') > 0);
+                  SELECT COUNT(*) INTO v_made FROM user_objects o WHERE o.object_type = 'FUNCTION' AND o.object_name = 'DRIVINE_TEMPORAL_ARITH' AND o.status = 'VALID' AND EXISTS (SELECT 1 FROM user_source s WHERE s.name = o.object_name AND s.type = 'FUNCTION' AND s.line = 1 AND INSTR(s.text, '-- drivine:5e63cce93700') > 0);
                   IF v_made = 0 THEN
                       BEGIN EXECUTE IMMEDIATE <TemporalArithmeticFunction.oracleClob(drivine)>; EXCEPTION WHEN e_denied THEN NULL; END;
                   END IF;
@@ -1179,18 +1179,18 @@ generated:
   # The digests of what each marker of a generated function stands for (GeneratedFunctions; see README.md, The store
   # layout), the Postgres DDL's digest at each PostgresDdl.VERSION, and each Oracle function's version comment.
   digests:
-    postgres: "7c68208c2276ead2e630b4d991da95b6660f33b6bebae2677a7abdddd00806f4"
-    postgresEnsuring: "509f103d2a785c5b4b1244df61ce4f2e19d60b7de847cccf74624b26d50cae32"
-    oracle: "466bf0c628fb1861adc47a8ea969600c0fc76d5d8226a31cb27e166942ed0ff1"
-    oracleClob: "089574696c7066c02c2cedb83fe14cc964d7c1ae4b4854d9582651fda8f253f4"
+    postgres: "ebe654a7a35766fa7927551d14e80fdcb65a67a0de6001e423cdab5dd192d500"
+    postgresEnsuring: "af191296b29adf73506e39c1633b4b8c1f9461082fea5c7509c4517c7caf204b"
+    oracle: "d388ebba071d0f9976055a7130499f3ab1ff1d8edc445bf000c2c6523ae414d5"
+    oracleClob: "6dea804b0515b09b91df0a98bbc1b4e70d8e7d0ebd75e08e20d3b4e4471c4586"
   postgresVersions:
-    "drivine:10": "f7bbf1b218a70035f0c9edcce2962bdcfcbe3b7707f9e5af3fbaecf4a545738e"
+    "drivine:10": "ee3e9fb36ea1c27e00d7dea54aa26026493216f87d3082d1e2cc94243d62d279"
   oracleVersions:
     drivine_nulls_equal: "ca86ed401a58"
     drivine_era: "6b3612ebd3a2"
     drivine_era_date: "5447820123db"
     drivine_temporal_key: "98bc9deef4c7"
-    drivine_temporal_arithmetic: "31c45a0c1700"
+    drivine_temporal_arith: "5e63cce93700"
 catalog:
   item: {kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}
   aliases: ["a", "b\"c"]

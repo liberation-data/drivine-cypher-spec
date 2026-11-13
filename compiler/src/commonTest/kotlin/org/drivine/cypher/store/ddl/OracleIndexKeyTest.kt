@@ -43,7 +43,7 @@ class OracleIndexKeyTest {
 
     @Test
     fun `no index Oracle is made with calls a function the store makes`() {
-        assertTrue("drivine_temporal_key" in functions && "drivine_era" in functions && "drivine_temporal_arithmetic" in functions, "store.yaml's Oracle functions: $functions")
+        assertTrue("drivine_temporal_key" in functions && "drivine_era" in functions && "drivine_temporal_arith" in functions, "store.yaml's Oracle functions: $functions")
         val indexes = (oracleTexts(store) + oracleTexts(marker)).flatMap(::indexStatements)
         assertTrue(indexes.isNotEmpty(), "No Oracle CREATE INDEX found in store.yaml or marker.yaml")
         for (index in indexes) {

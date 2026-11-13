@@ -327,6 +327,26 @@ class StoreDdlTest {
         assertEquals(full + "_r", longest.temporaryName(full))
     }
 
+    /**
+     * Each function the store keeps is named within the store's longest name for the longest graph name it takes: Oracle
+     * refuses a longer one (`ORA-00972`), failing the block that makes the store, and Postgres cuts it short.
+     */
+    @Test
+    fun eachFunctionTheStoreKeepsIsNamedWithinTheStoresNamesForTheLongestGraph() {
+        val longest = { max: Int -> "g" + "x".repeat(max - ("_uq2__".length + 8 + "_t".length) - 1) }
+        val function = Regex("""CREATE OR REPLACE FUNCTION (\w+)""")
+        val made = mapOf(
+            "Postgres" to (PostgresDdl.MAX_OBJECT_NAME to PostgresDdl(longest(PostgresDdl.MAX_OBJECT_NAME)).ddl),
+            "Oracle" to (OracleDdl.MAX_OBJECT_NAME to OracleDdl(longest(OracleDdl.MAX_OBJECT_NAME)).functions),
+        )
+        for ((engine, statements) in made) {
+            val (max, texts) = statements
+            val functions = texts.flatMap { text -> function.findAll(text).map { it.groupValues[1] } }
+            assertTrue(functions.any { it.endsWith(org.drivine.cypher.sql.TemporalArithmeticFunction.name("")) }, "$engine: $functions")
+            functions.forEach { assertTrue(it.length <= max, "$engine: $it is ${it.length} long, past $max") }
+        }
+    }
+
     private fun digest(statements: List<String>): String =
         Sha256.digest(statements.joinToString("\u0000").encodeToByteArray()).joinToString("") { (it.toInt() and 0xff).toString(16).padStart(2, '0') }
 

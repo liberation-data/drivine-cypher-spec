@@ -142,7 +142,7 @@ class FragmentsTest {
         ))
         for (stored in listOf(true, false)) {
             val answer = ask(stored)
-            assertEquals(stored, (answer["terms"] as ArrayNode).any { "g_temporal_arithmetic('-', " in it.textValue()!! }, "$answer")
+            assertEquals(stored, (answer["terms"] as ArrayNode).any { "g_temporal_arith('-', " in it.textValue()!! }, "$answer")
             assertEquals(stored, answer["storedFunctions"]?.get("temporalArithmetic")?.booleanValue(), "$answer")
         }
     }

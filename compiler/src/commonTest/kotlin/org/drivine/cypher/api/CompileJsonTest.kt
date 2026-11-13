@@ -152,10 +152,10 @@ class CompileJsonTest {
         val stored = compile("{\"name\": \"g\"}")
         assertEquals(stored, compile("{\"name\": \"g\", \"temporalArithmeticStored\": null}"))
         assertEquals(stored, compile("{\"name\": \"g\", \"temporalArithmeticStored\": true}"))
-        assertTrue("g_temporal_arithmetic('-', " in stored, stored)
+        assertTrue("g_temporal_arith('-', " in stored, stored)
         assertTrue("\"storedFunctions\":{\"nullsEqual\":false,\"era\":false,\"temporalArithmetic\":true}" in stored, stored)
         val without = compile("{\"name\": \"g\", \"temporalArithmeticStored\": false}")
-        assertTrue("_temporal_arithmetic(" !in without && "(drivine4j#418)" in without, without)
+        assertTrue("_temporal_arith(" !in without && "(drivine4j#418)" in without, without)
         assertTrue("\"storedFunctions\":{\"nullsEqual\":false,\"era\":false,\"temporalArithmetic\":false}" in without, without)
         assertEquals(
             "{\"error\":\"A request's graph gives temporalArithmeticStored as true or false.\"}",

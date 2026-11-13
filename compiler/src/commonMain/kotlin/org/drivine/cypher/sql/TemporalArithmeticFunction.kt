@@ -27,8 +27,11 @@ import org.drivine.cypher.json.TemporalValue
  */
 object TemporalArithmeticFunction {
 
-    /** The function the store of the graph [graph] keeps. */
-    fun name(graph: String) = "${graph}_temporal_arithmetic"
+    /**
+     * The function the store of the graph [graph] keeps: what it adds to the graph's name is at most 16 long, as each name the
+     * store gives is, so it fits the store's longest name for every graph's name it takes (`SqlStoreDdl.refusal`).
+     */
+    fun name(graph: String) = "${graph}_temporal_arith"
 
     /** A value of each kind, given where a body is compiled: the SQL depends on its kind, not on it. */
     private val SAMPLE = mapOf(

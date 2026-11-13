@@ -25,7 +25,7 @@ class TemporalArithmeticStoredTest {
     private val refusing = OracleCypherCompiler("g", true, true, emptySet(), null, false, false, false, false)
 
     /** Whether [sql] tests a side for a tag: it calls the store's function there, or fails by name. */
-    private fun tested(sql: String) = "_temporal_arithmetic('" in sql || refusal in sql
+    private fun tested(sql: String) = "_temporal_arith('" in sql || refusal in sql
 
     /**
      * The whole rule, by the form of a side (`tagFree`): each form, beside a number in `form - 1`, and whether it is tested for a
@@ -114,7 +114,7 @@ class TemporalArithmeticStoredTest {
 
     @Test
     fun `Postgres and Oracle work it out by their function, told the operator, and SQLite and an Oracle store without it fail by name`() {
-        val calls = mapOf(PostgresCypherCompiler("g") to "g_temporal_arithmetic('", OracleCypherCompiler("g") to "g_temporal_arithmetic('")
+        val calls = mapOf(PostgresCypherCompiler("g") to "g_temporal_arith('", OracleCypherCompiler("g") to "g_temporal_arith('")
         listOf("+", "-", "*", "/").forEach { operator ->
             calls.forEach { (compiler, call) ->
                 val sql = compiler.compile("MATCH (n:T) RETURN n.a $operator n.b", emptyMap()).sql
@@ -123,7 +123,7 @@ class TemporalArithmeticStoredTest {
             // SQLite keeps no function yet, nor an Oracle store made before it.
             listOf(refusing, SqliteCypherCompiler("g")).forEach { compiler ->
                 val sql = compiler.compile("MATCH (n:T) RETURN n.a $operator n.b", emptyMap()).sql
-                assertTrue(refusal in sql && "_temporal_arithmetic(" !in sql, "${compiler::class.simpleName} without the function, $operator:\n$sql")
+                assertTrue(refusal in sql && "_temporal_arith(" !in sql, "${compiler::class.simpleName} without the function, $operator:\n$sql")
             }
         }
     }
