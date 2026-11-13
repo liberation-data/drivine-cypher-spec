@@ -1955,8 +1955,8 @@ class OracleCypherCompiler(
      */
     override fun checkPattern(pattern: String) {
         super.checkPattern(pattern)
-        // One to a ninth group the pattern doesn't have matches nothing, as `=~` asks it ([Patterns.dangling]).
-        if (Patterns.groups(pattern) >= 9 && Patterns.backreferences(pattern).any { it.number >= 9 && !it.inClass }) {
+        // One whose group hasn't closed before it matches nothing, as `=~` asks it ([Patterns.dangling]).
+        if (Patterns.groups(pattern) >= 9 && Patterns.backreferences(pattern).any { it.number >= 9 && !it.inClass && it.closed }) {
             throw CompilerException("$NINTH_BACKREFERENCE '$pattern'")
         }
     }

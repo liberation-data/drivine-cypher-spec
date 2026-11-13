@@ -4,6 +4,13 @@ package org.drivine.cypher.sql
 internal object Patterns {
 
     /**
+     * A pattern of `=~` that matches no text: a character before the text's start. The SQL stores ask it in place of a
+     * pattern Java matches nothing with ([dangling]); on SQLite each library's regular expressions read it, so it is among
+     * the compiler's patterns the tests check on every target (`DrivinePatterns`).
+     */
+    const val NO_MATCH = "a^"
+
+    /**
      * A backreference, `\1` and on: its number, whether it is written in a character class, whether its group has
      * closed before it, as it must for Java to match it, and whether the pattern can match without it: in an alternative
      * (`(a)|\9`), in a lookaround, or where a quantifier lets it, or a group that holds it, match no times (`\1?(a)`).

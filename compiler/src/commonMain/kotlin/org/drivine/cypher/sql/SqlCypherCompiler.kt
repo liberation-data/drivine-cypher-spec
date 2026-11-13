@@ -5607,8 +5607,8 @@ abstract class SqlCypherCompiler(
                     // pattern: one given so is asked as a pattern that matches nothing, a character before the text's start
                     // (#236), written with only what every library's regular expressions read alike (host.yaml's regexp).
                     val dangling = given != null && Patterns.dangling(given)
-                    patternGiven = if (dangling) NO_MATCH else given
-                    Value.Bool(matchedText(a, if (dangling) literalJson(NO_MATCH) else b))
+                    patternGiven = if (dangling) Patterns.NO_MATCH else given
+                    Value.Bool(matchedText(a, if (dangling) literalJson(Patterns.NO_MATCH) else b))
                 }
                 Operator.ENDS_WITH -> Value.Bool(searchedTexts(a, b) { texts -> shared(*texts.toTypedArray()) { (x, y) -> endsWith(x, y) } })
                 Operator.CONTAINS -> Value.Bool(searchedTexts(a, b) { (x, y) -> containsText(x, y) })
@@ -6958,9 +6958,6 @@ abstract class SqlCypherCompiler(
     private enum class Kind { NODE, RELATIONSHIP, VALUE, NODES, RELATIONSHIPS, PATH }
 
     protected companion object {
-        /** A pattern of `=~` that matches no text: a character before the text's start. */
-        const val NO_MATCH = "a^"
-
         /** Why a schema command is not compiled: it is no query, and a PersistenceManager runs it. */
         const val SCHEMA_COMMAND = "The statement is a schema command, which is not compiled to SQL: run it through a PersistenceManager, which applies it to the store's schema."
 

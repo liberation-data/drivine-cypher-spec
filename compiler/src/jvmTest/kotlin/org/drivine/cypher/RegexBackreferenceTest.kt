@@ -127,4 +127,10 @@ class RegexBackreferenceTest {
         assertThrows<CompilerException> { OracleCypherCompiler("g").compile("RETURN 'abcdefghijj' =~ \$p", mapOf("p" to "$ten\\10")) }
         PostgresCypherCompiler("g").compile("RETURN 'abcdefghijj' =~ \$p", mapOf("p" to "$ten\\10"))
     }
+
+    @Test
+    fun `Oracle asks a ninth backreference whose group hasn't closed as a pattern that matches nothing, not refused`() {
+        val sql = OracleCypherCompiler("g").compile("RETURN 'a' =~ \$p", mapOf("p" to "(a)(b)(c)(d)(e)(f)(g)(h)\\9(i)")).sql
+        assertTrue(Patterns.NO_MATCH in sql, sql)
+    }
 }
