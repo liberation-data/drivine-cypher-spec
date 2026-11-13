@@ -71,8 +71,11 @@ class NullItemWriteTest {
             "MATCH (s:A) WITH s, {x: [s.y]} AS m CREATE (n:A) SET n = m",
             "MATCH (n:A)-[r:R]->() SET r.x = [n.y]",
         )
-        for (compiler in compilers()) for (cypher in worked) {
-            val sql = sql(compiler, cypher)
+        // Rows the statement gives, one of which holds null: the list given is read, and its rows tested as each is written.
+        val given = mapOf("rows" to listOf(mapOf("x" to listOf(1)), mapOf("x" to listOf(1, null))))
+        val rows = listOf("UNWIND \$rows AS row CREATE (n:A) SET n += row", "UNWIND \$rows AS row CREATE (:A {x: row.x})")
+        for (compiler in compilers()) for ((cypher, parameters) in worked.map { it to emptyMap<String, Any?>() } + rows.map { it to given }) {
+            val sql = sql(compiler, cypher, parameters)
             assertTrue(refuses(sql), "$cypher\n$sql")
             assertTrue(tests(compiler, sql), "$cypher\n$sql")
         }
