@@ -961,9 +961,10 @@ class OracleCypherCompiler(
      * …, "value": …}`, and the entry whose key is [key], passed in as the variable `k`, read from it by
      * `'$[*]?(@.key == $k).value'`. Matched so, a key is compared as the text it is, whatever it holds: a quote, a dot, a
      * `$`, a space, a bracket, a backslash or any other character. A key the map doesn't hold is null, as on Neo4j. Only a
-     * map's entries are taken, so a list read by a text is null, as on Postgres, and not each of its items' entries, as a lax
-     * path reads them (drivine4j#417). Oracle (23.26) reads nothing by a filter after `keyvalue()` in the same path, nor any
-     * item method after it: hence the list, and the filter over it.
+     * map's entries are taken, so a list given here is null, as on Postgres, and not each of its items' entries, as a lax
+     * path reads them (drivine4j#417); a list read by a text fails before it is given here, as in Neo4j (drivine4j#698).
+     * Oracle (23.26) reads nothing by a filter after `keyvalue()` in the same path, nor any item method after it: hence the
+     * list, and the filter over it.
      *
      * The entry is read as [listItem] reads an item, a text from the list written out as text, anything else as JSON: a text
      * past 32 KB taken out as JSON, for two rows or more, crashes the session (see [itemProperty]).

@@ -4213,15 +4213,18 @@ abstract class SqlCypherCompiler(
                     else -> {
                         // The identity a list of nodes keeps beside it is read as the item is, with no kind tested: it is a list.
                         fun item(list: String, tested: Boolean) = shared(list, at) { (map, key) ->
-                            // Of a subject whose kind is known, the key of the other kind fails with no test of the subject.
+                            // Of a subject whose kind is known, the key of the other kind fails with no test of its kind, but
+                            // only where it is there: a node an OPTIONAL MATCH didn't find, or a list split from null, read by
+                            // any key is null, as in Neo4j.
+                            fun unlessNull(message: String) = "CASE WHEN NOT ${isJsonNull(map)} THEN ${scalar(textFailure(message, typeOf(key)))} END"
                             val byNumber = when {
                                 !tested || subjectKind == Value.Known.LIST || untested -> element(map, key)
-                                subjectKind == Value.Known.MAP -> scalar(textFailure(NUMBER_KEY_OF_MAP, typeOf(key)))
+                                subjectKind == Value.Known.MAP -> unlessNull(NUMBER_KEY_OF_MAP)
                                 else -> listItem(map, key)
                             }
                             val byText = when {
                                 !tested || subjectKind == Value.Known.MAP || untested -> keyed(map, key)
-                                subjectKind == Value.Known.LIST -> scalar(textFailure(TEXT_INDEX_OF_LIST, typeOf(key)))
+                                subjectKind == Value.Known.LIST -> unlessNull(TEXT_INDEX_OF_LIST)
                                 else -> mapEntry(map, key)
                             }
                             "CASE ${typeOf(key)} WHEN 'number' THEN $byNumber WHEN 'string' THEN $byText END"
