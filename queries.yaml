@@ -995,7 +995,7 @@ cases:
         rows: [["", true, true, false], ["ab", false, false, true]]
       - only: [neo4j, sql]
         cypher: "UNWIND ['', 'ab', 'b'] AS x WITH x WHERE NOT x =~ 'a.*' RETURN x ORDER BY x"
-        rows: [[""], ["b"]]
+        rows: ["", "b"]
       - note: "A text a function makes empty."
         only: [neo4j, sql]
         cypher: "RETURN [('' + '') =~ '', toUpper('') =~ '^$', substring('ab', 2) =~ '']"
