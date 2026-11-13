@@ -91,5 +91,11 @@ class OracleListSortKeyTest {
                 assertTrue(!sql.contains("cy_list_key") && !sql.startsWith("WITH\nFUNCTION"), sql)
             }
         }
+        // A list read from a property is keyed by its items in one pass, not walked: the planner costs the walk at thousands a
+        // row, which turns its JIT on (drivine4j#271).
+        for (cypher in listOf("MATCH (n:A) RETURN n.l AS l ORDER BY l", "MATCH (n:A) RETURN [min(n.l), max(n.l)]")) {
+            val sql = PostgresCypherCompiler("g").compile(cypher, emptyMap()).sql
+            assertTrue("jsonb_array_elements" in sql && "RECURSIVE" !in sql, sql)
+        }
     }
 }

@@ -306,7 +306,7 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
         // Where the kind comes ([kindOrder], `2.1` … for a tag) and, in one text, a text by its code points and a temporal value's tag by
         // its sort key's bytes, a text of fixed width for each kind: so a value is ordered by one text compared, and a tag not as `jsonb`
         // compares objects of three keys, which took a third as long again over every moment of a label (#161). A duration, a number,
-        // a truth value, a list and a map are ordered then as `jsonb` orders them.
+        // a truth value and a map are ordered then as `jsonb` orders them, and a list by its items ([flatListKey]).
         val ranked = if (key != null) null else shared(value) { (x) ->
             val tag = "CASE ${tagKind(x)} ${TAG_ORDER.withIndex().joinToString(" ") { (i, kind) -> "WHEN '${kind.function}' THEN '2.${i + 1}'" }} END"
             "(CASE jsonb_typeof($x) WHEN 'object' THEN COALESCE($tag || COALESCE(${tagKey(x)}, ''), '1') WHEN 'array' THEN '2' WHEN 'string' THEN '3' || ${textOf(x)} " +
@@ -364,7 +364,8 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
      * any other kind. A row of nulls, a null's, comes after every other ascending, and before them descending, as null does.
      * A temporal value's tag is the object of its kind's rank ([tagRank]) and then its sort key (its text, a duration's), so
      * values of several temporal kinds sort by kind first, as Cypher sorts them: as its own object, `jsonb` compares a tag's
-     * keys in its own order, its sort key `s` first, and so sorted by time alone, whatever its kind.
+     * keys in its own order, its sort key `s` first, and so sorted by time alone, whatever its kind. A list is its items as
+     * [flatListKey] writes them, as `jsonb` orders a list the shorter first (drivine4j#271).
      */
     override fun sortKey(json: String) = shared(json) { (x) ->
         "ROW(CASE WHEN jsonb_typeof($x) = 'string' THEN '\"\"'::jsonb " +
@@ -431,8 +432,9 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
      * written, the end an empty list. `jsonb` orders the
      * shorter of two lists first, and every list here but the last is of three. An item that is a list is followed by its own
      * items, at any depth, then by its end, which comes before any item. Any other value sorts as itself, as before. Only a
-     * value the statement makes a list sorts so: the planner costs the walk at thousands a row, which brings in its JIT for a
-     * sort of more than a few dozen rows.
+     * value the statement makes a list is walked so: the planner costs the walk at thousands a row, which brings in its JIT for a
+     * sort of more than a few dozen rows. A list whose kind the statement leaves open is keyed by [flatListKey], which walks no
+     * list it holds.
      */
     override fun listSortKey(json: String) = shared(json) { (x) ->
         "CASE WHEN jsonb_typeof($x) = 'array' THEN CAST(${listKey(x)} AS jsonb) ELSE ${nullIfJsonNull(x)} END"

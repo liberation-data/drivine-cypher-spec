@@ -1935,3 +1935,17 @@ cases:
         rows: ["g", "f", "b"]
       - cypher: "MATCH (n:CyWrite) WHERE n.id IN ['f', 'g'] RETURN [min(n.l), max(n.l)]"
         rows: [[["a", "z"], ["b"]]]
+      - note: "A text by its code points, not as a collation orders it, and the empty list first."
+        cypher: "CREATE (:CyWrite {id: 'i', l: ['a']}), (:CyWrite {id: 'j', l: ['B']}), (:CyWrite {id: 'k', l: ['é']}), (:CyWrite {id: 'm', l: []})"
+      - cypher: "MATCH (n:CyWrite) WHERE n.id IN ['i', 'j', 'k', 'm'] RETURN n.id ORDER BY n.l"
+        rows: ["m", "j", "i", "k"]
+      - cypher: "MATCH (n:CyWrite) WHERE n.id IN ['i', 'j', 'k', 'm'] RETURN n.id ORDER BY n.l DESC"
+        rows: ["k", "i", "j", "m"]
+      - cypher: "MATCH (n:CyWrite) WHERE n.id IN ['i', 'j', 'k', 'm'] RETURN [min(n.l), max(n.l)]"
+        rows: [[[], ["é"]]]
+      - note: "A temporal value by its moment."
+        cypher: "CREATE (:CyWrite {id: 'p', l: [date('2020-01-02')]}), (:CyWrite {id: 'q', l: [date('2020-01-01'), date('2021-01-01')]}), (:CyWrite {id: 'r', l: [date('2020-01-01')]})"
+      - cypher: "MATCH (n:CyWrite) WHERE n.id IN ['p', 'q', 'r'] RETURN n.id ORDER BY n.l"
+        rows: ["r", "q", "p"]
+      - cypher: "MATCH (n:CyWrite) WHERE n.id IN ['p', 'q', 'r'] WITH min(n.l) AS lo, max(n.l) AS hi RETURN [size(lo), toString(lo[0]), toString(hi[0])]"
+        rows: [[1, "2020-01-01", "2020-01-02"]]
