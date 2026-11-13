@@ -933,6 +933,9 @@ abstract class SqlCypherCompiler(
      */
     protected abstract fun failure(message: String, value: String): String
 
+    /** [failure] of a [text] that is a SQL text already, which a store need not write as text again: see Oracle's. */
+    protected open fun textFailure(message: String, text: String): String = failure(message, text)
+
     /**
      * [round] of [value], whose JSON [json] gives, or [value] itself where it is an infinity, as Neo4j rounds one, to any
      * places in range, by a precision and mode that are not null: on a store whose JSON holds the infinities, where its
@@ -4180,9 +4183,15 @@ abstract class SqlCypherCompiler(
             is Expression.Binary -> binary(expression, scope)
             is Expression.Unary -> unary(expression, scope)
             is Expression.Index -> {
-                indexOfKind(expression, scope)
+                // A list read by a number, or a map, a node or a relationship by a text, needs no test of its kind as it runs:
+                // one the statement makes a list, as an item of a list of lists, is one.
+                val given = indexOfKind(expression, scope)
                 val index = expression.index
                 val listed by lazy { expression(expression.subject, scope) }
+                val subjectKind by lazy { given ?: Value.Known.LIST.takeIf { (listed as? Value.Json)?.let { it.list || it.texts } == true } }
+                // An item taken out of another value is read as it was before, its kind not tested: it is seldom known, and testing it
+                // at each level of a list of lists made the statement grow faster than twice as its depth doubled.
+                val untested = expression.subject is Expression.Index || expression.subject is Expression.Slice
                 val subject = { comparable(json(listed)) }
                 val at = comparable(json(expression(index, scope)))
                 val known = known(index)
@@ -4194,7 +4203,7 @@ abstract class SqlCypherCompiler(
                     // pattern comprehension gathers its properties too, but in a subquery of its own, so its item is read by id.
                     listed is Value.Entities && !contains(expression.subject, ::isAggregate) -> entityAt(listed as Value.Entities, at)
                     // An item of a list that holds a node or a relationship holds it by identity too: see [Value.Json.identity].
-                    known is Number -> listItem(subject(), at).let { item ->
+                    known is Number -> (if (subjectKind == Value.Known.LIST || untested) element(subject(), at) else listItem(subject(), at)).let { item ->
                         Value.Json(
                             item, temporal = itemsOf(listed), items = itemItemsOf(listed), entries = itemEntriesOf(listed),
                             identity = identityOf(listed, item, true) { element(it, at) },
@@ -4202,13 +4211,25 @@ abstract class SqlCypherCompiler(
                         )
                     }
                     else -> {
-                        fun item(list: String) = shared(list, at) { (map, key) ->
-                            "CASE ${typeOf(key)} WHEN 'number' THEN ${listItem(map, key)} WHEN 'string' THEN ${mapEntry(map, key)} END"
+                        // The identity a list of nodes keeps beside it is read as the item is, with no kind tested: it is a list.
+                        fun item(list: String, tested: Boolean) = shared(list, at) { (map, key) ->
+                            // Of a subject whose kind is known, the key of the other kind fails with no test of the subject.
+                            val byNumber = when {
+                                !tested || subjectKind == Value.Known.LIST || untested -> element(map, key)
+                                subjectKind == Value.Known.MAP -> scalar(textFailure(NUMBER_KEY_OF_MAP, typeOf(key)))
+                                else -> listItem(map, key)
+                            }
+                            val byText = when {
+                                !tested || subjectKind == Value.Known.MAP || untested -> keyed(map, key)
+                                subjectKind == Value.Known.LIST -> scalar(textFailure(TEXT_INDEX_OF_LIST, typeOf(key)))
+                                else -> mapEntry(map, key)
+                            }
+                            "CASE ${typeOf(key)} WHEN 'number' THEN $byNumber WHEN 'string' THEN $byText END"
                         }
-                        item(subject()).let { taken ->
+                        item(subject(), tested = true).let { taken ->
                             Value.Json(
                                 taken, temporal = itemsOf(listed), items = itemItemsOf(listed), entries = itemEntriesOf(listed),
-                                identity = identityOf(listed, taken, true, ::item),
+                                identity = identityOf(listed, taken, true) { item(it, tested = false) },
                                 list = holdsLists(listed), text = holdsTexts(listed), temporals = itemTemporalsOf(listed), jsonNull = !isFlat(listed),
                             )
                         }
@@ -4460,19 +4481,22 @@ abstract class SqlCypherCompiler(
          * index as a value of a kind its subject is not indexed by ([knownKind]): a list by an integer, a map by a text. As
          * Neo4j refuses it; where the subject's kind is left open, it is compiled as before. An index given as a parameter is of
          * its value's kind ([givenKind]): the statement is compiled for each call, and its SQL is already made by that value, a
-         * text read as a property and a number as an item, so one of the other kind would be read as neither.
+         * text read as a property and a number as an item, so one of the other kind would be read as neither. A subject given as
+         * a parameter is of its value's kind too, and a node or a relationship is read as a map (drivine4j#698). The subject's
+         * kind, where it is known, for the read to test no kind as it runs; null where it is left open.
          */
-        private fun indexOfKind(index: Expression.Index, scope: Map<String, Value>) {
+        private fun indexOfKind(index: Expression.Index, scope: Map<String, Value>): Value.Known? {
             // A node or a relationship is read by a text, as a map is.
             val read = (index.subject as? Expression.Variable)?.let { scope[it.name] }
-            val subject = (if (read is Value.Node || read is Value.Relationship) Value.Known.MAP else givenKind(index.subject, scope)) ?: return
+            val subject = (if (read is Value.Node || read is Value.Relationship) Value.Known.MAP else givenKind(index.subject, scope)) ?: return null
             val by = when (subject) {
                 Value.Known.LIST -> Value.Known.INTEGER
                 Value.Known.MAP -> Value.Known.TEXT
                 else -> throw CompilerException("${subject.noun.replaceFirstChar(Char::uppercase)} is not a list or a map, and is indexed as one, as in Neo4j.")
             }
-            val kind = givenKind(index.index, scope) ?: return
+            val kind = givenKind(index.index, scope) ?: return subject
             if (kind != by) throw CompilerException("${subject.noun.replaceFirstChar(Char::uppercase)} is indexed by ${by.noun}, not ${kind.noun}, as in Neo4j.")
+            return subject
         }
 
         /**
@@ -4481,12 +4505,12 @@ abstract class SqlCypherCompiler(
          * `$[0]` of an object is the object.
          */
         private fun listItem(list: String, index: String): String = shared(list) { (l) ->
-            "CASE WHEN ${typeOf(l)} = 'object' THEN ${scalar(failure(NUMBER_KEY_OF_MAP, typeOf(index)))} ELSE ${element(l, index)} END"
+            "CASE WHEN ${typeOf(l)} = 'object' THEN ${scalar(textFailure(NUMBER_KEY_OF_MAP, typeOf(index)))} ELSE ${element(l, index)} END"
         }
 
         /** The entry of the JSON [map] at the text [key], failing the statement where [map] is a list, as Neo4j fails a text index of one (drivine4j#698). */
         private fun mapEntry(map: String, key: String): String = shared(map) { (m) ->
-            "CASE WHEN ${typeOf(m)} = 'array' THEN ${scalar(failure(TEXT_INDEX_OF_LIST, typeOf(key)))} ELSE ${keyed(m, key)} END"
+            "CASE WHEN ${typeOf(m)} = 'array' THEN ${scalar(textFailure(TEXT_INDEX_OF_LIST, typeOf(key)))} ELSE ${keyed(m, key)} END"
         }
 
         /**

@@ -2132,6 +2132,9 @@ class OracleCypherCompiler(
     /** A text that is no number, read as one: Oracle fails with ORA-01722, whose ORA-03302 detail gives the text. */
     override fun failure(message: String, value: String) = "TO_NUMBER(${literal("$message ")} || TO_CHAR($value))"
 
+    /** A text is joined to the message as it is: `TO_CHAR` writes a number, which it isn't. */
+    override fun textFailure(message: String, text: String) = "TO_NUMBER(${literal("$message ")} || $text)"
+
     override fun raise(message: String) = "RAISE_APPLICATION_ERROR(-20000, ${literal(message)});"
 
     override fun idOf(json: String, key: String?) = "JSON_VALUE($json, ${key?.let { OracleSql.path(it) } ?: "'$'"} RETURNING NUMBER)"
