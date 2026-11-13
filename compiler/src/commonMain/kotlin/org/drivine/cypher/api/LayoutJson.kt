@@ -32,7 +32,7 @@ import org.drivine.cypher.store.marker.StoreLayout
  *   The engine is named as a stamp names it (`POSTGRES`, not `postgres`), and a stamp's `layout` is a whole number, its text, or null.
  *   Answered `{"verdict": "current"}`, `{"verdict": "stamp", "drops": [<statement>, …], "assign": false, "parameters": {…}}`:
  *   run the drops, then the restamp with the parameters, or where `assign`, the stamp's `assignIfAbsent` with its own
- *   parameters, as the graph has no stamp to give the layout, then read the stamps and ask again; or
+ *   parameters, as the graph has no stamp to give the layout, then read the stamps, list the objects again, and ask again; or
  *   `{"verdict": "refuse", "message": "…"}`.
  */
 @DrivineInternalApi

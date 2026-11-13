@@ -35,7 +35,8 @@ import org.drivine.cypher.store.ddl.StoreDdl
  * This layout's objects are its lock table ([SqlStoreDdl.lock]), which only this layout makes, and the names it generates
  * ([SqlStoreDdl.objectName], `g_ix2_…`); an earlier layout's, the names it generated (`g_ix_…`, [oldObjects]).
  *
- * After a [Verdict.Stamp]'s statements the library reads the stamps back and asks again, and refuses anything but
+ * After a [Verdict.Stamp]'s statements the library reads the stamps back, lists the objects again (a graph with no stamp
+ * is judged by them, and the objects asked of first are those it dropped), and asks again, and refuses anything but
  * [Verdict.Current]: two processes may stamp an empty graph at once, one of them a library from before layouts that stamps
  * with none, and the store is never used on a guess. A drop that fails leaves the graph refused, never used half re-stamped.
  */
@@ -49,7 +50,7 @@ object StoreLayout {
 
         /**
          * The graph holds no value of its own, and is in an older layout or none: run [drops], each a statement of the store's,
-         * then [StoreStampStatements.restampLayout] with [parameters], then read the stamps back and ask [verdict] again. Where
+         * then [StoreStampStatements.restampLayout] with [parameters], then read the stamps back, list the objects again, and ask [verdict] again. Where
          * [assign], the graph has no stamp to give the layout, a graph of this layout whose stamp a clear deleted: run
          * [StoreStampStatements.assignIfAbsent] with [StoreStamp.assignParameters] (the library's own id and moment) in place of
          * the re-stamp, then ask again.

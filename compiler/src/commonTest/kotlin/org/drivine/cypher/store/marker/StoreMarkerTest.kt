@@ -265,6 +265,23 @@ class StoreMarkerTest {
     }
 
     /**
+     * An empty graph with no stamp and an earlier layout's objects: its drops are run, and its restamp finds no stamp, so
+     * asked again it is judged by its objects. Listed again, the dropped ones gone, it is current; asked of the objects it
+     * was first asked of, it is a re-stamp still, which a library refuses after its drops.
+     */
+    @Test
+    fun anEmptyGraphWithNoStampIsCurrentAfterItsDropsOnlyWithItsObjectsListedAgain() {
+        val ddl = PostgresDdl(graph)
+        val engine = StoreStamp.engine(ddl)
+        val lock = mapOf("name" to ddl.lock, "type" to "TABLE")
+        val first = listOf(lock, mapOf("name" to "${graph}_uq_DrivineStorekey_e211949b", "type" to "INDEX"))
+        val asked = StoreLayout.verdict(engine, graph, emptyList(), false, first, ddl) as? StoreLayout.Verdict.Stamp ?: fail("not a re-stamp")
+        assertTrue(asked.drops.isNotEmpty() && !asked.assign, "$asked")
+        assertEquals(StoreLayout.Verdict.Current, StoreLayout.verdict(engine, graph, emptyList(), false, listOf(lock), ddl))
+        assertTrue(StoreLayout.verdict(engine, graph, emptyList(), false, first, ddl) !is StoreLayout.Verdict.Current)
+    }
+
+    /**
      * Each `firstConnection` case, which a library's runner sets up on its store: a graph holding values, with no stamp and
      * nothing of this layout's, which the verdict refuses before anything is made. The module can't run the order; it checks
      * that the state each case sets up is one it refuses, and that the lock table it names is the store's.

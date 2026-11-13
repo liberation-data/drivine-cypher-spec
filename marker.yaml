@@ -534,7 +534,7 @@ storeLayout:
   # The verdict on a graph by its store layout (#161), StoreLayout.verdict: the stamps' layouts as readStamps gives them, whether
   # foreignNodes gives a row, and the indexes, tables and triggers layoutObjects lists. A verdict is "current", a re-stamp with
   # the earlier layout's objects dropped first, or a refusal with its message. A library asks again of the stamps it reads back
-  # after a re-stamp, and refuses anything but "current".
+  # after a re-stamp, and of the objects it lists again, and refuses anything but "current".
   cases:
     - name: "In this layout, holding values"
       store: "postgres"
