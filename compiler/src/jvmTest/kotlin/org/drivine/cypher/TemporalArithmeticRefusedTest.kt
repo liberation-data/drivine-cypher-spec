@@ -33,6 +33,8 @@ class TemporalArithmeticRefusedTest {
         listOf(
             "MATCH (n:T) RETURN n.d + duration('PT1H')", "MATCH (n:T) RETURN duration('PT1H') + n.d", "RETURN 1 + 2", "RETURN 'a' + 'b'",
             "RETURN \$a * \$b", "RETURN [1] + [2]",
+            // A function that gives a number.
+            "MATCH (n:T) RETURN size(n.l) * 2", "MATCH (n:T) RETURN count(*) + 1", "MATCH (n:T) RETURN toInteger(n.a) - 1", "MATCH (n:T) RETURN 2 / abs(n.a)",
         ).forEach { cypher ->
             compilers.forEach { compiler ->
                 val sql = compiler.compile(cypher, mapOf("a" to 2, "b" to 3)).sql
@@ -48,5 +50,23 @@ class TemporalArithmeticRefusedTest {
         // A side known to be a number: only the other is tested.
         val one = PostgresCypherCompiler("g").compile("MATCH (n:T) RETURN n.a + 1", emptyMap()).sql
         assertTrue(refusal in one, one)
+    }
+
+    @Test
+    fun `a plus beside a text or a list, written or given, is not tested, as no tag beside it is refused`() {
+        listOf("n.name + 'x'", "'x' + n.name", "n.a + [1]", "[1] + n.a", "n.a + \$s", "n.a + \$l").forEach { expression ->
+            compilers.forEach { compiler ->
+                val sql = compiler.compile("MATCH (n:T) RETURN $expression", mapOf("s" to "x", "l" to listOf(1))).sql
+                assertFalse(refusal in sql, "${compiler::class.simpleName} $expression:\n$sql")
+            }
+        }
+    }
+
+    @Test
+    fun `the refusal names the tag's kind on either side, where the other side may be a number`() {
+        compilers.forEach { compiler ->
+            val sql = compiler.compile("MATCH (n:T) RETURN n.a * n.d", emptyMap()).sql
+            assertTrue(refusal in sql && "COALESCE(" in sql, "${compiler::class.simpleName}:\n$sql")
+        }
     }
 }

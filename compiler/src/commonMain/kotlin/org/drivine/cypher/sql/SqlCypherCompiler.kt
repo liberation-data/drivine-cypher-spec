@@ -5184,24 +5184,33 @@ abstract class SqlCypherCompiler(
          * temporal value: as the statement runs, a side that is one, a tag a property holds (`n.d1 + n.d2`, `n.d * 2`), fails by
          * name, where the generic arithmetic gave null (drivine4j#418). Temporal arithmetic is written only where a side is known
          * to be temporal; on two sides read from the store it is not compiled yet. A `+` refuses only a tag beside a tag or a
-         * number: beside a text a temporal value is its text, and beside a list an item, as before. A side known to be no
-         * temporal value, a number or a text written or given, is not tested.
+         * number: beside a text a temporal value is its text, and beside a list an item, as before, so beside a side known to be
+         * a text or a list it is not tested. A side known to be no temporal value, a number or a text written or given, is not
+         * tested. The kind named is the tag's on either side: the other may be a number (`n.n * n.d`).
          */
         private fun temporalRefused(binary: Expression.Binary, left: Value, right: Value, x: String, y: String, arithmetic: () -> String): String {
             val sides = listOf(left, right).map { (it as? Value.Json)?.temporal != null }
             if (sides.any { it }) return arithmetic()
-            val open = listOf(!untemporal(left, binary.left), !untemporal(right, binary.right))
-            if (open.none { it }) return arithmetic()
+            // A function that gives a number, `size(n.l) * 2`, `count(*) + 1`, gives no temporal value.
+            fun number(written: Expression) =
+                written == Expression.CountStar || written is Expression.Function && written.name.lowercase() in NUMBER_FUNCTIONS
+            val open = listOf(!untemporal(left, binary.left) && !number(binary.left), !untemporal(right, binary.right) && !number(binary.right))
+            // Of a `+`, a side beside a text or a list is no sum of tags or of a tag and a number.
+            val besideTextOrList = listOf(right to binary.right, left to binary.left).map { (value, written) ->
+                binary.operator == Operator.ADD && (isText(value) || isList(value) || given(written).let { it is String || it is List<*> })
+            }
+            val tested = open.zip(besideTextOrList).map { (maybe, beside) -> maybe && !beside }
+            if (tested.none { it }) return arithmetic()
             val tag = listOf(x, y).zip(open).map { (json, maybe) -> if (maybe) "${tagKind(json)} IS NOT NULL" else "FALSE" }
             val test = if (binary.operator == Operator.ADD) {
-                listOf(0 to 1, 1 to 0).filter { (i, _) -> open[i] }.joinToString(" OR ") { (i, j) ->
+                listOf(0 to 1, 1 to 0).filter { (i, _) -> tested[i] }.joinToString(" OR ") { (i, j) ->
                     val other = listOf(x, y)[j]
                     "(${tag[i]} AND (${tag[j]} OR ${typeOf(other)} = 'number'))"
                 }
             } else {
                 tag.filterIndexed { i, _ -> open[i] }.joinToString(" OR ")
             }
-            val kind = if (open[0]) tagKind(x) else tagKind(y)
+            val kind = if (open[0] && open[1]) "COALESCE(${tagKind(x)}, ${tagKind(y)})" else if (open[0]) tagKind(x) else tagKind(y)
             return "CASE WHEN $test THEN ${scalar(textFailure(TEMPORAL_ARITHMETIC, kind))} ELSE ${arithmetic()} END"
         }
 
@@ -7260,10 +7269,10 @@ abstract class SqlCypherCompiler(
         /** Why a pattern of `=~` worked out as the statement runs is refused where it writes a backreference: see [Patterns.refusal]. */
         const val COMPUTED_BACKREFERENCE = "A regular expression worked out as the statement runs writes a backreference, which the SQL stores answer as Java does only in a pattern the statement gives, written or bound:"
 
-        /** What a list read by a text fails with, before its kind: see mapEntry. */
         /** Why `+`, `-`, `*` or `/` of a temporal value whose kind the statement doesn't know fails as it runs: see `temporalRefused`. */
         const val TEMPORAL_ARITHMETIC = "Arithmetic on a temporal value read from the store, of a kind the statement doesn't know, isn't compiled to SQL yet (drivine4j#418):"
 
+        /** What a list read by a text fails with, before its kind: see mapEntry. */
         const val TEXT_INDEX_OF_LIST = "A list is indexed by an integer, as in Neo4j, not a"
 
         /** What `round()` fails with, as Neo4j fails it, a precision below 0 or past [MAX_COUNT]. */
@@ -7445,6 +7454,9 @@ abstract class SqlCypherCompiler(
 
         /** The functions whose value, null aside, is a float, whatever they are given, as Neo4j types them: see [Value.Json.known]. */
         val FLOAT_FUNCTIONS = MATH_FUNCTIONS + setOf("tofloat", "tofloatornull", "round", "floor", "ceil", "atan2", "e", "pi", "rand")
+
+        /** The functions whose value is a number, or null: no temporal value, which `temporalRefused` need not test for. */
+        val NUMBER_FUNCTIONS = FLOAT_FUNCTIONS + setOf("count", "size", "length", "tointeger", "tointegerornull", "abs", "sign", "timestamp")
 
         /** The operators of arithmetic, whose value is a number where both operands are: see [Value.Json.known]. */
         val ARITHMETIC = setOf(Operator.ADD, Operator.SUBTRACT, Operator.MULTIPLY, Operator.DIVIDE, Operator.MODULO, Operator.POWER)

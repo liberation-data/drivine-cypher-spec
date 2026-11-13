@@ -448,7 +448,7 @@ table:
     - form: "exp(n.age - n.age) = $one"
       parameters: {"one": 1.0}
       rows: [["p1", "p2", "p3"], [], ["p1", "p2", "p3", "p5"], ["p1", "p2", "p3"]]
-      digests: {"postgres": ["c838f6891c58c1f2", "6e0abe003245d1e5", "8bc342fb954e290c", "06b3fe2bf8db4f84"], "oracle": ["c2fff5d71cd0a52c", "5d217bb5bf1e9ac3", "71d2ceb20e0d79db", "36849468d95d659c"], "sqlite": ["502e56c798b3b904", "7154129dd4b3e779", "1265a854fee04722", "9380506343e1b921"]}
+      digests: {"postgres": ["e4206ecd2c467ec9", "a64af515efe868d5", "980c08b0f99976a6", "293f10dd5e17ff03"], "oracle": ["48728849f025138f", "b2bbf419ea81d911", "95f9d878d829134d", "beb7812d5a6fe464"], "sqlite": ["7feaa914edb21694", "fa08f8172883e3f3", "5d73f046eaf8ddd6", "d75a6ced8135af3e"]}
     - form: "-n.age < $a"
       parameters: {"a": -40}
       rows: [["p2"], ["p1", "p3"], ["p2", "p5"], ["p2"]]
