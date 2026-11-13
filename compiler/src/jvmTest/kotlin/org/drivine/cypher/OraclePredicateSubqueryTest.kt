@@ -66,6 +66,19 @@ class OraclePredicateSubqueryTest {
     }
 
     @Test
+    fun `each branch of the ids a DELETE of several variables reads is hinted on Oracle, and on Postgres and SQLite none`() {
+        // The ids are a UNION ALL of a query for each variable, and the check finds only the first, after its IN (.
+        val unhinted = Regex("""UNION ALL\s+SELECT\b(?! /\*\+ [^*]*\bNO_COALESCE_SQ\b)""")
+        for (cypher in listOf("MATCH (a:A), (b:B) DELETE a, b", "MATCH (a:A), (b:B) DETACH DELETE a, b", "MATCH (a)-[r:R]->(b)-[s:S]->() DELETE r, s")) {
+            val oracle = OracleCypherCompiler("g").compile(cypher).sql
+            assertTrue("UNION ALL" in oracle && unhinted.find(oracle) == null, oracle)
+            for (sql in listOf(PostgresCypherCompiler("g"), SqliteCypherCompiler("g")).map { it.compile(cypher).sql }) {
+                assertTrue(OracleSql.NO_COALESCE_SQ !in sql, sql)
+            }
+        }
+    }
+
+    @Test
     fun `the hint is written in a query's first hint comment, once, and a query that opens otherwise is read from one that holds it`() {
         assertEquals("SELECT /*+ NO_COALESCE_SQ */ 1 FROM DUAL", OracleSql.uncoalesced("SELECT 1 FROM DUAL"))
         val hinted = "SELECT /*+ CARDINALITY(i1 1) NO_COALESCE_SQ */ i1.v FROM t i1"
