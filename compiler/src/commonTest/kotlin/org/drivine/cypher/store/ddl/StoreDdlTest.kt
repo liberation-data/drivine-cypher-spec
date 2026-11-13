@@ -367,6 +367,8 @@ class StoreDdlTest {
         assertTrue("(n.props ->> %L)" !in ddl && "->> 'k'" !in ddl, "no id is compared as text:\n$ddl")
         assertTrue("RETURNING nid, (props -> %L)::text AS k" in ddl && "->> ((v_op -> 'id')::text)" in ddl, "the nodes made are keyed by the id's JSON:\n$ddl")
         assertTrue("p_id jsonb" in ddl && "DROP FUNCTION IF EXISTS ${graph}_find(jsonb, text, text)" in ddl, ddl)
+        // A session's lookup prepared by an earlier find took the id as text: the version in its name keeps it from being run.
+        assertTrue("'drivine_find_' || md5('${PostgresDdl.VERSION} $graph'" in ddl, "the find's prepared lookup is named for the version:\n$ddl")
         // A ref or patch step of a library that sends no id is refused, rather than finding no node and reading as absent.
         assertTrue("IF p_id IS NULL THEN\n        RAISE EXCEPTION" in ddl, "a step without an id is refused:\n$ddl")
         // An unlink names its targets by their ids' texts: a temporal target's id is read as its tag's text, `v`, both ways.
