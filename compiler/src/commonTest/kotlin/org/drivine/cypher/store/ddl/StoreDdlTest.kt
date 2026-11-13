@@ -352,8 +352,7 @@ class StoreDdlTest {
     @Test
     fun eachReadCompilesToSqlThatHoldsItsIndexsExpressions() {
         var checked = 0
-        for (case in store["cases"]!!) {
-            val read = case["read"] ?: continue
+        for (case in store["cases"]!!) for (read in listOfNotNull(case["read"]) + (case["reads"]?.toList() ?: emptyList())) {
             val name = case["name"]!!.textValue()!!
             val cypher = read["cypher"]!!.textValue()!!
             val parameters = (read["parameters"] as? ObjectNode)?.properties()?.associate { (k, v) -> k to v.textValue() }.orEmpty()

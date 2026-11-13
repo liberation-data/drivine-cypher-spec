@@ -321,6 +321,91 @@ class FragmentsTest {
     }
 
     /**
+     * An equality with a value worked out from the parameters alone, as `toLower($p)` is, is read through Oracle's labelled index
+     * as one with a parameter is: each of the index's columns stands bare, compared with the value worked out in a query of its
+     * own, which Oracle reads once. Inside that query, as the whole comparison was, no index is read (#238).
+     */
+    @Test
+    fun aValueOfParametersAloneIsComparedWithTheIndexsColumnsBare() {
+        val labelled = mapOf("n" to FragmentVariable.Node("people_", listOf("Person")))
+        val sql = OracleCypherCompiler("g", indexedProperties = setOf("Person" to "name")).condition("n.name = toLower(${'$'}p)", labelled, mapOf("p" to "ADA")).sql
+        val column = sql.indexOf("CASE WHEN JSON_EXISTS(people_.labels")
+        assertTrue(column >= 0, sql)
+        assertTrue(column < sql.indexOf("(SELECT"), "the index's column outside any query: $sql")
+        assertTrue(sql.contains(" END = (SELECT "), "compared with the value worked out in a query of its own: $sql")
+        assertTrue(!sql.contains(" IS NULL)"), "a text the index holds, compared as one: $sql")
+    }
+
+    /**
+     * Each function that gives no list or map is read through Oracle's labelled index where the value it gives from the
+     * parameters is one the index holds, as `toLower($p)` is: `toUpper`, `trim`, `ltrim`, `rtrim`, `toString` and `coalesce`
+     * of values given (#238).
+     */
+    @Test
+    fun eachFunctionThatGivesNoListIsComparedAsAGivenValueIs() {
+        val cases = listOf(
+            "n.name = toUpper(${'$'}p)" to mapOf("p" to "ada"),
+            "n.name = trim(${'$'}p)" to mapOf("p" to "  Ada "),
+            "n.name = ltrim(${'$'}p)" to mapOf("p" to " Ada"),
+            "n.name = rtrim(${'$'}p)" to mapOf("p" to "Ada "),
+            "n.name = toString(${'$'}n)" to mapOf("n" to 7L),
+            "n.name = toString(${'$'}b)" to mapOf("b" to true),
+            "n.name = toString(${'$'}p)" to mapOf("p" to "Ada"),
+            "n.name = coalesce(${'$'}q, ${'$'}p)" to mapOf("q" to null, "p" to "Ada"),
+            "n.name = coalesce(null, toLower(${'$'}p))" to mapOf("p" to "Ada"),
+            // A number and a truth value worked out, a literal's text, and a parameter's key's.
+            "n.name = coalesce(${'$'}q, ${'$'}n)" to mapOf("q" to null, "n" to 7L),
+            "n.name = coalesce(${'$'}b)" to mapOf("b" to false),
+            "n.name = toUpper('ada')" to emptyMap(),
+            "n.name = toLower(${'$'}m.name)" to mapOf("m" to mapOf("name" to "ADA")),
+        )
+        for ((condition, parameters) in cases) assertTrue(bare(condition, parameters), "$condition $parameters")
+    }
+
+    /**
+     * Whether Oracle compiles [condition], `n.name = <value>`, `Person`'s `name` indexed, with [parameters], to the labelled
+     * index's test with no escape beside it for a value the index doesn't hold: as a pattern's property, `{name: <value>}`,
+     * which a statement reads through the index and which takes every function, its escapes counted against `{name: $x}`'s.
+     */
+    private fun bare(condition: String, parameters: Map<String, Any?>): Boolean {
+        fun compiled(value: String, given: Map<String, Any?>) =
+            OracleCypherCompiler("g", indexedProperties = setOf("Person" to "name")).compile("MATCH (n:Person {name: $value}) RETURN n.name", given).sql
+        fun escapes(sql: String) = Regex(" IS NULL\\)").findAll(sql).count()
+        val sql = compiled(condition.substringAfter("n.name = "), parameters)
+        val labelled = Regex("CASE WHEN JSON_EXISTS\\(n\\d+\\.labels").containsMatchIn(sql)
+        return labelled && escapes(sql) == escapes(compiled("${'$'}x", mapOf("x" to "Ada")))
+    }
+
+    /**
+     * A text worked out that may be one Oracle's labelled index doesn't hold, an empty text or one past 4,000 bytes, is let
+     * through as a value of any kind is: the index's test is null for it, so a node whose property is that text would be
+     * dropped, where Cypher keeps it (#238).
+     */
+    @Test
+    fun aWorkedOutTextTheIndexMayNotHoldIsLetThrough() {
+        val cases = listOf(
+            "n.name = toLower(${'$'}p)" to mapOf("p" to ""),
+            "n.name = toLower(${'$'}p)" to mapOf("p" to "x".repeat(4001)),
+            "n.name = toLower(${'$'}p) + ${'$'}p" to mapOf("p" to "a".repeat(3000)),
+            "n.name = trim(${'$'}p)" to mapOf("p" to "   "),
+            "n.name = coalesce(${'$'}l, ${'$'}p)" to mapOf("l" to listOf(1L), "p" to "Ada"),
+            "n.name = coalesce(${'$'}q, ${'$'}p)" to mapOf("q" to null, "p" to ""),
+            "n.name = toString(${'$'}p)" to mapOf("p" to ""),
+            // A function worked() doesn't know, and one given a value of a kind it takes no text of.
+            "n.name = reverse(${'$'}p)" to mapOf("p" to "Ada"),
+            "n.name = toLower(${'$'}n)" to mapOf("n" to 7L),
+            // Oracle's TRIM, LTRIM and RTRIM take off spaces alone: a tab is left, and the text it leaves is past 4,000 bytes.
+            "n.name = trim(${'$'}p)" to mapOf("p" to "Ada" + "\t".repeat(4000)),
+            "n.name = ltrim(${'$'}p)" to mapOf("p" to "\t".repeat(4000) + "Ada"),
+            "n.name = rtrim(${'$'}p)" to mapOf("p" to "Ada" + "\t".repeat(4000)),
+            // A parameter's key that is empty, or not there, which is null and so leaves the empty text after it.
+            "n.name = toLower(${'$'}m.name)" to mapOf("m" to mapOf("name" to "")),
+            "n.name = coalesce(${'$'}m.name, ${'$'}p)" to mapOf("m" to emptyMap<String, Any?>(), "p" to ""),
+        )
+        for ((condition, parameters) in cases) assertTrue(!bare(condition, parameters), "$condition $parameters")
+    }
+
+    /**
      * `fragments.yaml`'s table: each form a fragment takes, each condition in each of its positions and each value as an order
      * both ways, compiled on each store to the terms whose digest the table pins, on every target. Each library's runner holds
      * each to Neo4j's rows on its store.

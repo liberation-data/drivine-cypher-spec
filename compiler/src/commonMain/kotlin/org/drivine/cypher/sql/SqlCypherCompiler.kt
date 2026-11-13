@@ -5946,7 +5946,7 @@ abstract class SqlCypherCompiler(
                 given == null && (right as? Value.Json)?.temporal?.takeIf { it != Temporal.DURATION } != null ->
                     (right as Value.Json).let { tag -> indexedTagEquality(a, tag.temporal!!, tagKeyOf(tag), of) }
                         ?: if (written != null && !givenAsWritten(written)) indexedEqualityOfAny(a, b, of, true) else null
-                given == null && written != null && !givenAsWritten(written) -> indexedEqualityOfAny(a, b, of, of?.scalar == true || scalarRows)
+                given == null && written != null && !givenAsWritten(written) -> indexedEqualityOfAny(a, b, of, of?.scalar == true || scalarRows || heldCase(written))
                 else -> null
             }
             // Null is equal to nothing, itself included: the comparison is null, as in Cypher. A value the statement
@@ -5963,6 +5963,52 @@ abstract class SqlCypherCompiler(
          * label, and the property only as a filter on each, even where the property's index was there (#617).
          */
         private var indexedEmitted = false
+
+        /**
+         * Whether [expression], a value the statement works out from what it is given, is a text, a number or a truth value the
+         * store's index holds ([indexHolds]): then it is no list or map, nor a value the index doesn't hold, and is compared as a
+         * given one is (#238). Worked out by [worked] from the values given, for the functions that give no list or map;
+         * anything else, or a value that may be empty, long or a list, is let through as a value of any kind is.
+         */
+        private fun heldCase(expression: Expression): Boolean = when (val value = worked(expression)) {
+            null -> false
+            is String -> indexHolds(value)
+            is Boolean, is Number -> indexHolds(value)
+            else -> false
+        }
+
+        /**
+         * What [expression] gives, worked out from the values the statement is given, as far as an index's test needs it: a
+         * text, a number or a truth value; null where it is none of those, may be null, or isn't known here. A text another
+         * case of is written twice, as a letter's other case takes half as many bytes again at most (Oracle's `LOWER` and
+         * `UPPER` map a letter to one letter), so [heldCase] holds it to what the longer could be. A trimmed text is the text
+         * as given, as a store's trim takes off less than Kotlin's whitespace (Oracle's spaces alone, so a tab stays): it is
+         * no longer, and is empty only where each of its characters is whitespace to Kotlin or a control character.
+         */
+        private fun worked(expression: Expression): Any? = when (expression) {
+            is Expression.Literal, is Expression.Parameter, is Expression.Property -> given(expression)?.takeIf { it is String || it is Number || it is Boolean }
+            is Expression.Function -> {
+                val arguments = expression.arguments
+                when (expression.name.lowercase()) {
+                    "tolower", "toupper" -> (arguments.singleOrNull()?.let(::worked) as? String)?.let { it + it }
+                    "trim", "ltrim", "rtrim" ->
+                        (arguments.singleOrNull()?.let(::worked) as? String)?.takeIf { it.any { c -> !c.isWhitespace() && c > ' ' } }
+                    "tostring" -> when (val value = arguments.singleOrNull()?.let(::worked)) {
+                        is String -> value
+                        is Boolean -> value.toString()
+                        is Number -> value.toString() + value.toString()
+                        else -> null
+                    }
+                    // The first argument not given as null decides, a list or a map among them: each before it is known to be null.
+                    "coalesce" -> arguments.firstOrNull { !isGivenNull(it) }?.let(::worked)
+                    else -> null
+                }
+            }
+            else -> null
+        }
+
+        /** Whether [expression] is a value the statement gives as null: a literal null, or a parameter bound to null. */
+        private fun isGivenNull(expression: Expression): Boolean = givenAsWritten(expression) && given(expression) == null
 
         /**
          * Whether the sides [leftWritten] and [rightWritten] of a comparison, compiled as [left] and [right], compare as JSON, as
