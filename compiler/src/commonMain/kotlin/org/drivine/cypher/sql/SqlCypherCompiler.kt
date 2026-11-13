@@ -1720,11 +1720,15 @@ abstract class SqlCypherCompiler(
             val candidates = VectorSearch.candidates(searchStore, graphName, request, vector, k)
             val name = alias("v")
             val columns = listOf("nid" to false, "score" to false)
-            if (select.sources.isEmpty()) select.source("(\n${indent(candidates)}\n) $name") else select.join(lateral(candidates, name, optional = false, columns))
+            // The first rows of the select are the search's own; after others, a lateral join reads each row's, and a store reads
+            // what such a join gives its own way ([lateralColumn]).
+            val joined = select.sources.isNotEmpty()
+            if (joined) select.join(lateral(candidates, name, optional = false, columns)) else select.source("(\n${indent(candidates)}\n) $name")
+            fun column(column: String) = if (joined) lateralColumn(name, column, json = false) else "$name.$column"
             val row = alias("n")
-            select.join("JOIN $nodes $row ON $row.nid = ${lateralColumn(name, "nid", json = false)}")
+            select.join("JOIN $nodes $row ON $row.nid = ${column("nid")}")
             search.node?.let { select.bind(it, Value.Node("$row.nid", "$row.labels", "$row.props", "$row.stamp")) }
-            val score = lateralColumn(name, "score", json = false)
+            val score = column("score")
             search.score?.let { select.bind(it, Value.Json(scalar(score))) }
             select.order += score to true
             select.order += "$row.nid" to false

@@ -197,6 +197,28 @@ object VectorSearch {
      */
     private fun amongK(request: VectorRequest): Int = request.searchK ?: (request.topK + 1)
 
+    // ----- A stored embedding of no length -----
+    //
+    // Measured by cosine, an embedding all of zeros has no direction, and its distance is NaN: Neo4j leaves it out of a cosine
+    // index, so a search never finds it (vector.yaml, "Only the index's nodes"). Postgres's HNSW index leaves it out too, but
+    // a search without one, Oracle's and SQLite's, measured it, and NaN sorted first. Each is left out here, on a cosine
+    // search; a euclidean one measures it, as Neo4j does.
+
+    /** Whether the embedding under [key] of [alias], of [dimensions], has a length, on a cosine search; null on another. */
+    private fun postgresLength(request: VectorRequest, alias: String, key: String, dimensions: Int): String? =
+        if (request.similarity != SimilarityFunction.COSINE) null
+        // Read only where it is a list of the size, as the cast fails on any other value.
+        else "CASE WHEN ${PostgresSql.holdsEmbedding(alias, key, dimensions)} THEN vector_norm(${PostgresSql.embedding(alias, key, dimensions)}) > 0 END"
+
+    /** Whether the embedding [embedding], read as a vector, has a length, on a cosine search; null on another. */
+    private fun oracleLength(request: VectorRequest, embedding: String): String? =
+        if (request.similarity != SimilarityFunction.COSINE) null else "VECTOR_NORM($embedding) > 0"
+
+    /** Whether the embedding under [key] of [alias] holds a number other than 0, on a cosine search; null on another. */
+    private fun sqliteLength(request: VectorRequest, alias: String, key: String): String? =
+        if (request.similarity != SimilarityFunction.COSINE) null
+        else "EXISTS (SELECT 1 FROM json_each(${SqliteSql.column(alias, "props")}, ${SqliteSql.path(key)}) e WHERE e.value <> 0)"
+
     // ----- Postgres: drivine4j's PostgresSelect nearestTo, nearestThrough and nearestAmong -----
 
     /**
@@ -206,7 +228,8 @@ object VectorSearch {
     private fun postgresTo(ddl: PostgresDdl, request: VectorRequest, size: Int, vector: String, k: String): String {
         val key = stored(request.property)
         val distance = "${PostgresSql.embedding("c", key)} ${PostgresSql.distance(request.similarity)} CAST($vector AS vector)"
-        val has = listOf(PostgresSql.hasLabels("c", request.labels + listOfNotNull(request.partitionLabel)), PostgresSql.holdsEmbedding("c", key, size))
+        val has = listOf(PostgresSql.hasLabels("c", request.labels + listOfNotNull(request.partitionLabel)), PostgresSql.holdsEmbedding("c", key, size)) +
+            listOfNotNull(postgresLength(request, "c", key, size))
         return Query(
             "c.nid, ${PostgresSql.score(request.similarity, distance)} AS score",
             Table(ddl.nodes, "c"), has, listOf("ORDER BY score DESC, c.nid", "LIMIT $k"),
@@ -223,7 +246,8 @@ object VectorSearch {
         val distance = "${PostgresSql.embedding("s", key, dimensions)} ${PostgresSql.distance(request.similarity)} CAST($vector AS vector($dimensions))"
         val indexed = Query(
             "s.nid, $distance AS distance", Table(ddl.nodes, "s"),
-            listOf(PostgresSql.hasLabel("s", indexLabel(request)), PostgresSql.holdsEmbedding("s", key, dimensions)),
+            listOf(PostgresSql.hasLabel("s", indexLabel(request)), PostgresSql.holdsEmbedding("s", key, dimensions)) +
+                listOfNotNull(postgresLength(request, "s", key, dimensions)),
             listOf("ORDER BY distance", "LIMIT $k"),
         )
         // drivine4j's text, trimmed of its indent as drivine4j trims it: its lines keep what of it the nested query's don't have.
@@ -289,7 +313,7 @@ object VectorSearch {
             OracleSql.hasLabels("c", request.labels + listOfNotNull(request.partitionLabel), scanned = true),
             OracleSql.hasProperty("c", key),
             OracleSql.holdsEmbedding("c", key, size),
-        ).joinToString(" AND ")
+        ).plus(listOfNotNull(oracleLength(request, OracleSql.embedding("c", key)))).joinToString(" AND ")
         return Query(
             "c.nid, $score AS score", GraphTable(ddl.name, OracleSql.node("c", has), OracleSql.NODE_COLUMNS, "c"),
             tail = listOf("ORDER BY score DESC, c.nid", "FETCH FIRST $k ROWS ONLY"),
@@ -305,7 +329,7 @@ object VectorSearch {
         val distance = "VECTOR_DISTANCE(s.embedding, TO_VECTOR($vector), ${OracleSql.metric(request.similarity)})"
         return """
             SELECT c.nid, ${OracleSql.score(request.similarity, "k.distance")} AS score
-            FROM (SELECT s.nid, $distance AS distance FROM $embeddings s ORDER BY distance FETCH APPROX FIRST $k ROWS ONLY) k
+            FROM (SELECT s.nid, $distance AS distance FROM $embeddings s${oracleLength(request, "s.embedding")?.let { " WHERE $it" } ?: ""} ORDER BY distance FETCH APPROX FIRST $k ROWS ONLY) k
             JOIN ${ddl.nodes} c ON c.nid = k.nid
             WHERE ${OracleSql.hasLabels("c", request.labels)}
         """.trimIndent()
@@ -357,7 +381,8 @@ object VectorSearch {
      */
     private fun sqliteTo(ddl: SqliteDdl, request: VectorRequest, size: Int, vector: String, k: String): String {
         val key = stored(request.property)
-        val has = listOf(SqliteSql.hasLabels("c", request.labels + listOfNotNull(request.partitionLabel)), SqliteSql.holdsEmbedding("c", key, size))
+        val has = listOf(SqliteSql.hasLabels("c", request.labels + listOfNotNull(request.partitionLabel)), SqliteSql.holdsEmbedding("c", key, size)) +
+            listOfNotNull(sqliteLength(request, "c", key))
         return Query(
             "c.nid, ${SqliteSql.score("c", key, request.similarity, vector)} AS score",
             Table(ddl.nodes, "c"), has, listOf("ORDER BY score DESC, c.nid", "LIMIT $k"),

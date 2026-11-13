@@ -206,8 +206,9 @@ cases:
   - name: "A vector from each row"
     description: "The vector may be read from the row: a node's property, or each of an UNWIND's lists, a search for each."
     steps:
-      - cypher: "MATCH (q:Chunk {id: 'c'}) CALL db.index.vector.queryNodes('chunk_cos', 3, q.embedding) YIELD node, score RETURN node.id, score"
-        rows: [["c", 1.0], ["b", 0.8999999761581421], ["a", 0.800000011920929]]
+      - note: "a and d score alike, so k is 4, to keep both: k = 3 would cut between them, and Neo4j's choice of one is not stable."
+        cypher: "MATCH (q:Chunk {id: 'c'}) CALL db.index.vector.queryNodes('chunk_cos', 4, q.embedding) YIELD node, score RETURN node.id, score"
+        rows: [["c", 1.0], ["b", 0.8999999761581421], ["a", 0.800000011920929], ["d", 0.800000011920929]]
       - cypher: "UNWIND [[0.0, 1.0, 0.0], [0.6, 0.8, 0.0]] AS v CALL db.index.vector.queryNodes('chunk_cos', 1, v) YIELD node, score RETURN v, node.id, score"
         rows: [[[0.0, 1.0, 0.0], "b", 1.0], [[0.6, 0.8, 0.0], "c", 1.0]]
       - cypher: "UNWIND [[0.0, 1.0, 0.0], [0.6, 0.8, 0.0]] AS v MATCH (c:Chunk) SEARCH c IN (VECTOR INDEX chunk_cos FOR v LIMIT 1) SCORE AS s RETURN v, c.id, s"

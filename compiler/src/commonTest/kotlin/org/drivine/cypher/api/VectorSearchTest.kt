@@ -53,6 +53,18 @@ class VectorSearchTest {
     }
 
     @Test
+    fun aCosineSearchLeavesOutAStoredEmbeddingOfNoLengthAndAEuclideanOneMeasuresIt() {
+        // Neo4j's cosine index holds no embedding of no length (vector.yaml, "Only the index's nodes"); a euclidean one does.
+        val lengths = mapOf(SearchStore.POSTGRES to "vector_norm(", SearchStore.ORACLE to "VECTOR_NORM(", SearchStore.SQLITE to "e.value <> 0")
+        for ((store, length) in lengths) for (dimensions in listOf(3, null)) {
+            val cosine = plan(store, request(SimilarityFunction.COSINE, dimensions = dimensions)).sql!!
+            val euclidean = plan(store, request(SimilarityFunction.EUCLIDEAN, dimensions = dimensions)).sql!!
+            assertTrue(cosine.contains(length), "$store, index of $dimensions, by cosine:\n$cosine")
+            assertTrue(!euclidean.contains(length), "$store, index of $dimensions, euclidean:\n$euclidean")
+        }
+    }
+
+    @Test
     fun anOracleSearchThroughTheIndexReadsTheSideTableTheDdlMakesWithItsMetric() {
         for (similarity in SimilarityFunction.entries) for (label in listOf("Doc", "Do'c\\x")) {
             val spec = VectorIndexSpec(label, "embedding", 3, similarity)
@@ -60,7 +72,7 @@ class VectorSearchTest {
             val table = create.substringAfter(" ON ").substringBefore(" (embedding)")
             val metric = create.substringAfter("DISTANCE ")
             val sql = plan(SearchStore.ORACLE, request(similarity, labels = listOf(label))).sql!!
-            assertTrue(sql.contains("FROM $table s ORDER BY distance FETCH APPROX FIRST"), "the search reads $table:\n$sql")
+            assertTrue(sql.contains("FROM $table s ") && sql.contains("ORDER BY distance FETCH APPROX FIRST"), "the search reads $table:\n$sql")
             assertTrue(sql.contains("TO_VECTOR(\$_cy_vec1), $metric)"), "the search measures by $metric:\n$sql")
             val among = plan(SearchStore.ORACLE, request(similarity, labels = listOf(label)).copy(among = VectorAmong(listOf("a"), "id"))).sql!!
             assertTrue(among.contains("FROM $table e"), "a search among ids reads $table:\n$among")
