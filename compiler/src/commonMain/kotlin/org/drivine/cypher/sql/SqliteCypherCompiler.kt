@@ -340,7 +340,9 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
         // A tag's sort key in its kind's rank, so a value of any other kind reads no tag (see [openSortKey]).
         val order = if (key != null) "${kindOrder(value)} $direction, $key $direction" else
             "CASE ${typeOf(value)} WHEN 'object' THEN ${tagRank(value, "'1'") { "'2~$it' || COALESCE(${tagKey(value)}, ${tagText(value)})" }} WHEN 'array' THEN '2' WHEN 'string' THEN '3' " +
-                "WHEN 'boolean' THEN '4' WHEN 'number' THEN '5' END $direction, ($value ->> '$') $direction"
+                "WHEN 'boolean' THEN '4' WHEN 'number' THEN '5' END $direction, " +
+                // A list by its items, as [sortKey] orders one, not as its text, which put [3] after [10] (drivine4j#271).
+                "CASE WHEN ${typeOf(value)} = 'array' THEN ${SqliteFunctions.SORT_KEY}($value) ELSE ($value ->> '$') END $direction"
         return "(json_group_array(json($value) ORDER BY $order) FILTER (WHERE NOT ${isJsonNull(value)}) -> 0)"
     }
 

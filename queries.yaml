@@ -3314,8 +3314,8 @@ cases:
       - note: "So does a list a CALL sorts and limits."
         cypher: "CALL { UNWIND [[1, null], [1, 2], ['a']] AS xs RETURN xs ORDER BY xs LIMIT 2 } RETURN xs ORDER BY xs DESC"
         rows: [[1, 2], ["a"]]
-      - note: "A list read from a map, whose kind the statement leaves open. Postgres sorts such a value as jsonb sorts it (drivine4j#307), and Oracle as its JSON sorts it (drivine4j#798)."
-        except: [postgres, oracle]
+      - note: "A list read from a map, whose kind the statement leaves open. Oracle sorts such a value as its JSON sorts it (drivine4j#798)."
+        except: [oracle]
         cypher: "UNWIND [{l: [1, 'a']}, {l: ['a']}, {l: [1, null]}] AS m RETURN m.l ORDER BY m.l"
         rows: [["a"], [1, "a"], [1, null]]
       - note: "A list of lists compares each inner list item by item too."
