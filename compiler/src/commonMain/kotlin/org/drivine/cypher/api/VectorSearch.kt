@@ -29,7 +29,8 @@ import org.drivine.schema.SimilarityFunction
 data class VectorIndex(val dimensions: Int? = null, val name: String? = null)
 
 /**
- * A search among ids: for each root among [ids] that holds the embedding, its nearest among the others.
+ * A search among ids: for each root among [ids] that holds the embedding, its nearest among the others. By cosine, on a SQL
+ * store, a root whose embedding has no length, all zeros, is left out, as a seed and as a neighbour.
  *
  * @param ids the roots' ids, as the text each is found by; a repeat is dropped, as drivine4j's `loadNearestAmong` drops it.
  * @param idProperty the property the root's id is stored under.

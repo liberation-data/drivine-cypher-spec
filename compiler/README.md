@@ -262,6 +262,7 @@ searched once however often it is given, as drivine4j's `loadNearestAmong` searc
   is bound, so one statement serves every partition.
 - A search among ids is the whole statement on every store, one row a root, `{seed, near}` (the column `result` on a SQL
   store, `row` on a graph engine), `near` its `topK` neighbours as `{id, score}`, best first, none under the threshold.
+  By cosine, on a SQL store, a root whose embedding has no length is left out, as a seed and as a neighbour (#160).
 - `parameters` are named `_cy_vec1`, `_cy_vec2`, …, with the compiler's reserved prefix. The query vector is not among
   them: `vector` names the parameter the library binds it as, as it binds a list, so a long vector doesn't pass through
   the module. `indexK` is how many the index is asked for: `searchK`, or where it is left out `topK`, and among ids
