@@ -18,9 +18,9 @@
 # give: for vector search, Neo4j's answer is the rule (liberation-data/drivine-cypher-spec#160). Where a store gives
 # something else today, `today` says what, and the issue, as in search.yaml; a library holds such a step in its own HELD
 # list until the issue's fix lands. `today` is not read. The SQL stores' compiler compiles db.index.vector.queryNodes(),
-# given the graph's vector indexes as its catalog records them (GraphOptions.vectorIndexes); on Oracle and SQLite only a
-# search whose vector the statement writes, so far. It does not read SEARCH yet, and refuses vector.similarity.cosine()
-# and vector.similarity.euclidean() as functions it does not compile: those steps are held.
+# given the graph's vector indexes as its catalog records them (GraphOptions.vectorIndexes). It does not read SEARCH
+# yet, and refuses vector.similarity.cosine() and vector.similarity.euclidean() as functions it does not compile: those
+# steps are held.
 #
 # Rows are compared as queries.yaml compares them, with two differences. Each float is compared within 1e-6: Neo4j's
 # scores are float32s, so 0.8 comes back 0.800000011920929. And a run of consecutive rows whose last column, the score,
@@ -113,7 +113,6 @@ cases:
       - cypher: "CALL db.index.vector.queryNodes('chunk_cos', $k, $v) YIELD node, score RETURN node.id, score"
         parameters: {k: 3, v: [1.0, 0.0, 0.0]}
         rows: [["a", 1.0], ["d", 1.0], ["c", 0.800000011920929]]
-        today: [{stores: ["oracle", "sqlite"], error: "A vector search (db.index.vector.queryNodes) is not compiled to SQL on this store yet.", issue: "liberation-data/drivine-cypher-spec#160"}]
       - cypher: "MATCH (c:Chunk) SEARCH c IN (VECTOR INDEX chunk_cos FOR $v LIMIT $k) SCORE AS s RETURN c.id, s"
         parameters: {k: 3, v: [1.0, 0.0, 0.0]}
         rows: [["a", 1.0], ["d", 1.0], ["c", 0.800000011920929]]
@@ -200,7 +199,6 @@ cases:
     steps:
       - cypher: "MATCH (q:Chunk {id: 'c'}) CALL (q) { CALL db.index.vector.queryNodes('chunk_cos', 2, q.embedding) YIELD node, score RETURN node, score } RETURN node.id, score"
         rows: [["c", 1.0], ["b", 0.8999999761581421]]
-        today: [{stores: ["oracle", "sqlite"], error: "A vector search (db.index.vector.queryNodes) is not compiled to SQL on this store yet.", issue: "liberation-data/drivine-cypher-spec#160"}]
       - cypher: "MATCH (q:Chunk {id: 'c'}) CALL (q) { MATCH (c:Chunk) SEARCH c IN (VECTOR INDEX chunk_cos FOR q.embedding LIMIT 2) SCORE AS s RETURN c, s } RETURN c.id, s"
         rows: [["c", 1.0], ["b", 0.8999999761581421]]
         today: [{stores: ["sql"], issue: "liberation-data/drivine-cypher-spec#160"}]
@@ -210,10 +208,8 @@ cases:
     steps:
       - cypher: "MATCH (q:Chunk {id: 'c'}) CALL db.index.vector.queryNodes('chunk_cos', 3, q.embedding) YIELD node, score RETURN node.id, score"
         rows: [["c", 1.0], ["b", 0.8999999761581421], ["a", 0.800000011920929]]
-        today: [{stores: ["oracle", "sqlite"], error: "A vector search (db.index.vector.queryNodes) is not compiled to SQL on this store yet.", issue: "liberation-data/drivine-cypher-spec#160"}]
       - cypher: "UNWIND [[0.0, 1.0, 0.0], [0.6, 0.8, 0.0]] AS v CALL db.index.vector.queryNodes('chunk_cos', 1, v) YIELD node, score RETURN v, node.id, score"
         rows: [[[0.0, 1.0, 0.0], "b", 1.0], [[0.6, 0.8, 0.0], "c", 1.0]]
-        today: [{stores: ["oracle", "sqlite"], error: "A vector search (db.index.vector.queryNodes) is not compiled to SQL on this store yet.", issue: "liberation-data/drivine-cypher-spec#160"}]
       - cypher: "UNWIND [[0.0, 1.0, 0.0], [0.6, 0.8, 0.0]] AS v MATCH (c:Chunk) SEARCH c IN (VECTOR INDEX chunk_cos FOR v LIMIT 1) SCORE AS s RETURN v, c.id, s"
         rows: [[[0.0, 1.0, 0.0], "b", 1.0], [[0.6, 0.8, 0.0], "c", 1.0]]
         today: [{stores: ["sql"], issue: "liberation-data/drivine-cypher-spec#160"}]
