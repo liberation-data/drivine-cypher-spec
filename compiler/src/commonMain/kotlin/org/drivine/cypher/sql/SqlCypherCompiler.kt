@@ -380,8 +380,8 @@ abstract class SqlCypherCompiler(
     protected open fun endHints(saved: Any?) {}
 
     /**
-     * The optimizer hints the library's query that holds the fragment's [terms] carries in its outermost `SELECT`, as a
-     * statement that reads them would be planned ([planned]): none here.
+     * The optimizer hints the library's query that holds the fragment's [terms], over the library's [rows] of the graph's
+     * tables, carries in its outermost `SELECT`, as a statement that reads them would be planned ([planned]): none here.
      */
     protected open fun fragmentHints(terms: List<String>): List<String> = emptyList()
 

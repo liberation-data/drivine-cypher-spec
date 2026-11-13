@@ -14,10 +14,11 @@ import org.drivine.DrivineInternalApi
  * statement parameters of names no other fragment of it uses. [nonFinite] is a statement's ([CompiledCypher.nonFinite]): a
  * value the fragment gives may then be NaN or an infinity, held as the store holds one, which the library reads back so.
  * [hints] are the optimizer hints the library's query that holds the terms carries in its outermost `SELECT`
- * (`SELECT /*+ … */`), as a statement that compares so is planned with them: on Oracle, `NO_JSON_TABLE_TRANSFORM` where a
- * term reads a property it compares by its own path or a list item by its place, without which Oracle 23 gives a comparison
- * over such a read the wrong truth, and `OPT_PARAM('_optimizer_use_feedback' 'false')` where a term tests a node's labels as
- * one read by its key; none on Postgres and SQLite. A value is for the library's SQL to compare, group or bind
+ * (`SELECT /*+ … */`): on Oracle, `NO_JSON_TABLE_TRANSFORM` always, as a statement that compares a property, reads a list
+ * item by its place or reads the graph's tables twice is planned with it, and a library's query reads them beside the
+ * fragment's own reads, in a FROM the module doesn't see; without it Oracle 23 may give a comparison the wrong truth or lose
+ * a row's label tests (#415). And `OPT_PARAM('_optimizer_use_feedback' 'false')` where a term tests a node's labels as one
+ * read by its key. None on Postgres and SQLite. A value is for the library's SQL to compare, group or bind
  * within it: a column read back as a statement's rows are is a statement's, which Oracle re-encodes as it returns it.
  */
 @DrivineInternalApi

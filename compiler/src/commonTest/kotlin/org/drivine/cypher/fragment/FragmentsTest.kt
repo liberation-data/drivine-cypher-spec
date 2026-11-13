@@ -211,14 +211,15 @@ class FragmentsTest {
             "EXISTS { (p)-->() }", "true",
         )
         val oracle = org.drivine.cypher.sql.OracleCypherCompiler("g")
-        var hinted = 0
+        // On Oracle every fragment is hinted against the JSON table transformation, a statement that compares so being hinted
+        // too, and the library's query reading the graph's tables in a FROM the module doesn't see: each hint a statement
+        // compiled of the condition carries, the fragment carries.
         for (condition in conditions.reversed() + conditions) {
             val statement = org.drivine.cypher.sql.OracleCypherCompiler("g").compile("MATCH (p) WHERE $condition RETURN p").sql
             val hints = oracle.condition(condition, variables).hints
-            assertEquals(statement.contains("NO_JSON_TABLE_TRANSFORM"), "NO_JSON_TABLE_TRANSFORM" in hints, "$condition: $hints, as\n$statement")
-            if (hints.isNotEmpty()) hinted++
+            assertTrue("NO_JSON_TABLE_TRANSFORM" in hints, "$condition: $hints")
+            if (statement.contains(OracleCypherCompiler.NO_FEEDBACK)) assertTrue(OracleCypherCompiler.NO_FEEDBACK in hints, "$condition: $hints, as\n$statement")
         }
-        assertTrue(hinted in 1 until conditions.size * 2, "some hinted and some not: $hinted")
         // A walk between two labelled nodes tests the later's labels as a node read by its key, which a statement is planned
         // without statistics feedback for: the fragment's query is too, and one whose walk starts at the library's row isn't.
         for ((walk, keyed) in listOf("EXISTS { (a:A)-[:R]->(b:B) }" to true, "EXISTS { (p)-[:R]->(b:B) }" to false)) {
@@ -227,6 +228,9 @@ class FragmentsTest {
             assertEquals(keyed, statement.contains(OracleCypherCompiler.NO_FEEDBACK), "$walk: $statement")
             assertEquals(keyed, OracleCypherCompiler.NO_FEEDBACK in hints, "$walk: $hints")
         }
+        // A fragment over two of the library's rows, as one over one, whose statement isn't hinted.
+        val two = mapOf("p" to FragmentVariable.Node("people_"), "q" to FragmentVariable.Node("others_"))
+        for (rows in listOf(variables, two)) assertTrue("NO_JSON_TABLE_TRANSFORM" in oracle.condition("elementId(p) = '1'", rows).hints, "$rows")
         // A statement compiled after the fragments is planned as on a compiler that compiled none.
         assertEquals(org.drivine.cypher.sql.OracleCypherCompiler("g").compile("MATCH (p) RETURN p.name").sql, oracle.compile("MATCH (p) RETURN p.name").sql)
         for (other in listOf(org.drivine.cypher.sql.PostgresCypherCompiler("g"), org.drivine.cypher.sql.SqliteCypherCompiler("g"))) {

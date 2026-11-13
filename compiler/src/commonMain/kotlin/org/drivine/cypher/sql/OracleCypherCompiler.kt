@@ -1812,15 +1812,16 @@ class OracleCypherCompiler(
     }
 
     /**
-     * A fragment's hints are as [planned] gives a statement's: by what the fragment itself compares and reads, and the graph's
-     * tables it reads counted with the library's row it is over, which its terms read and its own FROM holds.
+     * A fragment's hints: `NO_JSON_TABLE_TRANSFORM` always, and [NO_FEEDBACK] where a term tests a node's labels as one read by
+     * its key, as [planned] gives a statement. [planned] hints a statement against Oracle's JSON table transformation where a
+     * comparison reads a property by its own path, an item of a list is read by its place, or the graph's tables are read
+     * twice or more: a fragment is a part of the library's query, whose FROM the module doesn't see, and which reads the graph's
+     * tables beside the fragment's own reads, so it is hinted whatever it reads. The cost is a rewrite Oracle doesn't make,
+     * which a statement that compares a property forgoes too; without it Oracle 23 may give a comparison the wrong truth.
      */
     override fun fragmentHints(terms: List<String>): List<String> {
         val text = terms.joinToString("\n")
-        return listOfNotNull(
-            NO_JSON_TABLE_TRANSFORM.takeIf { readsCompared || (graphTable.findAll(text).count() + 1).let { it >= 2 || readsByPlace && it == 1 } },
-            NO_FEEDBACK.takeIf { keyed.any { it in text } },
-        )
+        return listOfNotNull(NO_JSON_TABLE_TRANSFORM, NO_FEEDBACK.takeIf { keyed.any { it in text } })
     }
 
     override fun startHints(): Any? = (readsCompared to readsByPlace).also { readsCompared = false; readsByPlace = false }
