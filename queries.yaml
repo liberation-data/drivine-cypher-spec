@@ -1002,9 +1002,14 @@ cases:
         rows: [[true, true, true]]
       - note: "Anchors and flags as Java reads them over the empty text: \\z its end, (?s) and (?m), and an escaped backslash before z, which is no anchor."
         only: [neo4j, sql]
-        cypher: "RETURN [$e =~ $z, $e =~ $za, $e =~ $s, $e =~ $m, $e =~ $l, $e =~ $nl, $e =~ $ns]"
-        parameters: {e: "", z: "\\z", za: "a?\\z", s: "(?s).*", m: "(?m)^$", l: "\\\\z", nl: "\\n", ns: "[^a]"}
-        rows: [[true, true, true, false, false, false, false]]
+        cypher: "RETURN [$e =~ $z, $e =~ $za, $e =~ $s, $e =~ $l, $e =~ $nl, $e =~ $ns]"
+        parameters: {e: "", z: "\\z", za: "a?\\z", s: "(?s).*", l: "\\\\z", nl: "\\n", ns: "[^a]"}
+        rows: [[true, true, true, false, false, false]]
+      - note: "Java's ^ under (?m) never matches at the input's end, which in the empty text is its start. Postgres's does, so it gives true (liberation-data/drivine-cypher-spec#227)."
+        only: [neo4j, oracle, sqlite]
+        cypher: "RETURN $e =~ $m"
+        parameters: {e: "", m: "(?m)^$"}
+        rows: [false]
       - note: "A text past 32 KB is matched as a CLOB."
         only: [neo4j, sql]
         cypher: "RETURN [$long =~ '', $long =~ 'x*', $e =~ 'x*']"
