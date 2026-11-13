@@ -1778,13 +1778,16 @@ class OracleCypherCompiler(
     override fun called(query: String) =
         "SELECT /*+ NO_MERGE${if (DISTINCT_SELECT.containsMatchIn(query)) " NO_DECORRELATE" else ""} */ * FROM (\n${indent(query)}\n)"
 
+    /** A fragment's term [sql] with its reads routed as a statement's are: see [finished]. */
+    override fun finishedTerm(sql: String) = OracleLongReads.routed(sql)
+
     /**
      * Each read of a stored value as JSON left off the CLOB route is routed it: a long text property read as a direct member of
      * a list or a map, or as a nested property, is routed the CLOB way on Oracle, to avoid an Oracle server defect
      * (drivine4j#670). See [OracleLongReads].
      */
     override fun finished(compiled: CompiledCypher): CompiledCypher {
-        val routed = OracleLongReads.routed(compiled.sql)
+        val routed = finishedTerm(compiled.sql)
         return compiled.copy(sql = if (readsAsText && !procedural && !typed) readAsText(routed) else routed)
     }
 

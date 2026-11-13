@@ -306,7 +306,7 @@ abstract class SqlCypherCompiler(
     /**
      * A fragment: [cypher] read as one expression, compiled by [write] over [variables] bound as a statement binds the nodes and
      * relationships it matches. A fragment is written into SQL the library writes, which declares no function: one that calls a
-     * function the store declares for a statement is refused.
+     * function the store declares for a statement is refused, and so is one that aggregates, as that SQL groups no rows for it.
      */
     private fun fragment(
         cypher: String,
@@ -314,33 +314,54 @@ abstract class SqlCypherCompiler(
         parameters: Map<String, Any?>,
         write: (Writer, Expression, Map<String, Value>) -> List<String>,
     ): SqlFragment {
-        val query = CypherReader.read("RETURN $cypher AS fragment")
-        val item = (query.clauses.singleOrNull() as? Clause.Return)?.projection?.items?.singleOrNull()
-        if (query.unions.isNotEmpty() || item == null || item.name != "fragment") {
+        // Read as a statement's RETURN, whose parse error would name a statement, and a column of that RETURN's text.
+        val query = try {
+            CypherReader.read("RETURN $cypher AS fragment")
+        } catch (e: CompilerException) {
+            null
+        }
+        // A RETURN of its own, DISTINCT or ordered, would be read past: only the one item is compiled.
+        val projection = (query?.clauses?.singleOrNull() as? Clause.Return)?.projection
+            ?.takeIf { !it.distinct && !it.star && it.orderBy.isEmpty() && it.skip == null && it.limit == null }
+        val item = projection?.items?.singleOrNull()
+        if (query == null || query.unions.isNotEmpty() || item == null || item.name != "fragment") {
             throw CompilerException("A fragment is one Cypher expression: $cypher")
         }
+        // An aggregate is refused as in a statement's WHERE: the library's SQL has no group for it to aggregate over.
+        Aggregates(::isAggregate, ::children).checkWhere(item.expression)
+        // As a statement that reads sets them, so the fragment is written as that statement's WHERE or ORDER BY would be.
         val given = parameters.values.any { holdsNonFinite(it) }
-        nonFinite = given
-        nanWorkedOut = given
+        nonFinite = given || (nonFiniteWorkedOut(false) && (worksOutNonFinite(query, parameters) || (infinitiesStored && worksOutNaN(query, parameters))))
+        nanWorkedOut = given || worksOutNonFinite(query, parameters) || worksOutNaN(query, parameters)
+        idsAtMost(mostIds(query))
         procedural = false
-        val declared = functions.size
-        val writer = Writer(Parameters(parameters, ::parameterJson, ::parameterCount, text = ::parameterText, asPath = parameterPath))
-        writer.labelsOf = variables.mapNotNull { (name, variable) -> (variable as? FragmentVariable.Node)?.let { name to it.labels } }.toMap()
-        val scope = variables.mapValues { (_, variable) ->
-            val row = variable.row
-            when (variable) {
-                is FragmentVariable.Node -> Value.Node("$row.nid", "$row.labels", "$row.props", "$row.stamp")
-                is FragmentVariable.Relationship -> Value.Relationship("$row.eid", "$row.src", "$row.dst", "$row.type", "$row.props")
+        // The functions the statements compiled before declared are set aside, and put back after: one the fragment calls is
+        // seen though such a statement declared it already, and none it declares is left for the next statement.
+        val declared = functions.toList()
+        functions.clear()
+        try {
+            val writer = Writer(Parameters(parameters, ::parameterJson, ::parameterCount, text = ::parameterText, asPath = parameterPath))
+            writer.labelsOf = variables.mapNotNull { (name, variable) -> (variable as? FragmentVariable.Node)?.let { name to it.labels } }.toMap()
+            val scope = variables.mapValues { (_, variable) ->
+                val row = variable.row
+                when (variable) {
+                    is FragmentVariable.Node -> Value.Node("$row.nid", "$row.labels", "$row.props", "$row.stamp")
+                    is FragmentVariable.Relationship -> Value.Relationship("$row.eid", "$row.src", "$row.dst", "$row.type", "$row.props")
+                }
             }
+            val terms = write(writer, item.expression, scope).map(::finishedTerm)
+            if (functions.isNotEmpty() || terms.any { calledFunctions(it).isNotEmpty() }) {
+                throw CompilerException("A fragment calls a function the store declares for a statement, which SQL a library writes doesn't declare: $cypher")
+            }
+            return SqlFragment(terms, writer.parameters.values)
+        } finally {
+            functions.clear()
+            functions += declared
         }
-        val terms = write(writer, item.expression, scope)
-        val called = functions.drop(declared) + terms.flatMap(::calledFunctions)
-        if (called.isNotEmpty()) {
-            while (functions.size > declared) functions.removeAt(functions.lastIndex)
-            throw CompilerException("A fragment calls a function the store declares for a statement, which SQL a library writes doesn't declare: $cypher")
-        }
-        return SqlFragment(terms, writer.parameters.values)
     }
+
+    /** A fragment's term [sql] after the last pass the store makes over a statement's text, as [finished] makes it: none here. */
+    protected open fun finishedTerm(sql: String): String = sql
 
     /** The statement [compiled] as the store runs it, after the last pass the store makes over it: none here. */
     protected open fun finished(compiled: CompiledCypher): CompiledCypher = compiled

@@ -7,8 +7,14 @@ import org.drivine.cypher.json.JsonNode
 import org.drivine.cypher.json.ObjectNode
 import org.drivine.cypher.number.oracleFile
 import org.drivine.cypher.number.target
+import org.drivine.cypher.CompilerException
+import org.drivine.cypher.sql.FragmentVariable
+import org.drivine.cypher.sql.OracleCypherCompiler
+import org.drivine.cypher.sql.PostgresCypherCompiler
+import org.drivine.cypher.sql.SqliteCypherCompiler
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 /**
@@ -81,12 +87,54 @@ class FragmentsTest {
             assertEquals(message, CypherJson.readTree(CompileJson.compile(request))["error"]?.textValue(), request)
         }
         for ((fragment, refusal) in listOf(
-            "{\"condition\": \"n.k = 1 RETURN 2\", $node}" to null,
+            "{\"condition\": \"n.k = 1 RETURN 2\", $node}" to "A fragment is one Cypher expression: n.k = 1 RETURN 2",
+            "{\"value\": \"DISTINCT n.k\", $node}" to "A fragment is one Cypher expression: DISTINCT n.k",
+            "{\"condition\": \"count(n) > 1\", $node}" to "count() aggregates, and a WHERE holds no aggregate",
+            "{\"order\": \"sum(n.k)\", $node}" to "sum() aggregates, and a WHERE holds no aggregate",
             "{\"condition\": \"m.k = 1\", $node}" to "m is not defined",
             "{\"condition\": \"n.k = \$missing\", $node}" to "missing",
         )) {
             val got = CypherJson.readTree(CompileJson.compile("{\"store\": \"sqlite\", $graph, \"fragment\": $fragment}"))
-            assertTrue(got["refusal"]?.textValue()?.contains(refusal ?: "") == true, "$fragment: $got")
+            assertTrue(got["refusal"]?.textValue()?.contains(refusal) == true, "$fragment: $got")
+        }
+    }
+
+    /** A row of people, as `fragments.yaml`'s variables give it. */
+    private val people = mapOf("n" to FragmentVariable.Node("people_", listOf("Person")))
+
+    @Test
+    fun aFragmentThatCallsAFunctionAStatementDeclaredBeforeIsRefusedStillAndTheStatementsDeclareItAgain() {
+        // Libraries keep one compiler: a function declared for a statement compiled before is still one the library's SQL lacks.
+        val oracle = OracleCypherCompiler("g")
+        val statement = "UNWIND [[1]] AS x RETURN x ORDER BY x"
+        assertTrue(oracle.compile(statement, emptyMap()).sql.startsWith("WITH\nFUNCTION cy_list_key("))
+        val refused = assertFailsWith<CompilerException> { oracle.order("[n.a]", false, people) }
+        assertTrue(refused.message!!.startsWith("A fragment calls a function the store declares"), refused.message)
+        // And none the fragment declared, nor one taken off before, changes the next statement.
+        assertEquals(OracleCypherCompiler("g").also { it.compile(statement, emptyMap()) }.compile(statement, emptyMap()).sql, oracle.compile(statement, emptyMap()).sql)
+    }
+
+    @Test
+    fun aFragmentIsWrittenAsTheWhereOfAStatementThatReadsWouldBe() {
+        // A float divided by zero works out an infinity, which Postgres's and SQLite's statements that read compile for.
+        for (compiler in listOf(PostgresCypherCompiler("g"), SqliteCypherCompiler("g"))) {
+            val term = compiler.condition("n.a / 0.0 > 1", people).sql
+            val fresh = if (compiler is PostgresCypherCompiler) PostgresCypherCompiler("g") else SqliteCypherCompiler("g")
+            val statement = fresh.compile("MATCH (people_) WHERE people_.a / 0.0 > 1 RETURN 1", emptyMap()).sql
+            assertTrue(statement.contains(Regex("2e309|numberDouble")) && term.contains(Regex("2e309|numberDouble")), "$term\n$statement")
+        }
+        // Oracle routes a read of a long text the CLOB way, as it routes a statement's (drivine4j#670).
+        assertTrue(OracleCypherCompiler("g").value("[n.name]", people).sql.contains("@.name.length() <= 4000"))
+        // And holds a walk's ids as its own bound needs, not as the statement compiled before needed them.
+        for (walk in listOf("EXISTS { (n)-[*]->() }", "EXISTS { (n)-[*1..2]->() }")) {
+            val oracle = OracleCypherCompiler("g")
+            val alone = OracleCypherCompiler("g").condition(walk, people)
+            // A walk with no bound holds its ids as JSON, and one with a bound as text (see OracleIdListFormTest).
+            assertEquals("[*]" in walk, "CAST(',' AS VARCHAR2(4000))" !in alone.sql, alone.sql)
+            for (before in listOf("MATCH (a)-[*]->(b) RETURN 1", "MATCH (a)-[*1..2]->(b) RETURN 1")) {
+                oracle.compile(before, emptyMap())
+                assertEquals(alone, oracle.condition(walk, people), "$walk after $before")
+            }
         }
     }
 
