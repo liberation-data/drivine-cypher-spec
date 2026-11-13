@@ -1,5 +1,6 @@
 package org.drivine.cypher.store.ddl
 
+import org.drivine.DrivineInternalApi
 import org.drivine.cypher.json.Sha256
 import org.drivine.cypher.sql.TemporalArithmeticFunction
 import org.drivine.cypher.store.OracleSql
@@ -20,6 +21,7 @@ import org.drivine.cypher.store.OracleSql
  * A runner of `store.yaml`'s statements expands each marker with [expand] before comparing, in every library: the one place
  * a marker is read.
  */
+@DrivineInternalApi
 object GeneratedFunctions {
 
     /** A marker: its form and its graph. */

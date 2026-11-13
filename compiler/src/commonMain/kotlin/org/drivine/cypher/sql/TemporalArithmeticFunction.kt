@@ -1,5 +1,6 @@
 package org.drivine.cypher.sql
 
+import org.drivine.DrivineInternalApi
 import org.drivine.cypher.json.TemporalValue
 
 /**
@@ -25,6 +26,7 @@ import org.drivine.cypher.json.TemporalValue
  * SQLite keeps no function, and has none yet: such arithmetic fails by name there as the statement runs, until a host function
  * the libraries register works it out (drivine4j#418).
  */
+@DrivineInternalApi
 object TemporalArithmeticFunction {
 
     /**
