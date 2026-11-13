@@ -1312,20 +1312,24 @@ class OracleCypherCompiler(
     override fun holdsNull(json: String) = serializedHolds(json, "[[,:]null[],}]")
 
     /**
-     * JSON's text of a list that holds null writes `[null` or `,null` in it, as no map does, which writes a key first, read as
-     * [holdsNull] reads it. A list held in it that holds null says so too, as one written in a map of properties does: neither
-     * is a property either.
+     * JSON's text of a list that holds null writes `[null` or `,null` in it, as no map does, which writes a key first, its texts
+     * and keys taken out as [holdsNull] takes them out; a list starts with `[`, a map with `{`. A list held in it that holds null
+     * says so too, as one written in a map of properties does: neither is a property either. Read only as a CLOB, once, with no
+     * kind read by `$.type()` and no `VARCHAR2` of it: a write of a text past 32 KB on two rows or more, read so, closed the
+     * session (ORA-03113, drivine4j#531, #255).
      */
-    override fun nullItem(json: String, entries: Boolean) = shared(json) { (x) ->
-        "(${kind(x)} = '${if (entries) "object" else "array"}' AND ${serializedHolds(x, "[[,]null[],]")})"
-    }
+    override fun nullItem(json: String, entries: Boolean) =
+        "EXISTS (SELECT 1 FROM (SELECT JSON_SERIALIZE($json RETURNING CLOB) AS t FROM DUAL) ni " +
+            "WHERE DBMS_LOB.SUBSTR(ni.t, 1, 1) = '${if (entries) "{" else "["}' AND ${serializedNulls("ni.t", "[[,]null[],]")})"
 
     /** Whether JSON's text of [json], its texts and keys taken out, matches [pattern]: see [holdsNull]. */
     private fun serializedHolds(json: String, pattern: String): String {
-        fun nulls(text: String) = "REGEXP_LIKE(REGEXP_REPLACE($text, '\"([^\"\\\\]|\\\\.)*\"', '\"\"'), '$pattern')"
         val short = "JSON_SERIALIZE($json RETURNING VARCHAR2(4000) NULL ON ERROR)"
-        return "($short IS NOT NULL AND ${nulls(short)} OR $short IS NULL AND ${nulls("JSON_SERIALIZE($json RETURNING CLOB)")})"
+        return "($short IS NOT NULL AND ${serializedNulls(short, pattern)} OR $short IS NULL AND ${serializedNulls("JSON_SERIALIZE($json RETURNING CLOB)", pattern)})"
     }
+
+    /** Whether JSON's text [text], its texts and keys taken out, matches [pattern]. */
+    private fun serializedNulls(text: String, pattern: String) = "REGEXP_LIKE(REGEXP_REPLACE($text, '\"([^\"\\\\]|\\\\.)*\"', '\"\"'), '$pattern')"
 
     /**
      * Two values written as the same JSON text are null, as one holds a null and so its pair in the other does: that needs

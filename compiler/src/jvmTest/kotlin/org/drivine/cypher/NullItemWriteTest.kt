@@ -102,4 +102,26 @@ class NullItemWriteTest {
             assertFalse(refuses(sql), "$cypher\n$sql")
         }
     }
+
+    @Test
+    fun `Oracle tests the value written only through its text as a CLOB, which a text past 32 KB is read through safely`() {
+        // A text past 32 KB read by `$.type()`, as a VARCHAR2 or taken out as JSON, on two rows or more, closed the session
+        // (ORA-03113, drivine4j#531, #255): the test reads the value once, by JSON_SERIALIZE … RETURNING CLOB, and nothing else.
+        val worked = listOf(
+            "UNWIND [1, 2] AS i MATCH (n:A) SET n.x = [n.y], n.t = \$long",
+            "UNWIND [1, 2] AS i MATCH (n:A) WITH n, {x: [n.y], t: \$long} AS m SET n += m",
+            "UNWIND [1, 2] AS i MATCH (s:A) CREATE (:A {x: [s.y], t: \$long})",
+            "UNWIND [1, 2] AS i MATCH (s:A) CREATE (s)-[:R {x: [s.y], t: \$long}]->(:A)",
+        )
+        for (cypher in worked) {
+            val sql = sql(OracleCypherCompiler("g"), cypher, mapOf("long" to "x".repeat(40_000)))
+            val checks = sql.lines().filter { "INTO cy_count" in it && "[[,]null[],]" in it }
+            assertTrue(checks.isNotEmpty(), "$cypher\n$sql")
+            for (check in checks) {
+                val read = Regex("""cy_value\b""").findAll(check).count()
+                assertTrue(read == 1 && "JSON_SERIALIZE(cy_value RETURNING CLOB)" in check, "$cypher\n$check")
+                listOf("type()", "VARCHAR2", "JSON_QUERY", "JSON_VALUE").forEach { assertFalse(it in check, "$it in $cypher\n$check") }
+            }
+        }
+    }
 }

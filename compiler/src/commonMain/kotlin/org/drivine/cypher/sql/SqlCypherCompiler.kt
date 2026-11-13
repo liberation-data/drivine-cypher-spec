@@ -2912,12 +2912,14 @@ abstract class SqlCypherCompiler(
          * The tests of the JSON [json], the value [written] gives in [scope], a property's or with [entries] a map of properties,
          * for a list that holds null ([nullItem]): none where it can hold none, as a value of one kind, a property read from the
          * store or a list or map written or given without one; null where it surely is or has one, as `[null]` written, or a
-         * parameter bound to one. A map written is tested entry by entry.
+         * parameter bound to one. A map written is known entry by entry, and tested whole where an entry is worked out as it
+         * runs: no entry is read out of it, which Oracle does not do safely for a text past 32 KB.
          */
         private fun nullItemTests(written: Expression?, scope: Map<String, Value>, json: String, entries: Boolean): List<String>? {
             if (written == null) return emptyList()
             if (entries && written is Expression.MapLiteral) {
-                return written.entries.flatMap { (key, value) -> nullItemTests(value, scope, propertyOf(json, key), entries = false) ?: return null }
+                val tested = written.entries.map { (_, value) -> nullItemTests(value, scope, json, entries = false) ?: return null }
+                return if (tested.all { it.isEmpty() }) emptyList() else listOf(nullItem(json, entries = true))
             }
             if (written is Expression.Parameter) return if (parameterTree(written.name)?.let { holdsNullItem(it, entries) } == true) null else emptyList()
             if (!entries && written is Expression.ListLiteral &&
