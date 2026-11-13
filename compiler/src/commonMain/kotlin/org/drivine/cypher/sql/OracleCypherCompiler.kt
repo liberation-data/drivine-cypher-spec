@@ -393,12 +393,13 @@ class OracleCypherCompiler(
      * and leaves it, `\A(pattern)\n\z`. Oracle's `$` and `\Z` match before a line break that ends the text, as they match at
      * the end of an empty one; an unescaped `\z` is read as `\Z` here, for the same. A pattern of Java's that reads a line
      * break of its own reads this one, and finds no second (`\n`, `\s`, `[^a]`, `(?s).`): it matches no empty text, as in
-     * Java. queries.yaml's "A regular expression over the empty text" checks it against Neo4j.
+     * Java. The line break the pattern must leave is written as a class, `[[:cntrl:]]`, which `(?x)` doesn't skip, as it
+     * skips a line break written as it is. queries.yaml's "A regular expression over the empty text" checks it against Neo4j.
      */
     private fun matchesEmpty(pattern: String) = shared(pattern) { (p) ->
         val flags = "REGEXP_SUBSTR($p, '^\\(\\?([a-z]+)\\)', 1, 1, NULL, 1)"
         val written = """REGEXP_REPLACE(REGEXP_REPLACE($p, '^\(\?[a-z]+\)', ''), '(^|[^\\])((\\\\)*)\\z', '\1\2\\Z')"""
-        "REGEXP_LIKE(CHR(10), '\\A(' || $written || ')' || CHR(10) || '\\z', NVL(REPLACE($flags, 's', 'n'), 'c'))"
+        "REGEXP_LIKE(CHR(10), '\\A(' || $written || ')[[:cntrl:]]\\z', NVL(REPLACE($flags, 's', 'n'), 'c'))"
     }
 
     /**

@@ -142,7 +142,7 @@ class OracleEmptyTextTest {
         assertTrue(sql.contains("SELECT CASE WHEN JSON_VALUE(JSON(\$_cy_q), '\$.type()') = 'string' THEN COALESCE(REGEXP_LIKE("), sql)
         assertTrue(sql.contains(
             ", CASE WHEN $e = 0 THEN REGEXP_LIKE(CHR(10), '\\A(' || REGEXP_REPLACE(REGEXP_REPLACE($q, '^\\(\\?[a-z]+\\)', ''), " +
-                "'(^|[^\\\\])((\\\\\\\\)*)\\\\z', '\\1\\2\\\\Z') || ')' || CHR(10) || '\\z', "), sql)
+                "'(^|[^\\\\])((\\\\\\\\)*)\\\\z', '\\1\\2\\\\Z') || ')[[:cntrl:]]\\z', "), sql)
         assertTrue(sql.endsWith(" END) END AS c1\n) p1"), sql)
         // A stored text's length by its own path, and a list's item's as the item.
         assertTrue(sql("MATCH (a:N) WHERE a.name =~ 'a*' RETURN a").contains(
