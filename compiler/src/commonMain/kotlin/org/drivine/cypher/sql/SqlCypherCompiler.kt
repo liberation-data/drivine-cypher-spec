@@ -6794,8 +6794,12 @@ abstract class SqlCypherCompiler(
             afterRowsAt[i]?.takeIf { (_, rows, alias) -> where.any { reads(it, rows) && reads(it, alias) } }?.let { (text) -> rowsJoin(text) } ?: source
         }
 
-        /** Whether [condition] reads a column of the source [alias]. */
-        private fun reads(condition: String, alias: String) = Regex("""\b${Regex.escape(alias)}\.""").containsMatchIn(condition)
+        /**
+         * Whether [condition] reads a column of the source [alias], outside its quoted texts: a text written in it, as
+         * `{key: 'u1.k'}`'s, or a JSON path, reads no source.
+         */
+        private fun reads(condition: String, alias: String) =
+            Regex("""\b${Regex.escape(alias)}\.""").containsMatchIn(condition.split('\'').filterIndexed { i, _ -> i % 2 == 0 }.joinToString(" "))
 
         /**
          * The hints the store's planner is given for this part ([fewRows]), in the order added. Each is for a source of this

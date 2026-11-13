@@ -55,6 +55,8 @@ class SqliteRowsJoinTest {
             "UNWIND \$rows AS row MATCH (c:Config {key: 'k'}) RETURN row.s, c",
             "UNWIND \$rows AS row WITH row MATCH (c:Config {key: 'k'}) RETURN row.s, c",
             "UNWIND \$rows AS row MATCH (c:Config {key: 'k'}) CREATE (c)-[:HAS]->(:Item {id: row.s})",
+            // A text written in the condition that reads like a column of the rows reads none of them.
+            "UNWIND \$rows AS row MATCH (c:Config {key: 'u1.k'}) RETURN row.s, c",
         ).forEach { cypher -> sql(cypher).let { assertFalse("CROSS JOIN" in it, "$cypher\n$it") } }
         // Read by a WHERE, it is pinned as by its properties.
         val where = sql("UNWIND \$rows AS row MATCH (a:Person) WHERE a.id = row.s RETURN count(*)")
