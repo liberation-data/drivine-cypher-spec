@@ -20,7 +20,10 @@ internal object Patterns {
      * backreference is answered where it is `\1` to `\8`, outside a character class, with no digit after it, to a group that
      * has closed before it and takes part in every match: one in no alternative, lookaround or quantifier that lets it match
      * no times, nor in a group that is. A pattern with the flag `x` is refused whole: there a space or a `#` comment may stand
-     * between a group and its quantifier, `(?x)(a) ?\1`, which the reading here doesn't step over.
+     * between a group and its quantifier, `(?x)(a) ?\1`, which the reading here doesn't step over. Postgres reads no
+     * backreference in a lookaround, and no group there as one that captures, so the groups after it are numbered one less
+     * than Java numbers them: a backreference in a lookaround is refused, and one past a group in a lookaround,
+     * `(?=(a))(a)\2`.
      */
     fun refusal(pattern: String): String? {
         val (found, groups, spaced) = scan(pattern)
@@ -32,11 +35,13 @@ internal object Patterns {
                 it.digitAfter -> "with a digit after it"
                 it.number !in it.closed -> "to a group that hasn't closed before it"
                 !groups[it.number - 1].always -> "to a group that may take no part in a match: in an alternative, a lookaround, or under a quantifier that lets it match no times"
+                it.inLookaround -> "in a lookaround, where Postgres reads none"
+                groups.take(it.number).any { group -> group.inLookaround } -> "past a group in a lookaround, which Postgres doesn't number"
                 else -> null
             }
             if (why != null) {
                 return "The regular expression '$pattern' writes a backreference, \\${it.number}, $why: the SQL stores answer a " +
-                    "backreference as Java does only where it is \\1 to \\8, with no digit after it, to a group that closed before it and takes part in every match."
+                    "backreference as Java does only where it is \\1 to \\8, with no digit after it, to a group that closed before it and takes part in every match, outside a lookaround and past no group in one."
             }
         }
         return null
@@ -45,19 +50,24 @@ internal object Patterns {
     /** Whether [pattern] writes a backreference, as Java reads one. */
     fun holdsBackreference(pattern: String): Boolean = scan(pattern).first.isNotEmpty()
 
-    /** A backreference: its number, whether it is in a character class, whether a digit follows it, and the groups closed before it. */
-    private class Backreference(val number: Int, val inClass: Boolean, val digitAfter: Boolean, val closed: Set<Int>)
+    /**
+     * A backreference: its number, whether it is in a character class, whether a digit follows it, the groups closed before
+     * it, and whether it is in a lookaround.
+     */
+    private class Backreference(val number: Int, val inClass: Boolean, val digitAfter: Boolean, val closed: Set<Int>, val inLookaround: Boolean)
 
     /**
      * A capturing group, and whether it takes part in every match, which is known once the pattern is read: none of it, nor
      * any group that holds it, is in an alternative or a lookaround, or under a quantifier that lets it match no times.
      */
-    private class Group {
+    private class Group(val inLookaround: Boolean) {
         var always = true
     }
 
     /** A group open as the pattern is read: the capturing group it is, if it captures; whether it alternates; what it holds. */
     private class Open(val group: Group?, val parent: Open?, val lookaround: Boolean) {
+        /** Whether this group, or one that holds it, is a lookaround. */
+        val inLookaround: Boolean = lookaround || parent?.inLookaround == true
         var alternated = false
         val held = mutableListOf<Group>()
     }
@@ -102,7 +112,7 @@ internal object Patterns {
                         while (depth == 0 && pattern.getOrNull(i) in '0'..'9' && number * 10 + (pattern[i] - '0') <= groups.size) {
                             number = number * 10 + (pattern[i++] - '0')
                         }
-                        found += Backreference(number, depth > 0, pattern.getOrNull(i) in '0'..'9', closed.toSet())
+                        found += Backreference(number, depth > 0, pattern.getOrNull(i) in '0'..'9', closed.toSet(), open.inLookaround)
                         continue
                     }
                     i += 2
@@ -111,7 +121,7 @@ internal object Patterns {
                 c == '(' && depth == 0 -> {
                     val named = pattern.startsWith("?<", i + 1) && pattern.getOrNull(i + 3)?.isLetter() == true
                     val lookaround = listOf("?=", "?!", "?<=", "?<!").any { pattern.startsWith(it, i + 1) }
-                    val group = if (!pattern.startsWith("?", i + 1) || named) Group().also(groups::add) else null
+                    val group = if (!pattern.startsWith("?", i + 1) || named) Group(lookaround || open.inLookaround).also(groups::add) else null
                     if (pattern.startsWith("?", i + 1) && 'x' in pattern.drop(i + 2).takeWhile { it.isLetter() }) spaced = true
                     open = Open(group, open, lookaround)
                 }

@@ -34,6 +34,9 @@ class RegexBackreferenceTest {
         "(a)\\2" to "hasn't closed", "\\1(a)" to "hasn't closed", "(a\\1)" to "hasn't closed",
         "(a)|\\1" to "may take no part", "(a)?\\1" to "may take no part", "(a)*\\1" to "may take no part", "(?:(a)|b)\\1" to "may take no part",
         "((a)|b)\\2" to "may take no part", "(?=(a))\\1" to "may take no part", "(a){0,2}\\1" to "may take no part", "x|(a)\\1" to "may take no part",
+        // Postgres reads no backreference in a lookaround, and numbers no group there: Java's second group here is its first.
+        "(a)(?=\\1)a" to "in a lookaround", "(a)(?!b\\1)a" to "in a lookaround", "(?=(a))(a)\\2" to "past a group in a lookaround",
+        "(?<=(a))(a)\\2" to "past a group in a lookaround",
         // Java reads (?x)(a) ?\1 as (a)?\1: a space may stand between a group and its quantifier.
         "(?x)(a) ?\\1" to "flag x", "(?ix)(a)\\1" to "flag x", "(a)(?x:b)\\1" to "flag x",
     )
