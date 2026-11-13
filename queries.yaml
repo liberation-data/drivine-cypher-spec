@@ -1025,7 +1025,7 @@ cases:
         rows: [[true, false, true, 2, false]]
 
   - name: "A regular expression with a backreference"
-    description: "A backreference names the group the pattern writes it for, as in Java. The SQL stores hold the pattern to the whole text in a group of their own, which on Postgres and Oracle captured, so the pattern's first group was the second: Postgres refused \\1, and Oracle read it as the whole match (#236). Past the simplest forms each store reads a backreference its own way, so the SQL stores answer one only where it is \\1 to \\8, with no digit after it, outside a class, to a group that closed before it and takes part in every match, outside a lookaround and past no group in one, which Postgres reads no backreference in and doesn't number, in a pattern the statement gives without the flag x; and refuse every other by name."
+    description: "A backreference names the group the pattern writes it for, as in Java. The SQL stores hold the pattern to the whole text in a group of their own, which on Postgres and Oracle captured, so the pattern's first group was the second: Postgres refused \\1, and Oracle read it as the whole match (#236). Past the simplest forms each store reads a backreference its own way, so the SQL stores answer one only where it is \\1 to \\8, with no digit after it, outside a class, to a group that closed before it and takes part in every match, not repeated where it may match nothing, which each engine repeats its own way, outside a lookaround and past no group in one, which Postgres reads no backreference in and doesn't number, in a pattern the statement gives without the flag x and with no class that holds (, ) or |, which Postgres and Oracle may read outside it; and refuse every other by name."
     steps:
       - note: "Each form answered, over a text it matches and one it doesn't."
         only: [neo4j, sql]
@@ -1099,6 +1099,16 @@ cases:
         only: [sql]
         cypher: "RETURN 'aa' =~ $p"
         parameters: {p: "(?=(a))(a)\\2"}
+        error: true
+      - note: "Refused: to a group repeated that may match nothing, which each engine repeats its own way once it has matched nothing: Java matches aba here."
+        only: [sql]
+        cypher: "RETURN 'aba' =~ $p"
+        parameters: {p: "(a?)+b\\1"}
+        error: true
+      - note: "Refused: in a pattern with a class that holds a group's parentheses, which Postgres, reading no class within a class, reads as a group: Java matches acc here."
+        only: [sql]
+        cypher: "RETURN 'acc' =~ $p"
+        parameters: {p: "[[a](b)](c)\\1"}
         error: true
       - note: "Refused: in a pattern with the flag x, where a space may stand between a group and its quantifier: Java reads this one as (a)?\\1."
         only: [sql]

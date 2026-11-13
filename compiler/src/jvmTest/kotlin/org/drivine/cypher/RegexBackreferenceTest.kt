@@ -26,6 +26,9 @@ class RegexBackreferenceTest {
         "(a|b)\\1", "(a)(?:b|c)\\1", "(a)+\\1", "(a){2}\\1", "(a)(b)(c)(d)(e)(f)(g)(h)\\8", "()\\1", "(a)\\1?", "(a)\\1x",
     )
 
+    /** Repeated groups that must match a character, which the stores repeat as Java does, and one that may match nothing, not repeated. */
+    private val repeatedAllowed = listOf("(a?b)+\\1", "(a{1,2})+\\1", "([ab])+\\1", "(\\.|a)+\\1", "(?:(a)b)+\\1", "(a?){1}\\1", "(a*)\\1")
+
     /** Each form refused, and what the message names. */
     private val refused = mapOf(
         "(a)[\\1]" to "in a character class", "(a)[\\]\\1]" to "in a character class",
@@ -39,11 +42,19 @@ class RegexBackreferenceTest {
         "(?<=(a))(a)\\2" to "past a group in a lookaround",
         // Java reads (?x)(a) ?\1 as (a)?\1: a space may stand between a group and its quantifier.
         "(?x)(a) ?\\1" to "flag x", "(?ix)(a)\\1" to "flag x", "(a)(?x:b)\\1" to "flag x",
+        // A group repeated that may match nothing, which engines repeat each their own way: Java matches aba to (a?)+b\1, and
+        // Tcl's engine, which Postgres's comes from, doesn't.
+        "(a?)+b\\1" to "repeated that may match nothing", "(a?){2}\\1" to "repeated that may match nothing",
+        "(a|)+\\1" to "repeated that may match nothing", "(?:(a*)b)+\\1" to "repeated that may match nothing",
+        "(a{0,2}){2}\\1" to "repeated that may match nothing", "(\\b)+\\1" to "repeated that may match nothing", "((?:a?))+\\1" to "repeated that may match nothing",
+        "((?i)a?)+\\1" to "repeated that may match nothing", "((?=a))+\\1" to "repeated that may match nothing",
+        // Java reads acc as [[a](b)](c)\1, where Postgres reads the class as [[a], and (b) as the first group.
+        "[[a](b)](c)\\1" to "holds (, ) or |", "[\\](b)](c)\\1" to "holds (, ) or |", "(a)[|]\\1" to "holds (, ) or |",
     )
 
     @Test
     fun `the forms answered are read as such, and each other form is refused by what it is`() {
-        allowed.forEach { assertNull(Patterns.refusal(it), it) }
+        (allowed + repeatedAllowed).forEach { assertNull(Patterns.refusal(it), it) }
         refused.forEach { (pattern, why) -> assertTrue(Patterns.refusal(pattern).orEmpty().contains(why), "$pattern: ${Patterns.refusal(pattern)}") }
         // Escaped, quoted and \c's character are no backreference.
         listOf("(a)\\\\1", "\\Q\\1\\E", "\\c\\1", "a").forEach { assertFalse(Patterns.holdsBackreference(it), it) }
