@@ -29,6 +29,9 @@ import org.drivine.cypher.json.TemporalValue
 @DrivineInternalApi
 object TemporalArithmeticFunction {
 
+    /** SQLite's host function of it, which each library registers on its connections, as it does the module's others. */
+    const val HOST = "drivine_temporal_arithmetic"
+
     /**
      * The function the store of the graph [graph] keeps: what it adds to the graph's name is at most 16 long, as each name the
      * store gives is, so it fits the store's longest name for every graph's name it takes (`SqlStoreDdl.refusal`).

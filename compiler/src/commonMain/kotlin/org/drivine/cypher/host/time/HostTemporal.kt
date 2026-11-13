@@ -104,7 +104,7 @@ internal object HostTemporal {
     private fun kind(name: String): Temporal =
         Temporal.entries.firstOrNull { it.name == name } ?: throw IllegalArgumentException("No enum constant org.drivine.cypher.sql.Temporal.$name")
 
-    private fun local(text: String, kind: Temporal): LocalDateTime = when (kind) {
+    internal fun local(text: String, kind: Temporal): LocalDateTime = when (kind) {
         Temporal.DATE -> LocalDateTime(JavaTime.parseDate(text), LocalTime(0, 0))
         Temporal.LOCAL_DATE_TIME -> JavaTime.parseDateTime(text)
         Temporal.DATE_TIME -> JavaTime.parseDateTime(unzoned(text))

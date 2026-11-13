@@ -1,5 +1,6 @@
 package org.drivine.cypher.sql
 
+import org.drivine.cypher.host.time.JavaDecimal
 import com.ionspin.kotlin.bignum.decimal.BigDecimal
 import kotlinx.datetime.atTime
 import kotlinx.datetime.atDate
@@ -1041,30 +1042,49 @@ class Temporals(
         }
 
         /** The canonical text of the duration text [text], as [text] of its parts writes it. */
-        private fun canonicalDuration(text: String): String {
-            val groups = Regex(Temporal.DURATION.pattern).matchEntire(text)!!.groupValues
+        private fun canonicalDuration(text: String): String = durationParts(text).let { (m0, d0, s0) -> durationText(m0, d0, s0) }
+
+        /**
+         * The parts of the duration text [text], exactly: its months (years as twelve), days (weeks as seven) and seconds (hours
+         * and minutes with them), each signed by the text's own sign, as [parts] reads them.
+         */
+        internal fun durationParts(text: String): Triple<BigDecimal, BigDecimal, BigDecimal> {
+            val groups = Regex(Temporal.DURATION.pattern).matchEntire(text)?.groupValues ?: throw IllegalArgumentException("'$text' is no duration.")
             // As java.math's `BigDecimal(text)`, which refuses a part of no digits or of two points with NumberFormatException.
             fun dec(text: String) = if (JAVA_DECIMAL.matches(text)) BigDecimal.parseString(text) else throw NumberFormatException("No decimal: $text")
+            fun dec(n: Int) = BigDecimal.fromInt(n)
+            fun part(group: Int) = groups[group].takeIf { it.isNotEmpty() }?.let(::dec) ?: BigDecimal.ZERO
+            val sign = if (groups[1] == "-") BigDecimal.ONE.negate() else BigDecimal.ONE
+            return Triple(sign * (part(3) * dec(12) + part(5)), sign * (part(7) * dec(7) + part(9)), sign * (part(12) * dec(3600) + part(14) * dec(60) + part(16)))
+        }
+
+        /**
+         * The duration text of the parts [m0] months, [d0] days and [s0] seconds, exactly, as [text] of parts writes one: a
+         * fraction of a month goes to the days as 30.436875 of them, and of a day to the seconds.
+         */
+        internal fun durationText(m0: BigDecimal, d0: BigDecimal, s0: BigDecimal, places: Long? = null): String {
+            fun dec(text: String) = BigDecimal.parseString(text)
             fun dec(n: Int) = BigDecimal.fromInt(n)
             fun down(value: BigDecimal) = value.roundToDigitPositionAfterDecimalPoint(0, com.ionspin.kotlin.bignum.decimal.RoundingMode.TOWARDS_ZERO)
             // As `divide(b, 0, DOWN)`, exactly, however many digits: [a] cut toward zero, divided as whole numbers.
             fun quotient(a: BigDecimal, b: BigDecimal) = BigDecimal.fromBigInteger(down(a).toBigInteger().divide(b.toBigInteger()))
-            fun part(group: Int) = groups[group].takeIf { it.isNotEmpty() }?.let(::dec) ?: BigDecimal.ZERO
-            val sign = if (groups[1] == "-") BigDecimal.ONE.negate() else BigDecimal.ONE
-            val m0 = sign * (part(3) * dec(12) + part(5))
-            val d0 = sign * (part(7) * dec(7) + part(9))
-            val s0 = sign * (part(12) * dec(3600) + part(14) * dec(60) + part(16))
             val monthDays = dec("30.436875")
             val months = down(m0)
             val daysExact = d0 + (m0 - months) * monthDays
             val days = down(daysExact)
-            val seconds = s0 + (daysExact - days) * dec(86400)
+            val exactSeconds = s0 + (daysExact - days) * dec(86400)
+            // With [places], the seconds rounded first, so a whole minute is no `59M60S`, and no time a `0S`.
+            val seconds = if (places == null) exactSeconds
+                else BigDecimal.parseString(JavaDecimal.parse(exactSeconds.toPlainString()).halfUp(places).toPlainString())
             if (months.signum() == 0 && days.signum() == 0 && seconds.signum() == 0) return "PT0S"
             val years = quotient(months, dec(12))
             val hours = quotient(seconds, dec(3600))
             val minutes = quotient(seconds - hours * dec(3600), dec(60))
             val secs = seconds - hours * dec(3600) - minutes * dec(60)
-            fun unit(value: BigDecimal, letter: String) = if (value.signum() != 0) value.toPlainString() + letter else ""
+            // With [places], each part as the builder's `number` writes it: rounded half away from zero to that many places.
+            fun written(value: BigDecimal) = if (places == null) value.toPlainString()
+                else JavaDecimal.parse(value.toPlainString()).halfUp(places).stripTrailingZeros().toPlainString()
+            fun unit(value: BigDecimal, letter: String) = if (value.signum() != 0) written(value) + letter else ""
             val time = if (seconds.signum() != 0) "T" + unit(hours, "H") + unit(minutes, "M") + unit(secs, "S") else ""
             return "P" + unit(years, "Y") + unit(months - years * dec(12), "M") + unit(days, "D") + time
         }

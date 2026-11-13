@@ -188,6 +188,9 @@ kotlin {
                 implementation(kotlin("test-junit5"))
                 implementation("com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:2.19.2")
                 implementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.19.2")
+                // SQLite, as drivine4j runs it, with the module's host functions registered: the host function of temporal
+                // arithmetic is checked against the inline SQL it stands for (drivine4j#418).
+                implementation("org.xerial:sqlite-jdbc:3.53.2.1")
                 runtimeOnly("org.junit.platform:junit-platform-launcher")
             }
         }
