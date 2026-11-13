@@ -67,7 +67,9 @@ object StoreLayout {
      * The verdict on the graph [graph] of the store [engine] names, whose stamps [stampRows] read (each a map with `layout`, as
      * [StoreStampStatements.readStamps] gives it), and which holds a node other than Drivine's own where [foreignNodes]. [objects]
      * are the names the store's [StoreStampStatements.layoutObjects] lists, each `{name, type}`, whose old layout's a [Verdict.Stamp]
-     * drops: on a store of [ddl], the one the library made the graph with, where it has one.
+     * drops, and which, where no stamp was read, tell a graph of this layout whose stamp a clear deleted from an earlier one's
+     * ([ownObjects], [oldObjects]): on a store of [ddl], the one the library made the graph with, where it has one; without it,
+     * no object is known as either layout's.
      */
     fun verdict(
         engine: String,
