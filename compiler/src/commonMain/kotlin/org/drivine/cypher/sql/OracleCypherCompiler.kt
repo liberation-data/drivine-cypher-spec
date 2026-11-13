@@ -379,12 +379,13 @@ class OracleCypherCompiler(
     /**
      * The empty text is matched as Java matches it, as Neo4j does: Oracle's is null as a `VARCHAR2` and as a CLOB, and no
      * regular expression of Oracle's matches its empty CLOB, so where the text is empty the pattern is asked of a lone line
-     * break that it must leave ([matchesEmpty]) (#416). A pattern that is null makes null, as it does in Cypher, though the
-     * pattern's text is null for the empty pattern too.
+     * break that it must leave ([matchesEmpty]) (#416). A pattern that is no text, null or another kind, makes null, as on
+     * the other stores: the pattern's text is null for the empty pattern too, and [matchesEmpty] reads a null one as empty,
+     * so its JSON kind tells them apart.
      */
     override fun matchedText(json: String, pattern: String) = shared(pattern) { (p) ->
         val matched = texts(json, lengths = { (x) -> "CASE WHEN $x = 0 THEN ${matchesEmpty(text(p))} END" }) { (x) -> matches(x, text(p)) }
-        "CASE WHEN NOT ${isJsonNull(p)} THEN $matched END"
+        "CASE WHEN ${kind(p)} = 'string' THEN $matched END"
     }
 
     /**
