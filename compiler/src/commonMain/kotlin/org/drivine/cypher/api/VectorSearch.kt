@@ -11,6 +11,7 @@ import org.drivine.cypher.search.Table
 import org.drivine.cypher.store.OracleSql
 import org.drivine.cypher.store.PostgresSql
 import org.drivine.cypher.store.SqliteSql
+import org.drivine.cypher.store.ValueLayout
 import org.drivine.cypher.store.ddl.CypherNames
 import org.drivine.cypher.store.ddl.OracleDdl
 import org.drivine.cypher.store.ddl.PostgresDdl
@@ -184,11 +185,11 @@ object VectorSearch {
     }
 
     /**
-     * The key a node's `props` holds [property] at, which the vector index is made over: the property's own name, as the
-     * DDL's index (`PostgresDdl`, `OracleDdl`) reads it. The one place a search names it: store layout 2 (#161) holds a
-     * property whose name begins with `$` under an escaped key, and the search switches to that key here, as the DDL does.
+     * The key a node's `props` holds [property] at, which the vector index is made over, as the DDL's index (`PostgresDdl`,
+     * `OracleDdl`) reads it: store layout 2 (#161) holds a property whose name begins with `$` under an escaped key, `$$e`
+     * for `$e` ([ValueLayout.escape]), and any other under its own name. The one place a search names it.
      */
-    private fun stored(property: String): String = property
+    private fun stored(property: String): String = ValueLayout.escape(property)
 
     /** The label the index a search goes through is on: its partition's, or the root's first. */
     private fun indexLabel(request: VectorRequest): String = request.partitionLabel ?: request.labels.first()

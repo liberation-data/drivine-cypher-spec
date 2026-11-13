@@ -42,12 +42,13 @@ class OracleListSortKeyTest {
     @Test
     fun `a value of a kind left open, as a property, sorts as before, by its kind and then as JSON, with no function declared`() {
         // A list such a value holds still sorts as JSON sorts it on Oracle: the key isn't read for every sort of a value left open.
+        // Its rank nests a temporal value's tag's (layout 2), so only its ends are matched.
         val sql = oracle("MATCH (n:A) RETURN n.l AS l ORDER BY l")
         assertEquals(0, declarations(sql), sql)
-        assertTrue(Regex("""ORDER BY DECODE\(JSON_VALUE\((\S+), '\$\.type\(\)'\), [^)]*\), \1$""").containsMatchIn(sql), sql)
+        assertTrue(Regex("""ORDER BY DECODE\(JSON_VALUE\((\S+), '\$\.type\(\)'\), .*\), \1$""").containsMatchIn(sql), sql)
         val nullable = OracleCypherCompiler("g").compile("UNWIND \$ms AS m RETURN m.l AS l ORDER BY l", mapOf("ms" to listOf(mapOf("l" to listOf(1)), mapOf("l" to null)))).sql
         assertEquals(0, declarations(nullable), nullable)
-        assertTrue(Regex("""ORDER BY DECODE\(JSON_VALUE\((\S+), '\$\.type\(\)'\), [^)]*\), NVL\(\1, JSON\('null'\)\)$""").containsMatchIn(nullable), nullable)
+        assertTrue(Regex("""ORDER BY DECODE\(JSON_VALUE\((\S+), '\$\.type\(\)'\), .*\), NVL\(\1, JSON\('null'\)\)$""").containsMatchIn(nullable), nullable)
     }
 
     @Test

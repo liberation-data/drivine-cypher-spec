@@ -193,6 +193,35 @@ abstract class TemporalSql(protected val shared: (List<String>, (List<String>) -
         else -> "CASE WHEN $test THEN $bc ELSE $ad END"
     }
 
+    // ----- The sort key's text and integer arithmetic: see [Temporals.sortKey] -----
+
+    /**
+     * The sort key of the canonical text [text] of [kind] as a function the store keeps works it out, the same as
+     * [Temporals.sortKey]'s SQL: null where the store keeps none, and the SQL is written inline.
+     */
+    open fun storedKey(text: String, kind: Temporal): String? = null
+
+    /** As [storedKey], of a value whose kind's word the SQL [kind] gives: null where the store keeps no such function. */
+    open fun storedKeyOf(text: String, kind: String): String? = null
+
+    /** As [storedKeyOf], where a comparison or an order reads the key: a store may cut it from the text where it can. */
+    open fun comparedKeyOf(text: String, kind: String): String? = storedKeyOf(text, kind)
+
+    /** The whole number the text [text] of digits, signed or not, is, as a 64-bit integer. */
+    open fun integer(text: String) = "CAST($text AS INTEGER)"
+
+    /** The place of the first [char], a one-character SQL text, in [text], from 1: 0 where it has none. */
+    open fun position(text: String, char: String) = "INSTR($text, $char)"
+
+    /** The whole number [n], at least 0, as the text of its digits, `0`s before them to make [width]. */
+    abstract fun digits(n: String, width: Int): String
+
+    /** The remainder of the whole numbers [a] by [b], of [a]'s sign. */
+    open fun mod(a: String, b: String) = "MOD($a, $b)"
+
+    /** The whole quotient of the whole numbers [a], at least 0, by [b]. */
+    abstract fun div(a: String, b: String): String
+
     /** The text [text] with every match of [pattern], a SQL text, replaced by [replacement]. */
     open fun replace(text: String, pattern: String, replacement: String) = "REGEXP_REPLACE($text, $pattern, $replacement)"
 

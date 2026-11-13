@@ -125,6 +125,15 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
             "json_insert($list, ${part.joinToString(", ") { "'$[#]', json($it)" }})"
         }
 
+    override fun tagKind(json: String) = "($json ->> '\$.\"\$t\"')"
+
+    /** Its keys in the order SQLite's store writes an object's, by their text, so a tag worked out is the same text as one stored. */
+    override fun tagObject(entries: List<Pair<String, String>>) = jsonObject(entries.sortedBy { it.first })
+
+    override fun tagText(json: String) = "($json ->> '\$.v')"
+
+    override fun tagKey(json: String) = "($json ->> '\$.s')"
+
     /** Past 50 entries, as for [jsonArray], the rest are set over the first 50 by [withEntries]. */
     override fun jsonObject(entries: List<Pair<String, String>>) =
         withEntries("json_object(${entries.take(MOST_ARGUMENTS / 2).joinToString(", ") { (key, value) -> "${literal(key)}, json($value)" }})", entries.drop(MOST_ARGUMENTS / 2))
@@ -143,7 +152,7 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
     /** Counted from the end where negative, as SQLite's `->` counts an index. */
     override fun element(json: String, index: String) = "($json -> CAST($index ->> '$' AS INTEGER))"
 
-    override fun keyed(json: String, key: String) = "($json -> ('$.' || json_quote($key ->> '$')))"
+    override fun keyed(json: String, key: String) = "($json -> ('$.' || json_quote(${escapedKey("($key ->> '$')")})))"
 
     /** The test a partial index over the label's nodes is made with: see [SqliteSql.hasLabel]. */
     override fun hasLabel(labels: String, label: String) = SqliteSql.holdsLabel(labels, label)
@@ -154,8 +163,19 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
      */
     override fun indexedEquality(property: String, value: String, of: IndexedProperty?): String? =
         Regex("""^\(([\w.]+) -> ('(?:[^']|'')*')\)$""").matchEntire(property)?.let {
-            "${SqliteSql.propertyText(it.groupValues[1], it.groupValues[2])} = (CASE json_type($value) WHEN 'text' THEN $value ->> '$' ELSE $value END)"
+            val (props, path) = it.groupValues[1] to it.groupValues[2]
+            shared(value) { (x) -> "${SqliteSql.indexClass(props, path)} = ${SqliteSql.valueClass(x)} AND ${SqliteSql.indexKey(props, path)} = ${SqliteSql.valueKey(x)}" }
         }
+
+    /** The property's class and key beside the kind's word and the value's key, a subquery of its own where it is long. */
+    override fun indexedTagEquality(property: String, kind: Temporal, key: String, of: IndexedProperty?): String? =
+        Regex("""^\(([\w.]+) -> ('(?:[^']|'')*')\)$""").matchEntire(property)?.let {
+            val (props, path) = it.groupValues[1] to it.groupValues[2]
+            "${SqliteSql.indexClass(props, path)} = '${kind.function}' AND ${SqliteSql.indexKey(props, path)} = ${if (binds(key)) "(SELECT $key)" else key}"
+        }
+
+    /** As [indexedEquality], for a value of any kind: its class and key are worked out as the index's are, the same for every kind. */
+    override fun indexedEqualityOfAny(property: String, value: String, of: IndexedProperty?, scalar: Boolean): String? = indexedEquality(property, value, of)
 
     /** SQLite compares an `INTEGER PRIMARY KEY` with a float by its value, so `5.0` reads the row whose key is `5`. */
     override fun keyValue(json: String) = shared(json) { (x) -> "(CASE WHEN json_type($x) IN ('integer', 'real') THEN $x ->> '\$' END)" }
@@ -252,17 +272,28 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
     override fun listOrder(x: String, y: String) = "${SqliteFunctions.LIST_ORDER}($x, $y)"
 
     /** A list as [SqliteFunctions.SORT_KEY] writes it, which orders as Cypher orders lists; any other value as the SQL value `->>` reads. */
-    override fun sortKey(json: String) = shared(json) { (x) -> "CASE WHEN json_type($x) = 'array' THEN ${SqliteFunctions.SORT_KEY}($x) ELSE ($x ->> '$') END" }
+    override fun sortKey(json: String) = shared(json) { (x) -> "CASE WHEN json_type($x) = 'array' THEN ${SqliteFunctions.SORT_KEY}($x) ELSE ${sortValue(x)} END" }
+
+    /** A text by the SQL value `->>` reads, as [sortKey] reads any value but a temporal value's tag. */
+    override fun textSortKey(json: String) = shared(json) { (x) -> "CASE WHEN json_type($x) = 'array' THEN ${SqliteFunctions.SORT_KEY}($x) ELSE ($x ->> '$') END" }
+
+    /**
+     * The SQL value the JSON [x] sorts by among values of its kind: a temporal value's tag by its sort key, a duration, which has
+     * none, by its text; any other as `->>` reads it.
+     */
+    private fun sortValue(x: String) = "CASE WHEN ${tagKind(x)} IS NOT NULL THEN COALESCE(${tagKey(x)}, ${tagText(x)}) ELSE ($x ->> '$') END"
 
     /**
      * Where the kind comes, then the SQL value `->>` reads, which orders a number before a text, and a truth value, 1 or 0, among
-     * the numbers. The first term is a text: the kind's rank, a list's followed by itself as [SqliteFunctions.SORT_KEY] writes
-     * it, so a list is ordered by it; and null for null. The value is read once more, not twice, as [sortKey] reads it, and
-     * each term is a value JSON holds, as a `CALL { … }` carries it out. NaN, where the statement is given it, is a number, whose
-     * text the value is, which comes after every number.
+     * the numbers. The first term is a text: the kind's rank, a list's `2!` followed by itself as [SqliteFunctions.SORT_KEY]
+     * writes it, so a list is ordered by it, and a temporal value's tag's, `2~` and its kind's place followed by its sort key (a
+     * duration's text), so the value's term reads no tag; the character after the `2` puts every list before every tag, whatever
+     * text a library's [SqliteFunctions.SORT_KEY] writes; and null for null. The value is read once more, not twice, as [sortKey] reads
+     * it, and each term is a value JSON holds, as a `CALL { … }` carries it out. NaN, where the statement is given it, is a
+     * number, whose text the value is, which comes after every number.
      */
     override fun openSortKey(json: String) = shared(json) { (x) ->
-        (if (nonFinite) "CASE WHEN ${isNaN(x)} THEN '5' ELSE " else "") + "CASE json_type($x) WHEN 'object' THEN '1' WHEN 'array' THEN '2' || ${SqliteFunctions.SORT_KEY}($x) WHEN 'text' THEN '3' " +
+        (if (nonFinite) "CASE WHEN ${isNaN(x)} THEN '5' ELSE " else "") + "CASE json_type($x) WHEN 'object' THEN ${tagRank(x, "'1'") { "'2~$it' || COALESCE(${tagKey(x)}, ${tagText(x)})" }} WHEN 'array' THEN '2!' || ${SqliteFunctions.SORT_KEY}($x) WHEN 'text' THEN '3' " +
             "WHEN 'true' THEN '4' WHEN 'false' THEN '4' WHEN 'integer' THEN '5' WHEN 'real' THEN '5' END" + if (nonFinite) " END" else ""
     }.let { rank -> listOf(rank, shared(json) { (x) -> "($x ->> '$')" }) }
 
@@ -297,7 +328,11 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
     /** The first of the values in order, the nulls left out: SQLite's `min` and `max` order no JSON. */
     override fun extreme(value: String, min: Boolean, key: String?): String {
         val direction = if (min) "ASC" else "DESC"
-        return "(json_group_array(json($value) ORDER BY ${kindOrder(value)} $direction, ${key ?: "($value ->> '$')"} $direction) FILTER (WHERE NOT ${isJsonNull(value)}) -> 0)"
+        // A tag's sort key in its kind's rank, so a value of any other kind reads no tag (see [openSortKey]).
+        val order = if (key != null) "${kindOrder(value)} $direction, $key $direction" else
+            "CASE ${typeOf(value)} WHEN 'object' THEN ${tagRank(value, "'1'") { "'2~$it' || COALESCE(${tagKey(value)}, ${tagText(value)})" }} WHEN 'array' THEN '2' WHEN 'string' THEN '3' " +
+                "WHEN 'boolean' THEN '4' WHEN 'number' THEN '5' END $direction, ($value ->> '$') $direction"
+        return "(json_group_array(json($value) ORDER BY $order) FILTER (WHERE NOT ${isJsonNull(value)}) -> 0)"
     }
 
     override fun idTokens(ids: String, key: String) = shared(ids) { (x) ->
@@ -317,7 +352,7 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
     override fun containsText(a: String, b: String) = "(instr($a, $b) > 0)"
 
     override fun function(name: String, json: String): String? = when (name) {
-        "keys" -> shared(json) { (x) -> keysOrFailure(typeOf(x), "(SELECT json_group_array(k.key ORDER BY k.key) FROM json_each($x) k)") }
+        "keys" -> shared(json) { (x) -> keysOrFailure(x, typeOf(x), "(SELECT json_group_array(u.k ORDER BY u.k) FROM (SELECT ${unescapedKey("k.key")} AS k FROM json_each($x) k) u)") }
         "size" -> shared(json) { (x) -> "CASE json_type($x) WHEN 'array' THEN json_quote(json_array_length($x)) WHEN 'text' THEN json_quote(length($x ->> '$')) END" }
         "tolower" -> scalar("${SqliteFunctions.LOWER}(${text(json)})")
         "toupper" -> scalar("${SqliteFunctions.UPPER}(${text(json)})")

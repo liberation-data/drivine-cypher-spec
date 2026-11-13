@@ -180,14 +180,6 @@ interface StoreSchema {
     fun dropMismatched(name: String): List<DdlStatement> = emptyList()
 
     /**
-     * What a recreate of [spec] drops first where [rows] list no record of it, and the objects under its names were read as
-     * another library's form ([ItemForm.Stale]): only those whose text decided the form, each with the statements that
-     * drop it, so the item is made again in this version's form over nothing of the other's. None where there is a record,
-     * which the recreate drops by, or on a store whose items have no form read from their objects.
-     */
-    fun unrecordedDrops(spec: SchemaItemSpec, rows: List<Any?>): List<ObjectDrop> = emptyList()
-
-    /**
      * The statement that samples the keys [spec] would refuse: each row a map of the `properties` that repeat, the
      * `count` of nodes that hold them, and `nodes`, [limit] of them at most, each named by its `elementId` ([elementId])
      * and, where the spec knows it, its [ConstraintSpec.nodeIdProperty]; [limit] rows at most. A violation is reported

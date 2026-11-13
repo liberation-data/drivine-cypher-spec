@@ -188,8 +188,8 @@ FullTextSearch.plan(store, graph, SearchRequest(labels, properties, query, index
      never clash with the library's own; each is written `$_cy_ft<n>` in the statement, as the compiler writes its own.
 
 Over JSON it is the same entry, `CompileJson.compile` (`compile`, `drivine_compile`): a request with `search` in place of
-`cypher` is a search, and one that gives more than one of `cypher`, `search`, `searchIndex`, `vector` and `settings` is an
-error.
+`cypher` is a search, and one that gives more than one of `cypher`, `search`, `searchIndex`, `vector`, `settings`, `read`,
+`temporalKey` and `layout` is an error.
 
 ```json
 {"store": "postgres", "graph": {"name": "g"},
@@ -241,7 +241,9 @@ index in its catalog, the index of the label searched (`partitionLabel`'s, or th
 the `dimensions` it was made for, null where none is made, and on a graph
 engine its `name` where it isn't `<label>_<property>_vector`. A nearest search goes through the index only where it was
 made for the vector's size; a search among ids goes through any index made. `among` is `{ids, idProperty, threshold}`, each id
-searched once however often it is given, as drivine4j's `loadNearestAmong` searches them.
+searched once however often it is given, as drivine4j's `loadNearestAmong` searches them. On a SQL store the embedding, and an among search's
+`idProperty`, are read at the key store layout 2 holds the property under, `$$e` for a name `$e` that begins with `$`
+(`ValueLayout.escape`), as the DDL's index reads it.
 
 `plan` gives a `VectorPlan`, or a `Refusal` of a graph name the store can't take:
 
@@ -301,11 +303,13 @@ and label check, and its planner's `planAmong`) at the commit it names: on each 
 cosine and Euclidean, with and without a partition and `searchK`, for roots of one label and of two, and names with a
 quote, a backslash and a backtick in them. Only the parameters' names were changed, and the query vector's binding left
 out, and on the graph engines a name with a quote, a backslash or a backtick, which drivine4j writes raw, is written
-escaped (#217): 84 of the golden's entries were edited for it by a script. And the 168 SQL entries of a nearest search
-by cosine were edited by a script to leave out a stored embedding of no length, as Neo4j's cosine index does, and the
-40 of a search among ids by cosine to leave out a root with one (#160), which drivine4j at that commit does not. No other entry was edited. `VectorSearchGoldenTest` checks
-`plan`, and the JSON request, against each on every target, putting back the candidates' columns drivine4j selects beside
-`nid` before it compares, as `FullTextSearchGoldenTest` does.
+escaped (#217): 84 of the golden's entries were edited for it by a script. On Oracle the side table is named as store
+layout 2 names its objects, `<graph>_v2_…` for drivine4j's `<graph>_v_…`, edited in each entry that names it. And the 168
+SQL entries of a nearest search by cosine were edited by a script to leave out a stored embedding of no length, as
+Neo4j's cosine index does, and the 40 of a search among ids by cosine to leave out a root with one (#160), which drivine4j
+at that commit does not. No other edit was made. `VectorSearchGoldenTest` checks
+`plan`, and the JSON request, against each on every target, putting back on Oracle the document drivine4j selects beside
+each candidate's row before it compares.
 
 On a graph engine the index's name in the `CALL` (FalkorDB's label, and its property) is a Cypher string, its quotes and
 backslashes escaped (`CypherNames.string`), and each of the root's labels in a search among ids' `MATCH` an identifier,
@@ -419,6 +423,38 @@ the states they hold: `{"settings":{"parserCacheStates":20000,"parserCacheRenewa
 asked, so a statement set too large for the cap shows in the log. The answer to a statement is as it was: when the caches
 are made anew depends on what the process compiled before, which the corpus check's byte-for-byte comparison can't
 hold to.
+
+### The store layout's questions
+
+A library on store layout 2 (#161) asks the module three things besides a statement, each through the JSON entry as a request
+of its own, so the three libraries read rows, key a temporal value and judge a graph alike. In Kotlin they are
+`ValueLayout.read`, `Temporals.key` and `StoreLayout.verdict`.
+
+```json
+{"read": "{\"d\":{\"$t\":\"date\",\"v\":\"2024-01-01\",\"s\":\"10000020240101\"},\"$$k\":1}", "typed": false}
+{"temporalKey": {"kind": "datetime", "v": "2024-03-15T10:30:00.500+02:00"}}
+{"layout": {"engine": "POSTGRES", "graph": "g", "stamps": [{"layout": null}], "foreignNodes": false, "objects": [{"name": "drivine_uq_Personemail_8e5a9c3b", "type": "INDEX"}]}}
+```
+
+- **`read`** takes a column of a compiled statement's rows as the store gave it, its JSON text, so the host's JSON reader
+  never rounds a whole number past 2^53 first (a fraction is read as a double, as the host's own reader would). The answer is `{"value": …}`: each temporal value's tag read as its text, and each map's
+  keys unescaped (`$$k` read as `$k`), at any depth. A column that nests its arrays and objects more than 64 deep is an
+  error, as a request is. With `"typed": true`, a tag is instead `{"$t": kind, "v": text}`, and a
+  map with a `$t` key of its own is `{"$t": "map", "v": …}`. `host.yaml`'s reads pin it.
+- **`temporalKey`** gives the sort key `s` of a temporal value's canonical text: `{"key": "…"}`, or null for a duration. A
+  `v` that is not its kind's canonical text (`10:00` for a `localtime`, where it is `10:00:00`) is an error. A
+  host writes it into a tag of its own (`{"$t", "v", "s"}`) where it builds a stored value itself. `host.yaml`'s keys pin it.
+- **`layout`** is asked on the graph's first connection, before anything is made in it: before the store's `ensuring` or `ddl` and the stamp's `prepare`, which make this layout's lock table, the evidence the verdict reads. A graph with no table of nodes yet is new, and asks nothing. It judges a graph by its stamps' layouts (as `readStamps` gives them), whether it holds a node other than
+  Drivine's own (`foreignNodes`), and the objects `layoutObjects` listed. The engine is named as a stamp names it
+  (`POSTGRES`, not `postgres`), and a stamp's `layout` is a whole number, its text, or null. The answer is one of:
+  - `{"verdict": "current"}`: use the graph;
+  - `{"verdict": "stamp", "drops": [...], "assign": false, "parameters": {...}}`: run the drops, then `restampLayout` with
+    the parameters, then read the stamps back, list the objects again, and ask again. Where `assign` is true, the graph has no stamp to give the layout:
+    a graph of this layout whose stamp a clear (`MATCH (n) DETACH DELETE n`) deleted. Then run `assignIfAbsent`, as when a
+    stamp is first made, in place of `restampLayout`;
+  - `{"verdict": "refuse", "message": "…"}`: throw the message.
+
+  `marker.yaml`'s `storeLayout` pins it.
 
 ### npm
 
@@ -737,6 +773,12 @@ and the JVM's answers on the exact JDK it pins (see [The pinned JDK](#the-pinned
 ```
 
 Run `./gradlew clean` before a build you check: the wasm optimize step can leave stale output behind.
+
+`check/corpus-classify.sh [ref]` compiles this checkout's spec statements with the compiler at `ref` (`origin/main` by
+default, unpacked with `git archive` into a directory of its own, so the checkout is not touched) and with this checkout's,
+and puts each answer that differs, where the statement involves no temporal value and no key that begins with `$`, down to
+one named cause of the store layout 2 by a marker it leaves in the SQL where the answers differ, not beside it
+(`check/corpus-classify.py`). It prints the counts for each cause and store, and fails on an answer it can put down to none.
 
 What the build generates (`gen/Generate.java`, run on the pinned JDK): the zone ids that JDK's `ZoneId.of` takes, which
 the other targets check a zone name against, as their own zone databases (the OS's, Node's ICU) are other tzdb releases;

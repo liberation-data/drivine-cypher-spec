@@ -20,7 +20,8 @@ import kotlin.test.assertTrue
  * backslash and a backtick in them. Only the parameters' names were changed, to the module's `_cy_vec<n>`, and the query
  * vector's binding left out, as the library binds it; and on the graph engines a name drivine4j wrote raw is written escaped
  * (#217): a string in the `CALL` as [org.drivine.cypher.store.ddl.CypherNames.string], a root label in the among `MATCH` as
- * [org.drivine.cypher.store.ddl.CypherNames.identifier].
+ * [org.drivine.cypher.store.ddl.CypherNames.identifier]. On store layout 2 (#161) Oracle's side table is named as layout 2
+ * names its objects, `<graph>_v2_…` for drivine4j's `<graph>_v_…`: that name alone was changed in its answers.
  *
  * [VectorSearch.plan] gives each statement byte for byte, and its parameters, and so does [CompileJson.compile] for the
  * same request as JSON. On a SQL store drivine4j's nearest statement selects each candidate's columns beside its score: the

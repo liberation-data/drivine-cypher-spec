@@ -252,7 +252,7 @@ object CypherReader {
     private fun property(context: OC_PropertyExpressionContext): Pair<String, String> {
         val variable = context.oC_Atom().oC_Variable()
         if (variable == null || context.oC_PropertyLookup().size != 1) refuse("A write to a property of anything but a variable")
-        return name(variable) to name(context.oC_PropertyLookup(0)!!.oC_PropertyKeyName()!!.oC_SchemaName())
+        return name(variable) to key(context.oC_PropertyLookup(0)!!.oC_PropertyKeyName()!!)
     }
 
     private fun labels(context: OC_NodeLabelsContext): List<String> = context.oC_NodeLabel().map { name(it.oC_LabelName().oC_SchemaName()) }
@@ -544,7 +544,7 @@ object CypherReader {
         var result = atom(context.oC_Atom())
         for (child in context.children!!.drop(1)) {
             result = when (child) {
-                is OC_PropertyLookupContext -> Expression.Property(result, name(child.oC_PropertyKeyName()!!.oC_SchemaName()))
+                is OC_PropertyLookupContext -> Expression.Property(result, key(child.oC_PropertyKeyName()!!))
                 is OC_ListOperatorExpressionContext -> {
                     val dots = child.children!!.any { it.text == ".." }
                     if (!dots) {
@@ -641,8 +641,8 @@ object CypherReader {
                 projection!!.oC_MapProjectionElement().map { element ->
                     when {
                         element.oC_Expression() != null ->
-                            Expression.MapProjection.Element.Entry(name(element.oC_PropertyKeyName()!!.oC_SchemaName()), expression(element.oC_Expression()!!))
-                        element.oC_PropertyKeyName() != null -> Expression.MapProjection.Element.Selected(name(element.oC_PropertyKeyName()!!.oC_SchemaName()))
+                            Expression.MapProjection.Element.Entry(key(element.oC_PropertyKeyName()!!), expression(element.oC_Expression()!!))
+                        element.oC_PropertyKeyName() != null -> Expression.MapProjection.Element.Selected(key(element.oC_PropertyKeyName()!!))
                         element.oC_Variable() != null -> Expression.MapProjection.Element.Variable(name(element.oC_Variable()!!))
                         else -> Expression.MapProjection.Element.All
                     }
@@ -677,7 +677,7 @@ object CypherReader {
     }
 
     private fun map(context: OC_MapLiteralContext) = Expression.MapLiteral(
-        context.oC_PropertyKeyName().zip(context.oC_Expression()).map { (key, value) -> name(key.oC_SchemaName()) to expression(value) }
+        context.oC_PropertyKeyName().zip(context.oC_Expression()).map { (name, value) -> key(name) to expression(value) }
     )
 
     /** `$name`, `$1`, or a keyword, `$limit`, which names a parameter as any other word does. */
@@ -689,6 +689,12 @@ object CypherReader {
 
     /** A variable's name: a keyword, as `end`, as it is written (#635). */
     private fun name(context: OC_VariableContext): String = context.oC_SymbolicName()?.let(::symbolic) ?: context.oC_KeywordVariable()!!.text
+
+    /**
+     * A map's or a property's key, as a SQL store holds it: one that begins with `$` with another `$` before it, so that a key
+     * with one `$` is only ever the store layout's own, a temporal value's tag's (see [org.drivine.cypher.store.ValueLayout]).
+     */
+    private fun key(context: OC_PropertyKeyNameContext): String = org.drivine.cypher.store.ValueLayout.escape(name(context.oC_SchemaName()))
 
     /** A name, as written or between backticks, where a doubled backtick is one. */
     private fun name(context: OC_SchemaNameContext): String =

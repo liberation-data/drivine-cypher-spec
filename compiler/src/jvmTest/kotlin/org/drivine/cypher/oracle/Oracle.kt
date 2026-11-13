@@ -27,7 +27,10 @@ import java.time.format.DateTimeFormatter
  *   other targets have no YAML reader. See `StoreDdlTest`.
  * - `marker.json`: the spec's `marker.yaml`, the schema marker and the stamps, as JSON likewise. See `StoreMarkerTest`.
  * - `plans.json`: the spec's `plans.yaml`, the schema plan's cases, as JSON likewise. See `StorePlanTest`.
- * - `host.json`: the spec's `host.yaml`, the host functions' cases, as JSON likewise. See [HostSpecJson] and `HostSpecTest`.
+ * - `typed-values-golden.json`: the module's golden of the store layout's typed values compiled (`src/commonTest/resources`),
+ *   for each target's `TypedValuesGoldenTest`.
+ * - `host.json`: the spec's `host.yaml`, as JSON likewise: the host functions' cases, its sort keys and its reads of the store
+ *   layout's tags. See [HostSpecJson], `HostSpecTest` and `ValueLayoutTest`.
  * - `regex.json`: Java's answers for the regular expressions SQLite's host functions see, for each target's
  *   `RegexOracleTest`. See [Regexes].
  * - `host-temporal.json`: Java's answers for SQLite's temporal host functions, `drivine_temporal`, `drivine_trunc` and
@@ -65,7 +68,7 @@ object Oracle {
         File(out, "marker.json").writeText(json.writeValueAsString(yaml.readTree(File(spec, "marker.yaml"))))
         // The schema plan's cases, for each target's StorePlanTest.
         File(out, "plans.json").writeText(json.writeValueAsString(yaml.readTree(File(spec, "plans.yaml"))))
-        // The host functions' cases, for each target's HostSpecTest.
+        // The host's functions and readers, for each target's HostSpecTest and ValueLayoutTest.
         HostSpecJson.write(spec, out)
         // Java's answers for the regular expressions SQLite's host functions see, for each target's RegexOracleTest (#108).
         Regexes.write(spec, out)
@@ -73,6 +76,8 @@ object Oracle {
         HostTemporals.write(spec, out)
         // drivine4j's full-text search statements, for each target's FullTextSearchGoldenTest.
         File(out, "search-golden.json").writeBytes(searchGolden())
+        // The store layout's typed values compiled, for each target's TypedValuesGoldenTest.
+        File(out, "typed-values-golden.json").writeBytes(requireNotNull(Oracle::class.java.getResource("/typed-values-golden.json")) { "No typed-values-golden.json on the classpath." }.readBytes())
         // drivine4j's vector search statements, for each target's VectorSearchGoldenTest.
         File(out, "vector-golden.json").writeBytes(vectorGolden())
         println("jvmOracle: ${corpus.first} statements in the corpus (${corpus.second} left out, as they embed the clock); $doubles double cases.")

@@ -1,6 +1,10 @@
 package org.drivine.cypher.store.ddl
 
 import org.drivine.DrivineInternalApi
+import org.drivine.cypher.sql.Temporals.Companion.NANOS
+import org.drivine.cypher.sql.Temporals.Companion.OFFSET_BIAS
+import org.drivine.cypher.sql.Temporals.Companion.TIME_BIAS
+import org.drivine.cypher.sql.Temporals.Companion.YEAR_BIAS
 import org.drivine.cypher.store.PostgresSql
 import org.drivine.cypher.store.PostgresSql.hasLabel
 import org.drivine.schema.ConstraintSpec
@@ -48,9 +52,13 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
             nid    bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
             labels jsonb NOT NULL,
             props  jsonb NOT NULL,
-            stamp  varchar(33)
+            stamp  varchar(33),
+            words  jsonb
         )
         """,
+        // The derived fields of a node beside its properties (see the README's Values in the store), on a store an earlier
+        // version made: nothing writes or reads them yet.
+        "ALTER TABLE $nodes ADD COLUMN IF NOT EXISTS words jsonb",
         """
         CREATE TABLE IF NOT EXISTS $edges (
             eid   bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -74,7 +82,128 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
         "CREATE INDEX IF NOT EXISTS ${name}_edge_src ON $edges (src, type)",
         "CREATE INDEX IF NOT EXISTS ${name}_edge_dst ON $edges (dst, type)",
         "CREATE INDEX IF NOT EXISTS ${name}_node_labels ON $nodes USING GIN (labels jsonb_path_ops)",
-    ).map { it.trimIndent() } + writes.ddl + "COMMENT ON TABLE $nodes IS '$VERSION'"
+        """
+        CREATE TABLE IF NOT EXISTS $counts (
+            kind varchar(16) NOT NULL,
+            name varchar(1000) NOT NULL,
+            n    bigint NOT NULL,
+            PRIMARY KEY (kind, name)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS $countDeltas (
+            id   bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+            kind varchar(16) NOT NULL,
+            name varchar(1000) NOT NULL,
+            d    bigint NOT NULL
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS $countDeltasIndex ON $countDeltas (kind, name)",
+        lockTable,
+        lockSeed,
+    ).map { it.trimIndent() } + writes.ddl + temporalKeyFunction() + "COMMENT ON TABLE $nodes IS '$VERSION'"
+
+    override val lockTable: String get() = "CREATE TABLE IF NOT EXISTS $lock (name text PRIMARY KEY)"
+
+    override val lockSeed: String get() = "INSERT INTO $lock (name) VALUES ('$lockRow') ON CONFLICT DO NOTHING"
+
+    /** The function compiled Cypher works out a temporal value's sort key by: see [temporalKeyFunction]. */
+    val temporalKey: String = temporalKeyName(name)
+
+    /**
+     * Makes [temporalKey]: the sort key `s` of the canonical text `t` of a temporal value of the kind `k`, its word, as
+     * `Temporals.key` works it out in Kotlin, by text and integer arithmetic on the text alone; null for a duration and for
+     * null. PL/pgSQL, which reads each part of the text once into a variable: a SQL function written out where it is called
+     * reads each part again wherever it is used, and a zoned moment's key, its UTC day and clock, cost some ten times as much
+     * (#161). Compiled Cypher calls it where a temporal value it makes as it runs is compared, sorted or leaves the expression
+     * it is made in. Never in an index's expression. Its body is a text in quotes, not dollars, so the block [ensuring] makes
+     * the store in reads it as one statement.
+     */
+    private fun temporalKeyFunction(): String = """
+        CREATE OR REPLACE FUNCTION ${temporalKeyName(name)}(k text, t text) RETURNS text LANGUAGE plpgsql IMMUTABLE PARALLEL SAFE AS '
+        DECLARE
+            n int := length(t);
+            zone int := 0;
+            o int := 0;
+            p int := 0;
+            y bigint;
+            m int;
+            d int;
+            u bigint;
+            f text;
+            days int;
+        BEGIN
+            IF k IS NULL OR t IS NULL OR k NOT IN ('date', 'localtime', 'time', 'localdatetime', 'datetime') THEN
+                RETURN NULL;
+            END IF;
+            -- A zoned text, its offset, in seconds, and how long its text is: Z, or +hh:mm.
+            IF k IN ('time', 'datetime') THEN
+                IF substr(t, n, 1) = 'Z' THEN
+                    zone := 1;
+                ELSE
+                    zone := 6;
+                    o := CASE WHEN substr(t, n - 5, 1) = '-' THEN -1 ELSE 1 END * (CAST(substr(t, n - 4, 2) AS int) * 3600 + CAST(substr(t, n - 1, 2) AS int) * 60);
+                END IF;
+            END IF;
+            -- The day, where the kind has one: the year is all before the month, signed past 9999 and before 0.
+            IF k IN ('date', 'localdatetime', 'datetime') THEN
+                p := CASE WHEN k = 'date' THEN n + 1 ELSE strpos(t, 'T') END;
+                y := CAST(substr(t, 1, p - 7) AS bigint);
+                m := CAST(substr(t, p - 5, 2) AS int);
+                d := CAST(substr(t, p - 2, 2) AS int);
+                IF k = 'date' THEN
+                    RETURN lpad(CAST(y + $YEAR_BIAS AS text), 10, '0') || lpad(CAST(m AS text), 2, '0') || lpad(CAST(d AS text), 2, '0');
+                END IF;
+            END IF;
+            -- The clock from the character after the day's T, in seconds, and the nine digits of its fraction.
+            u := CAST(substr(t, p + 1, 2) AS int) * 3600 + CAST(substr(t, p + 4, 2) AS int) * 60 + CAST(substr(t, p + 7, 2) AS int);
+            f := substr(CASE WHEN n - zone - p > 9 THEN substr(t, p + 10, n - zone - p - 9) ELSE '' END || '000000000', 1, 9);
+            IF k = 'localtime' THEN
+                RETURN lpad(CAST(u * $NANOS + CAST(f AS bigint) AS text), 14, '0');
+            ELSIF k = 'time' THEN
+                RETURN lpad(CAST((u - o) * $NANOS + CAST(f AS bigint) + $TIME_BIAS AS text), 15, '0') || lpad(CAST(o + $OFFSET_BIAS AS text), 6, '0');
+            ELSIF k = 'localdatetime' THEN
+                RETURN lpad(CAST(y + $YEAR_BIAS AS text), 10, '0') || lpad(CAST(m AS text), 2, '0') || lpad(CAST(d AS text), 2, '0') ||
+                    substr(t, p + 1, 2) || substr(t, p + 4, 2) || substr(t, p + 7, 2) || f;
+            END IF;
+            -- A moment by its UTC day and clock, a day before or after its own where the offset carries it past midnight.
+            u := u - o;
+            IF u < 0 THEN
+                u := u + 86400;
+                IF d > 1 THEN
+                    d := d - 1;
+                ELSIF m > 1 THEN
+                    m := m - 1;
+                    d := CASE WHEN m IN (4, 6, 9, 11) THEN 30 WHEN m = 2 THEN CASE WHEN y % 4 = 0 AND (y % 100 <> 0 OR y % 400 = 0) THEN 29 ELSE 28 END ELSE 31 END;
+                ELSE
+                    y := y - 1;
+                    m := 12;
+                    d := 31;
+                END IF;
+            ELSIF u >= 86400 THEN
+                u := u - 86400;
+                -- The days of its month, worked out before the test: an IF reads its condition up to the first THEN.
+                days := CASE WHEN m IN (4, 6, 9, 11) THEN 30 WHEN m = 2 THEN CASE WHEN y % 4 = 0 AND (y % 100 <> 0 OR y % 400 = 0) THEN 29 ELSE 28 END ELSE 31 END;
+                IF d < days THEN
+                    d := d + 1;
+                ELSIF m < 12 THEN
+                    m := m + 1;
+                    d := 1;
+                ELSE
+                    y := y + 1;
+                    m := 1;
+                    d := 1;
+                END IF;
+            END IF;
+            RETURN lpad(CAST(y + $YEAR_BIAS AS text), 10, '0') || lpad(CAST(m AS text), 2, '0') || lpad(CAST(d AS text), 2, '0') ||
+                lpad(CAST(u / 3600 AS text), 2, '0') || lpad(CAST(u % 3600 / 60 AS text), 2, '0') || lpad(CAST(u % 60 AS text), 2, '0') || f ||
+                lpad(CAST(o + $OFFSET_BIAS AS text), 6, '0');
+        END
+        '
+    """.trimIndent().let { function ->
+        val (start, end) = function.indexOf("AS '\n") + 5 to function.lastIndexOf("\n'")
+        function.substring(0, start) + function.substring(start, end).replace("'", "''") + function.substring(end)
+    }
 
     /**
      * The block that makes the store when it is not there, and does nothing when it is: the probe, the lock and the [ddl]
@@ -157,29 +286,32 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
         return statement("UPDATE $catalog SET details = $details WHERE ${recordOf(item)}")
     }
 
-    override fun formRecorded(item: CatalogItem): String =
-        statement("UPDATE $catalog SET details = jsonb_set(details, '{$FORM}', '$CURRENT_FORM') WHERE ${recordOf(item)}")
-
     /**
      * The partial index over [properties] of the nodes of [label]: each property as a statement reads it, and the test of
      * the label a statement makes, both of the table's own columns.
      */
     private fun over(label: String, properties: List<String>): String =
-        "$nodes (${properties.joinToString(", ") { "(${PostgresSql.property("", it)})" }}) WHERE ${hasLabel("", label)}"
+        "$nodes (${indexColumns(properties).joinToString(", ")}) WHERE ${hasLabel("", label)}"
+
+    /**
+     * The columns of a range index's or a uniqueness constraint's index over the stored [keys], in order, each as the
+     * module writes it: what the store's schema compares the columns it finds under the index's name with.
+     */
+    fun indexColumns(keys: List<String>): List<String> = keys.map { "(${PostgresSql.indexed("", it)})" }
 
     override fun createIndex(spec: IndexSpec, existing: CatalogItem?): List<DdlStatement> = when (spec) {
         is RangeIndexSpec -> {
             val name = objectName(RANGE, listOf(spec.label) + spec.properties)
-            statements("CREATE INDEX IF NOT EXISTS $name ON ${over(spec.label, spec.properties)}", recorded(spec, name))
+            statements("CREATE INDEX IF NOT EXISTS $name ON ${over(spec.label, spec.keys)}", recorded(spec, name))
         }
         is VectorIndexSpec -> {
             // An HNSW index over the embeddings of the label's nodes that are of its size: one of another size is left out, not refused.
-            val property = spec.properties.single()
-            val name = objectName(VECTOR, listOf(spec.label, property))
+            val name = objectName(VECTOR, listOf(spec.label, spec.properties.single()))
+            val key = spec.keys.single()
             statements(
                 "CREATE EXTENSION IF NOT EXISTS vector",
-                "CREATE INDEX IF NOT EXISTS $name ON $nodes USING hnsw ((${PostgresSql.embedding("", property, spec.dimensions)}) ${PostgresSql.operators(spec.similarity)}) " +
-                    "WHERE ${hasLabel("", spec.label)} AND ${PostgresSql.holdsEmbedding("", property, spec.dimensions)}",
+                "CREATE INDEX IF NOT EXISTS $name ON $nodes USING hnsw ((${PostgresSql.embedding("", key, spec.dimensions)}) ${PostgresSql.operators(spec.similarity)}) " +
+                    "WHERE ${hasLabel("", spec.label)} AND ${PostgresSql.holdsEmbedding("", key, spec.dimensions)}",
                 recorded(spec, name, vectorDetails(spec)),
             )
         }
@@ -188,7 +320,7 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
             val name = objectName(FULLTEXT, listOf(spec.label) + spec.properties)
             statements(
                 "CREATE EXTENSION IF NOT EXISTS pg_trgm",
-                "CREATE INDEX IF NOT EXISTS $name ON $nodes USING gin ((${PostgresSql.searchedText("", spec.properties)}) gin_trgm_ops) WHERE ${hasLabel("", spec.label)}",
+                "CREATE INDEX IF NOT EXISTS $name ON $nodes USING gin ((${PostgresSql.searchedText("", spec.keys)}) gin_trgm_ops) WHERE ${hasLabel("", spec.label)}",
                 recorded(spec, name, analyzerDetails(spec.analyzer)),
             )
         }
@@ -200,7 +332,7 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
     override fun createConstraint(spec: ConstraintSpec): List<DdlStatement> = when (spec) {
         is UniquenessConstraintSpec -> {
             val name = objectName(UNIQUE, listOf(spec.label) + spec.properties)
-            statements("CREATE UNIQUE INDEX IF NOT EXISTS $name ON ${over(spec.label, spec.properties)}", recorded(spec, name))
+            statements("CREATE UNIQUE INDEX IF NOT EXISTS $name ON ${over(spec.label, spec.keys)}", recorded(spec, name))
         }
     }
 
@@ -218,7 +350,7 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
                 name = name,
                 temporary = temporary,
                 leftover = listOf(DdlStatement.Text(droppedIndex(temporary))),
-                build = listOf(DdlStatement.Text(statement("CREATE UNIQUE INDEX $temporary ON ${over(spec.label, spec.properties)}"))),
+                build = listOf(DdlStatement.Text(statement("CREATE UNIQUE INDEX $temporary ON ${over(spec.label, spec.keys)}"))),
                 swap = listOf(
                     DdlStatement.Text(
                         statement(
@@ -302,7 +434,10 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
         const val FULLTEXT = "t"
 
         /** What the node table's comment says of a store this version made. */
-        const val VERSION = "drivine:7"
+        const val VERSION = "drivine:8"
+
+        /** The function the store of the graph [graph] keeps that works out a temporal value's sort key: see [temporalKey]. */
+        fun temporalKeyName(graph: String) = "${graph}_temporal_key"
 
         /** Why [name] cannot name a graph here; null where it can (see [SqlStoreDdl.refusal]). */
         fun refusal(name: String): String? = SqlStoreDdl.refusal(name, ENGINE, MAX_OBJECT_NAME)

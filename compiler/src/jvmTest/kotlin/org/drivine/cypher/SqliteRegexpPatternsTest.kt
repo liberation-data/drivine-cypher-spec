@@ -80,7 +80,7 @@ class SqliteRegexpPatternsTest {
         assertEquals("^a\\z", sqlite.regex("^a$"))
         assertEquals("^a\\\\\\z", sqlite.regex("^a\\\\$"), "an escaped backslash before an anchor")
         for (kept in listOf("^a\\$", "^a\\\\\\$", "[$]", "^a\\z", "(a$|b)c", "")) assertEquals(kept, sqlite.regex(kept))
-        assertEquals("^a$", PostgresTemporalSql { _, body -> body(emptyList()) }.regex("^a$"))
+        assertEquals("^a$", PostgresTemporalSql({ _, body -> body(emptyList()) }).regex("^a$"))
     }
 
     @Test

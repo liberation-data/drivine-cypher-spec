@@ -11,7 +11,6 @@ import org.drivine.cypher.store.marker.MarkerInventory
 import org.drivine.cypher.store.marker.MarkerStatements
 import org.drivine.cypher.store.marker.SchemaMarker
 import org.drivine.cypher.store.schema.ItemForm
-import org.drivine.cypher.store.schema.ObjectDrop
 import org.drivine.cypher.store.schema.SqlStoreSchema
 import org.drivine.cypher.store.schema.StoreError
 import org.drivine.cypher.store.schema.StoreSchema
@@ -567,8 +566,6 @@ internal class SchemaProgram(
         val form = formOf(spec)
         // Another item under a name Drivine gives this one's objects: never taken as made, and never made over.
         if (form is ItemForm.Mismatch) return mismatched(spec, existing, form)
-        // Another library's objects with no record of them: kept as they are, and never made over or recorded as made.
-        if (existing == null && form is ItemForm.Stale) return keptUnrecorded(spec, form)
         if (existing == null) {
             // A related item (of the kind and label, not the spec's) lets a store with an index a label (FalkorDB) make
             // only the properties missing.
@@ -636,7 +633,6 @@ internal class SchemaProgram(
         val cleared = clearMismatched(spec, found) { findIndex(spec) }
         cleared.drift?.let { return it }
         val existing = cleared.existing ?: found
-        if (existing == null) dropUnrecorded(spec)
         if (existing != null) dropExisting(existing, spec)
         // Read again after the drop: on a store with an index a label, the label may still have one over other
         // properties, which the create takes into account.
@@ -784,7 +780,7 @@ internal class SchemaProgram(
         updateRecord(ddl.aliased(item.catalogItem, aliases))
     }
 
-    /** Runs [statement], which changes what a SQL store's record keeps of an item (its aliases, its form), and nothing else. */
+    /** Runs [statement], which changes what a SQL store's record keeps of an item (its aliases), and nothing else. */
     private fun updateRecord(statement: String) {
         val action = PlanAction.Execute(DdlStatement.Text(statement), purpose = Purpose.ALIASES)
         val outcome = io.run(action)
@@ -833,7 +829,6 @@ internal class SchemaProgram(
         val form = formOf(spec)
         // Another item under the name Drivine gives this one's index: never taken as made, and never made over.
         if (form is ItemForm.Mismatch) return mismatched(spec, existing, form)
-        if (existing == null && form is ItemForm.Stale) return keptUnrecorded(spec, form)
         if (existing != null && existing.buildFailed) {
             // FalkorDB keeps listing a constraint whose build failed, though it enforces nothing: dropped, and built again,
             // which gives a violation where the data still repeats a key.
@@ -841,7 +836,8 @@ internal class SchemaProgram(
             log(LogLevel.WARN, CONSTRAINT_MANAGER, "Dropped $engine ${spec.kind} on ${spec.label}${spec.properties}, whose build had failed, to build it again")
         } else if (existing != null) {
             return if (store.matchesShape(existing, spec)) {
-                if (spec != SchemaMarker.CONSTRAINT) keepForm(spec, form) else adoptForm(form)
+                if (spec != SchemaMarker.CONSTRAINT) keepForm(spec, form)
+                clearLeftover(spec)
                 EnsureResult.AlreadyMatching(existing)
             } else {
                 log(LogLevel.WARN, CONSTRAINT_MANAGER, "Constraint drift on ${spec.label}${spec.properties}: existing $existing does not match requested $spec")
@@ -928,6 +924,34 @@ internal class SchemaProgram(
     }
 
     /**
+     * Where the constraint [spec], found as made, has beside its own index the unique index a recreate builds first, left by
+     * one cut off between its build and its swap: a unique index that may be of another shape, as one a newer version
+     * built, which would go on refusing writes the constraint allows. Dropped, said at `INFO`, where the store's swap
+     * needs it not to be there ([SqlStoreDdl.dropsLeftoverOnEnsure]); on Oracle, where a recreate in another session may
+     * be between its drop and its rename, kept, and said once at `WARN` with what drops it (drivine-cypher-spec#161).
+     */
+    private fun clearLeftover(spec: ConstraintSpec) {
+        val sql = store.ddl as? SqlStoreDdl ?: return
+        val schema = store as? SqlStoreSchema ?: return
+        val recreation = sql.recreation(spec)
+        if (!schema.leftover(listings[sql.listConstraintsQuery()].orEmpty(), recreation.temporary)) return
+        if (sql.dropsLeftoverOnEnsure) {
+            ddl(recreation.leftover)
+            log(
+                LogLevel.INFO, CONSTRAINT_MANAGER,
+                "Dropped $engine index ${recreation.temporary} beside ${recreation.name} for ${spec.kind} on ${spec.label}${spec.properties}: " +
+                    "a recreate built it first and never swapped it in, and left standing it would go on refusing writes",
+            )
+        } else {
+            log(
+                LogLevel.WARN, CONSTRAINT_MANAGER,
+                "$engine ${spec.kind} on ${spec.label}${spec.properties} has ${recreation.temporary} beside ${recreation.name}, the index a recreate of it builds first: " +
+                    "that recreate was cut off, or is still running. It is kept, and refuses writes as it was built to. $remake",
+            )
+        }
+    }
+
+    /**
      * Where only the index a cut-off recreate built first holds [spec] on a SQL store ([SqlStoreSchema.cutOff]), and so no
      * record is listed: that index is dropped, and the record forgotten, as it is what Drivine made of the constraint, and
      * left standing would go on refusing a key the data repeats. False where it isn't so.
@@ -978,7 +1002,7 @@ internal class SchemaProgram(
      *
      * Another index under a name of the constraint's that isn't its unique index (Oracle's index over the property of
      * every node) is dropped first, by its name, as an index's is: it holds nothing unique. What stands under the unique
-     * index's own name, another index or another library's, is what the swap drops. Oracle builds no second index over
+     * index's own name, an index Drivine didn't make there, is what the swap drops. Oracle builds no second index over
      * the expressions of one there (`ORA-01408`), which an index made as this version makes it is (a plain index over
      * them it builds beside, and the data refuses it, or not): it is dropped first and made again, as drivine4j made it,
      * said at `INFO` where it was of this version's form, which held the data unique, and at `WARN` where it wasn't.
@@ -1004,14 +1028,9 @@ internal class SchemaProgram(
         val others = mismatches.filterNot { inPlace(it.name) }.map { it.name.uppercase() }.toSet()
         val kept = rows.filterNot { ((it as? Map<*, *>)?.get(SqlStoreSchema.OBJECT) as? String)?.uppercase() in others }
         val form = store.formOf(made, kept)
-        val unrecorded = if (replaced == null) store.unrecordedDrops(made, rows) else emptyList()
         for (other in mismatches.filterNot { inPlace(it.name) }) {
             ddl(store.dropMismatched(other.name))
             log(LogLevel.INFO, CONSTRAINT_MANAGER, droppedMismatch(made, other))
-        }
-        for (drop in unrecorded.filterNot { inPlace(it.name) }) {
-            ddl(drop.statements)
-            log(LogLevel.INFO, CONSTRAINT_MANAGER, droppedUnrecorded(made, drop, kept))
         }
 
         // A recreate cut off after the old index was dropped left only the one built first: put in its place, not dropped.
@@ -1042,7 +1061,7 @@ internal class SchemaProgram(
             ddl(if (reordered == null) store.dropMismatched(recreation.name) else ddl.dropConstraint(reordered.catalogItem))
             val what = "Dropped $engine index $dropped of ${made.kind} on ${made.label}${made.properties} before making it again: " +
                 "Oracle builds no second index over the same expressions (ORA-01408), so the new one can't be built beside it."
-            val ours = replaced == null && (form is ItemForm.Current || form is ItemForm.Unrecorded)
+            val ours = replaced == null && form is ItemForm.Current
             if (ours) {
                 // Made as this version makes it, it held the data unique: only a write in between could repeat a key.
                 log(
@@ -1060,7 +1079,6 @@ internal class SchemaProgram(
         }
         ddl(recreation.swap)
         replaced?.let { log(LogLevel.INFO, CONSTRAINT_MANAGER, droppedMismatch(made, it)) }
-        unrecorded.filter { inPlace(it.name) }.forEach { log(LogLevel.INFO, CONSTRAINT_MANAGER, droppedUnrecorded(made, it, kept)) }
         if (reordered != null) dropReordered(ddl, made, reordered)
         return remake(made, recreation, found, violationSampleSize, aliases)
     }
@@ -1261,34 +1279,10 @@ internal class SchemaProgram(
     private fun droppedMismatch(spec: SchemaItemSpec, form: ItemForm.Mismatch): String =
         "Dropped $engine index ${form.name}, an index Drivine didn't make under its name for ${spec.kind} on ${spec.label}${spec.properties}: it was ${form.reason}"
 
-    /**
-     * Before the index [spec], of which no record is listed, is made again: the objects under its names that were read as
-     * another library's form, and decided it, are dropped by their names ([StoreSchema.unrecordedDrops]), so the item is
-     * made in this version's form, and not recorded as made over the other's. Said as a mismatch's drop is. A uniqueness
-     * constraint's are dropped as it is made in its place ([recreateInPlace]).
-     */
-    private fun dropUnrecorded(spec: IndexSpec) {
-        val rows = listings[store.ddl.listIndexesQuery(spec.kind)] ?: return
-        if (formOf(spec) !is ItemForm.Stale) return
-        for (drop in store.unrecordedDrops(spec, rows)) {
-            ddl(drop.statements)
-            log(LogLevel.INFO, INDEX_MANAGER, droppedUnrecorded(spec, drop, rows))
-        }
-    }
-
-    /** What is said of [drop], of another library's form under a name of [spec]'s with no record of it, dropped to make [spec] in this version's form. */
-    private fun droppedUnrecorded(spec: SchemaItemSpec, drop: ObjectDrop, rows: List<Any?>): String {
-        val found = (store.formOf(spec, rows) as? ItemForm.Stale)?.found
-        return "Dropped $engine ${drop.what} ${drop.name}, of $found under its name for ${spec.kind} on ${spec.label}${spec.properties}, which no record named, to make it in this version's form"
-    }
-
     /** What [clearMismatched] left: the item found once nothing else stands under its names, or the [drift] where something can't be dropped. */
     private class Cleared(val existing: SchemaItemInfo?, val drift: EnsureResult.Drift?)
 
-    /**
-     * An item found in its shape, in [form]: one of another form is kept and used as it is, and said so, once; one in this
-     * version's form whose record says none has its form recorded.
-     */
+    /** An item found in its shape, in [form]: one of another form is kept and used as it is, and said so, once. */
     private fun keepForm(spec: SchemaItemSpec, form: ItemForm) {
         if (form is ItemForm.Newer) {
             // Nothing to make again: this version would make it in an older form.
@@ -1305,21 +1299,6 @@ internal class SchemaProgram(
                     "(form ${form.expected} expected, found ${form.found}): it is kept and used as it is. $remake",
             )
         }
-        adoptForm(form)
-    }
-
-    /**
-     * An item of another form whose objects stand under its names with no record of it: kept and used as it is, and said
-     * so, as one recorded is; nothing is made, and no record is written, which would say it is this version's.
-     */
-    private fun keptUnrecorded(spec: SchemaItemSpec, form: ItemForm.Stale): EnsureResult {
-        keepForm(spec, form)
-        return EnsureResult.AlreadyMatching(SchemaItemInfo.fromSpec(spec))
-    }
-
-    /** Records the form of an item made in this version's form whose record says none ([ItemForm.Unrecorded]). */
-    private fun adoptForm(form: ItemForm) {
-        if (form is ItemForm.Unrecorded) updateRecord(form.statement)
     }
 
     // ----- Reads and DDL -----
