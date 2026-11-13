@@ -282,6 +282,24 @@ class StoreMarkerTest {
     }
 
     /**
+     * A graph named in capitals on Postgres, which folds the names it lists to lower case: its lock table, listed so, is still
+     * this layout's evidence, and a graph of this layout whose stamp a clear deleted is stamped again, not refused.
+     */
+    @Test
+    fun aGraphNamedInCapitalsIsKnownByItsLockTableAsPostgresListsIt() {
+        val ddl = PostgresDdl("MyGraph")
+        val engine = StoreStamp.engine(ddl)
+        val lock = ddl.lock.lowercase()
+        assertTrue(PostgresStoreStampStatements(ddl).layoutObjects.contains("'$lock'"), "layoutObjects lists $lock")
+        val listed = listOf(mapOf("name" to lock, "type" to "TABLE"), mapOf("name" to "mygraph_uq2_drivinestorekey_e211949b", "type" to "INDEX"))
+        assertEquals(listed.map { it["name"] }, StoreLayout.ownObjects(ddl, listed))
+        assertEquals(
+            StoreLayout.Verdict.Stamp(emptyList(), StoreStamp.restampParameters(engine), assign = true),
+            StoreLayout.verdict(engine, "MyGraph", emptyList(), true, listed.take(1), ddl),
+        )
+    }
+
+    /**
      * Each `firstConnection` case, which a library's runner sets up on its store: a graph holding values, with no stamp and
      * nothing of this layout's, which the verdict refuses before anything is made. The module can't run the order; it checks
      * that the state each case sets up is one it refuses, and that the lock table it names is the store's.
