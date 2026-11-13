@@ -190,8 +190,8 @@ FullTextSearch.plan(store, graph, SearchRequest(labels, properties, query, index
      never clash with the library's own; each is written `$_cy_ft<n>` in the statement, as the compiler writes its own.
 
 Over JSON it is the same entry, `CompileJson.compile` (`compile`, `drivine_compile`): a request with `search` in place of
-`cypher` is a search, and one that gives more than one of `cypher`, `search`, `searchIndex`, `vector`, `settings`, `read`,
-`temporalKey` and `layout` is an error.
+`cypher` is a search, and one that gives more than one of `cypher`, `search`, `searchIndex`, `vector`, `settings`,
+`fragment`, `read`, `temporalKey` and `layout` is an error.
 
 ```json
 {"store": "postgres", "graph": {"name": "g"},
