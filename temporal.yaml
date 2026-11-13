@@ -1032,33 +1032,35 @@ cases:
   - name: "Arithmetic on temporal values read from the store"
     description: "+, -, * and / of a temporal value read from the store, where the statement doesn't know its kind: Neo4j works it out, and so do Postgres and Oracle, by the function of temporal arithmetic each keeps, whose body is its own arithmetic of values the statement knows to be temporal (drivine4j#418). SQLite keeps none yet, so it fails by name there, where it gave null."
     steps:
-      - cypher: |
+      - only: [neo4j, sql]
+        cypher: |
           CREATE (:CyTemporal {id: 'a', d1: duration('P1DT2H'), d2: duration('PT30M'), at: datetime('2024-01-01T10:00Z'), n: 5,
                                endOfJanuary: date('2024-01-31'), newYear: date('2024-01-01'), leapNoon: localdatetime('2024-02-29T12:00:00'),
                                lateEvening: localtime('23:30:00'), ten: time('10:00:00+02:00'), month: duration('P1M'), year: duration('P1Y'),
                                back: duration('-P1M2DT3H'), threeQuarters: duration('PT45M'), fourteen: duration('PT14H'), second: duration('PT1S'),
                                mixed: duration('P1M2DT3H'), behind: duration('-P2M1DT30M'), k: 3, half: 0.5, ratio: 2.5})
       - note: "A side written in the statement: worked out on every store, as before."
+        only: [neo4j, sql]
         cypher: "MATCH (n:CyTemporal) RETURN [toString(n.d1 + duration('PT30M')), toString(n.d1 - duration('PT30M')), toString(n.at + duration('P1D')), n.n + 1]"
         rows: [["P1DT2H30M", "P1DT1H30M", "2024-01-02T10:00:00Z", 6]]
       - note: "Two durations, a moment and a duration, and a duration and a number, each read from the store."
-        except: [sqlite]
+        only: [neo4j, postgres, oracle]
         cypher: "MATCH (n:CyTemporal) RETURN [toString(n.d1 + n.d2), toString(n.d1 - n.d2), toString(n.at + n.d2), toString(n.at - n.d2), toString(n.d1 * 2), toString(n.d1 / 2)]"
         rows: [["P1DT2H30M", "P1DT1H30M", "2024-01-01T10:30:00Z", "2024-01-01T09:30:00Z", "P2DT4H", "PT13H"]]
       - note: "The end of a month, a leap day, a negative duration on a date, a time of day past midnight, a time with its offset."
-        except: [sqlite]
+        only: [neo4j, postgres, oracle]
         cypher: "MATCH (n:CyTemporal) RETURN [toString(n.endOfJanuary + n.month), toString(n.leapNoon - n.year), toString(n.newYear + n.back), toString(n.lateEvening + n.threeQuarters), toString(n.ten + n.fourteen)]"
         rows: [["2024-02-29", "2023-02-28T12:00:00", "2023-11-29", "00:15:00", "00:00:00+02:00"]]
       - note: "A month divided, its fraction spilt into days and seconds; a second halved; a duration and a negative one."
-        except: [sqlite]
+        only: [neo4j, postgres, oracle]
         cypher: "MATCH (n:CyTemporal) RETURN [toString(n.month / n.k), toString(n.second * n.half), toString(n.mixed + n.behind)]"
         rows: [["P10DT3H29M42S", "PT0.5S", "P-1M1DT2H30M"]]
       - note: "The duration first, or the number first."
-        except: [sqlite]
+        only: [neo4j, postgres, oracle]
         cypher: "MATCH (n:CyTemporal) RETURN [toString(n.d2 + n.at), toString(n.k * n.month)]"
         rows: [["2024-01-01T10:30:00Z", "P3M"]]
       - note: "Null beside a temporal value read from the store gives null."
-        except: [sqlite]
+        only: [neo4j, postgres, oracle]
         cypher: "MATCH (n:CyTemporal) RETURN [n.d1 + n.missing, n.missing - n.d1, n.d1 * n.missing]"
         rows: [[null, null, null]]
       - note: "SQLite keeps no function of temporal arithmetic yet: each fails by name there (drivine4j#418)."
@@ -1075,6 +1077,7 @@ cases:
         cypher: "MATCH (n:CyTemporal) RETURN n.d1 / n.k"
         error: true
       - note: "Two moments added, as no kind is: refused, as Neo4j refuses it."
+        only: [neo4j, sql]
         cypher: "MATCH (n:CyTemporal) RETURN n.at + n.at"
         error: true
       - note: "A duration divided by a float: Neo4j works it out in binary floating point (liberation-data/drivine-cypher-spec#254)."

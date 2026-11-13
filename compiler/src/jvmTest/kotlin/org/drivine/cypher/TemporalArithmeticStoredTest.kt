@@ -156,6 +156,8 @@ class TemporalArithmeticStoredTest {
             val nulls = text.indexOf("RETURN NULL;")
             assertTrue(nulls in 0 until text.indexOf("IF cy_op ="), store)
             assertTrue("\$_cy_" !in text && "2024-01" !in text && "P1D" !in text, store)
+            // No branch declares a function of its own (a statement's `WITH FUNCTION`), which a body selected within can't hold.
+            assertEquals(1, Regex("""\bFUNCTION\b""").findAll(text).count(), store)
             assertTrue(TemporalArithmeticFunction.UNDEFINED in text, store)
         }
         val postgres = forms.getValue("postgres")

@@ -19,8 +19,8 @@ class OracleIndexKeyTest {
     private val store: JsonNode = CypherJson.readTree(oracleFile("store.json"))
     private val marker: JsonNode = CypherJson.readTree(oracleFile("marker.json"))
 
-    /** The functions store.yaml makes on Oracle, by name. */
-    private val functions: Set<String> = texts(store)
+    /** The functions store.yaml makes on Oracle, by name, its generated ones' markers expanded (GeneratedFunctions). */
+    private val functions: Set<String> = texts(store).map(GeneratedFunctions::expand)
         .flatMap { Regex("""CREATE OR REPLACE FUNCTION (\w+)""", RegexOption.IGNORE_CASE).findAll(it).map { m -> m.groupValues[1].lowercase() } }
         .toSet()
 
@@ -43,7 +43,7 @@ class OracleIndexKeyTest {
 
     @Test
     fun `no index Oracle is made with calls a function the store makes`() {
-        assertTrue("drivine_temporal_key" in functions && "drivine_era" in functions, "store.yaml's Oracle functions: $functions")
+        assertTrue("drivine_temporal_key" in functions && "drivine_era" in functions && "drivine_temporal_arithmetic" in functions, "store.yaml's Oracle functions: $functions")
         val indexes = (oracleTexts(store) + oracleTexts(marker)).flatMap(::indexStatements)
         assertTrue(indexes.isNotEmpty(), "No Oracle CREATE INDEX found in store.yaml or marker.yaml")
         for (index in indexes) {
