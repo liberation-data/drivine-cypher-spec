@@ -384,6 +384,10 @@ class FragmentsTest {
             "n.name = trim(${'$'}p)" to mapOf("p" to "   "),
             "n.name = coalesce(${'$'}l, ${'$'}p)" to mapOf("l" to listOf(1L), "p" to "Ada"),
             "n.name = coalesce(${'$'}q, ${'$'}p)" to mapOf("q" to null, "p" to ""),
+            // Oracle's TRIM, LTRIM and RTRIM take off spaces alone: a tab is left, and the text it leaves is past 4,000 bytes.
+            "n.name = trim(${'$'}p)" to mapOf("p" to "Ada" + "\t".repeat(4000)),
+            "n.name = ltrim(${'$'}p)" to mapOf("p" to "\t".repeat(4000) + "Ada"),
+            "n.name = rtrim(${'$'}p)" to mapOf("p" to "Ada" + "\t".repeat(4000)),
         )
         for ((condition, parameters) in cases) assertTrue(!bare(condition, parameters), "$condition $parameters")
     }

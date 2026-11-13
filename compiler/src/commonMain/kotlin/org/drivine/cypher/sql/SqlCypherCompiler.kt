@@ -5980,8 +5980,10 @@ abstract class SqlCypherCompiler(
         /**
          * What [expression] gives, worked out from the values the statement is given, as far as an index's test needs it: a
          * text, a number or a truth value; null where it is none of those, may be null, or isn't known here. A text another
-         * case of is written twice, as a letter's other case takes half as many bytes again at most, so [heldCase] holds it
-         * to what the longer could be. `trim` takes off what both Neo4j's and SQL's spaces are, so an empty result is seen.
+         * case of is written twice, as a letter's other case takes half as many bytes again at most (Oracle's `LOWER` and
+         * `UPPER` map a letter to one letter), so [heldCase] holds it to what the longer could be. A trimmed text is the text
+         * as given, as a store's trim takes off less than Kotlin's whitespace (Oracle's spaces alone, so a tab stays): it is
+         * no longer, and is empty only where each of its characters is whitespace to Kotlin or a control character.
          */
         private fun worked(expression: Expression): Any? = when (expression) {
             is Expression.Literal, is Expression.Parameter, is Expression.Property -> given(expression)?.takeIf { it is String || it is Number || it is Boolean }
@@ -5989,9 +5991,8 @@ abstract class SqlCypherCompiler(
                 val arguments = expression.arguments
                 when (expression.name.lowercase()) {
                     "tolower", "toupper" -> (arguments.singleOrNull()?.let(::worked) as? String)?.let { it + it }
-                    "trim" -> (arguments.singleOrNull()?.let(::worked) as? String)?.trim()?.takeIf { it.trim { c -> c <= ' ' } == it }
-                    "ltrim" -> (arguments.singleOrNull()?.let(::worked) as? String)?.trimStart()?.takeIf { it.trimStart { c -> c <= ' ' } == it }
-                    "rtrim" -> (arguments.singleOrNull()?.let(::worked) as? String)?.trimEnd()?.takeIf { it.trimEnd { c -> c <= ' ' } == it }
+                    "trim", "ltrim", "rtrim" ->
+                        (arguments.singleOrNull()?.let(::worked) as? String)?.takeIf { it.any { c -> !c.isWhitespace() && c > ' ' } }
                     "tostring" -> when (val value = arguments.singleOrNull()?.let(::worked)) {
                         is String -> value
                         is Boolean -> value.toString()
