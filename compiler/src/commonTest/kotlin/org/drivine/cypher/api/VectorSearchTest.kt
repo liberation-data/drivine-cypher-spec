@@ -129,6 +129,26 @@ class VectorSearchTest {
     }
 
     @Test
+    fun aSqlStoreReadsAnEmbeddingAndAnAmongIdWhoseNameBeginsWithDollarAtTheEscapedKey() {
+        // Store layout 2 holds a property `$e` under `$$e` (ValueLayout.escape): every SQL search reads it there, the
+        // embedding and an among search's id alike, and never at the property's own name.
+        val unescaped = Regex("(?<!\\$)\\$(e|id)\\b")
+        val dollar = request(property = "\$e")
+        for (store in listOf(SearchStore.POSTGRES, SearchStore.ORACLE, SearchStore.SQLITE)) {
+            for (dimensions in listOf(null, 3)) {
+                val among = dollar.copy(index = VectorIndex(dimensions = dimensions), among = VectorAmong(listOf("a"), "\$id"))
+                for (searched in listOf(dollar.copy(index = VectorIndex(dimensions = dimensions)), among)) {
+                    val sql = plan(store, searched).sql!!
+                    // Oracle's search through the index reads its side table's column, and no property.
+                    assertTrue("\$\$e" in sql || (store == SearchStore.ORACLE && dimensions != null && searched.among == null), "${store.id} $dimensions:\n$sql")
+                    assertNull(unescaped.find(sql), "${store.id} $dimensions:\n$sql")
+                }
+                assertTrue("\$\$id" in plan(store, among).sql!!, "${store.id} $dimensions")
+            }
+        }
+    }
+
+    @Test
     fun theIndexIsAskedForSearchKWhereItIsGiven() {
         val plan = plan(SearchStore.POSTGRES, request().copy(searchK = 50))
         assertEquals(50, plan.indexK)

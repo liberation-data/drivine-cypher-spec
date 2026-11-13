@@ -185,8 +185,8 @@ FullTextSearch.plan(store, graph, SearchRequest(labels, properties, query, index
      never clash with the library's own; each is written `$_cy_ft<n>` in the statement, as the compiler writes its own.
 
 Over JSON it is the same entry, `CompileJson.compile` (`compile`, `drivine_compile`): a request with `search` in place of
-`cypher` is a search, and one that gives more than one of `cypher`, `search`, `searchIndex`, `vector` and `settings` is an
-error.
+`cypher` is a search, and one that gives more than one of `cypher`, `search`, `searchIndex`, `vector`, `settings`, `read`,
+`temporalKey` and `layout` is an error.
 
 ```json
 {"store": "postgres", "graph": {"name": "g"},
@@ -238,7 +238,9 @@ index in its catalog, the index of the label searched (`partitionLabel`'s, or th
 the `dimensions` it was made for, null where none is made, and on a graph
 engine its `name` where it isn't `<label>_<property>_vector`. A nearest search goes through the index only where it was
 made for the vector's size; a search among ids goes through any index made. `among` is `{ids, idProperty, threshold}`, each id
-searched once however often it is given, as drivine4j's `loadNearestAmong` searches them.
+searched once however often it is given, as drivine4j's `loadNearestAmong` searches them. On a SQL store the embedding, and an among search's
+`idProperty`, are read at the key store layout 2 holds the property under, `$$e` for a name `$e` that begins with `$`
+(`ValueLayout.escape`), as the DDL's index reads it.
 
 `plan` gives a `VectorPlan`, or a `Refusal` of a graph name the store can't take:
 
@@ -279,7 +281,9 @@ and label check, and its planner's `planAmong`) at the commit it names: on each 
 cosine and Euclidean, with and without a partition and `searchK`, for roots of one label and of two, and names with a
 quote, a backslash and a backtick in them. Only the parameters' names were changed, and the query vector's binding left
 out, and on the graph engines a name with a quote, a backslash or a backtick, which drivine4j writes raw, is written
-escaped (#217): 84 of the golden's entries were edited for it by a script, and no other. `VectorSearchGoldenTest` checks
+escaped (#217): 84 of the golden's entries were edited for it by a script. On Oracle the side table is named as store
+layout 2 names its objects, `<graph>_v2_…` for drivine4j's `<graph>_v_…`, edited in each entry that names it. No other
+edit was made. `VectorSearchGoldenTest` checks
 `plan`, and the JSON request, against each on every target, putting back the candidates' columns drivine4j selects beside
 `nid` before it compares, as `FullTextSearchGoldenTest` does.
 
