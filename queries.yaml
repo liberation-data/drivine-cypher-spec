@@ -1083,6 +1083,16 @@ cases:
         cypher: "WITH '(a)' + $nine AS p RETURN 'aa' =~ p"
         parameters: {nine: "\\9"}
         error: true
+      - note: "A digit after a backreference, where no group has the number they make together: Java reads the backreference and the digit, where Postgres read an octal escape."
+        only: [neo4j, sql]
+        cypher: "RETURN ['aa0' =~ $p, 'aa' =~ $p]"
+        parameters: {p: "(a)\\10"}
+        rows: [[true, false]]
+      - note: "Given as a parameter's key."
+        only: [neo4j, sql]
+        cypher: "RETURN ['a9' =~ $m.p, 'aa' =~ $m.p]"
+        parameters: {m: {p: "(a)\\9"}}
+        rows: [[false, false]]
       - note: "Over the empty text, which Oracle reads apart."
         only: [neo4j, sql]
         cypher: "RETURN [$e =~ $p, $e =~ $q]"

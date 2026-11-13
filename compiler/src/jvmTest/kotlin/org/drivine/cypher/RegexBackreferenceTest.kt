@@ -121,7 +121,7 @@ class RegexBackreferenceTest {
         assertEquals(10, Patterns.backreferences("$ten\\10").single().number)
         assertEquals(1, Patterns.backreferences("(a)\\10").single().number)
         assertEquals(11, Patterns.backreferences("$ten(k)\\11").single().number)
-        // The tenth group open at it: Java matches nothing, where Postgres, counting the groups closed, reads `\1` and a 0.
+        // The tenth group open at it: Java matches nothing; it is asked as NO_MATCH, so Postgres never reads it.
         assertTrue(Patterns.dangling("(a)(b)(c)(d)(e)(f)(g)(h)(i)(j\\10)"))
         // Oracle has no `\11` for the pattern's tenth group, held as its eleventh.
         assertThrows<CompilerException> { OracleCypherCompiler("g").compile("RETURN 'abcdefghijj' =~ \$p", mapOf("p" to "$ten\\10")) }
@@ -132,5 +132,26 @@ class RegexBackreferenceTest {
     fun `Oracle asks a ninth backreference whose group hasn't closed as a pattern that matches nothing, not refused`() {
         val sql = OracleCypherCompiler("g").compile("RETURN 'a' =~ \$p", mapOf("p" to "(a)(b)(c)(d)(e)(f)(g)(h)\\9(i)")).sql
         assertTrue(Patterns.NO_MATCH in sql, sql)
+    }
+
+    @Test
+    fun `a digit after a backreference is written in a class of its own, which Postgres reads as Java does, not as an octal escape`() {
+        val ten = "(a)(b)(c)(d)(e)(f)(g)(h)(i)(j)"
+        assertEquals("(a)\\1[0]", Patterns.digitsApart("(a)\\10"))
+        assertEquals("$ten\\10[0]0", Patterns.digitsApart("$ten\\1000"))
+        listOf("(a)\\1", "(a)\\\\10", "(a)\\Q\\10\\E", "(a)\\1a0").forEach { assertEquals(it, Patterns.digitsApart(it)) }
+        // Java: `(a)\10` over "aa0" is true. Postgres read `\10` as a backspace, there being no tenth group.
+        val sql = PostgresCypherCompiler("g").compile("RETURN 'aa0' =~ \$p", mapOf("p" to "(a)\\10")).sql
+        assertTrue("(a)\\\\1[0]" in sql, sql)
+        // A pattern no digit follows a backreference in is bound, as given.
+        assertFalse("(a)" in PostgresCypherCompiler("g").compile("RETURN 'aa' =~ \$p", mapOf("p" to "(a)\\1")).sql)
+    }
+
+    @Test
+    fun `a pattern given as a parameter's key is read as one given as a parameter`() {
+        listOf(PostgresCypherCompiler("g"), OracleCypherCompiler("g"), SqliteCypherCompiler("g")).forEach { compiler ->
+            val sql = compiler.compile("RETURN 'a9' =~ \$m.re", mapOf("m" to mapOf("re" to "(a)\\9"))).sql
+            assertTrue("\"a^\"" in sql || "'a^'" in sql, "${compiler::class.simpleName}:\n$sql")
+        }
     }
 }

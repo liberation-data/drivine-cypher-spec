@@ -5602,13 +5602,14 @@ abstract class SqlCypherCompiler(
                 Operator.STARTS_WITH -> Value.Bool(searchedTexts(a, b) { texts -> shared(*texts.toTypedArray()) { (x, y) -> startsWith(x, y) } })
                 // A pattern is short: only the text is read as a long one where it is.
                 Operator.MATCHES -> {
-                    val given = (known(binary.right) as? String)?.also(::checkPattern)
+                    val given = (given(binary.right) as? String)?.also(::checkPattern)
                     // A backreference to a group the pattern doesn't have matches nothing in Java, where Postgres refuses the
                     // pattern: one given so is asked as a pattern that matches nothing, a character before the text's start
                     // (#236), written with only what every library's regular expressions read alike (host.yaml's regexp).
-                    val dangling = given != null && Patterns.dangling(given)
-                    patternGiven = if (dangling) Patterns.NO_MATCH else given
-                    Value.Bool(matchedText(a, if (dangling) literalJson(Patterns.NO_MATCH) else b))
+                    // A digit after a backreference is written apart from it, as Java reads it ([Patterns.digitsApart]).
+                    val asked = given?.let { if (Patterns.dangling(it)) Patterns.NO_MATCH else Patterns.digitsApart(it) }
+                    patternGiven = asked
+                    Value.Bool(matchedText(a, if (asked != given) literalJson(asked) else b))
                 }
                 Operator.ENDS_WITH -> Value.Bool(searchedTexts(a, b) { texts -> shared(*texts.toTypedArray()) { (x, y) -> endsWith(x, y) } })
                 Operator.CONTAINS -> Value.Bool(searchedTexts(a, b) { (x, y) -> containsText(x, y) })

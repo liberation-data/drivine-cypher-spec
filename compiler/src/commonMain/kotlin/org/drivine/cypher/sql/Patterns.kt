@@ -13,9 +13,10 @@ internal object Patterns {
     /**
      * A backreference, `\1` and on: its number, whether it is written in a character class, whether its group has
      * closed before it, as it must for Java to match it, and whether the pattern can match without it: in an alternative
-     * (`(a)|\9`), in a lookaround, or where a quantifier lets it, or a group that holds it, match no times (`\1?(a)`).
+     * (`(a)|\9`), in a lookaround, or where a quantifier lets it, or a group that holds it, match no times (`\1?(a)`); and
+     * where its digits [end].
      */
-    data class Backreference(val number: Int, val inClass: Boolean, val closed: Boolean = false, val optional: Boolean = false)
+    data class Backreference(val number: Int, val inClass: Boolean, val closed: Boolean = false, val optional: Boolean = false, val end: Int = 0)
 
     /**
      * The groups [pattern] captures, as Java numbers them: each `(` that no backslash escapes, out of a class and a quote,
@@ -37,6 +38,16 @@ internal object Patterns {
      * that isn't its first character, and may hold another, as Java's do.
      */
     fun backreferences(pattern: String): List<Backreference> = scan(pattern).first
+
+    /**
+     * [pattern] with the digit after each backreference, out of a class, written in a class of its own, `\1[0]`, which
+     * every store reads as Java does. Java reads `(a)\10` as the first group's and a `0`; Postgres reads all the digits as
+     * one number, and where no group has it, as an octal escape, `\10` a backspace (#236).
+     */
+    fun digitsApart(pattern: String): String =
+        backreferences(pattern).filter { !it.inClass && pattern.getOrNull(it.end) in '0'..'9' }.foldRight(pattern) { it, p ->
+            p.substring(0, it.end) + "[" + p[it.end] + "]" + p.substring(it.end + 1)
+        }
 
     /**
      * A group open as the pattern is read, the whole pattern the first: its number, null for one that captures nothing;
@@ -81,7 +92,7 @@ internal object Patterns {
                         }
                         if (depth == 0) open.last().held += found.size
                         if (depth == 0 && none(pattern, i)) optional += found.size
-                        found += Backreference(number, depth > 0, number in closed)
+                        found += Backreference(number, depth > 0, number in closed, end = i)
                         continue
                     }
                     i += 2
