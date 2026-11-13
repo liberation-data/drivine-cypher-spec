@@ -171,6 +171,26 @@ class VectorSearchCompileTest {
     }
 
     @Test
+    fun `an index on a property whose name begins with a dollar reads the embedding at its escaped key`() {
+        // Store layout 2 holds a property `$e` under `$$e` (ValueLayout.escape): the candidates, their zero-length test, a
+        // vector read from the row and a hit's own property all read it there, never at `$e` and never escaped twice.
+        val dollar = listOf(VectorIndexSpec("Chunk", "\$e", 3, SimilarityFunction.COSINE, name = "dollar"))
+        val unescaped = Regex("(?<!\\$)\\\$e\\b")
+        compilers(dollar).forEach { compiler ->
+            val store = compiler::class.simpleName
+            for (cypher in listOf(
+                "$search('dollar', 2, [1.0, 0.0, 0.0]) YIELD node, score RETURN node.`\$e`, score",
+                "MATCH (q:Chunk {id: 'c'}) $search('dollar', 2, q.`\$e`) YIELD node, score RETURN node.`\$e`, score",
+            )) {
+                val sql = compiler.compile(cypher).sql
+                assertTrue("\$\$e" in sql, "$store:\n$sql")
+                assertFalse("\$\$\$e" in sql, "$store: escaped once:\n$sql")
+                assertFalse(unescaped.containsMatchIn(sql), "$store: never read unescaped:\n$sql")
+            }
+        }
+    }
+
+    @Test
     fun `an index is found by the name the schema API gives it, and one not given is refused`() {
         val unnamed = listOf(VectorIndexSpec("Chunk", "embedding", 3), VectorIndexSpec("Place", "location", 2, name = ""))
         compilers(unnamed).forEach { compiler ->
