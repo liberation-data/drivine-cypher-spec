@@ -194,6 +194,14 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
     /** [SqliteFunctions.EQUAL] compares a value that holds a null as Cypher does, null where no item or entry differs. */
     override fun holdsNull(json: String): String? = null
 
+    /** `json_each` gives each item of a list, and each entry of a map, with its JSON type. */
+    override fun nullItem(json: String, entries: Boolean): String =
+        shared(json) { (x) ->
+            val held = "EXISTS (SELECT 1 FROM json_each(${if (entries) "ni.value" else x}) AS nj WHERE nj.type = 'null')"
+            if (entries) "(json_type($x) = 'object' AND EXISTS (SELECT 1 FROM json_each($x) AS ni WHERE ni.type = 'array' AND $held))"
+            else "(json_type($x) = 'array' AND $held)"
+        }
+
     override fun nullsEqual(x: String, y: String, equals: (String, String) -> String) = equals(x, y)
 
     /** A text, a number or a truth value the statement gives is compared without the function that compares any two values. */

@@ -258,6 +258,11 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
 
     override fun holdsNull(json: String) = "jsonb_path_exists($json, '$.** ? (@ == null)')"
 
+    /** A list that holds JSON's null contains `[null]`, as `@>` reads it: a list held in it, or a map, does not. */
+    override fun nullItem(json: String, entries: Boolean): String =
+        if (entries) "EXISTS (SELECT 1 FROM jsonb_each(CASE WHEN jsonb_typeof($json) = 'object' THEN $json END) ni WHERE ${nullItem("ni.value", false)})"
+        else shared(json) { (x) -> "(jsonb_typeof($x) = 'array' AND $x @> '[null]')" }
+
     /**
      * The pairs of [x]'s and [y]'s items, and of their items', at any depth, walked together: a list's by place, a map's by key, where
      * the two are lists or maps both. A place or a key that one has and the other has not pairs a value with SQL's null. Each
