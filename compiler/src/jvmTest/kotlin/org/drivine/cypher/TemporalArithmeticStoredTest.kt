@@ -3,6 +3,7 @@ package org.drivine.cypher
 import org.drivine.cypher.sql.OracleCypherCompiler
 import org.drivine.cypher.sql.PostgresCypherCompiler
 import org.drivine.cypher.sql.SqliteCypherCompiler
+import org.drivine.cypher.sql.TemporalArithmeticFunction
 import org.junit.jupiter.api.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -135,6 +136,39 @@ class TemporalArithmeticStoredTest {
         assertTrue(known.callsStoredTemporalArithmetic)
         val none = OracleCypherCompiler("g").also { it.compile("MATCH (n:T) RETURN duration('P1D') * 2, size(n.l) + 1", emptyMap()) }
         assertFalse(none.callsStoredTemporalArithmetic)
+    }
+
+    /**
+     * The function's text on each store: a null on either side, SQL's or JSON's, gives null before any pair is tested; each pair,
+     * and each swapped, is one branch, read over the function's arguments with no parameter or sample value left; a pair of
+     * no branch fails with [TemporalArithmeticFunction.UNDEFINED], its operator and kinds.
+     */
+    @Test
+    fun `the function gives null for a null side, has one branch for each pair, and fails by name for any other`() {
+        val forms = mapOf(
+            "postgres" to TemporalArithmeticFunction.postgres("g"),
+            "oracle" to TemporalArithmeticFunction.oracle("g"),
+        )
+        forms.forEach { (store, text) ->
+            val branches = Regex("""\n {4}IF cy_op = '+[-+*/]'+ AND""").findAll(text).count()
+            // A moment plus or minus a duration, five kinds; a duration plus a moment; two durations; a duration times or by a number; a number times one.
+            assertEquals(5 * 2 + 5 + 2 + 2 + 1, branches, store)
+            val nulls = text.indexOf("RETURN NULL;")
+            assertTrue(nulls in 0 until text.indexOf("IF cy_op ="), store)
+            assertTrue("\$_cy_" !in text && "2024-01" !in text && "P1D" !in text, store)
+            assertTrue(TemporalArithmeticFunction.UNDEFINED in text, store)
+        }
+        val postgres = forms.getValue("postgres")
+        assertTrue("IF cy_x IS NULL OR cy_y IS NULL OR jsonb_typeof(cy_x) = ''null'' OR jsonb_typeof(cy_y) = ''null'' THEN" in postgres, postgres)
+        // RAISE takes as many arguments as its format has places, and the message itself has none.
+        assertTrue('%' !in TemporalArithmeticFunction.UNDEFINED)
+        assertEquals(
+            "RAISE EXCEPTION ''${TemporalArithmeticFunction.UNDEFINED} %, % and %'', cy_op, COALESCE(kx, jsonb_typeof(cy_x)), COALESCE(ky, jsonb_typeof(cy_y));",
+            postgres.lines().single { "RAISE EXCEPTION" in it }.trim(),
+        )
+        val oracle = forms.getValue("oracle")
+        assertTrue("IF tx IS NULL OR ty IS NULL OR tx = 'null' OR ty = 'null' THEN" in oracle, oracle)
+        assertTrue("RAISE_APPLICATION_ERROR(-20418, '${TemporalArithmeticFunction.UNDEFINED} ' || cy_op || ', ' || COALESCE(kx, tx) || ' and ' || COALESCE(ky, ty));" in oracle)
     }
 
     @Test

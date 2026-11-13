@@ -146,6 +146,24 @@ class CompileJsonTest {
     }
 
     @Test
+    fun temporalArithmeticStoredIsTrueWhereLeftOutAndStoredFunctionsSaysTheStatementCallsIt() {
+        // drivine4j#418: arithmetic of two values read from the store calls the store's function, where it keeps one.
+        fun compile(graph: String) = CompileJson.compile("{\"store\": \"oracle\", \"graph\": $graph, \"cypher\": \"MATCH (n:T) RETURN n.a - n.b\"}")
+        val stored = compile("{\"name\": \"g\"}")
+        assertEquals(stored, compile("{\"name\": \"g\", \"temporalArithmeticStored\": null}"))
+        assertEquals(stored, compile("{\"name\": \"g\", \"temporalArithmeticStored\": true}"))
+        assertTrue("g_temporal_arithmetic('-', " in stored, stored)
+        assertTrue("\"storedFunctions\":{\"nullsEqual\":false,\"era\":false,\"temporalArithmetic\":true}" in stored, stored)
+        val without = compile("{\"name\": \"g\", \"temporalArithmeticStored\": false}")
+        assertTrue("_temporal_arithmetic(" !in without && "(drivine4j#418)" in without, without)
+        assertTrue("\"storedFunctions\":{\"nullsEqual\":false,\"era\":false,\"temporalArithmetic\":false}" in without, without)
+        assertEquals(
+            "{\"error\":\"A request's graph gives temporalArithmeticStored as true or false.\"}",
+            compile("{\"name\": \"g\", \"temporalArithmeticStored\": \"false\"}"),
+        )
+    }
+
+    @Test
     fun aGraphsVectorIndexesAreWhatAVectorSearchFindsByName() {
         // liberation-data/drivine-cypher-spec#160: a SQL store keeps no index a statement can name, so the request gives them.
         fun compile(graph: String, store: String = "postgres") = CompileJson.compile(

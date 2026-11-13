@@ -143,30 +143,36 @@ class OracleDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
      */
     val temporalArithmetic: String = TemporalArithmeticFunction.name(name)
 
-    /** Each function the store keeps beside the graph's tables, by name, and its text, as `CREATE OR REPLACE` makes it. */
-    private val texts: Map<String, String> = linkedMapOf(
+    /**
+     * Each function the store keeps beside the graph's tables, by name, and its text, as `CREATE OR REPLACE` makes it. Made
+     * where it is first read, as what reads it is: [temporalArithmetic]'s takes some milliseconds to compile, and a search
+     * makes the DDL for its names alone, on every call.
+     */
+    private val texts: Map<String, String> by lazy { linkedMapOf(
         nullsEqual to OracleCypherCompiler.nullsEqualFunction(nullsEqual),
         era to OracleCypherCompiler.eraFunction(era),
         eraDate to OracleCypherCompiler.eraDateFunction(eraDate),
         temporalKey to OracleCypherCompiler.temporalKeyFunction(temporalKey),
         temporalArithmetic to TemporalArithmeticFunction.oracle(name),
-    )
+    ) }
 
     /**
      * Each function's version, by name: the first twelve hex digits of the SHA-256 of its text. Its first line ends with it,
      * `-- drivine:<version>`, which Oracle keeps in `user_source`, so [ensuring] makes again a function whose body an earlier
      * version made otherwise (#251): a body changes wherever the compiler's own changes, as [temporalArithmetic]'s does.
      */
-    val versions: Map<String, String> = texts.mapValues { (_, text) -> version(text) }
+    val versions: Map<String, String> by lazy { texts.mapValues { (_, text) -> version(text) } }
 
     /** Each function, by name, and what makes it: safe to run again. */
-    private val made: Map<String, String> = texts.mapValues { (function, text) ->
-        val line = text.substringBefore('\n')
-        "CREATE OR REPLACE $line $VERSION_MARK${versions.getValue(function)}" + text.removePrefix(line)
+    private val made: Map<String, String> by lazy {
+        texts.mapValues { (function, text) ->
+            val line = text.substringBefore('\n')
+            "CREATE OR REPLACE $line $VERSION_MARK${versions.getValue(function)}" + text.removePrefix(line)
+        }
     }
 
     /** What makes each function the store keeps, [nullsEqual], [era], [eraDate], [temporalKey] and [temporalArithmetic]: safe to run again. */
-    val functions: List<String> = made.values.toList()
+    val functions: List<String> by lazy { made.values.toList() }
 
     /**
      * The block that makes the store when it is not there, and does nothing when it is. The
@@ -184,7 +190,7 @@ class OracleDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
      * earlier version made gains those it lacks, and those whose body has changed since. A user who may not make a function (`ORA-01031`: making one takes `CREATE PROCEDURE`, which the `RESOURCE` role
      * grants) still has the store made: a statement then calls none of those it lacks (see `GraphOptions.nullsEqualStored`).
      */
-    val ensuring: String = """
+    val ensuring: String by lazy { """
         DECLARE
             v_made NUMBER;
             e_exists EXCEPTION;
@@ -232,7 +238,7 @@ ${made.entries.joinToString("\n") { (function, making) ->
             ).joinToString("\n") { "            $it" }
         }}
         END;
-    """.trimIndent()
+    """.trimIndent() }
 
     /** [text] as a schema statement. */
     private fun statement(text: String): String = text.trimIndent()

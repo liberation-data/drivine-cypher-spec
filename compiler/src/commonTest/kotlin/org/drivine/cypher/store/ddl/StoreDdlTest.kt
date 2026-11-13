@@ -100,6 +100,52 @@ class StoreDdlTest {
         )
     }
 
+    /** [GeneratedFunctions.marked] writes each statement the module makes as `store.yaml` holds it: the clob form before the text it quotes. */
+    @Test
+    fun eachGeneratedFunctionIsMarkedAsStoreYamlHoldsIt() {
+        val tables = store["tables"]!!
+        val held = listOf(tables["postgres"]!!["ensuring"]!!, tables["oracle"]!!["ensuring"]!!) + tables["postgres"]!!["ddl"]!!.toList() +
+            tables["oracle"]!!["functions"]!!.toList()
+        val made = listOf(postgres.ensuring, oracle.ensuring) + postgres.ddl + oracle.functions
+        assertEquals(held.map { it.textValue()!! }, made.map { GeneratedFunctions.marked(it, graph) })
+    }
+
+    /**
+     * Oracle keeps a function's text from `FUNCTION` on, so the version comment ends its first line in `user_source`, outside
+     * any literal, and [OracleDdl.ensuring] makes again each function whose line 1 lacks it (#251).
+     */
+    @Test
+    fun eachOracleFunctionsFirstLineEndsWithTheVersionEnsuringLooksFor() {
+        oracle.versions.entries.zip(oracle.functions).forEach { (entry, function) ->
+            val (name, version) = entry
+            val first = function.lines().first()
+            assertTrue(first.startsWith("CREATE OR REPLACE FUNCTION $name(") && first.endsWith(" ${OracleDdl.VERSION_MARK}$version"), first)
+            assertEquals(0, first.count { it == '\'' } % 2, "$name's version comment is in a literal: $first")
+            assertEquals(1, Regex("--").findAll(first).count(), first)
+            assertEquals(OracleDdl.version(function.replace(" ${OracleDdl.VERSION_MARK}$version\n", "\n").removePrefix("CREATE OR REPLACE ")), version, name)
+            assertTrue(
+                "o.object_name = '${name.uppercase()}' AND o.status = 'VALID' AND EXISTS (SELECT 1 FROM user_source s WHERE s.name = o.object_name " +
+                    "AND s.type = 'FUNCTION' AND s.line = 1 AND INSTR(s.text, '${OracleDdl.VERSION_MARK}$version') > 0);" in oracle.ensuring,
+                name,
+            )
+        }
+    }
+
+    /** [org.drivine.cypher.store.OracleSql.clob]: a text that fits one literal is one, a longer one pieces each well within a PL/SQL literal's 32,767 bytes. */
+    @Test
+    fun aClobLiteralIsInPiecesAPlSqlLiteralHolds() {
+        val clob = org.drivine.cypher.store.OracleSql::clob
+        assertEquals("'${"a".repeat(8_000)}'", clob("a".repeat(8_000)))
+        assertEquals("TO_CLOB('${"a".repeat(8_000)}') || TO_CLOB('a')", clob("a".repeat(8_001)))
+        // Quotes doubled within each piece, and a character of three bytes, still within the limit; the pieces put together are the text.
+        for (text in listOf("'".repeat(16_001), "€'".repeat(8_001))) {
+            val pieces = clob(text).removePrefix("TO_CLOB('").removeSuffix("')").split("') || TO_CLOB('")
+            assertEquals(3, pieces.size)
+            assertTrue(pieces.all { it.encodeToByteArray().size + 2 <= 32_767 })
+            assertEquals(text, pieces.joinToString("") { it.replace("''", "'") })
+        }
+    }
+
     @Test
     fun tablesAndProbeAreDrivine4js() {
         val tables = store["tables"]!!

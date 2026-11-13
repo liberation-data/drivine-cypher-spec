@@ -12,8 +12,11 @@ import org.drivine.cypher.json.TemporalValue
  * Its body on Postgres and Oracle is the compiler's own temporal arithmetic: for each pair of kinds, the statement it compiles
  * for `$x <op> $y` where x and y are given as values of those kinds, read over the function's arguments. A statement whose
  * sides the statement knows to be temporal is compiled to that same SQL inline, so the two give the same answers by
- * construction, and a fix to the one is a fix to the other. The SQL depends on the kinds alone, not the values given, so one
- * body serves each pair. A pair whose duration is first (`duration + date`, `2 * duration`) is the other way round.
+ * construction, and a fix to the one is a fix to the other. The SQL of two temporal values depends on their kinds alone, not
+ * the values given, so one body serves each pair. Of a duration and a number it depends on the number too, and the body is
+ * the one compiled for a whole number: on Postgres, a NaN, an infinity or a zero divisor given compiles to SQL that handles a
+ * value that is not finite, which the body doesn't; on Oracle a float only serializes its answer otherwise. A pair whose
+ * duration is first (`duration + date`, `2 * duration`) is the other way round.
  *
  * A body changes wherever the inline arithmetic changes. A store made before keeps the function it was made with until it is
  * made again: on Postgres when `PostgresDdl.VERSION` changes, on Oracle when the function's version, a hash of its DDL,

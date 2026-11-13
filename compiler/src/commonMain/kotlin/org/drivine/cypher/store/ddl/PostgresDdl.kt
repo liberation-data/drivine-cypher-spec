@@ -46,8 +46,12 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
     /** The functions the graph is written through. */
     val writes = PostgresWriteFunctions(this)
 
-    /** What makes the store, when it is not there. Each statement is safe to run again. */
-    val ddl: List<String> = listOf(
+    /**
+     * What makes the store, when it is not there. Each statement is safe to run again. Made where it is first read: it holds
+     * the function of temporal arithmetic, which takes some milliseconds to compile, and a search makes the DDL for its names
+     * alone, on every call.
+     */
+    val ddl: List<String> by lazy { listOf(
         """
         CREATE TABLE IF NOT EXISTS $nodes (
             nid    bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -102,7 +106,7 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
         "CREATE INDEX IF NOT EXISTS $countDeltasIndex ON $countDeltas (kind, name)",
         lockTable,
         lockSeed,
-    ).map { it.trimIndent() } + writes.ddl + temporalKeyFunction() + TemporalArithmeticFunction.postgres(name) + "COMMENT ON TABLE $nodes IS '$VERSION'"
+    ).map { it.trimIndent() } + writes.ddl + temporalKeyFunction() + TemporalArithmeticFunction.postgres(name) + "COMMENT ON TABLE $nodes IS '$VERSION'" }
 
     override val lockTable: String get() = "CREATE TABLE IF NOT EXISTS $lock (name text PRIMARY KEY)"
 
@@ -212,9 +216,9 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
      * alone, and the rest is made again over one an earlier version made, which keeps its rows and has its functions
      * replaced. The block takes a lock of its own for the graph first, so two processes that each find the store missing
      * make it one after the other, and the second, looking again once it has the lock, makes nothing. Postgres runs a
-     * block's schema statements in its transaction, so the store is made whole or not at all.
+     * block's schema statements in its transaction, so the store is made whole or not at all. Made where it is first read, as [ddl] is.
      */
-    val ensuring: String = """
+    val ensuring: String by lazy { """
         DO ${'$'}ensure${'$'}
         BEGIN
             IF obj_description(to_regclass('$nodes'), 'pg_class') IS DISTINCT FROM '$VERSION' THEN
@@ -233,7 +237,7 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
             END IF;
         END
         ${'$'}ensure${'$'}
-    """.trimIndent()
+    """.trimIndent() }
 
     /** [text] as a schema statement, as drivine4j's grammar gave it. */
     private fun statement(text: String): String = text.trimIndent()
@@ -436,7 +440,8 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
 
         /**
          * What the node table's comment says of a store this version made. A store an earlier version made has its functions
-         * made again when it is ensured: 9 finds a node by its id's JSON (#245).
+         * made again when it is ensured: 9 finds a node by its id's JSON (#245), and 10 keeps the function of temporal arithmetic
+         * (drivine4j#418), whose body changes with the compiler's: a change of the DDL bumps it (`store.yaml`'s `generated`).
          */
         const val VERSION = "drivine:10"
 

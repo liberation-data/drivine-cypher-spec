@@ -105,7 +105,7 @@ compiled SQL needs, `hostVersion()` and `drivine_host_version()`: see [The host 
 ```
 
 `store` is `postgres`, `oracle` or `sqlite`. `graph` has the graph's `name`; the rest of it is Oracle's, and may be left
-out: `nullsEqualStored` and `eraStored` (true where left out), `indexedProperties`, `oracleRowsAsText`, `oracleReencodeJson` and
+out: `nullsEqualStored`, `eraStored` and `temporalArithmeticStored` (true where left out), `indexedProperties`, `oracleRowsAsText`, `oracleReencodeJson` and
 `oracleReadsAsText` (false where left out, see [Oracle's rows as text](#oracles-rows-as-text),
 [Oracle's documents encoded again](#oracles-documents-encoded-again) and [Oracle's reads as text](#oracles-reads-as-text)). On every store,
 `vectorIndexes`, the graph's vector indexes as its catalog records them, `[{name, label, property, dimensions, similarity}, …]`
@@ -114,10 +114,10 @@ see [Vector search in the module](#vector-search-in-the-module). `typed`, false 
 relationships tagged and for the columns: see [Columns and typed rows](#columns-and-typed-rows). The answer is one of:
 
 - `{"sql": …, "parameters": {…}, "setup": […], "warnings": […], "nonFinite": false}`, and on Oracle
-  `"storedFunctions": {"nullsEqual": …, "era": …}`. Run `setup` first (on Postgres, the function a statement that
+  `"storedFunctions": {"nullsEqual": …, "era": …, "temporalArithmetic": …}`. Run `setup` first (on Postgres, the function a statement that
   writes is), then `sql`, binding `parameters`. `nonFinite` says NaN or an infinity may come back in the rows as
   `{"$numberDouble": "NaN"}`. `storedFunctions` says which of the graph's stored functions the statement calls: a store
-  without them is compiled for again with `nullsEqualStored` or `eraStored` false.
+  without them is compiled for again with `nullsEqualStored`, `eraStored` or `temporalArithmeticStored` false.
   With `typed`, it has `"columns"` too: `[{"name": "p", "kind": "node"}, …]`.
 - `{"refusal": "<message>"}`: the compiler refuses the statement, with the message the spec's refusals pin.
 - `{"error": "<message>"}`: the request is no request.
@@ -191,7 +191,7 @@ FullTextSearch.plan(store, graph, SearchRequest(labels, properties, query, index
 
 Over JSON it is the same entry, `CompileJson.compile` (`compile`, `drivine_compile`): a request with `search` in place of
 `cypher` is a search, and one that gives more than one of `cypher`, `search`, `searchIndex`, `vector`, `settings`,
-`fragment`, `read`, `temporalKey` and `layout` is an error.
+`fragment`, `read`, `temporalKey`, `layout` and `expand` is an error.
 
 ```json
 {"store": "postgres", "graph": {"name": "g"},
@@ -434,7 +434,8 @@ hold to.
 
 A library on store layout 2 (#161) asks the module three things besides a statement, each through the JSON entry as a request
 of its own, so the three libraries read rows, key a temporal value and judge a graph alike. In Kotlin they are
-`ValueLayout.read`, `Temporals.key` and `StoreLayout.verdict`.
+`ValueLayout.read`, `Temporals.key` and `StoreLayout.verdict`. A runner of `store.yaml` asks a fourth, `expand`
+(`GeneratedFunctions.expand`).
 
 ```json
 {"read": "{\"d\":{\"$t\":\"date\",\"v\":\"2024-01-01\",\"s\":\"10000020240101\"},\"$$k\":1}", "typed": false}
@@ -461,6 +462,9 @@ of its own, so the three libraries read rows, key a temporal value and judge a g
   - `{"verdict": "refuse", "message": "…"}`: throw the message.
 
   `marker.yaml`'s `storeLayout` pins it.
+- **`expand`** takes a statement of `store.yaml` and gives it, `{"text": "…"}`, with each marker of a generated function in it
+  (`<TemporalArithmeticFunction.postgres(drivine)>`) written out as the module makes it: `store.yaml` holds the function of
+  temporal arithmetic by its marker (drivine4j#418), so a runner expands each statement before it compares.
 
 ### Fragments
 
