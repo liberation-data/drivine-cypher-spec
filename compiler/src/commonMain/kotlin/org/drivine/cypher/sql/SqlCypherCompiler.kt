@@ -1702,7 +1702,7 @@ abstract class SqlCypherCompiler(
          * runs otherwise.
          */
         private fun vectorSearch(select: Select, search: Clause.VectorSearch): Select {
-            val index = vectorIndexes.firstOrNull { (it.name?.takeUnless(String::isBlank) ?: it.defaultName()) == search.index }
+            val index = vectorIndexes.firstOrNull { it.effectiveName == search.index }
                 ?: throw CompilerException("The index '${search.index}' does not exist, as Neo4j says of a vector index the graph has not made.")
             redeclared(listOfNotNull(search.node, search.score), select.bound.keys)
             val k = neighbours(search.k)
@@ -1736,8 +1736,8 @@ abstract class SqlCypherCompiler(
         }
 
         /**
-         * The number of neighbours a vector search asks for: a whole number of 1 or more, written or given, as Neo4j fails a
-         * search for 0 or fewer (22N03) and refuses a float before it runs (22NB1).
+         * The number of neighbours a vector search asks for: a whole number from 1 to 2147483647, written or given, as Neo4j
+         * fails a search for any other (22N03) and refuses a float before it runs (22NB1).
          */
         private fun neighbours(k: Expression): String {
             val value = searchGiven(k)
@@ -1746,7 +1746,7 @@ abstract class SqlCypherCompiler(
                 k !is Expression.Literal && k !is Expression.Parameter && !(k is Expression.Unary && value != null) ->
                     unsupported("A vector search whose number of neighbours is an expression")
                 whole == null -> throw CompilerException("db.index.vector.queryNodes() takes a whole number of neighbours, not ${describedGiven(k, value)}, as in Neo4j.")
-                whole < 1 -> throw CompilerException("db.index.vector.queryNodes() takes a number of neighbours from 1 to 2147483647, not $whole, as in Neo4j.")
+                whole !in 1..Int.MAX_VALUE -> throw CompilerException("db.index.vector.queryNodes() takes a number of neighbours from 1 to 2147483647, not $whole, as in Neo4j.")
                 k is Expression.Parameter -> parameters.count(k.name)
                 else -> whole.toString()
             }
@@ -1766,6 +1766,7 @@ abstract class SqlCypherCompiler(
         /** [value], given for [expression], as a message names it. */
         private fun describedGiven(expression: Expression, value: Any?): String = when {
             value == null && expression is Expression.Parameter -> "\$${expression.name}, which is null"
+            value == null -> "null"
             value is Number -> org.drivine.cypher.text.JavaText.of(value)
             value is String -> "'$value'"
             else -> "that"
@@ -1780,10 +1781,10 @@ abstract class SqlCypherCompiler(
             val numbers = list.map { (it as? Number)?.toDouble() ?: throw CompilerException("db.index.vector.queryNodes() takes its vector as a list of numbers, as in Neo4j: its coordinates must be finite.") }
             if (numbers.any { !it.isFinite() }) throw CompilerException("db.index.vector.queryNodes() takes a vector whose coordinates are finite, as in Neo4j.")
             if (numbers.size != index.dimensions) {
-                throw CompilerException("The index '${index.name ?: index.defaultName()}' is of vectors of ${index.dimensions} dimensions, and the query vector has ${numbers.size}, as Neo4j fails it.")
+                throw CompilerException("The index '${index.effectiveName}' is of vectors of ${index.dimensions} dimensions, and the query vector has ${numbers.size}, as Neo4j fails it.")
             }
             if (index.similarity == SimilarityFunction.COSINE && numbers.all { it == 0.0 }) {
-                throw CompilerException("The index '${index.name ?: index.defaultName()}' measures by cosine, which a vector of no length has none of, as Neo4j fails it.")
+                throw CompilerException("The index '${index.effectiveName}' measures by cosine, which a vector of no length has none of, as Neo4j fails it.")
             }
             return numbers
         }

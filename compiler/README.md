@@ -107,7 +107,10 @@ compiled SQL needs, `hostVersion()` and `drivine_host_version()`: see [The host 
 `store` is `postgres`, `oracle` or `sqlite`. `graph` has the graph's `name`; the rest of it is Oracle's, and may be left
 out: `nullsEqualStored` and `eraStored` (true where left out), `indexedProperties`, `oracleRowsAsText`, `oracleReencodeJson` and
 `oracleReadsAsText` (false where left out, see [Oracle's rows as text](#oracles-rows-as-text),
-[Oracle's documents encoded again](#oracles-documents-encoded-again) and [Oracle's reads as text](#oracles-reads-as-text)). `typed`, false where left out, asks for the rows' nodes and
+[Oracle's documents encoded again](#oracles-documents-encoded-again) and [Oracle's reads as text](#oracles-reads-as-text)). On every store,
+`vectorIndexes`, the graph's vector indexes as its catalog records them, `[{name, label, property, dimensions, similarity}, …]`
+(`GraphOptions.vectorIndexes`, `SqlCypherCompiler.vectorIndexes`), is what `db.index.vector.queryNodes` finds by name:
+see [Vector search in the module](#vector-search-in-the-module). `typed`, false where left out, asks for the rows' nodes and
 relationships tagged and for the columns: see [Columns and typed rows](#columns-and-typed-rows). The answer is one of:
 
 - `{"sql": …, "parameters": {…}, "setup": […], "warnings": […], "nonFinite": false}`, and on Oracle
@@ -272,6 +275,22 @@ Over JSON it is the same entry, `CompileJson.compile`: a request with `vector` i
 
 The answer is `{"sql": …, "parameters": {…}, "vector": …, "labelCheck": …, "indexK": …, "warnings": […]}`, with `cypher`
 in place of `sql` on a graph engine, or `{"refusal": …}`, or `{"error": …}` where the request is no request.
+
+**Compiled Cypher.** The compiler compiles Neo4j's `CALL db.index.vector.queryNodes(index, k, vector) YIELD node, score`
+on each SQL store (liberation-data/drivine-cypher-spec#160) to the same candidates: `VectorSearch.candidates` writes them,
+given the vector and `k` as SQL, as the statement reads them. A SQL store keeps no index a statement can name, so the library
+gives the graph's vector indexes as its catalog records them: `GraphOptions.vectorIndexes` (`graph.vectorIndexes` over
+JSON), each a `VectorIndexSpec` found by its name, or by `<label>_<property>_vector` where it has none. An index not given
+is refused, as Neo4j refuses one that does not exist, and so is an index named by anything but a string, as the store's
+table and expression are read when the statement is compiled. As the first clause the candidates are the statement's
+source; after other rows, a join for each row (a `LATERAL` join on Postgres and Oracle, `json_each` on SQLite), so the
+vector may be read from the row. Each candidate is joined to the node table, bound as `node` and its score as `score`,
+best first, ties by the node's id; a `WHERE` after the `YIELD`, and the clauses after it, filter those `k`, as Neo4j
+filters what its index found. `k` is a whole number from 1 to 2147483647, written or given as a parameter (bound, not
+written). A vector written or given is refused before the statement runs where Neo4j fails it: null, not a list of
+numbers, of another size than the index's, or of no length on a cosine index; one the statement works out is checked
+as it runs, by each store's `queryVector`, which fails the statement with the same words. Measured by cosine, a stored
+embedding of no length is left out of every search, as Neo4j leaves it out of its index.
 
 drivine4j's statements are the module's byte for byte. `src/commonTest/resources/vector-golden.json` holds them, written by
 drivine4j's own code (its selects' `nearestTo`, `nearestThrough` and `nearestAmong`, its grammars' `vectorSearchHead`

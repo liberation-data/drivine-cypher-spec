@@ -40,9 +40,9 @@ import org.drivine.cypher.text.JavaText
  */
 class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCompiler(graph, encoder) {
 
-    // The constructor drivine4j's compiler had, kept so that what was compiled against it still links.
     override val searchStore = org.drivine.cypher.api.SearchStore.SQLITE
 
+    // The constructor drivine4j's compiler had, kept so that what was compiled against it still links.
     constructor(graph: String) : this(graph, null)
 
     override fun literalJson(value: Any?) = literal(parameterText(value))
@@ -73,13 +73,12 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
     /** Null as SQL's null, where `json_quote` writes it as JSON's. */
     override fun scalar(sql: String) = "NULLIF(json_quote($sql), 'null')"
 
-    /** SQLite has no failing expression of its own: Drivine's function fails with the text. */
     /**
      * The vector as the library's similarity function reads it, its JSON array. Where it is null, not a list of numbers, of
      * another size than the index's, or of no length measured by cosine, the statement fails as it runs ([failure]).
      */
     override fun queryVector(json: String, index: org.drivine.schema.VectorIndexSpec): String {
-        val name = index.name ?: index.defaultName()
+        val name = index.effectiveName
         val noLength = if (index.similarity == org.drivine.schema.SimilarityFunction.COSINE) {
             "WHEN NOT EXISTS (SELECT 1 FROM json_each($json) e WHERE e.value <> 0) THEN ${failure("The index '$name' measures by cosine, which a vector of no length has none of:", json)} "
         } else ""
@@ -90,6 +89,7 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
             noLength + "ELSE $json END"
     }
 
+    /** SQLite has no failing expression of its own: Drivine's function fails with the text. */
     override fun failure(message: String, value: String) = "${SqliteFunctions.FAIL}(${literal("$message ")} || $value)"
 
     /** NaN, where the statement is given one, is a number: see the class. */

@@ -182,7 +182,9 @@ object CompileJson {
             ?: throw IllegalArgumentException("A vector index gives its dimensions as a whole number.")
         val similarity = given["similarity"]?.textValue()?.let { name -> SimilarityFunction.entries.firstOrNull { it.name == name } }
             ?: throw IllegalArgumentException("A vector index gives its similarity as COSINE or EUCLIDEAN.")
-        return VectorIndexSpec(label, property, dimensions, similarity, name = given["name"]?.textValue())
+        val name = given["name"]?.takeUnless { it.isNull }
+        require(name == null || name.isTextual) { "A vector index's name is a string, or left out." }
+        return VectorIndexSpec(label, property, dimensions, similarity, name = name?.textValue())
     }
 
     /** The graph's option [name], [default] where it is left out; refused where it is no boolean, as `"false"` would be read as true. */

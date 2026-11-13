@@ -167,6 +167,9 @@ object CypherReader {
         yields.forEach { (field, _) ->
             if (field !in VECTOR_FIELDS) throw CompilerException("$VECTOR_SEARCH() yields node and score, not $field.")
         }
+        yields.groupBy { (_, variable) -> variable }.entries.firstOrNull { it.value.size > 1 }?.let { (variable, _) ->
+            throw CompilerException("$VECTOR_SEARCH() yields $variable twice, as Neo4j refuses it: name each field it yields with a variable of its own.")
+        }
         val bound = yields.toMap()
         return Clause.VectorSearch(name, k, vector, bound["node"], bound["score"], where)
     }
