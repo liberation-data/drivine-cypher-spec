@@ -33,6 +33,8 @@ import org.drivine.cypher.json.sha256
 class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCompiler(graph, encoder) {
 
     // The constructor drivine4j's compiler had, kept so that what was compiled against it still links.
+    override val searchStore = org.drivine.cypher.api.SearchStore.POSTGRES
+
     constructor(graph: String) : this(graph, null)
 
     override fun literalJson(value: Any?) = "CAST(${literal(written(value))} AS jsonb)"
@@ -778,6 +780,23 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
      * is stable, not immutable, so the planner does not work out a failure of constants alone before any row, as it
      * works out an immutable `||` and cast in a branch of a CASE no row takes: `round(1.5, -2)` over no rows.
      */
+    /**
+     * The vector as pgvector reads it, its text: `[1.0, 0.0, 0.0]` as JSON writes a list is a vector's text. Where it is null,
+     * of another size than the index's, or of no length measured by cosine, the statement fails as it runs ([failure]); a
+     * list of anything but numbers fails as pgvector reads it.
+     */
+    override fun queryVector(json: String, index: org.drivine.schema.VectorIndexSpec): String {
+        val text = "CAST($json AS text)"
+        val vector = "CAST($text AS vector)"
+        val name = index.name ?: index.defaultName()
+        val noLength = if (index.similarity == org.drivine.schema.SimilarityFunction.COSINE) {
+            "WHEN vector_norm($vector) = 0 THEN CAST(${failure("The index '$name' measures by cosine, which a vector of no length has none of:", text)} AS text) "
+        } else ""
+        return "CASE WHEN ${isJsonNull(json)} THEN CAST(${failure("db.index.vector.queryNodes() takes its vector as a list of numbers, not", "'null'")} AS text) " +
+            "WHEN vector_dims($vector) <> ${index.dimensions} THEN CAST(${failure("The index '$name' is of vectors of ${index.dimensions} dimensions, and the query vector has", "vector_dims($vector)")} AS text) " +
+            noLength + "ELSE $text END"
+    }
+
     override fun failure(message: String, value: String) = "CAST(concat(${literal("$message ")}, $value) AS integer)"
 
     override fun raise(message: String) = "RAISE EXCEPTION USING MESSAGE = ${literal(message)};"

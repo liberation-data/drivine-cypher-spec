@@ -66,6 +66,8 @@ class OracleCypherCompiler(
 ) : SqlCypherCompiler(graph, encoder) {
 
     // The constructor with reencodeJson and without readsAsText, kept so that what was compiled against it still links.
+    override val searchStore = org.drivine.cypher.api.SearchStore.ORACLE
+
     constructor(
         graph: String,
         nullsEqualStored: Boolean,

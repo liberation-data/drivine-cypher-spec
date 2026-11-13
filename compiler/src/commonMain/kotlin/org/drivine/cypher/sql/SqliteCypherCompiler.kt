@@ -41,6 +41,8 @@ import org.drivine.cypher.text.JavaText
 class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCompiler(graph, encoder) {
 
     // The constructor drivine4j's compiler had, kept so that what was compiled against it still links.
+    override val searchStore = org.drivine.cypher.api.SearchStore.SQLITE
+
     constructor(graph: String) : this(graph, null)
 
     override fun literalJson(value: Any?) = literal(parameterText(value))

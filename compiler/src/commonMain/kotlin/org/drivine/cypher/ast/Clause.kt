@@ -39,6 +39,20 @@ sealed interface Clause {
      */
     data class Call(val optional: Boolean, val query: Query, val imports: List<String>? = null, val importsAll: Boolean = false) : Clause
 
+    /**
+     * `CALL db.index.vector.queryNodes(index, k, vector) YIELD node, score`: the [k] nodes of the vector index named [index]
+     * nearest [vector], best first, each bound to [node] and its score to [score], where they are yielded; with [where], the
+     * rows that meet it, of those [k], as Neo4j filters what the index found (liberation-data/drivine-cypher-spec#160).
+     */
+    data class VectorSearch(
+        val index: String,
+        val k: Expression,
+        val vector: Expression,
+        val node: String?,
+        val score: String?,
+        val where: Expression?,
+    ) : Clause
+
     /** `FOREACH (x IN list | …)`: [clauses] written for each item of [list], bound to [variable]; the rows are left as they were. */
     data class Foreach(val variable: String, val list: Expression, val clauses: List<Clause>) : Clause
 

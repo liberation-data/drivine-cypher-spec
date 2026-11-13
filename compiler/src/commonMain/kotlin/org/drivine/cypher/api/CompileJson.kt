@@ -13,6 +13,8 @@ import org.drivine.cypher.json.TemporalValue
 import org.drivine.cypher.json.jvmDoubleText
 import org.drivine.cypher.json.parseDouble
 import org.drivine.cypher.sql.Temporal
+import org.drivine.schema.SimilarityFunction
+import org.drivine.schema.VectorIndexSpec
 import kotlin.io.encoding.Base64
 import kotlin.io.encoding.ExperimentalEncodingApi
 
@@ -142,6 +144,11 @@ object CompileJson {
             require(label != null && property != null) { "An indexed property is [label, property]." }
             label to property
         }?.toSet() ?: emptySet()
+        val vectorGiven = graph["vectorIndexes"]?.takeUnless { it.isNull }
+        require(vectorGiven == null || vectorGiven is ArrayNode) {
+            "A request's vectorIndexes are [{name, label, property, dimensions, similarity}, …]."
+        }
+        val vectorIndexes = (vectorGiven as ArrayNode?)?.map(::vectorIndex).orEmpty()
         val options = GraphOptions(
             name = name,
             nullsEqualStored = flag(graph, "nullsEqualStored"),
@@ -150,6 +157,7 @@ object CompileJson {
             oracleRowsAsText = flag(graph, "oracleRowsAsText", default = false),
             oracleReencodeJson = flag(graph, "oracleReencodeJson", default = false),
             oracleReadsAsText = flag(graph, "oracleReadsAsText", default = false),
+            vectorIndexes = vectorIndexes,
         )
         val cypher = tree["cypher"]?.textValue() ?: throw IllegalArgumentException("A request gives its statement as cypher.")
         val parameters = when (val given = tree["parameters"]) {
@@ -160,6 +168,21 @@ object CompileJson {
         val typedGiven = tree["typed"]?.takeUnless { it.isNull }
         require(typedGiven == null || typedGiven.isBoolean) { "A request gives typed as true or false." }
         return Call(store, options, cypher, parameters, typedGiven?.booleanValue() ?: false)
+    }
+
+    /**
+     * A vector index of a request's `graph.vectorIndexes`: `{name, label, property, dimensions, similarity}`, its name left out
+     * where it is `<label>_<property>_vector`, its similarity `COSINE` or `EUCLIDEAN`.
+     */
+    private fun vectorIndex(given: JsonNode): VectorIndexSpec {
+        require(given is ObjectNode) { "A vector index is {name, label, property, dimensions, similarity}." }
+        val label = given["label"]?.textValue() ?: throw IllegalArgumentException("A vector index names its label.")
+        val property = given["property"]?.textValue() ?: throw IllegalArgumentException("A vector index names its property.")
+        val dimensions = given["dimensions"]?.takeIf { it.isIntegralNumber }?.longValue()?.takeIf { it in 1..Int.MAX_VALUE }?.toInt()
+            ?: throw IllegalArgumentException("A vector index gives its dimensions as a whole number.")
+        val similarity = given["similarity"]?.textValue()?.let { name -> SimilarityFunction.entries.firstOrNull { it.name == name } }
+            ?: throw IllegalArgumentException("A vector index gives its similarity as COSINE or EUCLIDEAN.")
+        return VectorIndexSpec(label, property, dimensions, similarity, name = given["name"]?.textValue())
     }
 
     /** The graph's option [name], [default] where it is left out; refused where it is no boolean, as `"false"` would be read as true. */
