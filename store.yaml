@@ -2087,6 +2087,38 @@ cases:
           - "COALESCE(props ->> '$.\"name\".\"$t\"', CASE json_type(props, '$.\"name\"') WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'null' THEN NULL ELSE json_type(props, '$.\"name\"') END)"
           - "COALESCE(props ->> '$.\"name\".s', props ->> '$.\"name\".v', props ->> '$.\"name\"')"
           - "instr(labels, '\"Person\"') > 0"
+    reads:
+      - note: "A text the statement works out from its parameters, of a function that gives no list or map, is read through the index as a given one is (#238)."
+        cypher: "MATCH (n:Person {name: toUpper($x)}) RETURN n"
+        parameters: {x: "ada"}
+        indexedProperties:
+          - ["Person", "name"]
+        holds:
+          postgres:
+            - "(props -> 'name')"
+            - "labels @> '[\"Person\"]'"
+          oracle:
+            - "CASE WHEN JSON_EXISTS(n.labels, '$[*]?(@ == \"Person\")') THEN CASE WHEN CASE JSON_VALUE(n.props, '$.name.type()' RETURNING VARCHAR2(16)) WHEN 'object' THEN COALESCE(JSON_VALUE(n.props, '$.name.s'), JSON_VALUE(n.props, '$.name.v')) WHEN 'number' THEN TO_CHAR(JSON_VALUE(n.props, '$.name' RETURNING NUMBER), 'TM9') WHEN 'double' THEN CASE WHEN JSON_VALUE(n.props, '$.name' RETURNING BINARY_DOUBLE) = FLOOR(JSON_VALUE(n.props, '$.name' RETURNING BINARY_DOUBLE)) AND JSON_VALUE(n.props, '$.name' RETURNING BINARY_DOUBLE) >= -9223372036854775808 AND JSON_VALUE(n.props, '$.name' RETURNING BINARY_DOUBLE) < 9223372036854775808 THEN TO_CHAR(CAST(FLOOR(JSON_VALUE(n.props, '$.name' RETURNING BINARY_DOUBLE) / 4294967296) AS NUMBER) * 4294967296 + CAST(JSON_VALUE(n.props, '$.name' RETURNING BINARY_DOUBLE) - FLOOR(JSON_VALUE(n.props, '$.name' RETURNING BINARY_DOUBLE) / 4294967296) * 4294967296 AS NUMBER), 'TM9') ELSE 'd' || TO_CHAR(JSON_VALUE(n.props, '$.name' RETURNING BINARY_DOUBLE)) END ELSE JSON_VALUE(n.props, '$.name') END IS NOT NULL THEN CASE JSON_VALUE(n.props, '$.name.type()' RETURNING VARCHAR2(16)) WHEN 'object' THEN JSON_VALUE(n.props, '$.name.\"$t\"' RETURNING VARCHAR2(16)) WHEN 'double' THEN 'number' ELSE JSON_VALUE(n.props, '$.name.type()' RETURNING VARCHAR2(16)) END END END"
+            - "CASE WHEN JSON_EXISTS(n.labels, '$[*]?(@ == \"Person\")') THEN CASE JSON_VALUE(n.props, '$.name.type()' RETURNING VARCHAR2(16)) WHEN 'object' THEN COALESCE(JSON_VALUE(n.props, '$.name.s'), JSON_VALUE(n.props, '$.name.v')) WHEN 'number' THEN TO_CHAR(JSON_VALUE(n.props, '$.name' RETURNING NUMBER), 'TM9') WHEN 'double' THEN CASE WHEN JSON_VALUE(n.props, '$.name' RETURNING BINARY_DOUBLE) = FLOOR(JSON_VALUE(n.props, '$.name' RETURNING BINARY_DOUBLE)) AND JSON_VALUE(n.props, '$.name' RETURNING BINARY_DOUBLE) >= -9223372036854775808 AND JSON_VALUE(n.props, '$.name' RETURNING BINARY_DOUBLE) < 9223372036854775808 THEN TO_CHAR(CAST(FLOOR(JSON_VALUE(n.props, '$.name' RETURNING BINARY_DOUBLE) / 4294967296) AS NUMBER) * 4294967296 + CAST(JSON_VALUE(n.props, '$.name' RETURNING BINARY_DOUBLE) - FLOOR(JSON_VALUE(n.props, '$.name' RETURNING BINARY_DOUBLE) / 4294967296) * 4294967296 AS NUMBER), 'TM9') ELSE 'd' || TO_CHAR(JSON_VALUE(n.props, '$.name' RETURNING BINARY_DOUBLE)) END ELSE JSON_VALUE(n.props, '$.name') END END"
+          sqlite:
+            - "COALESCE(props ->> '$.\"name\".\"$t\"', CASE json_type(props, '$.\"name\"') WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'null' THEN NULL ELSE json_type(props, '$.\"name\"') END)"
+            - "COALESCE(props ->> '$.\"name\".s', props ->> '$.\"name\".v', props ->> '$.\"name\"')"
+            - "instr(labels, '\"Person\"') > 0"
+      - cypher: "MATCH (n:Person {name: trim($x)}) RETURN n"
+        parameters: {x: " Ada "}
+        indexedProperties:
+          - ["Person", "name"]
+        holds:
+          postgres:
+            - "(props -> 'name')"
+            - "labels @> '[\"Person\"]'"
+          oracle:
+            - "CASE WHEN JSON_EXISTS(n.labels, '$[*]?(@ == \"Person\")') THEN CASE WHEN CASE JSON_VALUE(n.props, '$.name.type()' RETURNING VARCHAR2(16)) WHEN 'object' THEN COALESCE(JSON_VALUE(n.props, '$.name.s'), JSON_VALUE(n.props, '$.name.v')) WHEN 'number' THEN TO_CHAR(JSON_VALUE(n.props, '$.name' RETURNING NUMBER), 'TM9') WHEN 'double' THEN CASE WHEN JSON_VALUE(n.props, '$.name' RETURNING BINARY_DOUBLE) = FLOOR(JSON_VALUE(n.props, '$.name' RETURNING BINARY_DOUBLE)) AND JSON_VALUE(n.props, '$.name' RETURNING BINARY_DOUBLE) >= -9223372036854775808 AND JSON_VALUE(n.props, '$.name' RETURNING BINARY_DOUBLE) < 9223372036854775808 THEN TO_CHAR(CAST(FLOOR(JSON_VALUE(n.props, '$.name' RETURNING BINARY_DOUBLE) / 4294967296) AS NUMBER) * 4294967296 + CAST(JSON_VALUE(n.props, '$.name' RETURNING BINARY_DOUBLE) - FLOOR(JSON_VALUE(n.props, '$.name' RETURNING BINARY_DOUBLE) / 4294967296) * 4294967296 AS NUMBER), 'TM9') ELSE 'd' || TO_CHAR(JSON_VALUE(n.props, '$.name' RETURNING BINARY_DOUBLE)) END ELSE JSON_VALUE(n.props, '$.name') END IS NOT NULL THEN CASE JSON_VALUE(n.props, '$.name.type()' RETURNING VARCHAR2(16)) WHEN 'object' THEN JSON_VALUE(n.props, '$.name.\"$t\"' RETURNING VARCHAR2(16)) WHEN 'double' THEN 'number' ELSE JSON_VALUE(n.props, '$.name.type()' RETURNING VARCHAR2(16)) END END END"
+            - "CASE WHEN JSON_EXISTS(n.labels, '$[*]?(@ == \"Person\")') THEN CASE JSON_VALUE(n.props, '$.name.type()' RETURNING VARCHAR2(16)) WHEN 'object' THEN COALESCE(JSON_VALUE(n.props, '$.name.s'), JSON_VALUE(n.props, '$.name.v')) WHEN 'number' THEN TO_CHAR(JSON_VALUE(n.props, '$.name' RETURNING NUMBER), 'TM9') WHEN 'double' THEN CASE WHEN JSON_VALUE(n.props, '$.name' RETURNING BINARY_DOUBLE) = FLOOR(JSON_VALUE(n.props, '$.name' RETURNING BINARY_DOUBLE)) AND JSON_VALUE(n.props, '$.name' RETURNING BINARY_DOUBLE) >= -9223372036854775808 AND JSON_VALUE(n.props, '$.name' RETURNING BINARY_DOUBLE) < 9223372036854775808 THEN TO_CHAR(CAST(FLOOR(JSON_VALUE(n.props, '$.name' RETURNING BINARY_DOUBLE) / 4294967296) AS NUMBER) * 4294967296 + CAST(JSON_VALUE(n.props, '$.name' RETURNING BINARY_DOUBLE) - FLOOR(JSON_VALUE(n.props, '$.name' RETURNING BINARY_DOUBLE) / 4294967296) * 4294967296 AS NUMBER), 'TM9') ELSE 'd' || TO_CHAR(JSON_VALUE(n.props, '$.name' RETURNING BINARY_DOUBLE)) END ELSE JSON_VALUE(n.props, '$.name') END END"
+          sqlite:
+            - "COALESCE(props ->> '$.\"name\".\"$t\"', CASE json_type(props, '$.\"name\"') WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'null' THEN NULL ELSE json_type(props, '$.\"name\"') END)"
+            - "COALESCE(props ->> '$.\"name\".s', props ->> '$.\"name\".v', props ->> '$.\"name\"')"
+            - "instr(labels, '\"Person\"') > 0"
   - name: "Range index over two properties"
     description: "A composite range index: one expression per property, in order."
     spec: {kind: "RANGE_INDEX", label: "Person", properties: ["name", "born"]}
