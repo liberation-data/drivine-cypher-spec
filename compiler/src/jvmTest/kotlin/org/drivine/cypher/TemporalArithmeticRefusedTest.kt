@@ -22,17 +22,21 @@ class TemporalArithmeticRefusedTest {
     /**
      * The whole rule, by the form of a side (`tagFree`): each form, beside a number in `form - 1`, and whether it is tested for a
      * tag as the statement runs. The forms skipped are a closed set; any other is tested. `v` is a property bound by a WITH,
-     * `w` a number bound by one, `$i` a parameter given as a number.
+     * `date` a map's entry bound by one, `w` a number bound by one, `$i` a parameter given as a number.
      */
     private val sides = listOf(
         // Tested: a value whose kind is open, which may be a tag.
         "n.d" to true, "v" to true, "n.m.d" to true, "n.at.minute" to true, "head(n.l)" to true, "coalesce(n.d, 1)" to true,
         "n.l[0]" to true, "[x IN n.l | x][0]" to true, "CASE WHEN n.a THEN n.d ELSE 1 END" to true,
+        // A variable named as a temporal namespace is no function: its field may be a tag.
+        "date.day" to true,
         // Skipped: a kind known when compiling. A parameter, or its entry, is of the value given: a statement is compiled for each call.
         "1" to false, "-1" to false, "2.5" to false, "\$i" to false, "\$m.d" to false, "w" to false, "1 + 2" to false, "-w" to false,
         "CASE WHEN n.a THEN 1 ELSE 2 END" to false, "floor(n.a)" to false, "toFloat(n.a)" to false,
+        // Skipped: a text, a list or a truth value the statement makes.
+        "toString(n.a)" to false, "split(n.s, ',')" to false, "nodes(p)" to false, "n.a = 1" to false,
         // Skipped: a count, a COUNT subquery, or a function that gives a number.
-        "count(*)" to false, "COUNT { MATCH (m:T) }" to false, "size(n.l)" to false, "length(p)" to false, "toInteger(n.a)" to false,
+        "count(*)" to false, "count(n.d)" to false, "COUNT { MATCH (m:T) }" to false, "size(n.l)" to false, "length(p)" to false, "toInteger(n.a)" to false,
         "abs(n.a)" to false, "sign(n.a)" to false, "timestamp()" to false,
         // Skipped: a field of a temporal value the statement makes, a number or a text.
         "datetime(n.at).minute" to false, "localtime(n.t).hour" to false, "date.truncate('month', n.at).day" to false,
@@ -43,7 +47,7 @@ class TemporalArithmeticRefusedTest {
     fun `each form of a side is tested for a tag, or not, as the closed rule says, on every store`() {
         sides.forEach { (form, tested) ->
             compilers.forEach { compiler ->
-                val cypher = "MATCH p = (n:T)-->() WITH p, n, n.d AS v, 1 AS w RETURN $form - 1"
+                val cypher = "MATCH p = (n:T)-->() WITH p, n, n.d AS v, n.m AS date, 1 AS w RETURN $form - 1"
                 val sql = compiler.compile(cypher, mapOf("i" to 2, "m" to mapOf("d" to "x"))).sql
                 assertEquals(tested, refusal in sql, "${compiler::class.simpleName} $form: ${if (tested) "tested" else "skipped"} expected:\n$sql")
             }

@@ -5187,7 +5187,7 @@ abstract class SqlCypherCompiler(
          *   that gives a float, arithmetic of known numbers, a `CASE` of one known kind, a variable bound to one, a text or a list
          *   the statement makes, a truth value, a node or a relationship;
          * - it is `count(*)`, a `COUNT` subquery, or a function that gives a number ([NUMBER_FUNCTIONS]);
-         * - it is a field of a temporal value the statement makes, by a function of a temporal kind or in its namespace
+         * - it is a field of a temporal value the statement makes, by a function of a temporal kind ([Temporal.ofFunction]) or in its namespace
          *   (`datetime(b.at).minute`, `duration.between(a, b).days`): a number or a text, as no field of a temporal value is one.
          * A field of a value of open kind, `n.m.d`, may be a map's entry that is a tag, so it is tested.
          */
@@ -5195,7 +5195,7 @@ abstract class SqlCypherCompiler(
             Expression.CountStar -> true
             is Expression.Subquery -> written.kind == Expression.Subquery.Kind.COUNT
             is Expression.Function -> written.name.lowercase() in NUMBER_FUNCTIONS
-            is Expression.Property -> written.subject.let { it is Expression.Function && it.name.lowercase().substringBefore('.') in TEMPORAL_FUNCTION_NAMES }
+            is Expression.Property -> written.subject.let { it is Expression.Function && Temporal.ofFunction(it.name.lowercase().substringBefore('.')) != null }
             else -> false
         }
 
@@ -7474,9 +7474,6 @@ abstract class SqlCypherCompiler(
 
         /** The functions whose value is a number, or null: no temporal value, which `temporalRefused` need not test for. */
         val NUMBER_FUNCTIONS = FLOAT_FUNCTIONS + setOf("count", "size", "length", "tointeger", "tointegerornull", "abs", "sign", "timestamp")
-
-        /** The functions, and the namespaces of functions (`datetime.fromepoch`, `duration.between`), whose value is a temporal value of a kind. */
-        val TEMPORAL_FUNCTION_NAMES = Temporal.entries.map { it.function }.toSet()
 
         /** The operators of arithmetic, whose value is a number where both operands are: see [Value.Json.known]. */
         val ARITHMETIC = setOf(Operator.ADD, Operator.SUBTRACT, Operator.MULTIPLY, Operator.DIVIDE, Operator.MODULO, Operator.POWER)
