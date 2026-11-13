@@ -176,6 +176,9 @@ class FragmentsTest {
             assertTrue(compiler.condition("type(r) = 'KNOWS'", knows).sql.contains("knows_.type"), "$compiler")
             assertTrue(compiler.order("r.since", false, knows).terms.all { "knows_.props" in it }, "$compiler")
         }
+        // Through the JSON entry, a relationship's row is read as one.
+        val answer = CypherJson.readTree(CompileJson.compile("{\"store\": \"sqlite\", \"graph\": {\"name\": \"g\"}, \"fragment\": {\"condition\": \"type(r) = 'KNOWS'\", \"variables\": {\"r\": {\"relationship\": \"knows_\"}}}}"))
+        assertEquals(SqliteCypherCompiler("g").condition("type(r) = 'KNOWS'", knows).terms, (answer["terms"] as? ArrayNode)?.map { it.textValue() }, "$answer")
         // Oracle tests a node's labels beside an indexed equality only where the library gives them.
         val oracle = OracleCypherCompiler("g", false, false, setOf("Person" to "name"))
         assertTrue("JSON_EXISTS(people_.labels" in oracle.condition("n.name = 'Ada'", people).sql)

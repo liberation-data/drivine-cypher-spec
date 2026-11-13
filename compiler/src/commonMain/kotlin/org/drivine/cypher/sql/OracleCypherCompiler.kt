@@ -1812,6 +1812,26 @@ class OracleCypherCompiler(
     }
 
     /**
+     * A fragment's hints are as [planned] gives a statement's: by what the fragment itself compares and reads, and the graph's
+     * tables it reads counted with the library's row it is over, which its terms read and its own FROM holds.
+     */
+    override fun fragmentHints(terms: List<String>): List<String> {
+        val text = terms.joinToString("\n")
+        return listOfNotNull(
+            NO_JSON_TABLE_TRANSFORM.takeIf { readsCompared || (graphTable.findAll(text).count() + 1).let { it >= 2 || readsByPlace && it == 1 } },
+            NO_FEEDBACK.takeIf { keyed.any { it in text } },
+        )
+    }
+
+    override fun startHints(): Any? = (readsCompared to readsByPlace).also { readsCompared = false; readsByPlace = false }
+
+    override fun endHints(saved: Any?) {
+        val (compared, byPlace) = saved as Pair<*, *>
+        readsCompared = compared as Boolean
+        readsByPlace = byPlace as Boolean
+    }
+
+    /**
      * A query that reads the graph's tables twice or more is not rewritten by Oracle's JSON table transformation
      * (`NO_JSON_TABLE_TRANSFORM`), which reads several JSON values of a column, `n1.props`, by one `JSON_TABLE`: so
      * rewritten, a node's table beside another table, or beside a subquery of one, lost the tests of that node's labels
@@ -1833,26 +1853,6 @@ class OracleCypherCompiler(
      * A query of a procedure that reads the rows of a `FOREACH` or a `CALL { … }` written for each row alone is planned for
      * one row of them first: see [oneRowPlanned].
      */
-    /**
-     * A fragment's hints are as [planned] gives a statement's: by what the fragment itself compares and reads, and the graph's
-     * tables it reads counted with the library's row it is over, which its terms read and its own FROM holds.
-     */
-    override fun fragmentHints(terms: List<String>): List<String> {
-        val text = terms.joinToString("\n")
-        return listOfNotNull(
-            NO_JSON_TABLE_TRANSFORM.takeIf { readsCompared || (graphTable.findAll(text).count() + 1).let { it >= 2 || readsByPlace && it == 1 } },
-            NO_FEEDBACK.takeIf { keyed.any { it in text } },
-        )
-    }
-
-    override fun startHints(): Any? = (readsCompared to readsByPlace).also { readsCompared = false; readsByPlace = false }
-
-    override fun endHints(saved: Any?) {
-        val (compared, byPlace) = saved as Pair<*, *>
-        readsCompared = compared as Boolean
-        readsByPlace = byPlace as Boolean
-    }
-
     override fun planned(query: String): String {
         val estimated = oneRowPlanned(query)
         val hints = listOfNotNull(
