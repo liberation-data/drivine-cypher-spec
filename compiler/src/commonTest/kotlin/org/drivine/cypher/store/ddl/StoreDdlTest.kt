@@ -24,6 +24,7 @@ import org.drivine.schema.TextIndexSpec
 import org.drivine.schema.UniquenessConstraintSpec
 import org.drivine.schema.VectorIndexSpec
 import org.drivine.schema.made
+import org.drivine.cypher.store.PostgresSql
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -347,6 +348,32 @@ class StoreDdlTest {
             }
             assertEquals(entry["refusal"]?.takeUnless { it.isNull }?.textValue(), refusal, "${entry["store"]!!.textValue()}: $name")
         }
+    }
+
+    /**
+     * Postgres's write function finds a node by its id where a range index or a uniqueness constraint's index finds it: its
+     * lookup and its check of which nodes are there compare the property as the index is made over it, its JSON
+     * ([PostgresSql.indexed]), with the id as the store layout writes it, the plan step's `id`. Compared as text, `->>`, no
+     * index answered it, and a temporal id's tag never equalled its text (#245).
+     */
+    @Test
+    fun postgresWriteFunctionFindsANodeByItsIdAsTheIndexIsMadeOverIt() {
+        val ddl = PostgresDdl(graph).writes.ddl.joinToString("\n")
+        val compared = Regex("""WHERE (\(n\.props -> %L\)) = (\$1|s\.op -> 'id')""").findAll(ddl).toList()
+        assertEquals(2, compared.size, "the find's lookup and the check of which nodes are there:\n$ddl")
+        for (match in compared) assertEquals(PostgresSql.indexed("n", "k"), match.groupValues[1].replace("%L", "'k'"), match.value)
+        // Nor is the plan step's `k`, the id's text, read at all: the nodes a plan made together are told apart, and handed
+        // to their steps, by the id's JSON too, so a temporal id's step takes the node made for it, as made.
+        assertTrue("(n.props ->> %L)" !in ddl && "->> 'k'" !in ddl, "no id is compared as text:\n$ddl")
+        assertTrue("RETURNING nid, (props -> %L)::text AS k" in ddl && "->> ((v_op -> 'id')::text)" in ddl, "the nodes made are keyed by the id's JSON:\n$ddl")
+        assertTrue("p_id jsonb" in ddl && "DROP FUNCTION IF EXISTS ${graph}_find(jsonb, text, text)" in ddl, ddl)
+        // A session's lookup prepared by an earlier find took the id as text: the version in its name keeps it from being run.
+        assertTrue("'drivine_find_' || md5('${PostgresDdl.VERSION} $graph'" in ddl, "the find's prepared lookup is named for the version:\n$ddl")
+        // A ref or patch step of a library that sends no id is refused, rather than finding no node and reading as absent.
+        assertTrue("IF p_id IS NULL THEN\n        RAISE EXCEPTION" in ddl, "a step without an id is refused:\n$ddl")
+        // An unlink names its targets by their ids' texts: a temporal target's id is read as its tag's text, `v`, both ways.
+        val unlinkRead = "COALESCE(t.props -> (v_shape ->> 'key') ->> 'v', t.props ->> (v_shape ->> 'key'))"
+        assertEquals(3, ddl.split(unlinkRead).size, "an unlink reads a temporal target's id as its v:\n$ddl")
     }
 
     @Test
