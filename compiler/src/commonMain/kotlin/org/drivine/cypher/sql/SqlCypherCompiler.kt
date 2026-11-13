@@ -536,6 +536,12 @@ abstract class SqlCypherCompiler(
     protected open fun searchedTexts(a: String, b: String, search: (List<String>) -> String): String = texts(a, b, body = search)
 
     /**
+     * `=~` of the JSON values [json] and [pattern]: [matches] over the text of [json], as [texts] reads it, and the text of
+     * [pattern]. A store whose empty text reads as null answers for one otherwise: see Oracle's.
+     */
+    protected open fun matchedText(json: String, pattern: String): String = texts(json) { (x) -> matches(x, text(pattern)) }
+
+    /**
      * A function that makes a text, or [empty], of the texts of the JSON values [jsons] and the counts [counts]: [body] over
      * the texts, as [texts] reads them. A store whose empty text reads as null, so [body] gives null where it makes an empty
      * text, gives [empty] there instead, where each text is one and each count is not null: where [whereFirstEmpty], only where
@@ -5441,7 +5447,7 @@ abstract class SqlCypherCompiler(
                 }
                 Operator.STARTS_WITH -> Value.Bool(searchedTexts(a, b) { texts -> shared(*texts.toTypedArray()) { (x, y) -> startsWith(x, y) } })
                 // A pattern is short: only the text is read as a long one where it is.
-                Operator.MATCHES -> Value.Bool(texts(a) { (x) -> matches(x, text(b)) })
+                Operator.MATCHES -> Value.Bool(matchedText(a, b))
                 Operator.ENDS_WITH -> Value.Bool(searchedTexts(a, b) { texts -> shared(*texts.toTypedArray()) { (x, y) -> endsWith(x, y) } })
                 Operator.CONTAINS -> Value.Bool(searchedTexts(a, b) { (x, y) -> containsText(x, y) })
                 else -> error("logical operators are handled above")

@@ -12,7 +12,8 @@ import kotlin.test.assertTrue
  * where either text was empty, and `size('')` null (drivine4j#416). Where both reads give null, the texts' lengths, read as
  * JSON, answer as Cypher does; a text's size is 0 where both its reads are null. A function that makes a text, and `+`,
  * gave null where it made the empty text: where both its reads are null, it gives the empty text where each text's length
- * is read and each number is one.
+ * is read and each number is one. `=~` gave null over the empty text: where its length is 0, the pattern is asked of a lone
+ * line break it must leave, which matches as Java's `matches("")` does (stage 3).
  */
 class OracleEmptyTextTest {
 
@@ -68,8 +69,7 @@ class OracleEmptyTextTest {
     }
 
     @Test
-    fun `=~ and Postgres and SQLite's searches read no length, and a text function reads its texts' lengths last`() {
-        assertTrue(!sql("RETURN \$e =~ '.*'").contains(".length()' RETURNING NUMBER"))
+    fun `Postgres and SQLite's searches read no length, and a text function reads its texts' lengths last`() {
         // A function that makes a text gives the empty text where its texts are all texts and its SQL gives null (stage 2).
         for (cypher in listOf("RETURN toUpper(\$e)", "RETURN left(\$e, 1)", "RETURN split(\$e, \$t)")) {
             val sql = sql(cypher)
@@ -131,5 +131,41 @@ class OracleEmptyTextTest {
             "CASE WHEN JSON_VALUE(JSON(\$_cy_e), '\$.length()') = 0 AND JSON_VALUE(JSON(\$_cy_e), '\$.length()') = 0 THEN JSON('\"\"') WHEN "))
         val reversed = sql("WITH [\$t] AS l RETURN reverse(l)")
         assertTrue(reversed.substringAfter("WHEN 'array' THEN").let { it != reversed && !it.contains("length()") }, reversed)
+    }
+
+    @Test
+    fun `=~ asks a lone line break of the pattern last, where the text's length is 0, and is null where the pattern is no text`() {
+        val e = length("JSON(\$_cy_e)")
+        val q = "CASE WHEN JSON_VALUE(JSON(\$_cy_q), '\$.type()') = 'string' THEN JSON_VALUE(JSON(\$_cy_q), '\$') END"
+        val sql = OracleCypherCompiler("g").compile("RETURN \$e =~ \$q", mapOf("e" to "", "q" to "a*")).sql
+        // A number is no pattern: its text is null, as the empty pattern's is, so its kind is read, not whether it is null.
+        assertTrue(sql.contains("SELECT CASE WHEN JSON_VALUE(JSON(\$_cy_q), '\$.type()') = 'string' THEN COALESCE(REGEXP_LIKE("), sql)
+        assertTrue(sql.contains(
+            ", CASE WHEN $e = 0 THEN REGEXP_LIKE(CHR(10), '\\A(' || REGEXP_REPLACE(REGEXP_REPLACE($q, '^\\(\\?[a-z]+\\)', ''), " +
+                "'(^|[^\\\\])((\\\\\\\\)*)\\\\z', '\\1\\2\\\\Z') || ')[[:cntrl:]]\\z', "), sql)
+        assertTrue(sql.endsWith(" END) END AS c1\n) p1"), sql)
+        // A stored text's length by its own path, and a list's item's as the item.
+        assertTrue(sql("MATCH (a:N) WHERE a.name =~ 'a*' RETURN a").contains(
+            "CASE WHEN CASE WHEN JSON_VALUE(n1.props, '\$.name.type()') = 'string' THEN JSON_VALUE(n1.props, '\$.name.length()' RETURNING NUMBER) END = 0 THEN REGEXP_LIKE(CHR(10), "))
+        assertTrue(sql("RETURN any(x IN [\$e] WHERE x =~ 'a*')").contains("JSON_VALUE(q1.item, '\$.length()' RETURNING NUMBER) END = 0 THEN REGEXP_LIKE(CHR(10), "))
+    }
+
+    @Test
+    fun `Oracle's empty text and Postgres read an unescaped z escape as their Z, the text's end, and an escaped backslash before z as it is`() {
+        val oracle = OracleCypherCompiler("g").compile("RETURN \$e =~ \$q", mapOf("e" to "", "q" to "a*")).sql
+        val postgres = PostgresCypherCompiler("g").compile("RETURN \$e =~ \$q", mapOf("e" to "", "q" to "a*")).sql
+        val rewrite = Regex("""(^|[^\\])((\\\\)*)\\z""")
+        val written = "'${rewrite.pattern}', '\\1\\2\\\\Z'"
+        assertTrue(oracle.contains(written), oracle)
+        assertTrue(postgres.contains("regexp_replace(CASE WHEN jsonb_typeof(CAST(\$_cy_q AS jsonb)) = 'string' THEN CAST(\$_cy_q AS jsonb) #>> '{}' END, $written, 'g')"), postgres)
+        assertTrue(!SqliteCypherCompiler("g").compile("RETURN \$e =~ \$q", mapOf("e" to "", "q" to "a*")).sql.contains("Z'"))
+        // The rewrite's pattern reads alike as Java's, Postgres's ARE and Oracle's, each of which reads `[^\\]` as any
+        // character but a backslash; Postgres's 'g' and Oracle's default each replace every match.
+        for ((pattern, rewritten) in listOf(
+            "\\z" to "\\Z", "a?\\z" to "a?\\Z", "(\\z)" to "(\\Z)", "(?i)\\z" to "(?i)\\Z", "a\\z|b\\z" to "a\\Z|b\\Z",
+            "\\\\z" to "\\\\z", "\\\\\\z" to "\\\\\\Z", "x\\\\\\\\z" to "x\\\\\\\\z", "\\Z" to "\\Z", "z" to "z",
+        )) {
+            assertEquals(rewritten, rewrite.replace(pattern, "\$1\$2\\\\Z"), pattern)
+        }
     }
 }
