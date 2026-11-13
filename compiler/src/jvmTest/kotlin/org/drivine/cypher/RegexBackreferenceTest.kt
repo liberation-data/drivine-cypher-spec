@@ -24,6 +24,8 @@ class RegexBackreferenceTest {
     private val allowed = listOf(
         "(A).*\\1.*", "(a)\\1", "(a)\\1\\1", "(a)(b)\\2\\1", "((a)b)\\2", "(?i)(a)\\1", "(a)\\\\\\1", "(a)(?:b|c)\\1",
         "(a)(b)(c)(d)(e)(f)(g)(h)\\8", "()\\1", "(a)\\1?", "(a)\\1x", "([ab])\\1", "(a)[]\\]]\\1", "(?i-x)(a)\\1", "(?<x>a)\\1",
+        // A quantifier's character in a class is none, and a group held in one that captures nothing, unrepeated, takes part.
+        "([+*?{|])\\1", "(?:(a))\\1",
     )
 
     /** Each form refused, and what the message names. */
@@ -35,7 +37,7 @@ class RegexBackreferenceTest {
         // A group that holds a quantifier, an alternative or a group, or is repeated: each engine captures its own way there.
         "(a|b)\\1" to "holds a quantifier", "(a+)\\1" to "holds a quantifier", "((a)b)\\1" to "holds a quantifier",
         "(a)+\\1" to "holds a quantifier", "(a){2}\\1" to "holds a quantifier", "(a)?\\1" to "holds a quantifier",
-        "(a?)+b\\1" to "holds a quantifier", "(a|b)+\\1" to "holds a quantifier",
+        "(a?)+b\\1" to "holds a quantifier", "(a|b)+\\1" to "holds a quantifier", "((?i)a)\\1" to "holds a quantifier",
         // A group in an alternative or a repeated group may take no part in a match.
         "(a)|\\1" to "in an alternative or a repeated group", "x|(a)\\1" to "in an alternative or a repeated group",
         "(?:(a)|b)\\1" to "in an alternative or a repeated group", "(?:(a)b)+\\1" to "in an alternative or a repeated group",
