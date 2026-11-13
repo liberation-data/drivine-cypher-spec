@@ -169,6 +169,16 @@ class FragmentsTest {
         assertTrue("people_.labels" !in oracle.condition("n.name = 'Ada'", mapOf("n" to FragmentVariable.Node("people_"))).sql)
     }
 
+    @Test
+    fun aVariableBoundAgainWithinIsNotTheLibrarysRowAndHasNoneOfItsLabels() {
+        // `n` within the ANY is each node the person knows, which may be no Person: its equality isn't tested by Person's index.
+        for (within in listOf("ANY(n IN [(n)-->(m) | m] WHERE n.name = 'Ada')", "EXISTS { (n)-->(m) WHERE ANY(n IN [m] WHERE n.name = 'Ada') }")) {
+            val labelled = OracleCypherCompiler("g", false, false, setOf("Person" to "name")).condition(within, people).sql
+            val unlabelled = OracleCypherCompiler("g", false, false, setOf("Person" to "name")).condition(within, mapOf("n" to FragmentVariable.Node("people_"))).sql
+            assertEquals(unlabelled, labelled, within)
+        }
+    }
+
     private companion object {
         val STORES = listOf("postgres", "oracle", "sqlite")
     }

@@ -349,7 +349,7 @@ abstract class SqlCypherCompiler(
         functions.clear()
         try {
             val writer = Writer(Parameters(parameters, ::parameterJson, ::parameterCount, text = ::parameterText, asPath = parameterPath))
-            writer.labelsOf = variables.mapNotNull { (name, variable) -> (variable as? FragmentVariable.Node)?.let { name to it.labels } }.toMap()
+            writer.labelsOf = variables.values.mapNotNull { variable -> (variable as? FragmentVariable.Node)?.let { "${it.row}.props" to it.labels } }.toMap()
             val scope = variables.mapValues { (_, variable) ->
                 val row = variable.row
                 when (variable) {
@@ -1590,8 +1590,10 @@ abstract class SqlCypherCompiler(
         fun query(query: Query): String = projected(query).sql
 
         /**
-         * A fragment's nodes' labels, by variable, which the library knows: an equality of such a node's property with a value
-         * is then written as one in a pattern's properties is, with the index of that label ([indexedOf]). Empty in a statement.
+         * A fragment's nodes' labels, which the library knows, by the node's properties' column (its row's): an equality of such a
+         * node's property with a value is then written as one in a pattern's properties is, with the index of that label
+         * ([indexedOf]). By the row, not the variable: a variable bound again within the fragment, `ANY(n IN … WHERE n.k = 1)`,
+         * is another node, of no labels known. Empty in a statement.
          */
         var labelsOf: Map<String, List<String>> = emptyMap()
 
@@ -1609,8 +1611,8 @@ abstract class SqlCypherCompiler(
             if (labelsOf.isEmpty()) return null
             val property = expression as? Expression.Property ?: return null
             val name = (property.subject as? Expression.Variable)?.name ?: return null
-            val labels = labelsOf[name]?.takeIf { it.isNotEmpty() } ?: return null
             val node = scope[name] as? Value.Node ?: return null
+            val labels = labelsOf[node.props]?.takeIf { it.isNotEmpty() } ?: return null
             return IndexedProperty(node.props, property.key, labels, givenRowsScalar(value, scope))
         }
 
