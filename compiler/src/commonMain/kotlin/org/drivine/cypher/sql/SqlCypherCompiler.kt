@@ -4194,7 +4194,7 @@ abstract class SqlCypherCompiler(
                     // pattern comprehension gathers its properties too, but in a subquery of its own, so its item is read by id.
                     listed is Value.Entities && !contains(expression.subject, ::isAggregate) -> entityAt(listed as Value.Entities, at)
                     // An item of a list that holds a node or a relationship holds it by identity too: see [Value.Json.identity].
-                    known is Number -> element(subject(), at).let { item ->
+                    known is Number -> listItem(subject(), at).let { item ->
                         Value.Json(
                             item, temporal = itemsOf(listed), items = itemItemsOf(listed), entries = itemEntriesOf(listed),
                             identity = identityOf(listed, item, true) { element(it, at) },
@@ -4203,7 +4203,7 @@ abstract class SqlCypherCompiler(
                     }
                     else -> {
                         fun item(list: String) = shared(list, at) { (map, key) ->
-                            "CASE ${typeOf(key)} WHEN 'number' THEN ${element(map, key)} WHEN 'string' THEN ${keyed(map, key)} END"
+                            "CASE ${typeOf(key)} WHEN 'number' THEN ${listItem(map, key)} WHEN 'string' THEN ${mapEntry(map, key)} END"
                         }
                         item(subject()).let { taken ->
                             Value.Json(
@@ -4463,7 +4463,9 @@ abstract class SqlCypherCompiler(
          * text read as a property and a number as an item, so one of the other kind would be read as neither.
          */
         private fun indexOfKind(index: Expression.Index, scope: Map<String, Value>) {
-            val subject = knownKind(index.subject, scope) ?: return
+            // A node or a relationship is read by a text, as a map is.
+            val read = (index.subject as? Expression.Variable)?.let { scope[it.name] }
+            val subject = (if (read is Value.Node || read is Value.Relationship) Value.Known.MAP else givenKind(index.subject, scope)) ?: return
             val by = when (subject) {
                 Value.Known.LIST -> Value.Known.INTEGER
                 Value.Known.MAP -> Value.Known.TEXT
@@ -4471,6 +4473,20 @@ abstract class SqlCypherCompiler(
             }
             val kind = givenKind(index.index, scope) ?: return
             if (kind != by) throw CompilerException("${subject.noun.replaceFirstChar(Char::uppercase)} is indexed by ${by.noun}, not ${kind.noun}, as in Neo4j.")
+        }
+
+        /**
+         * The item of the JSON [list] at the number [index], failing the statement where [list] is a map, a node or a
+         * relationship, as Neo4j fails a number key of one (drivine4j#698): a number read a map as a list, and Oracle's lax
+         * `$[0]` of an object is the object.
+         */
+        private fun listItem(list: String, index: String): String = shared(list) { (l) ->
+            "CASE WHEN ${typeOf(l)} = 'object' THEN ${scalar(failure(NUMBER_KEY_OF_MAP, typeOf(index)))} ELSE ${element(l, index)} END"
+        }
+
+        /** The entry of the JSON [map] at the text [key], failing the statement where [map] is a list, as Neo4j fails a text index of one (drivine4j#698). */
+        private fun mapEntry(map: String, key: String): String = shared(map) { (m) ->
+            "CASE WHEN ${typeOf(m)} = 'array' THEN ${scalar(failure(TEXT_INDEX_OF_LIST, typeOf(key)))} ELSE ${keyed(m, key)} END"
         }
 
         /**
@@ -6826,6 +6842,12 @@ abstract class SqlCypherCompiler(
 
         /** What `keys()` fails with, as Neo4j fails it, of a value that is no map, node or relationship: its kind follows. */
         const val KEYS_OF_NO_MAP = "keys() takes a map, a node or a relationship, as in Neo4j, not a"
+
+        /** What a map, a node or a relationship read by a number fails with, before its kind: see listItem. */
+        const val NUMBER_KEY_OF_MAP = "A map, a node or a relationship is read by a text key, as in Neo4j, not a"
+
+        /** What a list read by a text fails with, before its kind: see mapEntry. */
+        const val TEXT_INDEX_OF_LIST = "A list is indexed by an integer, as in Neo4j, not a"
 
         /** What `round()` fails with, as Neo4j fails it, a precision below 0 or past [MAX_COUNT]. */
         const val PRECISION_OUT_OF_RANGE = "round() takes a precision from 0 to 2147483647, as in Neo4j."
