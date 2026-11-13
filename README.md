@@ -142,6 +142,15 @@ Each case's `stores` hold, for `postgres`, `oracle`, `sqlite`, `neo4j`, `memgrap
 
 **Reads.** A range index and a uniqueness constraint are only worth their DDL if a statement is read through them, so each such case has a `read`: a statement, its `parameters`, and the `indexedProperties` a library gives the compiler on Oracle. Compiled on each SQL store, its SQL holds each of `holds`, the expressions the index is made over as its `create` writes them, with each column a statement reads of the node, `props`, `labels` or `stamp`, as its alias's (Oracle's index names them as `n`'s). A runner checks each expression is in the case's `create`, as it is or within a PL/SQL literal, quotes doubled, and that the compiled SQL tests it where a planner reads an index by it: as a conjunct of its `WHERE`, a label's test, or as the left side of a conjunct's `=`, and not only within a `CASE` or beside an `OR`. A vector and a full-text index have none: their searches are each library's, not compiled Cypher. A case may also have `reads`, a list of more of them, each read alike: a lookup the index answers by a value the statement works out, such as `{name: toUpper($x)}`, among them (#238).
 
+### The write plan
+
+A library saves to a SQL store by a plan, a JSON array of steps, which Postgres's write function `<graph>_write` carries out (`PostgresWriteFunctions`) and each library carries out itself on Oracle and SQLite, alike. A step that finds a node by its id, `node`, `ref` or `patch`, names its shape `s`, an index into the plan's `shapes` (`{labels, key}`, `key` the id's stored key, `$`-escaped as every key is), and carries the id twice:
+
+- `id`: the id as the node holds it, the JSON the store layout writes ([Values in the store](#values-in-the-store)): a text, a number, a truth value, or a temporal value's tag. The node is found by `id`, compared as the store's range index or uniqueness constraint is made over the property (Postgres: `props -> key`; Oracle and SQLite: its class and key), so the index answers it; a node made is written with it.
+- `k`: the id's text, which keys the nodes within one plan: a temporal id's tag's text `v`, any other id as `->>` reads it.
+
+A `node`, `ref` or `patch` step without `id` is refused by name (drivine-cypher-spec#245): libraries that wrote plans before 0.48.1 sent `ref` and `patch` steps only `k`, and must add `id` when they take it. An `unlink` step names the targets of a relationship field it keeps or removes by their ids' texts, `ids` and `held`, read from each target as `k` is written: a temporal target's tag's `v`, any other as `->>` reads it.
+
 ### Values in the store
 
 How a value is held in a SQL store's `props`, and in the JSON compiled SQL passes around, is a contract of its own: every library writes it, and anything else that writes a store directly must write it so too, or the libraries read its values wrongly or refuse them. This is store layout 2, the one the store stamp names (see [The schema marker and the stamps](#the-schema-marker-and-the-stamps)). The graph engines hold their own values and are layout 1.
