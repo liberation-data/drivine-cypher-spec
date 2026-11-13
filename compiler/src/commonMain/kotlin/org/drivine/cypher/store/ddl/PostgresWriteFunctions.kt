@@ -22,6 +22,7 @@ import org.drivine.cypher.store.LowerCopies
  *   temporal id is found as it was written. The query is written for the shape it is asked, so it is
  *   planned as a query over that label and property; it is prepared once a session for each shape, and
  *   not planned again for each node. Its name holds the store's version, as the other prepared queries' do.
+ *   So each step that finds a node, `node`, `ref` and `patch`, carries `id`: one without it finds none.
  * - `<graph>_owns(bag, key)` says whether a property bag owns a stored key.
  * - `<graph>_lowered(props, keys)` gives the properties with the lowercased copy of each of `keys`:
  *   see [LowerCopies].
@@ -65,6 +66,11 @@ DECLARE
     v_nid   bigint;
     v_row   $nodes;
 BEGIN
+    -- Every step that finds a node carries its id as the JSON the node holds: a step without one, from a library that
+    -- writes plans of an earlier version, would find no node, and is refused rather than read as one that is not there.
+    IF p_id IS NULL THEN
+        RAISE EXCEPTION 'A plan step that finds a node by % carries no id: each node, ref and patch step carries its id''s JSON', p_key;
+    END IF;
     IF NOT EXISTS (SELECT 1 FROM pg_prepared_statements WHERE name = v_name) THEN
         -- Each label is a test of its own, as a statement writes it, so a partial index over one is used.
         EXECUTE format('PREPARE %I (jsonb) AS SELECT min(n.nid) FROM $nodes n WHERE (n.props -> %L) = ${'$'}1', v_name, p_key) ||
@@ -206,7 +212,7 @@ BEGIN
         -- there are found by one lookup and inserted by one statement, the first step for each id only. A
         -- node a uniqueness constraint refuses, made by another writer at this moment, is not inserted
         -- here: its step finds it, or is refused, as it would be on its own. What each made gets is in
-        -- `v_premade`, by shape and id, for its step to take below.
+        -- `v_premade`, by shape and the id's JSON, which `$find` finds a node by too, for its step to take below.
         -- Only where a shape has several such steps: for one node, the lookup and insert of its step are as cheap.
         FOR v_s IN
             SELECT (op ->> 's')::int FROM jsonb_array_elements(p_plan) op
@@ -221,9 +227,9 @@ BEGIN
             IF NOT EXISTS (SELECT 1 FROM pg_prepared_statements WHERE name = v_premade_as) THEN
                 EXECUTE format('PREPARE %I (jsonb, int) AS ', v_premade_as) || format(${'$'}made${'$'}
                     WITH steps AS (
-                        SELECT DISTINCT ON (op ->> 'k') ord, op FROM jsonb_array_elements(${'$'}1) WITH ORDINALITY AS t (op, ord)
+                        SELECT DISTINCT ON (op -> 'id') ord, op FROM jsonb_array_elements(${'$'}1) WITH ORDINALITY AS t (op, ord)
                         WHERE op ->> 'op' = 'node' AND (op ->> 's')::int = ${'$'}2 AND ${PLAIN_NODE.replace("STEP", "op")}
-                        ORDER BY op ->> 'k', ord),
+                        ORDER BY op -> 'id', ord),
                     absent AS (
                         SELECT s.ord, s.op FROM steps s
                         WHERE NOT EXISTS (SELECT 1 FROM $nodes n WHERE (n.props -> %L) = s.op -> 'id'%s)),
@@ -235,7 +241,7 @@ BEGIN
                                op ->> 'fresh'
                         FROM absent ORDER BY ord
                         ON CONFLICT DO NOTHING
-                        RETURNING nid, props ->> %L AS k)
+                        RETURNING nid, (props -> %L)::text AS k)
                     SELECT COALESCE(jsonb_object_agg(k, nid), '{}'::jsonb) FROM made
                 ${'$'}made${'$'}, v_shape ->> 'key',
                     COALESCE((SELECT string_agg(format(' AND n.labels @> %L::jsonb', jsonb_build_array(l)), '') FROM jsonb_array_elements_text(v_shape -> 'labels') l), ''),
@@ -255,9 +261,9 @@ BEGIN
                 v_fresh := v_op ->> 'fresh';
                 v_tries := 0;
                 -- A node made with the others above is this step's, once: a later step for the same id finds it.
-                v_pre := (v_premade -> (v_op ->> 's') ->> (v_op ->> 'k'))::bigint;
+                v_pre := (v_premade -> (v_op ->> 's') ->> ((v_op -> 'id')::text))::bigint;
                 IF v_pre IS NOT NULL THEN
-                    v_premade := v_premade #- ARRAY[v_op ->> 's', v_op ->> 'k'];
+                    v_premade := v_premade #- ARRAY[v_op ->> 's', (v_op -> 'id')::text];
                     v_nid := v_pre;
                     v_made := true;
                     v_found := NULL;

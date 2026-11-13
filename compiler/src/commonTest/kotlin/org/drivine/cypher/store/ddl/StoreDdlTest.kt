@@ -362,9 +362,13 @@ class StoreDdlTest {
         val compared = Regex("""WHERE (\(n\.props -> %L\)) = (\$1|s\.op -> 'id')""").findAll(ddl).toList()
         assertEquals(2, compared.size, "the find's lookup and the check of which nodes are there:\n$ddl")
         for (match in compared) assertEquals(PostgresSql.indexed("n", "k"), match.groupValues[1].replace("%L", "'k'"), match.value)
-        // The plan step's `k`, the id's text, still keys the nodes a plan made, within one call; no find is given it.
-        assertTrue("(n.props ->> %L)" !in ddl && !Regex("""_find\([^;]*v_op ->> 'k'\)""").containsMatchIn(ddl), "no id is compared as text:\n$ddl")
+        // Nor is the plan step's `k`, the id's text, read at all: the nodes a plan made together are told apart, and handed
+        // to their steps, by the id's JSON too, so a temporal id's step takes the node made for it, as made.
+        assertTrue("(n.props ->> %L)" !in ddl && "->> 'k'" !in ddl, "no id is compared as text:\n$ddl")
+        assertTrue("RETURNING nid, (props -> %L)::text AS k" in ddl && "->> ((v_op -> 'id')::text)" in ddl, "the nodes made are keyed by the id's JSON:\n$ddl")
         assertTrue("p_id jsonb" in ddl && "DROP FUNCTION IF EXISTS ${graph}_find(jsonb, text, text)" in ddl, ddl)
+        // A ref or patch step of a library that sends no id is refused, rather than finding no node and reading as absent.
+        assertTrue("IF p_id IS NULL THEN\n        RAISE EXCEPTION" in ddl, "a step without an id is refused:\n$ddl")
     }
 
     @Test
