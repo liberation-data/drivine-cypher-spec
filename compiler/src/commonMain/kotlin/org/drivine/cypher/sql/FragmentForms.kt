@@ -28,7 +28,7 @@ import org.drivine.cypher.ast.Pattern
 internal object FragmentForms {
 
     /** The functions a fragment calls, by the name Cypher gives them, in lower case. */
-    val FUNCTIONS = setOf("tolower", "toupper", "tostring", "tofloat", "tointeger", "coalesce", "exp", "floor", "abs", "size", "labels", "type")
+    val FUNCTIONS = setOf("tolower", "toupper", "tostring", "tofloat", "tointeger", "coalesce", "exp", "floor", "abs", "size", "labels")
 
     private val OPERATORS = Operator.entries.toSet() - setOf(Operator.MODULO, Operator.POWER)
 

@@ -481,7 +481,7 @@ A library's object manager writes its own SQL, and asks for the parts of it that
 - a literal, a parameter, a list of values, a variable, its property and a property of that (a temporal value's field, `n.born.year`), and a label test (`n:A:B`);
 - `=`, `<>`, `<`, `<=`, `>`, `>=`, `IN` (of a list given, or a stored list's, `$v IN n.list`), `STARTS WITH`, `ENDS WITH`, `CONTAINS`, `=~`, `IS NULL`, `IS NOT NULL`;
 - `AND`, `OR`, `XOR`, `NOT`; `+`, `-`, `*`, `/`, a negation; `CASE`;
-- `toLower`, `toUpper`, `toString`, `toFloat`, `toInteger`, `coalesce`, `exp`, `floor`, `abs`, `size`, `labels`, `type`;
+- `toLower`, `toUpper`, `toString`, `toFloat`, `toInteger`, `coalesce`, `exp`, `floor`, `abs`, `size`, `labels`;
 - `any`, `all`, `none` over a list;
 - `EXISTS { pattern [WHERE …] }` of nodes and relationships, a variable length among them, with properties of these forms.
 

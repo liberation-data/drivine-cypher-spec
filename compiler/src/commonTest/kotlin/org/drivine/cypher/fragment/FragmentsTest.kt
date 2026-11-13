@@ -192,12 +192,12 @@ class FragmentsTest {
     fun aRelationshipIsReadFromItsRowAndANodeOfNoLabelsByNoLabelsIndex() {
         val knows = mapOf("r" to FragmentVariable.Relationship("knows_"))
         for (compiler in listOf(PostgresCypherCompiler("g"), OracleCypherCompiler("g"), SqliteCypherCompiler("g"))) {
-            assertTrue(compiler.condition("type(r) = 'KNOWS'", knows).sql.contains("knows_.type"), "$compiler")
+            assertTrue(compiler.condition("r.since = 1", knows).sql.contains("knows_.props"), "$compiler")
             assertTrue(compiler.order("r.since", false, knows).terms.all { "knows_.props" in it }, "$compiler")
         }
         // Through the JSON entry, a relationship's row is read as one.
-        val answer = CypherJson.readTree(CompileJson.compile("{\"store\": \"sqlite\", \"graph\": {\"name\": \"g\"}, \"fragment\": {\"condition\": \"type(r) = 'KNOWS'\", \"variables\": {\"r\": {\"relationship\": \"knows_\"}}}}"))
-        assertEquals(SqliteCypherCompiler("g").condition("type(r) = 'KNOWS'", knows).terms, (answer["terms"] as? ArrayNode)?.map { it.textValue() }, "$answer")
+        val answer = CypherJson.readTree(CompileJson.compile("{\"store\": \"sqlite\", \"graph\": {\"name\": \"g\"}, \"fragment\": {\"condition\": \"r.since = 1\", \"variables\": {\"r\": {\"relationship\": \"knows_\"}}}}"))
+        assertEquals(SqliteCypherCompiler("g").condition("r.since = 1", knows).terms, (answer["terms"] as? ArrayNode)?.map { it.textValue() }, "$answer")
         // Oracle tests a node's labels beside an indexed equality only where the library gives them.
         val oracle = OracleCypherCompiler("g", false, false, setOf("Person" to "name"))
         assertTrue("JSON_EXISTS(people_.labels" in oracle.condition("n.name = 'Ada'", people).sql)
@@ -216,6 +216,7 @@ class FragmentsTest {
             "{a: n.k} = {a: 1}" to "a map", "n {.k} = {k: 1}" to "a map projection", "COUNT { (n)-->() } > 1" to "a subquery, COUNT { … }",
             "single(x IN n.list WHERE x = 1)" to "single()", "n.k % 2 = 0" to "modulo", "n.k ^ 2 = 4" to "power",
             "EXISTS { p = (n)-->() }" to "a path variable", "date() > n.k" to "date()", "count(DISTINCT n.k) > 1" to "count()",
+            "type(n) = 'KNOWS'" to "type()",
         )
         for (compiler in listOf(PostgresCypherCompiler("g"), OracleCypherCompiler("g"), SqliteCypherCompiler("g"))) {
             for ((cypher, form) in refused) {
