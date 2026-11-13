@@ -353,9 +353,14 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
      * A value as `jsonb` orders it, but a text after the other texts by its code points ([codePointText]): a row of the value, each
      * text in it the empty text, which comes where texts come among the other kinds, then its text by its code points, null for
      * any other kind. A row of nulls, a null's, comes after every other ascending, and before them descending, as null does.
+     * A temporal value's tag is the object of its kind's rank ([tagRank]) and then its sort key (its text, a duration's), so
+     * values of several temporal kinds sort by kind first, as Cypher sorts them: as its own object, `jsonb` compares a tag's
+     * keys in its own order, its sort key `s` first, and so sorted by time alone, whatever its kind.
      */
     override fun sortKey(json: String) = shared(json) { (x) ->
-        "ROW(CASE WHEN jsonb_typeof($x) = 'string' THEN '\"\"'::jsonb ELSE ${nullIfJsonNull(x)} END, ${codePointText(x)})"
+        "ROW(CASE WHEN jsonb_typeof($x) = 'string' THEN '\"\"'::jsonb " +
+            "WHEN ${tagKind(x)} IS NOT NULL THEN jsonb_build_object('k', ${tagRank(x, "0") { "$it" }}, 's', COALESCE($x -> 's', $x -> 'v')) " +
+            "ELSE ${nullIfJsonNull(x)} END, ${codePointText(x)})"
     }
 
     override fun add(a: String, b: String, given: Pair<Any?, Any?>) =
