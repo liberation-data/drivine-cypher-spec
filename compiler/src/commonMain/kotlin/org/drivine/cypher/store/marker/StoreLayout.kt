@@ -45,11 +45,12 @@ object StoreLayout {
 
     /** What a library does with a graph: see [StoreLayout]. */
     sealed interface Verdict {
-        /** The graph is in this library's layout: use it. */
+        /** The graph is in this library's layout, or new, with no stamp yet and nothing of an earlier layout's: use it. */
         data object Current : Verdict
 
         /**
-         * The graph holds no value of its own, and is in an older layout or none: run [drops], each a statement of the store's,
+         * The graph holds no value of its own, and is in an older layout or none, or, where [assign], holds values of this layout
+         * and no stamp: run [drops], each a statement of the store's,
          * then [StoreStampStatements.restampLayout] with [parameters], then read the stamps back, list the objects again, and ask [verdict] again. Where
          * [assign], the graph has no stamp to give the layout, a graph of this layout whose stamp a clear deleted: run
          * [StoreStampStatements.assignIfAbsent] with [StoreStamp.assignParameters] (the library's own id and moment) in place of
