@@ -25,7 +25,7 @@ import org.drivine.cypher.text.JavaText
  * - **A list of ids** is text, each id between commas (`,1,2,`), as on Oracle.
  * - **Sources are joined with `JOIN … ON TRUE`**, not `CROSS JOIN`, which SQLite takes as an order it must keep
  *   ([crossJoin]): a step's two nodes would be paired before its relationship was read. The one `CROSS JOIN` is the
- *   source after an `UNWIND`'s rows, so they are read first ([rowsJoin]).
+ *   source after an `UNWIND`'s rows, or those a write left, that is read by them, so they are read first ([rowsJoin]).
  * - **A relationship of either direction** is joined with an OR across its two directions, which SQLite probes by
  *   index, not read both ways round as on Postgres and Oracle ([undirectedBothWays]).
  *
@@ -446,11 +446,13 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
     override fun crossJoin(source: String) = "JOIN $source ON TRUE"
 
     /**
-     * The source after an `UNWIND`'s rows, joined with `CROSS JOIN`, so SQLite reads each row before it. Joined as any other
-     * source, SQLite read the rows innermost, as a lookup by `json_each`'s argument looks cheap, and scanned the nodes each
-     * `MATCH` after them reads around them: `UNWIND $rows AS row MATCH (a:Person {id: row.s}) MATCH (b:Person {id: row.d})`
-     * read nodes × nodes × rows, 78 s and 3 GB for 40 rows over 800 nodes (drivine#654), where read row by row it took
-     * 0.09 s. Only the source just after the rows is pinned so: SQLite then reads what follows after them too, by its cost.
+     * The source after an `UNWIND`'s rows, or those a write left, joined with `CROSS JOIN`, so SQLite reads each row before
+     * it. Joined as any other source, SQLite read the rows innermost, as a lookup by `json_each`'s argument looks cheap,
+     * and scanned the nodes each `MATCH` after them reads around them: `UNWIND $rows AS row MATCH (a:Person {id: row.s})
+     * MATCH (b:Person {id: row.d})` read nodes × nodes × rows, 78 s and 3 GB for 40 rows over 800 nodes (drivine#654),
+     * where read row by row it took 0.09 s; the same `MATCH`es after a write of each row, 37 s against 0.08 s. Only the
+     * source just after the rows is pinned so, and only where a condition reads both: SQLite then reads what follows after
+     * them too, by its cost.
      */
     override fun rowsJoin(source: String) = "CROSS JOIN $source"
 

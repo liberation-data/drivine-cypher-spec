@@ -1703,7 +1703,7 @@ abstract class SqlCypherCompiler(
             val passesPath = projected.scope.values.any { it is Value.Path }
             next.source("(\n${indent(if (apart || passesPath) called(sql) else sql)}\n) $name")
             // Rows an `UNWIND` read last are still read before what comes after a `WITH` of them: SQLite merges its query in.
-            next.afterRows = select.afterRows
+            next.afterRows = select.afterRows?.let { name }
             projected.scope.forEach { (variable, value) -> next.bind(variable, value.columnsOf(name)) }
             projected.order.forEach { (column, descending) -> next.order += "$name.$column" to descending }
             return with.where?.let { filtered(next, it) } ?: next
@@ -2128,7 +2128,7 @@ abstract class SqlCypherCompiler(
                 "CASE WHEN ${typeOf(x)} = 'array' THEN $x WHEN NOT ${isJsonNull(x)} THEN ${comparable(Value.Json(jsonArray(listOf(x)), ordered = true))} END"
             }
             select.source(elementsOf(list, items, name))
-            select.afterRows = true
+            select.afterRows = name
             select.unwound[item(name)] = name
             givenTree(unwind.list)?.let { unwoundGiven[item(name)] = it }
             // An item of a list that holds no null holds none, nor is JSON's null; of a list of texts, or of a text, is a text. An item
@@ -2707,6 +2707,8 @@ abstract class SqlCypherCompiler(
             val select = Select(emptyMap())
             val r = alias("r")
             select.source(elements(ROWS, r))
+            // Read before what the clauses after the write read, as an `UNWIND`'s rows are: SQLite read them innermost (#654).
+            select.afterRows = r
             select.order += itemNo(r) to false
             bindRow(select, item(r))
             unread = select to select.size()
@@ -6708,8 +6710,8 @@ abstract class SqlCypherCompiler(
     protected open fun crossJoin(source: String) = "CROSS JOIN $source"
 
     /**
-     * The join of [source] to the rows an `UNWIND` reads just before it, which [crossJoin] gives where the store reads them
-     * first unbidden. SQLite does not: see its compiler.
+     * The join of [source] to the rows an `UNWIND` reads just before it, where a condition reads both, which [crossJoin]
+     * gives where the store reads them first unbidden. SQLite does not: see its compiler.
      */
     protected open fun rowsJoin(source: String) = crossJoin(source)
 
@@ -6763,14 +6765,19 @@ abstract class SqlCypherCompiler(
         }
 
         /**
-         * Whether the rows of an `UNWIND` are the last source read, but for joins to them, or the last read by the `WITH` this
-         * part reads: the next source is joined by [rowsJoin].
+         * The alias of the rows of an `UNWIND`, or of those a write left in [ROWS], where they are the last source read, but for
+         * joins to them, or of the `WITH` this part reads where they were the last it read: the next source is joined by
+         * [rowsJoin] where a condition of this part reads both it and them ([from]).
          */
-        var afterRows = false
+        var afterRows: String? = null
+
+        /** Each source joined after the rows, by its place in [sources]: its text, and the aliases of the rows and of it. */
+        private val afterRowsAt = mutableMapOf<Int, Triple<String, String, String>>()
 
         fun source(text: String) {
-            sources += if (sources.isEmpty()) "FROM $text" else if (afterRows) rowsJoin(text) else crossJoin(text)
-            afterRows = false
+            afterRows?.takeIf { sources.isNotEmpty() }?.let { rows -> afterRowsAt[sources.size] = Triple(text, rows, text.substringAfterLast(' ')) }
+            sources += if (sources.isEmpty()) "FROM $text" else crossJoin(text)
+            afterRows = null
         }
 
         fun join(text: String) {
@@ -6778,7 +6785,17 @@ abstract class SqlCypherCompiler(
             sources += text
         }
 
-        fun from(): List<String> = sources
+        /**
+         * Its sources and joins. A source joined after the rows ([afterRows]) is joined by [rowsJoin] only where it is read by
+         * what they hold: one read alone, as `UNWIND $ids AS id MATCH (c:Config {key: 'k'})`'s, is then read once, not once
+         * for each row (5.8 s against 0.007 s for 1,000 rows over 10,000 nodes on SQLite).
+         */
+        fun from(): List<String> = sources.mapIndexed { i, source ->
+            afterRowsAt[i]?.takeIf { (_, rows, alias) -> where.any { reads(it, rows) && reads(it, alias) } }?.let { (text) -> rowsJoin(text) } ?: source
+        }
+
+        /** Whether [condition] reads a column of the source [alias]. */
+        private fun reads(condition: String, alias: String) = Regex("""\b${Regex.escape(alias)}\.""").containsMatchIn(condition)
 
         /**
          * The hints the store's planner is given for this part ([fewRows]), in the order added. Each is for a source of this

@@ -49,6 +49,32 @@ class SqliteRowsJoinTest {
     }
 
     @Test
+    fun `a source read by no condition on the rows is not pinned after them`() {
+        // Pinned, each row read every node: 5.8 s against 0.007 s for 1,000 rows over 10,000 nodes.
+        listOf(
+            "UNWIND \$rows AS row MATCH (c:Config {key: 'k'}) RETURN row.s, c",
+            "UNWIND \$rows AS row WITH row MATCH (c:Config {key: 'k'}) RETURN row.s, c",
+            "UNWIND \$rows AS row MATCH (c:Config {key: 'k'}) CREATE (c)-[:HAS]->(:Item {id: row.s})",
+        ).forEach { cypher -> sql(cypher).let { assertFalse("CROSS JOIN" in it, "$cypher\n$it") } }
+        // Read by a WHERE, it is pinned as by its properties.
+        val where = sql("UNWIND \$rows AS row MATCH (a:Person) WHERE a.id = row.s RETURN count(*)")
+        assertTrue(Regex("""AS u\d+\s+CROSS JOIN g_node""").containsMatchIn(where), where)
+    }
+
+    @Test
+    fun `the rows a write left are read before the MATCHes after it`() {
+        // Read innermost, as the rows of an UNWIND were, the MATCHes after the CREATE took 37 s at 800 nodes and 40 rows; 0.08 s after.
+        listOf(
+            "UNWIND \$rows AS row CREATE (:Log {id: row.s}) MATCH (a:Person {id: row.s}) MATCH (b:Person {id: row.d}) RETURN count(*)",
+            "UNWIND \$rows AS row CREATE (:Log {id: row.s}) WITH row MATCH (a:Person {id: row.s}) MATCH (b:Person {id: row.d}) CREATE (a)-[:F]->(b)",
+        ).forEach { cypher ->
+            val sql = sql(cypher)
+            assertEquals(1, Regex("""CROSS JOIN g_node""").findAll(sql).count(), "$cypher\n$sql")
+            assertTrue(Regex("""(json_each\(\?1\) AS r\d+|\) w\d+)(\s|\\n)+CROSS JOIN g_node""").containsMatchIn(sql), "$cypher\n$sql")
+        }
+    }
+
+    @Test
     fun `with no UNWIND, and on the other stores, nothing is pinned`() {
         assertFalse("CROSS JOIN" in sql("MATCH (a:Person {id: 1}) MATCH (b:Person {id: 2}) RETURN count(*)"))
         val postgres = PostgresCypherCompiler("g").compile("UNWIND \$rows AS row MATCH (a:Person {id: row.s}) RETURN count(*)", rows).sql
