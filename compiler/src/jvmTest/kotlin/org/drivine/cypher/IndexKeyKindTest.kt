@@ -70,13 +70,21 @@ class IndexKeyKindTest {
     }
 
     @Test
-    fun `a list of nodes or relationships read by a key that may be a text fails it, and by an integer is not tested`() {
-        // spec#232: SQLite read the text as 0, and gave the list's first node.
+    fun `a list of nodes or relationships read by a key that may be no integer fails it, and by an integer is not tested`() {
+        // spec#232: SQLite read the text as 0, and gave the list's first node; a float or a truth value it read as an integer.
         listOf(
-            "MATCH (n:Person) WITH collect(n) AS l, 'a' AS k RETURN l[k]",
-            "MATCH ()-[r]->() WITH collect(r) AS l, 'a' AS k RETURN l[k]",
-            "MATCH (n:Person) WITH collect(n) AS l UNWIND ['a', 0] AS k RETURN l[k]",
-        ).forEach { cypher -> each(cypher) { assertTrue(textIndexOfList in it) } }
+            "MATCH (n:Person) WITH collect(n) AS l, 'a' AS k RETURN l[k]" to emptyMap(),
+            "MATCH ()-[r]->() WITH collect(r) AS l, 'a' AS k RETURN l[k]" to emptyMap(),
+            "MATCH (n:Person) WITH collect(n) AS l UNWIND ['a', 0] AS k RETURN l[k]" to emptyMap(),
+            "MATCH (n:Person) WITH collect(n) AS l UNWIND [1.5, true] AS k RETURN l[k]" to emptyMap(),
+            "MATCH (n:Person) WITH collect(n) AS l RETURN l[\$k]" to mapOf("k" to 1.5),
+        ).forEach { (cypher, parameters) ->
+            each(cypher, parameters) { sql ->
+                assertTrue(textIndexOfList in sql)
+                // The index is read where it is an integer or null, and fails otherwise, whatever its kind.
+                assertTrue(sql.indexOf(" OR ") in 0 until sql.indexOf(textIndexOfList))
+            }
+        }
         listOf(
             "MATCH (n:Person) WITH collect(n) AS l RETURN l[0]",
             "MATCH (n:Person) WITH collect(n) AS l, 1 AS k RETURN l[k]",
