@@ -615,6 +615,8 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
      */
     override fun matches(text: String, pattern: String) = "($text REGEXP (${literal(MATCHES_BEFORE)} || $pattern || ${literal(MATCHES_AFTER)}))"
 
+    override fun holdsBackreference(text: String) = "($text REGEXP ${literal(Patterns.BACKREFERENCE)})"
+
     override fun split(text: String, separator: String) = "${SqliteFunctions.SPLIT}($text, $separator)"
 
     override fun reverseText(text: String) = "${SqliteFunctions.REVERSE}($text)"

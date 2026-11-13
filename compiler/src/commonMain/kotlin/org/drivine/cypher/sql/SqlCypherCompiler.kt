@@ -651,6 +651,27 @@ abstract class SqlCypherCompiler(
     protected open fun matchedText(json: String, pattern: String): String = texts(json) { (x) -> matches(x, text(pattern)) }
 
     /**
+     * Refuses a pattern of `=~` that the statement gives, written or bound, that writes a backreference the stores can't
+     * answer as Java does ([Patterns.refusal]): they hold the pattern to the whole text in a group of their own, and past the
+     * simplest forms each reads a backreference its own way (#236).
+     */
+    private fun checkPattern(pattern: String) {
+        Patterns.refusal(pattern)?.let { throw CompilerException(it) }
+    }
+
+    /**
+     * Whether the pattern [text], worked out as the statement runs, writes a backreference ([Patterns.BACKREFERENCE]): it is
+     * refused then, as one the compiler can't read for its form.
+     */
+    protected abstract fun holdsBackreference(text: String): String
+
+    /**
+     * The pattern of the `=~` being compiled, where the statement gives it, written or bound, else null: a store that works
+     * the pattern over as the statement runs can leave out what a pattern given doesn't need (see Oracle's [matches]).
+     */
+    protected var patternGiven: String? = null
+
+    /**
      * A function that makes a text, or [empty], of the texts of the JSON values [jsons] and the counts [counts]: [body] over
      * the texts, as [texts] reads them. A store whose empty text reads as null, so [body] gives null where it makes an empty
      * text, gives [empty] there instead, where each text is one and each count is not null: where [whereFirstEmpty], only where
@@ -5721,7 +5742,15 @@ abstract class SqlCypherCompiler(
                 }
                 Operator.STARTS_WITH -> Value.Bool(searchedTexts(a, b) { texts -> shared(*texts.toTypedArray()) { (x, y) -> startsWith(x, y) } })
                 // A pattern is short: only the text is read as a long one where it is.
-                Operator.MATCHES -> Value.Bool(matchedText(a, b))
+                Operator.MATCHES -> {
+                    val given = (known(binary.right) as? String)?.also(::checkPattern)
+                    patternGiven = given
+                    // A pattern worked out as the statement runs is refused then where it writes a backreference (#236).
+                    val pattern = if (binary.right is Expression.Literal || binary.right is Expression.Parameter) b else shared(b) { (x) ->
+                        "CASE WHEN ${holdsBackreference(text(x))} THEN ${scalar(textFailure(COMPUTED_BACKREFERENCE, text(x)))} ELSE $x END"
+                    }
+                    Value.Bool(matchedText(a, pattern))
+                }
                 Operator.ENDS_WITH -> Value.Bool(searchedTexts(a, b) { texts -> shared(*texts.toTypedArray()) { (x, y) -> endsWith(x, y) } })
                 Operator.CONTAINS -> Value.Bool(searchedTexts(a, b) { (x, y) -> containsText(x, y) })
                 else -> error("logical operators are handled above")
@@ -7197,6 +7226,9 @@ abstract class SqlCypherCompiler(
 
         /** What a map, a node or a relationship read by a number fails with, before its kind: see listItem. */
         const val NUMBER_KEY_OF_MAP = "A map, a node or a relationship is read by a text key, as in Neo4j, not a"
+
+        /** Why a pattern of `=~` worked out as the statement runs is refused where it writes a backreference: see [Patterns.refusal]. */
+        const val COMPUTED_BACKREFERENCE = "A regular expression worked out as the statement runs writes a backreference, which the SQL stores answer as Java does only in a pattern the statement gives, written or bound:"
 
         /** What a list read by a text fails with, before its kind: see mapEntry. */
         const val TEXT_INDEX_OF_LIST = "A list is indexed by an integer, as in Neo4j, not a"

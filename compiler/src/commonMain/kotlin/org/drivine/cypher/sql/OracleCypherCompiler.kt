@@ -401,7 +401,7 @@ class OracleCypherCompiler(
     private fun matchesEmpty(pattern: String) = shared(pattern) { (p) ->
         val flags = "REGEXP_SUBSTR($p, '^\\(\\?([a-z]+)\\)', 1, 1, NULL, 1)"
         val written = """REGEXP_REPLACE(REGEXP_REPLACE($p, '^\(\?[a-z]+\)', ''), '(^|[^\\])((\\\\)*)\\z', '\1\2\\Z')"""
-        "REGEXP_LIKE(CHR(10), '\\A(' || $written || ')[[:cntrl:]]\\z', NVL(REPLACE($flags, 's', 'n'), 'c'))"
+        "REGEXP_LIKE(CHR(10), '\\A(' || ${backreferencesShifted(written)} || ')[[:cntrl:]]\\z', NVL(REPLACE($flags, 's', 'n'), 'c'))"
     }
 
     /**
@@ -1960,8 +1960,24 @@ class OracleCypherCompiler(
      */
     override fun matches(text: String, pattern: String) = shared(pattern) { (p) ->
         val flags = "REGEXP_SUBSTR($p, '^\\(\\?([a-z]+)\\)', 1, 1, NULL, 1)"
-        "REGEXP_LIKE($text, '\\A(' || REGEXP_REPLACE($p, '^\\(\\?[a-z]+\\)', '') || ')\\z', NVL(REPLACE($flags, 's', 'n'), 'c'))"
+        "REGEXP_LIKE($text, '\\A(' || ${backreferencesShifted("REGEXP_REPLACE($p, '^\\(\\?[a-z]+\\)', '')")} || ')\\z', NVL(REPLACE($flags, 's', 'n'), 'c'))"
     }
+
+    /**
+     * [pattern] with each backreference that no backslash escapes, `\1` to `\8`, numbered one more: Oracle has no group that
+     * captures nothing, so the group [matches] holds the pattern in is the first, and the pattern's own are numbered from the
+     * second (#236). Each number is moved from the highest down, so none is moved twice; and twice over, as a backreference
+     * just after another, `(a)\1\1`, is not found until the one before it is. Only a pattern the statement gives writes a
+     * backreference here: one past `\8`, or otherwise out of what the stores answer as Java does, is refused as it is
+     * compiled ([Patterns.refusal]), and one worked out as the statement runs is refused as it runs. A pattern that writes
+     * none, as most don't, is left as it is: the sixteen calls would triple the SQL of each `=~`.
+     */
+    private fun backreferencesShifted(pattern: String) =
+        if (patternGiven?.let(Patterns::holdsBackreference) != true) pattern else (8 downTo 1).fold(pattern) { x, n ->
+            (1..2).fold(x) { y, _ -> """REGEXP_REPLACE($y, '(^|[^\\])((\\\\)*)\\$n', '\1\2\\${n + 1}')""" }
+        }
+
+    override fun holdsBackreference(text: String) = "REGEXP_LIKE($text, ${literal(Patterns.BACKREFERENCE)})"
 
     /**
      * The text as JSON writes it, with each separator as JSON writes it made the end of one string and the start of the next.

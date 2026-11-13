@@ -3,6 +3,7 @@ package org.drivine.cypher.host.regex
 import org.drivine.cypher.json.CypherJson
 import org.drivine.cypher.number.oracleFile
 import org.drivine.cypher.search.TextQuery
+import org.drivine.cypher.sql.Patterns
 import org.drivine.cypher.sql.SqliteCypherCompiler
 import org.drivine.cypher.sql.SqliteTemporalSql
 import org.drivine.cypher.sql.Temporal
@@ -77,6 +78,8 @@ internal object DrivinePatterns {
         // =~ around a user's pattern, case-insensitive too, as host.yaml's steps write it.
         put("=~ a|bc", matched("a|bc"))
         put("=~ (?i)[ck].*", matched("(?i)[ck].*"))
+        // The test of a pattern worked out as the statement runs for a backreference, which is refused then.
+        put("BACKREFERENCE", Patterns.BACKREFERENCE)
     }
 
     /** A full-text search's patterns, as SQLite's drivine_regexp_count is given them: each term, and each looking ahead. */
