@@ -14,6 +14,7 @@ import org.drivine.cypher.store.Stamps
 import com.ionspin.kotlin.bignum.decimal.BigDecimal
 import org.drivine.cypher.json.jvmDoubleText
 import org.drivine.cypher.json.sha256
+import org.drivine.cypher.store.schema.SqlText
 
 /**
  * Compiles a Cypher statement to SQL over a graph's tables on Postgres: see [SqlCypherCompiler].
@@ -883,7 +884,7 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
         private const val JSON_LIST = "jsonb_array_elements("
 
         /** A property read, `(n1.props -> 'name')`: the row's column, and the key. */
-        private val PROPERTY_READ = Regex("""^\(([\w.]+) -> ('[^']*(?:''[^']*)*')\)$""")
+        private val PROPERTY_READ = Regex("""^\(([\w.]+) -> ('${SqlText.BODY}')\)$""")
 
         /**
          * The characters of a text in a list that [codePoints] orders by their code points: at most 4 bytes each, 32 bits, which

@@ -1,5 +1,7 @@
 package org.drivine.cypher.sql
 
+import org.drivine.cypher.store.schema.SqlText
+
 /**
  * The last pass over a statement Oracle's compiler wrote: each read of a stored value by a key path as JSON,
  * `JSON_QUERY(source, '$.k' RETURNING JSON)`, that may give a text past 4,000 bytes, is routed the CLOB way. Its source is
@@ -129,10 +131,10 @@ internal object OracleLongReads {
 
     /** A base read as an item is: one that may hold a map with a key as extended JSON's are, as a parameter a `reduce()` step's context holds may. */
     private val ITEM = Regex("""[A-Za-z_]\w*\.item|cy_(?:row|context|caller\d+|saved\d+|gathered\d+)""")
-    private val READ_PATH = Regex("""('\$[^']*(?:''[^']*)*') RETURNING JSON""")
-    /** A key of a path in its quotes, `"a[b"`, as a key path has one. */
+    private val READ_PATH = Regex("""('\$${SqlText.BODY}') RETURNING JSON""")
+    /** A key of a path in its quotes, `"a[b"`, as a key path has one: unrolled as [SqlText.BODY] is. */
     private val QUOTED_KEY = Regex(""""[^"'\\]*(?:(?:\\.|'')[^"'\\]*)*"""")
-    private val KEY_PATH = Regex("""'\$(?:\.(?:[A-Za-z_]\w*|"[^"'\\]*(?:(?:\\.|'')[^"'\\]*)*"))+'""")
+    private val KEY_PATH = Regex("""'\$(?:\.(?:[A-Za-z_]\w*|${QUOTED_KEY.pattern}))+'""")
 
     /** [sql] with each run of white space outside its literals one space: a key's own spaces are kept. */
     private fun normal(sql: String) = sql.split('\'').mapIndexed { i, part -> if (i % 2 == 0) part.replace(SPACE, " ") else part }.joinToString("'").trim()

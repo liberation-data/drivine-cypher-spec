@@ -631,7 +631,7 @@ class OracleSchema(override val ddl: OracleDdl) : SqlStoreSchema() {
     private companion object {
         val VALUE = Regex("""JSON_VALUE\(\s*"?PROPS"?[^']*'${SqlText.LITERAL}'""", RegexOption.IGNORE_CASE)
         val LABEL_TEST = Regex("""JSON_EXISTS2?\(\s*"?LABELS"?[^']*'${SqlText.LITERAL}'""", RegexOption.IGNORE_CASE)
-        val LABEL_PATH = Regex("""\$(?:\[\*])?\?\(@ == ("[^"\\]*(?:\\.[^"\\]*)*")\)""")
+        val LABEL_PATH = Regex("""\$(?:\[\*])?\?\(@ == ("${SqlText.JSON_BODY}")\)""")
         val PLAIN_STEP = Regex("[A-Za-z_][A-Za-z0-9_]*")
 
         val VIOLATIONS = setOf(1, 1452)

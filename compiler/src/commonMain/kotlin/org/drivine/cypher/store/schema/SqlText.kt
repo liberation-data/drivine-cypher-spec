@@ -78,6 +78,17 @@ internal object SqlText {
         ((CypherJson.readTree(json) as? ArrayNode)?.singleOrNull() as? TextNode)?.value
     }.getOrNull()
 
-    /** A SQL literal's body, quotes doubled, as a pattern's group. */
-    const val LITERAL = "([^']*(?:''[^']*)*)"
+    /**
+     * A SQL literal's body, quotes doubled, as a pattern: a run of other characters, then each doubled quote and the run
+     * after it. Unrolled, not `(?:[^']|'')*`: Java's regex engine, and Kotlin/Native's, recurse once each time a group
+     * repeats, and a group repeated once a character overflowed the stack on a long key or text (drivine-cypher-spec#258).
+     * Not possessive (`*+`) either, which wasmJs's engine hasn't. It still recurses once a doubled quote.
+     */
+    const val BODY = "[^']*(?:''[^']*)*"
+
+    /** A JSON string's body, between its quotes, a `\` escaping the character after it: unrolled as [BODY] is. */
+    const val JSON_BODY = """[^"\\]*(?:\\.[^"\\]*)*"""
+
+    /** A SQL literal's body, quotes doubled, as a pattern's group: see [BODY]. */
+    const val LITERAL = "($BODY)"
 }
