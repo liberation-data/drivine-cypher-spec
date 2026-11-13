@@ -377,6 +377,30 @@ class OracleCypherCompiler(
         texts(a, b, lengths = { (x, y) -> "CASE WHEN $y = 0 AND $x IS NOT NULL THEN TRUE WHEN $x = 0 AND $y IS NOT NULL THEN FALSE END" }, body = search)
 
     /**
+     * The empty text is matched as Java matches it, as Neo4j does: Oracle's is null as a `VARCHAR2` and as a CLOB, and no
+     * regular expression of Oracle's matches its empty CLOB, so where the text is empty the pattern is asked of a lone line
+     * break that it must leave ([matchesEmpty]) (#416). A pattern that is null makes null, as it does in Cypher, though the
+     * pattern's text is null for the empty pattern too.
+     */
+    override fun matchedText(json: String, pattern: String) = shared(pattern) { (p) ->
+        val matched = texts(json, lengths = { (x) -> "CASE WHEN $x = 0 THEN ${matchesEmpty(text(p))} END" }) { (x) -> matches(x, text(p)) }
+        "CASE WHEN NOT ${isJsonNull(p)} THEN $matched END"
+    }
+
+    /**
+     * Whether [pattern] matches the empty text, as Java's `matches` would: whether it matches the start of a lone line break
+     * and leaves it, `\A(pattern)\n\z`. Oracle's `$` and `\Z` match before a line break that ends the text, as they match at
+     * the end of an empty one; an unescaped `\z` is read as `\Z` here, for the same. A pattern of Java's that reads a line
+     * break of its own reads this one, and finds no second (`\n`, `\s`, `[^a]`, `(?s).`): it matches no empty text, as in
+     * Java. queries.yaml's "A regular expression over the empty text" checks it against Neo4j.
+     */
+    private fun matchesEmpty(pattern: String) = shared(pattern) { (p) ->
+        val flags = "REGEXP_SUBSTR($p, '^\\(\\?([a-z]+)\\)', 1, 1, NULL, 1)"
+        val written = """REGEXP_REPLACE(REGEXP_REPLACE($p, '^\(\?[a-z]+\)', ''), '(^|[^\\])((\\\\)*)\\z', '\1\2\\Z')"""
+        "REGEXP_LIKE(CHR(10), '\\A(' || $written || ')' || CHR(10) || '\\z', NVL(REPLACE($flags, 's', 'n'), 'c'))"
+    }
+
+    /**
      * Oracle's empty text is null as a `VARCHAR2` and as a CLOB, so a function that makes an empty text, as `toUpper('')`
      * and `left('ab', 0)` do, gives null there: where each text is one, its length not null, and each count not null, it gives
      * [empty] instead (#416). A text whose function gives null for another reason, as `substring('ab', 1, null)`, is still null,
