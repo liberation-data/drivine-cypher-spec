@@ -2491,10 +2491,16 @@ abstract class SqlCypherCompiler(
 
         /**
          * The node or the relationship at [at] in [entities]: its id read from the list, and its columns from its row,
-         * so it is compared by its id as a node bound by a pattern is. Null where the list has no such item.
+         * so it is compared by its id as a node bound by a pattern is. Null where the list has no such item, or [at] is null.
+         * Where [at] may be no integer ([tested]), it fails the statement as Neo4j fails a list indexed by a text, a float or a
+         * truth value: SQLite read a text as 0 and a float or a truth value as an integer, and gave that item
+         * (liberation-data/drivine-cypher-spec#232).
          */
-        private fun entityAt(entities: Value.Entities, at: String): Value {
-            val id = idOf(element(entities.ids, at), null)
+        private fun entityAt(entities: Value.Entities, at: String, tested: Boolean): Value {
+            val item = if (!tested) element(entities.ids, at) else shared(at) { (a) ->
+                "CASE WHEN ${integral(a)} OR ${isJsonNull(a)} THEN ${element(entities.ids, a)} ELSE ${scalar(textFailure(TEXT_INDEX_OF_LIST, typeOf(a)))} END"
+            }
+            val id = idOf(item, null)
             val row = alias(if (entities.relationships) "e" else "n")
             fun column(name: String) = "(SELECT $row.$name FROM ${if (entities.relationships) edges else nodes} $row WHERE $row.${if (entities.relationships) "eid" else "nid"} = $id)"
             return if (entities.relationships) Value.Relationship(column("eid"), column("src"), column("dst"), column("type"), column("props"))
@@ -4285,7 +4291,8 @@ abstract class SqlCypherCompiler(
                     // An item of a list of nodes or relationships is the node or the relationship, so it is compared by its id;
                     // of one collect gathers in this query, its properties, for a store reads no aggregate from a subquery. A
                     // pattern comprehension gathers its properties too, but in a subquery of its own, so its item is read by id.
-                    listed is Value.Entities && !contains(expression.subject, ::isAggregate) -> entityAt(listed as Value.Entities, at)
+                    listed is Value.Entities && !contains(expression.subject, ::isAggregate) ->
+                        entityAt(listed as Value.Entities, at, givenKind(index, scope) != Value.Known.INTEGER)
                     // An item of a list that holds a node or a relationship holds it by identity too: see [Value.Json.identity].
                     known is Number -> (if (subjectKind == Value.Known.LIST || untested) element(subject(), at) else listItem(subject(), at)).let { item ->
                         Value.Json(
