@@ -16,7 +16,8 @@ import org.drivine.DrivineInternalApi
  * [hints] are the optimizer hints the library's query that holds the terms carries in its outermost `SELECT`
  * (`SELECT /*+ … */`), as a statement that compares so is planned with them: on Oracle, `NO_JSON_TABLE_TRANSFORM` where a
  * term reads a property it compares by its own path or a list item by its place, without which Oracle 23 gives a comparison
- * over such a read the wrong truth; none on Postgres and SQLite. A value is for the library's SQL to compare, group or bind
+ * over such a read the wrong truth, and `OPT_PARAM('_optimizer_use_feedback' 'false')` where a term tests a node's labels as
+ * one read by its key; none on Postgres and SQLite. A value is for the library's SQL to compare, group or bind
  * within it: a column read back as a statement's rows are is a statement's, which Oracle re-encodes as it returns it.
  */
 @DrivineInternalApi

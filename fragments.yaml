@@ -10,8 +10,8 @@
 # `sql` pins each store's terms, as the module gives them: the module's test holds it to them. `rows` is what Neo4j keeps
 # or orders for the same expression, over the nodes `setup` makes, by id: `MATCH (n:Person) WHERE <condition> RETURN n.id`,
 # or `MATCH (n:Person) RETURN n.id ORDER BY <order>, n.id`. Each library's runner makes the nodes on each SQL store, runs
-# `SELECT ... FROM <graph>_node people_ WHERE <the label test> AND <condition>` (or ORDER BY the order's terms, then the
-# id), and checks it keeps or orders those rows.
+# `SELECT /*+ <the fragment's hints> */ ... FROM <graph>_node people_ WHERE <the label test> AND <condition>` (or ORDER BY
+# the order's terms, then the id), and checks it keeps or orders those rows.
 
 graph: "g"
 indexed: [["Person", "name"], ["Person", "id"]]

@@ -216,6 +216,14 @@ class FragmentsTest {
             if (hints.isNotEmpty()) hinted++
         }
         assertTrue(hinted in 1 until conditions.size * 2, "some hinted and some not: $hinted")
+        // A walk between two labelled nodes tests the later's labels as a node read by its key, which a statement is planned
+        // without statistics feedback for: the fragment's query is too, and one whose walk starts at the library's row isn't.
+        for ((walk, keyed) in listOf("EXISTS { (a:A)-[:R]->(b:B) }" to true, "EXISTS { (p)-[:R]->(b:B) }" to false)) {
+            val statement = OracleCypherCompiler("g").compile("MATCH (p) WHERE $walk RETURN p").sql
+            val hints = oracle.condition(walk, variables).hints
+            assertEquals(keyed, statement.contains(OracleCypherCompiler.NO_FEEDBACK), "$walk: $statement")
+            assertEquals(keyed, OracleCypherCompiler.NO_FEEDBACK in hints, "$walk: $hints")
+        }
         // A statement compiled after the fragments is planned as on a compiler that compiled none.
         assertEquals(org.drivine.cypher.sql.OracleCypherCompiler("g").compile("MATCH (p) RETURN p.name").sql, oracle.compile("MATCH (p) RETURN p.name").sql)
         for (other in listOf(org.drivine.cypher.sql.PostgresCypherCompiler("g"), org.drivine.cypher.sql.SqliteCypherCompiler("g"))) {
