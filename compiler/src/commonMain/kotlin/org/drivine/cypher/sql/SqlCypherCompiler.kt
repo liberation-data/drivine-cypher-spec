@@ -306,7 +306,8 @@ abstract class SqlCypherCompiler(
     /**
      * A fragment: [cypher] read as one expression, compiled by [write] over [variables] bound as a statement binds the nodes and
      * relationships it matches. A fragment is written into SQL the library writes, which declares no function: one that calls a
-     * function the store declares for a statement is refused, and so is one that aggregates, as that SQL groups no rows for it.
+     * function the store declares for a statement is refused, and so is one that aggregates, as that SQL groups no rows for it,
+     * and one that calls randomUUID() within it, which a statement calls first for each row, as a column that SQL lacks.
      */
     private fun fragment(
         cypher: String,
@@ -337,6 +338,11 @@ abstract class SqlCypherCompiler(
         }
         // An aggregate is refused as in a statement's WHERE: the library's SQL has no group for it to aggregate over.
         Aggregates(::isAggregate, ::children).checkWhere(item.expression)
+        // A randomUUID() within the expression a statement calls first, as a column of each row (#412): worked out in the term,
+        // a subquery that reads nothing of the row is worked out once, and every row of the library's query had the same UUID.
+        if (!isAnew(item.expression) && holdsAnew(item.expression)) {
+            throw CompilerException("A fragment calls randomUUID() within its expression, which a statement calls first for each row, as a column the library's SQL lacks: $cypher")
+        }
         // As a statement that reads sets them, so the fragment is written as that statement's WHERE or ORDER BY would be.
         val given = parameters.values.any { holdsNonFinite(it) }
         nonFinite = given || (nonFiniteWorkedOut(false) && (worksOutNonFinite(query, parameters) || (infinitiesStored && worksOutNaN(query, parameters))))

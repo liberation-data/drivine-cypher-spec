@@ -206,6 +206,21 @@ class FragmentsTest {
     }
 
     @Test
+    fun aRandomUUIDAStatementMakesFirstForEachRowIsRefusedAndOneAloneIsCalledForEachRow() {
+        // A statement makes a randomUUID() in a term first, as a column of each row (#412): worked out in the term, a subquery
+        // that reads nothing of the row, as the comprehension's or a shared value's, is worked out once, so every row of the
+        // library's query had the same UUID. The library's SQL has no such column.
+        for (compiler in listOf(PostgresCypherCompiler("g"), OracleCypherCompiler("g"), SqliteCypherCompiler("g"))) {
+            for (value in listOf("[x IN [1] | randomUUID()]", "toUpper(randomUUID()) + '-x'", "n.id = randomUUID()")) {
+                val refused = assertFailsWith<CompilerException>("$compiler: $value") { compiler.value(value, people) }
+                assertEquals("A fragment calls randomUUID() within its expression, which a statement calls first for each row, as a column the library's SQL lacks: $value", refused.message)
+            }
+            // Alone, it is called for each row where the library's SQL reads the term.
+            assertTrue(compiler.value("randomUUID()", people).sql.let { "(SELECT" !in it && "sh1" !in it }, "$compiler")
+        }
+    }
+
+    @Test
     fun aVariableBoundAgainWithinIsNotTheLibrarysRowAndHasNoneOfItsLabels() {
         // `n` within the ANY is each node the person knows, which may be no Person: its equality isn't tested by Person's index.
         for (within in listOf("ANY(n IN [(n)-->(m) | m] WHERE n.name = 'Ada')", "EXISTS { (n)-->(m) WHERE ANY(n IN [m] WHERE n.name = 'Ada') }")) {
