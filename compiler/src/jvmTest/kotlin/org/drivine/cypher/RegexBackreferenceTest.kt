@@ -52,6 +52,21 @@ class RegexBackreferenceTest {
         assertEquals(listOf(1 to false), read("(a)[^]]\\1"))
         assertEquals(emptyList(), read("(a)\\Q\\1\\E"), "quoted")
         assertEquals(listOf(1 to false, 1 to false), read("(a)\\1\\1"))
+        assertEquals(listOf(1 to true), read("(a)[a[b]\\1]"), "a class in a class closes only itself")
+        assertEquals(listOf(1 to false), read("(a)[a[b]]\\1"))
+        assertEquals(listOf(1 to true), read("(a)[a&&[\\1]]"))
+        assertEquals(listOf(1 to true), read("(a)[\\Q]\\E\\1]"), "a ] quoted in a class leaves it open")
+        assertEquals(listOf(1 to false), read("(a)\\c[\\1"), "a control character's [ opens no class")
+    }
+
+    @Test
+    fun `Oracle numbers nothing in a pattern the statement gives that writes no backreference`() {
+        listOf("RETURN \$t =~ 'A.*'", "RETURN \$t =~ \$p").forEach { cypher ->
+            val oracle = OracleCypherCompiler("g").compile(cypher, mapOf("t" to "Ada", "p" to "A.*")).sql
+            assertFalse("\\\\1', " in oracle || "Oracle names groups" in oracle, "$cypher:\n$oracle")
+        }
+        val written = OracleCypherCompiler("g").compile("RETURN \$t =~ '(A).*\\\\1'", mapOf("t" to "Ada")).sql
+        assertTrue("\\\\1', " in written, written)
     }
 
     @Test
@@ -76,7 +91,7 @@ class RegexBackreferenceTest {
         assertTrue(Patterns.dangling("(a)\\2") && !Patterns.dangling("(a)\\1") && !Patterns.dangling("(a)[\\]\\2]"))
         listOf(PostgresCypherCompiler("g"), OracleCypherCompiler("g"), SqliteCypherCompiler("g")).forEach { compiler ->
             val sql = compiler.compile("RETURN 'a9' =~ \$p", mapOf("p" to "(a)\\9")).sql
-            assertTrue("\\Za" in sql, "${compiler::class.simpleName}:\n$sql")
+            assertTrue("\"a^\"" in sql || "'a^'" in sql, "${compiler::class.simpleName}:\n$sql")
         }
     }
 }

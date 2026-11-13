@@ -137,7 +137,7 @@ class OracleEmptyTextTest {
     fun `=~ asks a lone line break of the pattern last, where the text's length is 0, and is null where the pattern is no text`() {
         val e = length("JSON(\$_cy_e)")
         val q = "CASE WHEN JSON_VALUE(JSON(\$_cy_q), '\$.type()') = 'string' THEN JSON_VALUE(JSON(\$_cy_q), '\$') END"
-        val sql = OracleCypherCompiler("g").compile("RETURN \$e =~ \$q", mapOf("e" to "", "q" to "a*")).sql
+        val sql = OracleCypherCompiler("g").compile("RETURN \$e =~ \$q", mapOf("e" to "", "q" to "(a*)\\1")).sql
         // A number is no pattern: its text is null, as the empty pattern's is, so its kind is read, not whether it is null.
         assertTrue(sql.contains("SELECT CASE WHEN JSON_VALUE(JSON(\$_cy_q), '\$.type()') = 'string' THEN COALESCE(REGEXP_LIKE("), sql)
         // The pattern's text, its flags taken off and its z escape read as Z, then its backreferences numbered past the

@@ -553,6 +553,12 @@ abstract class SqlCypherCompiler(
     }
 
     /**
+     * The pattern of the `=~` being compiled, where the statement gives it, written or bound, else null: a store that works
+     * the pattern over as the statement runs can leave out what a pattern given doesn't need (see Oracle's [matches]).
+     */
+    protected var patternGiven: String? = null
+
+    /**
      * A function that makes a text, or [empty], of the texts of the JSON values [jsons] and the counts [counts]: [body] over
      * the texts, as [texts] reads them. A store whose empty text reads as null, so [body] gives null where it makes an empty
      * text, gives [empty] there instead, where each text is one and each count is not null: where [whereFirstEmpty], only where
@@ -5587,11 +5593,13 @@ abstract class SqlCypherCompiler(
                 Operator.STARTS_WITH -> Value.Bool(searchedTexts(a, b) { texts -> shared(*texts.toTypedArray()) { (x, y) -> startsWith(x, y) } })
                 // A pattern is short: only the text is read as a long one where it is.
                 Operator.MATCHES -> {
-                    val given = known(binary.right) as? String
-                    given?.let(::checkPattern)
+                    val given = (known(binary.right) as? String)?.also(::checkPattern)
                     // A backreference to a group the pattern doesn't have matches nothing in Java, where Postgres refuses the
-                    // pattern: one given so is asked as a pattern that matches nothing, the end of the text then a character (#236).
-                    Value.Bool(matchedText(a, if (given != null && Patterns.dangling(given)) literalJson("\\Za") else b))
+                    // pattern: one given so is asked as a pattern that matches nothing, a character before the text's start
+                    // (#236), written with only what every library's regular expressions read alike (host.yaml's regexp).
+                    val dangling = given != null && Patterns.dangling(given)
+                    patternGiven = if (dangling) NO_MATCH else given
+                    Value.Bool(matchedText(a, if (dangling) literalJson(NO_MATCH) else b))
                 }
                 Operator.ENDS_WITH -> Value.Bool(searchedTexts(a, b) { texts -> shared(*texts.toTypedArray()) { (x, y) -> endsWith(x, y) } })
                 Operator.CONTAINS -> Value.Bool(searchedTexts(a, b) { (x, y) -> containsText(x, y) })
@@ -6941,6 +6949,9 @@ abstract class SqlCypherCompiler(
     private enum class Kind { NODE, RELATIONSHIP, VALUE, NODES, RELATIONSHIPS, PATH }
 
     protected companion object {
+        /** A pattern of `=~` that matches no text: a character before the text's start. */
+        const val NO_MATCH = "a^"
+
         /** Why a schema command is not compiled: it is no query, and a PersistenceManager runs it. */
         const val SCHEMA_COMMAND = "The statement is a schema command, which is not compiled to SQL: run it through a PersistenceManager, which applies it to the store's schema."
 

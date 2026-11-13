@@ -40,6 +40,11 @@ internal object Patterns {
                         i = if (end < 0) pattern.length else end + 2
                         continue
                     }
+                    // A control character, `\cX`, is the next character's: `\c[` opens no class.
+                    if (next == 'c') {
+                        i += 3
+                        continue
+                    }
                     if (next in '1'..'9') found += Backreference(next - '0', depth > 0)
                     i += 2
                     continue

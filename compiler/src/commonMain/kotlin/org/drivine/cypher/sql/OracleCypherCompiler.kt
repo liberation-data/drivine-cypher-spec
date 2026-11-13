@@ -1937,15 +1937,17 @@ class OracleCypherCompiler(
      * captures nothing, so the group [matches] holds the pattern in is the first, and the pattern's own are numbered from the
      * second (#236). Each number is moved from the highest down, so none is moved twice; and twice over, as a backreference
      * just after another, `(a)\1\1`, is not found until the one before it is. Oracle reads no backreference past `\9`, so a
-     * pattern's `\9` names a group it doesn't have.
+     * pattern's `\9` names a group it doesn't have. A pattern the statement gives that writes no backreference, as most
+     * don't, is left as it is: the sixteen calls would triple the SQL of each `=~`, and run for each row.
      */
-    private fun backreferencesShifted(pattern: String) = shared(pattern) { (p) ->
-        val shifted = (8 downTo 1).fold(p) { x, n ->
-            (1..2).fold(x) { y, _ -> """REGEXP_REPLACE($y, '(^|[^\\])((\\\\)*)\\$n', '\1\2\\${n + 1}')""" }
+    private fun backreferencesShifted(pattern: String) =
+        if (patternGiven?.let(Patterns::backreferences)?.isEmpty() == true) pattern else shared(pattern) { (p) ->
+            val shifted = (8 downTo 1).fold(p) { x, n ->
+                (1..2).fold(x) { y, _ -> """REGEXP_REPLACE($y, '(^|[^\\])((\\\\)*)\\$n', '\1\2\\${n + 1}')""" }
+            }
+            // A pattern worked out as the statement runs, which [checkPattern] can't read, fails here.
+            """CASE WHEN REGEXP_LIKE($p, '(^|[^\\])((\\\\)*)\\9') THEN TO_CHAR(${textFailure(NINTH_BACKREFERENCE, p)}) ELSE $shifted END"""
         }
-        // A pattern worked out as the statement runs, which [checkPattern] can't read, fails here.
-        """CASE WHEN REGEXP_LIKE($p, '(^|[^\\])((\\\\)*)\\9') THEN TO_CHAR(${textFailure(NINTH_BACKREFERENCE, p)}) ELSE $shifted END"""
-    }
 
     /** Refuses, besides what every store does, a pattern that writes `\9`, which [backreferencesShifted] can't number on. */
     override fun checkPattern(pattern: String) {
