@@ -74,7 +74,9 @@ class NullItemWriteTest {
         // Rows the statement gives, one of which holds null: the list given is read, and its rows tested as each is written.
         val given = mapOf("rows" to listOf(mapOf("x" to listOf(1)), mapOf("x" to listOf(1, null))))
         val rows = listOf("UNWIND \$rows AS row CREATE (n:A) SET n += row", "UNWIND \$rows AS row CREATE (:A {x: row.x})")
-        for (compiler in compilers()) for ((cypher, parameters) in worked.map { it to emptyMap<String, Any?>() } + rows.map { it to given }) {
+        // A row given without the key is null there, so the list written of it holds null.
+        val missing = "UNWIND \$rows AS row CREATE (:A {x: [row.t]})" to mapOf("rows" to listOf(mapOf("t" to "a"), emptyMap<String, Any?>()))
+        for (compiler in compilers()) for ((cypher, parameters) in worked.map { it to emptyMap<String, Any?>() } + rows.map { it to given } + missing) {
             val sql = sql(compiler, cypher, parameters)
             assertTrue(refuses(sql), "$cypher\n$sql")
             assertTrue(tests(compiler, sql), "$cypher\n$sql")
@@ -95,10 +97,12 @@ class NullItemWriteTest {
             "MATCH (n:A) SET n.d = \$d, n.e = [\$t]" to mapOf("d" to listOf(java.time.LocalDate.of(2026, 11, 13)), "t" to java.time.LocalDate.of(2026, 11, 13)),
             "UNWIND \$ids AS id CREATE (:A {id: id})" to mapOf("ids" to listOf(1, 2)),
             "UNWIND \$rows AS row CREATE (n:A) SET n += row" to rows,
-            "UNWIND \$rows AS row CREATE (n:A {a: row.a, b: row.b, tags: [row.t]})" to rows,
+            "UNWIND \$rows AS row CREATE (n:A {a: row.a, b: row.b, tags: [row.t, 'z']})" to rows,
             "UNWIND [1, 2] AS i CREATE (:A {x: [i]})" to emptyMap(),
             "CREATE (:A {d: [date('2026-11-13'), datetime({year: 2026})]})" to emptyMap(),
             "MATCH (n:A) WITH n, toString(n.x) AS t, n.x + 1 AS i, 2.5 AS f SET n.t = t, n.i = i, n.f = f" to emptyMap(),
+            // A variable of a kind known that is no list, or a temporal value, though neither is known to hold no null.
+            "MATCH (n:A) WITH n, sqrt(n.x) AS r, date() + duration('P1D') AS d SET n.r = r, n.d = d" to emptyMap(),
         )
         for (compiler in compilers()) for ((cypher, parameters) in plain) {
             val sql = sql(compiler, cypher, parameters)
