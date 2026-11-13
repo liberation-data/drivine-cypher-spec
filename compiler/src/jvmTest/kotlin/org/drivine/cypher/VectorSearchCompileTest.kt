@@ -110,6 +110,23 @@ class VectorSearchCompileTest {
     }
 
     @Test
+    fun `a vector given as an array is a list, as a JVM caller gives an embedding`() {
+        // A float[] from an embedding model, as the driver and the store's binding take any list.
+        val given = listOf(floatArrayOf(1f, 0f, 0f), doubleArrayOf(1.0, 0.0, 0.0), intArrayOf(1, 0, 0), longArrayOf(1, 0, 0), arrayOf(1.0, 0.0, 0.0), setOf(1.0, 0.0, -1.0))
+        compilers().forEach { compiler ->
+            given.forEach { v -> compiler.compile("$search('chunk_cos', 2, \$v) YIELD node RETURN node", mapOf("v" to v)) }
+        }
+        assertEquals(
+            "The index 'chunk_cos' is of vectors of 3 dimensions, and the query vector has 2, as Neo4j fails it.",
+            refused("$search('chunk_cos', 2, \$v) YIELD node RETURN node", mapOf("v" to floatArrayOf(1f, 0f))),
+        )
+        assertEquals(
+            "db.index.vector.queryNodes() takes a vector whose coordinates are finite, as in Neo4j.",
+            refused("$search('chunk_cos', 2, \$v) YIELD node RETURN node", mapOf("v" to floatArrayOf(Float.NaN, 0f, 0f))),
+        )
+    }
+
+    @Test
     fun `a vector the statement works out is checked as it runs, and one written is written as the store reads it`() {
         val guards = mapOf(
             PostgresCypherCompiler::class to "vector_dims(",
@@ -133,6 +150,12 @@ class VectorSearchCompileTest {
             assertTrue(written.contains("'[1.0, 0.5, 0.0]'"), "$store:\n$written")
             assertFalse(written.contains("and the query vector has"), "$store: a vector written is checked before it runs:\n$written")
         }
+        // On Oracle the vector is read as a CLOB: JSON_SERIALIZE gives a VARCHAR2(4000) by default, which an embedding of a few
+        // hundred dimensions outgrows (ORA-40478); and so is each failure, so the CASE is of one type.
+        val oracle = OracleCypherCompiler("g").also { it.vectorIndexes = indexes }
+            .compile("$search('chunk_cos', 2, \$v) YIELD node RETURN node", mapOf("v" to listOf(1.0, 0.0, 0.0))).sql
+        assertTrue(oracle.contains(" RETURNING CLOB) END), COSINE)"), oracle)
+        assertFalse(oracle.contains("THEN TO_CHAR("), oracle)
     }
 
     @Test

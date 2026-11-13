@@ -1774,10 +1774,19 @@ abstract class SqlCypherCompiler(
 
         /**
          * The query vector [value], written or given, refused as Neo4j fails it: null (22N06), not a list of numbers, of another
-         * size than [index]'s (51N65), or of no length where the index measures by cosine (22NBG).
+         * size than [index]'s (51N65), or of no length where the index measures by cosine (22NBG). A list given is any the
+         * store binds as one ([CypherJson]): an array too, as a JVM caller gives an embedding, a `float[]`.
          */
         private fun checkedVector(value: Any?, index: VectorIndexSpec): List<Double> {
-            val list = value as? List<*> ?: throw CompilerException("db.index.vector.queryNodes() takes its vector as a list of numbers, not ${if (value == null) "null" else "that"}, as in Neo4j.")
+            val list = when (value) {
+                is Iterable<*> -> value.toList()
+                is Array<*> -> value.asList()
+                is FloatArray -> value.asList()
+                is DoubleArray -> value.asList()
+                is IntArray -> value.asList()
+                is LongArray -> value.asList()
+                else -> null
+            } ?: throw CompilerException("db.index.vector.queryNodes() takes its vector as a list of numbers, not ${if (value == null) "null" else "that"}, as in Neo4j.")
             val numbers = list.map { (it as? Number)?.toDouble() ?: throw CompilerException("db.index.vector.queryNodes() takes its vector as a list of numbers, as in Neo4j: its coordinates must be finite.") }
             if (numbers.any { !it.isFinite() }) throw CompilerException("db.index.vector.queryNodes() takes a vector whose coordinates are finite, as in Neo4j.")
             if (numbers.size != index.dimensions) {
