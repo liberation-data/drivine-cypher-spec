@@ -18,7 +18,9 @@ import kotlin.test.assertTrue
  * `indexedNodeLabelCheck`, and its planner's `planAmong`), on each store, exact and through its index, by cosine and
  * Euclidean, with and without a partition and an over-fetch, for roots of one label and of two, and of names with a quote, a
  * backslash and a backtick in them. Only the parameters' names were changed, to the module's `_cy_vec<n>`, and the query
- * vector's binding left out, as the library binds it.
+ * vector's binding left out, as the library binds it; and on the graph engines a name drivine4j wrote raw is written escaped
+ * (#217): a string in the `CALL` as [org.drivine.cypher.store.ddl.CypherNames.string], a root label in the among `MATCH` as
+ * [org.drivine.cypher.store.ddl.CypherNames.identifier].
  *
  * [VectorSearch.plan] gives each statement byte for byte, and its parameters, and so does [CompileJson.compile] for the
  * same request as JSON. On a SQL store drivine4j's nearest statement selects each candidate's columns beside its score: the

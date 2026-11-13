@@ -16,7 +16,8 @@ import kotlin.test.assertTrue
 
 /**
  * What [VectorSearch] decides beyond the golden of drivine4j's statements ([VectorSearchGoldenTest]): that a search through
- * an index reads the embedding as the module's DDL makes the index over it, so the index answers it, and what it refuses.
+ * an index reads the embedding as the module's DDL makes the index over it, so the index answers it, that a graph engine's
+ * names are written escaped (#217), and what it refuses.
  */
 @OptIn(org.drivine.DrivineInternalApi::class)
 class VectorSearchTest {
@@ -71,6 +72,46 @@ class VectorSearchTest {
         val spec = VectorIndexSpec("Doc", "embedding", 3)
         for (store in listOf(SearchStore.NEO4J, SearchStore.MEMGRAPH)) {
             assertTrue(plan(store, request()).cypher!!.contains("('${spec.defaultName()}', "), store.id)
+        }
+    }
+
+    @Test
+    fun aGraphEngineSearchWritesEachNameEscapedWhateverItHolds() {
+        // #217: a quote, a backslash and a backtick in each name the head writes into its CALL, and in the roots' labels.
+        val odd = "it's`\\x"
+        val string = "'it\\'s`\\\\x'"
+        val label = "`it's``\\x`"
+        val among = VectorAmong(listOf("a"), "id")
+        for (store in listOf(SearchStore.NEO4J, SearchStore.MEMGRAPH, SearchStore.FALKORDB)) {
+            val byName = request(labels = listOf("Doc")).copy(index = VectorIndex(name = odd))
+            val byLabel = request(labels = listOf(odd, odd), property = odd)
+            val calls = when (store) {
+                SearchStore.NEO4J -> "CALL db.index.vector.queryNodes("
+                SearchStore.MEMGRAPH -> "CALL vector_search.search("
+                else -> "CALL db.idx.vector.queryNodes("
+            }
+            val expected = when (store) {
+                SearchStore.FALKORDB -> listOf("$string, $string, " to byLabel, "'Doc', 'embedding', " to byName)
+                else -> listOf("$string, " to byName, "'it\\'s`\\\\x_it\\'s`\\\\x_vector', " to byLabel)
+            }
+            for ((arguments, request) in expected) for (asked in listOf(request, request.copy(among = among))) {
+                val cypher = plan(store, asked).cypher!!
+                assertTrue("$calls$arguments" in cypher, "${store.id}: $cypher")
+            }
+            val amongCypher = plan(store, byLabel.copy(among = among)).cypher!!
+            assertTrue("\nMATCH (seed:$label:$label)\n" in amongCypher, "${store.id}: $amongCypher")
+            assertEquals("n:`Doc`:$label", plan(store, request(labels = listOf("Doc", odd))).labelCheck, store.id)
+            // With a partition the index's name, or FalkorDB's label, is bound as it is, not written in; FalkorDB's property
+            // is still written, escaped.
+            val partitioned = plan(store, request(labels = listOf("Doc"), property = odd).copy(partitionLabel = odd))
+            val bound = if (store == SearchStore.FALKORDB) odd else "${odd}_${odd}_vector"
+            assertEquals(bound, partitioned.parameters["_cy_vec1"], store.id)
+            assertTrue(partitioned.cypher!!.startsWith("$calls\$_cy_vec1, " + if (store == SearchStore.FALKORDB) "$string, " else ""), "${store.id}: ${partitioned.cypher}")
+            // A plain name is written as it always was: bare in the MATCH, between plain quotes in the CALL.
+            val plain = plan(store, request(labels = listOf("Doc", "Chunk")).copy(among = among)).cypher!!
+            assertTrue("\nMATCH (seed:Doc:Chunk)\n" in plain, "${store.id}: $plain")
+            val plainArguments = if (store == SearchStore.FALKORDB) "'Doc', 'embedding', " else "'Doc_embedding_vector', "
+            assertTrue("$calls$plainArguments" in plain, "${store.id}: $plain")
         }
     }
 

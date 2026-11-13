@@ -278,12 +278,18 @@ drivine4j's own code (its selects' `nearestTo`, `nearestThrough` and `nearestAmo
 and label check, and its planner's `planAmong`) at the commit it names: on each store, exact and through the index, by
 cosine and Euclidean, with and without a partition and `searchK`, for roots of one label and of two, and names with a
 quote, a backslash and a backtick in them. Only the parameters' names were changed, and the query vector's binding left
-out. `VectorSearchGoldenTest` checks `plan`, and the JSON request, against each on every target, putting back the
-candidates' columns drivine4j selects beside `nid` before it compares, as `FullTextSearchGoldenTest` does.
+out, and on the graph engines a name with a quote, a backslash or a backtick, which drivine4j writes raw, is written
+escaped (#217): 84 of the golden's entries were edited for it by a script, and no other. `VectorSearchGoldenTest` checks
+`plan`, and the JSON request, against each on every target, putting back the candidates' columns drivine4j selects beside
+`nid` before it compares, as `FullTextSearchGoldenTest` does.
 
-As drivine4j does today, a graph engine's head writes an index name, a label or a property into the `CALL` between single
-quotes as it is, and a search among ids writes the root's labels into its `MATCH` unquoted: a name with a quote or a
-backtick in it gives a statement the engine can't read, as a full-text search's did before drivine4j#767.
+On a graph engine the index's name in the `CALL` (FalkorDB's label, and its property) is a Cypher string, its quotes and
+backslashes escaped (`CypherNames.string`), and each of the root's labels in a search among ids' `MATCH` an identifier,
+backtick-quoted where it is no plain one (`CypherNames.identifier`), whatever they hold, as a full-text search's are
+(liberation-data/drivine4j#767). A plain name is written as drivine4j writes it. drivine4j wrote them raw, so a name with a
+quote or a backtick gave a statement the engine couldn't read (#217). FalkorDB 6.0.3 reads no escaped backtick in a
+label, in a `CREATE` as in a search, so it can hold no such label (#174): a search that names one fails there with
+FalkorDB's own parser error, until #174 refuses it by name.
 
 ### Oracle's rows as text
 

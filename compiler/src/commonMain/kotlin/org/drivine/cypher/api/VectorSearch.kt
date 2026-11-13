@@ -386,7 +386,7 @@ object VectorSearch {
 
     /**
      * A nearest search's head on a graph engine. With a partition, the index's name (FalkorDB's label) is bound, so one
-     * statement serves every partition; without one it is written into the statement as drivine4j writes it.
+     * statement serves every partition; without one it is written into the statement as a Cypher string, escaped (#217).
      */
     private fun graphNearest(store: SearchStore, request: VectorRequest, scope: SearchParameters): VectorPlan {
         val label = indexLabel(request)
@@ -416,7 +416,7 @@ object VectorSearch {
         val topK = scope.bound(request.topK)
         val cypher = """
             |UNWIND $ids AS $SEED_ID
-            |MATCH ($SEED:${request.labels.joinToString(":")})
+            |MATCH ($SEED:${request.labels.joinToString(":") { CypherNames.identifier(it) }})
             |WHERE $SEED.$id = $SEED_ID AND $embedding IS NOT NULL
             |${head.text}$labelled
             |WITH $SEED_ID, $NODE, $SCORE
@@ -441,9 +441,10 @@ object VectorSearch {
         store: SearchStore, request: VectorRequest, label: String, named: String?, k: String, vector: String?, scope: SearchParameters,
         rescored: Boolean, alias: String, scoreAlias: String, carried: String? = null,
     ): Head {
-        // drivine4j's VectorQuerySpec.indexNameArgument and labelArgument: a literal between single quotes, as the name is.
-        val nameArgument = named ?: "'${indexName(request, label)}'"
-        val labelArgument = named ?: "'$label'"
+        // drivine4j's VectorQuerySpec.indexNameArgument and labelArgument: a Cypher string, its quotes and backslashes escaped
+        // whatever the name holds (#217), so a plain name is written as drivine4j writes it.
+        val nameArgument = named ?: CypherNames.string(indexName(request, label))
+        val labelArgument = named ?: CypherNames.string(label)
         val reserved = if (vector == null) scope.reserved() else null
         val source = vector ?: "\$$reserved"
         val prefix = carried?.let { "$it, " } ?: ""
@@ -474,7 +475,7 @@ object VectorSearch {
                     SimilarityFunction.COSINE -> "1.0 - score / 2.0"
                     SimilarityFunction.EUCLIDEAN -> "1.0 / (1.0 + score * score)"
                 }
-                "CALL db.idx.vector.queryNodes($labelArgument, '${request.property}', $k, ${vector ?: "vecf32($source)"})\n" +
+                "CALL db.idx.vector.queryNodes($labelArgument, ${CypherNames.string(request.property)}, $k, ${vector ?: "vecf32($source)"})\n" +
                     "YIELD node, score\nWITH ${prefix}node AS $alias, $score AS $scoreAlias"
             }
         }

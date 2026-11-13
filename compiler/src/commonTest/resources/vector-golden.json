@@ -1,5 +1,5 @@
 {
-  "source" : "drivine4j 8be5e760, written by its own code (VectorGoldenWriter, not committed): only parameter names are normalized, the SQL stores' $_pN to $_cy_vec<N+1>, and the graph engines' $_vector…, $_among… names to $_cy_vec<n> in the order the statement first names them. The query vector's own binding, [0.1, 0.2, 0.3], is left out of parameters and named by \"vector\".",
+  "source" : "drivine4j 8be5e760, written by its own code (VectorGoldenWriter, not committed): only parameter names are normalized, the SQL stores' $_pN to $_cy_vec<N+1>, and the graph engines' $_vector…, $_among… names to $_cy_vec<n> in the order the statement first names them. The query vector's own binding, [0.1, 0.2, 0.3], is left out of parameters and named by \"vector\". The graph engines' 84 answers that write an index name, a label or a property with a quote or a backslash into the CALL between single quotes, or a root label that is no plain identifier into the among MATCH, were then edited by a script to write it escaped, as a Cypher string or a backtick-quoted label (liberation-data/drivine-cypher-spec#217).",
   "entries" : [ {
     "request" : {
       "store" : "postgres",
@@ -8935,7 +8935,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL db.index.vector.queryNodes('Do'c\\x_emb'e\\d \"x\"_vector', $_cy_vec1, $_cy_vec2)\nYIELD node, score\nWITH node AS n, score AS _score",
+      "cypher" : "CALL db.index.vector.queryNodes('Do\\'c\\\\x_emb\\'e\\\\d \"x\"_vector', $_cy_vec1, $_cy_vec2)\nYIELD node, score\nWITH node AS n, score AS _score",
       "labelCheck" : null,
       "parameters" : {
         "_cy_vec1" : 10
@@ -8955,7 +8955,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL db.index.vector.queryNodes('Do'c\\x_emb'e\\d \"x\"_vector', $_cy_vec1, $_cy_vec2)\nYIELD node, score\nWITH node AS doc, score AS _score",
+      "cypher" : "CALL db.index.vector.queryNodes('Do\\'c\\\\x_emb\\'e\\\\d \"x\"_vector', $_cy_vec1, $_cy_vec2)\nYIELD node, score\nWITH node AS doc, score AS _score",
       "labelCheck" : null,
       "parameters" : {
         "_cy_vec1" : 10
@@ -8974,7 +8974,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL vector_search.search('Do'c\\x_emb'e\\d \"x\"_vector', $_cy_vec1, $_cy_vec2)\nYIELD node, distance\nWITH node AS n, 1.0 - distance / 2.0 AS _score",
+      "cypher" : "CALL vector_search.search('Do\\'c\\\\x_emb\\'e\\\\d \"x\"_vector', $_cy_vec1, $_cy_vec2)\nYIELD node, distance\nWITH node AS n, 1.0 - distance / 2.0 AS _score",
       "labelCheck" : null,
       "parameters" : {
         "_cy_vec1" : 10
@@ -8994,7 +8994,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL vector_search.search('Do'c\\x_emb'e\\d \"x\"_vector', $_cy_vec1, $_cy_vec2)\nYIELD node, distance\nWITH node AS doc, 1.0 - distance / 2.0 AS _score",
+      "cypher" : "CALL vector_search.search('Do\\'c\\\\x_emb\\'e\\\\d \"x\"_vector', $_cy_vec1, $_cy_vec2)\nYIELD node, distance\nWITH node AS doc, 1.0 - distance / 2.0 AS _score",
       "labelCheck" : null,
       "parameters" : {
         "_cy_vec1" : 10
@@ -9013,7 +9013,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL db.idx.vector.queryNodes('Do'c\\x', 'emb'e\\d \"x\"', $_cy_vec1, vecf32($_cy_vec2))\nYIELD node, score\nWITH node AS n, 1.0 - score / 2.0 AS _score",
+      "cypher" : "CALL db.idx.vector.queryNodes('Do\\'c\\\\x', 'emb\\'e\\\\d \"x\"', $_cy_vec1, vecf32($_cy_vec2))\nYIELD node, score\nWITH node AS n, 1.0 - score / 2.0 AS _score",
       "labelCheck" : null,
       "parameters" : {
         "_cy_vec1" : 10
@@ -9033,7 +9033,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL db.idx.vector.queryNodes('Do'c\\x', 'emb'e\\d \"x\"', $_cy_vec1, vecf32($_cy_vec2))\nYIELD node, score\nWITH node AS doc, 1.0 - score / 2.0 AS _score",
+      "cypher" : "CALL db.idx.vector.queryNodes('Do\\'c\\\\x', 'emb\\'e\\\\d \"x\"', $_cy_vec1, vecf32($_cy_vec2))\nYIELD node, score\nWITH node AS doc, 1.0 - score / 2.0 AS _score",
       "labelCheck" : null,
       "parameters" : {
         "_cy_vec1" : 10
@@ -9219,7 +9219,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL db.index.vector.queryNodes('Do'c\\x_emb'e\\d \"x\"_vector', $_cy_vec1, $_cy_vec2)\nYIELD node\nWITH node AS n, vector.similarity.cosine(node.`emb'e\\d \"x\"`, $_cy_vec2) AS _score",
+      "cypher" : "CALL db.index.vector.queryNodes('Do\\'c\\\\x_emb\\'e\\\\d \"x\"_vector', $_cy_vec1, $_cy_vec2)\nYIELD node\nWITH node AS n, vector.similarity.cosine(node.`emb'e\\d \"x\"`, $_cy_vec2) AS _score",
       "labelCheck" : null,
       "parameters" : {
         "_cy_vec1" : 50
@@ -9240,7 +9240,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL db.index.vector.queryNodes('Do'c\\x_emb'e\\d \"x\"_vector', $_cy_vec1, $_cy_vec2)\nYIELD node\nWITH node AS doc, vector.similarity.cosine(node.`emb'e\\d \"x\"`, $_cy_vec2) AS _score",
+      "cypher" : "CALL db.index.vector.queryNodes('Do\\'c\\\\x_emb\\'e\\\\d \"x\"_vector', $_cy_vec1, $_cy_vec2)\nYIELD node\nWITH node AS doc, vector.similarity.cosine(node.`emb'e\\d \"x\"`, $_cy_vec2) AS _score",
       "labelCheck" : null,
       "parameters" : {
         "_cy_vec1" : 50
@@ -9260,7 +9260,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL vector_search.search('Do'c\\x_emb'e\\d \"x\"_vector', $_cy_vec1, $_cy_vec2)\nYIELD node, distance\nWITH node AS n, 1.0 - distance / 2.0 AS _score",
+      "cypher" : "CALL vector_search.search('Do\\'c\\\\x_emb\\'e\\\\d \"x\"_vector', $_cy_vec1, $_cy_vec2)\nYIELD node, distance\nWITH node AS n, 1.0 - distance / 2.0 AS _score",
       "labelCheck" : null,
       "parameters" : {
         "_cy_vec1" : 50
@@ -9281,7 +9281,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL vector_search.search('Do'c\\x_emb'e\\d \"x\"_vector', $_cy_vec1, $_cy_vec2)\nYIELD node, distance\nWITH node AS doc, 1.0 - distance / 2.0 AS _score",
+      "cypher" : "CALL vector_search.search('Do\\'c\\\\x_emb\\'e\\\\d \"x\"_vector', $_cy_vec1, $_cy_vec2)\nYIELD node, distance\nWITH node AS doc, 1.0 - distance / 2.0 AS _score",
       "labelCheck" : null,
       "parameters" : {
         "_cy_vec1" : 50
@@ -9301,7 +9301,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL db.idx.vector.queryNodes('Do'c\\x', 'emb'e\\d \"x\"', $_cy_vec1, vecf32($_cy_vec2))\nYIELD node, score\nWITH node AS n, 1.0 - score / 2.0 AS _score",
+      "cypher" : "CALL db.idx.vector.queryNodes('Do\\'c\\\\x', 'emb\\'e\\\\d \"x\"', $_cy_vec1, vecf32($_cy_vec2))\nYIELD node, score\nWITH node AS n, 1.0 - score / 2.0 AS _score",
       "labelCheck" : null,
       "parameters" : {
         "_cy_vec1" : 50
@@ -9322,7 +9322,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL db.idx.vector.queryNodes('Do'c\\x', 'emb'e\\d \"x\"', $_cy_vec1, vecf32($_cy_vec2))\nYIELD node, score\nWITH node AS doc, 1.0 - score / 2.0 AS _score",
+      "cypher" : "CALL db.idx.vector.queryNodes('Do\\'c\\\\x', 'emb\\'e\\\\d \"x\"', $_cy_vec1, vecf32($_cy_vec2))\nYIELD node, score\nWITH node AS doc, 1.0 - score / 2.0 AS _score",
       "labelCheck" : null,
       "parameters" : {
         "_cy_vec1" : 50
@@ -9594,7 +9594,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL db.idx.vector.queryNodes($_cy_vec1, 'emb'e\\d \"x\"', $_cy_vec2, vecf32($_cy_vec3))\nYIELD node, score\nWITH node AS n, 1.0 - score / 2.0 AS _score",
+      "cypher" : "CALL db.idx.vector.queryNodes($_cy_vec1, 'emb\\'e\\\\d \"x\"', $_cy_vec2, vecf32($_cy_vec3))\nYIELD node, score\nWITH node AS n, 1.0 - score / 2.0 AS _score",
       "labelCheck" : "n:`Do'c\\x`",
       "parameters" : {
         "_cy_vec1" : "Tenant7",
@@ -9616,7 +9616,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL db.idx.vector.queryNodes($_cy_vec1, 'emb'e\\d \"x\"', $_cy_vec2, vecf32($_cy_vec3))\nYIELD node, score\nWITH node AS doc, 1.0 - score / 2.0 AS _score",
+      "cypher" : "CALL db.idx.vector.queryNodes($_cy_vec1, 'emb\\'e\\\\d \"x\"', $_cy_vec2, vecf32($_cy_vec3))\nYIELD node, score\nWITH node AS doc, 1.0 - score / 2.0 AS _score",
       "labelCheck" : "doc:`Do'c\\x`",
       "parameters" : {
         "_cy_vec1" : "Tenant7",
@@ -9901,7 +9901,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL db.idx.vector.queryNodes($_cy_vec1, 'emb'e\\d \"x\"', $_cy_vec2, vecf32($_cy_vec3))\nYIELD node, score\nWITH node AS n, 1.0 - score / 2.0 AS _score",
+      "cypher" : "CALL db.idx.vector.queryNodes($_cy_vec1, 'emb\\'e\\\\d \"x\"', $_cy_vec2, vecf32($_cy_vec3))\nYIELD node, score\nWITH node AS n, 1.0 - score / 2.0 AS _score",
       "labelCheck" : "n:`Do'c\\x`",
       "parameters" : {
         "_cy_vec1" : "Tenant7",
@@ -9924,7 +9924,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL db.idx.vector.queryNodes($_cy_vec1, 'emb'e\\d \"x\"', $_cy_vec2, vecf32($_cy_vec3))\nYIELD node, score\nWITH node AS doc, 1.0 - score / 2.0 AS _score",
+      "cypher" : "CALL db.idx.vector.queryNodes($_cy_vec1, 'emb\\'e\\\\d \"x\"', $_cy_vec2, vecf32($_cy_vec3))\nYIELD node, score\nWITH node AS doc, 1.0 - score / 2.0 AS _score",
       "labelCheck" : "doc:`Do'c\\x`",
       "parameters" : {
         "_cy_vec1" : "Tenant7",
@@ -10197,7 +10197,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL db.idx.vector.queryNodes($_cy_vec1, 'emb'e\\d \"x\"', $_cy_vec2, vecf32($_cy_vec3))\nYIELD node, score\nWITH node AS n, 1.0 - score / 2.0 AS _score",
+      "cypher" : "CALL db.idx.vector.queryNodes($_cy_vec1, 'emb\\'e\\\\d \"x\"', $_cy_vec2, vecf32($_cy_vec3))\nYIELD node, score\nWITH node AS n, 1.0 - score / 2.0 AS _score",
       "labelCheck" : "n:`Do'c\\x`",
       "parameters" : {
         "_cy_vec1" : "Ten'ant\\9",
@@ -10219,7 +10219,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL db.idx.vector.queryNodes($_cy_vec1, 'emb'e\\d \"x\"', $_cy_vec2, vecf32($_cy_vec3))\nYIELD node, score\nWITH node AS doc, 1.0 - score / 2.0 AS _score",
+      "cypher" : "CALL db.idx.vector.queryNodes($_cy_vec1, 'emb\\'e\\\\d \"x\"', $_cy_vec2, vecf32($_cy_vec3))\nYIELD node, score\nWITH node AS doc, 1.0 - score / 2.0 AS _score",
       "labelCheck" : "doc:`Do'c\\x`",
       "parameters" : {
         "_cy_vec1" : "Ten'ant\\9",
@@ -10504,7 +10504,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL db.idx.vector.queryNodes($_cy_vec1, 'emb'e\\d \"x\"', $_cy_vec2, vecf32($_cy_vec3))\nYIELD node, score\nWITH node AS n, 1.0 - score / 2.0 AS _score",
+      "cypher" : "CALL db.idx.vector.queryNodes($_cy_vec1, 'emb\\'e\\\\d \"x\"', $_cy_vec2, vecf32($_cy_vec3))\nYIELD node, score\nWITH node AS n, 1.0 - score / 2.0 AS _score",
       "labelCheck" : "n:`Do'c\\x`",
       "parameters" : {
         "_cy_vec1" : "Ten'ant\\9",
@@ -10527,7 +10527,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL db.idx.vector.queryNodes($_cy_vec1, 'emb'e\\d \"x\"', $_cy_vec2, vecf32($_cy_vec3))\nYIELD node, score\nWITH node AS doc, 1.0 - score / 2.0 AS _score",
+      "cypher" : "CALL db.idx.vector.queryNodes($_cy_vec1, 'emb\\'e\\\\d \"x\"', $_cy_vec2, vecf32($_cy_vec3))\nYIELD node, score\nWITH node AS doc, 1.0 - score / 2.0 AS _score",
       "labelCheck" : "doc:`Do'c\\x`",
       "parameters" : {
         "_cy_vec1" : "Ten'ant\\9",
@@ -10684,7 +10684,7 @@
       }
     },
     "answer" : {
-      "cypher" : "UNWIND $_cy_vec1 AS _seedId\nMATCH (seed:Do'c\\x)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL db.index.vector.queryNodes('Do'c\\x_emb'e\\d \"x\"_vector', $_cy_vec2, seed.`emb'e\\d \"x\"`)\nYIELD node\nWITH _seedId, node AS n, vector.similarity.cosine(node.`emb'e\\d \"x\"`, seed.`emb'e\\d \"x\"`) AS _score\nWITH _seedId, n, _score\nORDER BY _score DESC\nWITH _seedId, collect({id: n.`i'd\\`, score: _score}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.id IN $_cy_vec1 AND m.id <> _seedId][0..$_cy_vec3]} AS row",
+      "cypher" : "UNWIND $_cy_vec1 AS _seedId\nMATCH (seed:`Do'c\\x`)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL db.index.vector.queryNodes('Do\\'c\\\\x_emb\\'e\\\\d \"x\"_vector', $_cy_vec2, seed.`emb'e\\d \"x\"`)\nYIELD node\nWITH _seedId, node AS n, vector.similarity.cosine(node.`emb'e\\d \"x\"`, seed.`emb'e\\d \"x\"`) AS _score\nWITH _seedId, n, _score\nORDER BY _score DESC\nWITH _seedId, collect({id: n.`i'd\\`, score: _score}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.id IN $_cy_vec1 AND m.id <> _seedId][0..$_cy_vec3]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : 40,
@@ -10707,7 +10707,7 @@
       }
     },
     "answer" : {
-      "cypher" : "UNWIND $_cy_vec1 AS _seedId\nMATCH (seed:Do'c\\x)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL vector_search.search('Do'c\\x_emb'e\\d \"x\"_vector', $_cy_vec2, seed.`emb'e\\d \"x\"`)\nYIELD node, distance\nWITH _seedId, node AS n, 1.0 - distance / 2.0 AS _score\nWITH _seedId, n, _score\nORDER BY _score DESC\nWITH _seedId, collect({id: n.`i'd\\`, score: _score}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.id IN $_cy_vec1 AND m.id <> _seedId][0..$_cy_vec3]} AS row",
+      "cypher" : "UNWIND $_cy_vec1 AS _seedId\nMATCH (seed:`Do'c\\x`)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL vector_search.search('Do\\'c\\\\x_emb\\'e\\\\d \"x\"_vector', $_cy_vec2, seed.`emb'e\\d \"x\"`)\nYIELD node, distance\nWITH _seedId, node AS n, 1.0 - distance / 2.0 AS _score\nWITH _seedId, n, _score\nORDER BY _score DESC\nWITH _seedId, collect({id: n.`i'd\\`, score: _score}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.id IN $_cy_vec1 AND m.id <> _seedId][0..$_cy_vec3]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : 40,
@@ -10730,7 +10730,7 @@
       }
     },
     "answer" : {
-      "cypher" : "UNWIND $_cy_vec1 AS _seedId\nMATCH (seed:Do'c\\x)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL db.idx.vector.queryNodes('Do'c\\x', 'emb'e\\d \"x\"', $_cy_vec2, seed.`emb'e\\d \"x\"`)\nYIELD node, score\nWITH _seedId, node AS n, 1.0 - score / 2.0 AS _score\nWITH _seedId, n, _score\nORDER BY _score DESC\nWITH _seedId, collect({id: n.`i'd\\`, score: _score}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.id IN $_cy_vec1 AND m.id <> _seedId][0..$_cy_vec3]} AS row",
+      "cypher" : "UNWIND $_cy_vec1 AS _seedId\nMATCH (seed:`Do'c\\x`)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL db.idx.vector.queryNodes('Do\\'c\\\\x', 'emb\\'e\\\\d \"x\"', $_cy_vec2, seed.`emb'e\\d \"x\"`)\nYIELD node, score\nWITH _seedId, node AS n, 1.0 - score / 2.0 AS _score\nWITH _seedId, n, _score\nORDER BY _score DESC\nWITH _seedId, collect({id: n.`i'd\\`, score: _score}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.id IN $_cy_vec1 AND m.id <> _seedId][0..$_cy_vec3]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : 40,
@@ -10897,7 +10897,7 @@
       }
     },
     "answer" : {
-      "cypher" : "UNWIND $_cy_vec1 AS _seedId\nMATCH (seed:Do'c\\x)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL db.index.vector.queryNodes('Do'c\\x_emb'e\\d \"x\"_vector', $_cy_vec2, seed.`emb'e\\d \"x\"`)\nYIELD node\nWITH _seedId, node AS n, vector.similarity.cosine(node.`emb'e\\d \"x\"`, seed.`emb'e\\d \"x\"`) AS _score\nWITH _seedId, n, _score\nORDER BY _score DESC\nWITH _seedId, collect({id: n.`i'd\\`, score: _score}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.id IN $_cy_vec1 AND m.id <> _seedId AND m.score >= $_cy_vec3][0..$_cy_vec4]} AS row",
+      "cypher" : "UNWIND $_cy_vec1 AS _seedId\nMATCH (seed:`Do'c\\x`)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL db.index.vector.queryNodes('Do\\'c\\\\x_emb\\'e\\\\d \"x\"_vector', $_cy_vec2, seed.`emb'e\\d \"x\"`)\nYIELD node\nWITH _seedId, node AS n, vector.similarity.cosine(node.`emb'e\\d \"x\"`, seed.`emb'e\\d \"x\"`) AS _score\nWITH _seedId, n, _score\nORDER BY _score DESC\nWITH _seedId, collect({id: n.`i'd\\`, score: _score}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.id IN $_cy_vec1 AND m.id <> _seedId AND m.score >= $_cy_vec3][0..$_cy_vec4]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : 40,
@@ -10922,7 +10922,7 @@
       }
     },
     "answer" : {
-      "cypher" : "UNWIND $_cy_vec1 AS _seedId\nMATCH (seed:Do'c\\x)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL vector_search.search('Do'c\\x_emb'e\\d \"x\"_vector', $_cy_vec2, seed.`emb'e\\d \"x\"`)\nYIELD node, distance\nWITH _seedId, node AS n, 1.0 - distance / 2.0 AS _score\nWITH _seedId, n, _score\nORDER BY _score DESC\nWITH _seedId, collect({id: n.`i'd\\`, score: _score}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.id IN $_cy_vec1 AND m.id <> _seedId AND m.score >= $_cy_vec3][0..$_cy_vec4]} AS row",
+      "cypher" : "UNWIND $_cy_vec1 AS _seedId\nMATCH (seed:`Do'c\\x`)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL vector_search.search('Do\\'c\\\\x_emb\\'e\\\\d \"x\"_vector', $_cy_vec2, seed.`emb'e\\d \"x\"`)\nYIELD node, distance\nWITH _seedId, node AS n, 1.0 - distance / 2.0 AS _score\nWITH _seedId, n, _score\nORDER BY _score DESC\nWITH _seedId, collect({id: n.`i'd\\`, score: _score}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.id IN $_cy_vec1 AND m.id <> _seedId AND m.score >= $_cy_vec3][0..$_cy_vec4]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : 40,
@@ -10947,7 +10947,7 @@
       }
     },
     "answer" : {
-      "cypher" : "UNWIND $_cy_vec1 AS _seedId\nMATCH (seed:Do'c\\x)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL db.idx.vector.queryNodes('Do'c\\x', 'emb'e\\d \"x\"', $_cy_vec2, seed.`emb'e\\d \"x\"`)\nYIELD node, score\nWITH _seedId, node AS n, 1.0 - score / 2.0 AS _score\nWITH _seedId, n, _score\nORDER BY _score DESC\nWITH _seedId, collect({id: n.`i'd\\`, score: _score}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.id IN $_cy_vec1 AND m.id <> _seedId AND m.score >= $_cy_vec3][0..$_cy_vec4]} AS row",
+      "cypher" : "UNWIND $_cy_vec1 AS _seedId\nMATCH (seed:`Do'c\\x`)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL db.idx.vector.queryNodes('Do\\'c\\\\x', 'emb\\'e\\\\d \"x\"', $_cy_vec2, seed.`emb'e\\d \"x\"`)\nYIELD node, score\nWITH _seedId, node AS n, 1.0 - score / 2.0 AS _score\nWITH _seedId, n, _score\nORDER BY _score DESC\nWITH _seedId, collect({id: n.`i'd\\`, score: _score}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.id IN $_cy_vec1 AND m.id <> _seedId AND m.score >= $_cy_vec3][0..$_cy_vec4]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : 40,
@@ -11126,7 +11126,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL db.index.vector.queryNodes('Do'c\\x_emb'e\\d \"x\"_vector', $_cy_vec1, $_cy_vec2)\nYIELD node, score\nWITH node AS n, score AS _score",
+      "cypher" : "CALL db.index.vector.queryNodes('Do\\'c\\\\x_emb\\'e\\\\d \"x\"_vector', $_cy_vec1, $_cy_vec2)\nYIELD node, score\nWITH node AS n, score AS _score",
       "labelCheck" : "n:`Do'c\\x`:`Ch\"un``k`",
       "parameters" : {
         "_cy_vec1" : 10
@@ -11146,7 +11146,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL db.index.vector.queryNodes('Do'c\\x_emb'e\\d \"x\"_vector', $_cy_vec1, $_cy_vec2)\nYIELD node, score\nWITH node AS doc, score AS _score",
+      "cypher" : "CALL db.index.vector.queryNodes('Do\\'c\\\\x_emb\\'e\\\\d \"x\"_vector', $_cy_vec1, $_cy_vec2)\nYIELD node, score\nWITH node AS doc, score AS _score",
       "labelCheck" : "doc:`Do'c\\x`:`Ch\"un``k`",
       "parameters" : {
         "_cy_vec1" : 10
@@ -11165,7 +11165,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL vector_search.search('Do'c\\x_emb'e\\d \"x\"_vector', $_cy_vec1, $_cy_vec2)\nYIELD node, distance\nWITH node AS n, 1.0 - distance / 2.0 AS _score",
+      "cypher" : "CALL vector_search.search('Do\\'c\\\\x_emb\\'e\\\\d \"x\"_vector', $_cy_vec1, $_cy_vec2)\nYIELD node, distance\nWITH node AS n, 1.0 - distance / 2.0 AS _score",
       "labelCheck" : "n:`Do'c\\x`:`Ch\"un``k`",
       "parameters" : {
         "_cy_vec1" : 10
@@ -11185,7 +11185,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL vector_search.search('Do'c\\x_emb'e\\d \"x\"_vector', $_cy_vec1, $_cy_vec2)\nYIELD node, distance\nWITH node AS doc, 1.0 - distance / 2.0 AS _score",
+      "cypher" : "CALL vector_search.search('Do\\'c\\\\x_emb\\'e\\\\d \"x\"_vector', $_cy_vec1, $_cy_vec2)\nYIELD node, distance\nWITH node AS doc, 1.0 - distance / 2.0 AS _score",
       "labelCheck" : "doc:`Do'c\\x`:`Ch\"un``k`",
       "parameters" : {
         "_cy_vec1" : 10
@@ -11204,7 +11204,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL db.idx.vector.queryNodes('Do'c\\x', 'emb'e\\d \"x\"', $_cy_vec1, vecf32($_cy_vec2))\nYIELD node, score\nWITH node AS n, 1.0 - score / 2.0 AS _score",
+      "cypher" : "CALL db.idx.vector.queryNodes('Do\\'c\\\\x', 'emb\\'e\\\\d \"x\"', $_cy_vec1, vecf32($_cy_vec2))\nYIELD node, score\nWITH node AS n, 1.0 - score / 2.0 AS _score",
       "labelCheck" : "n:`Do'c\\x`:`Ch\"un``k`",
       "parameters" : {
         "_cy_vec1" : 10
@@ -11224,7 +11224,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL db.idx.vector.queryNodes('Do'c\\x', 'emb'e\\d \"x\"', $_cy_vec1, vecf32($_cy_vec2))\nYIELD node, score\nWITH node AS doc, 1.0 - score / 2.0 AS _score",
+      "cypher" : "CALL db.idx.vector.queryNodes('Do\\'c\\\\x', 'emb\\'e\\\\d \"x\"', $_cy_vec1, vecf32($_cy_vec2))\nYIELD node, score\nWITH node AS doc, 1.0 - score / 2.0 AS _score",
       "labelCheck" : "doc:`Do'c\\x`:`Ch\"un``k`",
       "parameters" : {
         "_cy_vec1" : 10
@@ -11410,7 +11410,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL db.index.vector.queryNodes('Do'c\\x_emb'e\\d \"x\"_vector', $_cy_vec1, $_cy_vec2)\nYIELD node\nWITH node AS n, vector.similarity.cosine(node.`emb'e\\d \"x\"`, $_cy_vec2) AS _score",
+      "cypher" : "CALL db.index.vector.queryNodes('Do\\'c\\\\x_emb\\'e\\\\d \"x\"_vector', $_cy_vec1, $_cy_vec2)\nYIELD node\nWITH node AS n, vector.similarity.cosine(node.`emb'e\\d \"x\"`, $_cy_vec2) AS _score",
       "labelCheck" : "n:`Do'c\\x`:`Ch\"un``k`",
       "parameters" : {
         "_cy_vec1" : 50
@@ -11431,7 +11431,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL db.index.vector.queryNodes('Do'c\\x_emb'e\\d \"x\"_vector', $_cy_vec1, $_cy_vec2)\nYIELD node\nWITH node AS doc, vector.similarity.cosine(node.`emb'e\\d \"x\"`, $_cy_vec2) AS _score",
+      "cypher" : "CALL db.index.vector.queryNodes('Do\\'c\\\\x_emb\\'e\\\\d \"x\"_vector', $_cy_vec1, $_cy_vec2)\nYIELD node\nWITH node AS doc, vector.similarity.cosine(node.`emb'e\\d \"x\"`, $_cy_vec2) AS _score",
       "labelCheck" : "doc:`Do'c\\x`:`Ch\"un``k`",
       "parameters" : {
         "_cy_vec1" : 50
@@ -11451,7 +11451,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL vector_search.search('Do'c\\x_emb'e\\d \"x\"_vector', $_cy_vec1, $_cy_vec2)\nYIELD node, distance\nWITH node AS n, 1.0 - distance / 2.0 AS _score",
+      "cypher" : "CALL vector_search.search('Do\\'c\\\\x_emb\\'e\\\\d \"x\"_vector', $_cy_vec1, $_cy_vec2)\nYIELD node, distance\nWITH node AS n, 1.0 - distance / 2.0 AS _score",
       "labelCheck" : "n:`Do'c\\x`:`Ch\"un``k`",
       "parameters" : {
         "_cy_vec1" : 50
@@ -11472,7 +11472,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL vector_search.search('Do'c\\x_emb'e\\d \"x\"_vector', $_cy_vec1, $_cy_vec2)\nYIELD node, distance\nWITH node AS doc, 1.0 - distance / 2.0 AS _score",
+      "cypher" : "CALL vector_search.search('Do\\'c\\\\x_emb\\'e\\\\d \"x\"_vector', $_cy_vec1, $_cy_vec2)\nYIELD node, distance\nWITH node AS doc, 1.0 - distance / 2.0 AS _score",
       "labelCheck" : "doc:`Do'c\\x`:`Ch\"un``k`",
       "parameters" : {
         "_cy_vec1" : 50
@@ -11492,7 +11492,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL db.idx.vector.queryNodes('Do'c\\x', 'emb'e\\d \"x\"', $_cy_vec1, vecf32($_cy_vec2))\nYIELD node, score\nWITH node AS n, 1.0 - score / 2.0 AS _score",
+      "cypher" : "CALL db.idx.vector.queryNodes('Do\\'c\\\\x', 'emb\\'e\\\\d \"x\"', $_cy_vec1, vecf32($_cy_vec2))\nYIELD node, score\nWITH node AS n, 1.0 - score / 2.0 AS _score",
       "labelCheck" : "n:`Do'c\\x`:`Ch\"un``k`",
       "parameters" : {
         "_cy_vec1" : 50
@@ -11513,7 +11513,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL db.idx.vector.queryNodes('Do'c\\x', 'emb'e\\d \"x\"', $_cy_vec1, vecf32($_cy_vec2))\nYIELD node, score\nWITH node AS doc, 1.0 - score / 2.0 AS _score",
+      "cypher" : "CALL db.idx.vector.queryNodes('Do\\'c\\\\x', 'emb\\'e\\\\d \"x\"', $_cy_vec1, vecf32($_cy_vec2))\nYIELD node, score\nWITH node AS doc, 1.0 - score / 2.0 AS _score",
       "labelCheck" : "doc:`Do'c\\x`:`Ch\"un``k`",
       "parameters" : {
         "_cy_vec1" : 50
@@ -11785,7 +11785,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL db.idx.vector.queryNodes($_cy_vec1, 'emb'e\\d \"x\"', $_cy_vec2, vecf32($_cy_vec3))\nYIELD node, score\nWITH node AS n, 1.0 - score / 2.0 AS _score",
+      "cypher" : "CALL db.idx.vector.queryNodes($_cy_vec1, 'emb\\'e\\\\d \"x\"', $_cy_vec2, vecf32($_cy_vec3))\nYIELD node, score\nWITH node AS n, 1.0 - score / 2.0 AS _score",
       "labelCheck" : "n:`Do'c\\x`:`Ch\"un``k`",
       "parameters" : {
         "_cy_vec1" : "Tenant7",
@@ -11807,7 +11807,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL db.idx.vector.queryNodes($_cy_vec1, 'emb'e\\d \"x\"', $_cy_vec2, vecf32($_cy_vec3))\nYIELD node, score\nWITH node AS doc, 1.0 - score / 2.0 AS _score",
+      "cypher" : "CALL db.idx.vector.queryNodes($_cy_vec1, 'emb\\'e\\\\d \"x\"', $_cy_vec2, vecf32($_cy_vec3))\nYIELD node, score\nWITH node AS doc, 1.0 - score / 2.0 AS _score",
       "labelCheck" : "doc:`Do'c\\x`:`Ch\"un``k`",
       "parameters" : {
         "_cy_vec1" : "Tenant7",
@@ -12092,7 +12092,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL db.idx.vector.queryNodes($_cy_vec1, 'emb'e\\d \"x\"', $_cy_vec2, vecf32($_cy_vec3))\nYIELD node, score\nWITH node AS n, 1.0 - score / 2.0 AS _score",
+      "cypher" : "CALL db.idx.vector.queryNodes($_cy_vec1, 'emb\\'e\\\\d \"x\"', $_cy_vec2, vecf32($_cy_vec3))\nYIELD node, score\nWITH node AS n, 1.0 - score / 2.0 AS _score",
       "labelCheck" : "n:`Do'c\\x`:`Ch\"un``k`",
       "parameters" : {
         "_cy_vec1" : "Tenant7",
@@ -12115,7 +12115,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL db.idx.vector.queryNodes($_cy_vec1, 'emb'e\\d \"x\"', $_cy_vec2, vecf32($_cy_vec3))\nYIELD node, score\nWITH node AS doc, 1.0 - score / 2.0 AS _score",
+      "cypher" : "CALL db.idx.vector.queryNodes($_cy_vec1, 'emb\\'e\\\\d \"x\"', $_cy_vec2, vecf32($_cy_vec3))\nYIELD node, score\nWITH node AS doc, 1.0 - score / 2.0 AS _score",
       "labelCheck" : "doc:`Do'c\\x`:`Ch\"un``k`",
       "parameters" : {
         "_cy_vec1" : "Tenant7",
@@ -12388,7 +12388,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL db.idx.vector.queryNodes($_cy_vec1, 'emb'e\\d \"x\"', $_cy_vec2, vecf32($_cy_vec3))\nYIELD node, score\nWITH node AS n, 1.0 - score / 2.0 AS _score",
+      "cypher" : "CALL db.idx.vector.queryNodes($_cy_vec1, 'emb\\'e\\\\d \"x\"', $_cy_vec2, vecf32($_cy_vec3))\nYIELD node, score\nWITH node AS n, 1.0 - score / 2.0 AS _score",
       "labelCheck" : "n:`Do'c\\x`:`Ch\"un``k`",
       "parameters" : {
         "_cy_vec1" : "Ten'ant\\9",
@@ -12410,7 +12410,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL db.idx.vector.queryNodes($_cy_vec1, 'emb'e\\d \"x\"', $_cy_vec2, vecf32($_cy_vec3))\nYIELD node, score\nWITH node AS doc, 1.0 - score / 2.0 AS _score",
+      "cypher" : "CALL db.idx.vector.queryNodes($_cy_vec1, 'emb\\'e\\\\d \"x\"', $_cy_vec2, vecf32($_cy_vec3))\nYIELD node, score\nWITH node AS doc, 1.0 - score / 2.0 AS _score",
       "labelCheck" : "doc:`Do'c\\x`:`Ch\"un``k`",
       "parameters" : {
         "_cy_vec1" : "Ten'ant\\9",
@@ -12695,7 +12695,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL db.idx.vector.queryNodes($_cy_vec1, 'emb'e\\d \"x\"', $_cy_vec2, vecf32($_cy_vec3))\nYIELD node, score\nWITH node AS n, 1.0 - score / 2.0 AS _score",
+      "cypher" : "CALL db.idx.vector.queryNodes($_cy_vec1, 'emb\\'e\\\\d \"x\"', $_cy_vec2, vecf32($_cy_vec3))\nYIELD node, score\nWITH node AS n, 1.0 - score / 2.0 AS _score",
       "labelCheck" : "n:`Do'c\\x`:`Ch\"un``k`",
       "parameters" : {
         "_cy_vec1" : "Ten'ant\\9",
@@ -12718,7 +12718,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL db.idx.vector.queryNodes($_cy_vec1, 'emb'e\\d \"x\"', $_cy_vec2, vecf32($_cy_vec3))\nYIELD node, score\nWITH node AS doc, 1.0 - score / 2.0 AS _score",
+      "cypher" : "CALL db.idx.vector.queryNodes($_cy_vec1, 'emb\\'e\\\\d \"x\"', $_cy_vec2, vecf32($_cy_vec3))\nYIELD node, score\nWITH node AS doc, 1.0 - score / 2.0 AS _score",
       "labelCheck" : "doc:`Do'c\\x`:`Ch\"un``k`",
       "parameters" : {
         "_cy_vec1" : "Ten'ant\\9",
@@ -12875,7 +12875,7 @@
       }
     },
     "answer" : {
-      "cypher" : "UNWIND $_cy_vec1 AS _seedId\nMATCH (seed:Do'c\\x:Ch\"un`k)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL db.index.vector.queryNodes('Do'c\\x_emb'e\\d \"x\"_vector', $_cy_vec2, seed.`emb'e\\d \"x\"`)\nYIELD node\nWITH _seedId, node AS n, vector.similarity.cosine(node.`emb'e\\d \"x\"`, seed.`emb'e\\d \"x\"`) AS _score\nWHERE n:`Do'c\\x`:`Ch\"un``k`\nWITH _seedId, n, _score\nORDER BY _score DESC\nWITH _seedId, collect({id: n.`i'd\\`, score: _score}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.id IN $_cy_vec1 AND m.id <> _seedId][0..$_cy_vec3]} AS row",
+      "cypher" : "UNWIND $_cy_vec1 AS _seedId\nMATCH (seed:`Do'c\\x`:`Ch\"un``k`)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL db.index.vector.queryNodes('Do\\'c\\\\x_emb\\'e\\\\d \"x\"_vector', $_cy_vec2, seed.`emb'e\\d \"x\"`)\nYIELD node\nWITH _seedId, node AS n, vector.similarity.cosine(node.`emb'e\\d \"x\"`, seed.`emb'e\\d \"x\"`) AS _score\nWHERE n:`Do'c\\x`:`Ch\"un``k`\nWITH _seedId, n, _score\nORDER BY _score DESC\nWITH _seedId, collect({id: n.`i'd\\`, score: _score}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.id IN $_cy_vec1 AND m.id <> _seedId][0..$_cy_vec3]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : 40,
@@ -12898,7 +12898,7 @@
       }
     },
     "answer" : {
-      "cypher" : "UNWIND $_cy_vec1 AS _seedId\nMATCH (seed:Do'c\\x:Ch\"un`k)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL vector_search.search('Do'c\\x_emb'e\\d \"x\"_vector', $_cy_vec2, seed.`emb'e\\d \"x\"`)\nYIELD node, distance\nWITH _seedId, node AS n, 1.0 - distance / 2.0 AS _score\nWHERE n:`Do'c\\x`:`Ch\"un``k`\nWITH _seedId, n, _score\nORDER BY _score DESC\nWITH _seedId, collect({id: n.`i'd\\`, score: _score}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.id IN $_cy_vec1 AND m.id <> _seedId][0..$_cy_vec3]} AS row",
+      "cypher" : "UNWIND $_cy_vec1 AS _seedId\nMATCH (seed:`Do'c\\x`:`Ch\"un``k`)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL vector_search.search('Do\\'c\\\\x_emb\\'e\\\\d \"x\"_vector', $_cy_vec2, seed.`emb'e\\d \"x\"`)\nYIELD node, distance\nWITH _seedId, node AS n, 1.0 - distance / 2.0 AS _score\nWHERE n:`Do'c\\x`:`Ch\"un``k`\nWITH _seedId, n, _score\nORDER BY _score DESC\nWITH _seedId, collect({id: n.`i'd\\`, score: _score}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.id IN $_cy_vec1 AND m.id <> _seedId][0..$_cy_vec3]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : 40,
@@ -12921,7 +12921,7 @@
       }
     },
     "answer" : {
-      "cypher" : "UNWIND $_cy_vec1 AS _seedId\nMATCH (seed:Do'c\\x:Ch\"un`k)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL db.idx.vector.queryNodes('Do'c\\x', 'emb'e\\d \"x\"', $_cy_vec2, seed.`emb'e\\d \"x\"`)\nYIELD node, score\nWITH _seedId, node AS n, 1.0 - score / 2.0 AS _score\nWHERE n:`Do'c\\x`:`Ch\"un``k`\nWITH _seedId, n, _score\nORDER BY _score DESC\nWITH _seedId, collect({id: n.`i'd\\`, score: _score}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.id IN $_cy_vec1 AND m.id <> _seedId][0..$_cy_vec3]} AS row",
+      "cypher" : "UNWIND $_cy_vec1 AS _seedId\nMATCH (seed:`Do'c\\x`:`Ch\"un``k`)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL db.idx.vector.queryNodes('Do\\'c\\\\x', 'emb\\'e\\\\d \"x\"', $_cy_vec2, seed.`emb'e\\d \"x\"`)\nYIELD node, score\nWITH _seedId, node AS n, 1.0 - score / 2.0 AS _score\nWHERE n:`Do'c\\x`:`Ch\"un``k`\nWITH _seedId, n, _score\nORDER BY _score DESC\nWITH _seedId, collect({id: n.`i'd\\`, score: _score}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.id IN $_cy_vec1 AND m.id <> _seedId][0..$_cy_vec3]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : 40,
@@ -13088,7 +13088,7 @@
       }
     },
     "answer" : {
-      "cypher" : "UNWIND $_cy_vec1 AS _seedId\nMATCH (seed:Do'c\\x:Ch\"un`k)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL db.index.vector.queryNodes('Do'c\\x_emb'e\\d \"x\"_vector', $_cy_vec2, seed.`emb'e\\d \"x\"`)\nYIELD node\nWITH _seedId, node AS n, vector.similarity.cosine(node.`emb'e\\d \"x\"`, seed.`emb'e\\d \"x\"`) AS _score\nWHERE n:`Do'c\\x`:`Ch\"un``k`\nWITH _seedId, n, _score\nORDER BY _score DESC\nWITH _seedId, collect({id: n.`i'd\\`, score: _score}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.id IN $_cy_vec1 AND m.id <> _seedId AND m.score >= $_cy_vec3][0..$_cy_vec4]} AS row",
+      "cypher" : "UNWIND $_cy_vec1 AS _seedId\nMATCH (seed:`Do'c\\x`:`Ch\"un``k`)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL db.index.vector.queryNodes('Do\\'c\\\\x_emb\\'e\\\\d \"x\"_vector', $_cy_vec2, seed.`emb'e\\d \"x\"`)\nYIELD node\nWITH _seedId, node AS n, vector.similarity.cosine(node.`emb'e\\d \"x\"`, seed.`emb'e\\d \"x\"`) AS _score\nWHERE n:`Do'c\\x`:`Ch\"un``k`\nWITH _seedId, n, _score\nORDER BY _score DESC\nWITH _seedId, collect({id: n.`i'd\\`, score: _score}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.id IN $_cy_vec1 AND m.id <> _seedId AND m.score >= $_cy_vec3][0..$_cy_vec4]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : 40,
@@ -13113,7 +13113,7 @@
       }
     },
     "answer" : {
-      "cypher" : "UNWIND $_cy_vec1 AS _seedId\nMATCH (seed:Do'c\\x:Ch\"un`k)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL vector_search.search('Do'c\\x_emb'e\\d \"x\"_vector', $_cy_vec2, seed.`emb'e\\d \"x\"`)\nYIELD node, distance\nWITH _seedId, node AS n, 1.0 - distance / 2.0 AS _score\nWHERE n:`Do'c\\x`:`Ch\"un``k`\nWITH _seedId, n, _score\nORDER BY _score DESC\nWITH _seedId, collect({id: n.`i'd\\`, score: _score}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.id IN $_cy_vec1 AND m.id <> _seedId AND m.score >= $_cy_vec3][0..$_cy_vec4]} AS row",
+      "cypher" : "UNWIND $_cy_vec1 AS _seedId\nMATCH (seed:`Do'c\\x`:`Ch\"un``k`)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL vector_search.search('Do\\'c\\\\x_emb\\'e\\\\d \"x\"_vector', $_cy_vec2, seed.`emb'e\\d \"x\"`)\nYIELD node, distance\nWITH _seedId, node AS n, 1.0 - distance / 2.0 AS _score\nWHERE n:`Do'c\\x`:`Ch\"un``k`\nWITH _seedId, n, _score\nORDER BY _score DESC\nWITH _seedId, collect({id: n.`i'd\\`, score: _score}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.id IN $_cy_vec1 AND m.id <> _seedId AND m.score >= $_cy_vec3][0..$_cy_vec4]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : 40,
@@ -13138,7 +13138,7 @@
       }
     },
     "answer" : {
-      "cypher" : "UNWIND $_cy_vec1 AS _seedId\nMATCH (seed:Do'c\\x:Ch\"un`k)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL db.idx.vector.queryNodes('Do'c\\x', 'emb'e\\d \"x\"', $_cy_vec2, seed.`emb'e\\d \"x\"`)\nYIELD node, score\nWITH _seedId, node AS n, 1.0 - score / 2.0 AS _score\nWHERE n:`Do'c\\x`:`Ch\"un``k`\nWITH _seedId, n, _score\nORDER BY _score DESC\nWITH _seedId, collect({id: n.`i'd\\`, score: _score}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.id IN $_cy_vec1 AND m.id <> _seedId AND m.score >= $_cy_vec3][0..$_cy_vec4]} AS row",
+      "cypher" : "UNWIND $_cy_vec1 AS _seedId\nMATCH (seed:`Do'c\\x`:`Ch\"un``k`)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL db.idx.vector.queryNodes('Do\\'c\\\\x', 'emb\\'e\\\\d \"x\"', $_cy_vec2, seed.`emb'e\\d \"x\"`)\nYIELD node, score\nWITH _seedId, node AS n, 1.0 - score / 2.0 AS _score\nWHERE n:`Do'c\\x`:`Ch\"un``k`\nWITH _seedId, n, _score\nORDER BY _score DESC\nWITH _seedId, collect({id: n.`i'd\\`, score: _score}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.id IN $_cy_vec1 AND m.id <> _seedId AND m.score >= $_cy_vec3][0..$_cy_vec4]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : 40,
@@ -13317,7 +13317,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL db.index.vector.queryNodes('Do'c\\x_emb'e\\d \"x\"_vector', $_cy_vec1, $_cy_vec2)\nYIELD node, score\nWITH node AS n, score AS _score",
+      "cypher" : "CALL db.index.vector.queryNodes('Do\\'c\\\\x_emb\\'e\\\\d \"x\"_vector', $_cy_vec1, $_cy_vec2)\nYIELD node, score\nWITH node AS n, score AS _score",
       "labelCheck" : "n:`Do'c\\x`:`Ch\"un``k`",
       "parameters" : {
         "_cy_vec1" : 10
@@ -13337,7 +13337,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL db.index.vector.queryNodes('Do'c\\x_emb'e\\d \"x\"_vector', $_cy_vec1, $_cy_vec2)\nYIELD node, score\nWITH node AS doc, score AS _score",
+      "cypher" : "CALL db.index.vector.queryNodes('Do\\'c\\\\x_emb\\'e\\\\d \"x\"_vector', $_cy_vec1, $_cy_vec2)\nYIELD node, score\nWITH node AS doc, score AS _score",
       "labelCheck" : "doc:`Do'c\\x`:`Ch\"un``k`",
       "parameters" : {
         "_cy_vec1" : 10
@@ -13356,7 +13356,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL vector_search.search('Do'c\\x_emb'e\\d \"x\"_vector', $_cy_vec1, $_cy_vec2)\nYIELD node, distance\nWITH node AS n, 1.0 / (1.0 + distance) AS _score",
+      "cypher" : "CALL vector_search.search('Do\\'c\\\\x_emb\\'e\\\\d \"x\"_vector', $_cy_vec1, $_cy_vec2)\nYIELD node, distance\nWITH node AS n, 1.0 / (1.0 + distance) AS _score",
       "labelCheck" : "n:`Do'c\\x`:`Ch\"un``k`",
       "parameters" : {
         "_cy_vec1" : 10
@@ -13376,7 +13376,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL vector_search.search('Do'c\\x_emb'e\\d \"x\"_vector', $_cy_vec1, $_cy_vec2)\nYIELD node, distance\nWITH node AS doc, 1.0 / (1.0 + distance) AS _score",
+      "cypher" : "CALL vector_search.search('Do\\'c\\\\x_emb\\'e\\\\d \"x\"_vector', $_cy_vec1, $_cy_vec2)\nYIELD node, distance\nWITH node AS doc, 1.0 / (1.0 + distance) AS _score",
       "labelCheck" : "doc:`Do'c\\x`:`Ch\"un``k`",
       "parameters" : {
         "_cy_vec1" : 10
@@ -13395,7 +13395,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL db.idx.vector.queryNodes('Do'c\\x', 'emb'e\\d \"x\"', $_cy_vec1, vecf32($_cy_vec2))\nYIELD node, score\nWITH node AS n, 1.0 / (1.0 + score * score) AS _score",
+      "cypher" : "CALL db.idx.vector.queryNodes('Do\\'c\\\\x', 'emb\\'e\\\\d \"x\"', $_cy_vec1, vecf32($_cy_vec2))\nYIELD node, score\nWITH node AS n, 1.0 / (1.0 + score * score) AS _score",
       "labelCheck" : "n:`Do'c\\x`:`Ch\"un``k`",
       "parameters" : {
         "_cy_vec1" : 10
@@ -13415,7 +13415,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL db.idx.vector.queryNodes('Do'c\\x', 'emb'e\\d \"x\"', $_cy_vec1, vecf32($_cy_vec2))\nYIELD node, score\nWITH node AS doc, 1.0 / (1.0 + score * score) AS _score",
+      "cypher" : "CALL db.idx.vector.queryNodes('Do\\'c\\\\x', 'emb\\'e\\\\d \"x\"', $_cy_vec1, vecf32($_cy_vec2))\nYIELD node, score\nWITH node AS doc, 1.0 / (1.0 + score * score) AS _score",
       "labelCheck" : "doc:`Do'c\\x`:`Ch\"un``k`",
       "parameters" : {
         "_cy_vec1" : 10
@@ -13601,7 +13601,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL db.index.vector.queryNodes('Do'c\\x_emb'e\\d \"x\"_vector', $_cy_vec1, $_cy_vec2)\nYIELD node\nWITH node AS n, vector.similarity.euclidean(node.`emb'e\\d \"x\"`, $_cy_vec2) AS _score",
+      "cypher" : "CALL db.index.vector.queryNodes('Do\\'c\\\\x_emb\\'e\\\\d \"x\"_vector', $_cy_vec1, $_cy_vec2)\nYIELD node\nWITH node AS n, vector.similarity.euclidean(node.`emb'e\\d \"x\"`, $_cy_vec2) AS _score",
       "labelCheck" : "n:`Do'c\\x`:`Ch\"un``k`",
       "parameters" : {
         "_cy_vec1" : 50
@@ -13622,7 +13622,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL db.index.vector.queryNodes('Do'c\\x_emb'e\\d \"x\"_vector', $_cy_vec1, $_cy_vec2)\nYIELD node\nWITH node AS doc, vector.similarity.euclidean(node.`emb'e\\d \"x\"`, $_cy_vec2) AS _score",
+      "cypher" : "CALL db.index.vector.queryNodes('Do\\'c\\\\x_emb\\'e\\\\d \"x\"_vector', $_cy_vec1, $_cy_vec2)\nYIELD node\nWITH node AS doc, vector.similarity.euclidean(node.`emb'e\\d \"x\"`, $_cy_vec2) AS _score",
       "labelCheck" : "doc:`Do'c\\x`:`Ch\"un``k`",
       "parameters" : {
         "_cy_vec1" : 50
@@ -13642,7 +13642,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL vector_search.search('Do'c\\x_emb'e\\d \"x\"_vector', $_cy_vec1, $_cy_vec2)\nYIELD node, distance\nWITH node AS n, 1.0 / (1.0 + distance) AS _score",
+      "cypher" : "CALL vector_search.search('Do\\'c\\\\x_emb\\'e\\\\d \"x\"_vector', $_cy_vec1, $_cy_vec2)\nYIELD node, distance\nWITH node AS n, 1.0 / (1.0 + distance) AS _score",
       "labelCheck" : "n:`Do'c\\x`:`Ch\"un``k`",
       "parameters" : {
         "_cy_vec1" : 50
@@ -13663,7 +13663,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL vector_search.search('Do'c\\x_emb'e\\d \"x\"_vector', $_cy_vec1, $_cy_vec2)\nYIELD node, distance\nWITH node AS doc, 1.0 / (1.0 + distance) AS _score",
+      "cypher" : "CALL vector_search.search('Do\\'c\\\\x_emb\\'e\\\\d \"x\"_vector', $_cy_vec1, $_cy_vec2)\nYIELD node, distance\nWITH node AS doc, 1.0 / (1.0 + distance) AS _score",
       "labelCheck" : "doc:`Do'c\\x`:`Ch\"un``k`",
       "parameters" : {
         "_cy_vec1" : 50
@@ -13683,7 +13683,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL db.idx.vector.queryNodes('Do'c\\x', 'emb'e\\d \"x\"', $_cy_vec1, vecf32($_cy_vec2))\nYIELD node, score\nWITH node AS n, 1.0 / (1.0 + score * score) AS _score",
+      "cypher" : "CALL db.idx.vector.queryNodes('Do\\'c\\\\x', 'emb\\'e\\\\d \"x\"', $_cy_vec1, vecf32($_cy_vec2))\nYIELD node, score\nWITH node AS n, 1.0 / (1.0 + score * score) AS _score",
       "labelCheck" : "n:`Do'c\\x`:`Ch\"un``k`",
       "parameters" : {
         "_cy_vec1" : 50
@@ -13704,7 +13704,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL db.idx.vector.queryNodes('Do'c\\x', 'emb'e\\d \"x\"', $_cy_vec1, vecf32($_cy_vec2))\nYIELD node, score\nWITH node AS doc, 1.0 / (1.0 + score * score) AS _score",
+      "cypher" : "CALL db.idx.vector.queryNodes('Do\\'c\\\\x', 'emb\\'e\\\\d \"x\"', $_cy_vec1, vecf32($_cy_vec2))\nYIELD node, score\nWITH node AS doc, 1.0 / (1.0 + score * score) AS _score",
       "labelCheck" : "doc:`Do'c\\x`:`Ch\"un``k`",
       "parameters" : {
         "_cy_vec1" : 50
@@ -13976,7 +13976,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL db.idx.vector.queryNodes($_cy_vec1, 'emb'e\\d \"x\"', $_cy_vec2, vecf32($_cy_vec3))\nYIELD node, score\nWITH node AS n, 1.0 / (1.0 + score * score) AS _score",
+      "cypher" : "CALL db.idx.vector.queryNodes($_cy_vec1, 'emb\\'e\\\\d \"x\"', $_cy_vec2, vecf32($_cy_vec3))\nYIELD node, score\nWITH node AS n, 1.0 / (1.0 + score * score) AS _score",
       "labelCheck" : "n:`Do'c\\x`:`Ch\"un``k`",
       "parameters" : {
         "_cy_vec1" : "Tenant7",
@@ -13998,7 +13998,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL db.idx.vector.queryNodes($_cy_vec1, 'emb'e\\d \"x\"', $_cy_vec2, vecf32($_cy_vec3))\nYIELD node, score\nWITH node AS doc, 1.0 / (1.0 + score * score) AS _score",
+      "cypher" : "CALL db.idx.vector.queryNodes($_cy_vec1, 'emb\\'e\\\\d \"x\"', $_cy_vec2, vecf32($_cy_vec3))\nYIELD node, score\nWITH node AS doc, 1.0 / (1.0 + score * score) AS _score",
       "labelCheck" : "doc:`Do'c\\x`:`Ch\"un``k`",
       "parameters" : {
         "_cy_vec1" : "Tenant7",
@@ -14283,7 +14283,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL db.idx.vector.queryNodes($_cy_vec1, 'emb'e\\d \"x\"', $_cy_vec2, vecf32($_cy_vec3))\nYIELD node, score\nWITH node AS n, 1.0 / (1.0 + score * score) AS _score",
+      "cypher" : "CALL db.idx.vector.queryNodes($_cy_vec1, 'emb\\'e\\\\d \"x\"', $_cy_vec2, vecf32($_cy_vec3))\nYIELD node, score\nWITH node AS n, 1.0 / (1.0 + score * score) AS _score",
       "labelCheck" : "n:`Do'c\\x`:`Ch\"un``k`",
       "parameters" : {
         "_cy_vec1" : "Tenant7",
@@ -14306,7 +14306,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL db.idx.vector.queryNodes($_cy_vec1, 'emb'e\\d \"x\"', $_cy_vec2, vecf32($_cy_vec3))\nYIELD node, score\nWITH node AS doc, 1.0 / (1.0 + score * score) AS _score",
+      "cypher" : "CALL db.idx.vector.queryNodes($_cy_vec1, 'emb\\'e\\\\d \"x\"', $_cy_vec2, vecf32($_cy_vec3))\nYIELD node, score\nWITH node AS doc, 1.0 / (1.0 + score * score) AS _score",
       "labelCheck" : "doc:`Do'c\\x`:`Ch\"un``k`",
       "parameters" : {
         "_cy_vec1" : "Tenant7",
@@ -14579,7 +14579,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL db.idx.vector.queryNodes($_cy_vec1, 'emb'e\\d \"x\"', $_cy_vec2, vecf32($_cy_vec3))\nYIELD node, score\nWITH node AS n, 1.0 / (1.0 + score * score) AS _score",
+      "cypher" : "CALL db.idx.vector.queryNodes($_cy_vec1, 'emb\\'e\\\\d \"x\"', $_cy_vec2, vecf32($_cy_vec3))\nYIELD node, score\nWITH node AS n, 1.0 / (1.0 + score * score) AS _score",
       "labelCheck" : "n:`Do'c\\x`:`Ch\"un``k`",
       "parameters" : {
         "_cy_vec1" : "Ten'ant\\9",
@@ -14601,7 +14601,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL db.idx.vector.queryNodes($_cy_vec1, 'emb'e\\d \"x\"', $_cy_vec2, vecf32($_cy_vec3))\nYIELD node, score\nWITH node AS doc, 1.0 / (1.0 + score * score) AS _score",
+      "cypher" : "CALL db.idx.vector.queryNodes($_cy_vec1, 'emb\\'e\\\\d \"x\"', $_cy_vec2, vecf32($_cy_vec3))\nYIELD node, score\nWITH node AS doc, 1.0 / (1.0 + score * score) AS _score",
       "labelCheck" : "doc:`Do'c\\x`:`Ch\"un``k`",
       "parameters" : {
         "_cy_vec1" : "Ten'ant\\9",
@@ -14886,7 +14886,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL db.idx.vector.queryNodes($_cy_vec1, 'emb'e\\d \"x\"', $_cy_vec2, vecf32($_cy_vec3))\nYIELD node, score\nWITH node AS n, 1.0 / (1.0 + score * score) AS _score",
+      "cypher" : "CALL db.idx.vector.queryNodes($_cy_vec1, 'emb\\'e\\\\d \"x\"', $_cy_vec2, vecf32($_cy_vec3))\nYIELD node, score\nWITH node AS n, 1.0 / (1.0 + score * score) AS _score",
       "labelCheck" : "n:`Do'c\\x`:`Ch\"un``k`",
       "parameters" : {
         "_cy_vec1" : "Ten'ant\\9",
@@ -14909,7 +14909,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL db.idx.vector.queryNodes($_cy_vec1, 'emb'e\\d \"x\"', $_cy_vec2, vecf32($_cy_vec3))\nYIELD node, score\nWITH node AS doc, 1.0 / (1.0 + score * score) AS _score",
+      "cypher" : "CALL db.idx.vector.queryNodes($_cy_vec1, 'emb\\'e\\\\d \"x\"', $_cy_vec2, vecf32($_cy_vec3))\nYIELD node, score\nWITH node AS doc, 1.0 / (1.0 + score * score) AS _score",
       "labelCheck" : "doc:`Do'c\\x`:`Ch\"un``k`",
       "parameters" : {
         "_cy_vec1" : "Ten'ant\\9",
@@ -15066,7 +15066,7 @@
       }
     },
     "answer" : {
-      "cypher" : "UNWIND $_cy_vec1 AS _seedId\nMATCH (seed:Do'c\\x:Ch\"un`k)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL db.index.vector.queryNodes('Do'c\\x_emb'e\\d \"x\"_vector', $_cy_vec2, seed.`emb'e\\d \"x\"`)\nYIELD node\nWITH _seedId, node AS n, vector.similarity.euclidean(node.`emb'e\\d \"x\"`, seed.`emb'e\\d \"x\"`) AS _score\nWHERE n:`Do'c\\x`:`Ch\"un``k`\nWITH _seedId, n, _score\nORDER BY _score DESC\nWITH _seedId, collect({id: n.`i'd\\`, score: _score}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.id IN $_cy_vec1 AND m.id <> _seedId][0..$_cy_vec3]} AS row",
+      "cypher" : "UNWIND $_cy_vec1 AS _seedId\nMATCH (seed:`Do'c\\x`:`Ch\"un``k`)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL db.index.vector.queryNodes('Do\\'c\\\\x_emb\\'e\\\\d \"x\"_vector', $_cy_vec2, seed.`emb'e\\d \"x\"`)\nYIELD node\nWITH _seedId, node AS n, vector.similarity.euclidean(node.`emb'e\\d \"x\"`, seed.`emb'e\\d \"x\"`) AS _score\nWHERE n:`Do'c\\x`:`Ch\"un``k`\nWITH _seedId, n, _score\nORDER BY _score DESC\nWITH _seedId, collect({id: n.`i'd\\`, score: _score}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.id IN $_cy_vec1 AND m.id <> _seedId][0..$_cy_vec3]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : 40,
@@ -15089,7 +15089,7 @@
       }
     },
     "answer" : {
-      "cypher" : "UNWIND $_cy_vec1 AS _seedId\nMATCH (seed:Do'c\\x:Ch\"un`k)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL vector_search.search('Do'c\\x_emb'e\\d \"x\"_vector', $_cy_vec2, seed.`emb'e\\d \"x\"`)\nYIELD node, distance\nWITH _seedId, node AS n, 1.0 / (1.0 + distance) AS _score\nWHERE n:`Do'c\\x`:`Ch\"un``k`\nWITH _seedId, n, _score\nORDER BY _score DESC\nWITH _seedId, collect({id: n.`i'd\\`, score: _score}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.id IN $_cy_vec1 AND m.id <> _seedId][0..$_cy_vec3]} AS row",
+      "cypher" : "UNWIND $_cy_vec1 AS _seedId\nMATCH (seed:`Do'c\\x`:`Ch\"un``k`)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL vector_search.search('Do\\'c\\\\x_emb\\'e\\\\d \"x\"_vector', $_cy_vec2, seed.`emb'e\\d \"x\"`)\nYIELD node, distance\nWITH _seedId, node AS n, 1.0 / (1.0 + distance) AS _score\nWHERE n:`Do'c\\x`:`Ch\"un``k`\nWITH _seedId, n, _score\nORDER BY _score DESC\nWITH _seedId, collect({id: n.`i'd\\`, score: _score}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.id IN $_cy_vec1 AND m.id <> _seedId][0..$_cy_vec3]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : 40,
@@ -15112,7 +15112,7 @@
       }
     },
     "answer" : {
-      "cypher" : "UNWIND $_cy_vec1 AS _seedId\nMATCH (seed:Do'c\\x:Ch\"un`k)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL db.idx.vector.queryNodes('Do'c\\x', 'emb'e\\d \"x\"', $_cy_vec2, seed.`emb'e\\d \"x\"`)\nYIELD node, score\nWITH _seedId, node AS n, 1.0 / (1.0 + score * score) AS _score\nWHERE n:`Do'c\\x`:`Ch\"un``k`\nWITH _seedId, n, _score\nORDER BY _score DESC\nWITH _seedId, collect({id: n.`i'd\\`, score: _score}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.id IN $_cy_vec1 AND m.id <> _seedId][0..$_cy_vec3]} AS row",
+      "cypher" : "UNWIND $_cy_vec1 AS _seedId\nMATCH (seed:`Do'c\\x`:`Ch\"un``k`)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL db.idx.vector.queryNodes('Do\\'c\\\\x', 'emb\\'e\\\\d \"x\"', $_cy_vec2, seed.`emb'e\\d \"x\"`)\nYIELD node, score\nWITH _seedId, node AS n, 1.0 / (1.0 + score * score) AS _score\nWHERE n:`Do'c\\x`:`Ch\"un``k`\nWITH _seedId, n, _score\nORDER BY _score DESC\nWITH _seedId, collect({id: n.`i'd\\`, score: _score}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.id IN $_cy_vec1 AND m.id <> _seedId][0..$_cy_vec3]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : 40,
@@ -15279,7 +15279,7 @@
       }
     },
     "answer" : {
-      "cypher" : "UNWIND $_cy_vec1 AS _seedId\nMATCH (seed:Do'c\\x:Ch\"un`k)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL db.index.vector.queryNodes('Do'c\\x_emb'e\\d \"x\"_vector', $_cy_vec2, seed.`emb'e\\d \"x\"`)\nYIELD node\nWITH _seedId, node AS n, vector.similarity.euclidean(node.`emb'e\\d \"x\"`, seed.`emb'e\\d \"x\"`) AS _score\nWHERE n:`Do'c\\x`:`Ch\"un``k`\nWITH _seedId, n, _score\nORDER BY _score DESC\nWITH _seedId, collect({id: n.`i'd\\`, score: _score}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.id IN $_cy_vec1 AND m.id <> _seedId AND m.score >= $_cy_vec3][0..$_cy_vec4]} AS row",
+      "cypher" : "UNWIND $_cy_vec1 AS _seedId\nMATCH (seed:`Do'c\\x`:`Ch\"un``k`)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL db.index.vector.queryNodes('Do\\'c\\\\x_emb\\'e\\\\d \"x\"_vector', $_cy_vec2, seed.`emb'e\\d \"x\"`)\nYIELD node\nWITH _seedId, node AS n, vector.similarity.euclidean(node.`emb'e\\d \"x\"`, seed.`emb'e\\d \"x\"`) AS _score\nWHERE n:`Do'c\\x`:`Ch\"un``k`\nWITH _seedId, n, _score\nORDER BY _score DESC\nWITH _seedId, collect({id: n.`i'd\\`, score: _score}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.id IN $_cy_vec1 AND m.id <> _seedId AND m.score >= $_cy_vec3][0..$_cy_vec4]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : 40,
@@ -15304,7 +15304,7 @@
       }
     },
     "answer" : {
-      "cypher" : "UNWIND $_cy_vec1 AS _seedId\nMATCH (seed:Do'c\\x:Ch\"un`k)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL vector_search.search('Do'c\\x_emb'e\\d \"x\"_vector', $_cy_vec2, seed.`emb'e\\d \"x\"`)\nYIELD node, distance\nWITH _seedId, node AS n, 1.0 / (1.0 + distance) AS _score\nWHERE n:`Do'c\\x`:`Ch\"un``k`\nWITH _seedId, n, _score\nORDER BY _score DESC\nWITH _seedId, collect({id: n.`i'd\\`, score: _score}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.id IN $_cy_vec1 AND m.id <> _seedId AND m.score >= $_cy_vec3][0..$_cy_vec4]} AS row",
+      "cypher" : "UNWIND $_cy_vec1 AS _seedId\nMATCH (seed:`Do'c\\x`:`Ch\"un``k`)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL vector_search.search('Do\\'c\\\\x_emb\\'e\\\\d \"x\"_vector', $_cy_vec2, seed.`emb'e\\d \"x\"`)\nYIELD node, distance\nWITH _seedId, node AS n, 1.0 / (1.0 + distance) AS _score\nWHERE n:`Do'c\\x`:`Ch\"un``k`\nWITH _seedId, n, _score\nORDER BY _score DESC\nWITH _seedId, collect({id: n.`i'd\\`, score: _score}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.id IN $_cy_vec1 AND m.id <> _seedId AND m.score >= $_cy_vec3][0..$_cy_vec4]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : 40,
@@ -15329,7 +15329,7 @@
       }
     },
     "answer" : {
-      "cypher" : "UNWIND $_cy_vec1 AS _seedId\nMATCH (seed:Do'c\\x:Ch\"un`k)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL db.idx.vector.queryNodes('Do'c\\x', 'emb'e\\d \"x\"', $_cy_vec2, seed.`emb'e\\d \"x\"`)\nYIELD node, score\nWITH _seedId, node AS n, 1.0 / (1.0 + score * score) AS _score\nWHERE n:`Do'c\\x`:`Ch\"un``k`\nWITH _seedId, n, _score\nORDER BY _score DESC\nWITH _seedId, collect({id: n.`i'd\\`, score: _score}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.id IN $_cy_vec1 AND m.id <> _seedId AND m.score >= $_cy_vec3][0..$_cy_vec4]} AS row",
+      "cypher" : "UNWIND $_cy_vec1 AS _seedId\nMATCH (seed:`Do'c\\x`:`Ch\"un``k`)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL db.idx.vector.queryNodes('Do\\'c\\\\x', 'emb\\'e\\\\d \"x\"', $_cy_vec2, seed.`emb'e\\d \"x\"`)\nYIELD node, score\nWITH _seedId, node AS n, 1.0 / (1.0 + score * score) AS _score\nWHERE n:`Do'c\\x`:`Ch\"un``k`\nWITH _seedId, n, _score\nORDER BY _score DESC\nWITH _seedId, collect({id: n.`i'd\\`, score: _score}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.id IN $_cy_vec1 AND m.id <> _seedId AND m.score >= $_cy_vec3][0..$_cy_vec4]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : 40,
@@ -15571,7 +15571,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL db.index.vector.queryNodes('my'ind\\ex', $_cy_vec1, $_cy_vec2)\nYIELD node, score\nWITH node AS n, score AS _score",
+      "cypher" : "CALL db.index.vector.queryNodes('my\\'ind\\\\ex', $_cy_vec1, $_cy_vec2)\nYIELD node, score\nWITH node AS n, score AS _score",
       "labelCheck" : "n:`Doc`:`Chunk`",
       "parameters" : {
         "_cy_vec1" : 10
@@ -15593,7 +15593,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL vector_search.search('my'ind\\ex', $_cy_vec1, $_cy_vec2)\nYIELD node, distance\nWITH node AS n, 1.0 / (1.0 + distance) AS _score",
+      "cypher" : "CALL vector_search.search('my\\'ind\\\\ex', $_cy_vec1, $_cy_vec2)\nYIELD node, distance\nWITH node AS n, 1.0 / (1.0 + distance) AS _score",
       "labelCheck" : "n:`Doc`:`Chunk`",
       "parameters" : {
         "_cy_vec1" : 10
@@ -15638,7 +15638,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL db.index.vector.queryNodes('my'ind\\ex', $_cy_vec1, $_cy_vec2)\nYIELD node\nWITH node AS n, vector.similarity.euclidean(node.embedding, $_cy_vec2) AS _score",
+      "cypher" : "CALL db.index.vector.queryNodes('my\\'ind\\\\ex', $_cy_vec1, $_cy_vec2)\nYIELD node\nWITH node AS n, vector.similarity.euclidean(node.embedding, $_cy_vec2) AS _score",
       "labelCheck" : "n:`Doc`:`Chunk`",
       "parameters" : {
         "_cy_vec1" : 50
@@ -15661,7 +15661,7 @@
       }
     },
     "answer" : {
-      "cypher" : "CALL vector_search.search('my'ind\\ex', $_cy_vec1, $_cy_vec2)\nYIELD node, distance\nWITH node AS n, 1.0 / (1.0 + distance) AS _score",
+      "cypher" : "CALL vector_search.search('my\\'ind\\\\ex', $_cy_vec1, $_cy_vec2)\nYIELD node, distance\nWITH node AS n, 1.0 / (1.0 + distance) AS _score",
       "labelCheck" : "n:`Doc`:`Chunk`",
       "parameters" : {
         "_cy_vec1" : 50
@@ -15711,7 +15711,7 @@
       }
     },
     "answer" : {
-      "cypher" : "UNWIND $_cy_vec1 AS _seedId\nMATCH (seed:Doc:Chunk)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL db.index.vector.queryNodes('my'ind\\ex', $_cy_vec2, seed.embedding)\nYIELD node\nWITH _seedId, node AS n, vector.similarity.euclidean(node.embedding, seed.embedding) AS _score\nWHERE n:`Doc`:`Chunk`\nWITH _seedId, n, _score\nORDER BY _score DESC\nWITH _seedId, collect({id: n.id, score: _score}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.id IN $_cy_vec1 AND m.id <> _seedId AND m.score >= $_cy_vec3][0..$_cy_vec4]} AS row",
+      "cypher" : "UNWIND $_cy_vec1 AS _seedId\nMATCH (seed:Doc:Chunk)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL db.index.vector.queryNodes('my\\'ind\\\\ex', $_cy_vec2, seed.embedding)\nYIELD node\nWITH _seedId, node AS n, vector.similarity.euclidean(node.embedding, seed.embedding) AS _score\nWHERE n:`Doc`:`Chunk`\nWITH _seedId, n, _score\nORDER BY _score DESC\nWITH _seedId, collect({id: n.id, score: _score}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.id IN $_cy_vec1 AND m.id <> _seedId AND m.score >= $_cy_vec3][0..$_cy_vec4]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : 40,
@@ -15739,7 +15739,7 @@
       }
     },
     "answer" : {
-      "cypher" : "UNWIND $_cy_vec1 AS _seedId\nMATCH (seed:Doc:Chunk)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL vector_search.search('my'ind\\ex', $_cy_vec2, seed.embedding)\nYIELD node, distance\nWITH _seedId, node AS n, 1.0 / (1.0 + distance) AS _score\nWHERE n:`Doc`:`Chunk`\nWITH _seedId, n, _score\nORDER BY _score DESC\nWITH _seedId, collect({id: n.id, score: _score}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.id IN $_cy_vec1 AND m.id <> _seedId AND m.score >= $_cy_vec3][0..$_cy_vec4]} AS row",
+      "cypher" : "UNWIND $_cy_vec1 AS _seedId\nMATCH (seed:Doc:Chunk)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL vector_search.search('my\\'ind\\\\ex', $_cy_vec2, seed.embedding)\nYIELD node, distance\nWITH _seedId, node AS n, 1.0 / (1.0 + distance) AS _score\nWHERE n:`Doc`:`Chunk`\nWITH _seedId, n, _score\nORDER BY _score DESC\nWITH _seedId, collect({id: n.id, score: _score}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.id IN $_cy_vec1 AND m.id <> _seedId AND m.score >= $_cy_vec3][0..$_cy_vec4]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : 40,
