@@ -23,8 +23,12 @@ class StoreLayoutTableTest {
 
     private val graph = "g"
 
-    /** The stamps a graph may hold, in terms of the engine's own layout. */
-    private enum class Stamps { NONE, CURRENT, EARLIER, NO_LAYOUT, NOT_A_NUMBER, LATER, MIXED }
+    /**
+     * The stamps a graph may hold, in terms of the engine's own layout. [MIXED] is this layout's and a later one's;
+     * [MIXED_EARLIER] this layout's and one with no `layout`, as a library from before layouts and this one leave racing
+     * to stamp a graph: two layouts on a SQL store, and one on a graph engine, where no `layout` is its own.
+     */
+    private enum class Stamps { NONE, CURRENT, EARLIER, NO_LAYOUT, NOT_A_NUMBER, LATER, MIXED, MIXED_EARLIER }
 
     /** The objects a store may list, each a name a layout generates, or another graph's, or entries of no name a library can read. */
     private enum class Object { OLD, LOCK, OWN, LATER, LATER_LOCK, NEIGHBOUR, UNKNOWN }
@@ -47,7 +51,7 @@ class StoreLayoutTableTest {
 
     /** The table, as the README and [StoreLayout]'s KDoc write it: the first row a graph meets is its verdict. */
     private val rows: List<Pair<String, (Graph) -> Expected?>> = listOf(
-        "1 stamps of two layouts" to { g -> if (g.stamps == Stamps.MIXED) Expected.Refuse("two versions of Drivine stamped it") else null },
+        "1 stamps of two layouts" to { g -> if (g.stamps == Stamps.MIXED || (g.stamps == Stamps.MIXED_EARLIER && g.sql)) Expected.Refuse("two versions of Drivine stamped it") else null },
         "2 a later layout's stamp" to { g -> if (g.laterStamp) Expected.Refuse("by a later version of Drivine") else null },
         "3 a later layout's objects" to { g -> if (g.known(Object.LATER) || g.known(Object.LATER_LOCK)) Expected.Refuse("by a later version of Drivine") else null },
         "4 this layout's stamp" to { g -> if (g.stamped && !g.earlierStamp) Expected.Current else null },
@@ -81,6 +85,7 @@ class StoreLayoutTableTest {
             Stamps.NOT_A_NUMBER -> listOf(mapOf("layout" to "two"))
             Stamps.LATER -> listOf(of(own + 1))
             Stamps.MIXED -> listOf(of(own), of(own + 1))
+            Stamps.MIXED_EARLIER -> listOf(of(null), of(own))
         }
     }
 
