@@ -89,8 +89,8 @@ class FragmentsTest {
         for ((fragment, refusal) in listOf(
             "{\"condition\": \"n.k = 1 RETURN 2\", $node}" to "A fragment is one Cypher expression: n.k = 1 RETURN 2",
             "{\"value\": \"DISTINCT n.k\", $node}" to "A fragment is one Cypher expression: DISTINCT n.k",
-            "{\"condition\": \"count(n) > 1\", $node}" to "count() aggregates, and a WHERE holds no aggregate",
-            "{\"order\": \"sum(n.k)\", $node}" to "sum() aggregates, and a WHERE holds no aggregate",
+            "{\"condition\": \"count(n) > 1\", $node}" to "The fragment API doesn't take count()",
+            "{\"order\": \"sum(n.k)\", $node}" to "The fragment API doesn't take sum()",
             "{\"condition\": \"m.k = 1\", $node}" to "m is not defined",
             "{\"condition\": \"n.k = \$missing\", $node}" to "missing",
         )) {
@@ -118,18 +118,17 @@ class FragmentsTest {
     fun aTemporalKeyOfASumIsRefusedWhereTheStatementDeclaresItAndCalledWhereTheStoreKeepsIt() {
         // Oracle works out a key of a sum of a stored kind with a function a statement declares where the store keeps none
         // (eraStored false), written in only once the statement is whole: the fragment's SQL would call a function no one declared.
-        for (fragment in listOf<(OracleCypherCompiler) -> Any>(
-            { it.order("n.born + duration('P1D')", false, people) },
-            { it.condition("n.born + duration('P1D') < date('2000-01-01')", people) },
-        )) {
-            val refused = assertFailsWith<CompilerException> { fragment(OracleCypherCompiler("g", false, false)) }
-            assertTrue(refused.message!!.startsWith("A fragment calls a function the store declares"), refused.message)
+        fun ask(era: Boolean, fragment: String) = CypherJson.readTree(CompileJson.compile(
+            "{\"store\": \"oracle\", \"graph\": {\"name\": \"g\", \"eraStored\": $era}, \"fragment\": {$fragment, " +
+                "\"variables\": {\"n\": {\"node\": \"people_\"}}}, \"parameters\": {\"d\": {\"\$temporal\": \"DURATION\", \"text\": \"P1D\"}, " +
+                "\"t\": {\"\$temporal\": \"DATE\", \"text\": \"2000-01-01\"}}}",
+        ))
+        for (fragment in listOf("\"order\": \"n.born + \$d\"", "\"condition\": \"n.born + \$d < \$t\"")) {
+            val refused = ask(false, fragment)["refusal"]?.textValue()
+            assertTrue(refused?.startsWith("A fragment calls a function the store declares") == true, "$fragment: $refused")
         }
         // Where the graph keeps the era's functions, the fragment calls the store's, and says so as a statement does.
-        val answer = CypherJson.readTree(CompileJson.compile(
-            "{\"store\": \"oracle\", \"graph\": {\"name\": \"g\", \"eraStored\": true}, \"fragment\": {\"order\": \"n.born + duration('P1D')\", " +
-                "\"variables\": {\"n\": {\"node\": \"people_\"}}}}",
-        ))
+        val answer = ask(true, "\"order\": \"n.born + \$d\"")
         assertTrue((answer["terms"] as ArrayNode).any { "g_temporal_key(" in it.textValue()!! }, "$answer")
         assertEquals(true, answer["storedFunctions"]?.get("era")?.booleanValue(), "$answer")
     }
@@ -206,24 +205,40 @@ class FragmentsTest {
     }
 
     @Test
-    fun aRandomUUIDAStatementMakesFirstForEachRowIsRefusedAndOneAloneIsCalledForEachRow() {
-        // A statement makes a randomUUID() in a term first, as a column of each row (#412): worked out in the term, a subquery
-        // that reads nothing of the row, as the comprehension's or a shared value's, is worked out once, so every row of the
-        // library's query had the same UUID. The library's SQL has no such column.
+    fun aFormNoLibraryWritesIsRefusedByNameAndEachTheyWriteIsTaken() {
+        // randomUUID() a statement makes first for each row (#412), which the library's SQL has no column for; an aggregate,
+        // which it has no group for; and the forms no library's object manager writes.
+        val refused = mapOf(
+            "toUpper(randomUUID()) + '-x'" to "randomUUID()", "randomUUID()" to "randomUUID()", "count(n) > 1" to "count()",
+            "[x IN [1] | x] = [1]" to "a list comprehension", "reduce(s = 0, x IN [1] | s + x) = 1" to "reduce()",
+            "size([(n)-->(m) | m]) > 0" to "a pattern comprehension", "(n)-->()" to "a pattern as a predicate, which EXISTS { … } writes",
+            "n.list[0] = 1" to "an item read by its place or key, x[i]", "n.list[0..1] = [1]" to "a slice, x[i..j]",
+            "{a: n.k} = {a: 1}" to "a map", "n {.k} = {k: 1}" to "a map projection", "COUNT { (n)-->() } > 1" to "a subquery, COUNT { … }",
+            "single(x IN n.list WHERE x = 1)" to "single()", "n.k % 2 = 0" to "modulo", "n.k ^ 2 = 4" to "power",
+            "EXISTS { p = (n)-->() }" to "a path variable", "date() > n.k" to "date()", "count(DISTINCT n.k) > 1" to "count()",
+        )
         for (compiler in listOf(PostgresCypherCompiler("g"), OracleCypherCompiler("g"), SqliteCypherCompiler("g"))) {
-            for (value in listOf("[x IN [1] | randomUUID()]", "toUpper(randomUUID()) + '-x'", "n.id = randomUUID()")) {
-                val refused = assertFailsWith<CompilerException>("$compiler: $value") { compiler.value(value, people) }
-                assertEquals("A fragment calls randomUUID() within its expression, which a statement calls first for each row, as a column the library's SQL lacks: $value", refused.message)
+            for ((cypher, form) in refused) {
+                val message = assertFailsWith<CompilerException>("$compiler: $cypher") { compiler.condition(cypher, people) }.message
+                assertEquals("The fragment API doesn't take $form: a fragment is a condition, a value or an order of the forms compiler/README.md lists. $cypher", message)
             }
-            // Alone, it is called for each row where the library's SQL reads the term.
-            assertTrue(compiler.value("randomUUID()", people).sql.let { "(SELECT" !in it && "sh1" !in it }, "$compiler")
+            // Each form the libraries write, taken.
+            for (cypher in listOf(
+                "n.k = \$p", "n.k <> \$p", "n.k < \$p", "n.k IN \$l", "\$p IN n.list", "n.k IS NULL", "n.k IS NOT NULL",
+                "n.k STARTS WITH \$p", "n.k ENDS WITH \$p", "n.k CONTAINS \$p", "n.k =~ \$p", "toLower(n.k) = toLower(\$p)",
+                "NOT (n.k = \$p) OR (n.a > 1 XOR n.b < 2)", "n:Person:Admin", "any(x IN labels(n) WHERE x IN \$l)",
+                "EXISTS { (n)-[:KNOWS*1..3]->(m:Person {name: \$p}) WHERE m.age > 1 }", "all(x IN n.list WHERE x > 1)",
+                "none(x IN n.list WHERE x > 1)", "coalesce(n.a, 0) * 2 - floor(exp(n.b)) / toFloat(abs(n.c)) > -1",
+                "CASE WHEN n.a IS NULL THEN 0 ELSE n.a END > toInteger(toString(size(n.list)))", "n.born.epochMillis / 1000.0 > 1",
+                "toUpper(n.k) = 'A'",
+            )) compiler.condition(cypher, people, mapOf("p" to "a", "l" to listOf("a")))
         }
     }
 
     @Test
     fun aVariableBoundAgainWithinIsNotTheLibrarysRowAndHasNoneOfItsLabels() {
         // `n` within the ANY is each node the person knows, which may be no Person: its equality isn't tested by Person's index.
-        for (within in listOf("ANY(n IN [(n)-->(m) | m] WHERE n.name = 'Ada')", "EXISTS { (n)-->(m) WHERE ANY(n IN [m] WHERE n.name = 'Ada') }")) {
+        for (within in listOf("EXISTS { (n)-->(m) WHERE ANY(n IN [m] WHERE n.name = 'Ada') }", "any(n IN [n.friend] WHERE n.name = 'Ada')")) {
             val labelled = OracleCypherCompiler("g", false, false, setOf("Person" to "name")).condition(within, people).sql
             val unlabelled = OracleCypherCompiler("g", false, false, setOf("Person" to "name")).condition(within, mapOf("n" to FragmentVariable.Node("people_"))).sql
             assertEquals(unlabelled, labelled, within)
@@ -242,7 +257,7 @@ class FragmentsTest {
     fun aFragmentSaysTheHintsItsLibrarysQueryCarriesAsTheStatementThatComparesSoIsPlannedWithThem() {
         val variables = mapOf("p" to org.drivine.cypher.sql.FragmentVariable.Node("people_"))
         val conditions = listOf(
-            "all(x IN [1] WHERE p.born > 1962) = true", "p.name = 'Ada'", "labels(p)[0] = 'Person'", "p.name IS NULL",
+            "all(x IN [1] WHERE p.born > 1962) = true", "p.name = 'Ada'", "p.name IS NULL",
             "EXISTS { (p)-->() }", "true",
         )
         val oracle = org.drivine.cypher.sql.OracleCypherCompiler("g")
@@ -265,7 +280,7 @@ class FragmentsTest {
         }
         // A fragment over two of the library's rows, as one over one, whose statement isn't hinted.
         val two = mapOf("p" to FragmentVariable.Node("people_"), "q" to FragmentVariable.Node("others_"))
-        for (rows in listOf(variables, two)) assertTrue("NO_JSON_TABLE_TRANSFORM" in oracle.condition("elementId(p) = '1'", rows).hints, "$rows")
+        for (rows in listOf(variables, two)) assertTrue("NO_JSON_TABLE_TRANSFORM" in oracle.condition("p.id = 'a'", rows).hints, "$rows")
         // A statement compiled after the fragments is planned as on a compiler that compiled none.
         assertEquals(org.drivine.cypher.sql.OracleCypherCompiler("g").compile("MATCH (p) RETURN p.name").sql, oracle.compile("MATCH (p) RETURN p.name").sql)
         for (other in listOf(org.drivine.cypher.sql.PostgresCypherCompiler("g"), org.drivine.cypher.sql.SqliteCypherCompiler("g"))) {
@@ -298,6 +313,50 @@ class FragmentsTest {
             assertEquals(oracle().condition(unkept, plain).sql, oracle().condition(unkept, labelled).sql, unkept)
         }
         assertEquals(oracle().value("n.name = 'Ada'", plain).sql, oracle().value("n.name = 'Ada'", labelled).sql, "a value")
+    }
+
+    /**
+     * `fragments.yaml`'s table: each form a fragment takes, each condition in each of its positions and each value as an order
+     * both ways, compiled on each store to the terms whose digest the table pins, on every target. Each library's runner holds
+     * each to Neo4j's rows on its store.
+     */
+    @Test
+    fun eachFormOfTheTableIsCompiledToTheTermsItsDigestPins() {
+        val table = spec["table"]!!
+        val positions = (table["positions"] as ArrayNode).map { it.textValue()!! }
+        var checked = 0
+        for (store in STORES) {
+            for (entry in table["conditions"]!!) {
+                val form = entry["form"]!!.textValue()!!
+                positions.forEachIndexed { i, position ->
+                    val case = tableCase("condition", position.replace("{f}", form), entry["parameters"])
+                    assertEquals(entry["digests"]?.get(store)?.get(i)?.textValue(), digest(case, store), "on $target, $store, $form in ${position}")
+                    checked++
+                }
+            }
+            for (entry in table["orders"]!!) {
+                val value = entry["value"]!!.textValue()!!
+                listOf(false, true).forEachIndexed { i, descending ->
+                    assertEquals(entry["digests"]?.get(store)?.get(i)?.textValue(), digest(tableCase("order", value, null, descending), store), "on $target, $store, order by $value")
+                    checked++
+                }
+            }
+        }
+        assertEquals(STORES.size * (table["conditions"]!!.size() * positions.size + table["orders"]!!.size() * 2), checked)
+    }
+
+    /** A table entry as a case of the file's: the [part] and its [cypher], its parameters, descending where an order is. */
+    fun tableCase(part: String, cypher: String, parameters: JsonNode?, descending: Boolean = false): JsonNode = CypherJson.readTree(
+        "{\"$part\": ${CypherJson.writeValueAsString(CypherJson.valueToTree(cypher))}" +
+            (if (part == "order") ", \"descending\": $descending" else "") +
+            (parameters?.let { ", \"parameters\": ${CypherJson.writeValueAsString(it)}" } ?: "") + "}",
+    )
+
+    /** The first 16 hexadecimal digits of the SHA-256 of [case]'s terms on [store], joined by a line feed. */
+    fun digest(case: JsonNode, store: String): String {
+        val got = CypherJson.readTree(CompileJson.compile(request(case, store)))
+        val terms = (got["terms"] as? ArrayNode)?.map { it.textValue()!! } ?: throw AssertionError("on $target, $store: $got")
+        return org.drivine.cypher.json.sha256(terms.joinToString("\n").encodeToByteArray()).joinToString("") { (it.toInt() and 0xff).toString(16).padStart(2, '0') }.take(16)
     }
 
     private companion object {

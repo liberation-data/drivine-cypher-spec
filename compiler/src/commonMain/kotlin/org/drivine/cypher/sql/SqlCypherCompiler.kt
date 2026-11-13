@@ -336,13 +336,9 @@ abstract class SqlCypherCompiler(
                 throw CompilerException("A fragment's variable $name is a row whose name ends with _, as no row the compiler names does: ${variable.row}")
             }
         }
-        // An aggregate is refused as in a statement's WHERE: the library's SQL has no group for it to aggregate over.
-        Aggregates(::isAggregate, ::children).checkWhere(item.expression)
-        // A randomUUID() within the expression a statement calls first, as a column of each row (#412): worked out in the term,
-        // a subquery that reads nothing of the row is worked out once, and every row of the library's query had the same UUID.
-        if (!isAnew(item.expression) && holdsAnew(item.expression)) {
-            throw CompilerException("A fragment calls randomUUID() within its expression, which a statement calls first for each row, as a column the library's SQL lacks: $cypher")
-        }
+        // Only the forms the libraries write their filters, orders and seeks in, each held to Neo4j's answer by fragments.yaml:
+        // an aggregate, a randomUUID() a statement makes first for each row, and every other form are refused by name.
+        FragmentForms.check(item.expression, cypher)
         // As a statement that reads sets them, so the fragment is written as that statement's WHERE or ORDER BY would be.
         val given = parameters.values.any { holdsNonFinite(it) }
         nonFinite = given || (nonFiniteWorkedOut(false) && (worksOutNonFinite(query, parameters) || (infinitiesStored && worksOutNaN(query, parameters))))

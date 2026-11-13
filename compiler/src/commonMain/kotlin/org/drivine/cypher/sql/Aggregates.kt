@@ -27,9 +27,6 @@ internal class Aggregates(
     /** Refuses [query] where it aggregates as Cypher does not. */
     fun check(query: Query) = query(query)
 
-    /** Refuses [expression] where it aggregates as a statement's `WHERE` may not: a fragment's, which no SQL of its groups rows for. */
-    fun checkWhere(expression: Expression) = where(expression)
-
     private fun query(query: Query) = (listOf(query.clauses) + query.unions.map { it.clauses }).forEach(::clauses)
 
     private fun clauses(clauses: List<Clause>): Unit = clauses.forEach { clause ->
