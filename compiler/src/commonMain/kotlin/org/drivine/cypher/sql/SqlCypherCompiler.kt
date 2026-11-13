@@ -338,7 +338,7 @@ abstract class SqlCypherCompiler(
         }
         // Only the forms the libraries write their filters, orders and seeks in, each held to Neo4j's answer by fragments.yaml:
         // an aggregate, a randomUUID() a statement makes first for each row, and every other form are refused by name.
-        FragmentForms.check(item.expression, cypher)
+        FragmentForms.check(item.expression, cypher, variables.keys)
         // As a statement that reads sets them, so the fragment is written as that statement's WHERE or ORDER BY would be.
         val given = parameters.values.any { holdsNonFinite(it) }
         nonFinite = given || (nonFiniteWorkedOut(false) && (worksOutNonFinite(query, parameters) || (infinitiesStored && worksOutNaN(query, parameters))))

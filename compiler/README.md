@@ -483,7 +483,7 @@ A library's object manager writes its own SQL, and asks for the parts of it that
 - `AND`, `OR`, `XOR`, `NOT`; `+`, `-`, `*`, `/`, a negation; `CASE`;
 - `toLower`, `toUpper`, `toString`, `toFloat`, `toInteger`, `coalesce`, `exp`, `floor`, `abs`, `size`, `labels`;
 - `any`, `all`, `none` over a list;
-- `EXISTS { pattern [WHERE …] }` of nodes and relationships, a variable length among them, with properties of these forms, or `EXISTS { MATCH pattern [WHERE …] }`; no other subquery.
+- `EXISTS { pattern [WHERE …] }` of one pattern that starts at a node bound already (the library's row, or one an enclosing pattern or quantifier binds), written bare, through nodes and relationships, a variable length among them unnamed, with properties of these forms; or `EXISTS { MATCH pattern [WHERE …] }`; no other subquery.
 
 Anything else is refused by name: `The fragment API doesn't take <form>: …`. What a library writes around its fragments (a seek's chain of terms, a group, an aggregate, a view's projection, a collection's sort) stays its own SQL, with fragments within it.
 

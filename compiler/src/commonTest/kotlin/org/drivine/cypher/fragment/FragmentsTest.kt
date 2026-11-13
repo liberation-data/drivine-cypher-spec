@@ -214,10 +214,13 @@ class FragmentsTest {
             "size([(n)-->(m) | m]) > 0" to "a pattern comprehension", "(n)-->()" to "a pattern as a predicate, which EXISTS { … } writes",
             "n.list[0] = 1" to "an item read by its place or key, x[i]", "n.list[0..1] = [1]" to "a slice, x[i..j]",
             "{a: n.k} = {a: 1}" to "a map", "n {.k} = {k: 1}" to "a map projection", "COUNT { (n)-->() } > 1" to "a subquery, COUNT { … }",
-            "single(x IN n.list WHERE x = 1)" to "single()", "n.k % 2 = 0" to "modulo", "n.k ^ 2 = 4" to "power",
+            "single(x IN n.list WHERE x = 1)" to "single()", "EXISTS { (m:Person)-->(n) }" to "a pattern that doesn't start at a node bound already",
+            "EXISTS { MATCH (n:Admin)-->(m) }" to "labels or properties on a pattern's first node, which is bound already",
+            "EXISTS { (n)-[r:KNOWS*1..2]->(m) }" to "a variable-length relationship with a variable", "n.k % 2 = 0" to "modulo", "n.k ^ 2 = 4" to "power",
             "EXISTS { p = (n)-->() }" to "a path variable", "date() > n.k" to "date()", "count(DISTINCT n.k) > 1" to "count()",
             "type(n) = 'KNOWS'" to "type()", "toLower(DISTINCT n.k) = 'a'" to "DISTINCT in toLower()",
             "EXISTS { (n) ((a)-[:KNOWS]->(b)){1,2} (m) }" to "a quantified path pattern", "EXISTS { OPTIONAL MATCH (n)-->(m) }" to "a subquery, EXISTS { … }",
+            "EXISTS { (n)-->(m), (m)-->(o) }" to "several patterns in an EXISTS", "EXISTS { MATCH (n)-->(m), (m)-->(o) }" to "several patterns in an EXISTS",
         )
         for (compiler in listOf(PostgresCypherCompiler("g"), OracleCypherCompiler("g"), SqliteCypherCompiler("g"))) {
             for ((cypher, form) in refused) {
@@ -274,13 +277,11 @@ class FragmentsTest {
             assertTrue("NO_JSON_TABLE_TRANSFORM" in hints, "$condition: $hints")
             if (statement.contains(OracleCypherCompiler.NO_FEEDBACK)) assertTrue(OracleCypherCompiler.NO_FEEDBACK in hints, "$condition: $hints, as\n$statement")
         }
-        // A walk between two labelled nodes tests the later's labels as a node read by its key, which a statement is planned
-        // without statistics feedback for: the fragment's query is too, and one whose walk starts at the library's row isn't.
-        for ((walk, keyed) in listOf("EXISTS { (a:A)-[:R]->(b:B) }" to true, "EXISTS { (p)-[:R]->(b:B) }" to false)) {
+        // A walk whose statement tests a node's labels as one read by its key is planned without statistics feedback: the
+        // fragment's query too, each walk from the library's row as the libraries write one.
+        for (walk in listOf("EXISTS { (p)-[:R]->(b:B) }", "EXISTS { (p)-[:R]->(a:A)-[:R]->(b:B) }", "EXISTS { (p)-[:R*1..2]->(b:B) }")) {
             val statement = OracleCypherCompiler("g").compile("MATCH (p) WHERE $walk RETURN p").sql
-            val hints = oracle.condition(walk, variables).hints
-            assertEquals(keyed, statement.contains(OracleCypherCompiler.NO_FEEDBACK), "$walk: $statement")
-            assertEquals(keyed, OracleCypherCompiler.NO_FEEDBACK in hints, "$walk: $hints")
+            assertEquals(statement.contains(OracleCypherCompiler.NO_FEEDBACK), OracleCypherCompiler.NO_FEEDBACK in oracle.condition(walk, variables).hints, "$walk: $statement")
         }
         // A fragment over two of the library's rows, as one over one, whose statement isn't hinted.
         val two = mapOf("p" to FragmentVariable.Node("people_"), "q" to FragmentVariable.Node("others_"))
