@@ -247,7 +247,8 @@ searched once however often it is given, as drivine4j's `loadNearestAmong` searc
 
 - On a SQL store a nearest search's `sql` is one `SELECT` of the ranked candidates, `nid` and `score`: the nearest
   `searchK` (or `topK`) nodes of the root's labels, through Postgres's HNSW index or Oracle's side table and its vector
-  index, or measured one by one (and on SQLite always so, by the library's `drivine_similarity`). The search reads the
+  index, or measured one by one (and on SQLite always so, by the library's `drivine_similarity`). By cosine, a node whose
+  embedding has no length, all zeros, is left out, as Neo4j's cosine index leaves it out (#160). The search reads the
   embedding by the expression the module's DDL makes the index over, so the index answers it. The library joins the
   candidates back to its node table by `nid` for its projection, and adds what `FullTextSearch`'s candidates are given:
   its threshold (`score >= threshold`), its predicates, the view's required relationships, `ORDER BY score DESC, nid`,
@@ -292,13 +293,16 @@ numbers, of another size than the index's, or of no length on a cosine index; on
 as it runs, by each store's `queryVector`, which fails the statement with the same words. Measured by cosine, a stored
 embedding of no length is left out of every search, as Neo4j leaves it out of its index.
 
-drivine4j's statements are the module's byte for byte. `src/commonTest/resources/vector-golden.json` holds them, written by
+drivine4j's statements are the module's byte for byte, but for the edits below. `src/commonTest/resources/vector-golden.json`
+holds them, written by
 drivine4j's own code (its selects' `nearestTo`, `nearestThrough` and `nearestAmong`, its grammars' `vectorSearchHead`
 and label check, and its planner's `planAmong`) at the commit it names: on each store, exact and through the index, by
 cosine and Euclidean, with and without a partition and `searchK`, for roots of one label and of two, and names with a
 quote, a backslash and a backtick in them. Only the parameters' names were changed, and the query vector's binding left
 out, and on the graph engines a name with a quote, a backslash or a backtick, which drivine4j writes raw, is written
-escaped (#217): 84 of the golden's entries were edited for it by a script, and no other. `VectorSearchGoldenTest` checks
+escaped (#217): 84 of the golden's entries were edited for it by a script. And the 168 SQL entries of a nearest search
+by cosine were edited by a script to leave out a stored embedding of no length, as Neo4j's cosine index does (#160),
+which drivine4j at that commit does not. No other entry was edited. `VectorSearchGoldenTest` checks
 `plan`, and the JSON request, against each on every target, putting back the candidates' columns drivine4j selects beside
 `nid` before it compares, as `FullTextSearchGoldenTest` does.
 
