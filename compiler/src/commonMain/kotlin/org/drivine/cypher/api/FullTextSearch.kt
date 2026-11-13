@@ -90,10 +90,11 @@ sealed interface SearchResult
 /**
  * A full-text search as a statement.
  *
- * @param sql on a SQL store, one `SELECT` of the ranked candidates, `nid` and `score`: the nodes whose text meets the query,
- *   each scored against the best of them, so the best scores 1, and only those that score above 0. The library joins them
- *   back to its node table by `nid` for its projection, and adds its threshold (`score >= threshold`), its predicates,
- *   `ORDER BY score DESC, nid` and its `LIMIT`.
+ * @param sql on a SQL store, one `SELECT` of the ranked candidates, each node's row (`nid`, `labels`, `props`, `stamp`) and
+ *   its `score`: the nodes whose text meets the query, each scored against the best of them, so the best scores 1, and only
+ *   those that score above 0. The library reads its projection from those columns, with no second join of its node table
+ *   (on Oracle that join loses a filter on it: see `Bm25.ROW`), and adds its threshold (`score >= threshold`), its
+ *   predicates, `ORDER BY score DESC, nid` and its `LIMIT`.
  * @param cypher on a graph engine, the search's head: the index's `CALL`, the hits that have every root label, the best
  *   [SearchRequest.topK] of them (or the over-fetch), and each node and its score against the best as
  *   [SearchRequest.alias] and [SearchRequest.scoreAlias], best first, to which the library adds its threshold
@@ -198,7 +199,7 @@ object FullTextSearch {
             emptyList()
         }
         return Bm25.ranked(
-            Query("c.nid, $text AS text, $len AS len", Table(ddl.nodes, "c"), labelled + narrowed).text(),
+            Query("c.nid, c.labels, c.props, c.stamp, $text AS text, $len AS len", Table(ddl.nodes, "c"), labelled + narrowed).text(),
             Query("$len AS len", Table(ddl.nodes, "c"), labelled).text(),
             query,
             Bm25.Dialect(
@@ -226,7 +227,7 @@ object FullTextSearch {
         val len = "NVL(LENGTH(${values.joinToString(" || ' ' || ")}), 0)"
         fun scanned() = GraphTable(ddl.name, "(c IS node WHERE ${oracleLabels("c", request.labels, scanned = true)})", ORACLE_NODE_COLUMNS, "c")
         return Bm25.ranked(
-            Query("c.nid, $text AS text, $len AS len", scanned()).text(),
+            Query("c.nid, c.labels, c.props, c.stamp, $text AS text, $len AS len", scanned()).text(),
             Query("$len AS len", scanned()).text(),
             query,
             Bm25.Dialect(
@@ -257,9 +258,9 @@ object FullTextSearch {
         val text = scope.bound(query.oracleText)
         val contains = keys.mapIndexed { i, key -> "JSON_TEXTCONTAINS(s.doc, ${OracleSql.path(key)}, $text, ${i + 1})" }
         return """
-            SELECT h.nid, h.score / MAX(h.score) OVER () AS score
+            SELECT h.nid, h.labels, h.props, h.stamp, h.score / MAX(h.score) OVER () AS score
             FROM (
-                SELECT c.nid, k.score
+                SELECT c.nid, c.labels, c.props, c.stamp, k.score
                 FROM (SELECT s.nid, ${keys.indices.joinToString(" + ") { "SCORE(${it + 1})" }} AS score FROM $texts s WHERE ${contains.joinToString(" OR ")}) k
                 JOIN ${ddl.nodes} c ON c.nid = k.nid
                 WHERE ${oracleLabels("c", request.labels)}
@@ -285,7 +286,7 @@ object FullTextSearch {
         val len = "length(${SqliteSql.joinedText("c", keys)})"
         val labelled = listOf(request.labels.joinToString(" AND ") { SqliteSql.hasLabel("c", it) })
         return Bm25.ranked(
-            Query("c.nid, $text AS text, $len AS len", Table(ddl.nodes, "c"), labelled).text(),
+            Query("c.nid, c.labels, c.props, c.stamp, $text AS text, $len AS len", Table(ddl.nodes, "c"), labelled).text(),
             Query("$len AS len", Table(ddl.nodes, "c"), labelled).text(),
             query,
             Bm25.Dialect(
