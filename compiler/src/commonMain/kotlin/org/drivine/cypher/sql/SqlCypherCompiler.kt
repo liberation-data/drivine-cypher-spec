@@ -2126,6 +2126,7 @@ abstract class SqlCypherCompiler(
                 "CASE WHEN ${typeOf(x)} = 'array' THEN $x WHEN NOT ${isJsonNull(x)} THEN ${comparable(Value.Json(jsonArray(listOf(x)), ordered = true))} END"
             }
             select.source(elementsOf(list, items, name))
+            select.afterRows = true
             select.unwound[item(name)] = name
             givenTree(unwind.list)?.let { unwoundGiven[item(name)] = it }
             // An item of a list that holds no null holds none, nor is JSON's null; of a list of texts, or of a text, is a text. An item
@@ -6704,6 +6705,12 @@ abstract class SqlCypherCompiler(
      */
     protected open fun crossJoin(source: String) = "CROSS JOIN $source"
 
+    /**
+     * The join of [source] to the rows an `UNWIND` reads just before it, which [crossJoin] gives where the store reads them
+     * first unbidden. SQLite does not: see its compiler.
+     */
+    protected open fun rowsJoin(source: String) = crossJoin(source)
+
     /** The rows a part of a statement reads: its sources and joins, its conditions, and the variables it binds. */
     private inner class Select(private val outer: Map<String, Value>) {
         val sources = mutableListOf<String>()
@@ -6753,8 +6760,12 @@ abstract class SqlCypherCompiler(
             labelTests[nid]?.forEach { where[it.at] = test(it.labels, it.all) }
         }
 
+        /** Whether the last source is the rows of an `UNWIND`, which the next is joined to by [rowsJoin]. */
+        var afterRows = false
+
         fun source(text: String) {
-            sources += if (sources.isEmpty()) "FROM $text" else crossJoin(text)
+            sources += if (sources.isEmpty()) "FROM $text" else if (afterRows) rowsJoin(text) else crossJoin(text)
+            afterRows = false
         }
 
         fun join(text: String) {

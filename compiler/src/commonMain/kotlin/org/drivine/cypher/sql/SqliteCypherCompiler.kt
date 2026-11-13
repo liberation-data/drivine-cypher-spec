@@ -445,6 +445,15 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
     override fun crossJoin(source: String) = "JOIN $source ON TRUE"
 
     /**
+     * The source after an `UNWIND`'s rows, joined with `CROSS JOIN`, so SQLite reads each row before it. Joined as any other
+     * source, SQLite read the rows innermost, as a lookup by `json_each`'s argument looks cheap, and scanned the nodes each
+     * `MATCH` after them reads around them: `UNWIND $rows AS row MATCH (a:Person {id: row.s}) MATCH (b:Person {id: row.d})`
+     * read nodes × nodes × rows, 78 s and 3 GB for 40 rows over 800 nodes (drivine#654), where read row by row it took
+     * 0.09 s. Only the source just after the rows is pinned so: SQLite then reads what follows after them too, by its cost.
+     */
+    override fun rowsJoin(source: String) = "CROSS JOIN $source"
+
+    /**
      * A relationship of either direction keeps its OR across the two directions here, which SQLite plans as a
      * `MULTI-INDEX OR`, probing the index on each end. Read both ways round, as on Postgres and Oracle (#570), SQLite
      * builds an index over all of it for each statement: at 20,000 nodes a walk from 20 of them took 59 ms, against
