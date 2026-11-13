@@ -24,7 +24,8 @@ internal object Patterns {
      * Why the SQL stores can't answer [pattern]'s backreferences as Java does, or null where they can, or it writes none. A
      * backreference is answered where it is `\1` to `\8`, outside a character class, with no digit after it, to a simple group
      * that closed before it and takes part in every match ([ANSWERED]). Past that, each store reads a group its own way:
-     * Postgres numbers no group in a lookaround and reads no backreference there; it and Oracle read no class within a class,
+     * Oracle reads no group of its own syntax, `(?:…)` among them, but a leading flag group, which it takes off; Postgres
+     * numbers no group in a lookaround and reads no backreference there; it and Oracle read no class within a class,
      * so a `(` in one may open a group for them; a group repeated, or one that holds a quantifier or an alternative, captures
      * what each engine last kept, which differ where it may match nothing (`(a?)+b\1`); and under the flag `x` a space may
      * stand between a group and its quantifier. So none of those is answered, rather than each told apart.
@@ -81,10 +82,10 @@ internal object Patterns {
         val found: List<Backreference>, val groups: List<Group>, val flagX: Boolean, val construct: Boolean, val classInClass: Boolean,
     )
 
-    /** A flag group that turns `x` on: `(?x)`, `(?ix)`, `(?x:…)`, not `(?i-x)`. */
     /** A leading flag group as Oracle's `=~` takes it off the pattern, `(?i)`: letters alone. */
     private val LEADING_FLAGS = Regex("""\(\?[a-z]+\)""")
 
+    /** A flag group that turns `x` on: `(?x)`, `(?ix)`, `(?x:…)`, not `(?i-x)`. */
     private val FLAG_X = Regex("""\(\?[a-zA-Z]*x[a-zA-Z]*(-[a-zA-Z]*)?[:)]""")
 
     /**

@@ -37,16 +37,17 @@ class RegexBackreferenceTest {
         // A group that holds a quantifier, an alternative or a group, or is repeated: each engine captures its own way there.
         "(a|b)\\1" to "holds a quantifier", "(a+)\\1" to "holds a quantifier", "((a)b)\\1" to "holds a quantifier",
         "(a)+\\1" to "holds a quantifier", "(a){2}\\1" to "holds a quantifier", "(a)?\\1" to "holds a quantifier",
-        "(a?)+b\\1" to "holds a quantifier", "(a|b)+\\1" to "holds a quantifier", "((?i)a)\\1" to "own syntax",
+        "(a?)+b\\1" to "holds a quantifier", "(a|b)+\\1" to "holds a quantifier",
         // A group in an alternative or a repeated group may take no part in a match.
         "(a)|\\1" to "in an alternative or a repeated group", "x|(a)\\1" to "in an alternative or a repeated group",
-        "(?:(a)|b)\\1" to "own syntax", "(?:(a)b)+\\1" to "own syntax",
+        "((a)|b)\\2" to "in an alternative or a repeated group", "((a)b)+\\2" to "in an alternative or a repeated group",
         // Postgres reads no backreference in a lookaround, and numbers no group there.
         "(a)(?=\\1)a" to "lookaround", "(?=(a))(a)\\2" to "lookaround", "(?<=(a))(a)\\2" to "lookaround",
         // Java reads (?x)(a) ?\1 as (a)?\1: a space may stand between a group and its quantifier.
         "(?x)(a) ?\\1" to "flag x", "(?ix)(a)\\1" to "flag x", "(a)(?x:b)\\1" to "flag x",
         // Oracle reads no group of its own syntax: (?:x) matches nothing there, so a backreference beside one is refused.
         "(a)(?:b|c)\\1" to "own syntax", "(?:(a))\\1" to "own syntax", "(?<x>a)\\1" to "own syntax", "(?i-x)(a)\\1" to "own syntax",
+        "((?i)a)\\1" to "own syntax", "(?:(a)|b)\\1" to "own syntax", "(?:(a)b)+\\1" to "own syntax",
         // Java reads acc as [[a](b)](c)\1, where Postgres reads the class as [[a], and (b) as the first group.
         "[[a](b)](c)\\1" to "class within a class",
     )
