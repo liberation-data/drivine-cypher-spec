@@ -134,6 +134,20 @@ class FragmentsTest {
     }
 
     @Test
+    fun aFragmentSaysItCallsTheStoresTemporalArithmeticAsAStatementDoes() {
+        // drivine4j#418: arithmetic of a value read from the store calls the store's function, where the graph keeps one.
+        fun ask(stored: Boolean) = CypherJson.readTree(CompileJson.compile(
+            "{\"store\": \"oracle\", \"graph\": {\"name\": \"g\", \"temporalArithmeticStored\": $stored}, " +
+                "\"fragment\": {\"value\": \"n.a - n.b\", \"variables\": {\"n\": {\"node\": \"people_\"}}}}",
+        ))
+        for (stored in listOf(true, false)) {
+            val answer = ask(stored)
+            assertEquals(stored, (answer["terms"] as ArrayNode).any { "g_temporal_arithmetic('-', " in it.textValue()!! }, "$answer")
+            assertEquals(stored, answer["storedFunctions"]?.get("temporalArithmetic")?.booleanValue(), "$answer")
+        }
+    }
+
+    @Test
     fun aFragmentIsWrittenAsTheWhereOfAStatementThatReadsWouldBe() {
         // A float divided by zero works out an infinity, which Postgres's and SQLite's statements that read compile for.
         for (compiler in listOf(PostgresCypherCompiler("g"), SqliteCypherCompiler("g"))) {

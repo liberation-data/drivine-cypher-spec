@@ -678,8 +678,7 @@ ${made.entries.joinToString("\n") { (function, making) ->
         const val VERSION_MARK = "-- drivine:"
 
         /** The version of a function of the text [text]: the first twelve hex digits of its SHA-256. */
-        fun version(text: String): String =
-            org.drivine.cypher.json.Sha256.digest(text.encodeToByteArray()).take(6).joinToString("") { (it.toInt() and 0xff).toString(16).padStart(2, '0') }
+        fun version(text: String): String = GeneratedFunctions.hex(text).take(12)
 
         /** The store's name, for what is said of a graph name it cannot take. */
         const val ENGINE = "Oracle"
