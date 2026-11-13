@@ -68,7 +68,7 @@ internal object Bm25 {
         val required = query.required.indices.map { "r${it + 1}" }
         val excluded = query.excluded.indices.map { "x${it + 1}" }
         val counts = query.scored.zip(tf) + query.required.zip(required) + query.excluded.zip(excluded)
-        val select = (listOf("s.nid") + ROW.map { "s.$it" } + listOf("s.len") + counts.map { (term, name) -> "${sql.count("s.text", term)} AS $name" }).joinToString(", ")
+        val select = (listOf(row("s"), "s.len") + counts.map { (term, name) -> "${sql.count("s.text", term)} AS $name" }).joinToString(", ")
         val counted = Query(select, Derived(candidates, "s"), listOf(query.scored.joinToString(" OR ", "(", ")") { sql.holds("s.text", it) }))
         // Each a subquery of its own, which no row is passed to, so a store works it out once. Joined beside the candidates,
         // Postgres read the label again for each candidate where it guessed there were few: 55 s for a rare word at 100,000.
@@ -87,8 +87,8 @@ internal object Bm25 {
                 score(listOf("w.${tf[i]}" to "w.${df[i]}"), "w.n", "w.len", "NULLIF(w.avglen, 0)", sql.ln)
             }
         }
-        val scored = Query("w.nid, ${ROW.joinToString("") { "w.$it, " }}${sql.real(score)} AS score", Derived(weighed.text(), "w"), required.map { "w.$it > 0" } + excluded.map { "w.$it = 0" })
-        return Query("b.nid, ${ROW.joinToString("") { "b.$it, " }}b.score / MAX(b.score) OVER () AS score", Derived(scored.text(), "b"), listOf("b.score > 0")).text()
+        val scored = Query("${row("w")}, ${sql.real(score)} AS score", Derived(weighed.text(), "w"), required.map { "w.$it > 0" } + excluded.map { "w.$it = 0" })
+        return Query("${row("b")}, b.score / MAX(b.score) OVER () AS score", Derived(scored.text(), "b"), listOf("b.score > 0")).text()
     }
 
     /**
@@ -99,6 +99,9 @@ internal object Bm25 {
      * (liberation-data/drivine-cypher-spec#223).
      */
     val ROW: List<String> = listOf("labels", "props", "stamp")
+
+    /** `nid` and the node's [ROW] as the rows named [alias] carry them: what each query of a search's candidates selects of a node. */
+    fun row(alias: String): String = (listOf("nid") + ROW).joinToString(", ") { "$alias.$it" }
 
     /**
      * The score of a text whose [length] is against the [average] over the label's [nodes]: for each term, its count in the

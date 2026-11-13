@@ -21,6 +21,8 @@ class FullTextSearchRowTest {
             val sql = sql(store, SearchIndex(trigram = trigram))
             assertTrue(sql.startsWith("SELECT b.nid, b.labels, b.props, b.stamp, b.score / MAX(b.score) OVER () AS score"), "$store:\n$sql")
             assertTrue("w.nid, w.labels, w.props, w.stamp, " in sql && "s.nid, s.labels, s.props, s.stamp, s.len" in sql, "$store:\n$sql")
+            assertTrue("SELECT c.nid, c.labels, c.props, c.stamp, " in sql, "$store's candidates select the row:\n$sql")
+            if (store == SearchStore.ORACLE) assertTrue("COLUMNS (c.nid, c.labels, c.props, c.stamp)) c" in sql, "the graph's row is read:\n$sql")
             assertTrue("JOIN g_node" !in sql, "$store reads the node table once, in the candidates:\n$sql")
         }
     }

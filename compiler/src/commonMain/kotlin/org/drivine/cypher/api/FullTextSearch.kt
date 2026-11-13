@@ -199,7 +199,7 @@ object FullTextSearch {
             emptyList()
         }
         return Bm25.ranked(
-            Query("c.nid, c.labels, c.props, c.stamp, $text AS text, $len AS len", Table(ddl.nodes, "c"), labelled + narrowed).text(),
+            Query("${Bm25.row("c")}, $text AS text, $len AS len", Table(ddl.nodes, "c"), labelled + narrowed).text(),
             Query("$len AS len", Table(ddl.nodes, "c"), labelled).text(),
             query,
             Bm25.Dialect(
@@ -227,7 +227,7 @@ object FullTextSearch {
         val len = "NVL(LENGTH(${values.joinToString(" || ' ' || ")}), 0)"
         fun scanned() = GraphTable(ddl.name, "(c IS node WHERE ${oracleLabels("c", request.labels, scanned = true)})", ORACLE_NODE_COLUMNS, "c")
         return Bm25.ranked(
-            Query("c.nid, c.labels, c.props, c.stamp, $text AS text, $len AS len", scanned()).text(),
+            Query("${Bm25.row("c")}, $text AS text, $len AS len", scanned()).text(),
             Query("$len AS len", scanned()).text(),
             query,
             Bm25.Dialect(
@@ -258,9 +258,9 @@ object FullTextSearch {
         val text = scope.bound(query.oracleText)
         val contains = keys.mapIndexed { i, key -> "JSON_TEXTCONTAINS(s.doc, ${OracleSql.path(key)}, $text, ${i + 1})" }
         return """
-            SELECT h.nid, h.labels, h.props, h.stamp, h.score / MAX(h.score) OVER () AS score
+            SELECT ${Bm25.row("h")}, h.score / MAX(h.score) OVER () AS score
             FROM (
-                SELECT c.nid, c.labels, c.props, c.stamp, k.score
+                SELECT ${Bm25.row("c")}, k.score
                 FROM (SELECT s.nid, ${keys.indices.joinToString(" + ") { "SCORE(${it + 1})" }} AS score FROM $texts s WHERE ${contains.joinToString(" OR ")}) k
                 JOIN ${ddl.nodes} c ON c.nid = k.nid
                 WHERE ${oracleLabels("c", request.labels)}
@@ -286,7 +286,7 @@ object FullTextSearch {
         val len = "length(${SqliteSql.joinedText("c", keys)})"
         val labelled = listOf(request.labels.joinToString(" AND ") { SqliteSql.hasLabel("c", it) })
         return Bm25.ranked(
-            Query("c.nid, c.labels, c.props, c.stamp, $text AS text, $len AS len", Table(ddl.nodes, "c"), labelled).text(),
+            Query("${Bm25.row("c")}, $text AS text, $len AS len", Table(ddl.nodes, "c"), labelled).text(),
             Query("$len AS len", Table(ddl.nodes, "c"), labelled).text(),
             query,
             Bm25.Dialect(

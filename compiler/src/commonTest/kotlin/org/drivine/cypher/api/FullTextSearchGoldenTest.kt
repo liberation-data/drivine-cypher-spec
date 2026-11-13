@@ -120,7 +120,7 @@ class FullTextSearchGoldenTest {
      */
     private fun projected(sql: String, store: SearchStore, index: JsonNode?): String {
         val oracleText = store == SearchStore.ORACLE && index?.get("oracleText")?.textValue() != null
-        val candidates = withoutRow(sql)
+        val candidates = withoutRow(sql, if (oracleText) listOf("c", "h") else listOf("c", "s", "w", "b"), oracle = store == SearchStore.ORACLE && !oracleText)
         return if (oracleText) {
             candidates.once("SELECT h.nid, h.score / MAX(h.score) OVER () AS score\n", "SELECT h.nid, h.labels, h.props, h.stamp, h.doc, h.score / MAX(h.score) OVER () AS score\n")
                 .once("\n    SELECT c.nid, k.score\n", "\n    SELECT c.nid, c.labels, c.props, c.stamp, $ORACLE_DOC AS doc, k.score\n")
@@ -132,12 +132,15 @@ class FullTextSearchGoldenTest {
     }
 
     /**
-     * [sql] without the node's row the module's candidates carry through each of their queries beside `nid` (`Bm25.ROW`, #223):
-     * drivine4j's candidates carried `nid` alone, and joined the node table back for the row.
+     * [sql] without the node's row the module's candidates carry beside `nid` (`Bm25.ROW`, #223) in each of their queries,
+     * [aliases], and on Oracle through BM25 in the `GRAPH_TABLE` the candidates read: drivine4j's candidates carried `nid`
+     * alone, and joined the node table back for the row. Each is found once, so a query that loses the row fails here.
      */
-    private fun withoutRow(sql: String): String =
-        listOf("c", "s", "w", "b", "h").fold(sql) { text, row -> text.replace("$row.nid, $row.labels, $row.props, $row.stamp, ", "$row.nid, ") }
-            .replace("COLUMNS (c.nid, c.labels, c.props, c.stamp)", "COLUMNS (c.nid, c.props)")
+    private fun withoutRow(sql: String, aliases: List<String>, oracle: Boolean): String {
+        val rows = aliases.associate { "$it.nid, $it.labels, $it.props, $it.stamp, " to "$it.nid, " } +
+            (if (oracle) mapOf("COLUMNS (c.nid, c.labels, c.props, c.stamp)" to "COLUMNS (c.nid, c.props)") else emptyMap())
+        return rows.entries.fold(sql) { text, (row, nid) -> text.once(row, nid) }
+    }
 
     /** [this] with [part] in place of [old], which it holds once. */
     private fun String.once(old: String, part: String): String {
