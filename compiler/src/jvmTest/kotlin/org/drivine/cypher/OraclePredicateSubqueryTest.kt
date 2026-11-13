@@ -101,6 +101,11 @@ class OraclePredicateSubqueryTest {
         val text = "x".repeat(200_000) + "''" + "y".repeat(200_000)
         val sql = "SELECT 1 FROM DUAL WHERE '$text' IS NOT NULL AND EXISTS (SELECT 1 FROM DUAL)"
         assertEquals(listOf("EXISTS (SELECT 1 FROM DUAL)"), PredicateSubqueries.unhinted(sql))
+        // As many doubled quotes, each a turn of the loop between runs.
+        val doubled = "x''".repeat(150_000)
+        assertEquals(listOf("EXISTS (SELECT 1 FROM DUAL)"), PredicateSubqueries.unhinted(sql.replace(text, doubled)))
+        // A quote left open is left as it is, its words read as SQL: it isn't closed at a doubled quote further on.
+        assertEquals(listOf("EXISTS (SELECT 1 FROM DUAL) ''x"), PredicateSubqueries.unhinted("SELECT 1 FROM DUAL WHERE 'a EXISTS (SELECT 1 FROM DUAL) ''x"))
     }
 
     @Test
