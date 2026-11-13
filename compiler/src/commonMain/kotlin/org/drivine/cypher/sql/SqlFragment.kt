@@ -22,7 +22,11 @@ data class SqlFragment(val terms: List<String>, val parameters: Map<String, Any?
 /** A variable a fragment's expression names, bound to a row of the library's own SQL: see [SqlFragment]. */
 @DrivineInternalApi
 sealed interface FragmentVariable {
-    /** The SQL row the variable is: an alias whose columns are those of the graph's table of nodes or of relationships. */
+    /**
+     * The SQL row the variable is: an alias whose columns are those of the graph's table of nodes or of relationships. Its name
+     * ends with `_`, as no name the compiler gives its own rows does, so a subquery the fragment writes doesn't take it for one
+     * of them (`n1`, `x`); another is refused.
+     */
     val row: String
 
     /**

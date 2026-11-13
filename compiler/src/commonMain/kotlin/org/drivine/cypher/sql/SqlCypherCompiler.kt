@@ -314,9 +314,10 @@ abstract class SqlCypherCompiler(
         parameters: Map<String, Any?>,
         write: (Writer, Expression, Map<String, Value>) -> List<String>,
     ): SqlFragment {
-        // Read as a statement's RETURN, whose parse error would name a statement, and a column of that RETURN's text.
+        // Read as a statement's RETURN, whose parse error would name a statement, and a column of that RETURN's text: on a line
+        // of its own, so a line comment the expression ends with leaves the column's name.
         val query = try {
-            CypherReader.read("RETURN $cypher AS fragment")
+            CypherReader.read("RETURN $cypher\nAS fragment")
         } catch (e: CompilerException) {
             null
         }
@@ -326,6 +327,13 @@ abstract class SqlCypherCompiler(
         val item = projection?.items?.singleOrNull()
         if (query == null || query.unions.isNotEmpty() || item == null || item.name != "fragment") {
             throw CompilerException("A fragment is one Cypher expression: $cypher")
+        }
+        // A row named as the compiler names its own, `n1` or `x`, would be taken for one of them inside a subquery the fragment
+        // writes: no name the compiler gives ends with `_`.
+        variables.forEach { (name, variable) ->
+            if (!LIBRARY_ROW.matches(variable.row)) {
+                throw CompilerException("A fragment's variable $name is a row whose name ends with _, as no row the compiler names does: ${variable.row}")
+            }
         }
         // An aggregate is refused as in a statement's WHERE: the library's SQL has no group for it to aggregate over.
         Aggregates(::isAggregate, ::children).checkWhere(item.expression)
@@ -7035,6 +7043,12 @@ abstract class SqlCypherCompiler(
 
         /** The functions that read a value without giving it on, so read it as it is in flight (see [Value.Json.inflight]). */
         val READS_IN_FLIGHT = setOf("size", "length", "tostring", "tointeger", "tofloat", "toboolean")
+
+        /**
+         * A fragment's row ([FragmentVariable.row]): a name that ends with `_`, as none of the rows and columns the compiler names
+         * its own does, so a subquery the fragment writes doesn't take the library's row for one of its own.
+         */
+        val LIBRARY_ROW = Regex("[A-Za-z][A-Za-z0-9_]*_")
 
         /** A column of the query [PENDING] stands for. */
         val PENDING_COLUMN = Regex("${PENDING}\\.(\\w+)")

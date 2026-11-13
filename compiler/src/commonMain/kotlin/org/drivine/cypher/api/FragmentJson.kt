@@ -20,7 +20,7 @@ import org.drivine.cypher.sql.SqlFragment
  *
  * `fragment` gives one of `condition` ([org.drivine.cypher.sql.SqlCypherCompiler.condition]), `value`, or `order`, with
  * `descending` (false where left out), each a Cypher expression; and `variables`, each a row of the library's SQL: `{"node":
- * "<alias>", "labels": […]}` or `{"relationship": "<alias>"}`. Answered `{"terms": […], "parameters": {…}}`, on Oracle with
+ * "<alias>", "labels": […]}` or `{"relationship": "<alias>"}`, the alias ending with `_` ([FragmentVariable.row]). Answered `{"terms": […], "parameters": {…}}`, on Oracle with
  * `storedFunctions` as a statement's answer has it, the parameters written as a statement's are; `{"refusal": …}` where the
  * compiler refuses the expression; `{"error": …}` where the request is no request.
  */

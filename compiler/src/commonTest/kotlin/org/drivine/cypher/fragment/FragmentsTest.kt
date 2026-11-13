@@ -68,7 +68,7 @@ class FragmentsTest {
     @Test
     fun aRequestThatIsNoFragmentIsAnErrorAndOneTheCompilerRefusesARefusal() {
         val graph = "\"graph\": {\"name\": \"g\"}"
-        val node = "\"variables\": {\"n\": {\"node\": \"r\"}}"
+        val node = "\"variables\": {\"n\": {\"node\": \"r_\"}}"
         for ((request, message) in listOf(
             "{\"store\": \"postgres\", $graph, \"fragment\": 3}" to "A request's fragment is {\"condition\" | \"value\" | \"order\": …, \"variables\": {…}}.",
             "{\"store\": \"postgres\", $graph, \"fragment\": {$node}}" to "A fragment gives one of condition, value and order.",
@@ -136,6 +136,37 @@ class FragmentsTest {
                 assertEquals(alone, oracle.condition(walk, people), "$walk after $before")
             }
         }
+    }
+
+    @Test
+    fun aRowNamedAsTheCompilerNamesItsOwnIsRefusedAsASubqueryWouldTakeItForOne() {
+        // `n1` is the compiler's name for the node a subquery matches: the walk would be read from it to itself.
+        val refused = assertFailsWith<CompilerException> { PostgresCypherCompiler("g").condition("EXISTS { (n)-->(m) }", mapOf("n" to FragmentVariable.Node("n1"))) }
+        assertEquals("A fragment's variable n is a row whose name ends with _, as no row the compiler names does: n1", refused.message)
+        for (row in listOf("x", "knows")) {
+            assertFailsWith<CompilerException> { SqliteCypherCompiler("g").condition("r.w > 1", mapOf("r" to FragmentVariable.Relationship(row))) }
+        }
+        assertTrue(PostgresCypherCompiler("g").condition("EXISTS { (n)-->(m) }", people).sql.contains("e2.src = people_.nid AND e2.dst = n1.nid"))
+    }
+
+    @Test
+    fun anExpressionThatEndsWithALineCommentIsOneExpression() {
+        for (compiler in listOf(PostgresCypherCompiler("g"), OracleCypherCompiler("g"), SqliteCypherCompiler("g"))) {
+            assertEquals(compiler.condition("n.name = \$p", people, mapOf("p" to "Ada")), compiler.condition("n.name = \$p // by name", people, mapOf("p" to "Ada")))
+        }
+    }
+
+    @Test
+    fun aRelationshipIsReadFromItsRowAndANodeOfNoLabelsByNoLabelsIndex() {
+        val knows = mapOf("r" to FragmentVariable.Relationship("knows_"))
+        for (compiler in listOf(PostgresCypherCompiler("g"), OracleCypherCompiler("g"), SqliteCypherCompiler("g"))) {
+            assertTrue(compiler.condition("type(r) = 'KNOWS'", knows).sql.contains("knows_.type"), "$compiler")
+            assertTrue(compiler.order("r.since", false, knows).terms.all { "knows_.props" in it }, "$compiler")
+        }
+        // Oracle tests a node's labels beside an indexed equality only where the library gives them.
+        val oracle = OracleCypherCompiler("g", false, false, setOf("Person" to "name"))
+        assertTrue("JSON_EXISTS(people_.labels" in oracle.condition("n.name = 'Ada'", people).sql)
+        assertTrue("people_.labels" !in oracle.condition("n.name = 'Ada'", mapOf("n" to FragmentVariable.Node("people_"))).sql)
     }
 
     private companion object {
