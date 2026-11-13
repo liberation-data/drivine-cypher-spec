@@ -3,6 +3,7 @@ package org.drivine.cypher.sql
 import org.drivine.cypher.json.JsonNode
 import org.drivine.cypher.json.JsonNodeFactory
 import org.drivine.cypher.json.NullNode
+import org.drivine.DrivineInternalApi
 import org.drivine.cypher.CompilerException
 import org.drivine.cypher.CypherReader
 import org.drivine.cypher.time.CommonTime
@@ -279,6 +280,66 @@ abstract class SqlCypherCompiler(
         returned = null
         taggedReturned.clear()
         return finished(compiled(query, parameters)).copy(columns = returned.orEmpty())
+    }
+
+    /**
+     * The condition [cypher], one Cypher expression, as a `WHERE` of the library's own SQL keeps a row by it: see [SqlFragment].
+     * Its [variables] are rows of that SQL, and [parameters] the values of the parameters it names.
+     */
+    @DrivineInternalApi
+    fun condition(cypher: String, variables: Map<String, FragmentVariable>, parameters: Map<String, Any?> = emptyMap()): SqlFragment =
+        fragment(cypher, variables, parameters) { writer, expression, scope -> listOf(writer.condition(expression, scope)) }
+
+    /** The value [cypher], one Cypher expression, as the store's JSON: see [condition] and [SqlFragment]. */
+    @DrivineInternalApi
+    fun value(cypher: String, variables: Map<String, FragmentVariable>, parameters: Map<String, Any?> = emptyMap()): SqlFragment =
+        fragment(cypher, variables, parameters) { writer, expression, scope -> listOf(writer.valueJson(expression, scope)) }
+
+    /**
+     * The terms an `ORDER BY` of the library's own SQL sorts by [cypher], one Cypher expression, as `ORDER BY` [cypher] sorts a
+     * compiled statement's rows: by kind, then value, a temporal value by its sort key, nulls last ascending; see [condition].
+     */
+    @DrivineInternalApi
+    fun order(cypher: String, descending: Boolean, variables: Map<String, FragmentVariable>, parameters: Map<String, Any?> = emptyMap()): SqlFragment =
+        fragment(cypher, variables, parameters) { writer, expression, scope -> writer.sortTerms(expression, scope).map { orderTerm(it, descending) } }
+
+    /**
+     * A fragment: [cypher] read as one expression, compiled by [write] over [variables] bound as a statement binds the nodes and
+     * relationships it matches. A fragment is written into SQL the library writes, which declares no function: one that calls a
+     * function the store declares for a statement is refused.
+     */
+    private fun fragment(
+        cypher: String,
+        variables: Map<String, FragmentVariable>,
+        parameters: Map<String, Any?>,
+        write: (Writer, Expression, Map<String, Value>) -> List<String>,
+    ): SqlFragment {
+        val query = CypherReader.read("RETURN $cypher AS fragment")
+        val item = (query.clauses.singleOrNull() as? Clause.Return)?.projection?.items?.singleOrNull()
+        if (query.unions.isNotEmpty() || item == null || item.name != "fragment") {
+            throw CompilerException("A fragment is one Cypher expression: $cypher")
+        }
+        val given = parameters.values.any { holdsNonFinite(it) }
+        nonFinite = given
+        nanWorkedOut = given
+        procedural = false
+        val declared = functions.size
+        val writer = Writer(Parameters(parameters, ::parameterJson, ::parameterCount, text = ::parameterText, asPath = parameterPath))
+        writer.labelsOf = variables.mapNotNull { (name, variable) -> (variable as? FragmentVariable.Node)?.let { name to it.labels } }.toMap()
+        val scope = variables.mapValues { (_, variable) ->
+            val row = variable.row
+            when (variable) {
+                is FragmentVariable.Node -> Value.Node("$row.nid", "$row.labels", "$row.props", "$row.stamp")
+                is FragmentVariable.Relationship -> Value.Relationship("$row.eid", "$row.src", "$row.dst", "$row.type", "$row.props")
+            }
+        }
+        val terms = write(writer, item.expression, scope)
+        val called = functions.drop(declared) + terms.flatMap(::calledFunctions)
+        if (called.isNotEmpty()) {
+            while (functions.size > declared) functions.removeAt(functions.lastIndex)
+            throw CompilerException("A fragment calls a function the store declares for a statement, which SQL a library writes doesn't declare: $cypher")
+        }
+        return SqlFragment(terms, writer.parameters.values)
     }
 
     /** The statement [compiled] as the store runs it, after the last pass the store makes over it: none here. */
@@ -1498,6 +1559,31 @@ abstract class SqlCypherCompiler(
         private fun anewVariable() = hidden(ANEW).also { madeAnew += it }
 
         fun query(query: Query): String = projected(query).sql
+
+        /**
+         * A fragment's nodes' labels, by variable, which the library knows: an equality of such a node's property with a value
+         * is then written as one in a pattern's properties is, with the index of that label ([indexedOf]). Empty in a statement.
+         */
+        var labelsOf: Map<String, List<String>> = emptyMap()
+
+        /** [expression] in [scope] as the store's JSON, as a fragment's value: see [SqlFragment]. */
+        fun valueJson(expression: Expression, scope: Map<String, Value>): String = comparable(json(expression(expression, scope)))
+
+        /** The terms that sort by [expression] in [scope], as `ORDER BY` sorts by it: see [sortable]. */
+        fun sortTerms(expression: Expression, scope: Map<String, Value>): List<String> = sortable(expression(expression, scope))
+
+        /**
+         * The property [expression] reads, where it is one of a fragment's node whose labels the library gave ([labelsOf]),
+         * as a pattern's properties name it to an index: null in a statement, which names its own in its patterns.
+         */
+        private fun indexedOf(expression: Expression, value: Expression, scope: Map<String, Value>): IndexedProperty? {
+            if (labelsOf.isEmpty()) return null
+            val property = expression as? Expression.Property ?: return null
+            val name = (property.subject as? Expression.Variable)?.name ?: return null
+            val labels = labelsOf[name]?.takeIf { it.isNotEmpty() } ?: return null
+            val node = scope[name] as? Value.Node ?: return null
+            return IndexedProperty(node.props, property.key, labels, givenRowsScalar(value, scope))
+        }
 
         /** [query], a statement that ends with `RETURN`, as that `RETURN` projects it: see [Projected.identity]. */
         fun projected(query: Query): Projected {
@@ -5506,7 +5592,10 @@ abstract class SqlCypherCompiler(
                     entrywise(binary, left, right, scope)?.let { equal -> return Value.Bool(if (binary.operator == Operator.NOT_EQUALS) "(NOT $equal)" else equal) }
                     val plain = plain(binary.left, binary.right, left, right, scope)
                     val equal = (if (plain) null else givenItemwise(binary.left, left, binary.right, right))
-                        ?: equality(left, right, binary.right, plain, stored(binary.left, scope), scalarRows = givenRowsScalar(binary.right, scope), leftWritten = binary.left)
+                        ?: equality(
+                            left, right, binary.right, plain, stored(binary.left, scope), of = indexedOf(binary.left, binary.right, scope),
+                            scalarRows = givenRowsScalar(binary.right, scope), leftWritten = binary.left,
+                        )
                     val keyed = if (conjunct && binary.operator == Operator.EQUALS) idEquality(binary, left, right, scope) else null
                     // A node equal to a node, where the row must pass that, may be read by its key: see [readByKey].
                     if (conjunct && binary.operator == Operator.EQUALS && left is Value.Node && right is Value.Node) comparedKeys.pairs += left.nid to right.nid
