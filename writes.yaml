@@ -1853,3 +1853,16 @@ cases:
       - only: [neo4j, sql]
         cypher: "DROP CONSTRAINT cy_unique_dollar"
         rows: []
+  - name: "A list of nodes or relationships read by a key of another kind"
+    description: "A list of nodes or relationships is indexed by an integer, as any list is, and Neo4j fails a text index of one, as it plans the statement or as it runs. SQLite read the text as 0, and gave the list's first item; Oracle gave null, and Postgres failed with another message (liberation-data/drivine-cypher-spec#232)."
+    steps:
+      - cypher: "CREATE (:CyWrite {i: 1})-[:R {i: 1}]->(:CyWrite {i: 2})"
+      - cypher: "MATCH (n:CyWrite) WITH n ORDER BY n.i WITH collect(n) AS l, 1 AS k RETURN l[k].i"
+        rows: [2]
+      - cypher: "MATCH (n:CyWrite) WITH collect(n) AS l, 'a' AS k RETURN l[k]"
+        error: true
+      - cypher: "MATCH ()-[r:R]->() WITH collect(r) AS l, 'a' AS k RETURN l[k]"
+        error: true
+      - note: "A key worked out for each row fails as the statement runs."
+        cypher: "MATCH (n:CyWrite) WITH collect(n) AS l UNWIND ['a'] AS k RETURN l[k]"
+        error: true

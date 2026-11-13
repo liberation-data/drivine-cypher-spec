@@ -70,6 +70,25 @@ class IndexKeyKindTest {
     }
 
     @Test
+    fun `a list of nodes or relationships read by a key that may be a text fails it, and by an integer is not tested`() {
+        // spec#232: SQLite read the text as 0, and gave the list's first node.
+        listOf(
+            "MATCH (n:Person) WITH collect(n) AS l, 'a' AS k RETURN l[k]",
+            "MATCH ()-[r]->() WITH collect(r) AS l, 'a' AS k RETURN l[k]",
+            "MATCH (n:Person) WITH collect(n) AS l UNWIND ['a', 0] AS k RETURN l[k]",
+        ).forEach { cypher -> each(cypher) { assertTrue(textIndexOfList in it) } }
+        listOf(
+            "MATCH (n:Person) WITH collect(n) AS l RETURN l[0]",
+            "MATCH (n:Person) WITH collect(n) AS l, 1 AS k RETURN l[k]",
+            "MATCH (n:Person) WITH collect(n) AS l RETURN l[\$k]" to mapOf("k" to 1),
+        ).forEach { case ->
+            val (cypher, parameters) = case as? Pair<*, *> ?: (case to emptyMap<String, Any?>())
+            @Suppress("UNCHECKED_CAST")
+            each(cypher as String, parameters as Map<String, Any?>) { assertFalse(textIndexOfList in it) }
+        }
+    }
+
+    @Test
     fun `an item taken out of another value is read untested`() {
         each("MATCH (n) UNWIND [0, 'a'] AS k RETURN n.x[0..1][k]") { sql -> assertFalse(numberKeyOfMap in sql || textIndexOfList in sql) }
         // Only the item n.x[0] is tested, by its number.
