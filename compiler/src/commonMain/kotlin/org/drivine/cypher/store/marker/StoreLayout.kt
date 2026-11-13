@@ -29,18 +29,19 @@ import org.drivine.cypher.store.ddl.StoreDdl
  * |---|---|---|---|---|
  * | 1 | of two layouts or more | any | any | [Verdict.Refuse]: stamped by two versions at once |
  * | 2 | of a later layout | any | any | [Verdict.Refuse]: written by a later Drivine, to be upgraded |
- * | 3 | any | any | a later layout's (`g_ix3_…`) | [Verdict.Refuse]: made by a later Drivine, to be upgraded |
+ * | 3 | any | any | a later layout's (`g_ix3_…`, `g_lock3`) | [Verdict.Refuse]: made by a later Drivine, to be upgraded |
  * | 4 | of this layout | any | any else | [Verdict.Current] |
- * | 5 | of an earlier layout | none | any else | [Verdict.Stamp]: the earlier layout's objects dropped, then [StoreStampStatements.restampLayout]. Nothing is migrated |
- * | 6 | of an earlier layout | some | any else | [Verdict.Refuse]: names its layout and this one, and the reload |
- * | 7 | none, on a graph engine | any | none | [Verdict.Current]: a graph engine holds layout 1, its own, with a stamp or without |
+ * | 5 | of an earlier layout, on a SQL store | none | any else | [Verdict.Stamp]: the earlier layout's objects dropped, then [StoreStampStatements.restampLayout]. Nothing is migrated |
+ * | 6 | of an earlier layout, on a SQL store | some | any else | [Verdict.Refuse]: names its layout and this one, and the reload |
+ * | 7 | none or of an earlier layout, on a graph engine | any | any | [Verdict.Current]: a graph engine holds layout 1, its own, with a stamp or without, and lists no objects |
  * | 8 | none | none | none of an earlier layout's | [Verdict.Current]: new, or cleared; the stamp is assigned as ever |
  * | 9 | none | none | an earlier layout's, whatever of this one's beside | [Verdict.Stamp]: those dropped, then asked again (the restamp finds no stamp, and changes nothing) |
  * | 10 | none | some | this layout's and an earlier one's | [Verdict.Refuse]: naming both |
  * | 11 | none | some | this layout's only | [Verdict.Stamp] with [Verdict.Stamp.assign]: a graph of this layout whose stamp a clear deleted (`MATCH (n) DETACH DELETE n` deletes Drivine's own nodes too), stamped again |
  * | 12 | none | some | an earlier layout's only, or none | [Verdict.Refuse]: as layout 1's, as row 6 |
  *
- * Without the store's DDL no object is known as any layout's, and the rows read so: none is new where empty (8), and refused
+ * A stamp whose `layout` is no number is read as one with none. DDL of another store than [verdict]'s `engine`
+ * is the library's error, thrown. Without the store's DDL no object is known as any layout's, and the rows read so: none is new where empty (8), and refused
  * as layout 1's holding values (12). An earlier layout's objects beside a stamp of this layout (4) are the schema plan's: a
  * record it holds of another form is made again by it, and none is the verdict's.
  *
@@ -93,6 +94,9 @@ object StoreLayout {
         objects: List<Map<String, Any?>> = emptyList(),
         ddl: StoreDdl? = null,
     ): Verdict {
+        require(ddl == null || (ddl is SqlStoreDdl) == (engine in SQL_ENGINES) && (ddl !is SqlStoreDdl || StoreStamp.engine(ddl) == engine)) {
+            "The DDL of ${ddl?.engine} given for a graph on $engine: a library gives the DDL of the store the graph is on, or none."
+        }
         val own = current(engine)
         val layouts = stampRows.map { layoutOf(it["layout"]) }.distinct().sorted()
         val store = ENGINE_NAMES[engine] ?: engine
@@ -107,7 +111,7 @@ object StoreLayout {
         // What the objects say, by the names each layout generates: known only on a store of [ddl], none on a graph engine.
         val old = sql?.let { oldObjects(it, objects) }.orEmpty()
         val ours = sql?.let { ownObjects(it, objects) }.orEmpty()
-        val later = sql?.let { s -> names.mapNotNull { generatedLayout(generated(s), it) } }.orEmpty().filter { it > own }.maxOrNull()
+        val later = sql?.let { s -> names.mapNotNull { generatedLayout(generated(s), it) ?: lockLayout(s, it) } }.orEmpty().filter { it > own }.maxOrNull()
         val stamped = layouts.singleOrNull()
         fun upgrade(layout: Int) = Verdict.Refuse(
             "The graph '$graph' on $store was written in store layout $layout by a later version of Drivine, and this version reads layout $own only: upgrade Drivine to use it.",
@@ -121,8 +125,8 @@ object StoreLayout {
             stamped != null && stamped > own -> upgrade(stamped)
             later != null -> upgrade(later)
             stamped == own -> Verdict.Current
-            stamped != null && !foreignNodes -> Verdict.Stamp(sql?.let { drops(it, objects) }.orEmpty(), StoreStamp.restampParameters(engine))
-            stamped != null -> reload(stamped)
+            stamped != null && engine in SQL_ENGINES && !foreignNodes -> Verdict.Stamp(sql?.let { drops(it, objects) }.orEmpty(), StoreStamp.restampParameters(engine))
+            stamped != null && engine in SQL_ENGINES -> reload(stamped)
             engine !in SQL_ENGINES -> Verdict.Current
             !foreignNodes && old.isEmpty() -> Verdict.Current
             !foreignNodes -> Verdict.Stamp(drops(sql!!, objects), StoreStamp.restampParameters(engine))
@@ -179,6 +183,10 @@ object StoreLayout {
      */
     private fun generated(ddl: SqlStoreDdl) =
         Regex("^${Regex.escape(ddl.name)}_(ix|lx|uq|t|v)([0-9]*)_[a-z0-9]*_[0-9a-f]{1,8}(_t|_i)?$", RegexOption.IGNORE_CASE)
+
+    /** The layout the lock table [name] of the store [ddl] carries (`g_lock2`, a later layout's `g_lock3`); null where [name] is no lock table. */
+    private fun lockLayout(ddl: SqlStoreDdl, name: String): Int? =
+        Regex("^${Regex.escape(ddl.name)}_lock([0-9]+)$", RegexOption.IGNORE_CASE).find(name)?.groupValues?.get(1)?.toIntOrNull()
 
     /** The layout the [generated] name [name] carries: none is 1; null where the name is no generated one. */
     private fun generatedLayout(generated: Regex, name: String): Int? =

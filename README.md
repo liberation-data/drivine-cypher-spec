@@ -341,17 +341,17 @@ nodeStamps: {property: "__drivine.stamp", token: 16, separator: ":", neverStampe
 
 ### The layout's verdict
 
-A SQL store's layout is 2, a graph engine's 1, and a stamp with no `layout` is 1: on a graph engine that is its own, on a SQL store an earlier one. The verdict is the first row of this table that the graph meets, and every graph meets one: the module's `StoreLayoutTableTest` asks it of every combination of an engine, the stamps (none, this layout's, an earlier one's, one with no `layout`, a later one's, two layouts'), whether the graph holds values, the objects the store lists (any set of an earlier layout's generated names, `<graph>_ix_…`; this layout's lock table, `<graph>_lock2`; its generated names, `<graph>_uq2_…`; a later layout's, `<graph>_ix3_…`; another graph's whose name begins with this one's), and whether the library gives the store's DDL, and holds each to its row. The values are whether the graph holds a node other than Drivine's own; the objects are known as a layout's only by the names it generates, where the library gives the DDL, and a graph engine lists none.
+A SQL store's layout is 2, a graph engine's 1, and a stamp with no `layout`, or one that is no number, is 1: on a graph engine that is its own, on a SQL store an earlier one. The verdict is the first row of this table that the graph meets, and every graph meets one: the module's `StoreLayoutTableTest` asks it of every combination of an engine, the stamps (none, this layout's, an earlier one's, one with no `layout`, one whose `layout` is no number, a later one's, two layouts'), whether the graph holds values, the objects the store lists (any set of an earlier layout's generated names, `<graph>_ix_…`; this layout's lock table, `<graph>_lock2`; its generated names, `<graph>_uq2_…`; a later layout's, `<graph>_ix3_…`, and its lock table, `<graph>_lock3`; another graph's whose name begins with this one's; entries with no name, or one that is no text), and whether the library gives the store's DDL, and holds each to its row. DDL of another store than the graph's is the library's error, thrown. The values are whether the graph holds a node other than Drivine's own; the objects are known as a layout's only by the names it generates, where the library gives the DDL, and a graph engine lists none.
 
 | # | Stamps | Values | Objects | Verdict |
 |---|---|---|---|---|
 | 1 | of two layouts or more | any | any | refused: stamped by two versions at once |
 | 2 | of a later layout | any | any | refused: written by a later Drivine, to be upgraded |
-| 3 | any | any | a later layout's | refused, as row 2 |
+| 3 | any | any | a later layout's (`<graph>_ix3_…`, `<graph>_lock3`) | refused, as row 2 |
 | 4 | of this layout | any | any else | `"current"` |
-| 5 | of an earlier layout | none | any else | `{stamp: {drops}}`: the earlier layout's objects dropped, then `restampLayout`. Nothing is migrated |
-| 6 | of an earlier layout | some | any else | refused: its layout and this one named, and the reload |
-| 7 | none, on a graph engine | any | none | `"current"`: a graph engine holds its own layout, with a stamp or without |
+| 5 | of an earlier layout, on a SQL store | none | any else | `{stamp: {drops}}`: the earlier layout's objects dropped, then `restampLayout`. Nothing is migrated |
+| 6 | of an earlier layout, on a SQL store | some | any else | refused: its layout and this one named, and the reload |
+| 7 | none or of an earlier layout, on a graph engine | any | any | `"current"`: a graph engine holds its own layout, with a stamp or without, and lists no objects |
 | 8 | none | none | none of an earlier layout's | `"current"`: new, or cleared; the stamp is assigned as ever |
 | 9 | none | none | an earlier layout's, whatever of this one's beside | `{stamp: {drops}}`: those dropped, then judged again; the restamp finds no stamp, and changes nothing |
 | 10 | none | some | this layout's and an earlier one's | refused, naming both |
