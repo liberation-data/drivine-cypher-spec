@@ -10,8 +10,8 @@ import kotlin.test.assertTrue
  * On Oracle, the query of an `EXISTS { … }` is read from a derived table, as a `COUNT { … }`'s is: Oracle refuses an `ORDER BY`
  * that ends the query of an `EXISTS` (ORA-00907), and one whose body unwinds a list or sorts its rows ends in one
  * (drivine4j#449). A body of a `UNION` is read the same way, and so is one in a `CASE`, a list comprehension or a write. The
- * spec's "EXISTS { } over UNWIND" and "SET and MERGE with EXISTS { } over UNWIND" cases run them on each store. Postgres
- * and SQLite read the query as it is.
+ * spec's "EXISTS { } over UNWIND" and "SET and MERGE with EXISTS { } over UNWIND" cases run them on each store. Its `SELECT`
+ * is hinted against subquery coalescing (`OraclePredicateSubqueryTest`). Postgres and SQLite read the query as it is.
  */
 class OracleExistsQueryTest {
 
@@ -41,7 +41,7 @@ class OracleExistsQueryTest {
         for (cypher in statements + writes) {
             val sql = OracleCypherCompiler("g").compile(cypher).sql
             val bodies = existsBodies(sql)
-            assertTrue(bodies.isNotEmpty() && bodies.all { it == "SELECT 1 FROM (" }, sql)
+            assertTrue(bodies.isNotEmpty() && bodies.all { it == "SELECT /*+ NO_COALESCE_SQ */ 1 FROM (" }, sql)
         }
     }
 
@@ -50,7 +50,7 @@ class OracleExistsQueryTest {
         val sql = OracleCypherCompiler("g").compile(
             "UNWIND [1, 2, 3] AS o RETURN o, EXISTS { UNWIND [3, 1, 2] AS j WITH j ORDER BY j LIMIT 1 WITH j WHERE j = o RETURN j }"
         ).sql
-        val inside = sql.substring(sql.indexOf("SELECT 1 FROM ("))
+        val inside = sql.substring(sql.indexOf("SELECT /*+ NO_COALESCE_SQ */ 1 FROM ("))
         assertTrue(Regex("""ORDER BY [^\n]*\n\s*FETCH NEXT 1 ROWS ONLY""").containsMatchIn(inside), sql)
     }
 
