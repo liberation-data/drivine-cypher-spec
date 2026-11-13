@@ -27,6 +27,7 @@ import java.time.format.DateTimeFormatter
  *   other targets have no YAML reader. See `StoreDdlTest`.
  * - `marker.json`: the spec's `marker.yaml`, the schema marker and the stamps, as JSON likewise. See `StoreMarkerTest`.
  * - `plans.json`: the spec's `plans.yaml`, the schema plan's cases, as JSON likewise. See `StorePlanTest`.
+ * - `fragments.json`: the spec's `fragments.yaml`, the fragments a library writes itself, as JSON likewise. See `FragmentsTest`.
  * - `typed-values-golden.json`: the module's golden of the store layout's typed values compiled (`src/commonTest/resources`),
  *   for each target's `TypedValuesGoldenTest`.
  * - `host.json`: the spec's `host.yaml`, as JSON likewise: the host functions' cases, its sort keys and its reads of the store
@@ -66,6 +67,8 @@ object Oracle {
         File(out, "store.json").writeText(json.writeValueAsString(yaml.readTree(File(spec, "store.yaml"))))
         // The schema marker and the stamps, for each target's StoreMarkerTest.
         File(out, "marker.json").writeText(json.writeValueAsString(yaml.readTree(File(spec, "marker.yaml"))))
+        // The fragments a library writes itself, for each target's FragmentsTest.
+        File(out, "fragments.json").writeText(json.writeValueAsString(yaml.readTree(File(spec, "fragments.yaml"))))
         // The schema plan's cases, for each target's StorePlanTest.
         File(out, "plans.json").writeText(json.writeValueAsString(yaml.readTree(File(spec, "plans.yaml"))))
         // The host's functions and readers, for each target's HostSpecTest and ValueLayoutTest.

@@ -151,12 +151,7 @@ object CypherCompiler {
      * labels and type, in the columns [ColumnKind.tagged] names. Untyped, the SQL is byte for byte the other's.
      */
     fun compile(store: Store, graph: GraphOptions, cypher: String, parameters: Map<String, Any?>, typed: Boolean): CompileResult {
-        val compiler: SqlCypherCompiler = when (store) {
-            Store.POSTGRES -> PostgresCypherCompiler(graph.name)
-            Store.ORACLE -> OracleCypherCompiler(graph.name, graph.nullsEqualStored, graph.eraStored, graph.indexedProperties, encoder = null, rowsAsText = graph.oracleRowsAsText, reencodeJson = graph.oracleReencodeJson, readsAsText = graph.oracleReadsAsText)
-            Store.SQLITE -> SqliteCypherCompiler(graph.name)
-        }
-        compiler.vectorIndexes = graph.vectorIndexes
+        val compiler = compiler(store, graph)
         val compiled = try {
             compiler.compile(cypher, parameters, typed)
         } catch (e: Exception) {
@@ -169,10 +164,28 @@ object CypherCompiler {
             setup = setup,
             warnings = compiler.warnings.toList(),
             nonFinite = compiled.nonFinite,
-            storedFunctions = (compiler as? OracleCypherCompiler)?.let { StoredFunctions(it.callsStoredNullsEqual, it.callsStoredEra) },
+            storedFunctions = storedFunctions(compiler),
             columns = compiled.columns,
         )
     }
+
+    /** The store's compiler of [graph], as a statement and a fragment ([org.drivine.cypher.sql.SqlFragment]) are compiled by. */
+    internal fun compiler(store: Store, graph: GraphOptions): SqlCypherCompiler {
+        val compiler: SqlCypherCompiler = when (store) {
+            Store.POSTGRES -> PostgresCypherCompiler(graph.name)
+            Store.ORACLE -> OracleCypherCompiler(graph.name, graph.nullsEqualStored, graph.eraStored, graph.indexedProperties, encoder = null, rowsAsText = graph.oracleRowsAsText, reencodeJson = graph.oracleReencodeJson, readsAsText = graph.oracleReadsAsText)
+            Store.SQLITE -> SqliteCypherCompiler(graph.name)
+        }
+        compiler.vectorIndexes = graph.vectorIndexes
+        return compiler
+    }
+
+    /**
+     * Whether a statement or a fragment [compiler] compiled calls each function the store keeps beside the graph, on Oracle:
+     * null elsewhere.
+     */
+    internal fun storedFunctions(compiler: SqlCypherCompiler): StoredFunctions? =
+        (compiler as? OracleCypherCompiler)?.let { StoredFunctions(it.callsStoredNullsEqual, it.callsStoredEra) }
 
     /**
      * A Postgres statement that writes, split into the function it makes and the call of it. The compiler writes them as one

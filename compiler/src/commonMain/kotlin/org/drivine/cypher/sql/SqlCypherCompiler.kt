@@ -3,6 +3,7 @@ package org.drivine.cypher.sql
 import org.drivine.cypher.json.JsonNode
 import org.drivine.cypher.json.JsonNodeFactory
 import org.drivine.cypher.json.NullNode
+import org.drivine.DrivineInternalApi
 import org.drivine.cypher.CompilerException
 import org.drivine.cypher.CypherReader
 import org.drivine.cypher.time.CommonTime
@@ -280,6 +281,114 @@ abstract class SqlCypherCompiler(
         taggedReturned.clear()
         return finished(compiled(query, parameters)).copy(columns = returned.orEmpty())
     }
+
+    /**
+     * The condition [cypher], one Cypher expression, as a `WHERE` of the library's own SQL keeps a row by it: see [SqlFragment].
+     * Its [variables] are rows of that SQL, and [parameters] the values of the parameters it names.
+     */
+    @DrivineInternalApi
+    fun condition(cypher: String, variables: Map<String, FragmentVariable>, parameters: Map<String, Any?> = emptyMap()): SqlFragment =
+        fragment(cypher, variables, parameters) { writer, expression, scope -> listOf(writer.condition(expression, scope)) }
+
+    /** The value [cypher], one Cypher expression, as the store's JSON: see [condition] and [SqlFragment]. */
+    @DrivineInternalApi
+    fun value(cypher: String, variables: Map<String, FragmentVariable>, parameters: Map<String, Any?> = emptyMap()): SqlFragment =
+        fragment(cypher, variables, parameters) { writer, expression, scope -> listOf(writer.valueJson(expression, scope)) }
+
+    /**
+     * The terms an `ORDER BY` of the library's own SQL sorts by [cypher], one Cypher expression, as `ORDER BY` [cypher] sorts a
+     * compiled statement's rows: by kind, then value, a temporal value by its sort key, nulls last ascending; see [condition].
+     */
+    @DrivineInternalApi
+    fun order(cypher: String, descending: Boolean, variables: Map<String, FragmentVariable>, parameters: Map<String, Any?> = emptyMap()): SqlFragment =
+        fragment(cypher, variables, parameters) { writer, expression, scope -> writer.sortTerms(expression, scope).map { orderTerm(it, descending) } }
+
+    /**
+     * A fragment: [cypher] read as one expression, compiled by [write] over [variables] bound as a statement binds the nodes and
+     * relationships it matches. A fragment is written into SQL the library writes, which declares no function: one that calls a
+     * function the store declares for a statement is refused, and so is one that aggregates, as that SQL groups no rows for it,
+     * and one that calls randomUUID() within it, which a statement calls first for each row, as a column that SQL lacks.
+     */
+    private fun fragment(
+        cypher: String,
+        variables: Map<String, FragmentVariable>,
+        parameters: Map<String, Any?>,
+        write: (Writer, Expression, Map<String, Value>) -> List<String>,
+    ): SqlFragment {
+        // Read as a statement's RETURN, whose parse error would name a statement, and a column of that RETURN's text: on a line
+        // of its own, so a line comment the expression ends with leaves the column's name.
+        val query = try {
+            CypherReader.read("RETURN $cypher\nAS fragment")
+        } catch (e: CompilerException) {
+            null
+        }
+        // A RETURN of its own, DISTINCT or ordered, would be read past: only the one item is compiled.
+        val projection = (query?.clauses?.singleOrNull() as? Clause.Return)?.projection
+            ?.takeIf { !it.distinct && !it.star && it.orderBy.isEmpty() && it.skip == null && it.limit == null }
+        val item = projection?.items?.singleOrNull()
+        if (query == null || query.unions.isNotEmpty() || item == null || item.name != "fragment") {
+            throw CompilerException("A fragment is one Cypher expression: $cypher")
+        }
+        // A row named as the compiler names its own, `n1` or `x`, would be taken for one of them inside a subquery the fragment
+        // writes: no name the compiler gives ends with `_`.
+        variables.forEach { (name, variable) ->
+            if (!LIBRARY_ROW.matches(variable.row)) {
+                throw CompilerException("A fragment's variable $name is a row whose name ends with _, as no row the compiler names does: ${variable.row}")
+            }
+        }
+        // Only the forms the libraries write their filters, orders and seeks in, each held to Neo4j's answer by fragments.yaml:
+        // an aggregate, a randomUUID() a statement makes first for each row, and every other form are refused by name.
+        FragmentForms.check(item.expression, cypher, variables.keys)
+        // As a statement that reads sets them, so the fragment is written as that statement's WHERE or ORDER BY would be.
+        val given = parameters.values.any { holdsNonFinite(it) }
+        nonFinite = given || (nonFiniteWorkedOut(false) && (worksOutNonFinite(query, parameters) || (infinitiesStored && worksOutNaN(query, parameters))))
+        nanWorkedOut = given || worksOutNonFinite(query, parameters) || worksOutNaN(query, parameters)
+        idsAtMost(mostIds(query))
+        procedural = false
+        // The functions the statements compiled before declared are set aside, and put back after: one the fragment calls is
+        // seen though such a statement declared it already, and none it declares is left for the next statement.
+        val declared = functions.toList()
+        functions.clear()
+        val hinting = startHints()
+        try {
+            val writer = Writer(Parameters(parameters, ::parameterJson, ::parameterCount, text = ::parameterText, asPath = parameterPath))
+            writer.labelsOf = variables.values.mapNotNull { variable -> (variable as? FragmentVariable.Node)?.let { "${it.row}.props" to it.labels } }.toMap()
+            val scope = variables.mapValues { (_, variable) ->
+                val row = variable.row
+                when (variable) {
+                    is FragmentVariable.Node -> Value.Node("$row.nid", "$row.labels", "$row.props", "$row.stamp")
+                    is FragmentVariable.Relationship -> Value.Relationship("$row.eid", "$row.src", "$row.dst", "$row.type", "$row.props")
+                }
+            }
+            val terms = write(writer, item.expression, scope).map(::finishedTerm)
+            if (functions.isNotEmpty() || terms.any { calledFunctions(it).isNotEmpty() }) {
+                throw CompilerException("A fragment calls a function the store declares for a statement, which SQL a library writes doesn't declare: $cypher")
+            }
+            return SqlFragment(terms, writer.parameters.values, nonFinite, fragmentHints(terms))
+        } finally {
+            functions.clear()
+            functions += declared
+            endHints(hinting)
+        }
+    }
+
+    /**
+     * What the statements compiled before left of what decides a fragment's hints ([fragmentHints]), set aside so a fragment's
+     * are its own: none here. [endHints] puts it back, so a statement compiled after is planned as it would have been.
+     */
+    protected open fun startHints(): Any? = null
+
+    /** Puts back what [startHints] set aside. */
+    protected open fun endHints(saved: Any?) {}
+
+    /**
+     * The optimizer hints the library's query that holds the fragment's [terms], over the library's [rows] of the graph's
+     * tables, carries in its outermost `SELECT`, as a statement that reads them would be planned ([planned]): none here.
+     */
+    protected open fun fragmentHints(terms: List<String>): List<String> = emptyList()
+
+    /** A fragment's term [sql] after the last pass the store makes over a statement's text, as [finished] makes it: none here. */
+    protected open fun finishedTerm(sql: String): String = sql
 
     /** The statement [compiled] as the store runs it, after the last pass the store makes over it: none here. */
     protected open fun finished(compiled: CompiledCypher): CompiledCypher = compiled
@@ -1520,6 +1629,35 @@ abstract class SqlCypherCompiler(
 
         fun query(query: Query): String = projected(query).sql
 
+        /**
+         * A fragment's nodes' labels, which the library knows, by the node's properties' column (its row's): an equality of such a
+         * node's property with a value is then written as one in a pattern's properties is, with the index of that label
+         * ([indexedOf]). By the row, not the variable: a variable bound again within the fragment, `ANY(n IN … WHERE n.k = 1)`,
+         * is another node, of no labels known. Empty in a statement.
+         */
+        var labelsOf: Map<String, List<String>> = emptyMap()
+
+        /** [expression] in [scope] as the store's JSON, as a fragment's value: see [SqlFragment]. */
+        fun valueJson(expression: Expression, scope: Map<String, Value>): String = comparable(json(expression(expression, scope)))
+
+        /** The terms that sort by [expression] in [scope], as `ORDER BY` sorts by it: see [sortable]. */
+        fun sortTerms(expression: Expression, scope: Map<String, Value>): List<String> = sortable(expression(expression, scope))
+
+        /**
+         * The property [expression] reads, where it is one of a fragment's node whose labels the library gave ([labelsOf]),
+         * as a pattern's properties name it to an index: null in a statement, which names its own in its patterns. Asked only of
+         * an `=` the row must pass to be kept, as a pattern's properties are: the index's test is null, not false, for a value
+         * it doesn't hold (a list, a long text), which under a `NOT`, an `OR` or in a value would keep or drop the wrong rows.
+         */
+        private fun indexedOf(expression: Expression, value: Expression, scope: Map<String, Value>): IndexedProperty? {
+            if (labelsOf.isEmpty()) return null
+            val property = expression as? Expression.Property ?: return null
+            val name = (property.subject as? Expression.Variable)?.name ?: return null
+            val node = scope[name] as? Value.Node ?: return null
+            val labels = labelsOf[node.props]?.takeIf { it.isNotEmpty() } ?: return null
+            return IndexedProperty(node.props, property.key, labels, givenRowsScalar(value, scope))
+        }
+
         /** [query], a statement that ends with `RETURN`, as that `RETURN` projects it: see [Projected.identity]. */
         fun projected(query: Query): Projected {
             give(query)
@@ -1739,6 +1877,8 @@ abstract class SqlCypherCompiler(
             // subqueries that read a path's nodes and relationships by the ids in its columns read the first row's on every row (#537).
             val passesPath = projected.scope.values.any { it is Value.Path }
             next.source("(\n${indent(if (apart || passesPath) called(sql) else sql)}\n) $name")
+            // Rows an `UNWIND` read last are still read before what comes after a `WITH` of them: SQLite merges its query in.
+            next.afterRows = select.afterRows?.let { name }
             projected.scope.forEach { (variable, value) -> next.bind(variable, value.columnsOf(name)) }
             projected.order.forEach { (column, descending) -> next.order += "$name.$column" to descending }
             return with.where?.let { filtered(next, it) } ?: next
@@ -2163,6 +2303,7 @@ abstract class SqlCypherCompiler(
                 "CASE WHEN ${typeOf(x)} = 'array' THEN $x WHEN NOT ${isJsonNull(x)} THEN ${comparable(Value.Json(jsonArray(listOf(x)), ordered = true))} END"
             }
             select.source(elementsOf(list, items, name))
+            select.afterRows = name
             select.unwound[item(name)] = name
             givenTree(unwind.list)?.let { unwoundGiven[item(name)] = it }
             // An item of a list that holds no null holds none, nor is JSON's null; of a list of texts, or of a text, is a text. An item
@@ -2747,6 +2888,8 @@ abstract class SqlCypherCompiler(
             val select = Select(emptyMap())
             val r = alias("r")
             select.source(elements(ROWS, r))
+            // Read before what the clauses after the write read, as an `UNWIND`'s rows are: SQLite read them innermost (#654).
+            select.afterRows = r
             select.order += itemNo(r) to false
             bindRow(select, item(r))
             unread = select to select.size()
@@ -5534,7 +5677,10 @@ abstract class SqlCypherCompiler(
                     entrywise(binary, left, right, scope)?.let { equal -> return Value.Bool(if (binary.operator == Operator.NOT_EQUALS) "(NOT $equal)" else equal) }
                     val plain = plain(binary.left, binary.right, left, right, scope)
                     val equal = (if (plain) null else givenItemwise(binary.left, left, binary.right, right))
-                        ?: equality(left, right, binary.right, plain, stored(binary.left, scope), scalarRows = givenRowsScalar(binary.right, scope), leftWritten = binary.left)
+                        ?: equality(
+                            left, right, binary.right, plain, stored(binary.left, scope), of = if (conjunct && binary.operator == Operator.EQUALS) indexedOf(binary.left, binary.right, scope) else null,
+                            scalarRows = givenRowsScalar(binary.right, scope), leftWritten = binary.left,
+                        )
                     val keyed = if (conjunct && binary.operator == Operator.EQUALS) idEquality(binary, left, right, scope) else null
                     // A node equal to a node, where the row must pass that, may be read by its key: see [readByKey].
                     if (conjunct && binary.operator == Operator.EQUALS && left is Value.Node && right is Value.Node) comparedKeys.pairs += left.nid to right.nid
@@ -5829,7 +5975,7 @@ abstract class SqlCypherCompiler(
                 given == null && (right as? Value.Json)?.temporal?.takeIf { it != Temporal.DURATION } != null ->
                     (right as Value.Json).let { tag -> indexedTagEquality(a, tag.temporal!!, tagKeyOf(tag), of) }
                         ?: if (written != null && !givenAsWritten(written)) indexedEqualityOfAny(a, b, of, true) else null
-                given == null && written != null && !givenAsWritten(written) -> indexedEqualityOfAny(a, b, of, of?.scalar == true || scalarRows)
+                given == null && written != null && !givenAsWritten(written) -> indexedEqualityOfAny(a, b, of, of?.scalar == true || scalarRows || heldCase(written))
                 else -> null
             }
             // Null is equal to nothing, itself included: the comparison is null, as in Cypher. A value the statement
@@ -5846,6 +5992,52 @@ abstract class SqlCypherCompiler(
          * label, and the property only as a filter on each, even where the property's index was there (#617).
          */
         private var indexedEmitted = false
+
+        /**
+         * Whether [expression], a value the statement works out from what it is given, is a text, a number or a truth value the
+         * store's index holds ([indexHolds]): then it is no list or map, nor a value the index doesn't hold, and is compared as a
+         * given one is (#238). Worked out by [worked] from the values given, for the functions that give no list or map;
+         * anything else, or a value that may be empty, long or a list, is let through as a value of any kind is.
+         */
+        private fun heldCase(expression: Expression): Boolean = when (val value = worked(expression)) {
+            null -> false
+            is String -> indexHolds(value)
+            is Boolean, is Number -> indexHolds(value)
+            else -> false
+        }
+
+        /**
+         * What [expression] gives, worked out from the values the statement is given, as far as an index's test needs it: a
+         * text, a number or a truth value; null where it is none of those, may be null, or isn't known here. A text another
+         * case of is written twice, as a letter's other case takes half as many bytes again at most (Oracle's `LOWER` and
+         * `UPPER` map a letter to one letter), so [heldCase] holds it to what the longer could be. A trimmed text is the text
+         * as given, as a store's trim takes off less than Kotlin's whitespace (Oracle's spaces alone, so a tab stays): it is
+         * no longer, and is empty only where each of its characters is whitespace to Kotlin or a control character.
+         */
+        private fun worked(expression: Expression): Any? = when (expression) {
+            is Expression.Literal, is Expression.Parameter, is Expression.Property -> given(expression)?.takeIf { it is String || it is Number || it is Boolean }
+            is Expression.Function -> {
+                val arguments = expression.arguments
+                when (expression.name.lowercase()) {
+                    "tolower", "toupper" -> (arguments.singleOrNull()?.let(::worked) as? String)?.let { it + it }
+                    "trim", "ltrim", "rtrim" ->
+                        (arguments.singleOrNull()?.let(::worked) as? String)?.takeIf { it.any { c -> !c.isWhitespace() && c > ' ' } }
+                    "tostring" -> when (val value = arguments.singleOrNull()?.let(::worked)) {
+                        is String -> value
+                        is Boolean -> value.toString()
+                        is Number -> value.toString() + value.toString()
+                        else -> null
+                    }
+                    // The first argument not given as null decides, a list or a map among them: each before it is known to be null.
+                    "coalesce" -> arguments.firstOrNull { !isGivenNull(it) }?.let(::worked)
+                    else -> null
+                }
+            }
+            else -> null
+        }
+
+        /** Whether [expression] is a value the statement gives as null: a literal null, or a parameter bound to null. */
+        private fun isGivenNull(expression: Expression): Boolean = givenAsWritten(expression) && given(expression) == null
 
         /**
          * Whether the sides [leftWritten] and [rightWritten] of a comparison, compiled as [left] and [right], compare as JSON, as
@@ -6871,6 +7063,12 @@ abstract class SqlCypherCompiler(
      */
     protected open fun crossJoin(source: String) = "CROSS JOIN $source"
 
+    /**
+     * The join of [source] to the rows an `UNWIND` reads just before it, where a condition reads both, which [crossJoin]
+     * gives where the store reads them first unbidden. SQLite does not: see its compiler.
+     */
+    protected open fun rowsJoin(source: String) = crossJoin(source)
+
     /** The rows a part of a statement reads: its sources and joins, its conditions, and the variables it binds. */
     private inner class Select(private val outer: Map<String, Value>) {
         val sources = mutableListOf<String>()
@@ -6920,8 +7118,20 @@ abstract class SqlCypherCompiler(
             labelTests[nid]?.forEach { where[it.at] = test(it.labels, it.all) }
         }
 
+        /**
+         * The alias of the rows of an `UNWIND`, or of those a write left in [ROWS], where they are the last source read, but for
+         * joins to them, or of the `WITH` this part reads where they were the last it read: the next source is joined by
+         * [rowsJoin] where a condition of this part reads both it and them ([from]).
+         */
+        var afterRows: String? = null
+
+        /** Each source joined after the rows, by its place in [sources]: its text, and the aliases of the rows and of it. */
+        private val afterRowsAt = mutableMapOf<Int, Triple<String, String, String>>()
+
         fun source(text: String) {
+            afterRows?.takeIf { sources.isNotEmpty() }?.let { rows -> afterRowsAt[sources.size] = Triple(text, rows, text.substringAfterLast(' ')) }
             sources += if (sources.isEmpty()) "FROM $text" else crossJoin(text)
+            afterRows = null
         }
 
         fun join(text: String) {
@@ -6929,7 +7139,21 @@ abstract class SqlCypherCompiler(
             sources += text
         }
 
-        fun from(): List<String> = sources
+        /**
+         * Its sources and joins. A source joined after the rows ([afterRows]) is joined by [rowsJoin] only where it is read by
+         * what they hold: one read alone, as `UNWIND $ids AS id MATCH (c:Config {key: 'k'})`'s, is then read once, not once
+         * for each row (5.8 s against 0.007 s for 1,000 rows over 10,000 nodes on SQLite).
+         */
+        fun from(): List<String> = sources.mapIndexed { i, source ->
+            afterRowsAt[i]?.takeIf { (_, rows, alias) -> where.any { reads(it, rows) && reads(it, alias) } }?.let { (text) -> rowsJoin(text) } ?: source
+        }
+
+        /**
+         * Whether [condition] reads a column of the source [alias], outside its quoted texts: a text written in it, as
+         * `{key: 'u1.k'}`'s, or a JSON path, reads no source.
+         */
+        private fun reads(condition: String, alias: String) =
+            Regex("""\b${Regex.escape(alias)}\.""").containsMatchIn(condition.split('\'').filterIndexed { i, _ -> i % 2 == 0 }.joinToString(" "))
 
         /**
          * The hints the store's planner is given for this part ([fewRows]), in the order added. Each is for a source of this
@@ -6961,6 +7185,12 @@ abstract class SqlCypherCompiler(
 
         /** The functions that read a value without giving it on, so read it as it is in flight (see [Value.Json.inflight]). */
         val READS_IN_FLIGHT = setOf("size", "length", "tostring", "tointeger", "tofloat", "toboolean")
+
+        /**
+         * A fragment's row ([FragmentVariable.row]): a name that ends with `_`, as none of the rows and columns the compiler names
+         * its own does, so a subquery the fragment writes doesn't take the library's row for one of its own.
+         */
+        val LIBRARY_ROW = Regex("[A-Za-z][A-Za-z0-9_]*_")
 
         /** A column of the query [PENDING] stands for. */
         val PENDING_COLUMN = Regex("${PENDING}\\.(\\w+)")

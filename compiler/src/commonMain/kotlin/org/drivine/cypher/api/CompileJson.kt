@@ -40,7 +40,8 @@ import kotlin.io.encoding.ExperimentalEncodingApi
  * A request with `search` or `searchIndex` in place of `cypher` is a full-text search, answered by [FullTextSearch]: see
  * [SearchJson]. One with `vector` is a vector search, answered by [VectorSearch]: see [VectorJson]. One with `read`,
  * `temporalKey` or `layout` asks the store layout's questions: a column's value read, a temporal value's sort key, a
- * graph's layout judged; see [LayoutJson]. A request that gives more than one kind is an error.
+ * graph's layout judged; see [LayoutJson]. One with `fragment` asks for a part of a statement a library writes itself, a
+ * condition, a value or an order's terms: see [FragmentJson]. A request that gives more than one kind is an error.
  *
  * Values, in the parameters given and those bound, are plain JSON, tagged only where JSON, or a host's reading of it, loses
  * what the SQL depends on:
@@ -93,7 +94,7 @@ object CompileJson {
         // A full-text search, asked of the same entry: a request with "search" or "searchIndex" in place of "cypher", and a
         // vector search, with "vector". A request asks one thing: one that gives two would have the other read past as though
         // it were not there.
-        val kinds = listOf("cypher", "search", "searchIndex", "vector", "settings") + LayoutJson.KINDS
+        val kinds = listOf("cypher", "search", "searchIndex", "vector", "settings", "fragment") + LayoutJson.KINDS
         if (kinds.count { tree.has(it) } > 1) {
             return error("A request gives one of ${kinds.dropLast(1).joinToString()} and ${kinds.last()}.")
         }
@@ -102,6 +103,7 @@ object CompileJson {
         // The store layout's questions, asked of the same entry: see LayoutJson.
         if (LayoutJson.KINDS.any { tree.has(it) }) return LayoutJson.answer(tree)
         if (tree.has("settings")) return settings(tree["settings"])
+        if (tree.has("fragment")) return FragmentJson.answer(tree)
         val call = try {
             read(tree)
         } catch (e: Exception) {
@@ -136,8 +138,23 @@ object CompileJson {
     private class Call(val store: Store, val graph: GraphOptions, val cypher: String, val parameters: Map<String, Any?>, val typed: Boolean)
 
     private fun read(tree: ObjectNode): Call {
+        val store = store(tree)
+        val options = graph(tree)
+        val cypher = tree["cypher"]?.textValue() ?: throw IllegalArgumentException("A request gives its statement as cypher.")
+        val parameters = parameters(tree)
+        val typedGiven = tree["typed"]?.takeUnless { it.isNull }
+        require(typedGiven == null || typedGiven.isBoolean) { "A request gives typed as true or false." }
+        return Call(store, options, cypher, parameters, typedGiven?.booleanValue() ?: false)
+    }
+
+    /** The store a request names. */
+    internal fun store(tree: ObjectNode): Store {
         val storeId = tree["store"]?.textValue() ?: throw IllegalArgumentException("A request names its store: postgres, oracle or sqlite.")
-        val store = Store.of(storeId) ?: throw IllegalArgumentException("No store $storeId: postgres, oracle or sqlite.")
+        return Store.of(storeId) ?: throw IllegalArgumentException("No store $storeId: postgres, oracle or sqlite.")
+    }
+
+    /** The graph a request gives, as [GraphOptions]. */
+    internal fun graph(tree: ObjectNode): GraphOptions {
         val graph = tree["graph"] as? ObjectNode ?: throw IllegalArgumentException("A request gives its graph: {\"name\": …}.")
         val name = graph["name"]?.textValue() ?: throw IllegalArgumentException("A request's graph has a name.")
         val indexedGiven = graph["indexedProperties"]?.takeUnless { it.isNull }
@@ -153,7 +170,7 @@ object CompileJson {
             "A request's vectorIndexes are [{name, label, property, dimensions, similarity}, …]."
         }
         val vectorIndexes = (vectorGiven as ArrayNode?)?.map(::vectorIndex).orEmpty()
-        val options = GraphOptions(
+        return GraphOptions(
             name = name,
             nullsEqualStored = flag(graph, "nullsEqualStored"),
             eraStored = flag(graph, "eraStored"),
@@ -163,15 +180,13 @@ object CompileJson {
             oracleReadsAsText = flag(graph, "oracleReadsAsText", default = false),
             vectorIndexes = vectorIndexes,
         )
-        val cypher = tree["cypher"]?.textValue() ?: throw IllegalArgumentException("A request gives its statement as cypher.")
-        val parameters = when (val given = tree["parameters"]) {
-            null -> emptyMap()
-            is ObjectNode -> given.properties().associate { (key, value) -> key to TypedJson.value(value, 3) }
-            else -> if (given.isNull) emptyMap() else throw IllegalArgumentException("A request's parameters are a JSON object.")
-        }
-        val typedGiven = tree["typed"]?.takeUnless { it.isNull }
-        require(typedGiven == null || typedGiven.isBoolean) { "A request gives typed as true or false." }
-        return Call(store, options, cypher, parameters, typedGiven?.booleanValue() ?: false)
+    }
+
+    /** The parameters a request gives, as the compiler takes them: none where it gives none. */
+    internal fun parameters(tree: ObjectNode): Map<String, Any?> = when (val given = tree["parameters"]) {
+        null -> emptyMap()
+        is ObjectNode -> given.properties().associate { (key, value) -> key to TypedJson.value(value, 3) }
+        else -> if (given.isNull) emptyMap() else throw IllegalArgumentException("A request's parameters are a JSON object.")
     }
 
     /**

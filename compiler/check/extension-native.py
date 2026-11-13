@@ -206,6 +206,18 @@ def main(library, version, host=None):
     finally:
         lib.drivine_free(answer)
     check("drivine_compile through ctypes compiles", "sql" in compiled, True)
+    # An UNWIND's rows are read before each MATCH after them, which SQLite read innermost, scanning every node of one
+    # MATCH for each of the other's: 70 s for 40 rows over 800 nodes (liberation-data/drivine#654).
+    cypher = "UNWIND $rows AS row MATCH (a:P {id: row.s}) MATCH (b:P {id: row.d}) RETURN count(*)"
+    request = json.dumps({"store": "sqlite", "graph": {"name": "g"}, "cypher": cypher, "parameters": {"rows": [{"s": 1, "d": 2}]}})
+    answer = lib.drivine_compile(request.encode("utf-8"))
+    try:
+        compiled = json.loads(ctypes.string_at(answer).decode("utf-8"))
+    finally:
+        lib.drivine_free(answer)
+    connection.execute("CREATE TABLE g_node (nid INTEGER PRIMARY KEY AUTOINCREMENT, labels TEXT NOT NULL, props TEXT NOT NULL, stamp TEXT, words TEXT)")
+    reads = [row[3] for row in connection.execute("EXPLAIN QUERY PLAN " + compiled["sql"], {"_cy_rows": json.dumps([{"s": 1, "d": 2}])}) if row[3].startswith(("SCAN ", "SEARCH "))]
+    check("An UNWIND's rows are read before the MATCHes after them", [r.split(" ")[1][0] for r in reads[:3]], ["u", "n", "n"])
     lib.drivine_gc_collect()
     check("drivine_gc_collect through ctypes returns, and SQL still answers", one("SELECT drivine_extension_version()"), version)
     # The compiler's host contract version, as C gives it, is the registered functions' (HostCheck).

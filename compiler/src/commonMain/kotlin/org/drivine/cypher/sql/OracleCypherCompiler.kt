@@ -763,10 +763,17 @@ class OracleCypherCompiler(
     override fun indexedTagEquality(property: String, kind: Temporal, key: String, of: IndexedProperty?): String? =
         labelledHeld(of, listOf("'${kind.function}'", if (binds(key)) "(SELECT $key FROM dual)" else key))
 
-    /** The [value]'s class and key ([OracleSql.valueClass], [OracleSql.valueKey]) equal to the property's, as [labelledHeld] reads it. */
-    private fun labelledEquals(of: IndexedProperty?, value: String): String? =
-        if (labelledHeld(of, emptyList()) == null) null
-        else shared(value) { (x) -> labelledHeld(of, listOf(OracleSql.valueClass(x), OracleSql.valueKey(x)))!! }
+    /**
+     * The [value]'s class and key ([OracleSql.valueClass], [OracleSql.valueKey]) equal to the property's, as [labelledHeld] reads it.
+     * A long value, as `toLower($p)` is, is worked out in a query of its own beside each of the index's columns ([sharedBound]),
+     * which Oracle reads once, as it reads a bound value: [shared] around the whole comparison would put the columns inside
+     * that query, where no index is read, and a lookup by a lowercased copy read every node of the label (#238).
+     */
+    private fun labelledEquals(of: IndexedProperty?, value: String): String? {
+        if (labelledHeld(of, emptyList()) == null) return null
+        if (!binds(value)) return labelledHeld(of, listOf(OracleSql.valueClass(value), OracleSql.valueKey(value)))
+        return labelledHeld(of, listOf(sharedBound(value) { (x) -> OracleSql.valueClass(x) }, sharedBound(value) { (x) -> OracleSql.valueKey(x) }))
+    }
 
     /**
      * The class and the key [held] equal to the property [of] names, as each index a label of its node may have over it holds
@@ -1778,13 +1785,16 @@ class OracleCypherCompiler(
     override fun called(query: String) =
         "SELECT /*+ NO_MERGE${if (DISTINCT_SELECT.containsMatchIn(query)) " NO_DECORRELATE" else ""} */ * FROM (\n${indent(query)}\n)"
 
+    /** A fragment's term [sql] with its reads routed as a statement's are: see [finished]. */
+    override fun finishedTerm(sql: String) = OracleLongReads.routed(sql)
+
     /**
      * Each read of a stored value as JSON left off the CLOB route is routed it: a long text property read as a direct member of
      * a list or a map, or as a nested property, is routed the CLOB way on Oracle, to avoid an Oracle server defect
      * (drivine4j#670). See [OracleLongReads].
      */
     override fun finished(compiled: CompiledCypher): CompiledCypher {
-        val routed = OracleLongReads.routed(compiled.sql)
+        val routed = finishedTerm(compiled.sql)
         return compiled.copy(sql = if (readsAsText && !procedural && !typed) readAsText(routed) else routed)
     }
 
@@ -1806,6 +1816,27 @@ class OracleCypherCompiler(
         val numbered = "SELECT cy_q.result, ROWNUM AS cy_n FROM (\n${indent(inner)}\n) cy_q"
         return query.substring(0, declared) +
             "$head JSON_SERIALIZE(cy_r.result RETURNING CLOB EXTENDED) AS result FROM (\n${indent(numbered)}\n) cy_r\nORDER BY cy_r.cy_n"
+    }
+
+    /**
+     * A fragment's hints: `NO_JSON_TABLE_TRANSFORM` always, and [NO_FEEDBACK] where a term tests a node's labels as one read by
+     * its key, as [planned] gives a statement. [planned] hints a statement against Oracle's JSON table transformation where a
+     * comparison reads a property by its own path, an item of a list is read by its place, or the graph's tables are read
+     * twice or more: a fragment is a part of the library's query, whose FROM the module doesn't see, and which reads the graph's
+     * tables beside the fragment's own reads, so it is hinted whatever it reads. The cost is a rewrite Oracle doesn't make,
+     * which a statement that compares a property forgoes too; without it Oracle 23 may give a comparison the wrong truth.
+     */
+    override fun fragmentHints(terms: List<String>): List<String> {
+        val text = terms.joinToString("\n")
+        return listOfNotNull(NO_JSON_TABLE_TRANSFORM, NO_FEEDBACK.takeIf { keyed.any { it in text } })
+    }
+
+    override fun startHints(): Any? = (readsCompared to readsByPlace).also { readsCompared = false; readsByPlace = false }
+
+    override fun endHints(saved: Any?) {
+        val (compared, byPlace) = saved as Pair<*, *>
+        readsCompared = compared as Boolean
+        readsByPlace = byPlace as Boolean
     }
 
     /**

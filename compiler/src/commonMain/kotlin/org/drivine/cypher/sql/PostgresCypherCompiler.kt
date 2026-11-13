@@ -306,13 +306,15 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
         // Where the kind comes ([kindOrder], `2.1` … for a tag) and, in one text, a text by its code points and a temporal value's tag by
         // its sort key's bytes, a text of fixed width for each kind: so a value is ordered by one text compared, and a tag not as `jsonb`
         // compares objects of three keys, which took a third as long again over every moment of a label (#161). A duration, a number,
-        // a truth value, a list and a map are ordered then as `jsonb` orders them.
+        // a truth value and a map are ordered then as `jsonb` orders them, and a list by its items ([flatListKey]).
         val ranked = if (key != null) null else shared(value) { (x) ->
             val tag = "CASE ${tagKind(x)} ${TAG_ORDER.withIndex().joinToString(" ") { (i, kind) -> "WHEN '${kind.function}' THEN '2.${i + 1}'" }} END"
             "(CASE jsonb_typeof($x) WHEN 'object' THEN COALESCE($tag || COALESCE(${tagKey(x)}, ''), '1') WHEN 'array' THEN '2' WHEN 'string' THEN '3' || ${textOf(x)} " +
                 "WHEN 'boolean' THEN '4' WHEN 'number' THEN '5' END) COLLATE \"C\""
         }
-        val order = (if (ranked != null) listOf(ranked, value) else listOfNotNull(kindOrder(value), key)).joinToString(", ") { "$it $direction" }
+        // A list among them by its items, as [sortKey] orders one (drivine4j#271).
+        val within = if (ranked != null) shared(value) { (x) -> "CASE WHEN jsonb_typeof($x) = 'array' THEN CAST(${flatListKey(x)} AS jsonb) ELSE $x END" } else null
+        val order = (if (ranked != null) listOf(ranked, within!!) else listOfNotNull(kindOrder(value), key)).joinToString(", ") { "$it $direction" }
         return "(array_agg($value ORDER BY $order) FILTER (WHERE COALESCE(jsonb_typeof($value), 'null') <> 'null'))[1]"
     }
 
@@ -362,13 +364,26 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
      * any other kind. A row of nulls, a null's, comes after every other ascending, and before them descending, as null does.
      * A temporal value's tag is the object of its kind's rank ([tagRank]) and then its sort key (its text, a duration's), so
      * values of several temporal kinds sort by kind first, as Cypher sorts them: as its own object, `jsonb` compares a tag's
-     * keys in its own order, its sort key `s` first, and so sorted by time alone, whatever its kind.
+     * keys in its own order, its sort key `s` first, and so sorted by time alone, whatever its kind. A list is its items as
+     * [flatListKey] writes them, as `jsonb` orders a list the shorter first (drivine4j#271).
      */
     override fun sortKey(json: String) = shared(json) { (x) ->
         "ROW(CASE WHEN jsonb_typeof($x) = 'string' THEN '\"\"'::jsonb " +
             "WHEN ${tagKind(x)} IS NOT NULL THEN jsonb_build_object('k', ${tagRank(x, "0") { "$it" }}, 's', COALESCE($x -> 's', $x -> 'v')) " +
+            "WHEN jsonb_typeof($x) = 'array' THEN CAST(${flatListKey(x)} AS jsonb) " +
             "ELSE ${nullIfJsonNull(x)} END, ${codePointText(x)})"
     }
+
+    /**
+     * A list whose kind the statement leaves open, as one read from a property, as `jsonb` that orders as Cypher orders lists:
+     * as [listSortKey] writes it, each item where its kind comes, the item, and what follows it, read in one pass over its items,
+     * not walked: a property's list holds no list, and the walk the planner costs at thousands a row. An item that is a list is
+     * compared as `jsonb` compares it, the shorter first (drivine4j#271).
+     */
+    private fun flatListKey(list: String) =
+        "(SELECT COALESCE(string_agg('[' || ${itemRank("fe.item")} || ', ' || CASE jsonb_typeof(fe.item) " +
+            "WHEN 'string' THEN ${codePoints("(fe.item #>> '{}')")} ELSE CAST(fe.item AS text) END || ', ', '' ORDER BY fe.item_no), '') " +
+            "|| '[]' || repeat(']', COUNT(*)::int) FROM jsonb_array_elements($list) WITH ORDINALITY fe (item, item_no))"
 
     /** A text as [sortKey] sorts it, by its code points: a value the statement makes a text is no tag, so none is read apart. */
     override fun textSortKey(json: String) = shared(json) { (x) ->
@@ -417,8 +432,9 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
      * written, the end an empty list. `jsonb` orders the
      * shorter of two lists first, and every list here but the last is of three. An item that is a list is followed by its own
      * items, at any depth, then by its end, which comes before any item. Any other value sorts as itself, as before. Only a
-     * value the statement makes a list sorts so: the planner costs the walk at thousands a row, which brings in its JIT for a
-     * sort of more than a few dozen rows.
+     * value the statement makes a list is walked so: the planner costs the walk at thousands a row, which brings in its JIT for a
+     * sort of more than a few dozen rows. A list whose kind the statement leaves open is keyed by [flatListKey], which walks no
+     * list it holds.
      */
     override fun listSortKey(json: String) = shared(json) { (x) ->
         "CASE WHEN jsonb_typeof($x) = 'array' THEN CAST(${listKey(x)} AS jsonb) ELSE ${nullIfJsonNull(x)} END"
