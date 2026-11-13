@@ -19,12 +19,14 @@ internal object Patterns {
      * Why the SQL stores can't answer [pattern]'s backreferences as Java does, or null where they can, or it writes none. A
      * backreference is answered where it is `\1` to `\8`, outside a character class, with no digit after it, to a group that
      * has closed before it and takes part in every match: one in no alternative, lookaround or quantifier that lets it match
-     * no times, nor in a group that is.
+     * no times, nor in a group that is. A pattern with the flag `x` is refused whole: there a space or a `#` comment may stand
+     * between a group and its quantifier, `(?x)(a) ?\1`, which the reading here doesn't step over.
      */
     fun refusal(pattern: String): String? {
-        val (found, groups) = scan(pattern)
+        val (found, groups, spaced) = scan(pattern)
         for (it in found) {
             val why = when {
+                spaced -> "in a pattern with the flag x, which reads spaces and # comments apart"
                 it.inClass -> "in a character class, which Java refuses"
                 it.number > 8 -> "past \\8"
                 it.digitAfter -> "with a digit after it"
@@ -68,15 +70,16 @@ internal object Patterns {
      * Each backreference [pattern] writes, and its capturing groups by number, read as Java reads them: a backslash that no
      * backslash escapes, then a digit 1 to 9, and each digit after it while the number still names a group opened before it.
      * One quoted (`\Q…\E`) is none, nor `\cX`'s character. A class is opened by `[` and closed by a `]` that isn't its first
-     * character, and may hold another, as Java's do.
+     * character, and may hold another, as Java's do. The last is whether a flag group anywhere sets `x`.
      */
-    private fun scan(pattern: String): Pair<List<Backreference>, List<Group>> {
+    private fun scan(pattern: String): Triple<List<Backreference>, List<Group>, Boolean> {
         val groups = mutableListOf<Group>()
         val closed = mutableSetOf<Int>()
         val found = mutableListOf<Backreference>()
         val top = Open(null, null, false)
         var open = top
         var depth = 0
+        var spaced = false
         var i = 0
         while (i < pattern.length) {
             val c = pattern[i]
@@ -109,6 +112,7 @@ internal object Patterns {
                     val named = pattern.startsWith("?<", i + 1) && pattern.getOrNull(i + 3)?.isLetter() == true
                     val lookaround = listOf("?=", "?!", "?<=", "?<!").any { pattern.startsWith(it, i + 1) }
                     val group = if (!pattern.startsWith("?", i + 1) || named) Group().also(groups::add) else null
+                    if (pattern.startsWith("?", i + 1) && 'x' in pattern.drop(i + 2).takeWhile { it.isLetter() }) spaced = true
                     open = Open(group, open, lookaround)
                 }
                 c == '|' && depth == 0 -> open.alternated = true
@@ -132,6 +136,6 @@ internal object Patterns {
             i++
         }
         if (top.alternated) top.held.forEach { it.always = false }
-        return found to groups
+        return Triple(found, groups, spaced)
     }
 }

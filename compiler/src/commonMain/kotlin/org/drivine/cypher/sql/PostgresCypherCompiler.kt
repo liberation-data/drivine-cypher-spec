@@ -657,12 +657,12 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
     /** [pattern] with each `\z` that no backslash escapes written `\Z`, Postgres's end of the text. */
     private fun javaEnds(pattern: String) = "regexp_replace($pattern, '(^|[^\\\\])((\\\\\\\\)*)\\\\z', '\\1\\2\\\\Z', 'g')"
 
+    override fun holdsBackreference(text: String) = "($text ~ ${literal(Patterns.BACKREFERENCE)})"
+
     /**
      * An empty separator cuts the text at each character, as Cypher's does: `string_to_array` does so for a null one.
      * The empty text is a list of itself, where `string_to_array` gives an empty one.
      */
-    override fun holdsBackreference(text: String) = "($text ~ ${literal(Patterns.BACKREFERENCE)})"
-
     override fun split(text: String, separator: String) = shared(text, separator) { (t, s) ->
         "CASE WHEN $s IS NOT NULL THEN CASE WHEN $t = '' THEN jsonb_build_array($t) ELSE to_jsonb(string_to_array($t, NULLIF($s, ''))) END END"
     }

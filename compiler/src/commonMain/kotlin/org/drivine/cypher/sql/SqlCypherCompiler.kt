@@ -6997,10 +6997,10 @@ abstract class SqlCypherCompiler(
         /** What a map, a node or a relationship read by a number fails with, before its kind: see listItem. */
         const val NUMBER_KEY_OF_MAP = "A map, a node or a relationship is read by a text key, as in Neo4j, not a"
 
-        /** What a list read by a text fails with, before its kind: see mapEntry. */
         /** Why a pattern of `=~` worked out as the statement runs is refused where it writes a backreference: see [Patterns.refusal]. */
         const val COMPUTED_BACKREFERENCE = "A regular expression worked out as the statement runs writes a backreference, which the SQL stores answer as Java does only in a pattern the statement gives, written or bound:"
 
+        /** What a list read by a text fails with, before its kind: see mapEntry. */
         const val TEXT_INDEX_OF_LIST = "A list is indexed by an integer, as in Neo4j, not a"
 
         /** What `round()` fails with, as Neo4j fails it, a precision below 0 or past [MAX_COUNT]. */

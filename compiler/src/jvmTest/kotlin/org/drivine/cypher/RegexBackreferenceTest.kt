@@ -34,6 +34,8 @@ class RegexBackreferenceTest {
         "(a)\\2" to "hasn't closed", "\\1(a)" to "hasn't closed", "(a\\1)" to "hasn't closed",
         "(a)|\\1" to "may take no part", "(a)?\\1" to "may take no part", "(a)*\\1" to "may take no part", "(?:(a)|b)\\1" to "may take no part",
         "((a)|b)\\2" to "may take no part", "(?=(a))\\1" to "may take no part", "(a){0,2}\\1" to "may take no part", "x|(a)\\1" to "may take no part",
+        // Java reads (?x)(a) ?\1 as (a)?\1: a space may stand between a group and its quantifier.
+        "(?x)(a) ?\\1" to "flag x", "(?ix)(a)\\1" to "flag x", "(a)(?x:b)\\1" to "flag x",
     )
 
     @Test
@@ -44,6 +46,8 @@ class RegexBackreferenceTest {
         listOf("(a)\\\\1", "\\Q\\1\\E", "\\c\\1", "a").forEach { assertFalse(Patterns.holdsBackreference(it), it) }
         // A class's first ], and an escaped one, leave the class as Java does.
         assertNull(Patterns.refusal("(a)[]\\]]\\1"))
+        // x turned off, or a named group called x, is no flag x.
+        listOf("(?i-x)(a)\\1", "(?<x>a)\\1").forEach { assertNull(Patterns.refusal(it), it) }
     }
 
     @Test
