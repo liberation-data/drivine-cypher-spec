@@ -24,6 +24,7 @@ import org.drivine.schema.TextIndexSpec
 import org.drivine.schema.UniquenessConstraintSpec
 import org.drivine.schema.VectorIndexSpec
 import org.drivine.schema.made
+import org.drivine.cypher.store.PostgresSql
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -347,6 +348,23 @@ class StoreDdlTest {
             }
             assertEquals(entry["refusal"]?.takeUnless { it.isNull }?.textValue(), refusal, "${entry["store"]!!.textValue()}: $name")
         }
+    }
+
+    /**
+     * Postgres's write function finds a node by its id where a range index or a uniqueness constraint's index finds it: its
+     * lookup and its check of which nodes are there compare the property as the index is made over it, its JSON
+     * ([PostgresSql.indexed]), with the id as the store layout writes it, the plan step's `id`. Compared as text, `->>`, no
+     * index answered it, and a temporal id's tag never equalled its text (#245).
+     */
+    @Test
+    fun postgresWriteFunctionFindsANodeByItsIdAsTheIndexIsMadeOverIt() {
+        val ddl = PostgresDdl(graph).writes.ddl.joinToString("\n")
+        val compared = Regex("""WHERE (\(n\.props -> %L\)) = (\$1|s\.op -> 'id')""").findAll(ddl).toList()
+        assertEquals(2, compared.size, "the find's lookup and the check of which nodes are there:\n$ddl")
+        for (match in compared) assertEquals(PostgresSql.indexed("n", "k"), match.groupValues[1].replace("%L", "'k'"), match.value)
+        // The plan step's `k`, the id's text, still keys the nodes a plan made, within one call; no find is given it.
+        assertTrue("(n.props ->> %L)" !in ddl && !Regex("""_find\([^;]*v_op ->> 'k'\)""").containsMatchIn(ddl), "no id is compared as text:\n$ddl")
+        assertTrue("p_id jsonb" in ddl && "DROP FUNCTION IF EXISTS ${graph}_find(jsonb, text, text)" in ddl, ddl)
     }
 
     @Test

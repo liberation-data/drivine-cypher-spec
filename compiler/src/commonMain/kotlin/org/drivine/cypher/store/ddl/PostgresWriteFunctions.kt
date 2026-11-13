@@ -16,9 +16,12 @@ import org.drivine.cypher.store.LowerCopies
  *
  * - `<graph>_find(labels, key, id)` finds the node of a shape by its id and locks it. The node is found
  *   without a lock, then locked by its key and looked at again: another writer may have changed it in
- *   between. The query is written for the shape it is asked, so it is planned as a query over that
- *   label and property, which the partial index of a range index or a uniqueness constraint answers;
- *   it is prepared once a session for each shape, and not planned again for each node.
+ *   between. The id is the JSON a node holds it as, `id` of the plan's step, as the store layout writes it
+ *   (a temporal value's tag among them), and is compared with the property's JSON, `props -> key`: what the
+ *   partial index of a range index or a uniqueness constraint is over, so the index answers it, and a
+ *   temporal id is found as it was written. The query is written for the shape it is asked, so it is
+ *   planned as a query over that label and property; it is prepared once a session for each shape, and
+ *   not planned again for each node. Its name holds the store's version, as the other prepared queries' do.
  * - `<graph>_owns(bag, key)` says whether a property bag owns a stored key.
  * - `<graph>_lowered(props, keys)` gives the properties with the lowercased copy of each of `keys`:
  *   see [LowerCopies].
@@ -46,22 +49,25 @@ class PostgresWriteFunctions internal constructor(private val graph: PostgresDdl
     /** The function that carries out a plan. */
     val write = "${graph.name}_write"
 
-    /** The statements that make the functions, each safe to run again. */
-    val ddl: List<String> get() = listOf(finding(), owning(), lowering(), writing())
+    /**
+     * The statements that make the functions, each safe to run again. The find an earlier version made, which took the id
+     * as text, is dropped first: one that takes it as JSON is another function to Postgres, and would stand beside it.
+     */
+    val ddl: List<String> get() = listOf("DROP FUNCTION IF EXISTS $find(jsonb, text, text)", finding(), owning(), lowering(), writing())
 
     private fun finding(): String = """
-CREATE OR REPLACE FUNCTION $find(p_labels jsonb, p_key text, p_id text) RETURNS $nodes AS ${'$'}fn${'$'}
+CREATE OR REPLACE FUNCTION $find(p_labels jsonb, p_key text, p_id jsonb) RETURNS $nodes AS ${'$'}fn${'$'}
 DECLARE
     -- The lookup of a shape is prepared once a session and run by name after: written for the shape, it
     -- is planned for its label and property, and planned again each time it would cost a lookup several
     -- times over. The name is a hash of what the lookup is for, so it fits whatever the graph is called.
-    v_name  text := 'drivine_find_' || md5('${graph.name}' || ' ' || p_key || ' ' || p_labels::text);
+    v_name  text := 'drivine_find_' || md5('${PostgresDdl.VERSION} ${graph.name}' || ' ' || p_key || ' ' || p_labels::text);
     v_nid   bigint;
     v_row   $nodes;
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_prepared_statements WHERE name = v_name) THEN
         -- Each label is a test of its own, as a statement writes it, so a partial index over one is used.
-        EXECUTE format('PREPARE %I (text) AS SELECT min(n.nid) FROM $nodes n WHERE (n.props ->> %L) = ${'$'}1', v_name, p_key) ||
+        EXECUTE format('PREPARE %I (jsonb) AS SELECT min(n.nid) FROM $nodes n WHERE (n.props -> %L) = ${'$'}1', v_name, p_key) ||
             COALESCE((SELECT string_agg(format(' AND n.labels @> %L::jsonb', jsonb_build_array(l)), '') FROM jsonb_array_elements_text(p_labels) l), '');
     END IF;
     LOOP
@@ -71,7 +77,7 @@ BEGIN
         END IF;
         SELECT * INTO v_row FROM $nodes n WHERE n.nid = v_nid FOR UPDATE;
         -- Locked: is it still the node that was looked for? Another writer may have changed it meanwhile.
-        IF FOUND AND v_row.props ->> p_key = p_id AND v_row.labels @> p_labels THEN
+        IF FOUND AND v_row.props -> p_key = p_id AND v_row.labels @> p_labels THEN
             RETURN v_row;
         END IF;
     END LOOP;
@@ -220,7 +226,7 @@ BEGIN
                         ORDER BY op ->> 'k', ord),
                     absent AS (
                         SELECT s.ord, s.op FROM steps s
-                        WHERE NOT EXISTS (SELECT 1 FROM $nodes n WHERE (n.props ->> %L) = s.op ->> 'k'%s)),
+                        WHERE NOT EXISTS (SELECT 1 FROM $nodes n WHERE (n.props -> %L) = s.op -> 'id'%s)),
                     made AS (
                         INSERT INTO $nodes (labels, props, stamp)
                         SELECT op -> 'labels',
@@ -257,7 +263,7 @@ BEGIN
                     v_found := NULL;
                 END IF;
                 WHILE v_pre IS NULL LOOP
-                    v_row := $find(v_shape -> 'labels', v_shape ->> 'key', v_op ->> 'k');
+                    v_row := $find(v_shape -> 'labels', v_shape ->> 'key', v_op -> 'id');
                     v_made := v_row.nid IS NULL;
                     IF v_made THEN
                         -- A checked save does not make the node again: it is gone, and the object is stale.
@@ -390,7 +396,7 @@ BEGIN
             WHEN 'ref' THEN
                 -- Finds a node that must be there, and locks it.
                 v_shape := p_shapes -> ((v_op ->> 's')::int);
-                v_row := $find(v_shape -> 'labels', v_shape ->> 'key', v_op ->> 'k');
+                v_row := $find(v_shape -> 'labels', v_shape ->> 'key', v_op -> 'id');
                 IF v_row.nid IS NULL THEN
                     RAISE EXCEPTION 'absent' USING ERRCODE = '$ABSENT';
                 END IF;
@@ -528,7 +534,7 @@ BEGIN
                 -- what the call hands back; one that does not meet the predicate is left as it is, and said to.
                 v_shape := p_shapes -> ((v_op ->> 's')::int);
                 v_fresh := v_op ->> 'fresh';
-                v_row := $find(v_shape -> 'labels', v_shape ->> 'key', v_op ->> 'k');
+                v_row := $find(v_shape -> 'labels', v_shape ->> 'key', v_op -> 'id');
                 IF v_row.nid IS NOT NULL THEN
                     v_met := 1;
                     IF p_patched_if IS NOT NULL THEN
