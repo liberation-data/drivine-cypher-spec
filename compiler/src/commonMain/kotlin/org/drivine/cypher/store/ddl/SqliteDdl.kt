@@ -43,7 +43,8 @@ class SqliteDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
             nid    INTEGER PRIMARY KEY AUTOINCREMENT,
             labels TEXT NOT NULL,
             props  TEXT NOT NULL,
-            stamp  TEXT
+            stamp  TEXT,
+            words  TEXT
         )
         """,
         """
@@ -68,7 +69,30 @@ class SqliteDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
         """,
         "CREATE INDEX IF NOT EXISTS ${name}_edge_src ON $edges (src, type)",
         "CREATE INDEX IF NOT EXISTS ${name}_edge_dst ON $edges (dst, type)",
+        """
+        CREATE TABLE IF NOT EXISTS $counts (
+            kind TEXT NOT NULL,
+            name TEXT NOT NULL,
+            n    INTEGER NOT NULL,
+            PRIMARY KEY (kind, name)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS $countDeltas (
+            id   INTEGER PRIMARY KEY AUTOINCREMENT,
+            kind TEXT NOT NULL,
+            name TEXT NOT NULL,
+            d    INTEGER NOT NULL
+        )
+        """,
+        "CREATE INDEX IF NOT EXISTS $countDeltasIndex ON $countDeltas (kind, name)",
+        lockTable,
+        lockSeed,
     ).map { it.trimIndent() }
+
+    override val lockTable: String get() = "CREATE TABLE IF NOT EXISTS $lock (name TEXT PRIMARY KEY)"
+
+    override val lockSeed: String get() = "INSERT OR IGNORE INTO $lock (name) VALUES ('$lockRow')"
 
     /**
      * Counts what of the [ddl] makes is there: each table and index, by its name in any case. A user who may only read the
@@ -80,10 +104,13 @@ class SqliteDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
      * whose name holds the word is not taken for one made with it. Such a store is refused, naming its file ([FILE]).
      */
     val made: String = run {
-        val names = ddl.map { Regex("IF NOT EXISTS (\\w+)").find(it)!!.groupValues[1].lowercase() }.joinToString(", ") { "'$it'" }
+        // A statement that makes nothing, the lock table's row, is there where the rest are: the [ddl] made them together.
+        val making = ddl.mapNotNull { Regex("IF NOT EXISTS (\\w+)").find(it)?.groupValues?.get(1)?.lowercase() }
+        val names = making.joinToString(", ") { "'$it'" }
+        val rows = ddl.size - making.size
         val keyed = listOf(nodes, edges).joinToString(", ") { "'${it.lowercase()}'" }
         "SELECT CASE WHEN EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND lower(name) IN ($keyed) AND sql NOT LIKE '%KEY AUTOINCREMENT%')" +
-            " THEN $REUSES_IDS ELSE COUNT(*) END FROM sqlite_master WHERE lower(name) IN ($names)"
+            " THEN $REUSES_IDS ELSE COUNT(*)${if (rows > 0) " + $rows" else ""} END FROM sqlite_master WHERE lower(name) IN ($names)"
     }
 
     /** [text] as a schema statement, as drivine4j's grammar gave it. */
@@ -124,20 +151,24 @@ class SqliteDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
         return statement("UPDATE $catalog SET details = $details WHERE ${recordOf(item)}")
     }
 
-    override fun formRecorded(item: CatalogItem): String =
-        statement("UPDATE $catalog SET details = json_set(details, '$.$FORM', $CURRENT_FORM) WHERE ${recordOf(item)}")
-
     /**
      * The partial index over [properties] of the nodes of [label]: each property as a statement reads it, and the test of
      * the label a statement makes, both of the table's own columns.
      */
     private fun over(label: String, properties: List<String>): String =
-        "$nodes (${properties.joinToString(", ") { SqliteSql.property("", it) }}) WHERE ${hasLabel("", label)}"
+        "$nodes (${indexColumns(properties).joinToString(", ")}) WHERE ${hasLabel("", label)}"
+
+    /**
+     * The columns of a range index's or a uniqueness constraint's index over the stored [keys], in order, each key's class
+     * and then its key, as the module writes them: what the store's schema compares the columns it finds with.
+     */
+    fun indexColumns(keys: List<String>): List<String> =
+        keys.flatMap { listOf(SqliteSql.indexClass("props", SqliteSql.path(it)), SqliteSql.indexKey("props", SqliteSql.path(it))) }
 
     override fun createIndex(spec: IndexSpec, existing: CatalogItem?): List<DdlStatement> = when (spec) {
         is RangeIndexSpec -> {
             val name = objectName(RANGE, listOf(spec.label) + spec.properties)
-            statements("CREATE INDEX IF NOT EXISTS $name ON ${over(spec.label, spec.properties)}", recorded(spec, name))
+            statements("CREATE INDEX IF NOT EXISTS $name ON ${over(spec.label, spec.keys)}", recorded(spec, name))
         }
         // Recorded and not made: SQLite has no vector index of its own.
         is VectorIndexSpec -> statements(recorded(spec, null, vectorDetails(spec)))
@@ -151,7 +182,7 @@ class SqliteDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
     override fun createConstraint(spec: ConstraintSpec): List<DdlStatement> = when (spec) {
         is UniquenessConstraintSpec -> {
             val name = objectName(UNIQUE, listOf(spec.label) + spec.properties)
-            statements("CREATE UNIQUE INDEX IF NOT EXISTS $name ON ${over(spec.label, spec.properties)}", recorded(spec, name))
+            statements("CREATE UNIQUE INDEX IF NOT EXISTS $name ON ${over(spec.label, spec.keys)}", recorded(spec, name))
         }
     }
 
@@ -166,7 +197,7 @@ class SqliteDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
         is UniquenessConstraintSpec -> {
             val name = objectName(UNIQUE, listOf(spec.label) + spec.properties)
             val temporary = temporaryName(name)
-            val over = over(spec.label, spec.properties)
+            val over = over(spec.label, spec.keys)
             UniqueRecreation(
                 name = name,
                 temporary = temporary,

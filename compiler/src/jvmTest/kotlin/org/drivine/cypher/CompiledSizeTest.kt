@@ -38,10 +38,12 @@ class CompiledSizeTest {
     @Test
     fun `a duration's field that reads no seconds binds nothing for them`() {
         // drivine4j#418: SQLite's floor binds its number; built for every field, it bound the seconds of `years` in a
-        // subquery left unread, and the statement's subqueries were numbered with a gap where it had been.
+        // subquery left unread. Each subquery the statement binds is read. (Their numbers may skip: layout 2 reads a stored
+        // value as a tag or as a text, and numbers the binding of the reading it leaves out.)
         val sql = SqliteCypherCompiler("g").compile("MATCH (c:Claim) RETURN duration(c.d).years").sql
         val aliases = Regex("\\) sh([0-9]+)\\b").findAll(sql).map { it.groupValues[1].toInt() }.toSortedSet()
-        assertEquals((aliases.first()..aliases.last()).toSortedSet(), aliases, sql)
+        assertTrue(aliases.isNotEmpty(), sql)
+        assertEquals(emptyList(), aliases.filter { !Regex("\\bsh$it\\.").containsMatchIn(sql) }, sql)
     }
 
     @Test
@@ -50,8 +52,9 @@ class CompiledSizeTest {
         compilers.forEach { compiler ->
             val (one, two, four) = listOf(1, 2, 4).map { compiler.compile(added(it)).sql.length }
             // A sum that may be a text writes each side as toString does, a float as Java writes it: on Oracle twice, the
-            // second time for a text past 4,000 bytes (#298).
-            assertTrue(one < 30_000, "${compiler::class.simpleName}: $one characters")
+            // second time for a text past 4,000 bytes (#298). On Postgres the sum's key is cut from its text where it can be,
+            // beside the store's function (#161).
+            assertTrue(one < 32_000, "${compiler::class.simpleName}: $one characters")
             assertTrue(four < 3 * two, "${compiler::class.simpleName}: $two, then $four characters")
         }
     }
@@ -327,14 +330,27 @@ class CompiledSizeTest {
     @Test
     fun `a sort by a property on Postgres is by its JSON and its text, and only a list the statement makes is keyed as a list`() {
         // Keyed as a list, a term costs thousands a row in the planner's estimate, which brings in its JIT for the whole
-        // statement past a few dozen rows. A text sorts by its code points (#273), in the same row, with no subquery.
+        // statement past a few dozen rows. A text sorts by its code points (#273), and a temporal value's tag by its kind and its
+        // key (#161), in the same row, with no subquery.
         val compiler = PostgresCypherCompiler("g")
         val property = compiler.compile("MATCH (c:Claim) RETURN c.name ORDER BY c.name").sql.substringAfter("ORDER BY ")
         assertEquals(
-            "ROW(CASE WHEN jsonb_typeof(p2.s1) = 'string' THEN '\"\"'::jsonb ELSE NULLIF(p2.s1, 'null'::jsonb) END, " +
+            "ROW(CASE WHEN jsonb_typeof(p2.s1) = 'string' THEN '\"\"'::jsonb " +
+                "WHEN (p2.s1 ->> '\$t') IS NOT NULL THEN jsonb_build_object('k', CASE (p2.s1 ->> '\$t') WHEN 'datetime' THEN 1 WHEN 'localdatetime' THEN 2 " +
+                "WHEN 'date' THEN 3 WHEN 'time' THEN 4 WHEN 'localtime' THEN 5 WHEN 'duration' THEN 6 ELSE 0 END, 's', COALESCE(p2.s1 -> 's', p2.s1 -> 'v')) " +
+                "ELSE NULLIF(p2.s1, 'null'::jsonb) END, " +
                 "(CASE WHEN jsonb_typeof(p2.s1) = 'string' THEN (p2.s1 #>> '{}') END) COLLATE \"C\")",
             property,
         )
+        // A value the statement makes a text is no tag, so its sort reads none apart, as SQLite's doesn't.
+        for (text in listOf("toString(c.name)", "toLower(c.name)")) {
+            assertEquals(
+                "ROW(CASE WHEN jsonb_typeof(p2.s1) = 'string' THEN '\"\"'::jsonb ELSE NULLIF(p2.s1, 'null'::jsonb) END, " +
+                    "(CASE WHEN jsonb_typeof(p2.s1) = 'string' THEN (p2.s1 #>> '{}') END) COLLATE \"C\")",
+                compiler.compile("MATCH (c:Claim) RETURN c.name ORDER BY $text").sql.substringAfter("ORDER BY "),
+                text,
+            )
+        }
         val list = compiler.compile("MATCH (c:Claim) WITH c.name AS n, collect(c.id) AS ids RETURN n ORDER BY ids").sql.substringAfter("ORDER BY ")
         assertTrue(list.contains("WITH RECURSIVE"), list)
         // Its items as arrays unnested, which the planner takes for 10 items, not a set-returning function's 100: a 150th of the cost.
@@ -474,7 +490,9 @@ class CompiledSizeTest {
         compilers.forEach { compiler ->
             statements.forEach { (over, first) ->
                 val (size, reference) = listOf(over, first).map { compiler.compile(it, emptyMap()).sql.length }
-                assertTrue(size < 120_000 && size < reference * 1.2, "${compiler::class.simpleName}: $over: $size characters, $reference with a WITH first")
+                // Four sums of a stored value and a duration on Oracle are the most, some 132,000 characters: each a tag of the kind
+                // the stored one names, its sort key by the store's function (#161).
+                assertTrue(size < 140_000 && size < reference * 1.2, "${compiler::class.simpleName}: $over: $size characters, $reference with a WITH first")
             }
         }
     }

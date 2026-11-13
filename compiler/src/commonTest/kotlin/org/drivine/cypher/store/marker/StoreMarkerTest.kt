@@ -199,6 +199,7 @@ class StoreMarkerTest {
         assertEquals("2b9f0c1e-0000-4000-8000-000000000000", bound["storeId"])
         assertEquals("2026-11-10T05:00:00.123Z", bound["assignedAt"], "the moment bound as its text, not a number")
         assertEquals("NEO4J", bound["engine"])
+        assertEquals(1, bound["layout"], "a graph engine's layout is its own, 1")
         for ((id, ddl) in stores) {
             val expected = stamp["stores"]!![id] ?: fail("marker.yaml has no stamp statements for $id")
             val statements = StoreStampStatements.of(ddl)
@@ -206,6 +207,10 @@ class StoreMarkerTest {
             assertEquals(prepared(id, expected["prepare"]!!), statements.prepare, "$id: prepare")
             assertEquals(expected["assignIfAbsent"]!!.textValue(), statements.assignIfAbsent, "$id: assignIfAbsent")
             assertEquals(expected["readStamps"]!!.textValue(), statements.readStamps, "$id: readStamps")
+            assertEquals(expected["foreignNodes"]!!.textValue(), statements.foreignNodes, "$id: foreignNodes")
+            assertEquals(expected["restampLayout"]?.textValue(), statements.restampLayout, "$id: restampLayout")
+            assertEquals(expected["layoutObjects"]?.textValue(), statements.layoutObjects, "$id: layoutObjects")
+            assertEquals(expected["layout"]!!.longValue().toInt(), StoreLayout.current(StoreStamp.engine(ddl)), "$id: layout")
             assertEquals(constraint(id, ddl, StoreStamp.CONSTRAINT), statements(expected["constraint"]!!), "$id: the stamp's constraint")
         }
         assertEquals(stamp["stores"]!!["memgraph"]!!["engine"]!!.textValue(), StoreStamp.engine(MemgraphDdl(1024)))
@@ -213,6 +218,108 @@ class StoreMarkerTest {
         // A store with no DDL here gets the graph engines' Cypher, but no engine name: its library names it.
         assertEquals(CypherStoreStampStatements, StoreStampStatements.of(neptune))
         assertFailsWith<IllegalArgumentException> { StoreStamp.engine(neptune) }
+    }
+
+    /**
+     * liberation-data/drivine-cypher-spec#161: each case of `storeLayout`, the verdict on a graph by its stamps' layouts, whether
+     * it holds a node other than Drivine's own, and the indexes, tables and triggers its store lists: in use, re-stamped after
+     * the old layout's are dropped, or refused with the message the library throws.
+     */
+    @Test
+    fun eachGraphsLayoutIsJudgedAsTheTableSays() {
+        val layout = pinned["storeLayout"]!!
+        var checked = 0
+        for (case in layout["cases"]!!) {
+            val name = case["name"]!!.textValue()!!
+            val id = case["store"]!!.textValue()!!
+            val ddl = stores.getValue(id)
+            val stamps = case["stamps"]!!.map { stamp -> mapOf("layout" to stamp["layout"]?.takeUnless { it.isNull }?.longValue()) }
+            val objects = case["objects"]?.map { mapOf("name" to it["name"]!!.textValue(), "type" to it["type"]?.textValue()) }.orEmpty()
+            val verdict = StoreLayout.verdict(StoreStamp.engine(ddl), graph, stamps, case["foreignNodes"]!!.booleanValue(), objects, ddl)
+            val expected = case["verdict"]!!
+            when {
+                expected.isTextual -> assertEquals("current", expected.textValue(), name).also { assertEquals(StoreLayout.Verdict.Current, verdict, name) }
+                expected["stamp"] != null -> {
+                    val stamp = verdict as? StoreLayout.Verdict.Stamp ?: fail("$name: $verdict, not a re-stamp")
+                    assertEquals(texts(expected["stamp"]!!["drops"]!!), stamp.drops, "$name: the old layout's drops")
+                    assertEquals(StoreStamp.restampParameters(StoreStamp.engine(ddl)), stamp.parameters, "$name: the re-stamp's parameters")
+                    assertEquals(expected["stamp"]!!["assign"]?.booleanValue() ?: false, stamp.assign, "$name: whether it is stamped anew")
+                }
+                else -> assertEquals(StoreLayout.Verdict.Refuse(expected["refuse"]!!.textValue()!!), verdict, name)
+            }
+            checked++
+        }
+        assertTrue(checked > 0, "marker.yaml has no storeLayout cases")
+    }
+
+    /**
+     * A SQL store's graph with no stamp, judged without the store's DDL, so no object is known as either layout's: empty, it
+     * is new, as with the DDL, and not a re-stamp, whose restamp finds no stamp and would be refused when asked again.
+     */
+    @Test
+    fun aGraphWithNoStampJudgedWithoutItsDdlIsNewWhenEmptyAndRefusedHoldingValues() {
+        for (engine in StoreLayout.SQL_ENGINES) {
+            assertEquals(StoreLayout.Verdict.Current, StoreLayout.verdict(engine, graph, emptyList(), false), engine)
+            assertTrue(StoreLayout.verdict(engine, graph, emptyList(), true) is StoreLayout.Verdict.Refuse, engine)
+        }
+    }
+
+    /**
+     * An empty graph with no stamp and an earlier layout's objects: its drops are run, and its restamp finds no stamp, so
+     * asked again it is judged by its objects. Listed again, the dropped ones gone, it is current; asked of the objects it
+     * was first asked of, it is a re-stamp still, which a library refuses after its drops.
+     */
+    @Test
+    fun anEmptyGraphWithNoStampIsCurrentAfterItsDropsOnlyWithItsObjectsListedAgain() {
+        val ddl = PostgresDdl(graph)
+        val engine = StoreStamp.engine(ddl)
+        val lock = mapOf("name" to ddl.lock, "type" to "TABLE")
+        val first = listOf(lock, mapOf("name" to "${graph}_uq_DrivineStorekey_e211949b", "type" to "INDEX"))
+        val asked = StoreLayout.verdict(engine, graph, emptyList(), false, first, ddl) as? StoreLayout.Verdict.Stamp ?: fail("not a re-stamp")
+        assertTrue(asked.drops.isNotEmpty() && !asked.assign, "$asked")
+        assertEquals(StoreLayout.Verdict.Current, StoreLayout.verdict(engine, graph, emptyList(), false, listOf(lock), ddl))
+        assertTrue(StoreLayout.verdict(engine, graph, emptyList(), false, first, ddl) !is StoreLayout.Verdict.Current)
+    }
+
+    /**
+     * A graph named in capitals on Postgres, which folds the names it lists to lower case: its lock table, listed so, is still
+     * this layout's evidence, and a graph of this layout whose stamp a clear deleted is stamped again, not refused.
+     */
+    @Test
+    fun aGraphNamedInCapitalsIsKnownByItsLockTableAsPostgresListsIt() {
+        val ddl = PostgresDdl("MyGraph")
+        val engine = StoreStamp.engine(ddl)
+        val lock = ddl.lock.lowercase()
+        assertTrue(PostgresStoreStampStatements(ddl).layoutObjects.contains("'$lock'"), "layoutObjects lists $lock")
+        val listed = listOf(mapOf("name" to lock, "type" to "TABLE"), mapOf("name" to "mygraph_uq2_drivinestorekey_e211949b", "type" to "INDEX"))
+        assertEquals(listed.map { it["name"] }, StoreLayout.ownObjects(ddl, listed))
+        assertEquals(
+            StoreLayout.Verdict.Stamp(emptyList(), StoreStamp.restampParameters(engine), assign = true),
+            StoreLayout.verdict(engine, "MyGraph", emptyList(), true, listed.take(1), ddl),
+        )
+    }
+
+    /**
+     * Each `firstConnection` case, which a library's runner sets up on its store: a graph holding values, with no stamp and
+     * nothing of this layout's, which the verdict refuses before anything is made. The module can't run the order; it checks
+     * that the state each case sets up is one it refuses, and that the lock table it names is the store's.
+     */
+    @Test
+    fun eachFirstConnectionCaseSetsUpAGraphTheVerdictRefuses() {
+        val cases = pinned["storeLayout"]!!["firstConnection"]!!
+        var checked = 0
+        for (case in cases) {
+            val name = case["name"]!!.textValue()!!
+            val ddl = stores.getValue(case["store"]!!.textValue()!!) as org.drivine.cypher.store.ddl.SqlStoreDdl
+            assertTrue(case["refused"]!!.booleanValue(), name)
+            assertEquals(listOf("{graph}_lock2"), texts(case["absent"]!!), name)
+            assertEquals("${graph}_lock2", ddl.lock, "$name: the lock table the case names is the store's")
+            // As the graph stands after the setup: no stamp, a node of the application's, and no object of this layout's.
+            val verdict = StoreLayout.verdict(StoreStamp.engine(ddl), graph, emptyList(), true, emptyList(), ddl)
+            assertEquals(StoreLayout.Verdict.Refuse(case["refuse"]!!.textValue()!!.replace("{graph}", graph)), verdict, name)
+            checked++
+        }
+        assertEquals(3, checked, "a case for each SQL store")
     }
 
     @Test

@@ -34,13 +34,14 @@ class OracleCompareTextTest {
     fun `two stored texts are ordered and compared as VARCHAR2s or CLOBs, each read by its own path, and other values as JSON`() {
         val n = listOf(property("n1"), property("n2"), property("n1", clob = true), property("n2", clob = true))
         for (operator in listOf("<", ">", "<=", ">=")) {
+            // Two texts, then two temporal values' tags of one kind by their sort keys (see ValueLayout).
             val ordered = sql("MATCH (n:Doc), (m:Doc) WHERE n.t $operator m.t RETURN count(*)")
             val text = texts(n[0], n[1], n[2], n[3], operator)
             val nan = notNaN(
                 "JSON_VALUE(n1.props, '\$.t.type()')", "JSON_VALUE(n1.props, '\$.t' RETURNING BINARY_DOUBLE)",
                 "JSON_VALUE(n2.props, '\$.t.type()')", "JSON_VALUE(n2.props, '\$.t' RETURNING BINARY_DOUBLE)",
             )
-            assertTrue(ordered.contains("THEN CASE WHEN JSON_VALUE(n1.props, '\$.t.type()') = 'string' THEN $text ELSE ($nan AND JSON_QUERY(n1.props, '\$.t' RETURNING JSON) $operator ${OracleReads.routedRead("n2.props", "'\$.t'")}) END END"), ordered)
+            assertTrue(ordered.contains("THEN CASE WHEN JSON_VALUE(n1.props, '\$.t.type()') = 'string' THEN $text ELSE ($nan AND JSON_QUERY(n1.props, '\$.t' RETURNING JSON) $operator ${OracleReads.routedRead("n2.props", "'\$.t'")}) END WHEN "), ordered)
             assertTrue(!ordered.contains("JSON_VALUE(JSON_QUERY("), ordered)
         }
         // Equal as JSON where both are read as VARCHAR2s, as is quicker than reading their kinds; else as CLOBs where both are

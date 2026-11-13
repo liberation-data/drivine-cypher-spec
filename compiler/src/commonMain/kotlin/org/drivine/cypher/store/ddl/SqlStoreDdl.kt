@@ -2,6 +2,7 @@ package org.drivine.cypher.store.ddl
 
 import org.drivine.DrivineInternalApi
 import org.drivine.cypher.CompilerException
+import org.drivine.cypher.store.ValueLayout
 import org.drivine.schema.ConstraintSpec
 import org.drivine.schema.IndexSpec
 import org.drivine.schema.SchemaItemKind
@@ -156,6 +157,44 @@ abstract class SqlStoreDdl(val name: String, final override val engine: String, 
     /** What Drivine made of indexes and constraints. */
     val catalog = "${name}_schema"
 
+    /**
+     * The count store's folded base: a row each `(kind, name)`, its count `n`, `kind` `label`, `type` or `words` (see the
+     * README's Values in the store). Its name carries the store layout ([ValueLayout.LAYOUT]). Made empty: nothing writes or
+     * reads it in this layout's first change.
+     */
+    val counts = "${name}_count${ValueLayout.LAYOUT}"
+
+    /** The count store's deltas, appended a row each change to a count, by its `(kind, name)`, `d`: see [counts]. */
+    val countDeltas = "${name}_count${ValueLayout.LAYOUT}_delta"
+
+    /** The index over [countDeltas]' `(kind, name)`, by which a count reads its deltas. */
+    val countDeltasIndex = "${name}_count${ValueLayout.LAYOUT}_dk"
+
+    /**
+     * The lock table: one column, `name`, its primary key, and one row, `name = 'schema'`, made with the graph ([lockSeed]).
+     * No schema block or compiled statement writes it: an executor that runs a schema change takes a row lock on that row
+     * first, from a connection of its own, so two processes' schema changes to one graph run one after the other (on
+     * Oracle, `SELECT name FROM <lock> WHERE name = 'schema' FOR UPDATE WAIT 10`, where concurrent DDL on one table
+     * deadlocked on the library cache lock, drivine4j#777). Its name carries the store layout ([ValueLayout.LAYOUT]).
+     */
+    val lock = "${name}_lock${ValueLayout.LAYOUT}"
+
+    /** The row of [lock] an executor locks to make a schema change. */
+    val lockRow = LOCK_ROW
+
+    /** Makes [lock], safe to run again: see each store's. */
+    abstract val lockTable: String
+
+    /** Puts [lockRow] in [lock], safe to run again: see each store's. */
+    abstract val lockSeed: String
+
+    /**
+     * The keys [properties] of a schema item are held at in a node's `props`: each property's name escaped as a statement
+     * writes it ([storedKeys]), `$x` at `$$x`. Every expression a store indexes or reads the item's properties by reads these;
+     * the item's name, its record and its objects' names keep the properties' own.
+     */
+    protected val SchemaItemSpec.keys: List<String> get() = storedKeys(properties)
+
     /** The table that holds the text a full-text index on [label]'s [properties] is over. */
     fun texts(label: String, properties: List<String>): String = objectName("t", listOf(label) + properties)
 
@@ -163,7 +202,9 @@ abstract class SqlStoreDdl(val name: String, final override val engine: String, 
     fun vectors(label: String, property: String): String = objectName("v", listOf(label, property))
 
     /**
-     * A name for an object of [kind] made for [parts], a label and properties: the graph's name, the kind, what of the parts
+     * A name for an object of [kind] made for [parts], a label and properties: the graph's name, the kind and the store layout
+     * it holds values in ([ValueLayout.LAYOUT], `ix2`), so that an index an earlier layout made, over values held otherwise, is
+     * never taken for this one's, and is found as an orphan to drop (see `StoreLayout`); then what of the parts
      * reads as a name, and a hash of the parts whole, which tells apart two objects whose parts read as one name: a label
      * and a property that run together as another pair does, or names that differ only in what a name cannot hold. It is a
      * hash of 32 bits and not a proof: two sets of parts that read alike and hash alike would share a name. It leaves room
@@ -175,9 +216,10 @@ abstract class SqlStoreDdl(val name: String, final override val engine: String, 
      */
     fun objectName(kind: String, parts: List<String>): String {
         val hash = javaHashCode(parts.joinToString("\u0000")).toUInt().toString(16)
-        val fixed = "${name}_${kind}__${hash}".length + BESIDE.length
+        val layered = "$kind${ValueLayout.LAYOUT}"
+        val fixed = "${name}_${layered}__${hash}".length + BESIDE.length
         val readable = parts.joinToString("") { it.replace(NOT_READABLE, "") }.take((maxObjectName - fixed).coerceIn(0, 40))
-        return "${name}_${kind}_${readable}_$hash"
+        return "${name}_${layered}_${readable}_$hash"
     }
 
     /** The properties of an item as its record holds them: part of the catalog's key, so written byte for byte the same each time. */
@@ -214,11 +256,11 @@ abstract class SqlStoreDdl(val name: String, final override val engine: String, 
 
     /**
      * The test that a name [column] holds is one Drivine gives an object of one of [kinds] (`ix`, `uq`, …), for this graph:
-     * `<graph>_<kind>_…`, matched in any case on SQLite, and in the case the store folds an unquoted name to elsewhere
-     * ([upper]).
+     * `<graph>_<kind><layout>_…`, as [objectName] writes it, matched in any case on SQLite, and in the case the store folds
+     * an unquoted name to elsewhere ([upper]).
      */
     protected fun namedAs(column: String, kinds: List<String>, upper: Boolean): String = kinds.joinToString(" OR ") { kind ->
-        val prefix = "${name}_${kind}_".let { if (upper) it.uppercase() else it.lowercase() }
+        val prefix = "${name}_${kind}${ValueLayout.LAYOUT}_".let { if (upper) it.uppercase() else it.lowercase() }
         "$column LIKE ${literal(prefix.replace("_", "\\_") + "%")} ESCAPE '\\'"
     }
 
@@ -236,12 +278,6 @@ abstract class SqlStoreDdl(val name: String, final override val engine: String, 
     abstract fun aliased(item: CatalogItem, aliases: List<String>): String
 
     /**
-     * What records [item]'s record as made in [CURRENT_FORM], and changes nothing else: for an item whose record says no
-     * form, made in this version's form before records said one. Safe to run again.
-     */
-    abstract fun formRecorded(item: CatalogItem): String
-
-    /**
      * What drops the index [name], by its name: one that stands under a name Drivine gives and isn't the item the name is
      * for, which a recreate drops before it makes the item, as it was never recorded as one.
      */
@@ -250,9 +286,9 @@ abstract class SqlStoreDdl(val name: String, final override val engine: String, 
     /**
      * The name a uniqueness constraint's unique index named [name] is built under first, when it is made again
      * ([recreation]): [name] and `_r`. [objectName] leaves two characters for it, so it fits within the [maxObjectName]
-     * the store allows, but for a graph whose name is as long as a graph's may be ([refusal]), whose `uq` names are one
-     * character longer: there it is cut by one, and its last character, of the hash, gives way. No name Drivine gives
-     * an object ends in `_r`, the hash being hexadecimal, so it is never another object's.
+     * the store allows, a graph's name being at most the store's longest less 16 ([refusal]); a longer [name], which
+     * Drivine doesn't give, is cut so it fits. No name Drivine gives an object ends in `_r`, the hash being hexadecimal, so
+     * it is never another object's.
      */
     fun temporaryName(name: String): String = name.take(maxObjectName - TEMPORARY.length) + TEMPORARY
 
@@ -265,6 +301,17 @@ abstract class SqlStoreDdl(val name: String, final override val engine: String, 
     abstract fun recreation(spec: ConstraintSpec): UniqueRecreation
 
     /**
+     * Whether a unique index a recreate built first under [temporaryName], and left beside the constraint's own, may be dropped
+     * by an ensure that finds it ([recreation]'s `leftover`): true where the store's swap needs no such index to be there to
+     * leave the constraint with one. Postgres's swap is one block, which rolls back whole, the old index kept, where the
+     * index to rename is gone; SQLite's makes the index again under its name and drops the one built first only if it is
+     * there. Oracle's drops the old index and then renames, so dropping the one a recreate in another session built first,
+     * between the two, would leave the constraint with no index: there it is kept, and said (drivine-cypher-spec#161).
+     */
+    open val dropsLeftoverOnEnsure: Boolean
+        get() = true
+
+    /**
      * What records [item]'s record as made in [CURRENT_FORM] as the object [objectName], under [item]'s name, and changes
      * nothing else (its aliases are kept): for a uniqueness constraint made again in its place ([recreation]), whose
      * record is left as one made anew would be. Safe to run again.
@@ -275,15 +322,26 @@ abstract class SqlStoreDdl(val name: String, final override val engine: String, 
         /** The key in a record's details its aliases are kept under. */
         const val ALIASES = "aliases"
 
+        /**
+         * The keys a node's `props` holds [properties] at, the properties of a schema item or a search: each escaped as
+         * `CypherReader` escapes a property it reads ([ValueLayout.escape]), so an index over `$x` is over the key `$$x` a
+         * statement writes it at, and a search reads that key.
+         */
+        fun storedKeys(properties: List<String>): List<String> = properties.map(ValueLayout::escape)
+
+        /** The one row of a graph's lock table: see [lock]. */
+        const val LOCK_ROW = "schema"
+
         /** The key in a record's details the form its item was made in is kept under. */
         const val FORM = "form"
 
         /**
          * The form this version makes every item in, on Postgres, Oracle and SQLite, as its record says. A change to what
          * an item's create makes is a new form, and its record says so: `store.yaml` pins each case's form, and a digest
-         * of its create statements, so a change of the DDL that keeps the form fails its tests.
+         * of its create statements, so a change of the DDL that keeps the form fails its tests. It is a counter of its own,
+         * apart from the store layout (`ValueLayout`): layout 2's DDL made it form 2.
          */
-        const val CURRENT_FORM = 1
+        const val CURRENT_FORM = 2
 
         /** The longest an object made beside another adds to its name: a trigger's `_t`, an index's `_i`. */
         private const val BESIDE = "_t"
@@ -308,8 +366,9 @@ abstract class SqlStoreDdl(val name: String, final override val engine: String, 
          * name that cannot is refused by the graph, and by a Cypher statement compiled over its tables.
          */
         fun refusal(name: String, engine: String, maxObjectName: Int): String? {
-            // The longest a name adds is a table beside the nodes, `_v__` and a hash with nothing readable, and that table's trigger.
-            val longest = maxObjectName - ("_v__".length + 8 + BESIDE.length)
+            // The longest a name adds is a two-letter kind and the layout, `_uq2__`, a hash of 8 with nothing readable, and the
+            // `_t` or `_i` of an object made beside it: so every name [objectName] gives, and what is made beside it, fits.
+            val longest = maxObjectName - ("_uq${ValueLayout.LAYOUT}__".length + 8 + BESIDE.length)
             if (Regex("[A-Za-z][A-Za-z0-9_]{0,${longest - 1}}").matches(name)) return null
             return "'$name' cannot name a graph on $engine: it names tables, so it is letters, digits and underscores, begins with a letter, and is at most $longest long, so that what it names fits in $engine's $maxObjectName."
         }

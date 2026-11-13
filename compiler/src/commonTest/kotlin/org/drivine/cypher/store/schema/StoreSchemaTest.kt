@@ -107,6 +107,30 @@ class StoreSchemaTest {
     }
 
     @Test
+    fun aConstraintOverAPropertyThatBeginsWithADollarIsSampledAtTheKeyTheStoreHoldsItAt() {
+        // Layout 2 holds `$x` as `$$x` (ValueLayout.escape): sampled at `$x`, no key would repeat, and a violation the build
+        // found would be thrown, not reported. Each sample still names the property as declared.
+        val spec = UniquenessConstraintSpec("Person", listOf("${'$'}x"))
+        for (id in listOf("postgres", "oracle", "sqlite")) {
+            val schema = schemas.getValue(id)
+            // A refill's sample names the copy it fills in, the declared property lowercased.
+            val sampled = mapOf("${'$'}x" to schema.sampleConflictsQuery(spec, 10), "__drivine.lower.${'$'}x" to schema.sampleRefilledConflictsQuery(spec.copy(ignoreCase = true), 10))
+            for ((named, sample) in sampled) {
+                assertTrue("${'$'}${'$'}x" in sample, "$id reads the stored key: $sample")
+                assertTrue("'$named'" in sample, "$id names the property as declared: $sample")
+            }
+        }
+    }
+
+    @Test
+    fun oracleSamplesATemporalValueByItsTextWhichJsonValueAloneReadsAsNull() {
+        // Layout 2 holds a date as a tag, {"$t", "v", "s"}, an object JSON_VALUE reads as null: sampled so, a key of dates
+        // that repeats found no repeat, and the violation was thrown rather than reported.
+        val sampled = schemas.getValue("oracle").sampleConflictsQuery(UniquenessConstraintSpec("Event", listOf("day")), 10)
+        assertTrue("COALESCE(JSON_VALUE(n.props, '${'$'}.day.v'), JSON_VALUE(n.props, '${'$'}.day'))" in sampled, sampled)
+    }
+
+    @Test
     fun eachListingIsReadBackAsDrivine4jReadIt() {
         for (case in store["listings"]!!) {
             val name = case["name"]!!.textValue()
@@ -234,11 +258,74 @@ class StoreSchemaTest {
         assertTrue(checked > 0, "store.yaml pins no form")
     }
 
+    /**
+     * Each column the module makes a range index's and a uniqueness constraint's indexes with, in its store's canonical form
+     * ([IndexText.canonical]), as `store.yaml`'s `columns` pins it: a change to the DDL a column is made with shows here.
+     */
+    @Test
+    fun eachIndexColumnIsPinnedInItsStoresCanonicalForm() {
+        var checked = 0
+        for (entry in store["columns"]!!) {
+            val spec = spec(entry["spec"]!!).made()
+            for ((id, pinned) in (entry["stores"] as ObjectNode).properties()) {
+                val expected = (pinned as ObjectNode).properties().associate { (name, columns) -> name to texts(columns) }
+                assertEquals(expected, (schemas.getValue(id) as SqlStoreSchema).expectedColumns(spec), "$id: the columns of $spec")
+                checked++
+            }
+        }
+        assertTrue(checked > 0, "store.yaml pins no columns")
+    }
+
+    /**
+     * A store the module made, its listing captured from the store: each column the store gives back of each of an item's
+     * indexes is, canonically, the column the module writes, so the item reads as current by its columns, not for want of
+     * reading them.
+     */
+    @Test
+    fun aFreshStoreGivesBackEachColumnAsTheModuleWritesIt() {
+        var checked = 0
+        for (case in store["forms"]!!.filter { it["fresh"]?.booleanValue() == true }) {
+            val id = case["store"]!!.textValue()!!
+            val schema = schemas.getValue(id) as SqlStoreSchema
+            val rows = case["rows"]!!.map(::plain)
+            for (entry in case["items"]!!) {
+                val spec = spec(entry["spec"]!!).made()
+                // An index the item doesn't stand under isn't listed: Oracle's range index a constraint's unique index serves.
+                for ((name, columns) in schema.expectedColumns(spec)) {
+                    val found = schema.foundColumns(name, rows) ?: continue
+                    assertEquals(columns, found, "$id, ${case["name"]!!.textValue()}: the columns of $name")
+                    checked++
+                }
+            }
+        }
+        assertTrue(checked >= 6, "store.yaml has no fresh store's columns: $checked")
+    }
+
+    /**
+     * A column the canonical form can't map is unknown, and no mismatch: a false one would drop a good index. Only a
+     * column read as another property, or a column of the table, is another item.
+     */
+    @Test
+    fun aColumnThatCantBeReadIsNoMismatch() {
+        val spec = RangeIndexSpec("Person", listOf("name"))
+        val oracle = schemas.getValue("oracle")
+        val name = OracleDdl(graph).objectName("ix", listOf("name"))
+        fun rows(vararg columns: String) = listOf(mapOf("object" to name.uppercase(), "type" to "INDEX", "table" to "DRIVINE_NODE", "uniqueness" to "NONUNIQUE", "columns" to columns.toList()))
+        assertEquals(ItemForm.Current, oracle.formOf(spec, rows("SOMETHING_ELSE(\"PROPS\", 'x')", "MORE(1)")), "unknown columns")
+        assertEquals(ItemForm.Mismatch(name.uppercase(), "an index over [TYPE]", true), oracle.formOf(spec, rows("TYPE")), "a column of the table")
+        val postgres = schemas.getValue("postgres")
+        val pg = PostgresDdl(graph).objectName("ix", listOf("Person", "name"))
+        fun pgRows(vararg columns: String) = listOf(mapOf("object" to pg.lowercase(), "type" to "i", "table" to "drivine_node", "unique" to false, "method" to "btree",
+            "where" to "labels @> '[\"Person\"]'::jsonb", "columns" to columns.toList()))
+        assertEquals(ItemForm.Current, postgres.formOf(spec, pgRows("(props -> 'name'::text)")), "the module's own column, as Postgres prints it")
+        assertEquals(ItemForm.Mismatch(pg.lowercase(), "an index over [age]", true), postgres.formOf(spec, pgRows("(props -> 'age'::text)")), "another property, in the module's shape")
+        assertEquals(ItemForm.Current, postgres.formOf(spec, pgRows("lower(props ->> 'name'::text)")), "an expression this can't read")
+    }
+
     private fun form(node: JsonNode): ItemForm = when {
         node.isTextual && node.textValue() == "current" -> ItemForm.Current
         node["stale"] != null -> ItemForm.Stale(node["stale"]!!.textValue()!!, org.drivine.cypher.store.ddl.SqlStoreDdl.CURRENT_FORM)
         node["newer"] != null -> ItemForm.Newer(node["newer"]!!.longValue().toInt(), org.drivine.cypher.store.ddl.SqlStoreDdl.CURRENT_FORM)
-        node["unrecorded"] != null -> ItemForm.Unrecorded(node["unrecorded"]!!.textValue()!!)
         node["mismatch"] != null -> node["mismatch"]!!.let {
             ItemForm.Mismatch(it["name"]!!.textValue()!!, it["reason"]!!.textValue()!!, it["droppable"]!!.booleanValue())
         }

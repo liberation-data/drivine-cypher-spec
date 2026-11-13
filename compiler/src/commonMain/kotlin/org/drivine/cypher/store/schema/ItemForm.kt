@@ -1,11 +1,6 @@
 package org.drivine.cypher.store.schema
 
 import org.drivine.DrivineInternalApi
-import org.drivine.cypher.store.ddl.DdlStatement
-
-/** An object a recreate drops by its name: what it is ([what], as a line names it), its [name], and the [statements] that drop it. */
-@DrivineInternalApi
-data class ObjectDrop(val what: String, val name: String, val statements: List<DdlStatement>)
 
 /**
  * What a SQL store's catalog and dictionary say of an item a spec declares, beyond whether it is there
@@ -14,8 +9,8 @@ data class ObjectDrop(val what: String, val name: String, val statements: List<D
  *
  * A form is how one version, or one library, writes an item's DDL: the same item, with the same label, properties, kind and
  * uniqueness, written with other expressions. Each record the module writes says its form
- * ([org.drivine.cypher.store.ddl.SqlStoreDdl.CURRENT_FORM]). A store made by an earlier version, or by Drivine for TypeScript
- * or drivine-python before they took the module's DDL, can hold an item of another form, which is kept and used as it is.
+ * ([org.drivine.cypher.store.ddl.SqlStoreDdl.CURRENT_FORM]). A store made by an earlier version can hold an item of another form,
+ * which is kept and used as it is.
  *
  * Another item under the name Drivine gives (an index that isn't unique where a uniqueness constraint's should be, one over
  * other properties, or an object that isn't an index) is no form of it: it is a [Mismatch], which a schema manager takes as
@@ -28,8 +23,7 @@ sealed interface ItemForm {
     data object Current : ItemForm
 
     /**
-     * The item is in another form than [expected], the one this version makes: [found] says which, `form 0` where its record
-     * says one, or the library whose form its expressions are. It is kept and used as it is, and a recreate makes it again.
+     * The item is in another form than [expected], the one this version makes: [found] says which, as `form 0`. It is kept and used as it is, and a recreate makes it again.
      */
     data class Stale(val found: String, val expected: Int) : ItemForm
 
@@ -38,12 +32,6 @@ sealed interface ItemForm {
      * as in a rolling deploy. It is kept and used as it is, and no recreate is suggested, as one here would make it in an older form.
      */
     data class Newer(val found: Int, val current: Int) : ItemForm
-
-    /**
-     * The item is in this version's form and its record says none: drivine4j's on Oracle, made before records said their
-     * form. [statement] records it as made in its form, and touches nothing else; it is safe to run again.
-     */
-    data class Unrecorded(val statement: String) : ItemForm
 
     /**
      * What stands under [name], a name Drivine gives one of the item's objects, isn't the item: [reason] says what it is. It

@@ -1,6 +1,7 @@
 package org.drivine.cypher.sql
 
 import org.drivine.cypher.CompilerException
+import org.drivine.cypher.store.ValueLayout
 
 /**
  * The parameters of a statement as the SQL binds them. A Cypher parameter is a value, so it is bound as
@@ -56,9 +57,10 @@ class Parameters(
     fun json(name: String, keys: List<String>): String? {
         val read = asPath ?: return null
         var map = given(name)
-        for (key in keys.dropLast(1)) map = (map as? Map<*, *>)?.get(key)
+        // The keys as the statement reads them, escaped as the bound text holds them; the caller's map has them as written.
+        for (key in keys.dropLast(1)) map = (map as? Map<*, *>)?.get(ValueLayout.unescape(key))
         if (map !is Map<*, *>) return null
-        val value = map[keys.last()]
+        val value = map[ValueLayout.unescape(keys.last())]
         if (inObject) return read(name, null, keys, value)
         val key = "_cy_$name"
         val written = text(given(name))

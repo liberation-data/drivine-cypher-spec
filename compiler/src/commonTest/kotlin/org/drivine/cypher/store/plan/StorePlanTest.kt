@@ -154,8 +154,7 @@ class StorePlanTest {
 
     /**
      * The DDL [execute] names on [id]: a `store.yaml` case's create, drop or dropUnnamed, or a step of its `recreate`
-     * (`leftover`, `build`, `swap`, `finish`, `remade`), the marker's, a statement given whole, or the record of the catalog's item
-     * made in the current form (`formRecorded`).
+     * (`leftover`, `build`, `swap`, `finish`, `remade`), the marker's, or a statement given whole.
      */
     private fun ddl(id: String, execute: JsonNode): List<PlanAction.Execute> {
         fun ddl(statements: List<DdlStatement>) = statements.map { PlanAction.Execute(it, purpose = Purpose.DDL) }
@@ -173,10 +172,6 @@ class StorePlanTest {
         execute["statement"]?.let { statement ->
             val purpose = execute["purpose"]?.textValue()?.let(Purpose::valueOf) ?: return ddl(listOf(DdlStatement.Text(statement.textValue()!!)))
             return listOf(PlanAction.Execute(DdlStatement.Text(statement.textValue()!!), purpose = purpose))
-        }
-        // The record of the catalog's item made in the current form, recorded so (`store.yaml`'s `catalog`).
-        execute["formRecorded"]?.let {
-            return listOf(PlanAction.Execute(DdlStatement.Text(store["catalog"]!!["stores"]!![id]!!["formRecorded"]!!.textValue()!!), purpose = Purpose.ALIASES))
         }
         execute["native"]?.let { return ddl(listOf(DdlStatement.Native(texts(it)))) }
         return when (val name = execute["marker"]!!.textValue()) {

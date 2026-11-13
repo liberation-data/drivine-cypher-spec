@@ -32,8 +32,8 @@ class TemporalBesideTextTest {
 
     private val date = TemporalValue(Temporal.DATE, "2024-01-01")
 
-    /** The kind's pattern, which a comparison of two dates tests each side's text by. */
-    private val pattern = "[0-9]{2}-[0-9]{2}"
+    /** The literal date's sort key, which a comparison of two dates compares the other side's by (#161). */
+    private val pattern = "10000020240101"
 
     @Test
     fun `a date beside a parameter of a temporal kind is compared as a date, and beside a text is not`() {
@@ -41,7 +41,7 @@ class TemporalBesideTextTest {
             val temporal = sql("RETURN date('2024-01-01') = \$d", mapOf("d" to date))
             assertTrue(pattern in temporal && "THEN FALSE END" !in temporal, "$store: $temporal")
             val text = sql("RETURN date('2024-01-01') = \$d", mapOf("d" to "2024-01-01"))
-            assertTrue(pattern !in text && "THEN FALSE END" in text, "$store: $text")
+            assertTrue("THEN FALSE END" in text, "$store: $text")
         }
     }
 

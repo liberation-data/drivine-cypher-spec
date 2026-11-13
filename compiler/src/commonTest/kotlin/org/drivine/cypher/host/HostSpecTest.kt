@@ -15,15 +15,20 @@ import kotlin.test.assertTrue
  * as SQLite calls them, on every target: each `function` step of a function the module implements gives its `result`, fails
  * with its `error`, or its values ascend. A function host.yaml calls that the module doesn't implement yet is in [PENDING], and [PENDING] holds
  * nothing else; each function the module implements has a step. A `read` step pins each library's row reader, not the
- * module's, and is passed over. The cases' `pairs` are checked by each library's runner (drivine4j's HostSpecTest), which
+ * module's, and a `key` step a temporal value's sort key, which `ValueLayoutTest` checks: each is passed over. The cases' `pairs` are checked by each library's runner (drivine4j's HostSpecTest), which
  * compiles them. The SQLite extension's check (check/extension-native.py) runs the same steps through SQL, on the
  * native library loaded in SQLite.
  */
 class HostSpecTest {
 
     private companion object {
-        /** The keys of each kind of step, beside its optional `note`: a function's result, its failure, its order, and a read. */
-        val SHAPES = setOf(setOf("function", "args", "result"), setOf("function", "args", "error"), setOf("function", "ascending"), setOf("read", "value"))
+        /**
+         * The keys of each kind of step, beside its optional `note`: a function's result, its failure, its order, a read, and
+         * a temporal value's sort key (`ValueLayoutTest` checks it, over `Temporals.key`).
+         */
+        val SHAPES = setOf(
+            setOf("function", "args", "result"), setOf("function", "args", "error"), setOf("function", "ascending"), setOf("read", "value"), setOf("key", "result"),
+        )
 
         /** Drivine's functions, and `regexp`, which SQLite calls, as `regexp(pattern, text)`, for `text REGEXP pattern`. */
         val FUNCTION = Regex("drivine_[a-z_]+|regexp")
@@ -201,7 +206,7 @@ class HostSpecTest {
     private fun check(step: JsonNode, where: String, pending: Set<String> = PENDING): Outcome {
         val keys = step.keys() - "note"
         require(keys in SHAPES) { "$where: a step has the keys of one of $SHAPES, and an optional note, not $keys" }
-        if ("read" in keys) return Outcome.READ
+        if ("read" in keys || "key" in keys) return Outcome.READ
         val name = step["function"]!!.textValue()!!
         require(name.matches(FUNCTION)) { "$where: $name is no function of Drivine's" }
         val functions = HostFunctions.all.filter { it.name == name }

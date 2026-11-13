@@ -9,6 +9,7 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import org.drivine.DrivineInternalApi
+import org.drivine.cypher.store.ValueLayout
 
 /**
  * SPIKE: a JSON tree shaped as Jackson's `JsonNode`, so the compiler's code that walks parameter trees moves to common code
@@ -246,8 +247,16 @@ object CypherJson {
     @OptIn(kotlin.io.encoding.ExperimentalEncodingApi::class)
     fun valueToTree(value: Any?, encoder: CypherEncoder? = null): JsonNode {
         if (value is JsonNode) return value
-        encoder?.tree(value)?.let { return it }
         fun valueToTree(value: Any?) = valueToTree(value, encoder)
+        // A temporal value is its tag, and a map's keys are escaped, as the store layout holds them, whatever the host's encoder
+        // would write: a map or a list that holds either is walked here, each item asked of the encoder (see ValueLayout).
+        temporalTag(value)?.let { return it }
+        if (laidOut(value)) when (value) {
+            is Map<*, *> -> return ObjectNode().apply { value.forEach { (k, v) -> set<JsonNode>(ValueLayout.escape(k.toString()), valueToTree(v)) } }
+            is Iterable<*> -> return ArrayNode().apply { value.forEach { add(valueToTree(it)) } }
+            is Array<*> -> return ArrayNode().apply { value.forEach { add(valueToTree(it)) } }
+        }
+        encoder?.tree(value)?.let { return it }
         return when (value) {
             null -> NullNode
             is String -> TextNode(value)
@@ -261,7 +270,6 @@ object CypherJson {
             is BigInteger -> BigIntegerNode(value)
             is BigDecimal -> DecimalNode(value, value.toPlainString(), value.toStringExpanded())
             is Char -> TextNode(value.toString())
-            is TemporalValue -> TextNode(value.text)
             is Map<*, *> -> ObjectNode().apply { value.forEach { (k, v) -> set<JsonNode>(k.toString(), valueToTree(v)) } }
             is Iterable<*> -> ArrayNode().apply { value.forEach { add(valueToTree(it)) } }
             is Array<*> -> ArrayNode().apply { value.forEach { add(valueToTree(it)) } }
@@ -277,9 +285,38 @@ object CypherJson {
         }
     }
 
+    /**
+     * Whether [value], a map or a list, holds at any depth a temporal value or a map with a key that begins with `$`, which
+     * the store layout holds otherwise than a host's encoder writes them: see [valueToTree].
+     */
+    private fun laidOut(value: Any?): Boolean = when (value) {
+        is Map<*, *> -> value.keys.any { it.toString().startsWith('$') } || value.values.any { temporalTag(it) != null || laidOut(it) }
+        is Iterable<*> -> value.any { temporalTag(it) != null || laidOut(it) }
+        is Array<*> -> value.any { temporalTag(it) != null || laidOut(it) }
+        else -> false
+    }
+
+    /**
+     * The tag of [value], where it is a temporal value, a [TemporalValue] or one of the platform's own temporal types, as the
+     * store layout holds one (see [ValueLayout]); null for any other value, and for one whose text is no value of its kind.
+     */
+    fun temporalTag(value: Any?): JsonNode? {
+        if (value == null || value is JsonNode) return null
+        val (kind, text) = when (value) {
+            is TemporalValue -> value.kind to value.text
+            else -> (platformTemporal(value) ?: return null) to (platformTree(value)?.textValue() ?: return null)
+        }
+        val canonical = try {
+            org.drivine.cypher.sql.Temporals.canonical(text, kind)
+        } catch (e: IllegalArgumentException) {
+            null
+        } ?: return TextNode(text)
+        return ValueLayout.tag(kind, canonical)
+    }
+
     /** [value] as compact JSON text: as [encoder] writes it where it does (decimals written plain aside), else as its tree. */
     fun writeValueAsString(value: Any?, plainDecimals: Boolean = false, encoder: CypherEncoder? = null): String {
-        if (!plainDecimals && value !is JsonNode) encoder?.text(value)?.let { return it }
+        if (!plainDecimals && value !is JsonNode && temporalTag(value) == null && !laidOut(value)) encoder?.text(value)?.let { return it }
         return StringBuilder().also { write(valueToTree(value, encoder), it, plainDecimals) }.toString()
     }
 

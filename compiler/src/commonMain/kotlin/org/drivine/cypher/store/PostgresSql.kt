@@ -65,6 +65,21 @@ object PostgresSql {
         return propertyText(column(alias, "props"), keyOf(key))
     }
 
+    /** [property], a temporal value's tag read as its text `v` (see [ValueLayout]): what a full-text search reads. */
+    fun searchedProperty(alias: String, key: String): String {
+        if (key == Stamps.PROPERTY) return property(alias, key)
+        return "COALESCE(${value(alias, key)} ->> ${literal(ValueLayout.TEXT)}, ${property(alias, key)})"
+    }
+
+    /**
+     * The property [key] of the node or relationship [alias] as a range index or a uniqueness constraint holds it: its JSON,
+     * [value], whose equality is `jsonb`'s, Neo4j's on every value a property holds: a text is equal only to a text, a number
+     * to a number of the same value (`1` to `1.0`, exactly past 2^53), and a temporal value's tag only to the same value's.
+     * A statement that compares the property with a value as JSON, `(props -> 'k') = $p`, is answered by it. The stamp is
+     * its column.
+     */
+    fun indexed(alias: String, key: String): String = if (key == Stamps.PROPERTY) column(alias, "stamp") else value(alias, key)
+
     /**
      * The property [key] of [alias] as a number where one is stored, and null for anything else: what the schema marker is
      * ordered by (`store.marker`), so a marker whose moment is not a number is read as never applied, not as text.
@@ -138,5 +153,5 @@ object PostgresSql {
 
     /** [searchedText] before it is lowered: what a full-text search measures a text's length by (drivine4j#604). */
     fun joinedText(alias: String, keys: List<String>): String =
-        keys.joinToString(" || ' ' || ") { "COALESCE(${property(alias, it)}, '')" }
+        keys.joinToString(" || ' ' || ") { "COALESCE(${searchedProperty(alias, it)}, '')" }
 }

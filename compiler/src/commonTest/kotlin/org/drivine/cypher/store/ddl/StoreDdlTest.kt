@@ -193,9 +193,25 @@ class StoreDdlTest {
     }
 
     /**
+     * A recreate builds its index over the keys the create indexes, so over a property whose name begins with `$`, held as
+     * `$$` ([SqlStoreDdl.storedKeys]), it builds over `$$x`, as the create does, not over `$x`, which no node holds: an
+     * index over that, swapped in, would hold nothing unique (drivine-cypher-spec#161).
+     */
+    @Test
+    fun aUniqueRecreateBuildsOverTheStoredKeysOfAPropertyThatBeginsWithADollar() {
+        val made = UniquenessConstraintSpec("Person", listOf("${'$'}x", "y")).made()
+        for (ddl in listOf(postgres, oracle, sqlite)) {
+            val recreation = ddl.recreation(made)
+            val create = ddl.createConstraint(made).map { (it as DdlStatement.Text).statement }
+            val unique = create.single { "CREATE UNIQUE INDEX IF NOT EXISTS ${recreation.name} " in it }
+            assertEquals(unique.replace("IF NOT EXISTS ${recreation.name} ", "${recreation.temporary} "), (recreation.build.single() as DdlStatement.Text).statement, ddl.engine)
+        }
+    }
+
+    /**
      * The name a unique index is built under first fits within the store's longest name, and is never a name Drivine
-     * gives: [SqlStoreDdl.objectName] leaves two characters, but for a graph whose name is as long as one may be, whose
-     * `uq` names are one character longer, where the name built under first is cut by one.
+     * gives: [SqlStoreDdl.objectName] leaves two characters for it, and a graph's name is at most the store's longest less
+     * 16 ([SqlStoreDdl.refusal]), so even its `uq2` names leave them.
      */
     @Test
     fun theNameAUniqueIndexIsBuiltUnderFirstFitsTheStoresNames() {
@@ -206,7 +222,7 @@ class StoreDdlTest {
         )
         for ((engine, max, make) in makers) {
             // The longest name a graph may have, and one shorter.
-            val longest = max - ("_v__".length + 8 + "_t".length)
+            val longest = max - ("_uq2__".length + 8 + "_t".length)
             for (graph in listOf("g" + "x".repeat(longest - 1), "g" + "x".repeat(longest - 2), "drivine")) {
                 val ddl = make(graph)
                 for (parts in listOf(listOf("Person", "email"), listOf("Membership", "tenantId", "userId"), listOf("P".repeat(80), "q"))) {
@@ -218,13 +234,14 @@ class StoreDdlTest {
                     assertEquals(expected, temporary, "$engine, $graph, $parts")
                 }
             }
-            assertEquals("drivine_uq_Personemail_5482a751_r", make("drivine").temporaryName("drivine_uq_Personemail_5482a751"), engine)
+            assertEquals("drivine_uq2_Personemail_5482a751_r", make("drivine").temporaryName("drivine_uq2_Personemail_5482a751"), engine)
         }
-        // At the longest a graph's name may be, a `uq` name with a hash of eight digits is one short of the store's longest.
-        val longest = PostgresDdl("g" + "x".repeat(PostgresDdl.MAX_OBJECT_NAME - 15))
+        // At the longest a graph's name may be, a `uq2` name with a hash of eight digits is two short of the store's longest,
+        // so `_r` fits whole.
+        val longest = PostgresDdl("g" + "x".repeat(PostgresDdl.MAX_OBJECT_NAME - 17))
         val full = longest.objectName("uq", listOf("Person", "email"))
-        assertEquals(PostgresDdl.MAX_OBJECT_NAME - 1, full.length, full)
-        assertEquals(full.dropLast(1) + "_r", longest.temporaryName(full))
+        assertEquals(PostgresDdl.MAX_OBJECT_NAME - 2, full.length, full)
+        assertEquals(full + "_r", longest.temporaryName(full))
     }
 
     private fun digest(statements: List<String>): String =
@@ -292,7 +309,6 @@ class StoreDdlTest {
             if (ddl is SqlStoreDdl) {
                 assertEquals(expected["aliased"]!!.textValue(), ddl.aliased(item, aliases), "$id: aliased")
                 assertEquals(expected["unaliased"]!!.textValue(), ddl.aliased(item, emptyList()), "$id: unaliased")
-                assertEquals(expected["formRecorded"]!!.textValue(), ddl.formRecorded(item), "$id: formRecorded")
             }
         }
         assertEquals(catalog["stores"]!!["oracle"]!!["labelled"]!!.textValue(), oracle.labelledIndexesQuery(), "oracle: labelled indexes")
@@ -310,7 +326,11 @@ class StoreDdlTest {
                 else -> fail("No SQL store $id")
             }
             val parts = texts(entry["parts"]!!)
-            assertEquals(entry["name"]!!.textValue(), ddl.objectName(entry["kind"]!!.textValue()!!, parts), "on $target: ${entry["store"]!!.textValue()} $graph $parts")
+            val name = ddl.objectName(entry["kind"]!!.textValue()!!, parts)
+            assertEquals(entry["name"]!!.textValue(), name, "on $target: ${entry["store"]!!.textValue()} $graph $parts")
+            // What is made beside it, a trigger's `_t`, an index's `_i`, a unique index built anew's `_r`, fits too.
+            val longest = when (ddl) { is OracleDdl -> OracleDdl.MAX_OBJECT_NAME; is PostgresDdl -> PostgresDdl.MAX_OBJECT_NAME; else -> SqliteDdl.MAX_OBJECT_NAME }
+            assertTrue(name.length + 2 <= longest, "${entry["store"]!!.textValue()} $graph $parts: $name and a suffix fit in $longest")
         }
         assertTrue(names.size() > 0)
     }
