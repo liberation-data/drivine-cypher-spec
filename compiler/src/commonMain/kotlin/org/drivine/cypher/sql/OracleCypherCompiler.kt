@@ -401,7 +401,7 @@ class OracleCypherCompiler(
     private fun matchesEmpty(pattern: String) = shared(pattern) { (p) ->
         val flags = "REGEXP_SUBSTR($p, '^\\(\\?([a-z]+)\\)', 1, 1, NULL, 1)"
         val written = """REGEXP_REPLACE(REGEXP_REPLACE($p, '^\(\?[a-z]+\)', ''), '(^|[^\\])((\\\\)*)\\z', '\1\2\\Z')"""
-        "REGEXP_LIKE(CHR(10), '\\A(' || $written || ')[[:cntrl:]]\\z', NVL(REPLACE($flags, 's', 'n'), 'c'))"
+        "REGEXP_LIKE(CHR(10), '\\A(' || ${backreferencesShifted(written)} || ')[[:cntrl:]]\\z', NVL(REPLACE($flags, 's', 'n'), 'c'))"
     }
 
     /**
@@ -1929,7 +1929,18 @@ class OracleCypherCompiler(
      */
     override fun matches(text: String, pattern: String) = shared(pattern) { (p) ->
         val flags = "REGEXP_SUBSTR($p, '^\\(\\?([a-z]+)\\)', 1, 1, NULL, 1)"
-        "REGEXP_LIKE($text, '\\A(' || REGEXP_REPLACE($p, '^\\(\\?[a-z]+\\)', '') || ')\\z', NVL(REPLACE($flags, 's', 'n'), 'c'))"
+        "REGEXP_LIKE($text, '\\A(' || ${backreferencesShifted("REGEXP_REPLACE($p, '^\\(\\?[a-z]+\\)', '')")} || ')\\z', NVL(REPLACE($flags, 's', 'n'), 'c'))"
+    }
+
+    /**
+     * [pattern] with each backreference that no backslash escapes, `\1` to `\8`, numbered one more: Oracle has no group that
+     * captures nothing, so the group [matches] holds the pattern in is the first, and the pattern's own are numbered from the
+     * second (#236). Each number is moved from the highest down, so none is moved twice; and twice over, as a backreference
+     * just after another, `(a)\1\1`, is not found until the one before it is. Oracle reads no backreference past `\9`, so a
+     * pattern's `\9` names a group it doesn't have.
+     */
+    private fun backreferencesShifted(pattern: String) = (8 downTo 1).fold(pattern) { x, n ->
+        (1..2).fold(x) { y, _ -> """REGEXP_REPLACE($y, '(^|[^\\])((\\\\)*)\\$n', '\1\2\\${n + 1}')""" }
     }
 
     /**

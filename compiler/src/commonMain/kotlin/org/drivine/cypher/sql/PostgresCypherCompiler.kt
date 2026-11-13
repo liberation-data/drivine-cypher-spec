@@ -646,10 +646,12 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
      * matches no line break, as Java's does, unless the pattern says `(?s)`. The anchors are `\A` and `\Z`, the text's
      * start and end, which `(?m)` leaves as they are: it lets the pattern's own `^` and `$` match at a line break.
      * Postgres's `s` and `m` each undo the other, so the two together end in `w`, which keeps both. Java's `\z`, the
-     * text's end, is Postgres's `\Z`, which it has no `\z` for: an unescaped one is written so (#416).
+     * text's end, is Postgres's `\Z`, which it has no `\z` for: an unescaped one is written so (#416). The pattern is held
+     * between the anchors by a group that captures nothing, `(?:…)`, so its own groups keep their numbers, as a backreference
+     * reads them (#236).
      */
     override fun matches(text: String, pattern: String) =
-        "($text ~ regexp_replace(regexp_replace(${javaEnds(pattern)}, '^(\\(\\?([a-z]+)\\))?(.*)\$', '(?p\\2)\\\\A(\\3)\\\\Z'), " +
+        "($text ~ regexp_replace(regexp_replace(${javaEnds(pattern)}, '^(\\(\\?([a-z]+)\\))?(.*)\$', '(?p\\2)\\\\A(?:\\3)\\\\Z'), " +
             "'^\\(\\?([a-z]*(s[a-z]*m|m[a-z]*s)[a-z]*)\\)', '(?\\1w)'))"
 
     /** [pattern] with each `\z` that no backslash escapes written `\Z`, Postgres's end of the text. */

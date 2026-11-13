@@ -1024,6 +1024,27 @@ cases:
         cypher: "RETURN ['  ' STARTS WITH '', '' CONTAINS ' ', '  ' ENDS WITH ' ', size('  '), isEmpty(' ')]"
         rows: [[true, false, true, 2, false]]
 
+  - name: "A regular expression with a backreference"
+    description: "A backreference names the group the pattern writes it for, as in Java. The SQL stores hold the pattern to the whole text inside a group of their own, which on Postgres and Oracle captured, so the pattern's first group was the second: Postgres refused `\\1`, and Oracle read it as the whole match (#236)."
+    steps:
+      - only: [neo4j, sql]
+        cypher: "RETURN [$a =~ $p, $b =~ $p]"
+        parameters: {a: "Ada founded Acme", b: "Bob founded Acme", p: "(A).*\\1.*"}
+        rows: [[true, false]]
+      - note: "A backreference just after another, two groups named in turn, and a backslash escaped before a digit."
+        only: [neo4j, sql]
+        cypher: "RETURN ['aaa' =~ $twice, 'aa' =~ $twice, 'abba' =~ $two, 'abab' =~ $two, $s =~ $escaped]"
+        parameters: {twice: "(a)\\1\\1", two: "(a)(b)\\2\\1", s: "a\\1", escaped: "(a)\\\\1"}
+        rows: [[true, false, true, false, true]]
+      - note: "Written in the statement."
+        only: [neo4j, sql]
+        cypher: "RETURN ['abab' =~ '(ab)\\\\1', 'abac' =~ '(ab)\\\\1']"
+        rows: [[true, false]]
+      - note: "Over the empty text, which Oracle reads apart."
+        only: [neo4j, sql]
+        cypher: "RETURN [$e =~ $p, $e =~ $q]"
+        parameters: {e: "", p: "()\\1", q: "(a)\\1"}
+        rows: [[true, false]]
   - name: "A regular expression over the empty text"
     description: "The empty text matches a pattern that matches it whole, as Java's matches() reads it, and no other; a pattern that is null makes null. Oracle's empty text is null as SQL text, so its regular expressions gave null there (drivine4j#416)."
     steps:
