@@ -30,7 +30,7 @@ class RegexBackreferenceTest {
 
     /** Each form refused, and what the message names. */
     private val refused = mapOf(
-        "(a)[\\1]" to "in a character class", "(a)[\\]\\1]" to "in a character class",
+        "(a)[\\1]" to "in a character class", "(a)[\\]\\1]" to "in a character class", "(a)[^]\\1]" to "in a character class",
         "(a)(b)(c)(d)(e)(f)(g)(h)(i)\\9" to "past \\8", "(a)(b)(c)(d)(e)(f)(g)(h)(i)(j)\\10" to "past \\8",
         "(a)\\10" to "with a digit after it",
         "(a)\\2" to "hasn't closed", "\\1(a)" to "hasn't closed", "(a\\1)" to "hasn't closed",
@@ -54,7 +54,7 @@ class RegexBackreferenceTest {
         allowed.forEach { assertNull(Patterns.refusal(it), it) }
         refused.forEach { (pattern, why) -> assertTrue(Patterns.refusal(pattern).orEmpty().contains(why), "$pattern: ${Patterns.refusal(pattern)}") }
         // Escaped, quoted and \c's character are no backreference.
-        listOf("(a)\\\\1", "\\Q\\1\\E", "\\c\\1", "a").forEach { assertFalse(Patterns.holdsBackreference(it), it) }
+        listOf("(a)\\\\1", "\\Q\\1\\E", "\\Q\\1", "\\c\\1", "a").forEach { assertFalse(Patterns.holdsBackreference(it), it) }
     }
 
     @Test
