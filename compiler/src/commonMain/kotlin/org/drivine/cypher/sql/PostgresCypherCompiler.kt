@@ -363,6 +363,11 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
             "ELSE ${nullIfJsonNull(x)} END, ${codePointText(x)})"
     }
 
+    /** A text as [sortKey] sorts it, by its code points: a value the statement makes a text is no tag, so none is read apart. */
+    override fun textSortKey(json: String) = shared(json) { (x) ->
+        "ROW(CASE WHEN jsonb_typeof($x) = 'string' THEN '\"\"'::jsonb ELSE ${nullIfJsonNull(x)} END, ${codePointText(x)})"
+    }
+
     override fun add(a: String, b: String, given: Pair<Any?, Any?>) =
         "CASE WHEN jsonb_typeof($a) = 'number' AND jsonb_typeof($b) = 'number' THEN ${scalar("${number(a)} + ${number(b)}")} " +
             "WHEN jsonb_typeof($a) = 'array' AND jsonb_typeof($b) = 'array' THEN $a || $b " +

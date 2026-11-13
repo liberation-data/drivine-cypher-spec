@@ -342,6 +342,15 @@ class CompiledSizeTest {
                 "(CASE WHEN jsonb_typeof(p2.s1) = 'string' THEN (p2.s1 #>> '{}') END) COLLATE \"C\")",
             property,
         )
+        // A value the statement makes a text is no tag, so its sort reads none apart, as SQLite's doesn't.
+        for (text in listOf("toString(c.name)", "toLower(c.name)")) {
+            assertEquals(
+                "ROW(CASE WHEN jsonb_typeof(p2.s1) = 'string' THEN '\"\"'::jsonb ELSE NULLIF(p2.s1, 'null'::jsonb) END, " +
+                    "(CASE WHEN jsonb_typeof(p2.s1) = 'string' THEN (p2.s1 #>> '{}') END) COLLATE \"C\")",
+                compiler.compile("MATCH (c:Claim) RETURN c.name ORDER BY $text").sql.substringAfter("ORDER BY "),
+                text,
+            )
+        }
         val list = compiler.compile("MATCH (c:Claim) WITH c.name AS n, collect(c.id) AS ids RETURN n ORDER BY ids").sql.substringAfter("ORDER BY ")
         assertTrue(list.contains("WITH RECURSIVE"), list)
         // Its items as arrays unnested, which the planner takes for 10 items, not a set-returning function's 100: a 150th of the cost.
