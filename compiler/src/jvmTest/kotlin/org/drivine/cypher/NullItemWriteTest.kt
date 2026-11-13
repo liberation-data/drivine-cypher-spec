@@ -111,6 +111,25 @@ class NullItemWriteTest {
     }
 
     @Test
+    fun `a SET of a node or a relationship that is null sets nothing, so it fails on no list it would write`() {
+        // Neo4j sets nothing on null, and so never works out the value (openCypher's Set1 [8]): the raise is only on a row
+        // whose node or relationship is there, its id read in the SELECT that may raise, as the UPDATE reads it.
+        val set = listOf(
+            "OPTIONAL MATCH (n:A) SET n.x = [null]" to emptyMap(),
+            "OPTIONAL MATCH (n:A) SET n += {x: [null]}" to emptyMap(),
+            "OPTIONAL MATCH (n:A) SET n = \$m" to mapOf("m" to mapOf("x" to listOf(null))),
+            "OPTIONAL MATCH ()-[r:R]->() SET r.x = [null]" to emptyMap(),
+            "OPTIONAL MATCH (n:A) WITH n, {x: [n.y]} AS m SET n += m" to emptyMap(),
+        )
+        val present = Regex("""CASE WHEN (CAST\(\S+ ->> \S+ AS (bigint|INTEGER)\)|JSON_VALUE\(cy_row, \S+ RETURNING NUMBER\)) IS NOT NULL""")
+        for (compiler in compilers()) for ((cypher, parameters) in set) {
+            val sql = sql(compiler, cypher, parameters)
+            assertTrue(refuses(sql), "$cypher\n$sql")
+            assertTrue(present.containsMatchIn(sql), "$cypher\n$sql")
+        }
+    }
+
+    @Test
     fun `Oracle tests the value written only through its text as a CLOB, which a text past 32 KB is read through safely`() {
         // A text past 32 KB read by `$.type()`, as a VARCHAR2 or taken out as JSON, on two rows or more, closed the session
         // (ORA-03113, drivine4j#531, #255): the test reads the value once, by JSON_SERIALIZE … RETURNING CLOB, and nothing else.
@@ -127,7 +146,9 @@ class NullItemWriteTest {
             for (check in checks) {
                 val read = Regex("""cy_value\b""").findAll(check).count()
                 assertTrue(read == 1 && "JSON_SERIALIZE(cy_value RETURNING CLOB)" in check, "$cypher\n$check")
-                listOf("type()", "VARCHAR2", "JSON_QUERY", "JSON_VALUE").forEach { assertFalse(it in check, "$it in $cypher\n$check") }
+                // A SET reads the id of the node it writes to as its UPDATE reads it, a number out of the row: not the value.
+                val tested = check.replace(Regex("""JSON_VALUE\(cy_row, '[^']*' RETURNING NUMBER\) IS NOT NULL AND """), "")
+                listOf("type()", "VARCHAR2", "JSON_QUERY", "JSON_VALUE").forEach { assertFalse(it in tested, "$it in $cypher\n$check") }
             }
         }
     }

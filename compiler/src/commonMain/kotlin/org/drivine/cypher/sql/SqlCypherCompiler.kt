@@ -2888,23 +2888,27 @@ abstract class SqlCypherCompiler(
 
         /**
          * [evaluate] of [written] into [VALUE], [value] the JSON it writes, a property's or with [entries] a map of properties,
-         * and the statement failed where that is or has a list that holds null ([refuseNullItems]).
+         * and the statement failed where that is or has a list that holds null ([refuseNullItems]) and [target], the id of the
+         * node or relationship a `SET` writes to, is not null.
          */
-        private fun evaluateWritten(written: Expression?, entries: Boolean, value: (Map<String, Value>) -> String) {
+        private fun evaluateWritten(written: Expression?, entries: Boolean, target: String? = null, value: (Map<String, Value>) -> String) {
             var tests: List<String>? = emptyList()
             evaluate(VALUE, written) { scope -> value(scope).also { tests = nullItemTests(written, asCarried(scope), VALUE, entries) } }
-            refuseNullItems(tests)
+            refuseNullItems(tests, target)
         }
 
         /**
          * Fails the statement where a property it writes is a list that holds null, as Neo4j fails it (drivine4j#557): for the row
          * it writes, so a write of no rows does not fail. [tests] are each such a list where it is true ([nullItemTests]), in one
-         * step; none where the statement writes none, which then costs nothing; null where it surely writes one.
+         * step; none where the statement writes none, which then costs nothing; null where it surely writes one. Where a `SET`
+         * writes to [target], it fails only where that is not null: Neo4j sets nothing on null, and works out no value for it
+         * (openCypher's Set1 [8]). The id is read in the `SELECT`, as the `UPDATE` reads it, not in Oracle's PL/SQL `IF`.
          */
-        private fun refuseNullItems(tests: List<String>?) {
-            if (tests == null) return step(ProcedureStep.Raise(NULL_ITEM))
-            if (tests.isEmpty()) return
-            step(ProcedureStep.Select(COUNT, "CASE WHEN ${tests.joinToString(" OR ")} THEN 1 ELSE 0 END", ""))
+        private fun refuseNullItems(tests: List<String>?, target: String?) {
+            if (tests == null && target == null) return step(ProcedureStep.Raise(NULL_ITEM))
+            if (tests?.isEmpty() == true) return
+            val refused = listOfNotNull(target?.let { "$it IS NOT NULL" }, tests?.joinToString(" OR ")?.let { if (target == null) it else "($it)" })
+            step(ProcedureStep.Select(COUNT, "CASE WHEN ${refused.joinToString(" AND ")} THEN 1 ELSE 0 END", ""))
             branch("$COUNT = 1") { step(ProcedureStep.Raise(NULL_ITEM)) }
         }
 
@@ -3011,19 +3015,19 @@ abstract class SqlCypherCompiler(
                     if (written is Expression.MapLiteral || written is Expression.ListLiteral && written.items.any { it is Expression.MapLiteral || it is Expression.ListLiteral }) {
                         throw CompilerException("A property is a number, a text, a truth value, a temporal value or a list of them, not ${if (written is Expression.MapLiteral) "a map" else "a list of maps or lists"}, as in Neo4j.")
                     }
-                    evaluateWritten(item.value, entries = false) { scope -> comparable(json(expression(item.value, scope))) }
+                    evaluateWritten(item.value, entries = false, target = row) { scope -> comparable(json(expression(item.value, scope))) }
                     if (table == nodes && item.key == Stamps.PROPERTY) execute("UPDATE $nodes SET stamp = ${text(VALUE)} WHERE nid = $row")
                     else execute("UPDATE $table SET props = ${merged("props", jsonObject(listOf(item.key to VALUE)))} WHERE $id = $row")
                 }
                 is SetItem.Replace -> {
                     val (table, id, row) = target(item.variable, "SET")
-                    evaluateWritten(item.value, entries = true) { scope -> properties(expression(item.value, scope)) }
+                    evaluateWritten(item.value, entries = true, target = row) { scope -> properties(expression(item.value, scope)) }
                     if (table == nodes) execute("UPDATE $nodes SET props = ${stripNulls(unstamped(orEmpty(VALUE)))}, stamp = ${stampOf(VALUE)} WHERE nid = $row")
                     else execute("UPDATE $table SET props = ${stripNulls(orEmpty(VALUE))} WHERE $id = $row")
                 }
                 is SetItem.Add -> {
                     val (table, id, row) = target(item.variable, "SET")
-                    evaluateWritten(item.value, entries = true) { scope -> properties(expression(item.value, scope)) }
+                    evaluateWritten(item.value, entries = true, target = row) { scope -> properties(expression(item.value, scope)) }
                     if (table == nodes) {
                         // The stamp is kept where the map has no entry for it, and removed where its entry is null.
                         val stamp = "CASE WHEN ${propertyOf(VALUE, Stamps.PROPERTY)} IS NULL THEN stamp ELSE ${stampOf(VALUE)} END"
