@@ -46,7 +46,8 @@ internal object Bm25 {
 
     /**
      * The nodes whose text meets [query], each with its BM25 score against the best of them, so the best scores one: a
-     * query of `nid` and `score`, only the nodes that score above 0. [candidates] is a query of `nid`, `text` and `len` for
+     * query of `nid`, the node's row ([ROW]) and `score`, only the nodes that score above 0. [candidates] is a query of `nid`,
+     * the row, `text` and `len` for
      * the nodes of the label that may hold a scoring term, which a store narrows by an index where it has one; [label] is a
      * query of `len` for every node of the label. `text` is lower-cased, as a term is matched in it, and `len` is the length
      * in characters of the text before it was, 0 where there is none: lowering every node's text only to measure it took
@@ -57,8 +58,9 @@ internal object Bm25 {
      * their average length are plain reads of [label], with no term matched. Then the nodes that lack a required term,
      * or hold an excluded one, are left out: they still count among those that hold the terms they do.
      *
-     * drivine4j's `Bm25.ranked` up to its join back to the node table, which is the library's, with its projection: its
-     * ranked candidates byte for byte, their scores against the best as drivine4j's are.
+     * drivine4j's `Bm25.ranked` up to its join back to the node table, its ranked candidates byte for byte but for the row
+     * they now carry, so the library reads its projection from them and joins its node table no second time (#223); their
+     * scores against the best as drivine4j's are.
      */
     fun ranked(candidates: String, label: String, query: TextQuery, sql: Dialect): String {
         val tf = query.scored.indices.map { "tf${it + 1}" }
@@ -66,7 +68,7 @@ internal object Bm25 {
         val required = query.required.indices.map { "r${it + 1}" }
         val excluded = query.excluded.indices.map { "x${it + 1}" }
         val counts = query.scored.zip(tf) + query.required.zip(required) + query.excluded.zip(excluded)
-        val select = (listOf("s.nid", "s.len") + counts.map { (term, name) -> "${sql.count("s.text", term)} AS $name" }).joinToString(", ")
+        val select = (listOf(row("s"), "s.len") + counts.map { (term, name) -> "${sql.count("s.text", term)} AS $name" }).joinToString(", ")
         val counted = Query(select, Derived(candidates, "s"), listOf(query.scored.joinToString(" OR ", "(", ")") { sql.holds("s.text", it) }))
         // Each a subquery of its own, which no row is passed to, so a store works it out once. Joined beside the candidates,
         // Postgres read the label again for each candidate where it guessed there were few: 55 s for a rare word at 100,000.
@@ -85,9 +87,21 @@ internal object Bm25 {
                 score(listOf("w.${tf[i]}" to "w.${df[i]}"), "w.n", "w.len", "NULLIF(w.avglen, 0)", sql.ln)
             }
         }
-        val scored = Query("w.nid, ${sql.real(score)} AS score", Derived(weighed.text(), "w"), required.map { "w.$it > 0" } + excluded.map { "w.$it = 0" })
-        return Query("b.nid, b.score / MAX(b.score) OVER () AS score", Derived(scored.text(), "b"), listOf("b.score > 0")).text()
+        val scored = Query("${row("w")}, ${sql.real(score)} AS score", Derived(weighed.text(), "w"), required.map { "w.$it > 0" } + excluded.map { "w.$it = 0" })
+        return Query("${row("b")}, b.score / MAX(b.score) OVER () AS score", Derived(scored.text(), "b"), listOf("b.score > 0")).text()
     }
+
+    /**
+     * What a search's candidates carry of each node beside its `nid`, as the [candidates] given to [ranked] select them: its row,
+     * which the library reads its projection from, with no second join of its node table. On Oracle 23.26 a join of the node
+     * table to a view of it on `nid` is eliminated with a filter on it, where an index over a `JSON_VALUE` of its properties
+     * is made, so that a bound value crashed the server process and a literal one was dropped
+     * (liberation-data/drivine-cypher-spec#223).
+     */
+    val ROW: List<String> = listOf("labels", "props", "stamp")
+
+    /** `nid` and the node's [ROW] as the rows named [alias] carry them: what each query of a search's candidates selects of a node. */
+    fun row(alias: String): String = (listOf("nid") + ROW).joinToString(", ") { "$alias.$it" }
 
     /**
      * The score of a text whose [length] is against the [average] over the label's [nodes]: for each term, its count in the

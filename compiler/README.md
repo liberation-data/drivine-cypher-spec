@@ -169,10 +169,12 @@ FullTextSearch.plan(store, graph, SearchRequest(labels, properties, query, index
    null) on Oracle, and on Neo4j and Memgraph the index's `name` where it isn't `<label>_<properties joined by _>_fulltext` (a blank one is none).
 3. `plan` gives a `SearchPlan`, or a `Refusal` of a query with no word to score (`A full-text query needs a word to look
    for: '-only' has none.`), or of a graph name the store can't take.
-   - On a SQL store, `sql` is one `SELECT` of the ranked candidates, `nid` and `score`: the nodes whose text meets the query,
-     each scored by BM25 as Lucene scores it (or on Oracle with an Oracle Text index, by Oracle Text), against the best of
-     them, so the best scores 1, and only those above 0. The library joins them back to its node table by `nid` for its
-     projection, and adds its threshold (`score >= threshold`), its predicates, the view's required relationships, `ORDER BY score DESC, nid` and
+   - On a SQL store, `sql` is one `SELECT` of the ranked candidates, each node's row (`nid`, `labels`, `props`, `stamp`) and
+     its `score`: the nodes whose text meets the query, each scored by BM25 as Lucene scores it (or on Oracle with an Oracle
+     Text index, by Oracle Text), against the best of them, so the best scores 1, and only those above 0. The library reads
+     its projection from those columns, with no second join of its node table: on Oracle 23.26 a join of the node table to
+     a view of it on `nid` is eliminated with a filter on it, where an index over a `JSON_VALUE` of its properties is made
+     (#223). It adds its threshold (`score >= threshold`), its predicates, the view's required relationships, `ORDER BY score DESC, nid` and
      its `LIMIT`. On SQLite it calls the functions the library registers, `drivine_lower`, `drivine_regexp_count` and
      `drivine_math`, and its expressions hold what the compiler's own don't (see the spec's README, *Regular
      expressions*): POSIX's `[[:alnum:]]`, read as Java's `\p{Alnum}` with Unicode's classes, `$` and a lookahead `(?=…)`,
@@ -210,9 +212,10 @@ its ranking test over `docs-corpus.json`, and labels and properties of other sha
 index: only the parameters' names were changed, drivine4j's `$_pN` to `$_cy_ft<N+1>`, and on the graph engines an index
 name or label with a quote or a backslash, which drivine4j wrote raw, is written escaped (liberation-data/drivine4j#767).
 `FullTextSearchGoldenTest` checks
-`plan`, and the JSON request, against each on every target. On a SQL store drivine4j's statement goes on to its projection of
-each node's row, which the module leaves to the library, so the test puts that back before it compares: the rest is
-byte for byte.
+`plan`, and the JSON request, against each on every target. On a SQL store drivine4j's candidates carried `nid` alone and its
+statement joined them back to the node table for its projection of each node's row; the module's carry the row (#223). So
+the test takes that row out of the module's and puts drivine4j's projection back before it compares: the rest is byte for
+byte.
 
 The query is read as Java reads it on every target: a word's characters are Java's `\p{IsAlphabetic}`, `\p{Nd}` and `_`, and
 its lower case is Java's `String.toLowerCase(Locale.ROOT)`, a final sigma among it, which Java reads by the word around it as

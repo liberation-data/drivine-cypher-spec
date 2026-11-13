@@ -20,9 +20,9 @@ import kotlin.test.fail
  *
  * [FullTextSearch.plan] gives each statement byte for byte, and its parameters, and so does [CompileJson.compile] for the
  * same request as JSON. On a SQL store drivine4j's statement goes on past the ranked candidates, to its own projection of
- * each node's row: the module gives the candidates alone, `nid` and `score`, and each library joins them back for its
- * projection. So the golden's statement is the module's with that projection put back ([projected]), and the rest of it
- * byte for byte.
+ * each node's row: drivine4j's candidates carried `nid` alone and it joined them back to the node table, where the module's
+ * now carry each node's row, which a library reads with no second join (#223). So the golden's statement is the module's
+ * without that row and with drivine4j's projection put back ([projected]), and the rest of it byte for byte.
  */
 @OptIn(org.drivine.DrivineInternalApi::class)
 class FullTextSearchGoldenTest {
@@ -120,14 +120,26 @@ class FullTextSearchGoldenTest {
      */
     private fun projected(sql: String, store: SearchStore, index: JsonNode?): String {
         val oracleText = store == SearchStore.ORACLE && index?.get("oracleText")?.textValue() != null
+        val candidates = withoutRow(sql, if (oracleText) listOf("c", "h") else listOf("c", "s", "w", "b"), oracle = store == SearchStore.ORACLE && !oracleText)
         return if (oracleText) {
-            sql.once("SELECT h.nid, h.score / MAX(h.score) OVER () AS score\n", "SELECT h.nid, h.labels, h.props, h.stamp, h.doc, h.score / MAX(h.score) OVER () AS score\n")
+            candidates.once("SELECT h.nid, h.score / MAX(h.score) OVER () AS score\n", "SELECT h.nid, h.labels, h.props, h.stamp, h.doc, h.score / MAX(h.score) OVER () AS score\n")
                 .once("\n    SELECT c.nid, k.score\n", "\n    SELECT c.nid, c.labels, c.props, c.stamp, $ORACLE_DOC AS doc, k.score\n")
         } else {
             val columns = if (store == SearchStore.ORACLE) "c.nid, c.labels, c.props, c.stamp, $ORACLE_DOC AS doc" else "c.nid, c.labels, c.props, c.stamp"
-            sql.once("SELECT b.nid, b.score / MAX(b.score) OVER () AS score\n", "SELECT $columns, b.score / MAX(b.score) OVER () AS score\n")
+            candidates.once("SELECT b.nid, b.score / MAX(b.score) OVER () AS score\n", "SELECT $columns, b.score / MAX(b.score) OVER () AS score\n")
                 .once("\n) b\nWHERE b.score > 0", "\n) b\nJOIN g_node c ON c.nid = b.nid\nWHERE b.score > 0")
         }
+    }
+
+    /**
+     * [sql] without the node's row the module's candidates carry beside `nid` (`Bm25.ROW`, #223) in each of their queries,
+     * [aliases], and on Oracle through BM25 in the `GRAPH_TABLE` the candidates read: drivine4j's candidates carried `nid`
+     * alone, and joined the node table back for the row. Each is found once, so a query that loses the row fails here.
+     */
+    private fun withoutRow(sql: String, aliases: List<String>, oracle: Boolean): String {
+        val rows = aliases.associate { "$it.nid, $it.labels, $it.props, $it.stamp, " to "$it.nid, " } +
+            (if (oracle) mapOf("COLUMNS (c.nid, c.labels, c.props, c.stamp)" to "COLUMNS (c.nid, c.props)") else emptyMap())
+        return rows.entries.fold(sql) { text, (row, nid) -> text.once(row, nid) }
     }
 
     /** [this] with [part] in place of [old], which it holds once. */
