@@ -542,6 +542,17 @@ abstract class SqlCypherCompiler(
     protected open fun matchedText(json: String, pattern: String): String = texts(json) { (x) -> matches(x, text(pattern)) }
 
     /**
+     * Refuses a pattern of `=~` that the statement gives, written or bound, where the store would read it otherwise than
+     * Java: a backreference in a character class, `[\1]`, which Java refuses ("Illegal/unsupported escape sequence"), where
+     * a store reads it as a character (#236). A store that reads more refuses it here too: see Oracle's.
+     */
+    protected open fun checkPattern(pattern: String) {
+        if (Patterns.backreferences(pattern).any { it.inClass }) throw CompilerException(
+            "The regular expression '$pattern' writes a backreference in a character class, which Java refuses: Illegal/unsupported escape sequence."
+        )
+    }
+
+    /**
      * A function that makes a text, or [empty], of the texts of the JSON values [jsons] and the counts [counts]: [body] over
      * the texts, as [texts] reads them. A store whose empty text reads as null, so [body] gives null where it makes an empty
      * text, gives [empty] there instead, where each text is one and each count is not null: where [whereFirstEmpty], only where
@@ -5575,7 +5586,10 @@ abstract class SqlCypherCompiler(
                 }
                 Operator.STARTS_WITH -> Value.Bool(searchedTexts(a, b) { texts -> shared(*texts.toTypedArray()) { (x, y) -> startsWith(x, y) } })
                 // A pattern is short: only the text is read as a long one where it is.
-                Operator.MATCHES -> Value.Bool(matchedText(a, b))
+                Operator.MATCHES -> {
+                    (known(binary.right) as? String)?.let(::checkPattern)
+                    Value.Bool(matchedText(a, b))
+                }
                 Operator.ENDS_WITH -> Value.Bool(searchedTexts(a, b) { texts -> shared(*texts.toTypedArray()) { (x, y) -> endsWith(x, y) } })
                 Operator.CONTAINS -> Value.Bool(searchedTexts(a, b) { (x, y) -> containsText(x, y) })
                 else -> error("logical operators are handled above")

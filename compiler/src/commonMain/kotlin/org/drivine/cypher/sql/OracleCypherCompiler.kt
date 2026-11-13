@@ -1939,8 +1939,18 @@ class OracleCypherCompiler(
      * just after another, `(a)\1\1`, is not found until the one before it is. Oracle reads no backreference past `\9`, so a
      * pattern's `\9` names a group it doesn't have.
      */
-    private fun backreferencesShifted(pattern: String) = (8 downTo 1).fold(pattern) { x, n ->
-        (1..2).fold(x) { y, _ -> """REGEXP_REPLACE($y, '(^|[^\\])((\\\\)*)\\$n', '\1\2\\${n + 1}')""" }
+    private fun backreferencesShifted(pattern: String) = shared(pattern) { (p) ->
+        val shifted = (8 downTo 1).fold(p) { x, n ->
+            (1..2).fold(x) { y, _ -> """REGEXP_REPLACE($y, '(^|[^\\])((\\\\)*)\\$n', '\1\2\\${n + 1}')""" }
+        }
+        // A pattern worked out as the statement runs, which [checkPattern] can't read, fails here.
+        """CASE WHEN REGEXP_LIKE($p, '(^|[^\\])((\\\\)*)\\9') THEN TO_CHAR(${textFailure(NINTH_BACKREFERENCE, p)}) ELSE $shifted END"""
+    }
+
+    /** Refuses, besides what every store does, a pattern that writes `\9`, which [backreferencesShifted] can't number on. */
+    override fun checkPattern(pattern: String) {
+        super.checkPattern(pattern)
+        if (Patterns.backreferences(pattern).any { it.number == 9 }) throw CompilerException("$NINTH_BACKREFERENCE '$pattern'")
     }
 
     /**
@@ -2215,6 +2225,8 @@ class OracleCypherCompiler(
     private fun kind(json: String) = "JSON_VALUE($json, '\$.type()')"
 
     companion object {
+        /** Why Oracle refuses a pattern of `=~` that writes `\\9`: see [backreferencesShifted]. */
+        const val NINTH_BACKREFERENCE = "Oracle names groups \\1 to \\9 only, and =~ holds the pattern in a group of its own, so the pattern's ninth group has no name there: a pattern that writes \\9 is refused:"
         /** A hint a query starts with: `SELECT /*+ … */ `. */
         private val LEADING_HINT = Regex("""^SELECT (/\*\+.*?\*/) """)
 

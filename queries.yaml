@@ -1040,6 +1040,30 @@ cases:
         only: [neo4j, sql]
         cypher: "RETURN ['abab' =~ '(ab)\\\\1', 'abac' =~ '(ab)\\\\1']"
         rows: [[true, false]]
+      - note: "A backslash before a backreference: three are an escaped backslash and a backreference, four two escaped backslashes and a digit."
+        only: [neo4j, sql]
+        cypher: "RETURN [$a =~ $three, $b =~ $three, $c =~ $four]"
+        parameters: {three: "(a)\\\\\\1", a: "a\\a", b: "a\\b", four: "(a)\\\\\\\\1", c: "a\\\\1"}
+        rows: [[true, false, true]]
+      - note: "A backreference in a character class, which Java refuses."
+        only: [neo4j, sql]
+        cypher: "RETURN 'a1' =~ $p"
+        parameters: {p: "(a)[\\1]"}
+        error: true
+      - note: "A backreference to a group the pattern doesn't have matches nothing, as in Java; Oracle names no ninth group of the pattern's, and refuses one."
+        only: [neo4j, postgres, sqlite]
+        cypher: "RETURN ['a9' =~ $p, 'abcdefghii' =~ $nine]"
+        parameters: {p: "(a)\\9", nine: "(a)(b)(c)(d)(e)(f)(g)(h)(i)\\9"}
+        rows: [[false, true]]
+      - only: [oracle]
+        cypher: "RETURN 'a9' =~ $p"
+        parameters: {p: "(a)\\9"}
+        error: true
+      - note: "Worked out as the statement runs."
+        only: [oracle]
+        cypher: "WITH '(a)' + $nine AS p RETURN 'aa' =~ p"
+        parameters: {nine: "\\9"}
+        error: true
       - note: "Over the empty text, which Oracle reads apart."
         only: [neo4j, sql]
         cypher: "RETURN [$e =~ $p, $e =~ $q]"
