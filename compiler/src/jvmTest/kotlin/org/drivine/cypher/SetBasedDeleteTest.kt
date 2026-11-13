@@ -78,7 +78,7 @@ class SetBasedDeleteTest {
 
     @Test
     fun `on Oracle a DELETE that reads its match reads the key with + 0, which Oracle does not unnest into a wrong answer`() {
-        assertTrue(Regex("DELETE FROM g_node WHERE nid IN \\(SELECT n\\d+\\.nid \\+ 0 AS id").containsMatchIn(OracleCypherCompiler("g").compile("MATCH (g:Gone) DETACH DELETE g").sql))
+        assertTrue(Regex("DELETE FROM g_node WHERE nid IN \\(SELECT (/\\*\\+ [^*]*\\*/ )?n\\d+\\.nid \\+ 0 AS id").containsMatchIn(OracleCypherCompiler("g").compile("MATCH (g:Gone) DETACH DELETE g").sql))
         assertTrue(Regex("DELETE FROM g_edge WHERE eid IN \\(SELECT (/\\*\\+ [^*]*\\*/ )?e\\d+\\.eid \\+ 0 AS id").containsMatchIn(OracleCypherCompiler("g").compile("MATCH ()-[r:R]->() DELETE r").sql))
         for (compiler in listOf(PostgresCypherCompiler("g"), SqliteCypherCompiler("g"))) {
             val sql = compiler.compile("MATCH (g:Gone) DETACH DELETE g").sql

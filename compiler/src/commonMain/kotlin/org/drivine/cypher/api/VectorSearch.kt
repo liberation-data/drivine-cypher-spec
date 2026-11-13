@@ -360,8 +360,8 @@ object VectorSearch {
         val members = Query(
             "c.nid, $id AS id, ${OracleSql.embedding("c", key)} AS embedding", Table(ddl.nodes, "c"),
             listOfNotNull(
-                OracleSql.hasLabels("c", request.labels), OracleSql.hasProperty("c", key), "$id IN (${OracleSql.textValues(scope.bound(among.ids))})",
-                embeddings?.let { "c.nid IN (SELECT e.nid FROM $it e)" },
+                OracleSql.hasLabels("c", request.labels), OracleSql.hasProperty("c", key), "$id IN (${OracleSql.uncoalesced(OracleSql.textValues(scope.bound(among.ids)))})",
+                embeddings?.let { "c.nid IN (${OracleSql.uncoalesced("SELECT e.nid FROM $it e")})" },
                 oracleLength(request, OracleSql.embedding("c", key)),
             ),
         )

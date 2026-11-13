@@ -1355,8 +1355,8 @@ class OracleCypherCompiler(
      * session (ORA-03113, drivine4j#531, #255).
      */
     override fun nullItem(json: String, entries: Boolean) =
-        "EXISTS (SELECT 1 FROM (SELECT JSON_SERIALIZE($json RETURNING CLOB) AS t FROM DUAL) ni " +
-            "WHERE DBMS_LOB.SUBSTR(ni.t, 1, 1) = '${if (entries) "{" else "["}' AND ${serializedNulls("ni.t", "[[,]null[],]")})"
+        "EXISTS (${predicateQuery("SELECT 1 FROM (SELECT JSON_SERIALIZE($json RETURNING CLOB) AS t FROM DUAL) ni " +
+            "WHERE DBMS_LOB.SUBSTR(ni.t, 1, 1) = '${if (entries) "{" else "["}' AND ${serializedNulls("ni.t", "[[,]null[],]")}")})"
 
     /** Whether JSON's text of [json], its texts and keys taken out, matches [pattern]: see [holdsNull]. */
     private fun serializedHolds(json: String, pattern: String): String {
@@ -1641,7 +1641,7 @@ class OracleCypherCompiler(
         if (idsAsJson) "JSON_EXISTS($list, '\$[*]?(@ == \$id)' PASSING $id AS \"id\")" else "INSTR($list, ',' || $id || ',') > 0"
 
     override fun idsOverlap(a: String, b: String) =
-        "EXISTS (SELECT 1 FROM ${idRows(a, "ov")} WHERE ${if (idsAsJson) idIn("ov.id", b) else "INSTR($b, ',' || ov.id || ',') > 0"})"
+        "EXISTS (${predicateQuery("SELECT 1 FROM ${idRows(a, "ov")} WHERE ${if (idsAsJson) idIn("ov.id", b) else "INSTR($b, ',' || ov.id || ',') > 0"}")})"
 
     override fun idCount(list: String) =
         if (idsAsJson) "JSON_SCALAR(JSON_VALUE($list, '\$.size()' RETURNING NUMBER))" else "JSON_SCALAR(REGEXP_COUNT($list, ',') - 1)"
@@ -1951,6 +1951,16 @@ class OracleCypherCompiler(
      * of the body reads still picks the rows they keep.
      */
     override fun existsQuery(query: String) = "SELECT 1 FROM (\n${indent(query)}\n)"
+
+    /**
+     * Each subquery a condition reads is hinted against Oracle's subquery coalescing, `SELECT /*+ NO_COALESCE_SQ */`, in its
+     * own `SELECT` ([OracleSql.uncoalesced]). Oracle 23.26 merged an `OR` of two correlated subqueries wrongly and kept only
+     * the rows the first one matched: `MATCH (g:GuideUser) WHERE EXISTS { (g)-[:IS_WEB_USER]->(:Anonymous) } OR EXISTS {
+     * (g)-[:IS_WEB_USER]->(:Registered) } RETURN g.uuid` gave one guide where Neo4j gives two (drivine-cypher-spec#252). The
+     * hint helps only in the subquery itself, not given to the statement. `OraclePredicateSubqueryTest` holds every compiled
+     * statement of the spec to it.
+     */
+    override fun predicateQuery(query: String) = OracleSql.uncoalesced(query)
 
     /**
      * Flags the pattern opens with, `(?i)`, are Oracle's match parameter, Java's `s` its `n`. The whole of the text
