@@ -29,7 +29,7 @@ import kotlin.io.encoding.ExperimentalEncodingApi
  * ```
  *
  * `store` is `postgres`, `oracle` or `sqlite`. `graph` is [GraphOptions]: `name`, and on Oracle `nullsEqualStored`,
- * `eraStored` (true where left out), `indexedProperties` (`[["Person", "name"], …]`), `oracleRowsAsText`,
+ * `eraStored` (true where left out), `temporalArithmeticStored` (true where left out), `indexedProperties` (`[["Person", "name"], …]`), `oracleRowsAsText`,
  * `oracleReencodeJson` and `oracleReadsAsText` (false where left out). `parameters` may be left out. With `"typed": true` (false where left out),
  * the rows' nodes and relationships are tagged with their labels and type: see [org.drivine.cypher.sql.ColumnKind].
  *
@@ -118,7 +118,7 @@ object CompileJson {
                 append(",\"setup\":"); TypedJson.write(result.setup, this)
                 append(",\"warnings\":"); TypedJson.write(result.warnings, this)
                 append(",\"nonFinite\":").append(result.nonFinite)
-                result.storedFunctions?.let { append(",\"storedFunctions\":{\"nullsEqual\":").append(it.nullsEqual).append(",\"era\":").append(it.era).append('}') }
+                result.storedFunctions?.let { append(",\"storedFunctions\":{\"nullsEqual\":").append(it.nullsEqual).append(",\"era\":").append(it.era).append(",\"temporalArithmetic\":").append(it.temporalArithmetic).append('}') }
                 // Only where asked, so an answer to a request without it is byte for byte as before.
                 if (call.typed) {
                     append(",\"columns\":[")
@@ -179,6 +179,7 @@ object CompileJson {
             oracleReencodeJson = flag(graph, "oracleReencodeJson", default = false),
             oracleReadsAsText = flag(graph, "oracleReadsAsText", default = false),
             vectorIndexes = vectorIndexes,
+            temporalArithmeticStored = flag(graph, "temporalArithmeticStored"),
         )
     }
 

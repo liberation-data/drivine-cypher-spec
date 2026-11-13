@@ -609,6 +609,9 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
 
     override val temporalSql = SqliteTemporalSql(sharedList)
 
+    /** The host function of temporal arithmetic each library registers on its connections: see [storedArithmetic]. */
+    override fun storedArithmetic(operator: String, x: String, y: String) = "${TemporalArithmeticFunction.HOST}('$operator', $x, $y)"
+
     /**
      * The whole of the text matches, as `=~` asks: `REGEXP` finds a match anywhere. It ends at `\z`, the text's end,
      * where Java's `$` would match before a line break that ends the text too.

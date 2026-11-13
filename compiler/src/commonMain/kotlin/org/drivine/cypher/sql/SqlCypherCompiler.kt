@@ -131,6 +131,15 @@ abstract class SqlCypherCompiler(
      */
     protected open fun calledFunctions(sql: String): List<String> = emptyList()
 
+    /**
+     * The call of the store's function that works out [operator], `+`, `-`, `*` or `/`, of the JSON [x] and [y] where either may
+     * be a tag of a temporal value read from the store, to the tag it gives (drivine4j#418); null where the store has none, as an
+     * Oracle store made by an earlier version, or by a user who may not make a function: such arithmetic then fails by name as
+     * the statement runs. Its body is the compiler's own temporal arithmetic, written for each pair of kinds
+     * ([TemporalArithmeticFunction]).
+     */
+    protected open fun storedArithmetic(operator: String, x: String, y: String): String? = null
+
     /** [compiled] with the functions it calls declared before it. */
     private fun withFunctions(compiled: CompiledCypher): CompiledCypher {
         val all = functions + calledFunctions(compiled.sql).filter { it !in functions }
@@ -5227,8 +5236,11 @@ abstract class SqlCypherCompiler(
             } else {
                 tag.filterIndexed { i, _ -> open[i] }.joinToString(" OR ")
             }
-            val kind = if (open[0] && open[1]) "COALESCE(${tagKind(x)}, ${tagKind(y)})" else if (open[0]) tagKind(x) else tagKind(y)
-            return "CASE WHEN $test THEN ${scalar(textFailure(TEMPORAL_ARITHMETIC, kind))} ELSE ${arithmetic()} END"
+            val worked = storedArithmetic(OPERATOR_WORDS.getValue(binary.operator), x, y) ?: run {
+                val kind = if (open[0] && open[1]) "COALESCE(${tagKind(x)}, ${tagKind(y)})" else if (open[0]) tagKind(x) else tagKind(y)
+                scalar(textFailure(TEMPORAL_ARITHMETIC, kind))
+            }
+            return "CASE WHEN $test THEN $worked ELSE ${arithmetic()} END"
         }
 
         /**
@@ -7477,6 +7489,9 @@ abstract class SqlCypherCompiler(
 
         /** The operators of arithmetic, whose value is a number where both operands are: see [Value.Json.known]. */
         val ARITHMETIC = setOf(Operator.ADD, Operator.SUBTRACT, Operator.MULTIPLY, Operator.DIVIDE, Operator.MODULO, Operator.POWER)
+
+        /** The operators a store's function of temporal arithmetic is called with, by the text it is told each by: see [storedArithmetic]. */
+        val OPERATOR_WORDS = mapOf(Operator.ADD to "+", Operator.SUBTRACT to "-", Operator.MULTIPLY to "*", Operator.DIVIDE to "/")
 
         /** The arithmetic that takes numbers alone, and temporal values where the store does: `+` puts texts and lists together too. */
         val NUMERIC_ONLY = ARITHMETIC - Operator.ADD

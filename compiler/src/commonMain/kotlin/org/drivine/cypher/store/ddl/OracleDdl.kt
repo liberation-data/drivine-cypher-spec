@@ -1,5 +1,6 @@
 package org.drivine.cypher.store.ddl
 
+import org.drivine.cypher.sql.TemporalArithmeticFunction
 import org.drivine.DrivineInternalApi
 import org.drivine.cypher.sql.OracleCypherCompiler
 import org.drivine.cypher.store.OracleSql
@@ -136,12 +137,19 @@ class OracleDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
      */
     val temporalKey: String = OracleCypherCompiler.temporalKeyName(name)
 
+    /**
+     * The function a compiled Cypher statement works out `+`, `-`, `*` and `/` of a temporal value read from the store by
+     * ([TemporalArithmeticFunction]), made after the era functions and [temporalKey], which it calls (drivine4j#418).
+     */
+    val temporalArithmetic: String = TemporalArithmeticFunction.name(name)
+
     /** Each function the store keeps beside the graph's tables, by name, and what makes it: safe to run again. */
     private val made: Map<String, String> = linkedMapOf(
         nullsEqual to OracleCypherCompiler.nullsEqualFunction(nullsEqual),
         era to OracleCypherCompiler.eraFunction(era),
         eraDate to OracleCypherCompiler.eraDateFunction(eraDate),
         temporalKey to OracleCypherCompiler.temporalKeyFunction(temporalKey),
+        temporalArithmetic to TemporalArithmeticFunction.oracle(name),
     ).mapValues { (_, function) -> "CREATE OR REPLACE $function" }
 
     /** What makes [nullsEqual], [era] and [eraDate]: safe to run again. */
@@ -204,7 +212,7 @@ ${made.entries.joinToString("\n") { (function, making) ->
             listOf(
                 "SELECT COUNT(*) INTO v_made FROM user_objects WHERE object_type = 'FUNCTION' AND object_name = '${function.uppercase()}' AND status = 'VALID';",
                 "IF v_made = 0 THEN",
-                "    BEGIN EXECUTE IMMEDIATE ${OracleSql.literal(making)}; EXCEPTION WHEN e_denied THEN NULL; END;",
+                "    BEGIN EXECUTE IMMEDIATE ${OracleSql.clob(making)}; EXCEPTION WHEN e_denied THEN NULL; END;",
                 "END IF;",
             ).joinToString("\n") { "            $it" }
         }}
