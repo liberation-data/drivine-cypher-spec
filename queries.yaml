@@ -1050,14 +1050,19 @@ cases:
         cypher: "RETURN 'a1' =~ $p"
         parameters: {p: "(a)[\\1]"}
         error: true
-      - note: "A backreference to a group the pattern doesn't have matches nothing, as in Java; Oracle names no ninth group of the pattern's, and refuses one."
+      - note: "A backreference to a group the pattern doesn't have matches nothing, as in Java, where Postgres refused the pattern."
+        only: [neo4j, sql]
+        cypher: "RETURN ['a9' =~ $p, 'aa' =~ $p, 'ab' =~ $two, $n =~ $p]"
+        parameters: {p: "(a)\\9", two: "(a)\\2", n: null}
+        rows: [[false, false, false, null]]
+      - note: "A ninth group's: Oracle names no ninth group of the pattern's, and refuses one."
         only: [neo4j, postgres, sqlite]
-        cypher: "RETURN ['a9' =~ $p, 'abcdefghii' =~ $nine]"
-        parameters: {p: "(a)\\9", nine: "(a)(b)(c)(d)(e)(f)(g)(h)(i)\\9"}
-        rows: [[false, true]]
+        cypher: "RETURN 'abcdefghii' =~ $nine"
+        parameters: {nine: "(a)(b)(c)(d)(e)(f)(g)(h)(i)\\9"}
+        rows: [true]
       - only: [oracle]
-        cypher: "RETURN 'a9' =~ $p"
-        parameters: {p: "(a)\\9"}
+        cypher: "RETURN 'abcdefghii' =~ $nine"
+        parameters: {nine: "(a)(b)(c)(d)(e)(f)(g)(h)(i)\\9"}
         error: true
       - note: "Worked out as the statement runs."
         only: [oracle]

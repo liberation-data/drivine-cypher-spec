@@ -1950,7 +1950,10 @@ class OracleCypherCompiler(
     /** Refuses, besides what every store does, a pattern that writes `\9`, which [backreferencesShifted] can't number on. */
     override fun checkPattern(pattern: String) {
         super.checkPattern(pattern)
-        if (Patterns.backreferences(pattern).any { it.number == 9 }) throw CompilerException("$NINTH_BACKREFERENCE '$pattern'")
+        // One to a ninth group the pattern doesn't have matches nothing, as `=~` asks it ([Patterns.dangling]).
+        if (Patterns.groups(pattern) >= 9 && Patterns.backreferences(pattern).any { it.number == 9 && !it.inClass }) {
+            throw CompilerException("$NINTH_BACKREFERENCE '$pattern'")
+        }
     }
 
     /**

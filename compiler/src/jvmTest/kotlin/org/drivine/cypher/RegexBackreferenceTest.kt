@@ -60,11 +60,23 @@ class RegexBackreferenceTest {
             val refused = assertThrows<CompilerException> { compiler.compile("RETURN 'a1' =~ \$p", mapOf("p" to "(a)[\\1]")) }
             assertTrue("character class" in refused.message.orEmpty(), refused.message)
         }
-        assertThrows<CompilerException> { OracleCypherCompiler("g").compile("RETURN 'a9' =~ '(a)\\\\9'", emptyMap()) }
-        assertThrows<CompilerException> { OracleCypherCompiler("g").compile("RETURN 'a9' =~ \$p", mapOf("p" to "(a)\\9")) }
-        PostgresCypherCompiler("g").compile("RETURN 'a9' =~ \$p", mapOf("p" to "(a)\\9"))
+        val nine = "(a)(b)(c)(d)(e)(f)(g)(h)(i)\\9"
+        assertThrows<CompilerException> { OracleCypherCompiler("g").compile("RETURN 'a9' =~ '${nine.replace("\\", "\\\\")}'", emptyMap()) }
+        assertThrows<CompilerException> { OracleCypherCompiler("g").compile("RETURN 'a9' =~ \$p", mapOf("p" to nine)) }
+        PostgresCypherCompiler("g").compile("RETURN 'a9' =~ \$p", mapOf("p" to nine))
         // One worked out as the statement runs is failed then.
         val oracle = OracleCypherCompiler("g").compile("WITH '(a)' + \$n AS p RETURN 'aa' =~ p", mapOf("n" to "\\9")).sql
         assertTrue("Oracle names groups" in oracle, oracle)
+    }
+
+    @Test
+    fun `a backreference to a group the pattern doesn't have is asked as a pattern that matches nothing, on every store`() {
+        assertEquals(1, Patterns.groups("(a)(?:b)(?=c)"))
+        assertEquals(2, Patterns.groups("(a)(?<n>b)[(]\\(\\Q(\\E"))
+        assertTrue(Patterns.dangling("(a)\\2") && !Patterns.dangling("(a)\\1") && !Patterns.dangling("(a)[\\]\\2]"))
+        listOf(PostgresCypherCompiler("g"), OracleCypherCompiler("g"), SqliteCypherCompiler("g")).forEach { compiler ->
+            val sql = compiler.compile("RETURN 'a9' =~ \$p", mapOf("p" to "(a)\\9")).sql
+            assertTrue("\\Za" in sql, "${compiler::class.simpleName}:\n$sql")
+        }
     }
 }
