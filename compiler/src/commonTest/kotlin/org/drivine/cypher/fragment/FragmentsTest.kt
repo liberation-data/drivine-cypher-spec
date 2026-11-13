@@ -209,7 +209,7 @@ class FragmentsTest {
         // randomUUID() a statement makes first for each row (#412), which the library's SQL has no column for; an aggregate,
         // which it has no group for; and the forms no library's object manager writes.
         val refused = mapOf(
-            "toUpper(randomUUID()) + '-x'" to "randomUUID()", "randomUUID()" to "randomUUID()", "count(n) > 1" to "count()",
+            "toUpper(randomUUID()) + '-x'" to "randomUUID()", "randomUUID()" to "randomUUID()", "count(n) > 1" to "count()", "count(*) > 1" to "count(*)",
             "[x IN [1] | x] = [1]" to "a list comprehension", "reduce(s = 0, x IN [1] | s + x) = 1" to "reduce()",
             "size([(n)-->(m) | m]) > 0" to "a pattern comprehension", "(n)-->()" to "a pattern as a predicate, which EXISTS { … } writes",
             "n.list[0] = 1" to "an item read by its place or key, x[i]", "n.list[0..1] = [1]" to "a slice, x[i..j]",
@@ -217,7 +217,7 @@ class FragmentsTest {
             "single(x IN n.list WHERE x = 1)" to "single()", "n.k % 2 = 0" to "modulo", "n.k ^ 2 = 4" to "power",
             "EXISTS { p = (n)-->() }" to "a path variable", "date() > n.k" to "date()", "count(DISTINCT n.k) > 1" to "count()",
             "type(n) = 'KNOWS'" to "type()", "toLower(DISTINCT n.k) = 'a'" to "DISTINCT in toLower()",
-            "EXISTS { (n) ((a)-[:KNOWS]->(b)){1,2} (m) }" to "a quantified path pattern", "EXISTS { MATCH (n)-->(m) }" to "a subquery, EXISTS { … }",
+            "EXISTS { (n) ((a)-[:KNOWS]->(b)){1,2} (m) }" to "a quantified path pattern", "EXISTS { OPTIONAL MATCH (n)-->(m) }" to "a subquery, EXISTS { … }",
         )
         for (compiler in listOf(PostgresCypherCompiler("g"), OracleCypherCompiler("g"), SqliteCypherCompiler("g"))) {
             for ((cypher, form) in refused) {
@@ -232,7 +232,8 @@ class FragmentsTest {
                 "EXISTS { (n)-[:KNOWS*1..3]->(m:Person {name: \$p}) WHERE m.age > 1 }", "all(x IN n.list WHERE x > 1)",
                 "none(x IN n.list WHERE x > 1)", "coalesce(n.a, 0) * 2 - floor(exp(n.b)) / toFloat(abs(n.c)) > -1",
                 "CASE WHEN n.a IS NULL THEN 0 ELSE n.a END > toInteger(toString(size(n.list)))", "n.born.epochMillis / 1000.0 > 1",
-                "toUpper(n.k) = 'A'", "n.a + 1 <= \$p AND n.b >= -n.c", "n.k IN [\$p, 'b']", "CASE n.k WHEN \$p THEN 1 ELSE 0 END = 1",
+                "toUpper(n.k) = 'A'",
+                "EXISTS { MATCH (n)-[:KNOWS]->(m:Person) WHERE m.age > 1 }", "n.a + 1 <= \$p AND n.b >= -n.c", "n.k IN [\$p, 'b']", "CASE n.k WHEN \$p THEN 1 ELSE 0 END = 1",
                 "EXISTS { (n)<-[:KNOWS {since: \$p}]-(m) } OR EXISTS { (n)-[:KNOWS*2..2]-(m) }",
             ))compiler.condition(cypher, people, mapOf("p" to "a", "l" to listOf("a")))
         }

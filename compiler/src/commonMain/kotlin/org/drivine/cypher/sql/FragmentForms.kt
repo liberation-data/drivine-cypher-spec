@@ -1,6 +1,7 @@
 package org.drivine.cypher.sql
 
 import org.drivine.cypher.CompilerException
+import org.drivine.cypher.ast.Clause
 import org.drivine.cypher.ast.Expression
 import org.drivine.cypher.ast.Expression.Binary.Operator
 import org.drivine.cypher.ast.Pattern
@@ -20,7 +21,7 @@ import org.drivine.cypher.ast.Pattern
  * - the functions in [FUNCTIONS];
  * - `any`, `all` and `none` over a list;
  * - `EXISTS { pattern [WHERE …] }`, of a pattern of nodes and relationships, a variable length among them, with properties
- *   of these forms.
+ *   of these forms, and its `EXISTS { MATCH pattern [WHERE …] }`, as TypeScript and Python write it.
  *
  * Anything else is refused by name: what the libraries write around a fragment (a seek's chain of terms, a group, an
  * aggregate, a view's projection) is their own SQL, and a form no library writes is one no case holds to an answer.
@@ -75,7 +76,13 @@ internal object FragmentForms {
         is Expression.Reduce -> refuse("reduce()", cypher)
         is Expression.PatternComprehension -> refuse("a pattern comprehension", cypher)
         is Expression.PatternPredicate -> refuse("a pattern as a predicate, which EXISTS { … } writes", cypher)
-        is Expression.Subquery -> refuse("a subquery, ${e.kind.name} { … }", cypher)
+        // `EXISTS { MATCH pattern [WHERE …] }`, as TypeScript and Python write it, is `EXISTS { pattern [WHERE …] }`.
+        is Expression.Subquery -> {
+            val match = (e.query.clauses.singleOrNull() as? Clause.Match)?.takeIf { e.kind == Expression.Subquery.Kind.EXISTS && !it.optional && e.query.unions.isEmpty() }
+                ?: refuse("a subquery, ${e.kind.name} { … }", cypher)
+            match.patterns.forEach { pattern(it, cypher) }
+            match.where?.let { form(it, cypher) }
+        }
         }
     }
 
