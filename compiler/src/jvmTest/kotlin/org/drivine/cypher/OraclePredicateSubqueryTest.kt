@@ -95,6 +95,15 @@ class OraclePredicateSubqueryTest {
     }
 
     @Test
+    fun `a long quoted text is read past without running out of stack, as on CI's smaller one`() {
+        // An alternation repeated over each character of a quoted text recursed once a character, and overflowed the stack
+        // on a long one (spec#257's CI run).
+        val text = "x".repeat(200_000) + "''" + "y".repeat(200_000)
+        val sql = "SELECT 1 FROM DUAL WHERE '$text' IS NOT NULL AND EXISTS (SELECT 1 FROM DUAL)"
+        assertEquals(listOf("EXISTS (SELECT 1 FROM DUAL)"), PredicateSubqueries.unhinted(sql))
+    }
+
+    @Test
     fun `the check finds a subquery a condition reads without the hint, and not one read otherwise`() {
         val hinted = """
             SELECT n1.nid FROM g_node n1
@@ -157,6 +166,13 @@ internal object PredicateSubqueries {
             .map { text.substring(it.range.first, minOf(text.length, it.range.last + 32)).replace(Regex("\\s+"), " ").trim() }
     }
 
-    /** [sql] with each quoted text, `'…'`, emptied, so the words a text holds aren't read as SQL. */
-    private fun unquoted(sql: String) = sql.replace(Regex("'(?:[^']|'')*'"), "''")
+    /**
+     * [sql] with each quoted text, `'…'`, emptied, so the words a text holds aren't read as SQL. Read as runs of other
+     * characters between doubled quotes, each run taken whole, so a long text costs no stack: Java's regex recurses once a
+     * repetition of an alternation, which overflowed CI's stack on a long text.
+     */
+    private fun unquoted(sql: String) = sql.replace(QUOTED, "''")
+
+    /** A quoted text, its doubled quotes within it. */
+    private val QUOTED = Regex("'[^']*+(?:''[^']*+)*+'")
 }
