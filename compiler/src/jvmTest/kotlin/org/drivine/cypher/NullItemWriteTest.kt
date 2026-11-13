@@ -1,0 +1,105 @@
+package org.drivine.cypher
+
+import org.drivine.cypher.sql.OracleCypherCompiler
+import org.drivine.cypher.sql.PostgresCypherCompiler
+import org.drivine.cypher.sql.SqlCypherCompiler
+import org.drivine.cypher.sql.SqliteCypherCompiler
+import org.junit.jupiter.api.Test
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
+
+/**
+ * A write of a property that is a list that holds null fails, as Neo4j fails it (drivine4j#557): where each store compiles
+ * the failure, and its test, without a store. What each store gives is the spec's, in `writes.yaml`, "A list that holds null
+ * as a property".
+ */
+class NullItemWriteTest {
+
+    private fun compilers(): List<SqlCypherCompiler> = listOf(PostgresCypherCompiler("g"), OracleCypherCompiler("g"), SqliteCypherCompiler("g"))
+
+    /** What each store tests a value for as it runs, as its SQL writes it: see each one's `nullItem`. */
+    private val tests = mapOf(
+        PostgresCypherCompiler::class to "@> '[null]'",
+        OracleCypherCompiler::class to "'[[,]null[],]'",
+        SqliteCypherCompiler::class to "nj.type = ''null''",
+    )
+
+    private fun sql(compiler: SqlCypherCompiler, cypher: String, parameters: Map<String, Any?> = emptyMap()) = compiler.compile(cypher, parameters).sql
+
+    /** Whether [sql] fails the statement with the refusal: SQLite's steps are a text literal, which doubles nothing in it. */
+    private fun refuses(sql: String) = sql.contains(refusal)
+
+    private val refusal = "A property is a number, a text, a truth value, a temporal value or a list of them, not a list that holds null, as in Neo4j."
+
+    private fun tests(compiler: SqlCypherCompiler, sql: String) = sql.contains(tests.getValue(compiler::class))
+
+    @Test
+    fun `a list written or given that holds null fails each row written, with no test`() {
+        val surely = listOf(
+            "CREATE (n:A {id: 2, x: [null]})" to emptyMap(),
+            "CREATE (n:A {id: 3, x: [1, null, 2]})" to emptyMap(),
+            "MERGE (n:A {id: 4, x: [null]})" to emptyMap(),
+            "MATCH (n:A) SET n.x = [null]" to emptyMap(),
+            "MATCH (n:A) SET n.x = [1, \$p]" to mapOf("p" to null),
+            "MATCH (n:A) SET n.x = \$p" to mapOf("p" to listOf(1, null)),
+            "MATCH (n:A) SET n += {x: [null]}" to emptyMap(),
+            "MATCH (n:A) SET n = \$m" to mapOf("m" to mapOf("x" to listOf(null), "y" to 1)),
+            "CREATE (n:A \$m)" to mapOf("m" to mapOf("x" to listOf(null))),
+            "MATCH (n:A) CREATE (n)-[r:R {x: [null]}]->(:A {id: 5})" to emptyMap(),
+            "MATCH (n:A) MERGE (n)-[r:R]->(m:A {id: 6}) ON CREATE SET r.x = \$q" to mapOf("q" to listOf(null)),
+            "MATCH (n:A) MERGE (n)-[r:R]->(m:A {id: 6}) ON MATCH SET r.x = [null]" to emptyMap(),
+            "MATCH (n:A) FOREACH (i IN [1] | SET n.x = [null])" to emptyMap(),
+        )
+        for (compiler in compilers()) for ((cypher, parameters) in surely) {
+            // Raised in the loop over the rows, so a statement of no rows does not fail, as in Neo4j.
+            val sql = sql(compiler, cypher, parameters)
+            assertTrue(refuses(sql), "$cypher\n$sql")
+            assertFalse(tests(compiler, sql), "$cypher\n$sql")
+        }
+    }
+
+    @Test
+    fun `a list worked out as it runs is tested as it is written, on every path that writes`() {
+        val worked = listOf(
+            "MATCH (n:A) SET n.x = [null] + [1]",
+            "MATCH (n:A) WITH n, [x IN [1, 2] | CASE WHEN x = 2 THEN null ELSE x END] AS l SET n.x = l",
+            "UNWIND [[1], [null]] AS l CREATE (n:A {x: l})",
+            "MATCH (s:A) MERGE (n:A {x: [s.y]})",
+            "MATCH (s:A) CREATE (s)-[:R {x: [s.y]}]->(:A)",
+            "MATCH (n:A) WITH n, {x: [n.y]} AS m SET n += m",
+            "MATCH (n:A) WITH n, {x: [n.y]} AS m SET n = m",
+            "MATCH (s:A) WITH s, {x: [s.y]} AS m CREATE (n:A) SET n = m",
+            "MATCH (n:A)-[r:R]->() SET r.x = [n.y]",
+        )
+        for (compiler in compilers()) for (cypher in worked) {
+            val sql = sql(compiler, cypher)
+            assertTrue(refuses(sql), "$cypher\n$sql")
+            assertTrue(tests(compiler, sql), "$cypher\n$sql")
+        }
+    }
+
+    @Test
+    fun `a value that can hold no null as an item is not tested, so the write costs what it did`() {
+        val rows = mapOf("rows" to listOf(mapOf("a" to null, "b" to listOf(1), "t" to "x"), mapOf("a" to 1, "b" to emptyList<Any>(), "t" to "y")))
+        val plain = listOf(
+            "CREATE (n:A {id: 1, x: [1, 2], s: 'a', none: null})" to emptyMap(),
+            "MATCH (n:A) SET n.x = [], n.y = null, n.z = 1" to emptyMap(),
+            "MATCH (n:A) SET n.x = \$p, n.y = \$none" to mapOf("p" to listOf(1, 2), "none" to null),
+            "MATCH (n:A), (m:A) SET n.x = m.y, n += m" to emptyMap(),
+            "MATCH (n:A)-[r:R]->(:A) SET n = r" to emptyMap(),
+            "MATCH (n:A) SET n = \$m" to mapOf("m" to mapOf("x" to listOf(1), "y" to null)),
+            // A temporal value is a tagged map, which holds no null as an item.
+            "MATCH (n:A) SET n.d = \$d, n.e = [\$t]" to mapOf("d" to listOf(java.time.LocalDate.of(2026, 11, 13)), "t" to java.time.LocalDate.of(2026, 11, 13)),
+            "UNWIND \$ids AS id CREATE (:A {id: id})" to mapOf("ids" to listOf(1, 2)),
+            "UNWIND \$rows AS row CREATE (n:A) SET n += row" to rows,
+            "UNWIND \$rows AS row CREATE (n:A {a: row.a, b: row.b, tags: [row.t]})" to rows,
+            "UNWIND [1, 2] AS i CREATE (:A {x: [i]})" to emptyMap(),
+            "CREATE (:A {d: [date('2026-11-13'), datetime({year: 2026})]})" to emptyMap(),
+            "MATCH (n:A) WITH n, toString(n.x) AS t, n.x + 1 AS i, 2.5 AS f SET n.t = t, n.i = i, n.f = f" to emptyMap(),
+        )
+        for (compiler in compilers()) for ((cypher, parameters) in plain) {
+            val sql = sql(compiler, cypher, parameters)
+            assertFalse(refuses(sql), "$cypher\n$sql")
+        }
+    }
+}

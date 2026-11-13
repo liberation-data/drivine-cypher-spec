@@ -1309,8 +1309,20 @@ class OracleCypherCompiler(
      * text (`"a,null]"`) does not say so: Oracle's JSON path walks no descendants. Read as a `VARCHAR2`, faster than as a
      * `CLOB`, which a value whose text is past 4,000 bytes is read as instead. It is exact, as a procedure's [nullsEqual] needs.
      */
-    override fun holdsNull(json: String): String {
-        fun nulls(text: String) = "REGEXP_LIKE(REGEXP_REPLACE($text, '\"([^\"\\\\]|\\\\.)*\"', '\"\"'), '[[,:]null[],}]')"
+    override fun holdsNull(json: String) = serializedHolds(json, "[[,:]null[],}]")
+
+    /**
+     * JSON's text of a list that holds null writes `[null` or `,null` in it, as no map does, which writes a key first, read as
+     * [holdsNull] reads it. A list held in it that holds null says so too, as one written in a map of properties does: neither
+     * is a property either.
+     */
+    override fun nullItem(json: String, entries: Boolean) = shared(json) { (x) ->
+        "(${kind(x)} = '${if (entries) "object" else "array"}' AND ${serializedHolds(x, "[[,]null[],]")})"
+    }
+
+    /** Whether JSON's text of [json], its texts and keys taken out, matches [pattern]: see [holdsNull]. */
+    private fun serializedHolds(json: String, pattern: String): String {
+        fun nulls(text: String) = "REGEXP_LIKE(REGEXP_REPLACE($text, '\"([^\"\\\\]|\\\\.)*\"', '\"\"'), '$pattern')"
         val short = "JSON_SERIALIZE($json RETURNING VARCHAR2(4000) NULL ON ERROR)"
         return "($short IS NOT NULL AND ${nulls(short)} OR $short IS NULL AND ${nulls("JSON_SERIALIZE($json RETURNING CLOB)")})"
     }

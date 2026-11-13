@@ -791,6 +791,13 @@ abstract class SqlCypherCompiler(
     protected abstract fun holdsNull(json: String): String?
 
     /**
+     * Whether the JSON [json], a property's value a write works out, is a list that holds null, or with [entries], a map of
+     * properties one of whose values is: no property, as Neo4j fails a write of one (drivine4j#557). JSON's null as an item of the
+     * list itself counts, not a null value, which removes a property, nor a temporal value, which is a tagged map.
+     */
+    protected abstract fun nullItem(json: String, entries: Boolean): String
+
+    /**
      * Whether the JSON values [x] and [y], neither of them null, are equal, as Cypher compares values that may hold a null: item
      * by item and key by key, at any depth, false where a pair differs (a list's length, a map's keys, a value's kind among
      * them), else null where a pair holds a null, else true. Called where [holdsNull] says one of them holds one; [equals]
@@ -2827,7 +2834,7 @@ abstract class SqlCypherCompiler(
                         idOf(ROW, key(node.variable!!))
                     }
                     null -> {
-                        evaluate(VALUE, node.properties) { scope -> written(node.properties, scope) }
+                        evaluateWritten(node.properties, entries = true) { scope -> written(node.properties, scope) }
                         if (merging) refuseUnmergeable(node.properties, "node")
                         execute(
                             "INSERT INTO $nodes (labels, props, stamp) VALUES (${literalJson(node.labels)}, ${stripNulls(unstamped(VALUE))}, ${stampOf(VALUE)}) RETURNING nid",
@@ -2849,7 +2856,7 @@ abstract class SqlCypherCompiler(
                     RelationshipPattern.Direction.EITHER ->
                         if (merging) ids[i] to ids[i + 1] else throw CompilerException("A relationship that CREATE makes has a direction.")
                 }
-                evaluate(VALUE, relationship.properties) { scope -> written(relationship.properties, scope) }
+                evaluateWritten(relationship.properties, entries = true) { scope -> written(relationship.properties, scope) }
                 if (merging) refuseUnmergeable(relationship.properties, "relationship")
                 execute("INSERT INTO $edges (src, dst, type, props) VALUES ($src, $dst, ${literal(type)}, ${stripNulls(VALUE)}) RETURNING eid", into = ID)
                 made(relationship.variable, Kind.RELATIONSHIP)
@@ -2878,6 +2885,71 @@ abstract class SqlCypherCompiler(
             step(ProcedureStep.Select(COUNT, "CASE $numbered ELSE 0 END", ""))
             refusals.forEachIndexed { i, (_, message) -> branch("$COUNT = ${i + 1}") { step(ProcedureStep.Raise(message)) } }
         }
+
+        /**
+         * [evaluate] of [written] into [VALUE], [value] the JSON it writes, a property's or with [entries] a map of properties,
+         * and the statement failed where that is or has a list that holds null ([refuseNullItems]).
+         */
+        private fun evaluateWritten(written: Expression?, entries: Boolean, value: (Map<String, Value>) -> String) {
+            var tests: List<String>? = emptyList()
+            evaluate(VALUE, written) { scope -> value(scope).also { tests = nullItemTests(written, asCarried(scope), VALUE, entries) } }
+            refuseNullItems(tests)
+        }
+
+        /**
+         * Fails the statement where a property it writes is a list that holds null, as Neo4j fails it (drivine4j#557): for the row
+         * it writes, so a write of no rows does not fail. [tests] are each such a list where it is true ([nullItemTests]), in one
+         * step; none where the statement writes none, which then costs nothing; null where it surely writes one.
+         */
+        private fun refuseNullItems(tests: List<String>?) {
+            if (tests == null) return step(ProcedureStep.Raise(NULL_ITEM))
+            if (tests.isEmpty()) return
+            step(ProcedureStep.Select(COUNT, "CASE WHEN ${tests.joinToString(" OR ")} THEN 1 ELSE 0 END", ""))
+            branch("$COUNT = 1") { step(ProcedureStep.Raise(NULL_ITEM)) }
+        }
+
+        /**
+         * The tests of the JSON [json], the value [written] gives in [scope], a property's or with [entries] a map of properties,
+         * for a list that holds null ([nullItem]): none where it can hold none, as a value of one kind, a property read from the
+         * store or a list or map written or given without one; null where it surely is or has one, as `[null]` written, or a
+         * parameter bound to one. A map written is tested entry by entry.
+         */
+        private fun nullItemTests(written: Expression?, scope: Map<String, Value>, json: String, entries: Boolean): List<String>? {
+            if (written == null) return emptyList()
+            if (entries && written is Expression.MapLiteral) {
+                return written.entries.flatMap { (key, value) -> nullItemTests(value, scope, propertyOf(json, key), entries = false) ?: return null }
+            }
+            if (written is Expression.Parameter) return if (parameterTree(written.name)?.let { holdsNullItem(it, entries) } == true) null else emptyList()
+            if (!entries && written is Expression.ListLiteral &&
+                written.items.any { it == Expression.Literal(null) || it is Expression.Parameter && parameterTree(it.name) == null }
+            ) return null
+            // A list written of items none of which is null, as `[row.tag]` of rows given each with a tag, or `[date('2026-11-13')]`:
+            // a temporal value made of values that are not null is none, or fails.
+            if (!entries && written is Expression.ListLiteral && written.items.all { item ->
+                    present(item) || givenRows(item, scope)?.none { row -> row == null || row.isNull } == true ||
+                        item is Expression.Function && Temporal.ofFunction(item.name.lowercase()) != null && item.arguments.all(::present)
+                }
+            ) return emptyList()
+            // A variable of a kind known when compiling other than a list, as `WITH n.x > 1 AS b` binds, is no list, nor is a temporal value.
+            if (!entries && written is Expression.Variable &&
+                (scope[written.name] as? Value.Json)?.let { it.known != null && it.known != Value.Known.LIST || it.temporal != null } == true
+            ) return emptyList()
+            if (scalar(written, scope) || flat(written, scope) || givenRows(written, scope)?.none { it != null && holdsNullItem(it, entries) } == true) return emptyList()
+            return listOf(nullItem(json, entries))
+        }
+
+        /**
+         * [scope] with each value a write reads from the row it is making as it was when the row was carried ([carried]): what
+         * is known of it then, that it holds no null ([Value.Json.flat]) or is an item of a list the statement gives
+         * ([unwoundGiven]), is so of it in the row, as `id` of `UNWIND ${'$'}ids AS id CREATE (:A {id: id})`. Read only to
+         * know so, never compiled.
+         */
+        private fun asCarried(scope: Map<String, Value>): Map<String, Value> =
+            scope.mapValues { (variable, value) -> if (value is Value.Json && value.rowKeys != null) carried[variable] ?: value else value }
+
+        /** Whether the JSON [node] is a list that holds null, or with [entries], a map one of whose values is: see [nullItem]. */
+        private fun holdsNullItem(node: JsonNode, entries: Boolean): Boolean =
+            if (entries) node.isObject && node.any { holdsNullItem(it, entries = false) } else node.isArray && node.any(JsonNode::isNull)
 
         /** The properties a pattern writes, as JSON: none where it gives none. */
         private fun written(properties: Expression?, scope: Map<String, Value>): String =
@@ -2937,19 +3009,19 @@ abstract class SqlCypherCompiler(
                     if (written is Expression.MapLiteral || written is Expression.ListLiteral && written.items.any { it is Expression.MapLiteral || it is Expression.ListLiteral }) {
                         throw CompilerException("A property is a number, a text, a truth value, a temporal value or a list of them, not ${if (written is Expression.MapLiteral) "a map" else "a list of maps or lists"}, as in Neo4j.")
                     }
-                    evaluate(VALUE, item.value) { scope -> comparable(json(expression(item.value, scope))) }
+                    evaluateWritten(item.value, entries = false) { scope -> comparable(json(expression(item.value, scope))) }
                     if (table == nodes && item.key == Stamps.PROPERTY) execute("UPDATE $nodes SET stamp = ${text(VALUE)} WHERE nid = $row")
                     else execute("UPDATE $table SET props = ${merged("props", jsonObject(listOf(item.key to VALUE)))} WHERE $id = $row")
                 }
                 is SetItem.Replace -> {
                     val (table, id, row) = target(item.variable, "SET")
-                    evaluate(VALUE, item.value) { scope -> properties(expression(item.value, scope)) }
+                    evaluateWritten(item.value, entries = true) { scope -> properties(expression(item.value, scope)) }
                     if (table == nodes) execute("UPDATE $nodes SET props = ${stripNulls(unstamped(orEmpty(VALUE)))}, stamp = ${stampOf(VALUE)} WHERE nid = $row")
                     else execute("UPDATE $table SET props = ${stripNulls(orEmpty(VALUE))} WHERE $id = $row")
                 }
                 is SetItem.Add -> {
                     val (table, id, row) = target(item.variable, "SET")
-                    evaluate(VALUE, item.value) { scope -> properties(expression(item.value, scope)) }
+                    evaluateWritten(item.value, entries = true) { scope -> properties(expression(item.value, scope)) }
                     if (table == nodes) {
                         // The stamp is kept where the map has no entry for it, and removed where its entry is null.
                         val stamp = "CASE WHEN ${propertyOf(VALUE, Stamps.PROPERTY)} IS NULL THEN stamp ELSE ${stampOf(VALUE)} END"
@@ -5643,7 +5715,14 @@ abstract class SqlCypherCompiler(
          * is then no list or map, though it may be null (#617). Nor where a key is read of a list, which Neo4j refuses: Oracle's
          * path reads the key of each of its items, so `row.a.b` of `{a: [{b: [1, 2]}]}` is `[1, 2]` there.
          */
-        private fun givenRowsScalar(expression: Expression, scope: Map<String, Value>): Boolean {
+        private fun givenRowsScalar(expression: Expression, scope: Map<String, Value>): Boolean =
+            givenRows(expression, scope)?.none { it != null && (it.isContainerNode || it.isTextual && !indexHolds(it.textValue()!!)) } == true
+
+        /**
+         * The value [expression] gives for each item of a list the statement gives ([unwoundGiven]), where it is such an item or a
+         * key of one, or of a map at one: null where it is not, or where a key is read of a list; an item null where its key is missing.
+         */
+        private fun givenRows(expression: Expression, scope: Map<String, Value>): List<JsonNode?>? {
             // The keys, outermost first, down to the unwound item: `row.start._id` reads `_id` of `start`.
             val keys = ArrayDeque<String>()
             var subject = expression
@@ -5651,13 +5730,10 @@ abstract class SqlCypherCompiler(
                 keys.addFirst(subject.key)
                 subject = subject.subject
             }
-            if (subject !is Expression.Variable) return false
-            val rows = (scope[subject.name] as? Value.Json)?.let { unwoundGiven[it.sql] } ?: return false
+            if (subject !is Expression.Variable) return null
+            val rows = (scope[subject.name] as? Value.Json)?.let { unwoundGiven[it.sql] } ?: return null
             val items = if (rows.isArray) rows.toList() else listOf(rows)
-            return items.none { item ->
-                keys.fold<String, JsonNode?>(item) { node, key -> if (node?.isArray == true) return false else node?.get(key) }
-                    ?.let { it.isContainerNode || it.isTextual && !indexHolds(it.textValue()!!) } == true
-            }
+            return items.map { item -> keys.fold<String, JsonNode?>(item) { node, key -> if (node?.isArray == true) return null else node?.get(key) } }
         }
 
         /** Whether the JSON [node] holds no null in a list or a map, at any depth. */
@@ -6695,6 +6771,9 @@ abstract class SqlCypherCompiler(
          * named by its text, or by its kind where it is no text.
          */
         const val ZONE_NOT_COMPILED = "A time zone that is not Z or an offset of hours and minutes (+hh:mm), such as a zone by name, an offset with seconds, '+01' or a value that is no text, is not compiled to SQL yet:"
+
+        /** Why a statement that writes a property that is a list that holds null fails, as Neo4j fails it (drivine4j#557). */
+        const val NULL_ITEM = "A property is a number, a text, a truth value, a temporal value or a list of them, not a list that holds null, as in Neo4j."
 
         /**
          * The greatest start or length `substring()`, `left()` and `right()` take, and the greatest precision `round()`
