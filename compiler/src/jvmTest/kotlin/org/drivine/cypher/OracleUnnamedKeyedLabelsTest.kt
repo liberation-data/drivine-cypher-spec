@@ -74,17 +74,30 @@ class OracleUnnamedKeyedLabelsTest {
             "MATCH (p:Person {id: \$id})-[:FOLLOWS]->(m:Person)-[:FOLLOWS]->(x:Person) RETURN count(*)", "n2",
         )
         // An unnamed node beside the keyed one left every node past it found through the index over labels too, named or not:
-        // an org's top topics took 391 s on Oracle.
-        val indexed = setOf("Org" to "id", "Repo" to "id", "Issue" to "id", "Topic" to "id")
-        fun chain(repo: String) = OracleCypherCompiler("g", indexedProperties = indexed).compile(
-            "MATCH (o:Org {id: \$id})<-[:OWNED_BY]-($repo:Repo)<-[:IN_REPO]-(i:Issue)-[:TAGGED]->(t:Topic) WHERE i.state = 'open' " +
-                "RETURN t.id, count(*) ORDER BY count(*) DESC LIMIT 10",
-            mapOf("id" to "o1"),
-        ).sql
-        val sql = chain("")
-        assertEquals(chain("r"), sql)
-        for ((alias, label) in listOf("n2" to "Repo", "n3" to "Issue", "n4" to "Topic")) {
-            assertTrue(byText(alias, label) in sql && !testedByIndex(sql, alias, label), sql)
+        // an org's top topics took 391 s on Oracle. Each of the bench's walks from a keyed node, as it runs them, compiles as it
+        // would with every node named, and tests every node past the keyed one by its text.
+        val indexed = setOf("Org" to "id", "Repo" to "id", "Issue" to "id", "Topic" to "id", "Person" to "id")
+        fun bench(cypher: String) = OracleCypherCompiler("g", indexedProperties = indexed).compile(cypher, mapOf("id" to "k1")).sql
+        for ((walk, named, past) in listOf(
+            Triple(
+                "MATCH (o:Org {id: \$id})<-[:OWNED_BY]-(:Repo)<-[:IN_REPO]-(i:Issue)-[:TAGGED]->(t:Topic) WHERE i.state = 'open' " +
+                    "WITH t.id AS topic, count(*) AS n ORDER BY n DESC, topic LIMIT 10 RETURN {topic: topic, n: n} AS r",
+                listOf("(:Repo)" to "(x:Repo)"), listOf("n2" to "Repo", "n3" to "Issue", "n4" to "Topic"),
+            ),
+            Triple(
+                "MATCH (r:Repo {id: \$id})<-[:IN_REPO]-(:Issue)<-[:ON]-(:Comment)-[:WRITTEN_BY]->(p:Person) " +
+                    "WITH p.id AS person, count(*) AS n ORDER BY n DESC, person LIMIT 10 RETURN {person: person, n: n} AS r",
+                listOf("(:Issue)" to "(x:Issue)", "(:Comment)" to "(y:Comment)"), listOf("n2" to "Issue", "n3" to "Comment", "n4" to "Person"),
+            ),
+            Triple(
+                "MATCH (p:Person {id: \$id})-[:FOLLOWS]->(:Person)<-[:OPENED_BY]-(:Issue)-[:IN_REPO]->(r:Repo) " +
+                    "WITH r.id AS repo, count(*) AS n ORDER BY n DESC, repo LIMIT 10 RETURN {repo: repo, n: n} AS r",
+                listOf("(:Person)" to "(x:Person)", "(:Issue)" to "(y:Issue)"), listOf("n2" to "Person", "n3" to "Issue", "n4" to "Repo"),
+            ),
+        )) {
+            val sql = bench(walk)
+            assertEquals(bench(named.fold(walk) { cypher, (from, to) -> cypher.replace(from, to) }), sql, walk)
+            for ((alias, label) in past) assertTrue(byText(alias, label) in sql && !testedByIndex(sql, alias, label), sql)
         }
     }
 

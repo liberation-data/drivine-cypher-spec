@@ -1790,8 +1790,7 @@ abstract class SqlCypherCompiler(
 
         /**
          * The later of [from] and [to], the two ends of one relationship, where [select] binds and tests both for labels, tested for
-         * its labels as [keyedLabels] tests a node read by its key: the edge gives its key. An end the pattern names with no
-         * variable, as `(:Person)`, is one [select] binds here ([Select.labelled]), so is tested as it would be named (#269). On Oracle (23.26) the test of a label
+         * its labels as [keyedLabels] tests a node read by its key: the edge gives its key. On Oracle (23.26) the test of a label
          * the index over labels answers had `MATCH (x:A)-[:R]->(y:B)` read one end's label, follow each edge, and read the index
          * over the other's label once for each, filtered on the edge's end: 1.3 s over 8,000 edges from 2,000 nodes of `A`,
          * growing with edges × nodes (drivine4j#581). The earlier end keeps its test, so the index still finds it, as
@@ -1801,6 +1800,8 @@ abstract class SqlCypherCompiler(
          * ([given] says which), it is the one the pattern starts from best, and keeps its test, and the earlier is read by its key:
          * `MATCH (a:Big)<-[:R]-(x:Small {s: 7})` took 15 ms over 8,000 edges keyed the other way round, a scan of every node
          * for `x`, and 5 ms so; `MATCH (x:Small {s: 7})-[:R]->(a:Big)` takes 4.
+         * An end found here with no variable, as `(:Person)`, counts as bound for this ([Select.labelled]), so is tested as it
+         * would be named (#269).
          *
          * With [both], for a relationship of either direction read from both halves of a `UNION ALL` ([bothWays]), each end is
          * tested so: Oracle reads the halves first, and found the earlier end through the index once for each edge, 2.6 s over the
