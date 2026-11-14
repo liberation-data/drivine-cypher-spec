@@ -144,7 +144,7 @@ internal object SqlText {
 
     /**
      * The first SQL literal in [text], from [from] on, whose opening quote [head] matches up to, and that [tail] follows
-     * at once: as `Regex(head + "'([^']*(?:''[^']*)*)'" + tail).find(text, from)` found it, without a regex over the literal
+     * at once: as `Regex(head + "([^']*(?:''[^']*)*)'" + tail).find(text, from)` found it, without a regex over the literal
      * (see [scanQuoted]). [head] is a regex of what is around the literal, no quoted text in it, that ends with the opening
      * `'` and matches it at one place from each start; [tail] is plain text, and doesn't start with a quote. With no
      * [tail], an unclosed literal is read as [greedyClose] reads it.
