@@ -31,7 +31,13 @@ import kotlin.test.assertTrue
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class TemporalArithmeticHostTest {
 
-    private val connection: Connection = DriverManager.getConnection("jdbc:sqlite::memory:").also { c -> HostFunctions.all.forEach { register(c, it) } }
+    private val connection: Connection = DriverManager.getConnection("jdbc:sqlite::memory:").also { c ->
+        HostFunctions.all.forEach { register(c, it) }
+        // drivine_fail, which each library registers itself, as a refusal the SQL writes calls it (#263's among them).
+        Function.create(c, org.drivine.cypher.store.SqliteFunctions.FAIL, object : Function() {
+            override fun xFunc() = error(value_text(0) ?: "failed")
+        }, 1, 0)
+    }
 
     @AfterAll
     fun close() = connection.close()
@@ -54,23 +60,10 @@ class TemporalArithmeticHostTest {
     /**
      * The cases where the inline SQLite SQL is wrong, and the host function gives Neo4j's answer: each fails this test where it
      * starts to match, so the list shrinks as the builder is fixed, and the test is back to all alike.
-     * - A year past 9999, which the inline SQL writes without its `+` (`10000-01-01`), where the canonical text, and Neo4j's,
-     *   has it: liberation-data/drivine-cypher-spec#263.
      * - A duration scaled by a number the inline SQL works out in SQLite's doubles, which writes a tail of a nanosecond
      *   (`6.262999999S`) where the answer is exact (liberation-data/drivine-cypher-spec#262).
      */
     private val known = setOf(
-        "date('9999-12-01') + duration('P1M')",
-        "duration('P1M') + date('9999-12-01')",
-        "date('9999-12-01') + duration('P1Y')",
-        "duration('P1Y') + date('9999-12-01')",
-        "date('9999-12-01') - duration('-P1M2DT3H')",
-        "date('9999-12-01') + duration('P1M2DT3H')",
-        "duration('P1M2DT3H') + date('9999-12-01')",
-        "date('9999-12-01') - duration('-P2M1DT30M')",
-        "date('9999-12-01') + duration('P1Y2M3DT4H5M6.789S')",
-        "duration('P1Y2M3DT4H5M6.789S') + date('9999-12-01')",
-        "date('9999-12-01') - duration('-P1Y2M3W4DT5H6M7.5S')",
         "duration('P1Y2M3DT4H5M6.789S') / 3",
         "duration('P1Y2M3DT4H5M6.789S') / 1.5",
         "duration('P1Y2M3DT4H5M6.789S') / 2.5",
