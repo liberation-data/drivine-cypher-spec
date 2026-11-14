@@ -7338,10 +7338,10 @@ abstract class SqlCypherCompiler(
         /** What a map, a node or a relationship read by a number fails with, before its kind: see listItem. */
         const val NUMBER_KEY_OF_MAP = "A map, a node or a relationship is read by a text key, as in Neo4j, not a"
 
-        /** Why a pattern of `=~` worked out as the statement runs is refused where it writes a backreference: see [Patterns.refusal]. */
         /** Why a pattern of `=~` worked out as the statement runs is refused on Oracle where it writes a group of its own syntax: see `refusedComputed`. */
         const val COMPUTED_CONSTRUCT = "A regular expression worked out as the statement runs writes a group of its own syntax, (?…), which Oracle answers as Java does only in a pattern the statement gives, written or bound (drivine-cypher-spec#242):"
 
+        /** Why a pattern of `=~` worked out as the statement runs is refused where it writes a backreference: see [Patterns.refusal]. */
         const val COMPUTED_BACKREFERENCE = "A regular expression worked out as the statement runs writes a backreference, which the SQL stores answer as Java does only in a pattern the statement gives, written or bound:"
 
         /** Why `+`, `-`, `*` or `/` of a temporal value whose kind the statement doesn't know fails as it runs: see `temporalRefused`. */

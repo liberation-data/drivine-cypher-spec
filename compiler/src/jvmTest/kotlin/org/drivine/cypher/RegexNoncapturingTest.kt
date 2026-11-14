@@ -31,6 +31,8 @@ class RegexNoncapturingTest {
         mapOf(
             "a(?=b)b" to "(?=", "(?<=a)b" to "(?<", "(?<n>a)" to "(?<", "a(?i)b" to "(?i", "(?i:a)" to "(?i", "(?:a)(?!b)" to "(?!",
             "[(?:]" to "character class", "[a(?:]x(?:y)" to "character class",
+            // \cX is one character, as Java and [Patterns.refusal] read it: `\c]` closes no class, so this (?: is in one.
+            "[\\c](?:x)]" to "character class",
         ).forEach { (pattern, named) ->
             val why = assertNotNull(Patterns.oracleRefusal(pattern), pattern)
             assertTrue(named in why && "#242" in why, why)
@@ -63,6 +65,13 @@ class RegexNoncapturingTest {
         }
         val plain = OracleCypherCompiler("g").compile("RETURN 'x' =~ \$p", mapOf("p" to "x.*")).sql
         assertFalse("""\(\?:'""" in plain, plain)
+    }
+
+    @Test
+    fun `Oracle rewrites a group that captures nothing where it asks a pattern of the empty text too`() {
+        val sql = OracleCypherCompiler("g").compile("RETURN \$e =~ \$p", mapOf("e" to "", "p" to "(?:a)?")).sql
+        // Twice over in each of matches, over the text as a VARCHAR2 and as a CLOB, and matchesEmpty, which asks a line break.
+        assertEquals(6, sql.split("""'(^|[^\\])((\\\\)*)\(\?:', '\1\2(')""").size - 1, sql)
     }
 
     @Test

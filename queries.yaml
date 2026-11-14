@@ -1146,6 +1146,11 @@ cases:
         cypher: "RETURN ['xb' =~ $p, 'a(?:b' =~ $q, 'ab' =~ $q, $t =~ $r]"
         parameters: {p: "x(?:b)", q: "a\\(\\?:b", r: "a\\\\(?:b)", t: "a\\b"}
         rows: [[true, true, false, true]]
+      - note: "Over the empty text, which Oracle asks of a line break of its own."
+        only: [neo4j, sql]
+        cypher: "RETURN ['' =~ '(?:a)?', '' =~ '(?:a)', $e =~ $p]"
+        parameters: {e: "", p: "(?:a|b?)"}
+        rows: [[true, false, true]]
       - note: "A lookaround: answered where the store reads one."
         only: [neo4j, postgres, sqlite]
         cypher: "RETURN 'ab' =~ $p"

@@ -45,52 +45,19 @@ internal object Patterns {
      * SQL's rewrite of each `(?:` can't tell from a group.
      */
     fun oracleRefusal(pattern: String): String? {
-        val why = constructs(pattern).firstOrNull { it != NONCAPTURING } ?: return null
+        val why = scan(pattern).constructs.firstOrNull { it != NONCAPTURING } ?: return null
         val what = if (why == IN_CLASS) "a character class that holds (?:" else "a group of its own syntax, $why…)"
         return "The regular expression '$pattern' writes $what, which Oracle doesn't read as Java does: Oracle answers (?:…) and a leading flag group, (?i), alone (drivine-cypher-spec#242)."
     }
 
     /** Whether [pattern] writes a group that captures nothing, `(?:…)`, outside a character class: Oracle's `=~` reads each as `(`. */
-    fun holdsNoncapturing(pattern: String): Boolean = NONCAPTURING in constructs(pattern)
+    fun holdsNoncapturing(pattern: String): Boolean = NONCAPTURING in scan(pattern).constructs
 
-    /** A group that captures nothing, as [constructs] gives it. */
+    /** A group that captures nothing, as [scan] gives it. */
     private const val NONCAPTURING = "(?:"
 
-    /** `(?:` written in a character class, as [constructs] gives it. */
+    /** `(?:` written in a character class, as [scan] gives it. */
     private const val IN_CLASS = "[(?:]"
-
-    /**
-     * Each group of its own syntax [pattern] writes, as its opening, `(?:`, `(?=`, `(?<n`…, but for a leading flag group,
-     * read as [scan] reads a pattern: a backslash escapes the next character, `\Q…\E` quotes, and a class is opened by `[`
-     * and closed by a `]` that isn't its first character. `(?:` in a class is given as [IN_CLASS].
-     */
-    private fun constructs(pattern: String): List<String> {
-        val found = mutableListOf<String>()
-        var depth = 0
-        var i = 0
-        while (i < pattern.length) {
-            val c = pattern[i]
-            when {
-                c == '\\' && i + 1 < pattern.length -> {
-                    if (pattern[i + 1] == 'Q') {
-                        val end = pattern.indexOf("\\E", i + 2)
-                        i = if (end < 0) pattern.length else end + 2
-                    } else i += 2
-                    continue
-                }
-                c == '[' -> {
-                    depth++
-                    if (pattern.startsWith("^]", i + 1)) i += 2 else if (pattern.startsWith("]", i + 1)) i += 1
-                }
-                c == ']' && depth > 0 -> depth--
-                depth > 0 -> if (pattern.startsWith(NONCAPTURING, i)) found += IN_CLASS
-                c == '(' && pattern.startsWith("?", i + 1) && !(i == 0 && LEADING_FLAGS.matchesAt(pattern, 0)) ->
-                    found += pattern.substring(i, minOf(pattern.length, i + 3))
-            }
-            i++
-        }
-        return found
-    }
 
     /** Whether [pattern] writes a backreference, as Java reads one. */
     fun holdsBackreference(pattern: String): Boolean = scan(pattern).found.isNotEmpty()
@@ -133,9 +100,13 @@ internal object Patterns {
         val held = mutableListOf<Group>()
     }
 
-    /** What [scan] reads of a pattern. */
+    /**
+     * What [scan] reads of a pattern: with each group of its own syntax it writes, as its opening, `(?:`, `(?=`, `(?<n`…, but
+     * for a leading flag group, and [IN_CLASS] for each `(?:` in a character class (#242).
+     */
     private class Read(
         val found: List<Backreference>, val groups: List<Group>, val flagX: Boolean, val construct: Boolean, val classInClass: Boolean,
+        val constructs: List<String>,
     )
 
     /** A leading flag group as Oracle's `=~` takes it off the pattern, `(?i)`: letters alone. */
@@ -156,6 +127,7 @@ internal object Patterns {
         val found = mutableListOf<Backreference>()
         val stack = ArrayDeque(listOf(Open(null)))
         var construct = false
+        val constructs = mutableListOf<String>()
         var classInClass = false
         var depth = 0
         var i = 0
@@ -193,11 +165,14 @@ internal object Patterns {
                     if (pattern.startsWith("^]", i + 1)) i += 2 else if (pattern.startsWith("]", i + 1)) i += 1
                 }
                 c == ']' && depth > 0 -> depth--
-                depth > 0 -> {}
+                depth > 0 -> if (pattern.startsWith(NONCAPTURING, i)) constructs += IN_CLASS
                 c == '(' -> {
                     stack.last().nested = true
                     // A group of its own syntax, a lookaround or (?:…) among them, but for a leading flag group, which Oracle takes off.
-                    if (pattern.startsWith("?", i + 1) && !(i == 0 && LEADING_FLAGS.matchesAt(pattern, 0))) construct = true
+                    if (pattern.startsWith("?", i + 1) && !(i == 0 && LEADING_FLAGS.matchesAt(pattern, 0))) {
+                        construct = true
+                        constructs += pattern.substring(i, minOf(pattern.length, i + 3))
+                    }
                     val named = pattern.startsWith("?<", i + 1) && pattern.getOrNull(i + 3)?.isLetter() == true
                     val group = if (!pattern.startsWith("?", i + 1) || named) Group().also(groups::add) else null
                     stack.addLast(Open(group))
@@ -222,6 +197,6 @@ internal object Patterns {
             i++
         }
         if (stack.first().alternated) stack.first().held.forEach { it.always = false }
-        return Read(found, groups, FLAG_X.containsMatchIn(pattern), construct, classInClass)
+        return Read(found, groups, FLAG_X.containsMatchIn(pattern), construct, classInClass, constructs)
     }
 }
