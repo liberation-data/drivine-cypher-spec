@@ -1143,14 +1143,14 @@ cases:
         rows: [[true, true, false, true, true, true, true]]
       - note: "Bound, and a (?: that a backslash escapes, which is the text (?: and no group."
         only: [neo4j, sql]
-        cypher: "RETURN ['xb' =~ $p, 'a(?:b' =~ $q, 'ab' =~ $q, 'a\\b' =~ $r]"
-        parameters: {p: "x(?:b)", q: "a\\(\\?:b", r: "a\\\\(?:b)"}
+        cypher: "RETURN ['xb' =~ $p, 'a(?:b' =~ $q, 'ab' =~ $q, $t =~ $r]"
+        parameters: {p: "x(?:b)", q: "a\\(\\?:b", r: "a\\\\(?:b)", t: "a\\b"}
         rows: [[true, true, false, true]]
       - note: "A lookaround: answered where the store reads one."
         only: [neo4j, postgres, sqlite]
         cypher: "RETURN 'ab' =~ $p"
         parameters: {p: "a(?=b)b"}
-        rows: [[true]]
+        rows: [true]
       - note: "Refused on Oracle, which reads no lookaround."
         only: [oracle]
         cypher: "RETURN 'ab' =~ $p"
@@ -1170,7 +1170,7 @@ cases:
         only: [neo4j, postgres, sqlite]
         cypher: "WITH '(?:' + $b AS p RETURN 'x' =~ p"
         parameters: {b: "x)"}
-        rows: [[true]]
+        rows: [true]
       - note: "Refused on Oracle as the statement runs, as the compiler can't read its form."
         only: [oracle]
         cypher: "WITH '(?:' + $b AS p RETURN 'x' =~ p"
