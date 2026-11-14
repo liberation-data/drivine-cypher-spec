@@ -1179,19 +1179,19 @@ generated:
   # The digests of what each marker of a generated function stands for (GeneratedFunctions; see README.md, The store
   # layout), the Postgres DDL's digest at each PostgresDdl.VERSION, and each Oracle function's version comment.
   digests:
-    postgres: "e74df5c1164613cedaec63a61e55425b4e08be51f784cee9ded8fcdc0d16ae9f"
-    postgresEnsuring: "377651bc7bcf59ba311b23ee5dfb5990de00c31c1f91ee2555b5d4d52dd81985"
-    oracle: "6bcd5169e5e7ee061e9d2d9b28fd58b921575583d89ec405db3473cecbdcb68b"
-    oracleClob: "7c4d091503d6d8a4b22f7b4a9bb74b90a0a1d572ba402a9fd147fb2deb6c995f"
+    postgres: "44c245b151628c4e0244fb337bae73adcc42f13ac092225e26900ec533609e8c"
+    postgresEnsuring: "cf64879a54f8a45a2a42628f1f7b5e9385b8640e88d0cbd5f8440e6413152cd3"
+    oracle: "f5fcadcd160cc254ebbd9c903b725edcf0864d0fbc21ae890795805593fd4c12"
+    oracleClob: "b0f83ede11a67982f501fca6f614ace4fea7b9a23679a4d443ba46a3029126b4"
   postgresVersions:
     "drivine:10": "b67fab8ec3349fa482c2dac7ffdc6ddfcf66da2ba3b158197a0a954058170471"
-    "drivine:11": "1a1fef0a7e0d75638bcf569137a51aedf3f606d5556378ca63474df24f82360f"
+    "drivine:11": "f368e0a7f9492b74dc4919099b86d26b3e0b0749245b5ab69645f33ad5b285ba"
   oracleVersions:
     drivine_nulls_equal: "ca86ed401a58"
-    drivine_era: "6b3612ebd3a2"
+    drivine_era: "09f7d49aa2ed"
     drivine_era_date: "5447820123db"
     drivine_temporal_key: "98bc9deef4c7"
-    drivine_temporal_arith: "8cbe78decc60"
+    drivine_temporal_arith: "c69b6a8775c4"
 catalog:
   item: {kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}
   aliases: ["a", "b\"c"]
