@@ -79,7 +79,8 @@ object SqliteFunctions {
      * The version of the host functions' contract: the forms of their arguments and results the compiler's SQL calls them
      * with, which the spec's host.yaml pins. A change to a function's form bumps it, in the same change as its host.yaml
      * steps, so a host that registers older functions fails on connecting, not mid-statement. 1 is the first a function
-     * reports; functions with no [HOST_VERSION_FUNCTION] are drivine4j's older forms.
+     * reports; functions with no [HOST_VERSION_FUNCTION] are drivine4j's older forms. 2 adds `drivine_temporal_arithmetic`
+     * (drivine4j#418), which the compiler's SQL calls on SQLite.
      */
-    const val HOST_VERSION = 1
+    const val HOST_VERSION = 2
 }

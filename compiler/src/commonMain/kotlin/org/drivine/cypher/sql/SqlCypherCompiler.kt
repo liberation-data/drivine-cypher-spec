@@ -133,10 +133,10 @@ abstract class SqlCypherCompiler(
 
     /**
      * The call of the store's function that works out [operator], `+`, `-`, `*` or `/`, of the JSON [x] and [y] where either may
-     * be a tag of a temporal value read from the store, to the tag it gives (drivine4j#418); null where the store has none, as
-     * SQLite, and an Oracle store made by an earlier version, or by a user who may not make a function: such arithmetic then
-     * fails by name as the statement runs. Its body is the compiler's own temporal arithmetic, written for each pair of kinds
-     * ([TemporalArithmeticFunction]).
+     * be a tag of a temporal value read from the store, to the tag it gives (drivine4j#418): on SQLite, the host function each
+     * library registers. Null where the store has none, as an Oracle store made by an earlier version, or by a user who may
+     * not make a function: such arithmetic then fails by name as the statement runs. On Postgres and Oracle its body is the
+     * compiler's own temporal arithmetic, written for each pair of kinds ([TemporalArithmeticFunction]).
      */
     protected open fun storedArithmetic(operator: String, x: String, y: String): String? = null
 
@@ -5224,7 +5224,8 @@ abstract class SqlCypherCompiler(
          * [arithmetic], the generic `+`, `-`, `*` or `/` of [binary]'s sides [x] and [y], where the statement knows neither to be a
          * temporal value: as the statement runs, a side that is one, a tag a property holds (`n.d1 + n.d2`, `n.d * 2`), is worked
          * out by the store's function of temporal arithmetic ([storedArithmetic]), where the generic arithmetic gave null
-         * (drivine4j#418); where the store keeps none, on SQLite and on an Oracle store without it, it fails by name. Temporal
+         * (drivine4j#418), or on SQLite by the host function the library registers; on an Oracle store without it, it fails by
+         * name. Temporal
          * arithmetic is written inline only where a side is known to be temporal. A `+` tests only a tag beside a tag or a
          * number: beside a text a temporal value is its text, and beside a list an item, as before, so beside a side known to be
          * a text or a list it is not tested. A side that can't be a tag ([tagFree]) is not tested. The kind a failure names is the

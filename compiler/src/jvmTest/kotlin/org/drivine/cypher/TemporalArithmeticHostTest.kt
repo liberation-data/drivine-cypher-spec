@@ -56,9 +56,8 @@ class TemporalArithmeticHostTest {
      * starts to match, so the list shrinks as the builder is fixed, and the test is back to all alike.
      * - A year past 9999, which the inline SQL writes without its `+` (`10000-01-01`), where the canonical text, and Neo4j's,
      *   has it: liberation-data/drivine-cypher-spec#263.
-     * - A duration scaled by a number the inline SQL works out in SQLite's doubles, which writes `.800000002S` where the answer
-     *   is exact (liberation-data/drivine-cypher-spec#262), and splits its seconds before rounding them, so `59M60S` or a `0S`
-     *   of a rounding's hair (liberation-data/drivine-cypher-spec#261).
+     * - A duration scaled by a number the inline SQL works out in SQLite's doubles, which writes a tail of a nanosecond
+     *   (`6.262999999S`) where the answer is exact (liberation-data/drivine-cypher-spec#262).
      */
     private val known = setOf(
         "date('9999-12-01') + duration('P1M')",
@@ -72,11 +71,6 @@ class TemporalArithmeticHostTest {
         "date('9999-12-01') + duration('P1Y2M3DT4H5M6.789S')",
         "duration('P1Y2M3DT4H5M6.789S') + date('9999-12-01')",
         "date('9999-12-01') - duration('-P1Y2M3W4DT5H6M7.5S')",
-        "duration('P1Y') / 2.5",
-        "duration('P1W') / 3",
-        "duration('P1W') / 1.5",
-        "duration('P1W') / 2.5",
-        "duration('P1W') / 10",
         "duration('P1Y2M3DT4H5M6.789S') / 3",
         "duration('P1Y2M3DT4H5M6.789S') / 1.5",
         "duration('P1Y2M3DT4H5M6.789S') / 2.5",

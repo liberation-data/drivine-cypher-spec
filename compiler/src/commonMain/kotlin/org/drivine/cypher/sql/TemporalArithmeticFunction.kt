@@ -23,8 +23,8 @@ import org.drivine.cypher.json.TemporalValue
  * made again: on Postgres when `PostgresDdl.VERSION` changes, on Oracle when the function's version, a hash of its DDL,
  * changes (`OracleDdl.ensuring`).
  *
- * SQLite keeps no function, and has none yet: such arithmetic fails by name there as the statement runs, until a host function
- * the libraries register works it out (drivine4j#418).
+ * SQLite keeps no function: the compiled SQL calls [HOST], the host function each library registers, which works out the same
+ * steps in the module's own code (`HostTemporalArithmetic`), checked against the inline SQLite SQL.
  */
 @DrivineInternalApi
 object TemporalArithmeticFunction {
