@@ -19,6 +19,8 @@ import kotlinx.datetime.number
 class Temporals(
     private val sql: TemporalSql,
     private val shared: (List<String>, (List<String>) -> String) -> String,
+    /** The statement failing by name, with a message and a SQL text it names, as it runs: see [format]. */
+    private val refuse: ((message: String, text: String) -> String)? = null,
     /** Whether [shared] binds a long value in a subquery where the SQL is being written, rather than writing it out. */
     private val binding: () -> Boolean = { true },
 ) {
@@ -156,7 +158,14 @@ class Temporals(
             Temporal.TIME -> "$time || ${offset ?: "'Z'"}"
             Temporal.DURATION -> error("a duration is no moment")
         }
-        if (kind == Temporal.DATE) text else "CASE WHEN $t IS NOT NULL THEN $text END"
+        val written = if (kind == Temporal.DATE) text else "CASE WHEN $t IS NOT NULL THEN $text END"
+        // A year past four digits, which a store whose timestamp holds it writes wrong (Postgres's `####`, SQLite's year
+        // unsigned), fails by name, as no SQL store works such a year out yet (#263, #264). Oracle's timestamp holds none, so
+        // it fails there as the year is worked out, before its text is written.
+        val refusing = refuse
+        val long = sql.longYear(t)
+        if (refusing == null || long == null || kind == Temporal.LOCAL_TIME || kind == Temporal.TIME) written
+        else "CASE WHEN $long THEN ${refusing(LONG_YEAR, "CAST($t AS ${sql.textType})")} ELSE $written END"
     } }
 
     /** A second's fraction as Java writes one: none for a whole second, else three digits or six. */
@@ -191,9 +200,19 @@ class Temporals(
 
     /**
      * The text of [kind] of the fields [fields], SQL numbers each by Cypher's names (`year`, `month`, `day`,
-     * `hour`, `minute`, `second`, `millisecond`, `microsecond`, `nanosecond`), and [timezone], a text.
+     * `hour`, `minute`, `second`, `millisecond`, `microsecond`, `nanosecond`), and [timezone], a text. [givenYear] where the
+     * statement gives the year, not where it is read off a value the store holds: see [yearHeld].
      */
-    fun of(fields: Map<String, String>, timezone: String?, kind: Temporal): String {
+    fun of(fields: Map<String, String>, timezone: String?, kind: Temporal, givenYear: Boolean = true): String {
+        val year = fields["year"]
+        // A year the statement gives is tested, bound once and the text made of the bound name, so the test writes no second
+        // copy (#263). One read off a value the store holds, as a truncation or a date's own reads it, is held already.
+        if (refuse != null && year != null && givenYear) return yearHeld(year) { y -> made(fields + ("year" to y), timezone, kind) }
+        return made(fields, timezone, kind)
+    }
+
+    /** [of], its fields as they are. */
+    private fun made(fields: Map<String, String>, timezone: String?, kind: Temporal): String {
         fun field(name: String, default: String, digits: Int) = "${sql.toChar}(${fields[name] ?: default}, 'FM${"0".repeat(digits)}')"
         val micros = "${sql.trunc}(${fields["millisecond"] ?: "0"} * 1000 + ${fields["microsecond"] ?: "0"} + ${fields["nanosecond"] ?: "0"} / 1000)"
         val date = "${field("year", "1970", 4)} || '-' || ${field("month", "1", 2)} || '-' || ${field("day", "1", 2)}"
@@ -211,14 +230,34 @@ class Temporals(
     }
 
     /**
+     * [made] of [year], bound once, a temporal value's text made of fields whose year it is, where the store holds that year:
+     * else the statement fails by name (#263). A year it doesn't hold reads back as no text, so it gave null, where Neo4j makes
+     * the value.
+     */
+    private fun yearHeld(year: String, made: (String) -> String): String {
+        val refusing = refuse ?: return made(year)
+        return shared(listOf(year)) { (y) ->
+            "CASE WHEN $y > 9999 OR $y < ${sql.firstYear} THEN ${refusing(LONG_YEAR, "CAST($y AS ${sql.textType})")} ELSE ${made(y)} END"
+        }
+    }
+
+    /**
      * [of] for [fields] that give the date by the calendar's other fields beside the `year`, SQL numbers each: a `week`
      * of the ISO week-based year and its `dayOfWeek`, an `ordinalDay`, or a `quarter` and its `dayOfQuarter`. The date
      * is so many days after the first of the year, of the quarter, or of the year's first ISO week, the week of January
      * 4th. As Neo4j has them, a field that is null is given as its least (the year 0, the first week, day or quarter),
      * and a week runs to 53 and a day of the quarter to 92 in any year, carried into the next where it has fewer. A
      * field that is not whole or is past its range gives the day 0, which the store fails on as it fails on `{day: 0}`.
+     * [givenYear] as [of] takes it.
      */
-    fun ofCalendar(fields: Map<String, String>, timezone: String?, kind: Temporal): String {
+    fun ofCalendar(fields: Map<String, String>, timezone: String?, kind: Temporal, givenYear: Boolean = true): String {
+        fun given(name: String, least: Int) = fields[name]?.let { "COALESCE($it, $least)" } ?: "$least"
+        if (refuse != null && "year" in fields && givenYear) return yearHeld(given("year", 0)) { y -> calendar(fields + ("year" to y), timezone, kind) }
+        return calendar(fields, timezone, kind)
+    }
+
+    /** [ofCalendar], its fields as they are. */
+    private fun calendar(fields: Map<String, String>, timezone: String?, kind: Temporal): String {
         val time = fields - CALENDAR_FIELDS - "year"
         fun given(name: String, least: Int) = fields[name]?.let { "COALESCE($it, $least)" } ?: "$least"
         fun january(y: String, day: Int) = sql.local("${sql.toChar}($y, 'FM0000') || '-01-0$day'", Temporal.DATE)
@@ -259,8 +298,8 @@ class Temporals(
      * first where [kind] has a time too, so a store fails on a day its month has none of: see [calendarDate].
      */
     private fun dated(date: Map<String, String>, time: Map<String, String>, timezone: String?, kind: Temporal): String =
-        if (kind == Temporal.DATE) of(date, null, kind)
-        else shared(listOf(sql.local(of(date, null, Temporal.DATE), Temporal.DATE))) { (checked) -> of(time + dateOf(checked), timezone, kind) }
+        if (kind == Temporal.DATE) of(date, null, kind, givenYear = false)
+        else shared(listOf(sql.local(of(date, null, Temporal.DATE, givenYear = false), Temporal.DATE))) { (checked) -> of(time + dateOf(checked), timezone, kind, givenYear = false) }
 
     /** The year, the month and the day of the month of the timestamp [timestamp], as [of] takes them. */
     private fun dateOf(timestamp: String) = mapOf("year" to sql.year(timestamp), "month" to sql.extract("MONTH", timestamp), "day" to sql.extract("DAY", timestamp))
@@ -346,14 +385,14 @@ class Temporals(
         if (day == null) return if (calendar.keys.any { it in CALENDAR_FIELDS }) ofCalendar(calendar + time, offset, kind) else of(fields.filterKeys { it in DAY } + time, offset, kind)
         fun own(name: String) = fields[name] ?: clockField(day, name)
         return when {
-            "week" in fields -> ofCalendar(mapOf("year" to (fields["year"] ?: clockField(day, "weekYear")), "week" to own("week"), "dayOfWeek" to own("dayOfWeek")) + time, offset, kind)
-            "ordinalDay" in fields -> ofCalendar(mapOf("year" to own("year"), "ordinalDay" to own("ordinalDay")) + time, offset, kind)
-            "dayOfQuarter" in fields -> ofCalendar(mapOf("year" to own("year"), "quarter" to own("quarter"), "dayOfQuarter" to own("dayOfQuarter")) + time, offset, kind)
+            "week" in fields -> ofCalendar(mapOf("year" to (fields["year"] ?: clockField(day, "weekYear")), "week" to own("week"), "dayOfWeek" to own("dayOfWeek")) + time, offset, kind, "year" in fields)
+            "ordinalDay" in fields -> ofCalendar(mapOf("year" to own("year"), "ordinalDay" to own("ordinalDay")) + time, offset, kind, "year" in fields)
+            "dayOfQuarter" in fields -> ofCalendar(mapOf("year" to own("year"), "quarter" to own("quarter"), "dayOfQuarter" to own("dayOfQuarter")) + time, offset, kind, "year" in fields)
             DAY.none { it in fields } -> moveDay(day, fields, time, offset, kind)
             // Beside a day of the week (no month or day can be), a year moves the date so many years, to February 28th from the
             // 29th of a common year, as Neo4j moves it, where alone it fails there.
             "dayOfWeek" in fields -> moveDay(sql.addMonths(day, "(${own("year")} - ${clockField(day, "year")}) * 12"), fields, time, offset, kind)
-            else -> shared(listOf(sql.local(of(DAY.associateWith { own(it) }, null, Temporal.DATE), Temporal.DATE))) { (checked) -> moveDay(checked, fields, time, offset, kind) }
+            else -> shared(listOf(sql.local(of(DAY.associateWith { own(it) }, null, Temporal.DATE, givenYear = "year" in fields), Temporal.DATE))) { (checked) -> moveDay(checked, fields, time, offset, kind) }
         }
     }
 
@@ -365,7 +404,7 @@ class Temporals(
         return when {
             quarter != null -> shared(listOf(quarter)) { (q) -> calendarDate(sql.addMonths(day, "($q - ${clockField(day, "quarter")}) * 3"), time, offset, kind) { whole(q, 4) } }
             dayOfWeek != null -> shared(listOf(dayOfWeek)) { (d) -> calendarDate(sql.addTime(day, "$d - ${sql.dayOfWeek(day)}", "0"), time, offset, kind) { whole(d, 7) } }
-            else -> of(dateOf(day) + time, offset, kind)
+            else -> of(dateOf(day) + time, offset, kind, givenYear = false)
         }
     }
 
@@ -587,7 +626,7 @@ class Temporals(
             "microsecond" in given && !carried -> given.getValue("microsecond")
             else -> kept
         }
-        val made = of(own.mapValues { (name, value) -> given[name] ?: value } + ("microsecond" to fraction), offset, kind)
+        val made = of(own.mapValues { (name, value) -> given[name] ?: value } + ("microsecond" to fraction), offset, kind, givenYear = "year" in given)
         val day = given["dayOfWeek"] ?: return made
         return shared(listOf(made)) { (m) ->
             shared(listOf(sql.local(m, kind))) { (clock) ->
@@ -849,6 +888,13 @@ class Temporals(
     private fun literal(text: String) = "'${text.replace("'", "''")}'"
 
     companion object {
+        /**
+         * What a statement that works out a date or a moment whose year the store can't hold fails with, the year or the moment
+         * after it: past 9999, or before the store's first, -4712 on Postgres, -4711 on Oracle and -9999 on SQLite (README.md,
+         * Values). Short, as a statement that makes many such values writes it for each.
+         */
+        const val LONG_YEAR = "A year the store doesn't hold, past 9999 or before its first, isn't worked out yet (drivine-cypher-spec#263, #264):"
+
         /**
          * The canonical text of [kind] of the text [text], worked out as the store's SQL would work it out, for a
          * value the statement writes: null where the text is of no temporal kind.
