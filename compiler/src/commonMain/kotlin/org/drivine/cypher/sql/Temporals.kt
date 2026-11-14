@@ -828,7 +828,7 @@ class Temporals(
         val months = if (times) "0" else sql.monthsBetween(a, b)
         if (sql.exactTime) exactBetween(a, b, months, unit) else when (unit) {
             "months" -> text(Parts(months, "0", "0"))
-            "days" -> text(Parts("0", "${sql.trunc}(${sql.secondsBetween(a, b)} / 86400)", "0"))
+            "days" -> text(Parts("0", sql.truncatedQuotient(sql.secondsBetween(a, b), "86400"), "0"))
             "seconds" -> text(Parts("0", "0", sql.secondsBetween(a, b)))
             else -> shared(listOf(months)) { (m) ->
                 shared(listOf(sql.secondsBetween(sql.addMonths(a, m), b))) { (rest) -> text(Parts(m, "${sql.truncatedQuotient(rest, "86400")}", "($rest - ${sql.truncatedQuotient(rest, "86400")} * 86400)")) }

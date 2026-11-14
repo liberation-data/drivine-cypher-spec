@@ -14,13 +14,14 @@ import kotlin.test.assertTrue
  */
 class TruncatedQuotientTest {
 
-    /** A statement for each builder that cuts a quotient: a duration's text, its fields, a date it moves, and `duration.between`. */
+    /** A statement for each builder that cuts a quotient: a duration's text, its fields, a date it moves, `duration.between` and `duration.inDays`. */
     private val statements = listOf(
         "RETURN toString(duration(\$d) + duration('PT1S'))",
         "WITH duration(\$d) AS d RETURN [d.years, d.quarters, d.weeks, d.hours, d.minutes, d.quartersOfYear, d.monthsOfQuarter, " +
             "d.monthsOfYear, d.daysOfWeek, d.minutesOfHour, d.secondsOfMinute]",
         "RETURN toString(date(\$t) + duration(\$d))",
         "RETURN toString(duration.between(localdatetime(\$a), localdatetime(\$b)))",
+        "RETURN toString(duration.inDays(localdatetime(\$a), localdatetime(\$b)))",
     )
 
     private val parameters = mapOf("d" to "P1Y2M3W4DT5H6M7.5S", "t" to "2024-01-01", "a" to "2024-01-01T00:00", "b" to "2024-03-01T12:00:00.5")
