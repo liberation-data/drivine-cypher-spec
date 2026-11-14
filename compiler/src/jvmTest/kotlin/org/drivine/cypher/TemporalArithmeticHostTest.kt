@@ -135,6 +135,16 @@ class TemporalArithmeticHostTest {
     }
 
     @Test
+    fun `a sum of durations the statement gives by the host function gives null where either is null, and feeds what reads it (#275)`() {
+        listOf("duration(null) + duration('P1D')", "duration('P1D') - duration(null)", "duration(\$d) + duration('P1D')").forEach {
+            assertEquals("null", inline(it, mapOf("d" to null)), it)
+        }
+        assertEquals(inline("'PT87660000H0.000000001S'"), inline("toString(duration(\$d) + duration('PT0.000000001S'))", mapOf("d" to "PT87660000H")))
+        assertEquals("12", inline("(duration('P1D') + duration('PT12H')).hours"))
+        assertEquals(inline("'2024-01-02'"), inline("toString(date('2024-01-01') + (duration('PT20H') + duration('PT4H')))"))
+    }
+
+    @Test
     fun `a duration the statement divides by zero fails in Neo4j's words and one scaled by an infinity fails by name (#262)`() {
         listOf("duration('P1D') / 0", "duration('P1D') / 0.0").forEach { assertEquals("fails: / by zero", inline(it, failure = true), it) }
         assertEquals("fails: / by zero", inline("duration('P1D') / \$k", mapOf("k" to 0L), failure = true))
