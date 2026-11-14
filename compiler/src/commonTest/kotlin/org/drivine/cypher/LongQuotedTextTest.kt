@@ -3,6 +3,7 @@ package org.drivine.cypher
 import org.drivine.cypher.sql.OracleCypherCompiler
 import org.drivine.cypher.sql.PostgresCypherCompiler
 import org.drivine.cypher.sql.SqliteCypherCompiler
+import org.drivine.cypher.store.OracleSql
 import org.drivine.cypher.store.ddl.OracleDdl
 import org.drivine.cypher.store.ddl.PostgresDdl
 import org.drivine.cypher.store.ddl.SqliteDdl
@@ -86,6 +87,23 @@ class LongQuotedTextTest {
         }
         // Most are compiled: a refusal of them all would prove nothing of the reads.
         assertTrue(compiled >= stores.size * keys.size * statements("k").size * 3 / 4, "compiled: $compiled")
+    }
+
+    /**
+     * Oracle's delete of the nodes of a label, where nodes of another exist, tests each label by its text, not by the index
+     * over labels: each label's JSON string is read back from the test the query wrote, through its escapes and its
+     * literal's doubled quotes, however long, and whatever `"`, `\`, `'` or `")'` it holds; each test in turn.
+     */
+    @Test
+    fun aDeleteOnOracleTestsEachLabelByItsTextWhateverItHolds() {
+        val labels = keys.values + listOf("a\")'b", "a\\\")'b", "\\", "it's")
+        for (label in labels) {
+            val sql = OracleCypherCompiler("g").compile("MATCH (n:${name(label)}) WHERE EXISTS { MATCH (m:${name("$label 2")}) } DETACH DELETE n").sql
+            val shown = label.take(20)
+            assertTrue(OracleSql.holdsLabel("n1.labels", label) in sql, "the first label of $shown")
+            assertTrue(OracleSql.holdsLabel("n2.labels", "$label 2") in sql, "the second label of $shown")
+            assertTrue("JSON_EXISTS(n1.labels" !in sql && "JSON_EXISTS(n2.labels" !in sql, "a test by the index of $shown")
+        }
     }
 
     /** [text] as JSON writes a string, in its quotes. */

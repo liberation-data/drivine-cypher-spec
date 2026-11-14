@@ -1,6 +1,11 @@
 package org.drivine.cypher.store.schema
 
+import org.drivine.cypher.store.Stamps
+import org.drivine.cypher.store.ddl.OracleDdl
+import org.drivine.cypher.store.ddl.PostgresDdl
 import org.drivine.cypher.store.schema.SqlText.Escape
+import org.drivine.schema.FullTextIndexSpec
+import org.drivine.schema.RangeIndexSpec
 import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -179,6 +184,55 @@ class SqlTextTest {
         for (text in texts(alphabet, 20_000, 25_800) + listOf("(n1.props -> 'a''b')", "(n1.props -> '')", "(n1.props -> 'a')\n")) {
             val expected = regex.matchEntire(text)?.let { it.groupValues[1] to it.groupValues[2] }
             assertEquals(expected, SqlText.arrowRead(text), "<$text>")
+        }
+    }
+
+    /**
+     * The keys a full-text index's column reads on Postgres, each key's read and the stamp in turn, are those the regex
+     * `props ->>? '…'::text|(?<![\w'".])stamp(?![\w'"])` found: the stamp only where no word, quote or `.` is before it and
+     * no word or quote after it, at the column's ends too, and a read whose literal no `::text` follows passed over.
+     */
+    @Test
+    fun aPostgresFullTextIndexReadsTheKeysTheRegexFound() {
+        val regex = Regex("""props ->>? '($body)'::text|(?<![\w'".])stamp(?![\w'"])""")
+        val ddl = PostgresDdl("g")
+        val schema = PostgresSchema(ddl)
+        val spec = FullTextIndexSpec("Doc", listOf("never"))
+        val name = ddl.objectName(PostgresDdl.FULLTEXT, listOf("Doc", "never"))
+        val alphabet = listOf("props ->> '", "props -> '", "'::text", "'::jsonb", "'", "''", "stamp", "a", ".", "\"", " ", "_", "(", ")")
+        val cases = listOf(
+            "stamp", "(stamp)", "xstamp", "stampx", "\"stamp\"", "n.stamp", "'stamp'", "stamp.x", "props ->> 'stamp'::text",
+            "props -> 'a'::jsonb || props ->> 'b'::text", "COALESCE(stamp, ''::text) || COALESCE((props ->> 'a stamp'::text), ''::text)",
+        )
+        for (column in cases + texts(alphabet, 5_000, 2581)) {
+            val keys = regex.findAll(column).map { if (it.value == "stamp") Stamps.PROPERTY else SqlText.unquoted(it.groupValues[1]) }.distinct().toList()
+            val rows = listOf(
+                mapOf("object" to name, "type" to "i", "table" to "g_node", "unique" to false, "method" to "gin", "where" to "labels @> '[\"Doc\"]'::jsonb", "columns" to listOf(column)),
+            )
+            assertEquals(ItemForm.Mismatch(name, "an index over $keys", true), schema.formOf(spec, rows), "<$column>")
+        }
+    }
+
+    /**
+     * The label a column of an index on Oracle tests, `$[*]?(@ == "Person")` or `$?(@ == "Person")` in its `JSON_EXISTS2`'s
+     * literal, is the one the regex `\$(?:\[\*])?\?\(@ == ("…")\)` read whole: none where anything else is in the path. The
+     * index read is the one over the key alone, of every node, which tests no label.
+     */
+    @Test
+    fun anOracleIndexTestsTheLabelTheRegexRead() {
+        val regex = Regex("""\$(?:\[\*])?\?\(@ == ("$jsonBody")\)""")
+        val schema = OracleSchema(OracleDdl("g"))
+        val spec = RangeIndexSpec("Person", listOf("name"))
+        val name = schema.expectedColumns(spec).keys.first()
+        val alphabet = listOf("$[*]?(@ == \"", "$?(@ == \"", "\"", "\\", "a", ")", "\")", "'", " ")
+        for (path in texts(alphabet, 5_000, 2582) + listOf("$?(@ == \"A\")", "$[*]?(@ == \"A\")", "$[*]?(@ == \"A\") ", "$?(@ == \"A\\\")\")")) {
+            val label = regex.matchEntire(path)?.let { SqlText.jsonString(it.groupValues[1]) }
+            if (label == "Person") continue
+            val column = "JSON_EXISTS2(\"LABELS\" FORMAT OSON , '${path.replace("'", "''")}' FALSE ON ERROR TYPE(LAX) )"
+            val rows = listOf(mapOf("object" to name, "type" to "INDEX", "table" to "G_NODE", "uniqueness" to "NONUNIQUE", "columns" to listOf(column)))
+            // The index over the key alone, of every node: a column that tests no label is its own.
+            val form = if (label == null) ItemForm.Current else ItemForm.Mismatch(name, "an index over the nodes of $label", true)
+            assertEquals(form, schema.formOf(spec, rows), "<$path>")
         }
     }
 }

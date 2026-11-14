@@ -120,6 +120,21 @@ class OracleNestedLongReadTest {
         // So is one by a key with a bracket in it, which is no list's item.
         val bracket = OracleLongReads.routed("SELECT JSON_VALUE(JSON_QUERY(n1.props, '\$.m' RETURNING JSON), '\$.\"a[0]\".type()') AS c1 FROM g_node n1")
         assertEquals("SELECT JSON_VALUE(n1.props, '\$.m.\"a[0]\".type()') AS c1 FROM g_node n1", bracket)
+        // And by one whose bracket follows an escaped quote, or a doubled one, still in the key.
+        val escaped = OracleLongReads.routed("SELECT JSON_VALUE(JSON_QUERY(n1.props, '\$.m' RETURNING JSON), '\$.\"a\\\"[0\".\"''[\".type()') AS c1 FROM g_node n1")
+        assertEquals("SELECT JSON_VALUE(n1.props, '\$.m.\"a\\\"[0\".\"''[\".type()') AS c1 FROM g_node n1", escaped)
+    }
+
+    @Test
+    fun `only a read by a key path is routed - each step a key, bare or quoted and closed in the literal (#258)`() {
+        fun sql(path: String) = "SELECT JSON_QUERY(n1.props, '$path' RETURNING JSON) AS c1 FROM g_node n1"
+        for (path in listOf("\$.a", "\$.a_1.\"b c\"", "\$.\"a\\\"b\"", "\$.\"a\\\\\"", "\$.\"it''s\"", "\$.\"\"", "\$.\"[0]\".b")) {
+            assertTrue(OracleLongReads.routed(sql(path)).contains("COALESCE(JSON_QUERY(n1.props, '\$?("), path)
+        }
+        // No step, a step into a list's item, a key that starts with a digit, a step with no key, and a quoted key left open.
+        for (path in listOf("\$", "\$.a[0]", "\$[0].a", "\$.1a", "\$.a.", "\$..a", "\$.\"a", "\$.\"a\\\"", "\$.\"a''")) {
+            assertEquals(sql(path), OracleLongReads.routed(sql(path)), path)
+        }
     }
 
     @Test
