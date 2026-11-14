@@ -8312,6 +8312,54 @@ forms:
       - {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "name": "Chunk_embedding_vector", "dimensions": 384, "similarity": "COSINE"}
     items:
       - {spec: {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["embedding"], "options": {"dimensions": 384, "similarity": "COSINE"}}, form: "current"}
+  - name: "Oracle: a vector index over a property whose name begins with $"
+    description: "Made by the module's own DDL: its trigger reads the property by the key it is held at, `$x` at `$$x`. Current, as the module made it (#266)."
+    store: "oracle"
+    listing: "indexes.VECTOR_INDEX"
+    rows:
+      - {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["$x"], "name": "Chunk_$x_vector", "details": {"form": 2, "dimensions": 384, "similarity": "COSINE"}, "status": null}
+      - {"object": "DRIVINE_V2_CHUNKX_7B5C9367", "type": "TABLE", "table": null, "uniqueness": null, "indexType": null, "columns": null, "tableColumns": ["NID NUMBER", "EMBEDDING VECTOR"], "source": null}
+      - {"object": "DRIVINE_V2_CHUNKX_7B5C9367_I", "type": "INDEX", "table": "DRIVINE_V2_CHUNKX_7B5C9367", "uniqueness": "NONUNIQUE", "indexType": "VECTOR", "columns": ["EMBEDDING"], "tableColumns": null, "source": null}
+      - {"object": "DRIVINE_V2_CHUNKX_7B5C9367_T", "type": "TRIGGER", "table": "DRIVINE_NODE", "uniqueness": null, "indexType": null, "columns": null, "tableColumns": null, "source": ["TRIGGER drivine_v2_Chunkx_7b5c9367_t AFTER INSERT OR UPDATE OF labels, props ON drivine_node FOR EACH ROW\n", "BEGIN\n", "    IF INSTR(',' || LTRIM(RTRIM(JSON_SERIALIZE(:NEW.labels), ']'), '[') || ',\"', ',\"Chunk\",\"') > 0 AND JSON_EXISTS(:NEW.props, '$.\"$$x\"') THEN\n", "                BEGIN\n", "            MERGE INTO drivine_v2_Chunkx_7b5c9367 s USING (SELECT :NEW.nid AS nid, TO_VECTOR(JSON_QUERY(:NEW.props, '$.\"$$x\"' RETURNING CLOB)) AS embedding FROM dual) n ON (s.nid = n.nid)\n", "WHEN MATCHED THEN UPDATE SET s.embedding = n.embedding\n", "WHEN NOT MATCHED THEN INSERT (nid, embedding) VALUES (n.nid, n.embedding);\n", "        EXCEPTION WHEN OTHERS THEN\n", "            -- Not a payload the column takes: the node is kept, and left out of the table, as the graph engines leave it out of the index.\n", "            DELETE FROM drivine_v2_Chunkx_7b5c9367 WHERE nid = :NEW.nid;\n", "        END;\n", "    ELSE\n", "        DELETE FROM drivine_v2_Chunkx_7b5c9367 WHERE nid = :NEW.nid;\n", "    END IF;\n", "END;"]}
+    listed:
+      - {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["$x"], "name": "Chunk_$x_vector", "dimensions": 384, "similarity": "COSINE"}
+    items:
+      - {spec: {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["$x"], "options": {"dimensions": 384, "similarity": "COSINE"}}, form: "current"}
+  - name: "Oracle: a full-text index over properties whose names hold a quote and begin with $"
+    description: "Made by the module's own DDL: its trigger reads each property by the key it is held at, `$x` at `$$x`, in a literal whose quotes are doubled, `'$.\"it''s\"'`. Current, as the module made it (#266)."
+    store: "oracle"
+    listing: "indexes.FULLTEXT_INDEX"
+    rows:
+      - {"kind": "FULLTEXT_INDEX", "label": "Doc", "properties": ["it's", "$x"], "name": "Doc_it's_$x_fulltext", "details": {"form": 2}, "status": null}
+      - {"object": "DRIVINE_T2_DOCITSX_49C8CAF5", "type": "TABLE", "table": null, "uniqueness": null, "indexType": null, "columns": null, "tableColumns": ["NID NUMBER", "DOC JSON"], "source": null}
+      - {"object": "DRIVINE_T2_DOCITSX_49C8CAF5_I", "type": "INDEX", "table": "DRIVINE_T2_DOCITSX_49C8CAF5", "uniqueness": "NONUNIQUE", "indexType": "DOMAIN", "columns": ["DOC"], "tableColumns": null, "source": null}
+      - {"object": "DRIVINE_T2_DOCITSX_49C8CAF5_T", "type": "TRIGGER", "table": "DRIVINE_NODE", "uniqueness": null, "indexType": null, "columns": null, "tableColumns": null, "source": ["TRIGGER drivine_t2_Docitsx_49c8caf5_t AFTER INSERT OR UPDATE OF labels, props ON drivine_node FOR EACH ROW\n", "BEGIN\n", "    IF INSTR(',' || LTRIM(RTRIM(JSON_SERIALIZE(:NEW.labels), ']'), '[') || ',\"', ',\"Doc\",\"') > 0 THEN\n", "        MERGE INTO drivine_t2_Docitsx_49c8caf5 s USING (SELECT :NEW.nid AS nid, JSON_OBJECT('it''s' VALUE COALESCE(JSON_VALUE(:NEW.props, '$.\"it''s\".v' RETURNING CLOB), JSON_VALUE(:NEW.props, '$.\"it''s\"' RETURNING CLOB)), '$x' VALUE COALESCE(JSON_VALUE(:NEW.props, '$.\"$$x\".v' RETURNING CLOB), JSON_VALUE(:NEW.props, '$.\"$$x\"' RETURNING CLOB)) ABSENT ON NULL RETURNING JSON) AS doc FROM dual) n ON (s.nid = n.nid)\n", "WHEN MATCHED THEN UPDATE SET s.doc = n.doc\n", "WHEN NOT MATCHED THEN INSERT (nid, doc) VALUES (n.nid, n.doc);\n", "    ELSE\n", "        DELETE FROM drivine_t2_Docitsx_49c8caf5 WHERE nid = :NEW.nid;\n", "    END IF;\n", "END;"]}
+    listed:
+      - {"kind": "FULLTEXT_INDEX", "label": "Doc", "properties": ["it's", "$x"], "name": "Doc_it's_$x_fulltext"}
+    items:
+      - {spec: {"kind": "FULLTEXT_INDEX", "label": "Doc", "properties": ["it's", "$x"]}, form: "current"}
+  - name: "Postgres: a vector index over a property whose name begins with $"
+    description: "Made by the module's own DDL: its index reads each property by the key it is held at, `$x` at `$$x`. Current, as the module made it (#266)."
+    store: "postgres"
+    listing: "indexes.VECTOR_INDEX"
+    rows:
+      - {"kind": "VECTOR_INDEX", "name": "Chunk_$x_vector", "label": "Chunk", "details": {"form": 2, "dimensions": 384, "similarity": "COSINE"}, "properties": ["$x"]}
+      - {"type": "i", "table": "drivine_node", "where": "labels @> '[\"Chunk\"]'::jsonb AND jsonb_typeof(props -> '$$x'::text) = 'array'::text AND jsonb_array_length(props -> '$$x'::text) = 384", "method": "hnsw", "object": "drivine_v2_chunkx_7b5c9367", "unique": false, "columns": ["((((props -> '$$x'::text)::text))::vector(384))"], "opclasses": ["vector_cosine_ops"]}
+    listed:
+      - {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["$x"], "name": "Chunk_$x_vector", "dimensions": 384, "similarity": "COSINE"}
+    items:
+      - {spec: {"kind": "VECTOR_INDEX", "label": "Chunk", "properties": ["$x"], "options": {"dimensions": 384, "similarity": "COSINE"}}, form: "current"}
+  - name: "Postgres: a full-text index over properties whose names hold a quote and begin with $"
+    description: "Made by the module's own DDL: its index reads each property by the key it is held at, `$x` at `$$x`. Current, as the module made it (#266)."
+    store: "postgres"
+    listing: "indexes.FULLTEXT_INDEX"
+    rows:
+      - {"kind": "FULLTEXT_INDEX", "name": "Doc_it's_$x_fulltext", "label": "Doc", "details": {"form": 2}, "properties": ["it's", "$x"]}
+      - {"type": "i", "table": "drivine_node", "where": "labels @> '[\"Doc\"]'::jsonb", "method": "gin", "object": "drivine_t2_docitsx_49c8caf5", "unique": false, "columns": ["lower((COALESCE(COALESCE((props -> 'it''s'::text) ->> 'v'::text, props ->> 'it''s'::text), ''::text) || ' '::text) || COALESCE(COALESCE((props -> '$$x'::text) ->> 'v'::text, props ->> '$$x'::text), ''::text))"], "opclasses": ["gin_trgm_ops"]}
+    listed:
+      - {"kind": "FULLTEXT_INDEX", "label": "Doc", "properties": ["it's", "$x"], "name": "Doc_it's_$x_fulltext"}
+    items:
+      - {spec: {"kind": "FULLTEXT_INDEX", "label": "Doc", "properties": ["it's", "$x"]}, form: "current"}
   - name: "Postgres: a partitioned table under a constraint's name"
     description: "A relation Postgres names as it names an index, and no index."
     store: "postgres"
