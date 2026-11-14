@@ -88,7 +88,11 @@ class TemporalArithmeticStoredTest {
         ).forEach { cypher ->
             compilers.forEach { compiler ->
                 val sql = compiler.compile(cypher, mapOf("a" to 2, "b" to 3)).sql
-                assertFalse(tested(sql), "${compiler::class.simpleName} $cypher:\n$sql")
+                // On SQLite a sum of durations is the host function's, not refused (#275).
+                if (compiler is SqliteCypherCompiler && "duration('PT1H')" in cypher) {
+                    assertFalse(refusal in sql, "$cypher:\n$sql")
+                    assertTrue("drivine_temporal_arithmetic('+', " in sql, "$cypher:\n$sql")
+                } else assertFalse(tested(sql), "${compiler::class.simpleName} $cypher:\n$sql")
             }
         }
     }

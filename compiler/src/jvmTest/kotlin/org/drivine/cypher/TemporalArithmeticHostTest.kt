@@ -59,7 +59,7 @@ class TemporalArithmeticHostTest {
 
     /**
      * Durations that move a moment past the years SQLite's text writes, which fails by name, where a time of day, which writes
-     * no year, takes them (#263). Beside a moment only: summed, the inline SQL's doubles leave tails.
+     * no year, takes them (#263). Summed too: a sum of durations is the host function's on SQLite (#275).
      */
     private val long = listOf("P10000Y", "-P10000Y", "PT87660000H")
 
@@ -75,7 +75,7 @@ class TemporalArithmeticHostTest {
                 cases += Triple("-", literal(kind, text), literal(Temporal.DURATION, d))
             } }
         }
-        durations.forEach { a -> durations.forEach { b ->
+        (durations + long).forEach { a -> (durations + long).forEach { b ->
             cases += Triple("+", literal(Temporal.DURATION, a), literal(Temporal.DURATION, b))
             cases += Triple("-", literal(Temporal.DURATION, a), literal(Temporal.DURATION, b))
         } }
@@ -132,6 +132,16 @@ class TemporalArithmeticHostTest {
         }
         assertEquals("null", inline("duration(\$d) / 2.5", mapOf("d" to null)))
         assertEquals(inline("duration('P1Y') / 2.5"), inline("duration('P1Y') / \$k", mapOf("k" to 2.5)))
+    }
+
+    @Test
+    fun `a sum of durations the statement gives by the host function gives null where either is null, and feeds what reads it (#275)`() {
+        listOf("duration(null) + duration('P1D')", "duration('P1D') - duration(null)", "duration(\$d) + duration('P1D')").forEach {
+            assertEquals("null", inline(it, mapOf("d" to null)), it)
+        }
+        assertEquals(inline("'PT87660000H0.000000001S'"), inline("toString(duration(\$d) + duration('PT0.000000001S'))", mapOf("d" to "PT87660000H")))
+        assertEquals("12", inline("(duration('P1D') + duration('PT12H')).hours"))
+        assertEquals(inline("'2024-01-02'"), inline("toString(date('2024-01-01') + (duration('PT20H') + duration('PT4H')))"))
     }
 
     @Test

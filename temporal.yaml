@@ -42,6 +42,20 @@ cases:
                   hours: (duration('P1D') + duration('PT12H')).hours,
                   doubled: (duration('PT1H') * 2).minutes}
         rows: [{endOfFebruary: 29, nextDay: 16, fortnightBefore: 2, days: 1, hours: 12, doubled: 120}]
+      - note: "Exactly, a nanosecond beside ten thousand years of hours: SQLite added the parts in doubles and lost it (#275)."
+        cypher: "RETURN [toString(duration('PT87660000H') + duration('PT0.000000001S')), toString(duration('PT87660000H') - duration('PT0.000000001S')), toString(duration('P10000Y') - duration('-P10000Y'))]"
+        rows: [["PT87660000H0.000000001S", "PT87659999H59M59.999999999S", "P20000Y"]]
+      - note: "A long duration a hair under a whole unit is cut toward zero, not rounded up by Postgres's numeric division to the next: in its text and its fields (#275). SQLite works the fields out in doubles, which round it up (#278)."
+        only: [neo4j, postgres, oracle]
+        cypher: "WITH duration('PT87659999H59M59.999999999S') AS d RETURN [d.hours, d.minutes, d.minutesOfHour, d.secondsOfMinute, toString(d)]"
+        rows: [[87659999, 5259599999, 59, 59, "PT87659999H59M59.999999999S"]]
+      - only: [sqlite]
+        cypher: "RETURN toString(duration('PT87659999H59M59.999999999S'))"
+        rows: ["PT87659999H59M59.999999999S"]
+      - note: "And the whole days a date takes of one: Oracle fails a hundred thousand days with ORA-01873 (#279)."
+        only: [neo4j, postgres, sqlite]
+        cypher: "RETURN toString(date('2024-01-01') + duration('PT2399999H59M59.999999999S'))"
+        rows: ["2297-10-15"]
       - cypher: "CREATE (:CyTemporal {id: 'a', day: date('2024-03-15')}), (:CyTemporal {id: 'b', day: date('2024-01-01')})"
       - note: "A moment read from the store, its kind told by its text."
         cypher: "MATCH (n:CyTemporal) RETURN (n.day + duration('P1D')).day ORDER BY n.id"
