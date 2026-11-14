@@ -806,8 +806,11 @@ tables:
             RETURN eq(JSON_ELEMENT_T.parse(JSON_SERIALIZE(cy_x RETURNING CLOB)), JSON_ELEMENT_T.parse(JSON_SERIALIZE(cy_y RETURNING CLOB)));
         END;
       - |-
-        CREATE OR REPLACE FUNCTION drivine_era(t VARCHAR2) RETURN VARCHAR2 DETERMINISTIC IS -- drivine:6b3612ebd3a2
+        CREATE OR REPLACE FUNCTION drivine_era(t VARCHAR2) RETURN VARCHAR2 DETERMINISTIC IS -- drivine:09f7d49aa2ed
         BEGIN
+            IF INSTR(t, '.') > 0 AND REGEXP_LIKE(t, '[.][0-9]{6}[0-9]{0,2}[1-9]') THEN
+                RAISE_APPLICATION_ERROR(-20421, 'A fraction of a second past the microsecond isn''t kept by the store''s time, so isn''t worked out yet (drivine4j#421, drivine-cypher-spec#246): ' || t);
+            END IF;
             IF ASCII(t) < 49 THEN
                 RETURN REGEXP_REPLACE(t, '^(-[0-9]{4}|0000)', TO_CHAR(TO_NUMBER(REGEXP_SUBSTR(t, '^-?[0-9]{4}')) - 1, 'FM0000'));
             END IF;
@@ -1036,10 +1039,13 @@ tables:
           RETURN eq(JSON_ELEMENT_T.parse(JSON_SERIALIZE(cy_x RETURNING CLOB)), JSON_ELEMENT_T.parse(JSON_SERIALIZE(cy_y RETURNING CLOB)));
       END;'; EXCEPTION WHEN e_denied THEN NULL; END;
                   END IF;
-                  SELECT COUNT(*) INTO v_made FROM user_objects o WHERE o.object_type = 'FUNCTION' AND o.object_name = 'DRIVINE_ERA' AND o.status = 'VALID' AND EXISTS (SELECT 1 FROM user_source s WHERE s.name = o.object_name AND s.type = 'FUNCTION' AND s.line = 1 AND INSTR(s.text, '-- drivine:6b3612ebd3a2') > 0);
+                  SELECT COUNT(*) INTO v_made FROM user_objects o WHERE o.object_type = 'FUNCTION' AND o.object_name = 'DRIVINE_ERA' AND o.status = 'VALID' AND EXISTS (SELECT 1 FROM user_source s WHERE s.name = o.object_name AND s.type = 'FUNCTION' AND s.line = 1 AND INSTR(s.text, '-- drivine:09f7d49aa2ed') > 0);
                   IF v_made = 0 THEN
-                      BEGIN EXECUTE IMMEDIATE 'CREATE OR REPLACE FUNCTION drivine_era(t VARCHAR2) RETURN VARCHAR2 DETERMINISTIC IS -- drivine:6b3612ebd3a2
+                      BEGIN EXECUTE IMMEDIATE 'CREATE OR REPLACE FUNCTION drivine_era(t VARCHAR2) RETURN VARCHAR2 DETERMINISTIC IS -- drivine:09f7d49aa2ed
       BEGIN
+          IF INSTR(t, ''.'') > 0 AND REGEXP_LIKE(t, ''[.][0-9]{6}[0-9]{0,2}[1-9]'') THEN
+              RAISE_APPLICATION_ERROR(-20421, ''A fraction of a second past the microsecond isn''''t kept by the store''''s time, so isn''''t worked out yet (drivine4j#421, drivine-cypher-spec#246): '' || t);
+          END IF;
           IF ASCII(t) < 49 THEN
               RETURN REGEXP_REPLACE(t, ''^(-[0-9]{4}|0000)'', TO_CHAR(TO_NUMBER(REGEXP_SUBSTR(t, ''^-?[0-9]{4}'')) - 1, ''FM0000''));
           END IF;
@@ -1121,7 +1127,7 @@ tables:
           RETURN digits(y + 1000000000, 10) || digits(m, 2) || digits(d, 2) || digits(TRUNC(u / 3600), 2) || digits(MOD(TRUNC(u / 60), 60), 2) || digits(MOD(u, 60), 2) || f || digits(o + 64800, 6);
       END;'; EXCEPTION WHEN e_denied THEN NULL; END;
                   END IF;
-                  SELECT COUNT(*) INTO v_made FROM user_objects o WHERE o.object_type = 'FUNCTION' AND o.object_name = 'DRIVINE_TEMPORAL_ARITH' AND o.status = 'VALID' AND EXISTS (SELECT 1 FROM user_source s WHERE s.name = o.object_name AND s.type = 'FUNCTION' AND s.line = 1 AND INSTR(s.text, '-- drivine:8cbe78decc60') > 0);
+                  SELECT COUNT(*) INTO v_made FROM user_objects o WHERE o.object_type = 'FUNCTION' AND o.object_name = 'DRIVINE_TEMPORAL_ARITH' AND o.status = 'VALID' AND EXISTS (SELECT 1 FROM user_source s WHERE s.name = o.object_name AND s.type = 'FUNCTION' AND s.line = 1 AND INSTR(s.text, '-- drivine:c69b6a8775c4') > 0);
                   IF v_made = 0 THEN
                       BEGIN EXECUTE IMMEDIATE <TemporalArithmeticFunction.oracleClob(drivine)>; EXCEPTION WHEN e_denied THEN NULL; END;
                   END IF;
