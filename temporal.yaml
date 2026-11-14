@@ -45,6 +45,9 @@ cases:
       - note: "Exactly, a nanosecond beside ten thousand years of hours: SQLite added the parts in doubles and lost it (#275)."
         cypher: "RETURN [toString(duration('PT87660000H') + duration('PT0.000000001S')), toString(duration('PT87660000H') - duration('PT0.000000001S')), toString(duration('P10000Y') - duration('-P10000Y'))]"
         rows: [["PT87660000H0.000000001S", "PT87659999H59M59.999999999S", "P20000Y"]]
+      - note: "A long duration a hair under a whole unit is cut toward zero, not rounded up by Postgres's numeric division to the next: in its text, its fields, and the whole days a date takes of it (#275)."
+        cypher: "WITH duration('PT87659999H59M59.999999999S') AS d RETURN [toString(date('2024-01-01') + duration('PT2399999H59M59.999999999S')), d.hours, d.minutes, d.minutesOfHour, d.secondsOfMinute, toString(d)]"
+        rows: [["2297-10-15", 87659999, 5259599999, 59, 59, "PT87659999H59M59.999999999S"]]
       - cypher: "CREATE (:CyTemporal {id: 'a', day: date('2024-03-15')}), (:CyTemporal {id: 'b', day: date('2024-01-01')})"
       - note: "A moment read from the store, its kind told by its text."
         cypher: "MATCH (n:CyTemporal) RETURN (n.day + duration('P1D')).day ORDER BY n.id"
