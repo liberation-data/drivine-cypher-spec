@@ -8,11 +8,11 @@ import org.drivine.cypher.host.HostArgs
 import org.drivine.cypher.host.HostResult
 import org.drivine.cypher.host.SqlType
 import org.drivine.cypher.json.CypherJson
-import org.drivine.cypher.json.JsonNode
 import org.drivine.cypher.json.ObjectNode
 import org.drivine.cypher.sql.Temporal
 import org.drivine.cypher.sql.TemporalArithmeticFunction
 import org.drivine.cypher.sql.Temporals
+import org.drivine.cypher.store.SqliteCypherValues
 import org.drivine.cypher.store.SqliteTimestamps
 import org.drivine.cypher.store.ValueLayout
 
@@ -23,12 +23,13 @@ import org.drivine.cypher.store.ValueLayout
  * none, so this works out the same steps the inline SQLite SQL takes, in the same order, by the same functions it calls
  * ([HostTemporal]): a moment moved by `add_months`, then `add_time` of the days, whole seconds and nanoseconds, each step
  * written as SQLite's timestamp is, to the microsecond, and the moment written as `Temporals.format` writes it; a duration's
- * parts summed or scaled, and written as `Temporals.durationText` writes them, exactly. A test runs it beside the inline SQL
+ * parts summed or scaled, and written as `Temporals.durationText` writes them, exactly, to nine places. A test runs it beside the inline SQL
  * over generated values, so the inline builder stays what it is checked against.
  *
- * x and y are JSON texts, or SQL numbers. Either null, SQL's or JSON's, gives null. A pair of kinds Cypher has no arithmetic of
- * fails by name ([TemporalArithmeticFunction.UNDEFINED]), as does a moment whose year is past 9999 or before -9999
- * ([Temporals.LONG_YEAR]), which the inline SQL refuses as it writes the moment. The answer is the tag the arithmetic makes, as JSON text.
+ * x and y are JSON texts, or SQL numbers. Either null, SQL's or JSON's, or an empty text, gives null. A pair of kinds Cypher has
+ * no arithmetic of fails by name ([TemporalArithmeticFunction.UNDEFINED]), as does a moment whose year is past 9999 or before -9999
+ * ([Temporals.LONG_YEAR]), which the inline SQL refuses as it writes the moment. The answer is the tag the arithmetic makes, as
+ * JSON text.
  */
 internal object HostTemporalArithmetic {
 
@@ -58,15 +59,15 @@ internal object HostTemporalArithmetic {
     /** Division's quotient, `1 / k`, to more places than a store's number holds. */
     private val QUOTIENT = DecimalMode(40, RoundingMode.ROUND_HALF_AWAY_FROM_ZERO)
 
-    /** The side at [i]: null where it is null, SQL's or JSON's. */
+    /** The side at [i]: null where it is null, SQL's or JSON's, or an empty text. */
     private fun side(args: HostArgs, i: Int): Side? = when (args.type(i)) {
         SqlType.NULL -> null
         SqlType.INTEGER -> args.long(i).let { Side(null, null, BigDecimal.fromLong(it), "number") }
         SqlType.FLOAT -> args.double(i).let { Side(null, null, BigDecimal.parseString(it.toString()), "number") }
         else -> {
-            val node: JsonNode = CypherJson.readTree(args.text(i)!!)
+            // As the module's other functions of JSON values read one: an empty text is no value.
+            val node = SqliteCypherValues.read(args.text(i)) ?: return null
             when {
-                node.isNull -> null
                 node.isNumber -> Side(null, null, BigDecimal.parseString(node.asText()), "number")
                 node is ObjectNode && node[ValueLayout.KIND]?.isTextual == true -> {
                     val word = node[ValueLayout.KIND]!!.textValue()!!
@@ -154,12 +155,12 @@ internal object HostTemporalArithmetic {
         }
     }
 
-    /** The duration text of [x] and [y] added, or with [sign] -1 [y] taken from [x], as `Temporals.sum` writes it. */
+    /** The duration text of [x] and [y] added, or with [sign] -1 [y] taken from [x], as `Temporals.sum` writes it: to nine places. */
     private fun sum(x: Side, y: Side, sign: Int): String {
         val (m1, d1, s1) = Temporals.durationParts(x.v!!)
         val (m2, d2, s2) = Temporals.durationParts(y.v!!)
         val k = BigDecimal.fromInt(sign)
-        return Temporals.durationText(m1 + m2 * k, d1 + d2 * k, s1 + s2 * k)
+        return Temporals.durationText(m1 + m2 * k, d1 + d2 * k, s1 + s2 * k, PLACES)
     }
 
     /** The duration text of [duration] times [factor], as `Temporals.times` writes it: each part to nine places, as its `number` does. */

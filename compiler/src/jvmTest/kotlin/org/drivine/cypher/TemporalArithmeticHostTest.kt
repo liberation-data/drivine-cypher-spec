@@ -53,9 +53,10 @@ class TemporalArithmeticHostTest {
     private val durations = listOf(
         "P1M", "P1Y", "-P1M2DT3H", "P1M2DT3H", "-P2M1DT30M", "PT45M", "PT14H", "PT25H", "PT1S", "PT0.5S", "-PT0.000001S", "P1W", "P1DT2H",
         "PT30M0.5S", "P1Y2M3DT4H5M6.789S", "-P1Y2M3W4DT5H6M7.5S", "PT0S", "P0.5M", "P1.5D", "PT24H", "-PT24H",
+        "PT-1.5S", "-PT1M0.5S", "-PT25H0.5S", "P1.5M", "-P0.5M", "PT1.5H", "PT0.9999999999S", "PT0.0000000001S",
     )
 
-    private val numbers = listOf("2", "3", "-1", "0.5", "1.5", "2.5", "-7", "10")
+    private val numbers = listOf("2", "3", "-1", "0.5", "1.5", "2.5", "-7", "10", "1e3", "2.5E-1")
 
     /**
      * The cases where the inline SQLite SQL is wrong, and the host function gives Neo4j's answer: each fails this test where it
@@ -118,6 +119,20 @@ class TemporalArithmeticHostTest {
         }
     }
 
+    @Test
+    fun `a number given as a SQL integer or float is the number its JSON text is, and an empty text is no value`() {
+        val month = tag(Temporal.DURATION, "P1M")
+        listOf<Pair<Any, String>>(3L to "3", 1.5 to "1.5", 1e-7 to "1e-7", 1e20 to "1e20", -7L to "-7").forEach { (number, json) ->
+            listOf("*", "/").forEach { op ->
+                assertEquals(call(op, month, json), call(op, month, number), "$op $number")
+            }
+            assertEquals(call("*", json, month), call("*", number, month), "$number *")
+        }
+        assertEquals("{\"\$t\":\"duration\",\"v\":\"P3M\"}", call("*", month, 3L))
+        assertEquals(null, call("+", month, ""))
+        assertEquals(null, call("*", " ", month))
+    }
+
     /** The Cypher literal of [text] of [kind]. */
     private fun literal(kind: Temporal, text: String) = "${kind.function}('$text')"
 
@@ -142,9 +157,10 @@ class TemporalArithmeticHostTest {
     /** What the host function gives for [op] of the sides [x] and [y]: its tag as JSON text, or its failure. */
     private fun host(op: String, x: String, y: String): String = runCatching { call(op, stored(x), stored(y)) }.fold({ normal(it) }, { "fails" })
 
-    private fun call(op: String, x: String?, y: String?): String? =
+    /** The host function of [op], [x] and [y], each a text, a SQL number ([Long] or [Double]), or null. */
+    private fun call(op: String, x: Any?, y: Any?): String? =
         connection.prepareStatement("SELECT ${TemporalArithmeticFunction.HOST}(?, ?, ?)").use { s ->
-            s.setString(1, op); s.setString(2, x); s.setString(3, y)
+            s.setString(1, op); s.setObject(2, x); s.setObject(3, y)
             s.executeQuery().use { r -> r.next(); r.getString(1) }
         }
 

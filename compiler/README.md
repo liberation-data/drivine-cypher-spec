@@ -96,6 +96,8 @@ It takes `readsAsText` too, false where left out, the Kotlin form of the request
 A host with no Kotlin types calls `CompileJson.compile(request)`, JSON text in and out. The wasm build exports it as
 `compile`, and the shared library as `drivine_compile`. Each also exports the SQLite host functions' version the
 compiled SQL needs, `hostVersion()` and `drivine_host_version()`: see [The host functions' version](#the-host-functions-version).
+The wasm build exports SQLite's host function of temporal arithmetic too, `temporalArithmetic(operator, x, y)`, for a host
+that registers it as a call of the module's code (see [The SQLite extension](#the-sqlite-extension)).
 
 ```json
 {"store": "oracle",
@@ -499,6 +501,7 @@ The spec's `fragments.yaml` pins each case's terms on each store and the rows Ne
 const { compile } = require('@liberation-data/drivine-cypher-compiler');      // or: import { compile } from '@liberation-data/drivine-cypher-compiler'
 const answer = JSON.parse(compile(JSON.stringify({ store: 'sqlite', graph: { name: 'g' }, cypher: 'RETURN 1' })));
 const { hostVersion } = require('@liberation-data/drivine-cypher-compiler');  // what SELECT drivine_host_version() must give
+const { temporalArithmetic } = require('@liberation-data/drivine-cypher-compiler');  // registered as drivine_temporal_arithmetic(operator, x, y)
 ```
 
 The CommonJS entry (`npm/index.cjs`) loads the wasm synchronously. Kotlin/Wasm writes only an ES module loader, with a
@@ -587,6 +590,7 @@ on a text that is no JSON, and takes an empty one as no value, as drivine4j's do
 | `drivine_regex_group(text, pattern, group)` | the text the group of that number matches where the pattern first matches (0 the whole match), as Postgres's `regexp_match` gives it; null where it matches nowhere, the group takes no part or is past the pattern's, or the text or pattern is null. A null group is 0; a negative one fails the statement. Deterministic. |
 | `drivine_regexp_replace(text, pattern, replacement)` | the text with each match replaced, `\1` in the replacement naming a group as Postgres's and Oracle's do, anything else itself; null where any is null. A match whose replacement names a group the pattern hasn't fails the statement, as Java's does. Deterministic. |
 | `drivine_temporal(operation, …)` | what compiled SQL works out of a timestamp, the text of a wall clock to the microsecond (`2024-03-15T10:30:00.000000`), as java.time works it out, by its operation: `local(text, kind)` and `utc(text, kind)`, the wall clock an ISO text of a kind (`DATE_TIME` …) reads, its offset (`Z`, `±hh:mm` or `±hhmm`; one with seconds is none) left out or moved to UTC; `extract(timestamp, field)`, `YEAR`, `MONTH`, `DAY`, `HOUR`, `MINUTE` or `NANOSECOND_OF_MINUTE` (no `SECOND`); `day_of_week(timestamp)`; `add_months(timestamp, months)`; `add_time(timestamp, days, seconds, nanos)`, added as Java's `plusDays`, `plusSeconds` and `plusNanos` add them; `months_between(from, to)`; `seconds_between(from, to)`, whole seconds, floored, and `nanos_between(from, to)`, the nanoseconds past them, 0 to 999,999,999, so the two are exact over the whole range of years; `truncate(timestamp, unit)`. Whole numbers each, but for the timestamps; a count given as a float or a text is read as a decimal rounded half away from zero. A timestamp it writes keeps the microsecond, cut, never rounded. Null where an argument after the operation is null; a text that is no temporal value fails the statement, naming it. Deterministic. |
+| `drivine_temporal_arithmetic(operator, x, y)` | Cypher's `x + y`, `x - y`, `x * y` or `x / y` where either is the tag of a temporal value read from the store, as JSON text, as Postgres and Oracle work it out by the function they keep (`TemporalArithmeticFunction`, drivine4j#418): a moment moved by a duration, as the inline SQLite SQL moves one, to the microsecond; two durations added or taken away, and a duration times or divided by a number, exactly, each part to nine places. `x` and `y` are JSON texts or SQL numbers; null where either is null, SQL's or JSON's. A pair Cypher has no arithmetic of fails the statement, naming it. The wasm build exports it as `temporalArithmetic(operator, x, y)`, a JSON text or null for each side, which throws where the function fails. Deterministic. |
 | `drivine_trunc(number)` | the number with its fraction cut off, a whole number where one holds it, as Postgres's and Oracle's `TRUNC` give it; a float within two units of its last place of a whole number is that whole number (SQLite's binary misses `33.001 * 1e6` by that much); past a whole number's range, the float. Null of null. Deterministic. |
 | `drivine_to_char(value, pattern)` | a timestamp in a pattern of `YYYY`, `MM`, `DD`, `HH24`, `MI`, `SS`, `IYYY`, `IW`, `DDD` and quoted text, its year signed before 0 (`-0044`), or a number in an `FM` pattern (`FM0000`, `FM9999999999990.999999999`), rounded half away from zero, as Postgres's and Oracle's `to_char` write those compiled SQL writes; null where either is null. Deterministic. |
 | `drivine_host_version()` | the version of these functions' forms, `SqliteFunctions.HOST_VERSION`, which a host checks: see below. Deterministic. |
@@ -597,7 +601,7 @@ on a text that is no JSON, and takes an empty one as no value, as drivine4j's do
 #### The host functions' version
 
 The compiled SQL calls the host functions in the forms the spec's `host.yaml` pins, which change now and then
-(`drivine_temporal`'s `add_time` took a float of seconds before version 1). `SqliteFunctions.HOST_VERSION` is the version
+(`drivine_temporal`'s `add_time` took a float of seconds before version 1; version 2 adds `drivine_temporal_arithmetic`). `SqliteFunctions.HOST_VERSION` is the version
 of the forms the compiler's SQL calls, bumped with each change to them, in the same change as their `host.yaml` steps;
 `drivine_host_version()` gives the version of the functions registered. A host that registers the functions itself
 (drivine4j on xerial, the TypeScript and Python libraries) checks the two agree once on each connection, right after
@@ -607,8 +611,8 @@ functions) is not the compiler's. A host with no Kotlin types reads the compiler
 in C or `hostVersion()` in wasm, and words the failure as `HostCheck` does:
 
 ```text
-SQLite's drivine_ functions are version 0, the compiler needs 1: register the module's host functions
-SQLite has no drivine_host_version(): its drivine_ functions are older than version 1, the compiler's: register the module's host functions
+SQLite's drivine_ functions are version 1, the compiler needs 2: register the module's host functions
+SQLite has no drivine_host_version(): its drivine_ functions are older than version 2, the compiler's: register the module's host functions
 ```
 
 The extension registers the module's own functions, so on a connection that loaded it the two always agree.

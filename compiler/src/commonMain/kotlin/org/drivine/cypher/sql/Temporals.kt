@@ -1060,7 +1060,8 @@ class Temporals(
 
         /**
          * The duration text of the parts [m0] months, [d0] days and [s0] seconds, exactly, as [text] of parts writes one: a
-         * fraction of a month goes to the days as 30.436875 of them, and of a day to the seconds.
+         * fraction of a month goes to the days as 30.436875 of them, and of a day to the seconds. With [places], the seconds and
+         * each part are rounded half away from zero to that many places, as the builder's `number` writes them.
          */
         internal fun durationText(m0: BigDecimal, d0: BigDecimal, s0: BigDecimal, places: Long? = null): String {
             fun dec(text: String) = BigDecimal.parseString(text)
