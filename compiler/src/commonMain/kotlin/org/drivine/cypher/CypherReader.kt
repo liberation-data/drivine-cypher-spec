@@ -195,7 +195,7 @@ object CypherReader {
                 when (child) {
                     is OC_ReadingClauseContext -> clauses += reading(child)
                     is OC_UpdatingClauseContext -> clauses += updating(child)
-                    is OC_WithContext -> clauses += Clause.With(projection(child.oC_ProjectionBody()), child.oC_Where()?.let { expression(it.oC_Expression()) })
+                    is OC_WithContext -> clauses += Clause.With(projection(child.oC_ProjectionBody(), with = true), child.oC_Where()?.let { expression(it.oC_Expression()) })
                 }
             }
         }
@@ -277,7 +277,12 @@ object CypherReader {
     /** Reading clauses that return nothing, the body of an `EXISTS { … }` or a `COUNT { … }`. */
     private fun readings(context: OC_SubqueryReadingsContext): Query = Query(context.oC_ReadingClause().map(::reading))
 
-    private fun projection(context: OC_ProjectionBodyContext): Projection {
+    /**
+     * A `WITH`'s or a `RETURN`'s items, order, `SKIP` and `LIMIT`. Of a `WITH`, [with], an item that is not a variable or a
+     * map projection is refused without an alias, as Neo4j refuses it (its 42N21): `WITH a, count(*)`. A `RETURN` names it
+     * by its text.
+     */
+    private fun projection(context: OC_ProjectionBodyContext, with: Boolean = false): Projection {
         val items = context.oC_ProjectionItems()
         return Projection(
             distinct = context.DISTINCT() != null,
@@ -286,6 +291,9 @@ object CypherReader {
             // `ORDER BY p.name` after `RETURN p {.name}, count(*)` reads the item.
             items = items.oC_ProjectionItem().map { item ->
                 val expression = expression(item.oC_Expression()!!)
+                if (with && item.oC_Variable() == null && expression !is Expression.Variable && expression !is Expression.MapProjection) {
+                    throw CompilerException("Expression in WITH must be aliased (use AS), as in Neo4j: ${item.oC_Expression()!!.text} has no alias.")
+                }
                 Projection.Item(expression, item.oC_Variable()?.let(::name) ?: (expression as? Expression.Variable)?.name ?: (expression as? Expression.MapProjection)?.variable ?: item.oC_Expression()!!.text)
             },
             orderBy = context.oC_Order()?.oC_SortItem()?.map { sort ->
