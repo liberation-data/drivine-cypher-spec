@@ -194,9 +194,9 @@ class LongQuotedTextTest {
         fun name(of: SchemaItemSpec) = (if (of is VectorIndexSpec) ddl.vectors(of.label, of.property) else ddl.texts(of.label, of.properties)) + "_t"
         fun rows(trigger: String, source: String) = listOf(mapOf("object" to trigger, "type" to "TRIGGER", "table" to "G_NODE", "source" to source))
         for ((what, key) in keys) {
-            val path = "'${sql("$." + json(key))}'"
-            val fullText = "x := JSON_VALUE(:NEW.props, $path RETURNING CLOB);"
-            val vector = "x := TO_VECTOR(JSON_QUERY(:NEW.props, $path RETURNING CLOB));"
+            // As the side tables' triggers read it ([OracleSql.searchedText], [OracleSql.embedding]): a plain key's path bare, `'$.kk…'`.
+            val fullText = "x := ${OracleSql.searchedText(":NEW", key)};"
+            val vector = "x := ${OracleSql.embedding(":NEW", key)};"
             val triggers = listOf(
                 Triple(FullTextIndexSpec("Doc", listOf(key)), FullTextIndexSpec("Doc", listOf("body")), fullText),
                 Triple(VectorIndexSpec("Doc", key, 3), VectorIndexSpec("Doc", "body", 3), vector),
