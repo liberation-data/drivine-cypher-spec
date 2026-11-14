@@ -62,6 +62,9 @@ class PostgresTemporalSql(
         else -> local(text, kind)
     }
 
+    /** Postgres's cast of a text that is no timestamp fails, quoting it: see [microsWritten]. */
+    override fun heldMicros(text: String, kinds: List<Temporal>) = microsWritten(text)
+
     /**
      * Postgres reads no year before 1 in ISO text, but reads one BC after it: so 1 BC, the year `0000`, is `0001 … BC`,
      * and 45 BC, the year `-0044`, is `0045 … BC`. See [bcOnly].

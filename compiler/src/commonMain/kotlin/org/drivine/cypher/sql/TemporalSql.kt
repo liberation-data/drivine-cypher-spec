@@ -235,6 +235,24 @@ abstract class TemporalSql(protected val shared: (List<String>, (List<String>) -
     /** The remainder of the whole numbers [a] by [b], of [a]'s sign. */
     open fun mod(a: String, b: String) = "MOD($a, $b)"
 
+    /**
+     * The text [text] of one of [kinds], read so that the store's [local] or [utc] of it fails by name where its fraction of a
+     * second goes past the microsecond, the text written once (drivine4j#421); null where the store can't, and [Temporals]
+     * tests it first, which writes it out twice where nothing binds it.
+     */
+    open fun heldMicros(text: String, kinds: List<Temporal>): String? = null
+
+    /**
+     * [text], or where its fraction of a second goes past the microsecond, the text with [SUB_MICRO_WRITTEN] in place of its
+     * nanoseconds, the text written once: for a store whose read of a text that is no temporal value fails, quoting the text,
+     * so the failure names why (drivine4j#421). A text read as it is is unchanged. The words are few, as a statement that
+     * reads a value beside a walk writes them in each copy of it.
+     */
+    protected fun microsWritten(text: String) = replace(text, "'([.][0-9]{6})[0-9]{0,2}[1-9][0-9]*'", "'\\1 $SUB_MICRO_WRITTEN'")
+
+    /** What [microsWritten] writes in place of a nanosecond past the microsecond. */
+    protected val SUB_MICRO_WRITTEN = "past the microsecond (drivine4j#421)"
+
     /** The whole quotient of the whole numbers [a], at least 0, by [b]. */
     abstract fun div(a: String, b: String): String
 

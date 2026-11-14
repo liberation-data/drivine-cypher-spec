@@ -2679,6 +2679,10 @@ class OracleCypherCompiler(
         fun eraFunction(name: String): String = listOf(
             "FUNCTION $name(t VARCHAR2) RETURN VARCHAR2 DETERMINISTIC IS",
             "BEGIN",
+            // A nanosecond past the microsecond, which Oracle's timestamp as it is written (FF6) would drop: drivine4j#421.
+            "    IF INSTR(t, '.') > 0 AND REGEXP_LIKE(t, '${Temporals.SUB_MICRO_DIGITS}') THEN",
+            "        RAISE_APPLICATION_ERROR(-20421, '${Temporals.SUB_MICRO.replace("'", "''")} ' || t);",
+            "    END IF;",
             "    IF ASCII(t) < ${TemporalSql.BC_BELOW} THEN",
             "        RETURN REGEXP_REPLACE(t, '^(-[0-9]{4}|0000)', TO_CHAR(TO_NUMBER(REGEXP_SUBSTR(t, '^-?[0-9]{4}')) - 1, 'FM0000'));",
             "    END IF;",

@@ -40,14 +40,18 @@ class Temporals(
      * SQLite's is written to six places, so each cut or rounded the rest away (drivine4j#421). A store's timestamp is read only
      * of a text held so ([local], [utc]); the text itself keeps its nine digits, compared and sorted by its key.
      */
-    private fun held(text: String): String {
+    private fun held(text: String, kinds: List<Temporal>): String {
         val refusing = refuse ?: return text
         // A text the compiler writes holds six digits at most ([written]), and one written in the statement is read as it compiles.
         if (text in written || text == "NULL") return text
         LITERAL.matchEntire(text)?.let { quoted ->
             return if (SUB_MICRO_REGEX.containsMatchIn(quoted.groupValues[1].replace("''", "'"))) refusing(SUB_MICRO, text) else text
         }
-        return shared(listOf(text)) { (t) -> "CASE WHEN ${sql.matches(t, literal(sql.regex(SUB_MICRO_DIGITS)))} THEN ${refusing(SUB_MICRO, t)} ELSE $t END" }
+        // A store whose own read of the text refuses it reads it once ([TemporalSql.holdsMicros]); else it is tested here,
+        // the message naming no text, so where nothing binds it the text is written out twice, not three times.
+        if (kinds.all { it == Temporal.DATE }) return text
+        sql.heldMicros(text, kinds)?.let { return it }
+        return shared(listOf(text)) { (t) -> "CASE WHEN ${sql.matches(t, literal(sql.regex(SUB_MICRO_DIGITS)))} THEN ${refusing(SUB_MICRO, "''")} ELSE $t END" }
     }
 
     /**
@@ -68,11 +72,24 @@ class Temporals(
 
     private fun written(text: String) = text.also { written += it }
 
+    /**
+     * The duration text [text], or the statement failing by name where its seconds go past the microsecond, as it moves a
+     * moment ([add]): a store's own read takes no duration, so it is tested here, a written one as it compiles.
+     */
+    private fun heldDuration(text: String): String {
+        val refusing = refuse ?: return text
+        if (text == "NULL") return text
+        LITERAL.matchEntire(text)?.let { quoted ->
+            return if (SUB_MICRO_REGEX.containsMatchIn(quoted.groupValues[1].replace("''", "'"))) refusing(SUB_MICRO, text) else text
+        }
+        return shared(listOf(text)) { (t) -> "CASE WHEN ${sql.matches(t, literal(sql.regex(SUB_MICRO_DIGITS)))} THEN ${refusing(SUB_MICRO, "''")} ELSE $t END" }
+    }
+
     /** The store's timestamp of the text [text] of [kind] on its wall clock, of a text [held] to the microsecond. */
-    private fun local(text: String, kind: Temporal) = sql.local(held(text), kind)
+    private fun local(text: String, kind: Temporal) = sql.local(held(text, listOf(kind)), kind)
 
     /** The store's timestamp of the moment the text [text] of [kind] is, in UTC, of a text [held] to the microsecond. */
-    private fun utc(text: String, kind: Temporal) = sql.utc(held(text), kind)
+    private fun utc(text: String, kind: Temporal) = sql.utc(held(text, listOf(kind)), kind)
 
     /**
      * [body] of the kind among [kinds] that the text [text] is, as its shape tells, and of the text, written once:
@@ -230,7 +247,7 @@ class Temporals(
     private fun offset(text: String, from: Temporal, to: Temporal): String? = if (to.zoned) (if (from.zoned) offset(text) else "'Z'") else null
 
     /** The text of [to] the text [text] of [from] is: a moment's date, a date's midnight, a local value's in UTC. */
-    fun convert(text: String, from: Temporal, to: Temporal): String = written(shared(listOf(held(text))) { (t) ->
+    fun convert(text: String, from: Temporal, to: Temporal): String = written(shared(listOf(held(text, listOf(from)))) { (t) ->
         // The wall clock kept is of the text's year, so is written as one from 1000 on where the text's is.
         sql.local(t, from).let { clock -> sql.asAd(t, listOf(clock)) { format(clock, to, offset(t, from, to)) } }
     })
@@ -389,7 +406,7 @@ class Temporals(
      */
     fun over(date: Base?, time: Base?, fields: Map<String, String>, timezone: String?, kind: Temporal): String {
         val bases = listOfNotNull(date, time).distinct()
-        return written(shared(bases.map { held(it.text) }) { texts ->
+        return written(shared(bases.map { held(it.text, it.kinds) }) { texts ->
             fun text(base: Base) = texts[bases.indexOf(base)]
             val clocks = bases.map { clock(text(it), it.kinds) }
             shared(clocks) { bound ->
@@ -602,7 +619,7 @@ class Temporals(
     fun add(text: String, kind: Temporal, duration: String, sign: Int): String =
         // A duration's seconds past the microsecond are refused too, the moment moved by them being a store's timestamp; a date
         // takes the whole days of a duration's time alone, so its fraction is no matter there (drivine4j#421).
-        written(shared(listOf(held(text), if (kind == Temporal.DATE) duration else held(duration))) { (t, d) ->
+        written(shared(listOf(held(text, listOf(kind)), if (kind == Temporal.DATE) duration else heldDuration(duration))) { (t, d) ->
             format(moved(sql.local(t, kind), d, sign, if (kind == Temporal.DATE) "1 = 1" else null), kind, offset(t, kind, kind))
         })
 
@@ -658,9 +675,9 @@ class Temporals(
         if (sql.truncate(unit, "NULL") == null) return null
         if (overrides == null || (overrides.fields.isEmpty() && overrides.timezone == null)) {
             // A truncation of a year from 1000 on is of one too, so is written as such.
-            return written(shared(listOf(held(text))) { (t) -> sql.truncate(unit, sql.local(t, from))!!.let { cut -> sql.asAd(t, listOf(cut)) { format(cut, to, offset(t, from, to)) } } })
+            return written(shared(listOf(held(text, listOf(from)))) { (t) -> sql.truncate(unit, sql.local(t, from))!!.let { cut -> sql.asAd(t, listOf(cut)) { format(cut, to, offset(t, from, to)) } } })
         }
-        return written(shared(listOf(held(text))) { (t) ->
+        return written(shared(listOf(held(text, listOf(from)))) { (t) ->
             shared(listOf(sql.truncate(unit, sql.local(t, from))!!)) { (cut) -> overridden(cut, unit, to, overrides, overrides.timezone ?: offset(t, from, to)) }
         })
     }

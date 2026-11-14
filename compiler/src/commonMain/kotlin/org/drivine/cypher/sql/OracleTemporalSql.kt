@@ -42,6 +42,17 @@ class OracleTemporalSql(
         Temporal.DURATION -> error("a duration is no moment")
     }
 
+    /**
+     * Where the store keeps the era functions, its era function refuses a nanosecond past the microsecond as it reads the
+     * text, once (drivine4j#421): a moment's text is read through it already, and a time of day's is given through it.
+     */
+    override fun heldMicros(text: String, kinds: List<Temporal>): String? {
+        val era = storedEraText ?: return null
+        if (kinds.none { it == Temporal.LOCAL_TIME || it == Temporal.TIME }) return text
+        callsStored()
+        return "$era($text)"
+    }
+
     override fun utc(text: String, kind: Temporal) = when (kind) {
         Temporal.DATE_TIME -> "CAST(SYS_EXTRACT_UTC(${iso(eraOf(text), "TIMESTAMP WITH TIME ZONE")}) AS TIMESTAMP)"
         Temporal.TIME -> "CAST(SYS_EXTRACT_UTC(${iso("'1970-01-01T' || $text", "TIMESTAMP WITH TIME ZONE")}) AS TIMESTAMP)"
