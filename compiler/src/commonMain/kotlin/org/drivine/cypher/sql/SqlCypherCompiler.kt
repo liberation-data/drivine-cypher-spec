@@ -1514,7 +1514,10 @@ abstract class SqlCypherCompiler(
     protected abstract val temporalSql: TemporalSql
 
     /** openCypher's temporal values: see [Temporals]. */
-    private val temporals by lazy { Temporals(temporalSql, sharedList) { sharing } }
+    private val temporals by lazy {
+        // A failure where a temporal value's text is written is a text, as the text it stands in for is.
+        Temporals(temporalSql, sharedList, { message, text -> "CAST(${textFailure(message, text)} AS ${temporalSql.textType})" }) { sharing }
+    }
 
     // ----- A store's procedure, for a statement that writes -----
 

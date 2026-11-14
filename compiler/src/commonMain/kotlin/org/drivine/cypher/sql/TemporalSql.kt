@@ -107,6 +107,19 @@ abstract class TemporalSql(protected val shared: (List<String>, (List<String>) -
      */
     open val numbersBcFromOne = true
 
+    /**
+     * Whether the timestamp [timestamp] is of a year the store's text can't write, a SQL condition: such a moment fails by name
+     * where its text is written (#263). Null where the store's timestamp holds no such year, as Oracle's, which fails as the
+     * year is worked out.
+     */
+    open fun longYear(timestamp: String): String? = null
+
+    /** The first year, as Cypher numbers it, the store's timestamp holds: a value made of fields of one before it fails by name (#263). */
+    open val firstYear = -9999
+
+    /** The store's type of a text a number or a timestamp is cast to, as a refusal of a year it doesn't hold names it. */
+    open val textType = "VARCHAR(40)"
+
     /** The year of [timestamp], a number, as Cypher numbers it: see [numbersBcFromOne]. */
     open fun year(timestamp: String): String =
         if (!numbersBcFromOne) extract("YEAR", timestamp) else shared(listOf(extract("YEAR", timestamp))) { (y) -> "($y + CASE WHEN $y < 0 THEN 1 ELSE 0 END)" }

@@ -30,6 +30,9 @@ class OracleTemporalSql(
     /** The store's function [storedKey] calls, where it keeps one. */
     private val storedTemporalKey = storedEra?.let(OracleCypherCompiler::temporalKeyName)
 
+
+    /** Oracle holds no date before 4712 BC, as its timestamp is read. */
+    override val firstYear = -4711
     override fun local(text: String, kind: Temporal) = when (kind) {
         Temporal.DATE -> "TO_TIMESTAMP(${eraOf(text)}, 'SYYYY-MM-DD')"
         Temporal.LOCAL_DATE_TIME -> iso(eraOf(text), "TIMESTAMP")
