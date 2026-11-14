@@ -437,23 +437,68 @@ class PostgresSchema(override val ddl: PostgresDdl) : SqlStoreSchema() {
             when {
                 text == null -> null
                 text == "stamp" -> Read.Property(Stamps.PROPERTY)
-                else -> PROPERTY.matchEntire(text)?.let { Read.Property(SqlText.unquoted(it.groupValues[1])) } ?: Read.Other(text)
+                else -> SqlText.literal(text, PROPERTY, "::text")?.takeIf { it.head.range.first == 0 && it.end == text.length }
+                    ?.let { Read.Property(SqlText.unquoted(it.body)) } ?: Read.Other(text)
             }
         }
-        val label = there.predicate?.let { LABEL.find(it) }?.let { SqlText.jsonLabel(SqlText.unquoted(it.groupValues[1])) }
-        val keys = there.columns.filterNotNull().flatMap { column ->
-            KEY.findAll(column).map { if (it.value == "stamp") Stamps.PROPERTY else SqlText.unquoted(it.groupValues[1]) }
-        }.distinct()
+        val label = there.predicate?.let { SqlText.literal(it, LABEL, "::jsonb") }?.let { SqlText.jsonLabel(SqlText.unquoted(it.body)) }
+        val keys = there.columns.filterNotNull().flatMap(::keysOf).distinct()
         val dimensions = there.columns.filterNotNull().firstNotNullOfOrNull { DIMENSIONS.find(it)?.groupValues?.get(1)?.toInt() }
         return Shape(columns, listOf(label), keys, dimensions)
     }
 
+    /**
+     * Each property [column] reads, in turn: a key of `props`, `props ->> 'name'::text` or `props -> 'name'::text`, or the
+     * stamp, a column of its own (`COALESCE(stamp, ''::text)`). Each is the leftmost read from where the one before ends,
+     * a key's read where both start at once, as the alternation `props ->>? '…'::text|stamp` found them.
+     */
+    private fun keysOf(column: String): List<String> {
+        val keys = mutableListOf<String>()
+        var from = 0
+        var key = SqlText.literal(column, KEY, "::text")
+        var stamp = stampAt(column, 0)
+        while (key != null || stamp >= 0) {
+            if (key != null && (stamp < 0 || key.head.range.first <= stamp)) {
+                keys += SqlText.unquoted(key.body)
+                from = key.end
+            } else {
+                keys += Stamps.PROPERTY
+                from = stamp + STAMP.length
+            }
+            if (key != null && key.head.range.first < from) key = SqlText.literal(column, KEY, "::text", from)
+            if (stamp in 0 until from) stamp = stampAt(column, from)
+        }
+        return keys
+    }
+
+    /**
+     * Where the stamp is read in [column] from [from] on, a column of its own, not in a literal nor a quoted name: `stamp`
+     * with no `\w`, `'`, `"` or `.` before it, and no `\w`, `'` or `"` after it; -1 where it isn't. As the regex
+     * `(?<![\w'".])stamp(?![\w'"])` found it, but by hand: the stdlib's regex engine on Kotlin/Native and Kotlin/Wasm
+     * tries a lookbehind at each place in time that grows with how far into the text it is, which took 2 s over a key of
+     * 20,000 characters on wasmJs, and would have taken many minutes over a long one.
+     */
+    private fun stampAt(column: String, from: Int): Int {
+        var at = column.indexOf(STAMP, from)
+        while (at >= 0) {
+            val before = column.getOrNull(at - 1)
+            val after = column.getOrNull(at + STAMP.length)
+            if ((before == null || !(SqlText.word(before) || before in "'\".")) && (after == null || !(SqlText.word(after) || after in "'\""))) return at
+            at = column.indexOf(STAMP, at + 1)
+        }
+        return -1
+    }
+
     private companion object {
-        val PROPERTY = Regex("""props ->> '${SqlText.LITERAL}'::text""")
-        /** A property an expression reads: a key of `props`, or the stamp, a column of its own (`COALESCE(stamp, ''::text)`). */
-        val KEY = Regex("""props ->>? '${SqlText.LITERAL}'::text|(?<![\w'".])stamp(?![\w'"])""")
+        /** What is before the key's literal of a property `pg_get_indexdef` gives, `props ->> 'name'::text`, its quote: see [SqlText.literal]. */
+        val PROPERTY = Regex("""props ->> '""")
+        /** What is before the key's literal of a read of a property, `props ->> 'name'::text` or `props -> 'name'::text`: see [keysOf]. */
+        val KEY = Regex("""props ->>? '""")
+        /** The stamp's column, read by [stampAt]. */
+        const val STAMP = "stamp"
         val DIMENSIONS = Regex("""vector\((\d+)\)""")
-        val LABEL = Regex("""labels @> '${SqlText.LITERAL}'::jsonb""")
+        /** What is before the labels' literal of a predicate, `labels @> '["Person"]'::jsonb`. */
+        val LABEL = Regex("""labels @> '""")
 
         /** pg_trgm's operator class, which a full-text index's GIN index is made with. */
         const val TRIGRAMS = "gin_trgm_ops"
@@ -550,10 +595,10 @@ class OracleSchema(override val ddl: OracleDdl) : SqlStoreSchema() {
             when {
                 column == null -> null
                 PLAIN_STEP.matches(column) -> if (column.equals("stamp", ignoreCase = true)) Read.Property(Stamps.PROPERTY) else Read.Other(column)
-                else -> VALUE.find(column)?.let { pathKey(SqlText.unquoted(it.groupValues[1])) }?.let { Read.Property(it) }
+                else -> SqlText.literal(column, VALUE)?.let { pathKey(SqlText.unquoted(it.body)) }?.let { Read.Property(it) }
             }
         }
-        val labels = there.columns.filterNotNull().map { column -> LABEL_TEST.find(column)?.let { labelOf(SqlText.unquoted(it.groupValues[1])) } }
+        val labels = there.columns.filterNotNull().map { column -> SqlText.literal(column, LABEL_TEST)?.let { labelOf(SqlText.unquoted(it.body)) } }
         return Shape(columns, labels)
     }
 
@@ -589,7 +634,7 @@ class OracleSchema(override val ddl: OracleDdl) : SqlStoreSchema() {
                 trigger.table != null && !trigger.table.equals(ddl.nodes, ignoreCase = true) -> "a trigger on ${trigger.table}"
                 else -> {
                     val label = sideLabel(source)
-                    val read = SIDE_PATH.findAll(source).mapNotNull { pathKey(it.groupValues[1]) }.distinct().toList()
+                    val read = SqlText.literals(source, SIDE_PATH).mapNotNull { pathKey(it.body) }.distinct().toList()
                     when {
                         label != null && label != spec.label -> "a trigger over the nodes of $label"
                         read.isNotEmpty() && read != keys -> "a trigger over $read"
@@ -613,11 +658,11 @@ class OracleSchema(override val ddl: OracleDdl) : SqlStoreSchema() {
 
     /** The label a trigger's [source] tests, as either library writes the test; null where it tests none this reads. */
     private fun sideLabel(source: String): String? {
-        MODULES_SIDE_LABEL.find(source)?.let { found ->
-            val needle = SqlText.unquoted(found.groupValues[1])
+        SqlText.literal(source, MODULES_SIDE_LABEL, ") > 0")?.let { found ->
+            val needle = SqlText.unquoted(found.body)
             return SqlText.jsonString(needle.removePrefix(",").removeSuffix(",\""))
         }
-        return LIBRARIES_SIDE_LABEL.find(source)?.let { labelOf(SqlText.unquoted(it.groupValues[1])) }
+        return SqlText.literal(source, LIBRARIES_SIDE_LABEL, ")")?.let { labelOf(SqlText.unquoted(it.body)) }
     }
 
     private fun pathKey(path: String): String? = when {
@@ -626,12 +671,20 @@ class OracleSchema(override val ddl: OracleDdl) : SqlStoreSchema() {
         else -> null
     }
 
-    private fun labelOf(path: String): String? = LABEL_PATH.matchEntire(path)?.let { SqlText.jsonString(it.groupValues[1]) }
+    /** The label a path that tests one gives, `$[*]?(@ == "Person")` or `$?(@ == "Person")`, the whole of [path]; null where it is none. */
+    private fun labelOf(path: String): String? {
+        val open = LABEL_PATHS.firstOrNull { path.startsWith(it) }?.let { it.length - 1 } ?: return null
+        if (SqlText.scanQuoted(path, open, '"', SqlText.Escape.BACKSLASH) != path.length - 1 || !path.endsWith(")")) return null
+        return SqlText.jsonString(path.substring(open, path.length - 1))
+    }
 
     private companion object {
-        val VALUE = Regex("""JSON_VALUE\(\s*"?PROPS"?[^']*'${SqlText.LITERAL}'""", RegexOption.IGNORE_CASE)
-        val LABEL_TEST = Regex("""JSON_EXISTS2?\(\s*"?LABELS"?[^']*'${SqlText.LITERAL}'""", RegexOption.IGNORE_CASE)
-        val LABEL_PATH = Regex("""\$(?:\[\*])?\?\(@ == ("${SqlText.JSON_BODY}")\)""")
+        /** What is before the path's literal of a column's `JSON_VALUE` of `PROPS`, its quote: see [SqlText.literal]. */
+        val VALUE = Regex("""JSON_VALUE\(\s*"?PROPS"?[^']*'""", RegexOption.IGNORE_CASE)
+        /** What is before the path's literal of a column's `JSON_EXISTS2` of `LABELS`, its quote. */
+        val LABEL_TEST = Regex("""JSON_EXISTS2?\(\s*"?LABELS"?[^']*'""", RegexOption.IGNORE_CASE)
+        /** What is before the label's JSON string of a path that tests one, its quote: see [labelOf]. */
+        val LABEL_PATHS = listOf("\$[*]?(@ == \"", "\$?(@ == \"")
         val PLAIN_STEP = Regex("[A-Za-z_][A-Za-z0-9_]*")
 
         val VIOLATIONS = setOf(1, 1452)
@@ -644,13 +697,13 @@ class OracleSchema(override val ddl: OracleDdl) : SqlStoreSchema() {
         const val INDEX = "_i"
 
         /** drivine4j's test of a label in a trigger, by its text: the needle is the label as `JSON_SERIALIZE` writes it. */
-        val MODULES_SIDE_LABEL = Regex("""JSON_SERIALIZE\(:NEW\.labels\), '\]'\), '\['\) \|\| ',"', '${SqlText.LITERAL}'\) > 0""", RegexOption.IGNORE_CASE)
+        val MODULES_SIDE_LABEL = Regex("""JSON_SERIALIZE\(:NEW\.labels\), '\]'\), '\['\) \|\| ',"', '""", RegexOption.IGNORE_CASE)
 
         /** TypeScript's and Python's test of a label in a trigger, by a path. */
-        val LIBRARIES_SIDE_LABEL = Regex("""JSON_EXISTS\(:NEW\.labels, '${SqlText.LITERAL}'\)""", RegexOption.IGNORE_CASE)
+        val LIBRARIES_SIDE_LABEL = Regex("""JSON_EXISTS\(:NEW\.labels, '""", RegexOption.IGNORE_CASE)
 
         /** Each path into a node's properties a trigger reads. */
-        val SIDE_PATH = Regex("""JSON_(?:QUERY|VALUE)\(:NEW\.props, '${SqlText.LITERAL}'""", RegexOption.IGNORE_CASE)
+        val SIDE_PATH = Regex("""JSON_(?:QUERY|VALUE)\(:NEW\.props, '""", RegexOption.IGNORE_CASE)
     }
 
     /**
@@ -750,18 +803,20 @@ class SqliteSchema(override val ddl: SqliteDdl) : SqlStoreSchema() {
             val text = SqlText.unwrapped(column)
             when {
                 text == "stamp" -> Read.Property(Stamps.PROPERTY)
-                else -> PATH.find(text)?.let { path -> SqlText.jsonString(SqlText.unquoted(path.groupValues[1]).removePrefix("$."))?.let { Read.Property(it) } }
+                else -> SqlText.literal(text, PATH, ")")?.let { path -> SqlText.jsonString(SqlText.unquoted(path.body).removePrefix("$."))?.let { Read.Property(it) } }
                     ?: Read.Other(column.trim())
             }
         }
-        val label = LABEL.find(statement.substring(close + 1))?.let { SqlText.jsonString(SqlText.unquoted(it.groupValues[1])) }
+        val label = SqlText.literal(statement.substring(close + 1), LABEL, ") > 0")?.let { SqlText.jsonString(SqlText.unquoted(it.body)) }
         return Shape(columns, listOf(label))
     }
 
     private companion object {
         val ON = Regex("""\sON\s+\S+\s*\(""", RegexOption.IGNORE_CASE)
-        val PATH = Regex("""json_type\(props, '${SqlText.LITERAL}'\)""")
-        val LABEL = Regex("""instr\(labels, '${SqlText.LITERAL}'\) > 0""")
+        /** What is before the path's literal of a column, `json_type(props, '$."name"')`, its quote: see [SqlText.literal]. */
+        val PATH = Regex("""json_type\(props, '""")
+        /** What is before the label's literal of the predicate, `instr(labels, '"Person"') > 0`, its quote. */
+        val LABEL = Regex("""instr\(labels, '""")
     }
 
     /**

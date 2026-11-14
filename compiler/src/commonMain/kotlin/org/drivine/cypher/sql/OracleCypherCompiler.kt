@@ -599,7 +599,7 @@ class OracleCypherCompiler(
     private fun nanFree(json: String): Boolean {
         if (!written(json) || json.contains("TO_BINARY_DOUBLE('NaN')")) return false
         // A list or a map the statement makes of literals alone: no word but its own and theirs outside a quoted text.
-        val words = json.replace(QUOTED, "").split(WRITTEN_SEPARATORS)
+        val words = withoutLiterals(json).split(WRITTEN_SEPARATORS)
         return words.all { it.isEmpty() || it in WRITTEN_WORDS }
     }
 
@@ -688,9 +688,29 @@ class OracleCypherCompiler(
     /** The JSON [json] as a `VARCHAR2`, where it is a text of at most 4,000 bytes, a number or a truth value; else null. */
     private fun short(json: String) = "JSON_VALUE($json, '\$')"
 
-    /** The properties and the path of [json] where it is a property as [propertyOf] reads it, `JSON_QUERY(props, '$.a' RETURNING JSON)`. */
-    private fun propertyRead(json: String): Pair<String, String>? =
-        PROPERTY_READ.matchEntire(json)?.takeIf { balanced(it.groupValues[1]) }?.let { it.groupValues[1] to it.groupValues[2] }
+    /**
+     * The properties and the path of [json] where it is a property as [propertyOf] reads it, `JSON_QUERY(props, '$.a' RETURNING
+     * JSON)`, the path a literal whose quotes are doubled. The properties are what is before the last `, '$` from which the
+     * path's literal closes just before ` RETURNING JSON)`, on one line, as the regex `JSON_QUERY\((.+), ('\$…') RETURNING
+     * JSON\)` read them; and their parentheses must close each other. The literal is read by [SqlText.scanQuoted], not by a
+     * regex, which recursed on a long or quote-heavy key (drivine-cypher-spec#258).
+     */
+    private fun propertyRead(json: String): Pair<String, String>? {
+        if (!json.startsWith(READ_HEAD) || !json.endsWith(READ_TAIL)) return null
+        val close = json.length - READ_TAIL.length
+        // A regex's `.` reads no line break, so the properties end before the first.
+        var limit = READ_HEAD.length
+        while (limit < json.length && json[limit] !in LINE_BREAKS) limit++
+        var comma = json.lastIndexOf(READ_PATH, minOf(limit, close - READ_PATH.length))
+        while (comma > READ_HEAD.length) {
+            if (SqlText.scanQuoted(json, comma + 2, '\'', SqlText.Escape.DOUBLED) == close + 1) {
+                val properties = json.substring(READ_HEAD.length, comma)
+                return if (balanced(properties)) properties to json.substring(comma + 2, close + 1) else null
+            }
+            comma = json.lastIndexOf(READ_PATH, comma - 1)
+        }
+        return null
+    }
 
     /** Whether [sql]'s parentheses outside its literals close each other: so it is the one argument, not two calls. */
     private fun balanced(sql: String): Boolean {
@@ -1929,10 +1949,27 @@ class OracleCypherCompiler(
      * `NO_ADAPTIVE_PLAN` (already the session's) or `NO_INDEX` on the outer node alone it crashed as often. The subquery
      * then reads the outer node's table whole, once, and the lateral's node by its key.
      */
-    override fun deletedIds(query: String): String =
-        super.deletedIds(query).replace(INDEXED_LABEL) { m ->
-            OracleSql.holdsLabel(m.groupValues[1], m.groupValues[2].replace("''", "'").replace(Regex("""\\(.)"""), "$1"))
+    override fun deletedIds(query: String): String {
+        val sql = super.deletedIds(query)
+        val out = StringBuilder(sql.length)
+        var done = 0
+        var from = 0
+        while (true) {
+            val test = INDEXED_LABEL.find(sql, from) ?: break
+            // The label's JSON string, read by its escapes, then `")')` after it.
+            val open = test.range.last
+            val end = SqlText.scanQuoted(sql, open, '"', SqlText.Escape.BACKSLASH)
+            if (end < 0 || !sql.startsWith(")')", end)) {
+                from = test.range.first + 1
+                continue
+            }
+            val label = sql.substring(open + 1, end - 1).replace("''", "'").replace(Regex("""\\(.)"""), "$1")
+            out.appendRange(sql, done, test.range.first).append(OracleSql.holdsLabel(test.groupValues[1], label))
+            done = end + ")')".length
+            from = done
         }
+        return if (done == 0) sql else out.appendRange(sql, done, sql.length).toString()
+    }
 
     /** A read of the graph's node or relationship table: see [planned]. */
     private val graphTable = Regex("\\b(?:${Regex.escape(nodes)}|${Regex.escape(edges)}) \\w")
@@ -2281,8 +2318,13 @@ class OracleCypherCompiler(
          */
         const val ROWS_AS_TEXT = "rows:json"
 
-        /** A property as [propertyOf] reads it, its properties and its path, a literal whose quotes are doubled: see [propertyRead]. */
-        val PROPERTY_READ = Regex("""JSON_QUERY\((.+), ('\$${SqlText.BODY}') RETURNING JSON\)""")
+        /** What a property as [propertyOf] reads it starts with, its path's start, and what it ends with, its path's closing quote: see [propertyRead]. */
+        private const val READ_HEAD = "JSON_QUERY("
+        private const val READ_PATH = ", '\$"
+        private const val READ_TAIL = "' RETURNING JSON)"
+
+        /** The characters a regex's `.` doesn't read, as the JVM's and the stdlib's engines have them. */
+        private const val LINE_BREAKS = "\n\r\u0085\u2028\u2029"
 
         /**
          * A float [literalJson] writes: see [written]. Not NaN, written for an item of a list the statement is given, which is
@@ -2297,10 +2339,24 @@ class OracleCypherCompiler(
         private const val JAVA_NAMES = "^([+-]?NaN|[+]?Infinity|-Infinity)\$"
 
         /**
-         * A quoted SQL text, its quotes doubled: see [nanFree]. A run of other characters is matched at once, not one by one in an
-         * alternation, which the JVM's regex recurses into for each character: so it overflowed the stack on a piece of 4,000.
+         * [json] without its quoted SQL texts, their quotes doubled, as a regex's `replace` of `'[^']*(?:''[^']*)*'` left it,
+         * an unclosed one read as [SqlText.greedyClose] reads it: see [nanFree]. Read by a loop, not that regex, which
+         * recursed for each character, and once unrolled, for each doubled quote: it overflowed the stack on a piece of 4,000,
+         * then on a text of a few thousand quotes (drivine-cypher-spec#258).
          */
-        private val QUOTED = Regex("'[^']*(?:''[^']*)*'")
+        private fun withoutLiterals(json: String): String {
+            val out = StringBuilder(json.length)
+            var done = 0
+            while (true) {
+                val open = json.indexOf('\'', done)
+                if (open < 0) break
+                val close = SqlText.greedyClose(json, open)
+                if (close < 0) break
+                out.appendRange(json, done, open)
+                done = close + 1
+            }
+            return out.appendRange(json, done, json.length).toString()
+        }
 
         /** What separates the words of a value the statement writes: see [nanFree]. */
         private val WRITTEN_SEPARATORS = Regex("[\\s(),]+")
@@ -2379,10 +2435,12 @@ class OracleCypherCompiler(
         const val FEW_ROWS = 10
 
         /**
-         * A test of a column of labels, `n1.labels`, as [hasLabel] writes it, `JSON_EXISTS(n1.labels, '$[*]?(@ == "X")')`,
-         * and the label, written as JSON writes a string and then as SQL quotes one: see [deletedIds].
+         * A test of a column of labels, `n1.labels`, as [hasLabel] writes it, `JSON_EXISTS(n1.labels, '$[*]?(@ == "X")')`, up to
+         * the label's opening quote. The label, written as JSON writes a string and then as SQL quotes one, is read by
+         * [SqlText.scanQuoted], not by a regex, which recursed on a long or quote-heavy one (drivine-cypher-spec#258): see
+         * [deletedIds].
          */
-        private val INDEXED_LABEL = Regex("""JSON_EXISTS\(([\w.]+\.labels), '\$\[\*\]\?\(@ == "(${SqlText.JSON_BODY})"\)'\)""")
+        private val INDEXED_LABEL = Regex("""JSON_EXISTS\(([\w.]+\.labels), '\$\[\*\]\?\(@ == """")
 
         /** A query, or a subquery of one, that keeps its rows distinct, hinted or not: see [called]. */
         private val DISTINCT_SELECT = Regex("""\bSELECT (?:/\*\+ .*? \*/ )?DISTINCT\b""")

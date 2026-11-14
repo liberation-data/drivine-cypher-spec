@@ -77,7 +77,7 @@ internal object OracleLongReads {
         }
         if (end >= sql.length) return null
         // Not into a list's item, `'$[$i]'`: the routed value is read as any list is, to avoid an Oracle server defect (drivine4j#670).
-        if (sql.substring(at, end).replace(QUOTED_KEY, "").contains('[')) return null
+        if (withoutQuotedKeys(sql.substring(at, end)).contains('[')) return null
         val whole = path + read.path.drop(2).dropLast(1) + sql.substring(at + 2, end + 1)
         return Triple(start - "JSON_VALUE(".length, end + 1, "JSON_VALUE($base, $whole")
     }
@@ -106,7 +106,7 @@ internal object OracleLongReads {
         if (!source.startsWith("JSON_QUERY(") || closing(source, "JSON_QUERY".length) != source.length - 1) return null
         val arguments = arguments(source.substring("JSON_QUERY(".length, source.length - 1))
         if (arguments.size != 2) return null
-        val path = READ_PATH.matchEntire(arguments[1])?.groupValues?.get(1)?.takeIf { KEY_PATH.matches(it) } ?: return null
+        val path = readPath(arguments[1])?.takeIf(::keyPath) ?: return null
         val (base, before) = chain(arguments[0]) ?: return null
         return base to before + path.drop(2).dropLast(1)
     }
@@ -131,10 +131,74 @@ internal object OracleLongReads {
 
     /** A base read as an item is: one that may hold a map with a key as extended JSON's are, as a parameter a `reduce()` step's context holds may. */
     private val ITEM = Regex("""[A-Za-z_]\w*\.item|cy_(?:row|context|caller\d+|saved\d+|gathered\d+)""")
-    private val READ_PATH = Regex("""('\$${SqlText.BODY}') RETURNING JSON""")
-    /** A key of a path in its quotes, `"a[b"`, as a key path has one: unrolled as [SqlText.BODY] is. */
-    private val QUOTED_KEY = Regex(""""[^"'\\]*(?:(?:\\.|'')[^"'\\]*)*"""")
-    private val KEY_PATH = Regex("""'\$(?:\.(?:[A-Za-z_]\w*|${QUOTED_KEY.pattern}))+'""")
+
+    /** What a read's path argument ends with, after its path's literal: see [readPath]. */
+    private const val READ_TAIL = "' RETURNING JSON"
+
+    /**
+     * The path of a read's second argument, `'$.k' RETURNING JSON`, in its quotes, as `('\$…') RETURNING JSON` read it
+     * whole: a literal whose quotes are doubled, that starts `'$` and closes just before ` RETURNING JSON`. Null where
+     * [argument] is no such path.
+     *
+     * A path, and each key of it ([keyPath], [withoutQuotedKeys]), is read by [SqlText.scanQuoted]'s loop, not by a regex:
+     * the JVM's regex engine, and the stdlib's on Kotlin/Native and Kotlin/Wasm, recurse as a group repeats, and a regex
+     * over a path overflowed the stack on a long or quote-heavy key (drivine-cypher-spec#258). Each reads what its regex read.
+     */
+    private fun readPath(argument: String): String? {
+        val close = argument.length - READ_TAIL.length
+        if (close < 2 || !argument.startsWith("'$") || !argument.endsWith(READ_TAIL)) return null
+        return if (SqlText.scanQuoted(argument, 0, '\'', SqlText.Escape.DOUBLED) == close + 1) argument.substring(0, close + 1) else null
+    }
+
+    /**
+     * Whether [path], a path's literal in its quotes, is a key path, `'$.a."b c"'`: one or more steps, each a key, bare
+     * (`[A-Za-z_]\w*`) or a JSON string in the literal's quotes (see [SqlText.Escape.BACKSLASH_IN_LITERAL]), `"a[b"`; as
+     * `'\$(?:\.(?:[A-Za-z_]\w*|"…"))+'` read it.
+     */
+    private fun keyPath(path: String): Boolean {
+        val end = path.length - 1
+        if (end < 2 || !path.startsWith("'$") || path[end] != '\'') return false
+        var i = 2
+        if (i == end) return false
+        while (i < end) {
+            if (path[i] != '.' || i + 1 >= end) return false
+            i++
+            val c = path[i]
+            i = when {
+                c in 'A'..'Z' || c in 'a'..'z' || c == '_' -> {
+                    var j = i + 1
+                    while (j < end && SqlText.word(path[j])) j++
+                    j
+                }
+                c == '"' -> SqlText.scanQuoted(path, i, '"', SqlText.Escape.BACKSLASH_IN_LITERAL).takeIf { it in 0..end } ?: return false
+                else -> return false
+            }
+        }
+        return true
+    }
+
+    /**
+     * [path], a path's literal, without the keys in its quotes, `"a[b"`, as a regex's `replace` of each left it: so a `[`
+     * left is a step into a list's item, not a key's own.
+     */
+    private fun withoutQuotedKeys(path: String): String {
+        val out = StringBuilder(path.length)
+        var done = 0
+        var from = 0
+        while (true) {
+            val open = path.indexOf('"', from)
+            if (open < 0) break
+            val end = SqlText.scanQuoted(path, open, '"', SqlText.Escape.BACKSLASH_IN_LITERAL)
+            if (end < 0) {
+                from = open + 1
+                continue
+            }
+            out.appendRange(path, done, open)
+            done = end
+            from = end
+        }
+        return out.appendRange(path, done, path.length).toString()
+    }
 
     /** [sql] with each run of white space outside its literals one space: a key's own spaces are kept. */
     private fun normal(sql: String) = sql.split('\'').mapIndexed { i, part -> if (i % 2 == 0) part.replace(SPACE, " ") else part }.joinToString("'").trim()
@@ -213,7 +277,7 @@ internal object OracleLongReads {
         val close = closing(sql, open).takeIf { it >= 0 } ?: return null
         val arguments = arguments(sql.substring(open + 1, close))
         if (arguments.size != 2) return null
-        val path = READ_PATH.matchEntire(arguments[1])?.groupValues?.get(1)?.takeIf { KEY_PATH.matches(it) } ?: return null
+        val path = readPath(arguments[1])?.takeIf(::keyPath) ?: return null
         if (!STORED.containsMatchIn(arguments[0])) return null
         val source = normal(arguments[0])
         if (guarded(stack, source, path)) {

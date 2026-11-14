@@ -760,6 +760,9 @@ over 29,694 characters on the main thread's 8 MiB, where it crashed from 29,772,
 where it crashed from 949; groups nested 12,200 deep crashed compiling on 8 MiB, and are refused from 7,800; 20,300 nodes
 in a row (`a?` …) crashed, and are refused from 8,200.
 Kotlin/Wasm's overflow is a `RangeError` its host's JavaScript catches, and isn't checked.
+The compiler's own readings of the SQL it writes, or a store gives back, use no regex over a quoted text: each key,
+literal and label is read by a loop (`SqlText.scanQuoted`), so none overflows the stack however long it is, or however
+many quotes or backslashes it holds (drivine-cypher-spec#258).
 
 **Long texts and `$`, `\Z`, `\b`, `\B`.** These look at the character before a place, and Harmony's lookbehind takes time
 proportional to how far into the text it is tried, as it looks for its body ending there from each place back to the
