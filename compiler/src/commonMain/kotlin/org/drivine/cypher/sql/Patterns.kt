@@ -36,6 +36,62 @@ internal object Patterns {
         return "The regular expression '$pattern' writes a backreference ${why.first}, ${why.second}: $ANSWERED"
     }
 
+    /**
+     * Why Oracle can't answer [pattern] as Java does for a group of its own syntax, `(?…)`, or null where it can (#242).
+     * Oracle reads no such group but a leading flag group, `(?i)`, which its `=~` takes off as its match parameter: a group
+     * that captures nothing, `(?:…)`, is read as one that captures, which is the same match where the pattern writes no
+     * backreference, and the [BACKREFERENCE] refusal already holds that one to none ([refusal]). Every other, a lookaround,
+     * a named group, or a flag group within the pattern, is refused, as is `(?:` written in a character class, which the
+     * SQL's rewrite of each `(?:` can't tell from a group.
+     */
+    fun oracleRefusal(pattern: String): String? {
+        val why = constructs(pattern).firstOrNull { it != NONCAPTURING } ?: return null
+        val what = if (why == IN_CLASS) "a character class that holds (?:" else "a group of its own syntax, $why…)"
+        return "The regular expression '$pattern' writes $what, which Oracle doesn't read as Java does: Oracle answers (?:…) and a leading flag group, (?i), alone (drivine-cypher-spec#242)."
+    }
+
+    /** Whether [pattern] writes a group that captures nothing, `(?:…)`, outside a character class: Oracle's `=~` reads each as `(`. */
+    fun holdsNoncapturing(pattern: String): Boolean = NONCAPTURING in constructs(pattern)
+
+    /** A group that captures nothing, as [constructs] gives it. */
+    private const val NONCAPTURING = "(?:"
+
+    /** `(?:` written in a character class, as [constructs] gives it. */
+    private const val IN_CLASS = "[(?:]"
+
+    /**
+     * Each group of its own syntax [pattern] writes, as its opening, `(?:`, `(?=`, `(?<n`…, but for a leading flag group,
+     * read as [scan] reads a pattern: a backslash escapes the next character, `\Q…\E` quotes, and a class is opened by `[`
+     * and closed by a `]` that isn't its first character. `(?:` in a class is given as [IN_CLASS].
+     */
+    private fun constructs(pattern: String): List<String> {
+        val found = mutableListOf<String>()
+        var depth = 0
+        var i = 0
+        while (i < pattern.length) {
+            val c = pattern[i]
+            when {
+                c == '\\' && i + 1 < pattern.length -> {
+                    if (pattern[i + 1] == 'Q') {
+                        val end = pattern.indexOf("\\E", i + 2)
+                        i = if (end < 0) pattern.length else end + 2
+                    } else i += 2
+                    continue
+                }
+                c == '[' -> {
+                    depth++
+                    if (pattern.startsWith("^]", i + 1)) i += 2 else if (pattern.startsWith("]", i + 1)) i += 1
+                }
+                c == ']' && depth > 0 -> depth--
+                depth > 0 -> if (pattern.startsWith(NONCAPTURING, i)) found += IN_CLASS
+                c == '(' && pattern.startsWith("?", i + 1) && !(i == 0 && LEADING_FLAGS.matchesAt(pattern, 0)) ->
+                    found += pattern.substring(i, minOf(pattern.length, i + 3))
+            }
+            i++
+        }
+        return found
+    }
+
     /** Whether [pattern] writes a backreference, as Java reads one. */
     fun holdsBackreference(pattern: String): Boolean = scan(pattern).found.isNotEmpty()
 

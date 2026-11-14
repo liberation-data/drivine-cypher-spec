@@ -1135,6 +1135,52 @@ cases:
         cypher: "WITH '(a)' + $b AS p RETURN ['aa' =~ p, 'a' =~ p]"
         parameters: {b: "a"}
         rows: [[true, false]]
+  - name: "A regular expression with a group that captures nothing"
+    description: "A group that captures nothing, (?:…), groups as in Java. Oracle reads no group of its own syntax but a leading flag group, so it matched nothing where a pattern wrote one; the compiler now writes each (?: there as (, the same match where the pattern writes no backreference, as one that writes both is refused (#242). Oracle refuses by name every other group of its own syntax, a lookaround among them, a (?: written in a character class, and any group of its own syntax in a pattern worked out as the statement runs."
+    steps:
+      - only: [neo4j, sql]
+        cypher: "RETURN ['x' =~ '(?:x)', 'xb' =~ 'x(?:b)', 'x?:b' =~ 'x(?:b)', 'abab' =~ '(?:ab)+', 'ac' =~ 'a(?:b|c)', 'abab' =~ '(?:(?:a)b)+', 'XB' =~ '(?i)x(?:b)']"
+        rows: [[true, true, false, true, true, true, true]]
+      - note: "Bound, and a (?: that a backslash escapes, which is the text (?: and no group."
+        only: [neo4j, sql]
+        cypher: "RETURN ['xb' =~ $p, 'a(?:b' =~ $q, 'ab' =~ $q, 'a\\b' =~ $r]"
+        parameters: {p: "x(?:b)", q: "a\\(\\?:b", r: "a\\\\(?:b)"}
+        rows: [[true, true, false, true]]
+      - note: "A lookaround: answered where the store reads one."
+        only: [neo4j, postgres, sqlite]
+        cypher: "RETURN 'ab' =~ $p"
+        parameters: {p: "a(?=b)b"}
+        rows: [[true]]
+      - note: "Refused on Oracle, which reads no lookaround."
+        only: [oracle]
+        cypher: "RETURN 'ab' =~ $p"
+        parameters: {p: "a(?=b)b"}
+        error: true
+      - note: "(?: in a character class is three characters of it."
+        only: [neo4j, postgres, sqlite]
+        cypher: "RETURN [':' =~ $p, 'x' =~ $p]"
+        parameters: {p: "[(?:]"}
+        rows: [[true, false]]
+      - note: "Refused on Oracle: the rewrite of each (?: can't tell one in a class from a group."
+        only: [oracle]
+        cypher: "RETURN ':' =~ $p"
+        parameters: {p: "[(?:]"}
+        error: true
+      - note: "Worked out as the statement runs."
+        only: [neo4j, postgres, sqlite]
+        cypher: "WITH '(?:' + $b AS p RETURN 'x' =~ p"
+        parameters: {b: "x)"}
+        rows: [[true]]
+      - note: "Refused on Oracle as the statement runs, as the compiler can't read its form."
+        only: [oracle]
+        cypher: "WITH '(?:' + $b AS p RETURN 'x' =~ p"
+        parameters: {b: "x)"}
+        error: true
+      - note: "A leading flag group alone is answered on every store, worked out as the statement runs too."
+        only: [neo4j, sql]
+        cypher: "WITH '(?i)' + $b AS p RETURN ['X' =~ p, 'X' =~ '(?i)x']"
+        parameters: {b: "x"}
+        rows: [[true, true]]
   - name: "A regular expression over the empty text"
     description: "The empty text matches a pattern that matches it whole, as Java's matches() reads it, and no other; a pattern that is null makes null. Oracle's empty text is null as SQL text, so its regular expressions gave null there (drivine4j#416)."
     steps:

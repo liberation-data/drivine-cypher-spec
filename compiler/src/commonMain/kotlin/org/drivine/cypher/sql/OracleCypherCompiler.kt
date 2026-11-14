@@ -2038,8 +2038,30 @@ class OracleCypherCompiler(
      */
     override fun matches(text: String, pattern: String) = shared(pattern) { (p) ->
         val flags = "REGEXP_SUBSTR($p, '^\\(\\?([a-z]+)\\)', 1, 1, NULL, 1)"
-        "REGEXP_LIKE($text, '\\A(' || ${backreferencesShifted("REGEXP_REPLACE($p, '^\\(\\?[a-z]+\\)', '')")} || ')\\z', NVL(REPLACE($flags, 's', 'n'), 'c'))"
+        "REGEXP_LIKE($text, '\\A(' || ${backreferencesShifted(noncapturingAsGroups("REGEXP_REPLACE($p, '^\\(\\?[a-z]+\\)', '')"))} || ')\\z', NVL(REPLACE($flags, 's', 'n'), 'c'))"
     }
+
+    /**
+     * [pattern] with each group that captures nothing, `(?:`, that no backslash escapes, written `(`: Oracle reads no such
+     * group, and matched nothing where a pattern wrote one (drivine-cypher-spec#242). A group that captures is the same match
+     * where the pattern writes no backreference, as one that writes both is refused ([Patterns.refusal]); and one written in
+     * a character class, or any other group of its own syntax, is refused too ([storeRefusal]). Twice over, as a `(?:` just
+     * after another, `(?:(?:a))`, is not found until the one before it is. A pattern that writes none is left as it is.
+     */
+    private fun noncapturingAsGroups(pattern: String) =
+        if (patternGiven?.let(Patterns::holdsNoncapturing) != true) pattern else (1..2).fold(pattern) { x, _ ->
+            """REGEXP_REPLACE($x, '(^|[^\\])((\\\\)*)\(\?:', '\1\2(')"""
+        }
+
+    /** A pattern the statement gives that writes a group of its own syntax Oracle can't read as Java does: see [Patterns.oracleRefusal]. */
+    override fun storeRefusal(pattern: String) = Patterns.oracleRefusal(pattern)
+
+    /**
+     * A pattern worked out as the statement runs that writes a group of its own syntax, `(?` that no backslash escapes, but for
+     * a leading flag group: Oracle can't be given it to read as Java does, as the compiler can't read its form (#242).
+     */
+    override fun refusedComputed(text: String) =
+        """REGEXP_LIKE(REGEXP_REPLACE($text, '^\(\?[a-z]+\)', ''), '(^|[^\\])(\\\\)*\(\?')"""
 
     /**
      * [pattern] with each backreference that no backslash escapes, `\1` to `\8`, numbered one more: Oracle has no group that

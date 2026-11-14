@@ -673,7 +673,17 @@ abstract class SqlCypherCompiler(
      */
     private fun checkPattern(pattern: String) {
         Patterns.refusal(pattern)?.let { throw CompilerException(it) }
+        storeRefusal(pattern)?.let { throw CompilerException(it) }
     }
+
+    /** Why this store can't answer a pattern of `=~` the statement gives as Java does, past [Patterns.refusal], or null: see Oracle's. */
+    protected open fun storeRefusal(pattern: String): String? = null
+
+    /**
+     * Whether a pattern worked out as the statement runs is one this store can't answer as Java does, past a backreference, as
+     * SQL of its text [text]; null where the store answers every such pattern: see Oracle's.
+     */
+    protected open fun refusedComputed(text: String): String? = null
 
     /**
      * Whether the pattern [text], worked out as the statement runs, writes a backreference ([Patterns.BACKREFERENCE]): it is
@@ -5831,7 +5841,8 @@ abstract class SqlCypherCompiler(
                     patternGiven = given
                     // A pattern worked out as the statement runs is refused then where it writes a backreference (#236).
                     val pattern = if (binary.right is Expression.Literal || binary.right is Expression.Parameter) b else shared(b) { (x) ->
-                        "CASE WHEN ${holdsBackreference(text(x))} THEN ${scalar(textFailure(COMPUTED_BACKREFERENCE, text(x)))} ELSE $x END"
+                        val construct = refusedComputed(text(x))?.let { "WHEN $it THEN ${scalar(textFailure(COMPUTED_CONSTRUCT, text(x)))} " } ?: ""
+                        "CASE WHEN ${holdsBackreference(text(x))} THEN ${scalar(textFailure(COMPUTED_BACKREFERENCE, text(x)))} $construct" + "ELSE $x END"
                     }
                     Value.Bool(matchedText(a, pattern))
                 }
@@ -7328,6 +7339,9 @@ abstract class SqlCypherCompiler(
         const val NUMBER_KEY_OF_MAP = "A map, a node or a relationship is read by a text key, as in Neo4j, not a"
 
         /** Why a pattern of `=~` worked out as the statement runs is refused where it writes a backreference: see [Patterns.refusal]. */
+        /** Why a pattern of `=~` worked out as the statement runs is refused on Oracle where it writes a group of its own syntax: see `refusedComputed`. */
+        const val COMPUTED_CONSTRUCT = "A regular expression worked out as the statement runs writes a group of its own syntax, (?…), which Oracle answers as Java does only in a pattern the statement gives, written or bound (drivine-cypher-spec#242):"
+
         const val COMPUTED_BACKREFERENCE = "A regular expression worked out as the statement runs writes a backreference, which the SQL stores answer as Java does only in a pattern the statement gives, written or bound:"
 
         /** Why `+`, `-`, `*` or `/` of a temporal value whose kind the statement doesn't know fails as it runs: see `temporalRefused`. */
