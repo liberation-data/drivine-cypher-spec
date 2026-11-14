@@ -320,6 +320,9 @@ class StoreSchemaTest {
         assertEquals(ItemForm.Current, postgres.formOf(spec, pgRows("(props -> 'name'::text)")), "the module's own column, as Postgres prints it")
         assertEquals(ItemForm.Mismatch(pg.lowercase(), "an index over [age]", true), postgres.formOf(spec, pgRows("(props -> 'age'::text)")), "another property, in the module's shape")
         assertEquals(ItemForm.Current, postgres.formOf(spec, pgRows("lower(props ->> 'name'::text)")), "an expression this can't read")
+        // A property's read is the column's whole text, not the start of it (#258).
+        assertEquals(ItemForm.Mismatch(pg.lowercase(), "an index over [age]", true), postgres.formOf(spec, pgRows("(props ->> 'age'::text)")), "another property, as text")
+        assertEquals(ItemForm.Current, postgres.formOf(spec, pgRows("(props ->> 'age'::text || 'x')")), "an expression that starts with a property's read")
     }
 
     private fun form(node: JsonNode): ItemForm = when {
