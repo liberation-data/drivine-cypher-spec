@@ -129,9 +129,11 @@ internal object HostTemporalArithmetic {
             val (y, mo, w, d, h, mi) = small.map { it!! }
             val g = groups[16]
             val point = g.indexOf('.')
-            val fraction = if (point >= 0) (g.substring(point + 1) + "000000000").take(9).toLong() else 0L
+            // Seconds java.math refuses, `.` or `1.2.3`, take the exact path, which fails as java.math does.
+            val decimal = g.isEmpty() || (g.any { it in '0'..'9' } && g.indexOf('.', point + 1) < 0)
             val whole = (if (point >= 0) g.substring(0, point) else g).let { if (it == "-" || it.isEmpty()) 0L else it.toLongOrNull() }
-            if (whole != null) {
+            if (decimal && whole != null) {
+                val fraction = if (point >= 0) (g.substring(point + 1) + "000000000").take(9).toLong() else 0L
                 val wholeSeconds = textSign * (h * 3600 + mi * 60 + whole)
                 val nanos = textSign * (if (g.startsWith("-")) -1 else 1) * fraction
                 return listOf(sign * textSign * (y * 12 + mo), sign * textSign * (w * 7 + d), sign * wholeSeconds, sign * nanos)
