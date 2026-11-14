@@ -327,7 +327,7 @@ class CompilerRefusalTest {
     @Test
     fun `a quantifier, a list comprehension, reduce(), toInteger() and toFloat() over a kind left open, or one they take, are compiled`() {
         // #420: the spec's refusals hold a list written of one kind that isn't a number, and toInteger() and toFloat() of a kind
-        // written that Neo4j refuses when it plans the statement; a list it refuses only as the row is read. A list of two kinds, or holding null, an empty list, one holding a parameter, a property or a
+        // written that Neo4j refuses when it plans the statement; a list given to toInteger() it refuses only as the row is read. A list of two kinds, or holding null, an empty list, one holding a parameter, a property or a
         // variable of a node, and a list given as a parameter leave the variable's kind open, as do a parameter, a property, a
         // node and a relationship given to toInteger() or toFloat() (a path is refused for another reason). UNWIND is as it was. A
         // variable of the same name bound outside, or by an outer comprehension, is the inner one's kind, as is one a WITH binds again.
@@ -346,8 +346,8 @@ class CompilerRefusalTest {
                 "MATCH (n)-[r]->() RETURN toInteger(n.x), toFloat(n.x), toInteger(n), toFloat(r)" to emptyMap(),
                 "WITH 'a' AS x RETURN [x IN [1] | x % 2], any(x IN [1] WHERE x % 2 = 0), [x IN ['a'] | [x IN [1] | x % 2]]" to emptyMap(),
                 "WITH [1] AS l WITH 1 AS l RETURN toInteger(l), toFloat(l)" to emptyMap(),
-                "RETURN toInteger([]), toFloat([]), [x IN [[1]] | toInteger(x)]" to emptyMap(),
-                "WITH [1] AS l RETURN toInteger(l), toFloat(l)" to emptyMap(),
+                "RETURN toInteger([]), [x IN [[1]] | toInteger(x)]" to emptyMap(),
+                "WITH [1] AS l RETURN toInteger(l)" to emptyMap(),
                 "RETURN reduce(a = 0, x IN [1, 2] | a + x % 2), reduce(a = 0, x IN ['a', 1] | a + x % 2), reduce(a = 0, x IN ['a'] | a % 2)" to emptyMap(),
             ).forEach { (cypher, parameters) -> compiler().compile(cypher, parameters) }
         }

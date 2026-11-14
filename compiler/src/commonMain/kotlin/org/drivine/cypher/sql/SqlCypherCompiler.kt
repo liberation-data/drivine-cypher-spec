@@ -4841,12 +4841,14 @@ abstract class SqlCypherCompiler(
 
         /**
          * Refuses `toInteger()` or `toFloat()` of [function] where the statement makes its argument a kind Neo4j refuses when it
-         * plans the statement ([knownKind]): a map, and for `toFloat()` a truth value too, which gave null (#420). A list Neo4j
-         * plans, and refuses only as the row is read, so it is compiled as before, as is a parameter or a value whose kind is left open.
+         * plans the statement ([knownKind]): a map, and for `toFloat()` a truth value or a list too, which gave null (#420). A list
+         * given to `toInteger()` Neo4j plans, and refuses only as the row is read, so it is compiled as before, as is a parameter or
+         * a value whose kind is left open.
          */
         private fun conversionOfKind(function: Expression.Function, scope: Map<String, Value>) {
             val (taken, nouns) = CONVERTED_KINDS[function.name.lowercase()] ?: return
-            val kind = function.arguments.singleOrNull()?.let { knownKind(it, scope) }?.takeIf { it != Value.Known.LIST } ?: return
+            val kind = function.arguments.singleOrNull()?.let { knownKind(it, scope) } ?: return
+            if (kind == Value.Known.LIST && function.name.lowercase() == "tointeger") return
             if (kind !in taken) throw CompilerException("${function.name}() takes $nouns, not ${kind.noun}, as in Neo4j.")
         }
 

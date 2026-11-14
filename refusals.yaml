@@ -97,8 +97,8 @@ cases:
       - cypher: "RETURN reduce(a = 0, x IN ['a'] | a + x % 2) AS result"
         error: "% takes numbers, not a text, as in Neo4j."
 
-  - name: "toInteger() of a map, and toFloat() of a truth value or a map"
-    description: "Neo4j documents toInteger() as taking a truth value, an integer, a float or a text, and toFloat() an integer, a float or a text, and refuses a map, and for toFloat() a truth value, when it plans the statement. Where the statement writes or makes the argument as one, the statement is refused; it gave null (liberation-data/drivine4j#420). toInteger(true) is 1, as Neo4j gives it. A list Neo4j plans, and refuses only as the row is read, so it is compiled as before, as is a parameter, a property or a node, whose kind is left open here."
+  - name: "toInteger() of a map, and toFloat() of a truth value, a list or a map"
+    description: "Neo4j documents toInteger() as taking a truth value, an integer, a float or a text, and toFloat() an integer, a float or a text, and refuses a map, and for toFloat() a truth value or a list, when it plans the statement. Where the statement writes or makes the argument as one, the statement is refused; it gave null (liberation-data/drivine4j#420). toInteger(true) is 1, as Neo4j gives it. A list given to toInteger() Neo4j plans, and refuses only as the row is read, so it is compiled as before, as is a parameter, a property or a node, whose kind is left open here."
     steps:
       - cypher: "RETURN toInteger({})"
         error: "toInteger() takes a truth value, an integer, a float or a text, not a map, as in Neo4j."
@@ -106,6 +106,14 @@ cases:
         error: "toFloat() takes an integer, a float or a text, not a truth value, as in Neo4j."
       - cypher: "RETURN toFloat({})"
         error: "toFloat() takes an integer, a float or a text, not a map, as in Neo4j."
+      - cypher: "WITH {a: 1} AS m RETURN toInteger(m)"
+        error: "toInteger() takes a truth value, an integer, a float or a text, not a map, as in Neo4j."
+      - cypher: "RETURN toFloat([])"
+        error: "toFloat() takes an integer, a float or a text, not a list, as in Neo4j."
+      - cypher: "WITH [1] AS l RETURN toFloat(l)"
+        error: "toFloat() takes an integer, a float or a text, not a list, as in Neo4j."
+      - cypher: "RETURN [x IN [[1]] | toFloat(x)]"
+        error: "toFloat() takes an integer, a float or a text, not a list, as in Neo4j."
 
   - name: "Value used as the wrong kind"
     description: "Using a value as something it isn't (a number as a node, a path's property) is refused."
