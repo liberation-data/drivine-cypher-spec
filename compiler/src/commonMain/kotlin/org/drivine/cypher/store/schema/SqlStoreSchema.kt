@@ -398,7 +398,11 @@ data class StoreObject(
 @DrivineInternalApi
 class PostgresSchema(override val ddl: PostgresDdl) : SqlStoreSchema() {
 
-    /** Each item is one index, of the label's nodes. A vector's and a full-text index's expressions aren't compared. */
+    /**
+     * Each item is one index, of the label's nodes. A vector's and a full-text index's expressions aren't compared, only
+     * the keys they read, which are the stored keys ([SqlStoreDdl.storedKeys]: `$x` is held at `$$x`), as the index reads
+     * the key the property is held at.
+     */
     override fun madeAs(spec: SchemaItemSpec): List<MadeObject> {
         val parts = listOf(spec.label) + spec.properties
         return when (spec.kind) {
@@ -409,12 +413,12 @@ class PostgresSchema(override val ddl: PostgresDdl) : SqlStoreSchema() {
                 listOf(
                     MadeObject(
                         ddl.objectName(PostgresDdl.VECTOR, listOf(spec.label, spec.properties.single())), false, null, spec.label,
-                        keys = spec.properties, method = "hnsw", opclasses = listOf(PostgresSql.operators(vector.similarity)), dimensions = vector.dimensions,
+                        keys = SqlStoreDdl.storedKeys(spec.properties), method = "hnsw", opclasses = listOf(PostgresSql.operators(vector.similarity)), dimensions = vector.dimensions,
                     ),
                 )
             }
             SchemaItemKind.FULLTEXT_INDEX ->
-                listOf(MadeObject(ddl.objectName(PostgresDdl.FULLTEXT, parts), false, null, spec.label, keys = spec.properties, method = "gin", opclasses = listOf(TRIGRAMS)))
+                listOf(MadeObject(ddl.objectName(PostgresDdl.FULLTEXT, parts), false, null, spec.label, keys = SqlStoreDdl.storedKeys(spec.properties), method = "gin", opclasses = listOf(TRIGRAMS)))
             SchemaItemKind.TEXT_INDEX -> emptyList()
         }
     }
@@ -616,11 +620,12 @@ class OracleSchema(override val ddl: OracleDdl) : SqlStoreSchema() {
      * reads other properties, or the index is of another type (a `VECTOR` index; Oracle Text's `DOMAIN` index) or on another
      * table. The trigger is read as each library wrote it: a label tested by its text (`INSTR(…, ',"Chunk","')`, drivine4j's)
      * or by a path (`JSON_EXISTS(:NEW.labels, '$?(@ == "Chunk")')`, TypeScript's and Python's), and each property by the
-     * path it reads (`'$.p'` or `'$."p"'`). Only an index can be dropped by its name.
+     * path it reads (`'$.p'` or `'$."p"'`), the literal's doubled quotes made one, which is the key the property is held at
+     * ([SqlStoreDdl.storedKeys]: `$x` at `$$x`). Only an index can be dropped by its name.
      */
     override fun otherMismatch(spec: SchemaItemSpec, objects: StoreObjects, structureOnly: Boolean): ItemForm.Mismatch? {
         val side = side(spec) ?: return null
-        val keys = spec.properties
+        val keys = SqlStoreDdl.storedKeys(spec.properties)
         val (column, type) = if (spec.kind == SchemaItemKind.VECTOR_INDEX) "EMBEDDING" to "VECTOR" else "DOC" to "JSON"
         // A newer form's: only the index over the table, whose type and table Oracle says without anything being read of
         // its text; the table's columns and the trigger's text are what a newer form may write otherwise.
@@ -634,7 +639,7 @@ class OracleSchema(override val ddl: OracleDdl) : SqlStoreSchema() {
                 trigger.table != null && !trigger.table.equals(ddl.nodes, ignoreCase = true) -> "a trigger on ${trigger.table}"
                 else -> {
                     val label = sideLabel(source)
-                    val read = SqlText.literals(source, SIDE_PATH).mapNotNull { pathKey(it.body) }.distinct().toList()
+                    val read = SqlText.literals(source, SIDE_PATH).mapNotNull { pathKey(SqlText.unquoted(it.body)) }.distinct().toList()
                     when {
                         label != null && label != spec.label -> "a trigger over the nodes of $label"
                         read.isNotEmpty() && read != keys -> "a trigger over $read"

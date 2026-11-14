@@ -174,9 +174,8 @@ class LongQuotedTextTest {
             val libraries = "IF JSON_EXISTS(:NEW.labels, '${sql("$?(@ == " + json(key) + ")")}') THEN"
             assertEquals(ItemForm.Mismatch(trigger, "a trigger over the nodes of $key", false), oracle.formOf(spec, rows(libraries)), "the libraries' label of $what")
             val read = "IF JSON_EXISTS(:NEW.labels, '\$?(@ == \"Doc\")') THEN x := JSON_VALUE(:NEW.props, '${sql("$." + json(key))}' RETURNING CLOB); END IF;"
-            // The trigger's path is read as its literal's body, its quotes still doubled, as it was before #258: a key with a
-            // quote reads as another key. Not this change's to fix.
-            assertEquals(ItemForm.Mismatch(trigger, "a trigger over [${sql(key)}]", false), oracle.formOf(spec, rows(read)), "a key of $what")
+            // The trigger's path is read as its literal's body with its quotes un-doubled (#266): the key itself, which isn't `body`.
+            assertEquals(ItemForm.Mismatch(trigger, "a trigger over [$key]", false), oracle.formOf(spec, rows(read)), "a key of $what")
         }
     }
 }

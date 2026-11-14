@@ -14,6 +14,14 @@ import kotlinx.datetime.toLocalDateTime
  */
 class SqliteTemporalSql(shared: (List<String>, (List<String>) -> String) -> String) : TemporalSql(shared) {
 
+
+    /**
+     * SQLite's timestamp is a text that holds any year, its digits before the month: one of five digits or more, signed or not,
+     * is past 9999 or before -9999 (see [TemporalSql.longYear]).
+     */
+    override fun longYear(timestamp: String) = "($timestamp GLOB '[0-9][0-9][0-9][0-9][0-9]*' OR $timestamp GLOB '[-+][0-9][0-9][0-9][0-9][0-9]*')"
+
+    override val textType = "TEXT"
     override fun local(text: String, kind: Temporal) = temporal("local", text, "'${kind.name}'")
 
     override fun utc(text: String, kind: Temporal) = temporal("utc", text, "'${kind.name}'")
