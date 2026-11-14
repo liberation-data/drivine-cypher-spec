@@ -48,7 +48,8 @@ internal object VariableKinds {
 
     /**
      * Refuses [query] where a variable of it is used as two kinds, or made where it is bound already; where a pattern in a
-     * `WITH`'s `WHERE` names a variable the `WITH` drops (see [Scope]); and where a `WITH` or a `RETURN` names two items alike.
+     * `WITH`'s `WHERE` names a variable the `WITH` drops (see [Scope]); where a `WITH` or a `RETURN` names two items alike;
+     * and where a pattern is used as a value, not as a condition (see [valued]).
      */
     fun check(query: Query) {
         query(query, Scope())
@@ -75,6 +76,7 @@ internal object VariableKinds {
                 }
                 is Clause.Unwind -> {
                     expression(clause.list, current)
+                    valued(clause.list, condition = false)
                     current[clause.variable] = Kind.ANY
                 }
                 is Clause.With -> current = projected(clause.projection, current, clause.where, kept.keys).also { next ->
@@ -167,7 +169,10 @@ internal object VariableKinds {
         projection.items.groupBy { it.name }.entries.firstOrNull { it.value.size > 1 }?.let { (name, _) ->
             throw CompilerException("Two items are named $name, as Cypher refuses: name each item of a WITH or a RETURN once, with AS.")
         }
-        projection.items.forEach { expression(it.expression, scope) }
+        projection.items.forEach {
+            expression(it.expression, scope)
+            valued(it.expression, condition = false)
+        }
         // What a WITH outside drops stays dropped after a subquery's own WITH, but for an item that names it again.
         val next = if (projection.star) scope.copy() else Scope(dropped = LinkedHashSet(scope.dropped))
         projection.items.forEach { next[it.name] = kindOf(it.expression, scope) }
@@ -176,7 +181,10 @@ internal object VariableKinds {
             val dropped = scope.kinds.keys.filterTo(LinkedHashSet(next.dropped)) { name -> next[name] == null && name !in kept }
             expression(it, Scope(LinkedHashMap(reading.kinds), dropped))
         }
-        projection.orderBy.forEach { expression(it.expression, reading) }
+        projection.orderBy.forEach {
+            expression(it.expression, reading)
+            valued(it.expression, condition = false)
+        }
         projection.skip?.let { expression(it, scope) }
         projection.limit?.let { expression(it, scope) }
         return next
@@ -360,6 +368,65 @@ internal object VariableKinds {
         val names = pattern.nodes.indices.flatMap { i -> listOfNotNull(pattern.nodes[i].variable, pattern.relationships.getOrNull(i)?.variable) }
         names.firstOrNull { scope[it] == null }?.let {
             throw CompilerException("$it is not defined: a pattern used as an expression binds no new variable, as in Neo4j. Bind it in a MATCH, or test the pattern with EXISTS { … }.")
+        }
+    }
+
+    /**
+     * Refuses a pattern used as a value in [expression], an item of a `WITH` or a `RETURN`, an order term or an `UNWIND`'s
+     * list, as Neo4j refuses it (its 42I34): `RETURN (n)-->()`. A pattern is only a condition there, where [condition] is,
+     * as Neo4j takes one: an operand of `NOT`, `AND`, `OR` or `XOR`, a `CASE`'s `WHEN`, the `WHERE` of a comprehension, a
+     * quantifier or a pattern. `size()` of one is refused for that (see [function]), and a subquery's
+     * own items are read as its own projection's.
+     */
+    private fun valued(expression: Expression, condition: Boolean) {
+        fun value(part: Expression) = valued(part, condition = false)
+        fun test(part: Expression) = valued(part, condition = true)
+        when (expression) {
+            is Expression.PatternPredicate -> if (!condition) {
+                throw CompilerException(
+                    "A pattern expression can only be used to test the existence of a pattern, as in Neo4j: as a condition, as in a WHERE. " +
+                        "Use a pattern comprehension instead, as in [(a)-->(b) | b], or EXISTS { … } or COUNT { … }."
+                )
+            }
+            is Expression.Binary -> {
+                val logical = expression.operator in setOf(Expression.Binary.Operator.AND, Expression.Binary.Operator.OR, Expression.Binary.Operator.XOR)
+                listOf(expression.left, expression.right).forEach { valued(it, logical) }
+            }
+            is Expression.Unary -> valued(expression.operand, expression.operator == Expression.Unary.Operator.NOT)
+            is Expression.Function -> when {
+                expression.name.equals("size", ignoreCase = true) && expression.arguments.singleOrNull() is Expression.PatternPredicate -> {}
+                else -> expression.arguments.forEach(::value)
+            }
+            is Expression.Case -> {
+                listOfNotNull(expression.subject, expression.otherwise).forEach(::value)
+                expression.alternatives.forEach { (key, result) ->
+                    valued(key, condition = expression.subject == null)
+                    value(result)
+                }
+            }
+            is Expression.ListComprehension -> {
+                value(expression.list)
+                expression.where?.let(::test)
+                expression.projection?.let(::value)
+            }
+            is Expression.Quantifier -> {
+                value(expression.list)
+                expression.where?.let(::test)
+            }
+            is Expression.Reduce -> listOf(expression.initial, expression.list, expression.expression).forEach(::value)
+            is Expression.PatternComprehension -> {
+                expression.where?.let(::test)
+                value(expression.projection)
+            }
+            is Expression.Exists -> expression.where?.let(::test)
+            is Expression.Property -> value(expression.subject)
+            is Expression.HasLabels -> value(expression.subject)
+            is Expression.ListLiteral -> expression.items.forEach(::value)
+            is Expression.MapLiteral -> expression.entries.forEach { value(it.second) }
+            is Expression.MapProjection -> expression.elements.forEach { if (it is Expression.MapProjection.Element.Entry) value(it.value) }
+            is Expression.Index -> listOf(expression.subject, expression.index).forEach(::value)
+            is Expression.Slice -> listOfNotNull(expression.subject, expression.from, expression.to).forEach(::value)
+            is Expression.Literal, is Expression.Parameter, is Expression.Variable, Expression.CountStar, is Expression.Subquery -> {}
         }
     }
 
