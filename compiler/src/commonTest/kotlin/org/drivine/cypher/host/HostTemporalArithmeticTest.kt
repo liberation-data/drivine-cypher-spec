@@ -87,7 +87,7 @@ class HostTemporalArithmeticTest {
     }
 
     @Test
-    fun `a clock written as SQLite's timestamp and read again is cut to the microsecond, and nothing else`() {
+    fun `a clock written as SQLite's timestamp and read again is cut to the microsecond and nothing else`() {
         for (year in listOf(-999999999, -10000, -9999, -44, -1, 0, 1, 9999, 10000, 999999999)) for (nanos in listOf(0, 1, 999, 1000, 500000, 999999999)) {
             val clock = LocalDateTime(LocalDate(year, 12, 31), LocalTime(23, 59, 59, nanos))
             val cut = LocalDateTime(clock.date, LocalTime(clock.hour, clock.minute, clock.second, nanos / 1000 * 1000))
