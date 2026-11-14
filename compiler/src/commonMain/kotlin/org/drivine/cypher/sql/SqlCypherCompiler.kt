@@ -5839,7 +5839,8 @@ abstract class SqlCypherCompiler(
                 Operator.MATCHES -> {
                     val given = (known(binary.right) as? String)?.also(::checkPattern)
                     patternGiven = given
-                    // A pattern worked out as the statement runs is refused then where it writes a backreference (#236).
+                    // A pattern worked out as the statement runs is refused then where it writes a backreference (#236), or one the store
+                    // refuses past it ([refusedComputed]: on Oracle, a group of its own syntax, #242).
                     val pattern = if (binary.right is Expression.Literal || binary.right is Expression.Parameter) b else shared(b) { (x) ->
                         val construct = refusedComputed(text(x))?.let { "WHEN $it THEN ${scalar(textFailure(COMPUTED_CONSTRUCT, text(x)))} " } ?: ""
                         "CASE WHEN ${holdsBackreference(text(x))} THEN ${scalar(textFailure(COMPUTED_BACKREFERENCE, text(x)))} $construct" + "ELSE $x END"

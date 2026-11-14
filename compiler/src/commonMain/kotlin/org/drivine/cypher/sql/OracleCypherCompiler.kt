@@ -2035,7 +2035,8 @@ class OracleCypherCompiler(
      * Flags the pattern opens with, `(?i)`, are Oracle's match parameter, Java's `s` its `n`. The whole of the text
      * matches, as `=~` asks: it starts at `\A` and ends at `\z`, the text's start and end, which `(?m)` leaves as they are,
      * and Oracle's `$` also matches before a line break that ends the text. Under `(?m)`, Oracle's own `^` and `$` match
-     * at a line break only where nothing in the pattern reads past it: `x$\n^ab` matches no text.
+     * at a line break only where nothing in the pattern reads past it: `x$\n^ab` matches no text. Each `(?:` is written `(`
+     * ([noncapturingAsGroups], #242).
      */
     override fun matches(text: String, pattern: String) = shared(pattern) { (p) ->
         val flags = "REGEXP_SUBSTR($p, '^\\(\\?([a-z]+)\\)', 1, 1, NULL, 1)"
