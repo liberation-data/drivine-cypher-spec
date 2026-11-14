@@ -97,6 +97,13 @@ class PostgresTemporalSql(
 
     override fun number(text: String) = "CAST(NULLIF($text, '') AS numeric)"
 
+    /**
+     * `numeric`'s division keeps some 16 significant digits, so the quotient of a large dividend had fewer than the nine places a
+     * duration's seconds are written to: `3600000000 / 7` is `514285714.28571429` (`duration('PT1000000H') / 7`, #260). The
+     * dividend is given 20 places, which the quotient keeps.
+     */
+    override fun quotient(dividend: String, divisor: String) = "ROUND($dividend, 20) / $divisor"
+
     override fun sortable(timestamp: String) = "to_char($timestamp, 'YYYY-MM-DD\"T\"HH24:MI:SS.US')"
 
     override fun micros(timestamp: String) = "to_char($timestamp, 'US')"
@@ -113,6 +120,12 @@ class PostgresTemporalSql(
         shared(listOf("age($to, $from)")) { (age) -> "(EXTRACT(YEAR FROM $age) * 12 + EXTRACT(MONTH FROM $age))" }
 
     override fun secondsBetween(from: String, to: String) = "EXTRACT(EPOCH FROM ($to - $from))"
+
+    /**
+     * Postgres rounds a `numeric` to places, and no `double precision`: a duration's part may be either, as a statement reads
+     * it (#261), so it is rounded as the `numeric` it is or converts to.
+     */
+    override fun round(number: String, places: Int) = "ROUND(CAST($number AS numeric), $places)"
 
     /**
      * `date_trunc`, but for the units it counts otherwise than Neo4j: its millennium starts in 2001 and its century in

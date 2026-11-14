@@ -5156,7 +5156,8 @@ abstract class SqlCypherCompiler(
                     r == duration -> tagged(duration, temporals.times(b, number(comparable(json(left)))))
                     else -> null
                 }
-                Operator.DIVIDE -> if (l == duration) tagged(duration, temporals.times(a, "(1.0 / ${number(comparable(json(right)))})")) else null
+                // Each part divided, as Cypher divides a duration: times `1.0 / k` lost a month on Postgres (P1Y / 3, #260).
+                Operator.DIVIDE -> if (l == duration) tagged(duration, temporals.divided(a, number(comparable(json(right))))) else null
                 Operator.EQUALS, Operator.NOT_EQUALS, Operator.LESS_THAN, Operator.GREATER_THAN, Operator.LESS_THAN_OR_EQUAL, Operator.GREATER_THAN_OR_EQUAL -> {
                     val sql = mapOf(
                         Operator.EQUALS to "=", Operator.NOT_EQUALS to "<>", Operator.LESS_THAN to "<", Operator.GREATER_THAN to ">",

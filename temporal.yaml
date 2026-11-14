@@ -1089,6 +1089,19 @@ cases:
         cypher: "MATCH (n:CyTemporal) RETURN toString(n.month / n.ratio)"
         rows: ["P12DT4H11M38.4S"]
 
+  - name: "A duration divided, and its seconds written"
+    description: "A duration divided by a number is each of its parts divided, as Cypher divides it, not times the number's reciprocal, whose rounding lost a whole month on Postgres (#260). Its seconds are rounded to the nine places a duration's text writes before they are split into hours and minutes, so a hair under a whole minute is no 59M60S, nor a hair over a whole time a 0S (#261)."
+    steps:
+      - only: [neo4j, sql]
+        cypher: "RETURN [toString(duration('P1Y') / 3), toString(duration('P1Y') / 1.5), toString(duration('P1W') / 3), toString(duration('P1M') / 3)]"
+        rows: [["P4M", "P8M", "P2DT8H", "P10DT3H29M42S"]]
+      - only: [neo4j, sql]
+        cypher: "CREATE (:CyTemporal {id: 'q', y: duration('P1Y'), w: duration('P1W'), k: 3, k15: 1.5})"
+      - note: "Read from the store, worked out by the store's function (drivine4j#418); SQLite keeps none yet."
+        only: [neo4j, postgres, oracle]
+        cypher: "MATCH (n:CyTemporal {id: 'q'}) RETURN [toString(n.y / n.k), toString(n.y / n.k15), toString(n.w / n.k)]"
+        rows: [["P4M", "P8M", "P2DT8H"]]
+
   - name: "Temporal functions on stored values"
     description: "A temporal value read from the store truncates, becomes a duration, and gives the duration between it and another."
     steps:
