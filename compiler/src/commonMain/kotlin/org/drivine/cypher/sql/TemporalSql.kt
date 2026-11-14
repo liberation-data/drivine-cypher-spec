@@ -243,6 +243,12 @@ abstract class TemporalSql(protected val shared: (List<String>, (List<String>) -
     open fun heldMicros(text: String, kinds: List<Temporal>): String? = null
 
     /**
+     * The duration text [text], read so that it fails by name where its seconds go past the microsecond, the text written
+     * once; null where the store can't, and [Temporals] tests it first (drivine4j#421).
+     */
+    open fun heldDurationMicros(text: String): String? = null
+
+    /**
      * [text], or where its fraction of a second goes past the microsecond, the text with [SUB_MICRO_WRITTEN] in place of its
      * nanoseconds, the text written once: for a store whose read of a text that is no temporal value fails, quoting the text,
      * so the failure names why (drivine4j#421). A text read as it is is unchanged. The words are few, as a statement that

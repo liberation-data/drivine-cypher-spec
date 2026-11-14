@@ -82,6 +82,7 @@ class Temporals(
         LITERAL.matchEntire(text)?.let { quoted ->
             return if (SUB_MICRO_REGEX.containsMatchIn(quoted.groupValues[1].replace("''", "'"))) refusing(SUB_MICRO, text) else text
         }
+        sql.heldDurationMicros(text)?.let { return it }
         return shared(listOf(text)) { (t) -> "CASE WHEN ${sql.matches(t, literal(sql.regex(SUB_MICRO_DIGITS)))} THEN ${refusing(SUB_MICRO, "''")} ELSE $t END" }
     }
 

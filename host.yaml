@@ -1056,6 +1056,17 @@ cases:
         function: "drivine_temporal_arithmetic"
         args: ['/', '{"$t":"duration","v":"P1D"}', '0']
         error: "/ by zero"
+      - note: "A moment of a nanosecond past the microsecond, or moved by a duration of one, fails by name: SQLite's timestamp keeps microseconds (drivine4j#421)."
+        function: "drivine_temporal_arithmetic"
+        args: ['+', '{"$t":"localdatetime","v":"2024-01-01T00:00:00.000000001"}', '{"$t":"duration","v":"PT1S"}']
+        error: "A fraction of a second past the microsecond"
+      - function: "drivine_temporal_arithmetic"
+        args: ['+', '{"$t":"localdatetime","v":"2024-01-01T00:00:00"}', '{"$t":"duration","v":"PT0.000000001S"}']
+        error: "A fraction of a second past the microsecond"
+      - note: "A date takes the whole days of a duration's time alone, so its nanoseconds are no matter there."
+        function: "drivine_temporal_arithmetic"
+        args: ['+', '{"$t":"date","v":"2024-01-01","s":"10000020240101"}', '{"$t":"duration","v":"PT0.000000001S"}']
+        result: '{"$t":"date","v":"2024-01-01","s":"10000020240101"}'
 
   - name: "drivine_host_version"
     description: "drivine_host_version() is the version of the drivine_ functions' contract, the forms of their arguments and results this file pins, as the compiler's SqliteFunctions.HOST_VERSION is. A library checks it once on each connection it registers the functions on, and fails where it is not the compiler's, or the function is missing: then the functions are not those the compiled SQL calls. No compiled statement calls it, so its case pairs no store case."

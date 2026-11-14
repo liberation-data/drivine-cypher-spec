@@ -46,6 +46,13 @@ class OracleTemporalSql(
      * Where the store keeps the era functions, its era function refuses a nanosecond past the microsecond as it reads the
      * text, once (drivine4j#421): a moment's text is read through it already, and a time of day's is given through it.
      */
+    /** Through the era function too, which refuses a duration's nanoseconds as a moment's and leaves its text as it is. */
+    override fun heldDurationMicros(text: String): String? {
+        val era = storedEraText ?: return null
+        callsStored()
+        return "$era($text)"
+    }
+
     override fun heldMicros(text: String, kinds: List<Temporal>): String? {
         val era = storedEraText ?: return null
         if (kinds.none { it == Temporal.LOCAL_TIME || it == Temporal.TIME }) return text
