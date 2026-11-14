@@ -188,8 +188,16 @@ object HostFunctions {
         result.long(SqliteFunctions.HOST_VERSION.toLong())
     }
 
+    /**
+     * `drivine_temporal_arithmetic(operator, x, y)`: `+`, `-`, `*` or `/` where a side is a tag of a temporal value read from the
+     * store, as Postgres and Oracle work it out by the function they keep (drivine4j#418): see [HostTemporalArithmetic].
+     */
+    val temporalArithmetic = HostFunction(org.drivine.cypher.sql.TemporalArithmeticFunction.HOST, 3, deterministic = true) { args, count, result ->
+        org.drivine.cypher.host.time.HostTemporalArithmetic.arithmetic(args, count, result)
+    }
+
     /** Every host function the module implements, in the order each host registers them. */
     val all: List<HostFunction> = listOf(
-        floatText, equal, add, canonical, sortKey, listOrder, round, regexp, regexGroup, regexpReplace, temporal, trunc, toChar, hostVersion,
+        floatText, equal, add, canonical, sortKey, listOrder, round, regexp, regexGroup, regexpReplace, temporal, temporalArithmetic, trunc, toChar, hostVersion,
     )
 }

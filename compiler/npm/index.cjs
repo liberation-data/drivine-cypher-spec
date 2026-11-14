@@ -65,4 +65,14 @@ function hostVersion() {
     return load().hostVersion();
 }
 
-module.exports = { compile, hostVersion };
+/**
+ * SQLite's host function of temporal arithmetic, `drivine_temporal_arithmetic(operator, x, y)`, as the module works it out
+ * (drivine4j#418): a host registers it as a call of this, so every library runs the module's one copy. `x` and `y` are each a
+ * JSON text, or null; a number is given as its text. The tag it makes as JSON text, or null; a pair Cypher has no arithmetic
+ * of throws, naming it.
+ */
+function temporalArithmetic(operator, x, y) {
+    return load().temporalArithmetic(operator, x, y);
+}
+
+module.exports = { compile, hostVersion, temporalArithmetic };

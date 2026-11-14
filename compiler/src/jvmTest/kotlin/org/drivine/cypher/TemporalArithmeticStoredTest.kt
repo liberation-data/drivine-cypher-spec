@@ -14,8 +14,8 @@ import kotlin.test.assertTrue
 
 /**
  * drivine4j#418: `+`, `-`, `*` and `/` of a temporal value whose kind the statement doesn't know, a tag read from the store, is
- * worked out as the statement runs by the store's function of temporal arithmetic on Postgres and Oracle, where the generic
- * arithmetic gave null; on SQLite, which has none yet, and on an Oracle store without it, it fails by name. What each store gives is the spec's, in `temporal.yaml` ("Arithmetic on
+ * worked out as the statement runs by the store's function of temporal arithmetic on Postgres and Oracle, and by the host
+ * function on SQLite, where the generic arithmetic gave null; on an Oracle store without the function, it fails by name. What each store gives is the spec's, in `temporal.yaml` ("Arithmetic on
  * temporal values read from the store"): this is what each is given.
  */
 class TemporalArithmeticStoredTest {
@@ -28,7 +28,7 @@ class TemporalArithmeticStoredTest {
     private val refusing = OracleCypherCompiler("g", true, true, emptySet(), null, false, false, false, false)
 
     /** Whether [sql] tests a side for a tag: it calls the store's function there, or fails by name. */
-    private fun tested(sql: String) = "_temporal_arith('" in sql || refusal in sql
+    private fun tested(sql: String) = "_temporal_arith('" in sql || "drivine_temporal_arithmetic('" in sql || refusal in sql
 
     /**
      * The whole rule, by the form of a side (`tagFree`): each form, beside a number in `form - 1`, and whether it is tested for a
@@ -116,15 +116,16 @@ class TemporalArithmeticStoredTest {
     }
 
     @Test
-    fun `Postgres and Oracle work it out by their function, told the operator, and SQLite and an Oracle store without it fail by name`() {
-        val calls = mapOf(PostgresCypherCompiler("g") to "g_temporal_arith('", OracleCypherCompiler("g") to "g_temporal_arith('")
+    fun `each store works it out by its function, or SQLite by its host function, told the operator, and an Oracle store without it fails by name`() {
+        val calls = mapOf(PostgresCypherCompiler("g") to "g_temporal_arith('", OracleCypherCompiler("g") to "g_temporal_arith('",
+            SqliteCypherCompiler("g") to "drivine_temporal_arithmetic('")
         listOf("+", "-", "*", "/").forEach { operator ->
             calls.forEach { (compiler, call) ->
                 val sql = compiler.compile("MATCH (n:T) RETURN n.a $operator n.b", emptyMap()).sql
                 assertTrue("$call$operator', " in sql && refusal !in sql, "${compiler::class.simpleName} $operator:\n$sql")
             }
-            // SQLite keeps no function yet, nor an Oracle store made before it.
-            listOf(refusing, SqliteCypherCompiler("g")).forEach { compiler ->
+            // An Oracle store made before the function keeps none.
+            listOf(refusing).forEach { compiler ->
                 val sql = compiler.compile("MATCH (n:T) RETURN n.a $operator n.b", emptyMap()).sql
                 assertTrue(refusal in sql && "_temporal_arith(" !in sql, "${compiler::class.simpleName} without the function, $operator:\n$sql")
             }
