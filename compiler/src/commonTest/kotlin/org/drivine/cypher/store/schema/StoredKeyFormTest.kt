@@ -21,7 +21,7 @@ import kotlin.test.assertNotNull
  */
 class StoredKeyFormTest {
 
-    private val names = listOf("body", "it's", "\$x", "\$\$y", "a''b")
+    private val names = listOf("body", "it's", "\$x", "\$\$y", "a''b", "say \"hi\"", "a\\b", "a.b", "a\$b", "\$it's.\"x\"")
 
     private val oracle = OracleDdl("drivine")
     private val postgres = PostgresDdl("drivine")
@@ -72,6 +72,21 @@ class StoredKeyFormTest {
         }
     }
 
+    /**
+     * A trigger over the key a property had before layout 2 (`$x` itself, not `$$x`) reads no key a statement writes: it
+     * is drift. A store of layout 1 is refused unless empty, so only an object Drivine didn't make reads so.
+     */
+    @Test
+    fun oracleTellsATriggerOverAnUnescapedKey() {
+        val schema = OracleSchema(oracle)
+        val spec = FullTextIndexSpec("Doc", listOf("title", "\$x"))
+        val made = oracleTrigger(spec)
+        @Suppress("UNCHECKED_CAST")
+        val unescaped = made + ("source" to (made["source"] as List<String>).map { it.replace("\"\$\$x\"", "\"\$x\"") })
+        val name = oracle.sideName(spec) + "_t"
+        assertEquals(ItemForm.Mismatch(name.uppercase(), "a trigger over [title, \$x]", droppable = false), schema.formOf(spec, listOf(unescaped)))
+    }
+
     // ----- Postgres: the index's columns -----
 
     /**
@@ -118,6 +133,16 @@ class StoredKeyFormTest {
                 assertEquals("an index over ${SqlStoreDdl.storedKeys(listOf(made))}", form.reason, "$spec")
                 assertEquals(true, form.droppable, "$spec")
             }
+        }
+    }
+
+    /** An index over the key a property had before layout 2 (`$x` itself, not `$$x`) is drift, as on Oracle. */
+    @Test
+    fun postgresTellsAnIndexOverAnUnescapedKey() {
+        val schema = PostgresSchema(postgres)
+        for (spec in listOf(VectorIndexSpec("Doc", "\$x", 3), FullTextIndexSpec("Doc", listOf("title", "\$x")))) {
+            val form = schema.formOf(spec, listOf(postgresIndex(spec, spec.properties)))
+            assertEquals(ItemForm.Mismatch(postgres.objectName(if (spec is VectorIndexSpec) PostgresDdl.VECTOR else PostgresDdl.FULLTEXT, listOf("Doc") + spec.properties).lowercase(), "an index over ${spec.properties}", droppable = true), form, "$spec")
         }
     }
 }
