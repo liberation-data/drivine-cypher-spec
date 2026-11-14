@@ -38,6 +38,19 @@ class TruncatedQuotientTest {
         }
     }
 
+    /**
+     * Postgres has `div` of numerics only, and casts no double precision to one by itself: a duration built of a map with no
+     * years, quarters or months holds its months as `TRUNC((0 * 12 + 0 * 3 + 0))`, a double precision, so `div` of them failed.
+     */
+    @Test
+    fun `Postgres casts each dividend it cuts with div to numeric`() {
+        listOf("RETURN toString(duration({days: 1, hours: 12}))", "RETURN duration({days: 1}).hours").forEach { cypher ->
+            val sql = PostgresCypherCompiler("g").compile(cypher, emptyMap()).sql
+            assertTrue("div(" in sql, "$cypher:\n$sql")
+            assertFalse("div(" in sql.replace("div(CAST(", ""), "$cypher:\n$sql")
+        }
+    }
+
     @Test
     fun `Oracle and SQLite cut it as they did, by their own truncation`() {
         statements.forEach { cypher ->
