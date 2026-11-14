@@ -612,6 +612,15 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
     override fun storedArithmetic(operator: String, x: String, y: String) = "${TemporalArithmeticFunction.HOST}('$operator', $x, $y)"
 
     /**
+     * A duration scaled by a number, by the host function too: SQLite's SQL works its parts out in doubles, which left a tail of
+     * a nanosecond or two in its seconds (`P1Y / 2.5` was `…16.800000002S`), where the host function works them out in decimals
+     * as Postgres and Oracle do (drivine-cypher-spec#262). The duration is given as its tag, the number as SQL's; null where
+     * either is.
+     */
+    override fun scaled(operator: String, duration: String, number: String) =
+        "(${storedArithmetic(operator, tagged(Temporal.DURATION, duration).sql, number)} ->> '\$.v')"
+
+    /**
      * The whole of the text matches, as `=~` asks: `REGEXP` finds a match anywhere. It ends at `\z`, the text's end,
      * where Java's `$` would match before a line break that ends the text too.
      */

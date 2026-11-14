@@ -26,7 +26,8 @@ import kotlin.test.assertTrue
  * SQLite SQL gives for the same operator and values, byte for byte, the inline SQL run on SQLite with the module's host functions
  * registered as drivine4j registers them. The inline builder is what it is checked against: each case is a pair of kinds and
  * values, generated over the edges a calendar has (a month's end, a leap day, a year BC, an offset, a fraction of a second, a
- * negative duration, a fraction of a month).
+ * negative duration, a fraction of a month). A duration scaled by a number the statement knows is the host function's on SQLite
+ * too, as its SQL worked it out in doubles (#262): those cases check the SQL calls it as a value read from the store does.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class TemporalArithmeticHostTest {
@@ -58,26 +59,11 @@ class TemporalArithmeticHostTest {
 
     /**
      * Durations that move a moment past the years SQLite's text writes, which fails by name, where a time of day, which writes
-     * no year, takes them (#263). Beside a moment only: summed or scaled, the inline SQL's doubles leave tails (#262).
+     * no year, takes them (#263). Beside a moment only: summed, the inline SQL's doubles leave tails.
      */
     private val long = listOf("P10000Y", "-P10000Y", "PT87660000H")
 
     private val numbers = listOf("2", "3", "-1", "0.5", "1.5", "2.5", "-7", "10", "1e3", "2.5E-1")
-
-    /**
-     * The cases where the inline SQLite SQL is wrong, and the host function gives Neo4j's answer: each fails this test where it
-     * starts to match, so the list shrinks as the builder is fixed, and the test is back to all alike.
-     * - A duration scaled by a number the inline SQL works out in SQLite's doubles, which writes a tail of a nanosecond
-     *   (`6.262999999S`) where the answer is exact (liberation-data/drivine-cypher-spec#262).
-     */
-    private val known = setOf(
-        "duration('P1Y2M3DT4H5M6.789S') / 3",
-        "duration('P1Y2M3DT4H5M6.789S') / 1.5",
-        "duration('P1Y2M3DT4H5M6.789S') / 2.5",
-        "duration('-P1Y2M3W4DT5H6M7.5S') / 3",
-        "duration('-P1Y2M3W4DT5H6M7.5S') / 1.5",
-        "duration('-P1Y2M3W4DT5H6M7.5S') / 2.5",
-    )
 
     @Test
     fun `the host function gives what the inline SQL gives, for each operator and pair of kinds`() {
@@ -101,12 +87,9 @@ class TemporalArithmeticHostTest {
         val differ = cases.mapNotNull { (op, x, y) ->
             val inline = inline("$x $op $y")
             val host = host(op, x, y)
-            val alike = inline == host
-            val expected = "$x $op $y" !in known
-            if (alike == expected) null else if (alike) "$x $op $y: alike, but listed as known" else "$x $op $y: inline $inline, host $host"
+            if (inline == host) null else "$x $op $y: inline $inline, host $host"
         }
-        assertTrue(differ.isEmpty(), "${differ.size} of ${cases.size} unlike the list, such as:\n${differ.take(25).joinToString("\n")}")
-        assertTrue(known.all { k -> cases.any { (op, x, y) -> "$x $op $y" == k } }, "a known case is no longer generated")
+        assertTrue(differ.isEmpty(), "${differ.size} of ${cases.size} differ, such as:\n${differ.take(25).joinToString("\n")}")
         assertTrue(cases.size > 2000, "${cases.size}")
     }
 
@@ -142,6 +125,25 @@ class TemporalArithmeticHostTest {
         assertEquals(null, call("*", " ", month))
     }
 
+    @Test
+    fun `a duration the statement scales by the host function gives null where the duration or the number is null (#262)`() {
+        listOf("duration(null) * 2", "2 * duration(null)", "duration(null) / 2.5", "duration('P1D') * null", "duration('P1D') / null").forEach {
+            assertEquals("null", inline(it), it)
+        }
+        assertEquals("null", inline("duration(\$d) / 2.5", mapOf("d" to null)))
+        assertEquals(inline("duration('P1Y') / 2.5"), inline("duration('P1Y') / \$k", mapOf("k" to 2.5)))
+    }
+
+    @Test
+    fun `a duration the statement divides by zero fails in Neo4j's words and one scaled by an infinity fails by name (#262)`() {
+        listOf("duration('P1D') / 0", "duration('P1D') / 0.0").forEach { assertEquals("fails: / by zero", inline(it, failure = true), it) }
+        assertEquals("fails: / by zero", inline("duration('P1D') / \$k", mapOf("k" to 0L), failure = true))
+        listOf("duration('P1D') * toFloat('Infinity')", "duration('P1D') / toFloat('-Infinity')").forEach {
+            val failed = inline(it, failure = true)
+            assertTrue(TemporalArithmeticFunction.UNDEFINED in failed && "Infinity" in failed, "$it: $failed")
+        }
+    }
+
     /** The Cypher literal of [text] of [kind]. */
     private fun literal(kind: Temporal, text: String) = "${kind.function}('$text')"
 
@@ -154,14 +156,14 @@ class TemporalArithmeticHostTest {
         return tag(kind, side.removePrefix(kind.function + "('").removeSuffix("')"))
     }
 
-    /** What the inline SQL the compiler writes for [expression] gives on SQLite: its value as JSON text, or its failure. */
-    private fun inline(expression: String): String = runCatching {
-        val compiled = SqliteCypherCompiler("g").compile("RETURN $expression AS r", emptyMap())
+    /** What the inline SQL the compiler writes for [expression] gives on SQLite: its value as JSON text, or its failure, with its message where [failure]. */
+    private fun inline(expression: String, parameters: Map<String, Any?> = emptyMap(), failure: Boolean = false): String = runCatching {
+        val compiled = SqliteCypherCompiler("g").compile("RETURN $expression AS r", parameters)
         val sql = compiled.parameters.entries.sortedByDescending { it.key.length }.fold(compiled.sql) { text, (name, value) ->
-            text.replace("\$$name", if (value is Number) value.toString() else "'" + value.toString().replace("'", "''") + "'")
+            text.replace("\$$name", if (value == null) "NULL" else if (value is Number) value.toString() else "'" + value.toString().replace("'", "''") + "'")
         }
         connection.createStatement().use { s -> s.executeQuery(sql).use { r -> r.next(); r.getString(1) } }
-    }.fold({ value -> normal(value) }, { "fails" })
+    }.fold({ value -> normal(value) }, { if (failure) "fails: " + it.message?.substringAfter("(")?.removeSuffix(")") else "fails" })
 
     /** What the host function gives for [op] of the sides [x] and [y]: its tag as JSON text, or its failure. */
     private fun host(op: String, x: String, y: String): String = runCatching { call(op, stored(x), stored(y)) }.fold({ normal(it) }, { "fails" })
