@@ -59,7 +59,7 @@ class TemporalArithmeticHostTest {
 
     /**
      * Durations that move a moment past the years SQLite's text writes, which fails by name, where a time of day, which writes
-     * no year, takes them (#263). Beside a moment only: summed, the inline SQL's doubles leave tails.
+     * no year, takes them (#263). Summed too: a sum of durations is the host function's on SQLite (#275).
      */
     private val long = listOf("P10000Y", "-P10000Y", "PT87660000H")
 
@@ -75,7 +75,7 @@ class TemporalArithmeticHostTest {
                 cases += Triple("-", literal(kind, text), literal(Temporal.DURATION, d))
             } }
         }
-        durations.forEach { a -> durations.forEach { b ->
+        (durations + long).forEach { a -> (durations + long).forEach { b ->
             cases += Triple("+", literal(Temporal.DURATION, a), literal(Temporal.DURATION, b))
             cases += Triple("-", literal(Temporal.DURATION, a), literal(Temporal.DURATION, b))
         } }
