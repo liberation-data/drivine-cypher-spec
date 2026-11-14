@@ -1179,12 +1179,12 @@ generated:
   # The digests of what each marker of a generated function stands for (GeneratedFunctions; see README.md, The store
   # layout), the Postgres DDL's digest at each PostgresDdl.VERSION, and each Oracle function's version comment.
   digests:
-    postgres: "a580603dd8e7c791afe4a399a29c21d24ac42b3c4c7c5fa57fbd4b78681ed644"
-    postgresEnsuring: "f4db018b74cc5b54538518d51198770ed4161a2eb21b2fee86bccfa5bdc2289c"
+    postgres: "8b15de1fe43da3af5c30abcfe8b2f6d9d111ffe38dfb5987634b7a68fbea3d43"
+    postgresEnsuring: "a76e3da90613ac4d89370cc2a10fea855c928e0769d28b6ba94f158598eefcdd"
     oracle: "6bcd5169e5e7ee061e9d2d9b28fd58b921575583d89ec405db3473cecbdcb68b"
     oracleClob: "7c4d091503d6d8a4b22f7b4a9bb74b90a0a1d572ba402a9fd147fb2deb6c995f"
   postgresVersions:
-    "drivine:10": "b05f7c38e30c5d6172e56625d76d9355a9331e9923ef360010959db311d455a4"
+    "drivine:10": "b67fab8ec3349fa482c2dac7ffdc6ddfcf66da2ba3b158197a0a954058170471"
   oracleVersions:
     drivine_nulls_equal: "ca86ed401a58"
     drivine_era: "6b3612ebd3a2"

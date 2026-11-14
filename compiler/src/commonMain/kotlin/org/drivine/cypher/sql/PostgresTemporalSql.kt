@@ -7,6 +7,17 @@ class PostgresTemporalSql(
     private val graph: String? = null,
 ) : TemporalSql(shared) {
 
+    /**
+     * Postgres's timestamp holds years past 9999, which `to_char` writes `####`, and none before 4713 BC: see
+     * [TemporalSql.longYear].
+     */
+    override fun longYear(timestamp: String) = "$timestamp >= TIMESTAMP '10000-01-01 00:00:00'"
+
+    override val textType = "text"
+
+    /** Postgres holds no whole year before 4713 BC: of 4714 BC, Cypher's -4713, only the days from November 24th. */
+    override val firstYear = -4712
+
     /** The store's `PostgresDdl.temporalKey`: written inline, the key of a zoned moment is some 2,500 characters. */
     override fun storedKey(text: String, kind: Temporal): String? = storedKeyOf(text, "'${kind.function}'")
 
