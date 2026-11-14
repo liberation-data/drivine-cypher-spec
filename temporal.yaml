@@ -42,6 +42,9 @@ cases:
                   hours: (duration('P1D') + duration('PT12H')).hours,
                   doubled: (duration('PT1H') * 2).minutes}
         rows: [{endOfFebruary: 29, nextDay: 16, fortnightBefore: 2, days: 1, hours: 12, doubled: 120}]
+      - note: "Exactly, a nanosecond beside ten thousand years of hours: SQLite added the parts in doubles and lost it (#275)."
+        cypher: "RETURN [toString(duration('PT87660000H') + duration('PT0.000000001S')), toString(duration('PT87660000H') - duration('PT0.000000001S')), toString(duration('P10000Y') - duration('-P10000Y'))]"
+        rows: [["PT87660000H0.000000001S", "PT87659999H59M59.999999999S", "P20000Y"]]
       - cypher: "CREATE (:CyTemporal {id: 'a', day: date('2024-03-15')}), (:CyTemporal {id: 'b', day: date('2024-01-01')})"
       - note: "A moment read from the store, its kind told by its text."
         cypher: "MATCH (n:CyTemporal) RETURN (n.day + duration('P1D')).day ORDER BY n.id"

@@ -147,6 +147,15 @@ abstract class SqlCypherCompiler(
      */
     protected open fun scaled(operator: String, duration: String, number: String): String? = null
 
+    /**
+     * The duration text of the duration texts [a] and [b] added, or with [sign] -1 [b] taken from [a], where the store works it
+     * out otherwise than [Temporals.sum]: see SQLite's. Null where the store's SQL works it out exactly.
+     */
+    protected open fun summed(a: String, b: String, sign: Int): String? = null
+
+    /** [a] and [b] added, or with [sign] -1 [b] taken from [a]: by [summed] where the store gives one, else by [Temporals.sum]. */
+    private fun durationSum(a: String, b: String, sign: Int) = summed(a, b, sign) ?: temporals.sum(a, b, sign)
+
     /** [compiled] with the functions it calls declared before it. */
     private fun withFunctions(compiled: CompiledCypher): CompiledCypher {
         val all = functions + calledFunctions(compiled.sql).filter { it !in functions }
@@ -5153,11 +5162,11 @@ abstract class SqlCypherCompiler(
                     fun isDuration(json: String) = "${tagKind(json)} = '${duration.function}'"
                     // The value of the kind a stored tag names [x], with the duration [d], a tag's text, added or taken away.
                     fun addTo(x: String, d: String, sign: Int, whole: Boolean) = temporals.byTag(tagKind(x), tagText(x), Temporal.instants + duration) { kind, t ->
-                        if (kind == duration) temporals.sum(t, d, sign) else temporals.add(t, kind, d, sign)
+                        if (kind == duration) durationSum(t, d, sign) else temporals.add(t, kind, d, sign)
                     }.let { text -> if (whole) taggedOf(tagKind(x), text) else inflightOf(tagKind(x), text) }
                     fun Value.Json.of(whole: Boolean) = if (whole) sql else inflight!!
                     when {
-                        l == duration && r == duration -> tagged(duration, temporals.sum(a, b, sign))
+                        l == duration && r == duration -> tagged(duration, durationSum(a, b, sign))
                         l != null && l.instant && r == duration -> tagged(l, temporals.add(a, l, b, sign))
                         l == duration && r != null && r.instant && sign > 0 -> tagged(r, temporals.add(b, r, a, 1))
                         // A value read from the store, its kind named by its tag, and a duration the statement gives.
@@ -5165,7 +5174,7 @@ abstract class SqlCypherCompiler(
                         l == duration && r == null && sign > 0 -> read(null, byDuration = true) { x, y, whole -> addTo(y, v(x, 0), 1, whole) }
                         // A duration read from the store, taken from a duration or added to a moment the statement gives. A sum is of
                         // no kind, for what is read may be a list, which the moment is added to as any value is.
-                        l == duration && r == null -> read(duration) { x, y, whole -> "CASE WHEN ${isDuration(y)} THEN ${tagged(duration, temporals.sum(v(x, 0), tagText(y), sign)).of(whole)} END" }
+                        l == duration && r == null -> read(duration) { x, y, whole -> "CASE WHEN ${isDuration(y)} THEN ${tagged(duration, durationSum(v(x, 0), tagText(y), sign)).of(whole)} END" }
                         l != null && l.instant && r == null ->
                             read(l.takeIf { sign < 0 }) { x, y, whole -> "CASE WHEN ${isDuration(y)} THEN ${tagged(l, temporals.add(v(x, 0), l, tagText(y), sign)).of(whole)} END" }
                         l == null && r != null && r.instant && sign > 0 ->
