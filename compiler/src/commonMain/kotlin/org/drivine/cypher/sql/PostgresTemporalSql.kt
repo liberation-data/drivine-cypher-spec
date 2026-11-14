@@ -102,6 +102,13 @@ class PostgresTemporalSql(
 
     override fun div(a: String, b: String) = "div($a, $b)"
 
+    /**
+     * By `div`, exactly: numeric's `/` keeps 16 significant digits or so, so `315575999999.999999999 / 3600` is
+     * `87660000.000000000000`, and `PT87660000H - PT0.000000001S` was written `PT87660000H-0.000000001S`
+     * (drivine-cypher-spec#275).
+     */
+    override fun truncatedQuotient(a: String, b: String) = "div($a, $b)"
+
     override fun matches(text: String, pattern: String) = "($text ~ $pattern)"
 
     override fun group(text: String, pattern: String, group: Int) = "(regexp_match($text, $pattern))[$group]"

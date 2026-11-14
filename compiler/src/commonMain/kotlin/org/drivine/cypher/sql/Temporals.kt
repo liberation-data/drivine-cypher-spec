@@ -581,7 +581,7 @@ class Temporals(
             }
         }
         val parts = parts(duration)
-        val seconds = if (date == null) parts.seconds else shared(listOf(parts.seconds)) { (sec) -> "CASE WHEN $date THEN ${sql.trunc}($sec / 86400) * 86400 ELSE $sec END" }
+        val seconds = if (date == null) parts.seconds else shared(listOf(parts.seconds)) { (sec) -> "CASE WHEN $date THEN ${sql.truncatedQuotient(sec, "86400")} * 86400 ELSE $sec END" }
         return sql.addTime(sql.addMonths(timestamp, "$s(${parts.months})"), "$s(${parts.days})", "$s($seconds)")
     }
 
@@ -737,10 +737,10 @@ class Temporals(
         // nor a hair over a whole time a `0S` (#261).
         val s = sql.round("($s0 + ($d0 + ($m0 - ${sql.trunc}($m0)) * 30.436875 - $d) * 86400)", 9)
         shared(listOf(m, d, s)) { (months, days, seconds) ->
-            val years = "${sql.trunc}($months / 12)"
-            val hours = "${sql.trunc}($seconds / 3600)"
-            val minutes = "(${sql.trunc}($seconds / 60) - $hours * 60)"
-            val secs = "($seconds - ${sql.trunc}($seconds / 60) * 60)"
+            val years = "${sql.truncatedQuotient(months, "12")}"
+            val hours = sql.truncatedQuotient(seconds, "3600")
+            val minutes = "(${sql.truncatedQuotient(seconds, "60")} - $hours * 60)"
+            val secs = "($seconds - ${sql.truncatedQuotient(seconds, "60")} * 60)"
             fun unit(value: String, letter: String) = "CASE WHEN $value <> 0 THEN ${number(value)} || '$letter' ELSE '' END"
             "CASE WHEN $months = 0 AND $days = 0 AND $seconds = 0 THEN 'PT0S' WHEN $seconds IS NOT NULL THEN 'P' || ${unit(years, "Y")} || ${unit("($months - $years * 12)", "M")} || " +
                 "${unit(days, "D")} || CASE WHEN $seconds <> 0 THEN 'T' || ${unit(hours, "H")} || ${unit(minutes, "M")} || ${unit(secs, "S")} ELSE '' END END"
@@ -759,23 +759,23 @@ class Temporals(
         // Lazy: on SQLite a floor binds its number, and a binding made for a field that reads no seconds is left unread.
         val whole by lazy { floor(s) }
         return when (name) {
-            "years" -> "${sql.trunc}($m / 12)"
-            "quarters" -> "${sql.trunc}($m / 3)"
+            "years" -> "${sql.truncatedQuotient(m, "12")}"
+            "quarters" -> "${sql.truncatedQuotient(m, "3")}"
             "months" -> m
-            "weeks" -> "${sql.trunc}($d / 7)"
+            "weeks" -> "${sql.truncatedQuotient(d, "7")}"
             "days" -> d
-            "hours" -> "${sql.trunc}($whole / 3600)"
-            "minutes" -> "${sql.trunc}($whole / 60)"
+            "hours" -> "${sql.truncatedQuotient(whole, "3600")}"
+            "minutes" -> "${sql.truncatedQuotient(whole, "60")}"
             "seconds" -> whole
             "milliseconds" -> floor("$s * 1000")
             "microseconds" -> floor("$s * 1000000")
             "nanoseconds" -> floor("$s * 1000000000")
-            "quartersOfYear" -> "(${sql.trunc}($m / 3) - ${sql.trunc}($m / 12) * 4)"
-            "monthsOfQuarter" -> "($m - ${sql.trunc}($m / 3) * 3)"
-            "monthsOfYear" -> "($m - ${sql.trunc}($m / 12) * 12)"
-            "daysOfWeek" -> "($d - ${sql.trunc}($d / 7) * 7)"
-            "minutesOfHour" -> "(${sql.trunc}($whole / 60) - ${sql.trunc}($whole / 3600) * 60)"
-            "secondsOfMinute" -> "($whole - ${sql.trunc}($whole / 60) * 60)"
+            "quartersOfYear" -> "(${sql.truncatedQuotient(m, "3")} - ${sql.truncatedQuotient(m, "12")} * 4)"
+            "monthsOfQuarter" -> "($m - ${sql.truncatedQuotient(m, "3")} * 3)"
+            "monthsOfYear" -> "($m - ${sql.truncatedQuotient(m, "12")} * 12)"
+            "daysOfWeek" -> "($d - ${sql.truncatedQuotient(d, "7")} * 7)"
+            "minutesOfHour" -> "(${sql.truncatedQuotient(whole, "60")} - ${sql.truncatedQuotient(whole, "3600")} * 60)"
+            "secondsOfMinute" -> "($whole - ${sql.truncatedQuotient(whole, "60")} * 60)"
             "millisecondsOfSecond" -> "(${floor("$s * 1000")} - $whole * 1000)"
             "microsecondsOfSecond" -> "(${floor("$s * 1000000")} - $whole * 1000000)"
             "nanosecondsOfSecond" -> "(${floor("$s * 1000000000")} - $whole * 1000000000)"
@@ -831,7 +831,7 @@ class Temporals(
             "days" -> text(Parts("0", "${sql.trunc}(${sql.secondsBetween(a, b)} / 86400)", "0"))
             "seconds" -> text(Parts("0", "0", sql.secondsBetween(a, b)))
             else -> shared(listOf(months)) { (m) ->
-                shared(listOf(sql.secondsBetween(sql.addMonths(a, m), b))) { (rest) -> text(Parts(m, "${sql.trunc}($rest / 86400)", "($rest - ${sql.trunc}($rest / 86400) * 86400)")) }
+                shared(listOf(sql.secondsBetween(sql.addMonths(a, m), b))) { (rest) -> text(Parts(m, "${sql.truncatedQuotient(rest, "86400")}", "($rest - ${sql.truncatedQuotient(rest, "86400")} * 86400)")) }
             }
         }
     }

@@ -238,6 +238,12 @@ abstract class TemporalSql(protected val shared: (List<String>, (List<String>) -
     /** The whole quotient of the whole numbers [a], at least 0, by [b]. */
     abstract fun div(a: String, b: String): String
 
+    /**
+     * [a] divided by [b] and cut toward zero, [a] a number of any places: a duration's seconds by an hour's or a minute's. A
+     * store whose division rounds its quotient to fewer places than [a] holds works it out otherwise: see Postgres's.
+     */
+    open fun truncatedQuotient(a: String, b: String) = "$trunc($a / $b)"
+
     /** The text [text] with every match of [pattern], a SQL text, replaced by [replacement]. */
     open fun replace(text: String, pattern: String, replacement: String) = "REGEXP_REPLACE($text, $pattern, $replacement)"
 
