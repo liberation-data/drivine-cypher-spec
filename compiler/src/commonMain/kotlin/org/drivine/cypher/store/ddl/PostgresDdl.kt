@@ -106,11 +106,41 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
         "CREATE INDEX IF NOT EXISTS $countDeltasIndex ON $countDeltas (kind, name)",
         lockTable,
         lockSeed,
-    ).map { it.trimIndent() } + writes.ddl + temporalKeyFunction() + TemporalArithmeticFunction.postgres(name) + "COMMENT ON TABLE $nodes IS '$VERSION'" }
+    ).map { it.trimIndent() } + writes.ddl + temporalKeyFunction() + heldFunction() + TemporalArithmeticFunction.postgres(name) + "COMMENT ON TABLE $nodes IS '$VERSION'" }
 
     override val lockTable: String get() = "CREATE TABLE IF NOT EXISTS $lock (name text PRIMARY KEY)"
 
     override val lockSeed: String get() = "INSERT INTO $lock (name) VALUES ('$lockRow') ON CONFLICT DO NOTHING"
+
+    /** The function compiled Cypher reads a temporal value's text through before a timestamp is read of it: see [heldFunction]. */
+    val held: String = heldName(name)
+
+    /**
+     * Makes [held]: the text `t` as it is, or the statement failing by name where its fraction of a second has a seventh,
+     * eighth or ninth digit that isn't 0, which a timestamp's microseconds would round away (drivine4j#421). The digits are
+     * read one by one from the point, to the first that is none, an offset's sign or `Z`, or the text's end: no regular
+     * expression, whose `REGEXP_REPLACE` cost Postgres some 60 µs a row, and a text with no point is given back at once. Its
+     * message is [org.drivine.cypher.sql.Temporals.SUB_MICRO], as the test the SQL writes where the store keeps no such function.
+     */
+    private fun heldFunction(): String = """
+        CREATE OR REPLACE FUNCTION ${heldName(name)}(t text) RETURNS text LANGUAGE plpgsql IMMUTABLE PARALLEL SAFE AS '
+        DECLARE
+            p int := strpos(t, ''.'');
+            c text;
+        BEGIN
+            IF p = 0 THEN
+                RETURN t;
+            END IF;
+            FOR i IN 1 .. 9 LOOP
+                c := substr(t, p + i, 1);
+                EXIT WHEN c = '''' OR c < ''0'' OR c > ''9'';
+                IF i > 6 AND c <> ''0'' THEN
+                    RAISE EXCEPTION ''% %'', ''$HELD_MESSAGE'', t;
+                END IF;
+            END LOOP;
+            RETURN t;
+        END';
+    """.trimIndent()
 
     /** The function compiled Cypher works out a temporal value's sort key by: see [temporalKeyFunction]. */
     val temporalKey: String = temporalKeyName(name)
@@ -448,6 +478,12 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
 
         /** The function the store of the graph [graph] keeps that works out a temporal value's sort key: see [temporalKey]. */
         fun temporalKeyName(graph: String) = "${graph}_temporal_key"
+
+        /** The function the store of the graph [graph] keeps that refuses a nanosecond past the microsecond: see [held]. */
+        fun heldName(graph: String) = "${graph}_held"
+
+        /** [org.drivine.cypher.sql.Temporals.SUB_MICRO] as [heldFunction]'s body quotes it, a quote written four times (twice in the body's quotes, twice in its own). */
+        private val HELD_MESSAGE = org.drivine.cypher.sql.Temporals.SUB_MICRO.replace("'", "''''")
 
         /** Why [name] cannot name a graph here; null where it can (see [SqlStoreDdl.refusal]). */
         fun refusal(name: String): String? = SqlStoreDdl.refusal(name, ENGINE, MAX_OBJECT_NAME)

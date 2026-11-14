@@ -1132,12 +1132,12 @@ cases:
         error: true
 
   - name: "A nanosecond past the microsecond"
-    description: "A temporal value keeps its nanoseconds in its text on every store, written, stored and read back, compared and sorted by its key, and its fields read off its text. No store's timestamp keeps a nanosecond past the microsecond: Postgres's holds microseconds, Oracle's is written FF6, SQLite's to six places. So where a value is worked out through one, made of a nanosecond field, moved by a duration, truncated, converted, or measured by duration.between, a nanosecond past the microsecond fails by name on the SQL stores, where they cut or rounded it away (drivine4j#421). Working it out exactly is drivine-cypher-spec#246. A date takes the whole days of a duration's time alone, so a duration's nanoseconds are no matter beside one; and a digit past the ninth is none, as Neo4j drops it."
+    description: "A temporal value keeps its nanoseconds in its text on every store, written, stored and read back, compared and sorted by its key, and its fields read off its text. No store's timestamp keeps a nanosecond past the microsecond: Postgres's holds microseconds, Oracle's is written FF6, SQLite's to six places. So where a value is worked out through one, made of a nanosecond field, moved by a duration, truncated, converted, or measured by duration.between, a nanosecond past the microsecond fails by name on the SQL stores, where they cut or rounded it away (drivine4j#421). Working it out exactly is drivine-cypher-spec#246. A date takes the whole days of a duration's time alone, so a duration's nanoseconds are no matter beside one;"
     steps:
       - note: "Kept: written, its text, its fields and its order."
         only: [neo4j, sql]
-        cypher: "RETURN [toString(localtime('12:31:14.645876123')), toString(localdatetime('2024-01-01T00:00:00.000000001')), localtime('12:00:00.000000002') > localtime('12:00:00.000000001'), localtime('12:00:00.645876123').nanosecond, toString(duration({seconds: 1, nanoseconds: 1})), toString(date('2024-01-01') + duration('PT0.000000001S')), toString(duration('PT0.0000000001S'))]"
-        rows: [["12:31:14.645876123", "2024-01-01T00:00:00.000000001", true, 645876123, "PT1.000000001S", "2024-01-01", "PT0S"]]
+        cypher: "RETURN [toString(localtime('12:31:14.645876123')), toString(localdatetime('2024-01-01T00:00:00.000000001')), localtime('12:00:00.000000002') > localtime('12:00:00.000000001'), localtime('12:00:00.645876123').nanosecond, toString(duration({seconds: 1, nanoseconds: 1})), toString(date('2024-01-01') + duration('PT0.000000001S'))]"
+        rows: [["12:31:14.645876123", "2024-01-01T00:00:00.000000001", true, 645876123, "PT1.000000001S", "2024-01-01"]]
       - only: [neo4j, sql]
         cypher: "UNWIND [localtime('12:00:00.000000002'), localtime('12:00:00.000000001'), localtime('12:00:00.000000003')] AS t RETURN toString(t) ORDER BY t"
         rows: ["12:00:00.000000001", "12:00:00.000000002", "12:00:00.000000003"]
@@ -1184,6 +1184,21 @@ cases:
         error: true
       - only: [sql]
         cypher: "MATCH (n:CyTemporal {id: 'ns'}) RETURN duration.between(n.at, localdatetime('2024-01-02T00:00:00'))"
+        error: true
+      - note: "A fraction of one to nine digits, beside an offset or Z: refused only where a seventh to ninth digit isn't 0, read as the store reads the text."
+        only: [neo4j, sql]
+        cypher: "CREATE (:CyTemporal {id: 'ns2', a: datetime('2024-01-01T00:00:00.123456789+10:00'), b: datetime('2024-01-01T00:00:00.5Z'), c: localdatetime('2024-01-01T00:00:00.1234560'), e: datetime('2024-01-01T00:00:00.12345+10:00'), f: localtime('12:00:00.123456001'), g: time('12:00:00.000000001Z')})"
+      - only: [neo4j, sql]
+        cypher: "MATCH (n:CyTemporal {id: 'ns2'}) RETURN [toString(n.b + duration('PT1S')), toString(n.c + duration('PT1S')), toString(n.e + duration('PT1S'))]"
+        rows: [["2024-01-01T00:00:01.500Z", "2024-01-01T00:00:01.123456", "2024-01-01T00:00:01.123450+10:00"]]
+      - only: [sql]
+        cypher: "MATCH (n:CyTemporal {id: 'ns2'}) RETURN n.a + duration('PT1S')"
+        error: true
+      - only: [sql]
+        cypher: "MATCH (n:CyTemporal {id: 'ns2'}) RETURN n.f + duration('PT1S')"
+        error: true
+      - only: [sql]
+        cypher: "MATCH (n:CyTemporal {id: 'ns2'}) RETURN n.g + duration('PT1S')"
         error: true
 
   - name: "A duration divided, and its seconds written"

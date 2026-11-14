@@ -62,8 +62,15 @@ class PostgresTemporalSql(
         else -> local(text, kind)
     }
 
-    /** Postgres's cast of a text that is no timestamp fails, quoting it: see [microsWritten]. */
-    override fun heldMicros(text: String, kinds: List<Temporal>) = microsWritten(text)
+    /**
+     * Through the store's function, which refuses a nanosecond past the microsecond by name (`PostgresDdl.held`), or where the
+     * SQL is written inline, Postgres's cast of a text that is no timestamp failing, quoting it ([microsWritten]).
+     */
+    override fun heldMicros(text: String, kinds: List<Temporal>) =
+        graph?.let { "${org.drivine.cypher.store.ddl.PostgresDdl.heldName(it)}($text)" } ?: microsWritten(text)
+
+    /** A duration's text through the store's function too, where it keeps one: else [Temporals] tests it. */
+    override fun heldDurationMicros(text: String) = graph?.let { "${org.drivine.cypher.store.ddl.PostgresDdl.heldName(it)}($text)" }
 
     /**
      * Postgres reads no year before 1 in ISO text, but reads one BC after it: so 1 BC, the year `0000`, is `0001 … BC`,
