@@ -27,8 +27,8 @@ import org.drivine.cypher.store.ValueLayout
  * over generated values, so the inline builder stays what it is checked against.
  *
  * x and y are JSON texts, or SQL numbers. Either null, SQL's or JSON's, or an empty text, gives null. A pair of kinds Cypher has
- * no arithmetic of fails by name ([TemporalArithmeticFunction.UNDEFINED]), as does a moment whose year is past 9999 or before -9999
- * ([Temporals.LONG_YEAR]), which the inline SQL refuses as it writes the moment. The answer is the tag the arithmetic makes, as
+ * no arithmetic of fails by name ([TemporalArithmeticFunction.UNDEFINED]), as does a date or a moment with a date whose year is past
+ * 9999 or before -9999 ([Temporals.LONG_YEAR]), which the inline SQL refuses as it writes the moment. The answer is the tag the arithmetic makes, as
  * JSON text.
  */
 internal object HostTemporalArithmetic {
@@ -100,8 +100,10 @@ internal object HostTemporalArithmetic {
         clock = LocalDateTime(JavaTime.plusDays(clock.date, days), clock.time)
         clock = JavaTime.plus(clock, seconds, 0)
         clock = timestamp(JavaTime.plus(clock, 0, fraction))
-        // A year SQLite's text can't write fails by name, as the inline SQL's does where it writes the moment (#263).
-        if (clock.year > 9999 || clock.year < -9999) throw IllegalArgumentException("${Temporals.LONG_YEAR} ${SqliteTimestamps.write(clock)}")
+        // A year SQLite's text can't write fails by name, as the inline SQL's does where it writes the moment (#263): a time
+        // of day writes no year, so it takes any.
+        val dated = kind != Temporal.LOCAL_TIME && kind != Temporal.TIME
+        if (dated && (clock.year > 9999 || clock.year < -9999)) throw IllegalArgumentException("${Temporals.LONG_YEAR} ${SqliteTimestamps.write(clock)}")
         return format(SqliteTimestamps.write(clock), kind, if (kind.zoned) offset(text) else null)
     }
 

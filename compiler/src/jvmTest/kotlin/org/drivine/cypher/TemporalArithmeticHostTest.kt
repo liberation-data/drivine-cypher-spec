@@ -56,6 +56,12 @@ class TemporalArithmeticHostTest {
         "PT-1.5S", "-PT1M0.5S", "-PT25H0.5S", "P1.5M", "-P0.5M", "PT1.5H", "PT0.9999999999S", "PT0.0000000001S",
     )
 
+    /**
+     * Durations that move a moment past the years SQLite's text writes, which fails by name, where a time of day, which writes
+     * no year, takes them (#263). Beside a moment only: summed or scaled, the inline SQL's doubles leave tails (#262).
+     */
+    private val long = listOf("P10000Y", "-P10000Y", "PT87660000H")
+
     private val numbers = listOf("2", "3", "-1", "0.5", "1.5", "2.5", "-7", "10", "1e3", "2.5E-1")
 
     /**
@@ -77,7 +83,7 @@ class TemporalArithmeticHostTest {
     fun `the host function gives what the inline SQL gives, for each operator and pair of kinds`() {
         val cases = mutableListOf<Triple<String, String, String>>()
         moments.forEach { (kind, texts) ->
-            texts.forEach { text -> durations.forEach { d ->
+            texts.forEach { text -> (durations + long).forEach { d ->
                 cases += Triple("+", literal(kind, text), literal(Temporal.DURATION, d))
                 cases += Triple("+", literal(Temporal.DURATION, d), literal(kind, text))
                 cases += Triple("-", literal(kind, text), literal(Temporal.DURATION, d))
@@ -117,6 +123,9 @@ class TemporalArithmeticHostTest {
             val failure = runCatching { call(op, x, y) }.exceptionOrNull()
             assertTrue(failure?.message?.contains(TemporalArithmeticFunction.UNDEFINED) == true, "$op: $failure")
         }
+        // A moment moved past the years SQLite's text writes fails by name, as the inline SQL does (#263).
+        val late = runCatching { call("+", tag(Temporal.DATE, "9999-12-31"), tag(Temporal.DURATION, "P1D")) }.exceptionOrNull()
+        assertTrue(late?.message?.contains(Temporals.LONG_YEAR) == true, "$late")
     }
 
     @Test
