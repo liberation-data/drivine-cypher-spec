@@ -986,7 +986,7 @@ cases:
         result: null
 
   - name: "drivine_temporal_arithmetic"
-    description: "drivine_temporal_arithmetic(operator, x, y) is Cypher's x + y, x - y, x * y or x / y where either is the tag of a temporal value read from the store, of a kind the statement doesn't know: the tag the arithmetic makes, as JSON text, as Postgres and Oracle work it out by the function they keep (drivine4j#418). A moment moved by a duration's months, then its days and time, a date taking the time in whole days; two durations added or taken away; a duration times or divided by a number, each part divided. x and y are JSON texts, or SQL numbers; null where either is SQL's or JSON's null. A pair Cypher has no arithmetic of fails, naming it."
+    description: "drivine_temporal_arithmetic(operator, x, y) is Cypher's x + y, x - y, x * y or x / y where either is the tag of a temporal value read from the store, of a kind the statement doesn't know: the tag the arithmetic makes, as JSON text, as Postgres and Oracle work it out by the function they keep (drivine4j#418). A moment moved by a duration's months, then its days and time, a date taking the time in whole days; two durations added or taken away; a duration times or divided by a number, each part divided. x and y are JSON texts, or SQL numbers; null where either is SQL's or JSON's null. A pair Cypher has no arithmetic of fails, naming it, as does a date or a moment with a date moved past the year 9999 or before -9999, as the inline SQL fails (#263)."
     pairs:
       temporal.yaml: ["Arithmetic on temporal values read from the store", "A duration divided, and its seconds written"]
     steps:
@@ -1044,6 +1044,10 @@ cases:
       - function: "drivine_temporal_arithmetic"
         args: ['/', '2', '{"$t":"duration","v":"P1D"}']
         error: "Cypher has no temporal arithmetic of the operator, kinds or values"
+      - note: "A date moved past the years SQLite's text writes fails by name, as the inline SQL does (#263)."
+        function: "drivine_temporal_arithmetic"
+        args: ['+', '{"$t":"date","v":"9999-12-31","s":"10000099991231"}', '{"$t":"duration","v":"P1D"}']
+        error: "A year the store doesn't hold, past 9999 or before its first"
 
   - name: "drivine_host_version"
     description: "drivine_host_version() is the version of the drivine_ functions' contract, the forms of their arguments and results this file pins, as the compiler's SqliteFunctions.HOST_VERSION is. A library checks it once on each connection it registers the functions on, and fails where it is not the compiler's, or the function is missing: then the functions are not those the compiled SQL calls. No compiled statement calls it, so its case pairs no store case."

@@ -35,6 +35,9 @@ import org.drivine.DrivineInternalApi
  *   in the forms the compiler's SQL calls: `drivine_temporal`'s `add_time(timestamp, days, seconds, nanos)`, whole
  *   numbers each; `seconds_between(from, to)`, whole seconds, floored, and `nanos_between(from, to)`, the nanoseconds past
  *   them; and `extract(timestamp, 'NANOSECOND_OF_MINUTE')`, where `SECOND` is no field.
+ * - `drivine_temporal_arithmetic` (`TemporalArithmeticFunction.HOST`) works out `+`, `-`, `*` and `/` of a temporal value
+ *   read from the store, as Postgres and Oracle do by the function they keep: the module's alone
+ *   (`org.drivine.cypher.host.HostFunctions.temporalArithmetic`, drivine4j#418).
  * - [HOST_VERSION_FUNCTION] gives [HOST_VERSION], the version of those forms, which a host checks once on each
  *   connection, as `org.drivine.cypher.host.HostCheck` words it.
  * - [CYPHER] carries out the procedure a statement that writes compiles to: see [SqliteCypherFunction].
