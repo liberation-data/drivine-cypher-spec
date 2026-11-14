@@ -178,4 +178,21 @@ class LongQuotedTextTest {
             assertEquals(ItemForm.Mismatch(trigger, "a trigger over [$key]", false), oracle.formOf(spec, rows(read)), "a key of $what")
         }
     }
+
+    /**
+     * A full-text index's trigger on Oracle that reads a long or quote-heavy key, as the index over that key's property, is
+     * read as current: its path, un-doubled, is the key the property is held at (#266), however long and whatever it holds.
+     */
+    @Test
+    fun aTriggerOverALongOrQuoteHeavyKeyIsCurrentForTheIndexOverItOnOracle() {
+        val ddl = OracleDdl("g")
+        val oracle = OracleSchema(ddl)
+        for ((what, key) in keys) {
+            val spec = FullTextIndexSpec("Doc", listOf(key))
+            val trigger = ddl.texts(spec.label, spec.properties) + "_t"
+            val read = "IF JSON_EXISTS(:NEW.labels, '\$?(@ == \"Doc\")') THEN x := JSON_VALUE(:NEW.props, '${sql("$." + json(key))}' RETURNING CLOB); END IF;"
+            val rows = listOf(mapOf("object" to trigger, "type" to "TRIGGER", "table" to "G_NODE", "source" to read))
+            assertEquals(ItemForm.Current, oracle.formOf(spec, rows), "a key of $what")
+        }
+    }
 }
