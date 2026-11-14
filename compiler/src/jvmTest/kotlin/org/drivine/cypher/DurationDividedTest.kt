@@ -28,7 +28,7 @@ class DurationDividedTest {
     @Test
     fun `on SQLite the host function divides it, in decimals, where its SQL worked in doubles (#262)`() {
         val sql = SqliteCypherCompiler("g").compile(cypher, emptyMap()).sql
-        assertTrue("drivine_temporal_arithmetic('/', json_object('\$t', 'duration', 'v', " in sql, sql)
+        assertTrue("drivine_temporal_arithmetic('/', CASE WHEN 'PT1000000H' IS NOT NULL THEN json_object('\$t', " in sql, sql)
         assertFalse("(1.0 / " in sql, sql)
     }
 

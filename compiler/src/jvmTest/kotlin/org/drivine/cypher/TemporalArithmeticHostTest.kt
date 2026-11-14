@@ -125,6 +125,25 @@ class TemporalArithmeticHostTest {
         assertEquals(null, call("*", " ", month))
     }
 
+    @Test
+    fun `a duration the statement scales by the host function gives null where the duration or the number is null (#262)`() {
+        listOf("duration(null) * 2", "2 * duration(null)", "duration(null) / 2.5", "duration('P1D') * null", "duration('P1D') / null").forEach {
+            assertEquals("null", inline(it), it)
+        }
+        assertEquals("null", inline("duration(\$d) / 2.5", mapOf("d" to null)))
+        assertEquals(inline("duration('P1Y') / 2.5"), inline("duration('P1Y') / \$k", mapOf("k" to 2.5)))
+    }
+
+    @Test
+    fun `a duration the statement divides by zero fails in Neo4j's words and one scaled by an infinity fails by name (#262)`() {
+        listOf("duration('P1D') / 0", "duration('P1D') / 0.0").forEach { assertEquals("fails: / by zero", inline(it, failure = true), it) }
+        assertEquals("fails: / by zero", inline("duration('P1D') / \$k", mapOf("k" to 0L), failure = true))
+        listOf("duration('P1D') * toFloat('Infinity')", "duration('P1D') / toFloat('-Infinity')").forEach {
+            val failed = inline(it, failure = true)
+            assertTrue(TemporalArithmeticFunction.UNDEFINED in failed && "Infinity" in failed, "$it: $failed")
+        }
+    }
+
     /** The Cypher literal of [text] of [kind]. */
     private fun literal(kind: Temporal, text: String) = "${kind.function}('$text')"
 
@@ -137,14 +156,14 @@ class TemporalArithmeticHostTest {
         return tag(kind, side.removePrefix(kind.function + "('").removeSuffix("')"))
     }
 
-    /** What the inline SQL the compiler writes for [expression] gives on SQLite: its value as JSON text, or its failure. */
-    private fun inline(expression: String): String = runCatching {
-        val compiled = SqliteCypherCompiler("g").compile("RETURN $expression AS r", emptyMap())
+    /** What the inline SQL the compiler writes for [expression] gives on SQLite: its value as JSON text, or its failure, with its message where [failure]. */
+    private fun inline(expression: String, parameters: Map<String, Any?> = emptyMap(), failure: Boolean = false): String = runCatching {
+        val compiled = SqliteCypherCompiler("g").compile("RETURN $expression AS r", parameters)
         val sql = compiled.parameters.entries.sortedByDescending { it.key.length }.fold(compiled.sql) { text, (name, value) ->
-            text.replace("\$$name", if (value is Number) value.toString() else "'" + value.toString().replace("'", "''") + "'")
+            text.replace("\$$name", if (value == null) "NULL" else if (value is Number) value.toString() else "'" + value.toString().replace("'", "''") + "'")
         }
         connection.createStatement().use { s -> s.executeQuery(sql).use { r -> r.next(); r.getString(1) } }
-    }.fold({ value -> normal(value) }, { "fails" })
+    }.fold({ value -> normal(value) }, { if (failure) "fails: " + it.message?.substringAfter("(")?.removeSuffix(")") else "fails" })
 
     /** What the host function gives for [op] of the sides [x] and [y]: its tag as JSON text, or its failure. */
     private fun host(op: String, x: String, y: String): String = runCatching { call(op, stored(x), stored(y)) }.fold({ normal(it) }, { "fails" })

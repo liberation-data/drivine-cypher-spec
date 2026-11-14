@@ -10,6 +10,8 @@ import org.drivine.cypher.host.HostResult
 import org.drivine.cypher.host.SqlType
 import org.drivine.cypher.json.CypherJson
 import org.drivine.cypher.json.ObjectNode
+import org.drivine.cypher.number.DoubleText
+import org.drivine.cypher.sql.SqliteCypherCompiler
 import org.drivine.cypher.sql.Temporal
 import org.drivine.cypher.sql.TemporalArithmeticFunction
 import org.drivine.cypher.sql.Temporals
@@ -64,7 +66,8 @@ internal object HostTemporalArithmetic {
     private fun side(args: HostArgs, i: Int): Side? = when (args.type(i)) {
         SqlType.NULL -> null
         SqlType.INTEGER -> args.long(i).let { Side(null, null, BigDecimal.fromLong(it), "number") }
-        SqlType.FLOAT -> args.double(i).let { Side(null, null, BigDecimal.parseString(it.toString()), "number") }
+        // NaN or an infinity has no decimal: it is no number a duration is scaled by, and fails by name.
+        SqlType.FLOAT -> args.double(i).let { if (it.isFinite()) Side(null, null, BigDecimal.parseString(DoubleText.of(it)), "number") else Side(null, null, null, it.toString()) }
         else -> {
             // As the module's other functions of JSON values read one: an empty text is no value.
             val node = SqliteCypherValues.read(args.text(i)) ?: return null
@@ -193,8 +196,9 @@ internal object HostTemporalArithmetic {
         return Temporals.durationText(m * factor, d * factor, s * factor, PLACES)
     }
 
-    /** The duration text of [duration] divided by [divisor], each part of it divided, as Cypher divides a duration. */
+    /** The duration text of [duration] divided by [divisor], each part of it divided, as Cypher divides a duration; by zero it fails, in Neo4j's words, as the other stores fail. */
     private fun divided(duration: Side, divisor: BigDecimal): String {
+        if (divisor.isZero()) throw IllegalArgumentException(SqliteCypherCompiler.BY_ZERO)
         val (m, d, s) = Temporals.durationParts(duration.v!!)
         return Temporals.durationText(m.divide(divisor, QUOTIENT), d.divide(divisor, QUOTIENT), s.divide(divisor, QUOTIENT), PLACES)
     }
