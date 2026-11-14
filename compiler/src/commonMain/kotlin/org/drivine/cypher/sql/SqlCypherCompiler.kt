@@ -2728,7 +2728,10 @@ abstract class SqlCypherCompiler(
             val name = alias("x")
             val inner = scope + (
                 comprehension.variable to
-                    Value.Json(item(name), temporal = itemsOf(listed), items = itemItemsOf(listed), temporals = itemTemporalsOf(listed), list = holdsLists(listed))
+                    Value.Json(
+                        item(name), temporal = itemsOf(listed), items = itemItemsOf(listed), temporals = itemTemporalsOf(listed), list = holdsLists(listed),
+                        known = itemsKind(comprehension.list, scope),
+                    )
                 )
             val projected = comprehension.projection?.let { member(it, inner, routed) }
             val projection = projected?.let { json(it).sql } ?: item(name)
@@ -4659,7 +4662,10 @@ abstract class SqlCypherCompiler(
                 Value.Bool(
                     // Over a list of nodes or relationships, each item is the node or the relationship, read from its table.
                     if (listed is Value.Entities) shared(listed.ids) { (ids) -> entityItems(ids, listed.relationships, name).let { (from, item) -> quantified(from, item, "$ids IS NULL") } }
-                    else shared(comparable(json(listed))) { (items) -> quantified("FROM ${elementsOf(listed, items, name)}", Value.Json(item(name), temporal = itemsOf(listed), temporals = itemTemporalsOf(listed)), isJsonNull(items)) }
+                    else shared(comparable(json(listed))) { (items) ->
+                        val item = Value.Json(item(name), temporal = itemsOf(listed), temporals = itemTemporalsOf(listed), known = itemsKind(expression.list, scope))
+                        quantified("FROM ${elementsOf(listed, items, name)}", item, isJsonNull(items))
+                    }
                 )
             }
         }
@@ -4822,6 +4828,25 @@ abstract class SqlCypherCompiler(
                     else -> Value.Known.of(value)
                 }
             }
+
+        /**
+         * The kind of each item of [list] where the statement writes it as a list whose every item is of one known kind
+         * ([knownKind]), as Neo4j types the variable of a quantifier or a list comprehension over it (#420): `['a', 'b']` is of
+         * texts. Null where an item's kind is left open or null, where two are of other kinds, and of an empty list.
+         */
+        private fun itemsKind(list: Expression, scope: Map<String, Value>): Value.Known? =
+            (list as? Expression.ListLiteral)?.items?.map { knownKind(it, scope) }?.distinct()?.singleOrNull()
+
+        /**
+         * Refuses `toInteger()` or `toFloat()` of [function] where the statement makes its argument a kind Neo4j refuses
+         * ([knownKind]): a list or a map, and for `toFloat()` a truth value too, which gave null (#420). A parameter, or a value
+         * whose kind is left open, is compiled as before.
+         */
+        private fun conversionOfKind(function: Expression.Function, scope: Map<String, Value>) {
+            val (taken, nouns) = CONVERTED_KINDS[function.name.lowercase()] ?: return
+            val kind = function.arguments.singleOrNull()?.let { knownKind(it, scope) } ?: return
+            if (kind !in taken) throw CompilerException("${function.name}() takes $nouns, not ${kind.noun}, as in Neo4j.")
+        }
 
         /**
          * Refuses [binary], `-`, `*`, `/`, `%` or `^`, where a side is known to be a text, a truth value, a list or a map
@@ -6870,6 +6895,7 @@ abstract class SqlCypherCompiler(
                     // A function the store has no SQL for is named before its arguments are counted.
                     if (function(name, "NULL") == null) unsupported("The function ${function.name}()")
                     if (name == "tostring") textOfKind(function, one())
+                    conversionOfKind(function, scope)
                     // A temporal value's text is its tag's.
                     if (name == "tostring") (one() as? Value.Json)?.takeIf { it.temporal != null }?.let { return Value.Json(scalar(tagTextOf(it)), text = true) }
                     // A function that gives a number, a text or a truth value of its argument, never the argument, reads it in flight.
@@ -7549,6 +7575,12 @@ abstract class SqlCypherCompiler(
 
         /** The arithmetic that takes numbers alone, and temporal values where the store does: `+` puts texts and lists together too. */
         val NUMERIC_ONLY = ARITHMETIC - Operator.ADD
+
+        /** The kinds `toInteger()` and `toFloat()` take, as Neo4j documents them, and how a refusal names them: see [conversionOfKind]. */
+        val CONVERTED_KINDS = mapOf(
+            "tointeger" to (setOf(Value.Known.BOOLEAN, Value.Known.INTEGER, Value.Known.FLOAT, Value.Known.TEXT) to "a truth value, an integer, a float or a text"),
+            "tofloat" to (setOf(Value.Known.INTEGER, Value.Known.FLOAT, Value.Known.TEXT) to "an integer, a float or a text"),
+        )
 
         /** How the statement writes each of [NUMERIC_ONLY], for a refusal to name it. */
         val NUMERIC_SYMBOLS = mapOf(Operator.SUBTRACT to "-", Operator.MULTIPLY to "*", Operator.DIVIDE to "/", Operator.MODULO to "%", Operator.POWER to "^")

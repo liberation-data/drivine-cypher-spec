@@ -79,6 +79,38 @@ cases:
         parameters: {l: []}
         error: "toBoolean() takes a truth value, an integer or a text, not a list, as in Neo4j."
 
+  - name: "Arithmetic of the variable of a quantifier or a list comprehension over a list written of one kind that isn't a number"
+    description: "The variable of none(), any(), all(), single() or a list comprehension over a list the statement writes, each of whose items is of one known kind, is of that kind, as Neo4j types it, so arithmetic of it is refused as arithmetic of that kind is; it gave null (liberation-data/drivine4j#420). The first four are openCypher's TCK Quantifier1 to Quantifier4, scenarios 15 and 16, which Neo4j refuses when it plans them. A list of items of two kinds, an empty list, a list holding a value whose kind is left open (a parameter, a property, a node) and a list given as a parameter are compiled as before."
+    steps:
+      - cypher: "RETURN none(x IN ['Clara'] WHERE x % 2 = 0) AS result"
+        error: "% takes numbers, not a text, as in Neo4j."
+      - cypher: "RETURN any(x IN [false, true] WHERE x % 2 = 0) AS result"
+        error: "% takes numbers, not a truth value, as in Neo4j."
+      - cypher: "RETURN all(x IN ['Clara', 'Bob', 'Dave', 'Alice'] WHERE x % 2 = 0) AS result"
+        error: "% takes numbers, not a text, as in Neo4j."
+      - cypher: "RETURN single(x IN [{a: 1}] WHERE x % 2 = 0) AS result"
+        error: "% takes numbers, not a map, as in Neo4j."
+      - cypher: "RETURN [x IN ['a'] | x % 2] AS result"
+        error: "% takes numbers, not a text, as in Neo4j."
+      - cypher: "RETURN [x IN [[1], [2]] WHERE x - 1 > 0] AS result"
+        error: "- takes numbers, not a list, as in Neo4j."
+
+  - name: "toInteger() of a list or a map, and toFloat() of a truth value, a list or a map"
+    description: "Neo4j documents toInteger() as taking a truth value, an integer, a float or a text, and toFloat() an integer, a float or a text, and refuses another kind. Where the statement writes or makes the argument as one, the statement is refused; it gave null (liberation-data/drivine4j#420). toInteger(true) is 1, as Neo4j gives it. A parameter, a property or a node, whose kind is left open here, is compiled as before."
+    steps:
+      - cypher: "RETURN toInteger([])"
+        error: "toInteger() takes a truth value, an integer, a float or a text, not a list, as in Neo4j."
+      - cypher: "RETURN toInteger({})"
+        error: "toInteger() takes a truth value, an integer, a float or a text, not a map, as in Neo4j."
+      - cypher: "RETURN toFloat(true)"
+        error: "toFloat() takes an integer, a float or a text, not a truth value, as in Neo4j."
+      - cypher: "RETURN toFloat([])"
+        error: "toFloat() takes an integer, a float or a text, not a list, as in Neo4j."
+      - cypher: "RETURN toFloat({})"
+        error: "toFloat() takes an integer, a float or a text, not a map, as in Neo4j."
+      - cypher: "WITH [1] AS l RETURN toInteger(l)"
+        error: "toInteger() takes a truth value, an integer, a float or a text, not a list, as in Neo4j."
+
   - name: "Value used as the wrong kind"
     description: "Using a value as something it isn't (a number as a node, a path's property) is refused."
     steps:
