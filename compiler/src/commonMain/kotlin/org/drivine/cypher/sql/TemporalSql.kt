@@ -86,6 +86,9 @@ abstract class TemporalSql(protected val shared: (List<String>, (List<String>) -
     /** The name of the function that cuts a number's fraction off, as `TRUNC` does. */
     open val trunc = "TRUNC"
 
+    /** [number] rounded half away from zero to [places] places, a number of the store's: see [Temporals.text]. */
+    open fun round(number: String, places: Int) = "ROUND($number, $places)"
+
     /** The number [number] rounded down to a whole number, as `FLOOR` does. */
     open fun floor(number: String) = "FLOOR($number)"
 
