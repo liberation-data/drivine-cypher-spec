@@ -140,6 +140,13 @@ abstract class SqlCypherCompiler(
      */
     protected open fun storedArithmetic(operator: String, x: String, y: String): String? = null
 
+    /**
+     * The duration text of the duration text [duration] times, with [operator] `*`, or divided by, with `/`, the SQL number
+     * [number], where the store works it out otherwise than [Temporals.times] and [Temporals.divided]: see SQLite's. Null
+     * where the store's SQL works it out exactly.
+     */
+    protected open fun scaled(operator: String, duration: String, number: String): String? = null
+
     /** [compiled] with the functions it calls declared before it. */
     private fun withFunctions(compiled: CompiledCypher): CompiledCypher {
         val all = functions + calledFunctions(compiled.sql).filter { it !in functions }
@@ -5167,12 +5174,12 @@ abstract class SqlCypherCompiler(
                     }
                 }
                 Operator.MULTIPLY -> when {
-                    l == duration -> tagged(duration, temporals.times(a, number(comparable(json(right)))))
-                    r == duration -> tagged(duration, temporals.times(b, number(comparable(json(left)))))
+                    l == duration -> number(comparable(json(right))).let { k -> tagged(duration, scaled("*", a, k) ?: temporals.times(a, k)) }
+                    r == duration -> number(comparable(json(left))).let { k -> tagged(duration, scaled("*", b, k) ?: temporals.times(b, k)) }
                     else -> null
                 }
                 // Each part divided, as Cypher divides a duration: times `1.0 / k` lost a month on Postgres (P1Y / 3, #260).
-                Operator.DIVIDE -> if (l == duration) tagged(duration, temporals.divided(a, number(comparable(json(right))))) else null
+                Operator.DIVIDE -> if (l == duration) number(comparable(json(right))).let { k -> tagged(duration, scaled("/", a, k) ?: temporals.divided(a, k)) } else null
                 Operator.EQUALS, Operator.NOT_EQUALS, Operator.LESS_THAN, Operator.GREATER_THAN, Operator.LESS_THAN_OR_EQUAL, Operator.GREATER_THAN_OR_EQUAL -> {
                     val sql = mapOf(
                         Operator.EQUALS to "=", Operator.NOT_EQUALS to "<>", Operator.LESS_THAN to "<", Operator.GREATER_THAN to ">",

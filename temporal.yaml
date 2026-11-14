@@ -1123,6 +1123,10 @@ cases:
       - only: [neo4j, sql]
         cypher: "RETURN [toString(duration('P1Y') / 3), toString(duration('P1Y') / 1.5), toString(duration('P1W') / 3), toString(duration('P1M') / 3)]"
         rows: [["P4M", "P8M", "P2DT8H", "P10DT3H29M42S"]]
+      - note: "Exactly, on every SQL store: SQLite worked a duration the statement scales out in doubles, which left a tail of a nanosecond or two (…16.800000002S), and now works it out by its host function as one read from the store (#262). Neo4j's float tails are a known difference (#254)."
+        only: [sql]
+        cypher: "RETURN [toString(duration('P1Y') / 2.5), toString(duration('P1Y2M3DT4H5M6.789S') / 3), toString(duration('-P1Y2M3W4DT5H6M7.5S') / 1.5), toString(duration('P1Y2M3DT4H5M6.789S') / 2.5), toString(duration('P1Y2M3DT4H5M6.789S') * 0.4), toString(0.4 * duration('P1Y2M3DT4H5M6.789S'))]"
+        rows: [["P4M24DT8H23M16.8S", "P4M21DT8H21M6.263S", "P-9M-26DT-22H-53M-47S", "P5M19DT12H43M30.3156S", "P5M19DT12H43M30.3156S", "P5M19DT12H43M30.3156S"]]
       - only: [neo4j, sql]
         cypher: "CREATE (:CyTemporal {id: 'q', y: duration('P1Y'), w: duration('P1W'), k: 3, k15: 1.5})"
       - note: "Read from the store, worked out by the store's function, or SQLite's host function (drivine4j#418)."

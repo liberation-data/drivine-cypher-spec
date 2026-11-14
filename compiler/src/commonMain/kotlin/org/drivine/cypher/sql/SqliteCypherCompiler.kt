@@ -1,5 +1,6 @@
 package org.drivine.cypher.sql
 
+import org.drivine.cypher.store.ValueLayout
 import org.drivine.cypher.CompilerException
 import org.drivine.cypher.store.SqliteCypherValues
 import org.drivine.cypher.store.SqliteFunctions
@@ -610,6 +611,16 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
 
     /** The host function of temporal arithmetic each library registers on its connections (HOST_VERSION 2): see [storedArithmetic]. */
     override fun storedArithmetic(operator: String, x: String, y: String) = "${TemporalArithmeticFunction.HOST}('$operator', $x, $y)"
+
+    /**
+     * A duration scaled by a number, by the host function too: SQLite's SQL works its parts out in doubles, which left a tail of
+     * a nanosecond or two in its seconds (`P1Y / 2.5` was `…16.800000002S`), where the host function works them out in decimals
+     * as Postgres and Oracle do (drivine-cypher-spec#262). The duration is given as its tag, the number as SQL's; null where
+     * the number is.
+     */
+    override fun scaled(operator: String, duration: String, number: String) = shared(duration, number) { (d, k) ->
+        "(${storedArithmetic(operator, "json_object(${literal(ValueLayout.KIND)}, ${literal(ValueLayout.word(Temporal.DURATION))}, ${literal(ValueLayout.TEXT)}, $d)", k)} ->> '\$.v')"
+    }
 
     /**
      * The whole of the text matches, as `=~` asks: `REGEXP` finds a match anywhere. It ends at `\z`, the text's end,

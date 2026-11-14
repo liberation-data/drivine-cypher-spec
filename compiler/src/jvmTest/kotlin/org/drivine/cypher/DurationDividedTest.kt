@@ -17,12 +17,19 @@ class DurationDividedTest {
     private val cypher = "RETURN toString(duration('PT1000000H') / 7)"
 
     @Test
-    fun `each part is divided, not times the divisor's reciprocal, and the seconds rounded to nine places, on every store`() {
-        listOf(PostgresCypherCompiler("g"), OracleCypherCompiler("g"), SqliteCypherCompiler("g")).forEach { compiler ->
+    fun `each part is divided, not times the divisor's reciprocal, and the seconds rounded to nine places, on Postgres and Oracle`() {
+        listOf(PostgresCypherCompiler("g"), OracleCypherCompiler("g")).forEach { compiler ->
             val sql = compiler.compile(cypher, emptyMap()).sql
             assertFalse("(1.0 / " in sql, "${compiler::class.simpleName}:\n$sql")
             assertTrue(Regex(""", 9\)""").containsMatchIn(sql), "${compiler::class.simpleName}:\n$sql")
         }
+    }
+
+    @Test
+    fun `on SQLite the host function divides it, in decimals, where its SQL worked in doubles (#262)`() {
+        val sql = SqliteCypherCompiler("g").compile(cypher, emptyMap()).sql
+        assertTrue("drivine_temporal_arithmetic('/', json_object('\$t', 'duration', 'v', " in sql, sql)
+        assertFalse("(1.0 / " in sql, sql)
     }
 
     @Test
