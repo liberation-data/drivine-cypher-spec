@@ -180,6 +180,10 @@ class OracleUnnamedKeyedLabelsTest {
         val walked = oracle("MATCH (:Person)-[:FOLLOWS]->(:Person) RETURN count(*)")
         assertEquals(oracle("MATCH (a:Person)-[:FOLLOWS]->(b:Person) RETURN count(*)"), walked)
         assertTrue(testedByIndex(walked, "n1") && byText("n1") !in walked && byText("n2") in walked, walked)
+        // That rule asks for no index over a property, so a store given none (drivine4j with no catalog) compiles it so too.
+        val uncatalogued = oracle("MATCH (:Person)-[:FOLLOWS]->(:Person) RETURN count(*)", emptySet())
+        assertEquals(oracle("MATCH (a:Person)-[:FOLLOWS]->(b:Person) RETURN count(*)", emptySet()), uncatalogued)
+        assertTrue(testedByIndex(uncatalogued, "n1") && byText("n2") in uncatalogued, uncatalogued)
         // A node alone, or given a property no index is over, is found through the index over labels.
         for (cypher in listOf("MATCH (:Person) RETURN count(*)", "MATCH (:Person {name: \$n}) RETURN count(*)")) {
             val sql = oracle(cypher)
