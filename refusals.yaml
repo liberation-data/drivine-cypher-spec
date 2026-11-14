@@ -1002,7 +1002,7 @@ cases:
         error: "count(*) aggregates, and an ORDER BY holds no aggregate unless its WITH or RETURN aggregates or is DISTINCT, as in Neo4j: give the aggregate as an item, and order by its name, as in RETURN x, count(*) AS c ORDER BY c."
 
   - name: "Expression in WITH without an alias"
-    description: "An item of a WITH that is not a variable or a map projection has an alias, as Neo4j (its 42N21, \"unaliased return item\") refuses it: compiled, it ran and named the column by its text (liberation-data/drivine4j#714). It is refused before what else is wrong with the statement, as Neo4j refuses it. A variable, one in parentheses, and a map projection need none (see queries.yaml, \"Items of a WITH named without AS\"). Neo4j 2026.10.1 refuses each of these."
+    description: "An item of a WITH that is not a variable or a map projection has an alias, as Neo4j (its 42N21, \"unaliased return item\") refuses it: compiled, it ran and named the column by its text (liberation-data/drivine4j#714). It is refused before a parameter no value is bound to, as Neo4j refuses it. A variable, one in parentheses, and a map projection need none (see queries.yaml, \"Items of a WITH named without AS\"). Neo4j 2026.10.1 refuses each of these."
     steps:
       - note: "The openCypher TCK's With4 [5]."
         cypher: "MATCH (a) WITH a, count(*) RETURN a"

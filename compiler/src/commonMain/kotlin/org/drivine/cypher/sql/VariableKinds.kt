@@ -375,8 +375,8 @@ internal object VariableKinds {
      * Refuses a pattern used as a value in [expression], an item of a `WITH` or a `RETURN`, an order term or an `UNWIND`'s
      * list, as Neo4j refuses it (its 42I34): `RETURN (n)-->()`. A pattern is only a condition there, where [condition] is,
      * as Neo4j takes one: an operand of `NOT`, `AND`, `OR` or `XOR`, a `CASE`'s `WHEN`, the `WHERE` of a comprehension, a
-     * quantifier or a pattern. `size()` of one is refused for that (see [function]), and a subquery's
-     * own items are read as its own projection's.
+     * quantifier or a pattern. Read after [expression], so `size()` of one is refused for that first (see
+     * [function]); a subquery's own items are read as its own projection's.
      */
     private fun valued(expression: Expression, condition: Boolean) {
         fun value(part: Expression) = valued(part, condition = false)
@@ -393,10 +393,7 @@ internal object VariableKinds {
                 listOf(expression.left, expression.right).forEach { valued(it, logical) }
             }
             is Expression.Unary -> valued(expression.operand, expression.operator == Expression.Unary.Operator.NOT)
-            is Expression.Function -> when {
-                expression.name.equals("size", ignoreCase = true) && expression.arguments.singleOrNull() is Expression.PatternPredicate -> {}
-                else -> expression.arguments.forEach(::value)
-            }
+            is Expression.Function -> expression.arguments.forEach(::value)
             is Expression.Case -> {
                 listOfNotNull(expression.subject, expression.otherwise).forEach(::value)
                 expression.alternatives.forEach { (key, result) ->
