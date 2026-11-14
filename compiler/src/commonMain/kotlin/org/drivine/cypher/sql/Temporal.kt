@@ -18,6 +18,9 @@ enum class Temporal(val pattern: String, val zoned: Boolean = false) {
     /** `P1Y2M3W4DT5H6M7.5S`, each part optional and signed, or the whole negated: its parts are read by [DURATION_PARTS]. */
     DURATION("^(-?)P((-?[0-9.]+)Y)?((-?[0-9.]+)M)?((-?[0-9.]+)W)?((-?[0-9.]+)D)?(T((-?[0-9.]+)H)?((-?[0-9.]+)M)?((-?[0-9.]+)S)?)?$");
 
+    /** [pattern], compiled once: a host function reads a value by it on each call. */
+    val regex: Regex by lazy { Regex(pattern) }
+
     /** The name of the function that makes a value of this kind: `date`, `localdatetime`… */
     val function: String get() = name.lowercase().replace("_", "")
 
@@ -54,6 +57,15 @@ enum class Temporal(val pattern: String, val zoned: Boolean = false) {
 
         /** The offset a zoned text ends with. */
         const val OFFSET = "(Z|[+-][0-9]{2}:?[0-9]{2})$"
+
+        /** [OFFSET], compiled once. */
+        val OFFSET_REGEX = Regex(OFFSET)
+
+        /** An offset of no hours and minutes, which is written `Z`. */
+        val ZERO_OFFSET = Regex("^[+-]00:?00$")
+
+        /** An offset written without its colon, `+0530`, whose hours and minutes are written `+05:30`. */
+        val OFFSET_WITHOUT_COLON = Regex("^([+-][0-9]{2})([0-9]{2})$")
 
         /** The kind of a function that makes a temporal value, by its name in lower case: `date`, `datetime`… */
         fun ofFunction(name: String): Temporal? = when (name) {
