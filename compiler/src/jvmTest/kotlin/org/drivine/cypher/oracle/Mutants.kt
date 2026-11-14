@@ -78,7 +78,7 @@ object Mutants {
 
     private class Token(val start: Int, val end: Int, val kind: Char)
 
-    /** A quoted text's run of plain characters is matched at once, as `OracleCypherCompiler`'s `QUOTED` is, so a long one doesn't overflow the stack. */
+    /** A quoted text's run of plain characters is matched at once, not one by one in an alternation, so a long one doesn't overflow the stack: the JVM's tests alone read it. */
     private val TOKEN = Regex(
         """('[^'\\]*(?:\\.[^'\\]*)*'?|"[^"\\]*(?:\\.[^"\\]*)*"?)|(`[^`]*(?:``[^`]*)*`?)|(\$\w+)|(0x[0-9a-fA-F]+|\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)|([\p{L}_][\p{L}\p{N}_]*)|(<>|<=|>=|=~|->|<-|\.\.|\+=|\S)""",
     )

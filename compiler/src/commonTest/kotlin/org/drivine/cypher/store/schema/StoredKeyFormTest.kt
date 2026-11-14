@@ -12,6 +12,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
+import kotlin.test.assertTrue
 
 /**
  * A vector or a full-text index over a property whose name holds a `'` or begins with `$` reads as current against what
@@ -39,7 +40,9 @@ class StoredKeyFormTest {
         val text = oracle.createIndex(spec as org.drivine.schema.IndexSpec, null).filterIsInstance<DdlStatement.Text>().joinToString("\n") { it.statement }
         val opens = text.indexOf("'CREATE OR REPLACE TRIGGER ")
         assertNotNull(opens.takeIf { it >= 0 }, "no trigger made for $spec:\n$text")
-        val body = Regex("'${SqlText.LITERAL}'").find(text, opens)!!.groupValues[1]
+        val end = SqlText.scanQuoted(text, opens, '\'', SqlText.Escape.DOUBLED)
+        assertTrue(end > opens, "the trigger's literal is unclosed:\n$text")
+        val body = text.substring(opens + 1, end - 1)
         val source = SqlText.unquoted(body).removePrefix("CREATE OR REPLACE ")
         return mapOf("object" to name.uppercase(), "type" to "TRIGGER", "table" to oracle.nodes.uppercase(), "source" to listOf(source))
     }

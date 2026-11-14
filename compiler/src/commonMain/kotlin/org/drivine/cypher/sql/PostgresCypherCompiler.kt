@@ -14,6 +14,7 @@ import org.drivine.cypher.store.Stamps
 import com.ionspin.kotlin.bignum.decimal.BigDecimal
 import org.drivine.cypher.json.jvmDoubleText
 import org.drivine.cypher.json.sha256
+import org.drivine.cypher.store.schema.SqlText
 
 /**
  * Compiles a Cypher statement to SQL over a graph's tables on Postgres: see [SqlCypherCompiler].
@@ -235,10 +236,10 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
      * the comparison's, `1` equal to `1.0` and `[1]` to `[1.0]`, and leaves the comparison to say where either is null.
      */
     override fun indexedEqualityOfAny(property: String, value: String, of: IndexedProperty?, scalar: Boolean): String? =
-        PROPERTY_READ.matchEntire(property)?.let { "$property = $value" }
+        SqlText.arrowRead(property)?.let { "$property = $value" }
 
     /** The JSON [json]'s text, where it is a text: a property's read with `->>`, which costs less than `#>>`. */
-    private fun textOf(json: String) = PROPERTY_READ.matchEntire(json)?.let { PostgresSql.propertyText(it.groupValues[1], it.groupValues[2]) } ?: "($json #>> '{}')"
+    private fun textOf(json: String) = SqlText.arrowRead(json)?.let { (props, key) -> PostgresSql.propertyText(props, key) } ?: "($json #>> '{}')"
 
     /**
      * A whole number as the `bigint` the key is: a key compared with a `numeric` is cast to one, and read by no index. A number
@@ -886,9 +887,6 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
 
         /** How a query reads the rows of a JSON list: see [plannedAsNestedLoops]. */
         private const val JSON_LIST = "jsonb_array_elements("
-
-        /** A property read, `(n1.props -> 'name')`: the row's column, and the key. */
-        private val PROPERTY_READ = Regex("""^\(([\w.]+) -> ('(?:[^']|'')*')\)$""")
 
         /**
          * The characters of a text in a list that [codePoints] orders by their code points: at most 4 bytes each, 32 bits, which

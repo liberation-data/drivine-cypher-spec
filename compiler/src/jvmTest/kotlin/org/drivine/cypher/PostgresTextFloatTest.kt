@@ -18,7 +18,7 @@ class PostgresTextFloatTest {
     private fun sql(cypher: String, parameters: Map<String, Any?> = emptyMap()) = PostgresCypherCompiler("g").compile(cypher, parameters).sql
 
     /** The patterns the statement's text is matched with by `~`, in turn. */
-    private fun patterns(sql: String) = Regex("""~ '((?:[^']|'')*)'""").findAll(sql).map { it.groupValues[1].replace("''", "'") }.toList()
+    private fun patterns(sql: String) = Regex("""~ '([^']*+(?:''[^']*+)*+)'""").findAll(sql).map { it.groupValues[1].replace("''", "'") }.toList()
 
     /** Which of [patterns] [text] matches first. */
     private fun first(patterns: List<String>, text: String) = patterns.indexOfFirst { Regex(it).containsMatchIn(text) }
