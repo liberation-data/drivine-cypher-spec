@@ -1803,6 +1803,8 @@ abstract class SqlCypherCompiler(
          * ([given] says which), it is the one the pattern starts from best, and keeps its test, and the earlier is read by its key:
          * `MATCH (a:Big)<-[:R]-(x:Small {s: 7})` took 15 ms over 8,000 edges keyed the other way round, a scan of every node
          * for `x`, and 5 ms so; `MATCH (x:Small {s: 7})-[:R]->(a:Big)` takes 4.
+         * An end found here with no variable, as `(:Person)`, counts as bound for this ([Select.labelled]), so is tested as it
+         * would be named (#269).
          *
          * With [both], for a relationship of either direction read from both halves of a `UNION ALL` ([bothWays]), each end is
          * tested so: Oracle reads the halves first, and found the earlier end through the index once for each edge, 2.6 s over the
@@ -2391,7 +2393,7 @@ abstract class SqlCypherCompiler(
                         val name = alias("n")
                         select.source("$nodes $name")
                         Value.Node("$name.nid", "$name.labels", "$name.props", "$name.stamp").also { value ->
-                            node.variable?.let { select.bind(it, value) }
+                            node.variable?.let { select.bind(it, value) } ?: select.findsUnnamed(value.nid)
                             if (select.afterGrouping) grouped += value.nid
                         }
                     }
@@ -7192,8 +7194,24 @@ abstract class SqlCypherCompiler(
         /** Whether the node whose key is [nid] is bound here, not in a part around it. */
         fun bindsNode(nid: String) = bound.values.any { it is Value.Node && it.nid == nid }
 
-        /** Where the node whose key is [nid], bound here, is first tested for its labels among its conditions; null where it is not. */
-        fun labelled(nid: String): Int? = labelTests[nid]?.first()?.at?.takeIf { bindsNode(nid) }
+        /**
+         * The keys of the nodes a pattern of this part finds that no variable names, as `(:Person)`: read here as a node
+         * bound here is, and tested for its labels so ([labelled]), but no name of the statement's reads them.
+         */
+        private val unnamed = mutableSetOf<String>()
+
+        /** The node whose key is [nid], found here by a pattern that names it with no variable: see [unnamed]. */
+        fun findsUnnamed(nid: String) {
+            unnamed += nid
+        }
+
+        /**
+         * Where the node whose key is [nid], bound here or found here unnamed ([unnamed]), is first tested for its labels
+         * among its conditions; null where it is not. An unnamed node is tested as one bound so would be: on Oracle (23.26)
+         * `MATCH (:Person)-[:FOLLOWS]->(p:Person {id: $id})` drove from every `Person`, through the index over labels, and read
+         * the key's index once for each edge, 2.1 s over 1.5M edges, where `(a:Person)` took 0.5 ms (#269).
+         */
+        fun labelled(nid: String): Int? = labelTests[nid]?.first()?.at?.takeIf { bindsNode(nid) || nid in unnamed }
 
         /** Each test of the labels of the node whose key is [nid] written again, as [test] gives it for its labels and those it tests. */
         fun relabel(nid: String, test: (String, List<String>) -> String) {
