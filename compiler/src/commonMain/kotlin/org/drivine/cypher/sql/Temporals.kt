@@ -683,7 +683,7 @@ class Temporals(
      */
     private fun literalParts(text: String): Parts? {
         if (text.length < 3 || !text.startsWith("'") || !text.endsWith("'") || text.drop(1).dropLast(1).contains('\'')) return null
-        val groups = Regex(Temporal.DURATION.pattern).matchEntire(text.drop(1).dropLast(1))?.groupValues ?: return null
+        val groups = Temporal.DURATION.regex.matchEntire(text.drop(1).dropLast(1))?.groupValues ?: return null
         fun part(group: Int) = groups[group].ifEmpty { "0" }.takeIf { Regex("-?[0-9]+([.][0-9]+)?").matches(it) }?.let(BigDecimal::parseString)
         val (y, mo, w, d, h, mi, sec) = listOf(3, 5, 7, 9, 12, 14, 16).map { part(it) ?: return null }
         val sign = if (groups[1] == "-") BigDecimal.ONE.negate() else BigDecimal.ONE
@@ -901,7 +901,7 @@ class Temporals(
          * value the statement writes: null where the text is of no temporal kind.
          */
         fun canonical(text: String, kind: Temporal): String? {
-            if (kind == Temporal.DURATION) return if (Regex(Temporal.DURATION.pattern).matches(text)) canonicalDuration(text) else null
+            if (kind == Temporal.DURATION) return if (Temporal.DURATION.regex.matches(text)) canonicalDuration(text) else null
             // A year past 9999, or before -9999, as ISO 8601 and Neo4j write one, signed (`+999999999-12-31`): read as the year of the
             // same place in the Gregorian calendar's 400-year cycle, which has the same days, and written back with its own.
             EXTENDED_YEAR.find(text)?.let { found ->
@@ -912,10 +912,10 @@ class Temporals(
                 val read = canonical(stand.toString() + text.substring(found.groupValues[1].length), kind) ?: return null
                 return if (kind.function.contains("time") && !kind.function.contains("date")) read else isoYear(year) + read.substring(4)
             }
-            val from = Temporal.instants.firstOrNull { Regex(it.pattern).matches(text) } ?: return null
-            val written = if (from.zoned) Regex(Temporal.OFFSET).find(text)!!.value else null
+            val from = Temporal.instants.firstOrNull { it.regex.matches(text) } ?: return null
+            val written = if (from.zoned) Temporal.OFFSET_REGEX.find(text)!!.value else null
             val local = if (written != null) text.removeSuffix(written) else text
-            val offset = written?.replace(Regex("^[+-]00:?00$"), "Z")?.replace(Regex("^([+-][0-9]{2})([0-9]{2})$"), "$1:$2")
+            val offset = written?.replace(Temporal.ZERO_OFFSET, "Z")?.replace(Temporal.OFFSET_WITHOUT_COLON, "$1:$2")
             // SPIKE: java.time's message where it refuses the text; kotlinx-datetime's are its own.
             org.drivine.cypher.time.CommonTime.javaParseError(local)?.let { throw org.drivine.cypher.time.CommonTime.TemporalException(it) }
             val clock = when (from) {
@@ -1049,7 +1049,7 @@ class Temporals(
          * and minutes with them), each signed by the text's own sign, as [parts] reads them.
          */
         internal fun durationParts(text: String): Triple<BigDecimal, BigDecimal, BigDecimal> {
-            val groups = Regex(Temporal.DURATION.pattern).matchEntire(text)?.groupValues ?: throw IllegalArgumentException("'$text' is no duration.")
+            val groups = Temporal.DURATION.regex.matchEntire(text)?.groupValues ?: throw IllegalArgumentException("'$text' is no duration.")
             // As java.math's `BigDecimal(text)`, which refuses a part of no digits or of two points with NumberFormatException.
             fun dec(text: String) = if (JAVA_DECIMAL.matches(text)) BigDecimal.parseString(text) else throw NumberFormatException("No decimal: $text")
             fun dec(n: Int) = BigDecimal.fromInt(n)
@@ -1076,7 +1076,7 @@ class Temporals(
             val exactSeconds = s0 + (daysExact - days) * dec(86400)
             // With [places], the seconds rounded first, so a whole minute is no `59M60S`, and no time a `0S`.
             val seconds = if (places == null) exactSeconds
-                else BigDecimal.parseString(JavaDecimal.parse(exactSeconds.toPlainString()).halfUp(places).toPlainString())
+                else exactSeconds.roundToDigitPositionAfterDecimalPoint(places, com.ionspin.kotlin.bignum.decimal.RoundingMode.ROUND_HALF_AWAY_FROM_ZERO)
             if (months.signum() == 0 && days.signum() == 0 && seconds.signum() == 0) return "PT0S"
             val years = quotient(months, dec(12))
             val hours = quotient(seconds, dec(3600))

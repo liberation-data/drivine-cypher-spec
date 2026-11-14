@@ -4,6 +4,7 @@ import com.ionspin.kotlin.bignum.decimal.BigDecimal
 import com.ionspin.kotlin.bignum.decimal.DecimalMode
 import com.ionspin.kotlin.bignum.decimal.RoundingMode
 import kotlinx.datetime.LocalDateTime
+import kotlinx.datetime.LocalTime
 import org.drivine.cypher.host.HostArgs
 import org.drivine.cypher.host.HostResult
 import org.drivine.cypher.host.SqlType
@@ -45,7 +46,7 @@ internal object HostTemporalArithmetic {
             operator == "+" && x.kind.moment && y.kind == Temporal.DURATION -> x.kind!! to moved(x, y, 1)
             operator == "+" && x.kind == Temporal.DURATION && y.kind.moment -> y.kind!! to moved(y, x, 1)
             operator == "-" && x.kind.moment && y.kind == Temporal.DURATION -> x.kind!! to moved(x, y, -1)
-            operator in setOf("+", "-") && x.kind == Temporal.DURATION && y.kind == Temporal.DURATION -> Temporal.DURATION to sum(x, y, if (operator == "+") 1 else -1)
+            (operator == "+" || operator == "-") && x.kind == Temporal.DURATION && y.kind == Temporal.DURATION -> Temporal.DURATION to sum(x, y, if (operator == "+") 1 else -1)
             operator == "*" && x.kind == Temporal.DURATION && y.number != null -> Temporal.DURATION to times(x, y.number)
             operator == "*" && x.number != null && y.kind == Temporal.DURATION -> Temporal.DURATION to times(y, x.number)
             operator == "/" && x.kind == Temporal.DURATION && y.number != null -> Temporal.DURATION to divided(x, y.number)
@@ -107,17 +108,36 @@ internal object HostTemporalArithmetic {
         return format(SqliteTimestamps.write(clock), kind, if (kind.zoned) offset(text) else null)
     }
 
-    /** [clock] as SQLite's timestamp holds it, to the microsecond: each primitive step writes one. */
-    private fun timestamp(clock: LocalDateTime): LocalDateTime = HostTemporal.local(SqliteTimestamps.write(clock), Temporal.LOCAL_DATE_TIME)
+    /**
+     * [clock] as SQLite's timestamp holds it, to the microsecond: each primitive step writes one. [SqliteTimestamps.write]
+     * cuts the nanoseconds to microseconds and changes nothing else, so the clock is cut here, not written and read again.
+     */
+    private fun timestamp(clock: LocalDateTime): LocalDateTime =
+        LocalDateTime(clock.date, LocalTime(clock.hour, clock.minute, clock.second, clock.nanosecond / 1000 * 1000))
 
     /**
      * The duration text [text]'s months and days, whole as `add_months` and `add_time` read a number (half away from zero), and
      * its time as whole seconds and nanoseconds, as `Temporals.exactParts` reads them, each times [sign].
      */
     private fun exactParts(text: String, sign: Int): List<Long> {
-        val (m0, d0, _) = Temporals.durationParts(text)
-        val groups = Regex(Temporal.DURATION.pattern).matchEntire(text)!!.groupValues
+        val groups = Temporal.DURATION.regex.matchEntire(text)!!.groupValues
         val textSign = if (groups[1] == "-") -1L else 1L
+        // Whole years, months, weeks, days, hours and minutes, as a stored duration's are, add up as longs: the exact parts
+        // below give the same, slower. A fraction of any, or a part too long for a long, takes them.
+        val small = WHOLE_GROUPS.map { groups[it].let { g -> if (g.isEmpty()) 0L else if (isSmallWhole(g)) g.toLong() else null } }
+        if (null !in small) {
+            val (y, mo, w, d, h, mi) = small.map { it!! }
+            val g = groups[16]
+            val point = g.indexOf('.')
+            val fraction = if (point >= 0) (g.substring(point + 1) + "000000000").take(9).toLong() else 0L
+            val whole = (if (point >= 0) g.substring(0, point) else g).let { if (it == "-" || it.isEmpty()) 0L else it.toLongOrNull() }
+            if (whole != null) {
+                val wholeSeconds = textSign * (h * 3600 + mi * 60 + whole)
+                val nanos = textSign * (if (g.startsWith("-")) -1 else 1) * fraction
+                return listOf(sign * textSign * (y * 12 + mo), sign * textSign * (w * 7 + d), sign * wholeSeconds, sign * nanos)
+            }
+        }
+        val (m0, d0, _) = Temporals.durationParts(text)
         fun whole(value: BigDecimal) = JavaDecimal.parse(value.toPlainString()).halfUp(0).wrappedLong()
         fun number(group: Int) = groups[group].ifEmpty { "0" }.let { BigDecimal.parseString(it) }
         val g = groups[16]
@@ -132,8 +152,8 @@ internal object HostTemporalArithmetic {
 
     /** The offset the zoned text [text] ends with, as `Temporals.offset` gives it. */
     private fun offset(text: String): String {
-        val written = Regex(Temporal.OFFSET + "$").find(text)?.value ?: "Z"
-        return written.replace(Regex("^[+-]00:?00$"), "Z").replace(Regex("^([+-][0-9]{2})([0-9]{2})$"), "$1:$2")
+        val written = Temporal.OFFSET_REGEX.find(text)?.value ?: "Z"
+        return written.replace(Temporal.ZERO_OFFSET, "Z").replace(Temporal.OFFSET_WITHOUT_COLON, "$1:$2")
     }
 
     /** The text of [kind] of the SQLite timestamp [timestamp], with [offset] where zoned, as `Temporals.format` writes it. */
@@ -176,6 +196,17 @@ internal object HostTemporalArithmetic {
         val (m, d, s) = Temporals.durationParts(duration.v!!)
         return Temporals.durationText(m.divide(divisor, QUOTIENT), d.divide(divisor, QUOTIENT), s.divide(divisor, QUOTIENT), PLACES)
     }
+
+    /** The groups of [Temporal.DURATION] of its years, months, weeks, days, hours and minutes. */
+    private val WHOLE_GROUPS = listOf(3, 5, 7, 9, 12, 14)
+
+    /** Whether [group] is a whole number of at most 12 digits, signed or not: one that adds up as a long. */
+    private fun isSmallWhole(group: String): Boolean {
+        val digits = if (group.startsWith('-')) group.substring(1) else group
+        return digits.length in 1..12 && digits.all { it in '0'..'9' }
+    }
+
+    private operator fun <T> List<T>.component6() = this[5]
 
     /** The places the builder's `number` writes a part of a duration to: nanoseconds. */
     private const val PLACES = 9L
