@@ -36,6 +36,29 @@ internal object Patterns {
         return "The regular expression '$pattern' writes a backreference ${why.first}, ${why.second}: $ANSWERED"
     }
 
+    /**
+     * Why Oracle can't answer [pattern] as Java does for a group of its own syntax, `(?…)`, or null where it can (#242).
+     * Oracle reads no such group but a leading flag group, `(?i)`, which its `=~` takes off as its match parameter: a group
+     * that captures nothing, `(?:…)`, is read as one that captures, which is the same match where the pattern writes no
+     * backreference, and the [BACKREFERENCE] refusal already holds that one to none ([refusal]). Every other, a lookaround,
+     * a named group, or a flag group within the pattern, is refused, as is `(?:` written in a character class, which the
+     * SQL's rewrite of each `(?:` can't tell from a group.
+     */
+    fun oracleRefusal(pattern: String): String? {
+        val why = scan(pattern).constructs.firstOrNull { it != NONCAPTURING } ?: return null
+        val what = if (why == IN_CLASS) "a character class that holds (?:" else "a group of its own syntax, $why…)"
+        return "The regular expression '$pattern' writes $what, which Oracle doesn't read as Java does: Oracle answers (?:…) and a leading flag group, (?i), alone (drivine-cypher-spec#242)."
+    }
+
+    /** Whether [pattern] writes a group that captures nothing, `(?:…)`, outside a character class: Oracle's `=~` reads each as `(`. */
+    fun holdsNoncapturing(pattern: String): Boolean = NONCAPTURING in scan(pattern).constructs
+
+    /** A group that captures nothing, as [scan] gives it. */
+    private const val NONCAPTURING = "(?:"
+
+    /** `(?:` written in a character class, as [scan] gives it. */
+    private const val IN_CLASS = "[(?:]"
+
     /** Whether [pattern] writes a backreference, as Java reads one. */
     fun holdsBackreference(pattern: String): Boolean = scan(pattern).found.isNotEmpty()
 
@@ -77,9 +100,13 @@ internal object Patterns {
         val held = mutableListOf<Group>()
     }
 
-    /** What [scan] reads of a pattern. */
+    /**
+     * What [scan] reads of a pattern: with each group of its own syntax it writes, as its opening, `(?:`, `(?=`, `(?<n`…, but
+     * for a leading flag group, and [IN_CLASS] for each `(?:` in a character class (#242).
+     */
     private class Read(
         val found: List<Backreference>, val groups: List<Group>, val flagX: Boolean, val construct: Boolean, val classInClass: Boolean,
+        val constructs: List<String>,
     )
 
     /** A leading flag group as Oracle's `=~` takes it off the pattern, `(?i)`: letters alone. */
@@ -100,6 +127,7 @@ internal object Patterns {
         val found = mutableListOf<Backreference>()
         val stack = ArrayDeque(listOf(Open(null)))
         var construct = false
+        val constructs = mutableListOf<String>()
         var classInClass = false
         var depth = 0
         var i = 0
@@ -137,11 +165,14 @@ internal object Patterns {
                     if (pattern.startsWith("^]", i + 1)) i += 2 else if (pattern.startsWith("]", i + 1)) i += 1
                 }
                 c == ']' && depth > 0 -> depth--
-                depth > 0 -> {}
+                depth > 0 -> if (pattern.startsWith(NONCAPTURING, i)) constructs += IN_CLASS
                 c == '(' -> {
                     stack.last().nested = true
                     // A group of its own syntax, a lookaround or (?:…) among them, but for a leading flag group, which Oracle takes off.
-                    if (pattern.startsWith("?", i + 1) && !(i == 0 && LEADING_FLAGS.matchesAt(pattern, 0))) construct = true
+                    if (pattern.startsWith("?", i + 1) && !(i == 0 && LEADING_FLAGS.matchesAt(pattern, 0))) {
+                        construct = true
+                        constructs += pattern.substring(i, minOf(pattern.length, i + 3))
+                    }
                     val named = pattern.startsWith("?<", i + 1) && pattern.getOrNull(i + 3)?.isLetter() == true
                     val group = if (!pattern.startsWith("?", i + 1) || named) Group().also(groups::add) else null
                     stack.addLast(Open(group))
@@ -166,6 +197,6 @@ internal object Patterns {
             i++
         }
         if (stack.first().alternated) stack.first().held.forEach { it.always = false }
-        return Read(found, groups, FLAG_X.containsMatchIn(pattern), construct, classInClass)
+        return Read(found, groups, FLAG_X.containsMatchIn(pattern), construct, classInClass, constructs)
     }
 }

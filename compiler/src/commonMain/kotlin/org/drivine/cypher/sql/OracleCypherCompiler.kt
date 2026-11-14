@@ -427,12 +427,13 @@ class OracleCypherCompiler(
      * the end of an empty one; an unescaped `\z` is read as `\Z` here, for the same. A pattern of Java's that reads a line
      * break of its own reads this one, and finds no second (`\n`, `\s`, `[^a]`, `(?s).`): it matches no empty text, as in
      * Java. The line break the pattern must leave is written as a class, `[[:cntrl:]]`, which `(?x)` doesn't skip, as it
-     * skips a line break written as it is. queries.yaml's "A regular expression over the empty text" checks it against Neo4j.
+     * skips a line break written as it is. Each `(?:` is written `(`, as [matches] writes it (#242). queries.yaml's "A regular
+     * expression over the empty text" checks it against Neo4j.
      */
     private fun matchesEmpty(pattern: String) = shared(pattern) { (p) ->
         val flags = "REGEXP_SUBSTR($p, '^\\(\\?([a-z]+)\\)', 1, 1, NULL, 1)"
         val written = """REGEXP_REPLACE(REGEXP_REPLACE($p, '^\(\?[a-z]+\)', ''), '(^|[^\\])((\\\\)*)\\z', '\1\2\\Z')"""
-        "REGEXP_LIKE(CHR(10), '\\A(' || ${backreferencesShifted(written)} || ')[[:cntrl:]]\\z', NVL(REPLACE($flags, 's', 'n'), 'c'))"
+        "REGEXP_LIKE(CHR(10), '\\A(' || ${backreferencesShifted(noncapturingAsGroups(written))} || ')[[:cntrl:]]\\z', NVL(REPLACE($flags, 's', 'n'), 'c'))"
     }
 
     /**
@@ -2034,12 +2035,35 @@ class OracleCypherCompiler(
      * Flags the pattern opens with, `(?i)`, are Oracle's match parameter, Java's `s` its `n`. The whole of the text
      * matches, as `=~` asks: it starts at `\A` and ends at `\z`, the text's start and end, which `(?m)` leaves as they are,
      * and Oracle's `$` also matches before a line break that ends the text. Under `(?m)`, Oracle's own `^` and `$` match
-     * at a line break only where nothing in the pattern reads past it: `x$\n^ab` matches no text.
+     * at a line break only where nothing in the pattern reads past it: `x$\n^ab` matches no text. Each `(?:` is written `(`
+     * ([noncapturingAsGroups], #242).
      */
     override fun matches(text: String, pattern: String) = shared(pattern) { (p) ->
         val flags = "REGEXP_SUBSTR($p, '^\\(\\?([a-z]+)\\)', 1, 1, NULL, 1)"
-        "REGEXP_LIKE($text, '\\A(' || ${backreferencesShifted("REGEXP_REPLACE($p, '^\\(\\?[a-z]+\\)', '')")} || ')\\z', NVL(REPLACE($flags, 's', 'n'), 'c'))"
+        "REGEXP_LIKE($text, '\\A(' || ${backreferencesShifted(noncapturingAsGroups("REGEXP_REPLACE($p, '^\\(\\?[a-z]+\\)', '')"))} || ')\\z', NVL(REPLACE($flags, 's', 'n'), 'c'))"
     }
+
+    /**
+     * [pattern] with each group that captures nothing, `(?:`, that no backslash escapes, written `(`: Oracle reads no such
+     * group, and matched nothing where a pattern wrote one (drivine-cypher-spec#242). A group that captures is the same match
+     * where the pattern writes no backreference, as one that writes both is refused ([Patterns.refusal]); and one written in
+     * a character class, or any other group of its own syntax, is refused too ([storeRefusal]). Twice over, as a `(?:` just
+     * after another, `(?:(?:a))`, is not found until the one before it is. A pattern that writes none is left as it is.
+     */
+    private fun noncapturingAsGroups(pattern: String) =
+        if (patternGiven?.let(Patterns::holdsNoncapturing) != true) pattern else (1..2).fold(pattern) { x, _ ->
+            """REGEXP_REPLACE($x, '(^|[^\\])((\\\\)*)\(\?:', '\1\2(')"""
+        }
+
+    /** A pattern the statement gives that writes a group of its own syntax Oracle can't read as Java does: see [Patterns.oracleRefusal]. */
+    override fun storeRefusal(pattern: String) = Patterns.oracleRefusal(pattern)
+
+    /**
+     * A pattern worked out as the statement runs that writes a group of its own syntax, `(?` that no backslash escapes, but for
+     * a leading flag group: Oracle can't be given it to read as Java does, as the compiler can't read its form (#242).
+     */
+    override fun refusedComputed(text: String) =
+        """REGEXP_LIKE(REGEXP_REPLACE($text, '^\(\?[a-z]+\)', ''), '(^|[^\\])(\\\\)*\(\?')"""
 
     /**
      * [pattern] with each backreference that no backslash escapes, `\1` to `\8`, numbered one more: Oracle has no group that
