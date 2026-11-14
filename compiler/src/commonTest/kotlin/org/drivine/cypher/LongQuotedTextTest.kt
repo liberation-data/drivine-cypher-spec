@@ -14,6 +14,8 @@ import org.drivine.cypher.store.schema.SqlStoreSchema
 import org.drivine.cypher.store.schema.SqliteSchema
 import org.drivine.schema.FullTextIndexSpec
 import org.drivine.schema.RangeIndexSpec
+import org.drivine.schema.SchemaItemSpec
+import org.drivine.schema.VectorIndexSpec
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -180,19 +182,31 @@ class LongQuotedTextTest {
     }
 
     /**
-     * A full-text index's trigger on Oracle that reads a long or quote-heavy key, as the index over that key's property, is
-     * read as current: its path, un-doubled, is the key the property is held at (#266), however long and whatever it holds.
+     * A full-text or a vector index's trigger on Oracle that reads a long or quote-heavy key, by `JSON_VALUE` or by
+     * `JSON_QUERY` as the vector's embedding is read, is read as current for the index over that key's property: its path,
+     * un-doubled, is the key the property is held at (#266), however long and whatever it holds. For the index over
+     * another property, it is a trigger over that key.
      */
     @Test
     fun aTriggerOverALongOrQuoteHeavyKeyIsCurrentForTheIndexOverItOnOracle() {
         val ddl = OracleDdl("g")
         val oracle = OracleSchema(ddl)
+        fun name(of: SchemaItemSpec) = (if (of is VectorIndexSpec) ddl.vectors(of.label, of.property) else ddl.texts(of.label, of.properties)) + "_t"
+        fun rows(trigger: String, source: String) = listOf(mapOf("object" to trigger, "type" to "TRIGGER", "table" to "G_NODE", "source" to source))
         for ((what, key) in keys) {
-            val spec = FullTextIndexSpec("Doc", listOf(key))
-            val trigger = ddl.texts(spec.label, spec.properties) + "_t"
-            val read = "IF JSON_EXISTS(:NEW.labels, '\$?(@ == \"Doc\")') THEN x := JSON_VALUE(:NEW.props, '${sql("$." + json(key))}' RETURNING CLOB); END IF;"
-            val rows = listOf(mapOf("object" to trigger, "type" to "TRIGGER", "table" to "G_NODE", "source" to read))
-            assertEquals(ItemForm.Current, oracle.formOf(spec, rows), "a key of $what")
+            val path = "'${sql("$." + json(key))}'"
+            val fullText = "x := JSON_VALUE(:NEW.props, $path RETURNING CLOB);"
+            val vector = "x := TO_VECTOR(JSON_QUERY(:NEW.props, $path RETURNING CLOB));"
+            val triggers = listOf(
+                Triple(FullTextIndexSpec("Doc", listOf(key)), FullTextIndexSpec("Doc", listOf("body")), fullText),
+                Triple(VectorIndexSpec("Doc", key, 3), VectorIndexSpec("Doc", "body", 3), vector),
+            )
+            for ((spec, other, read) in triggers) {
+                val source = "IF JSON_EXISTS(:NEW.labels, '\$?(@ == \"Doc\")') THEN $read END IF;"
+                assertEquals(ItemForm.Current, oracle.formOf(spec, rows(name(spec), source)), "${spec.kind}, a key of $what")
+                assertEquals(ItemForm.Mismatch(name(other), "a trigger over [$key]", false), oracle.formOf(other, rows(name(other), source)),
+                    "${spec.kind} over body, a key of $what")
+            }
         }
     }
 }
