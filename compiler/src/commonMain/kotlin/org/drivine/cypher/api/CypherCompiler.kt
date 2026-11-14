@@ -30,6 +30,8 @@ enum class Store(val id: String) {
  *   a null. A store made by an earlier version, or by a user who may not make a function, has none: compile again with
  *   false where [Compiled.storedFunctions] says the statement calls it and the store hasn't it.
  * @param eraStored on Oracle, whether the store keeps the graph's functions that renumber a year BC, likewise.
+ * @param temporalArithmeticStored on Oracle, whether the store keeps the graph's function of temporal arithmetic, likewise: where
+ *   it doesn't, `+`, `-`, `*` and `/` of a temporal value read from the store fail by name as the statement runs (drivine4j#418).
  * @param indexedProperties on Oracle, the labels and properties a range index or a one-property uniqueness constraint is
  *   over, each `label to property`: a node a pattern finds by one is read through that index.
  * @param oracleRowsAsText on Oracle, whether a statement that writes and returns rows returns them all as one row of JSON
@@ -74,6 +76,7 @@ data class GraphOptions(
     val oracleReencodeJson: Boolean = false,
     val oracleReadsAsText: Boolean = false,
     val vectorIndexes: List<VectorIndexSpec> = emptyList(),
+    val temporalArithmeticStored: Boolean = true,
 )
 
 /** What compiling a statement gives: the SQL, or the compiler's refusal of the statement. */
@@ -104,7 +107,7 @@ data class Compiled(
 ) : CompileResult
 
 /** Which of the graph's stored functions an Oracle statement calls: see [GraphOptions]. */
-data class StoredFunctions(val nullsEqual: Boolean, val era: Boolean)
+data class StoredFunctions(val nullsEqual: Boolean, val era: Boolean, val temporalArithmetic: Boolean = false)
 
 /**
  * The compiler refuses the statement, with [message]: what each library throws, as the spec's refusals pin it. Or a
@@ -173,7 +176,7 @@ object CypherCompiler {
     internal fun compiler(store: Store, graph: GraphOptions): SqlCypherCompiler {
         val compiler: SqlCypherCompiler = when (store) {
             Store.POSTGRES -> PostgresCypherCompiler(graph.name)
-            Store.ORACLE -> OracleCypherCompiler(graph.name, graph.nullsEqualStored, graph.eraStored, graph.indexedProperties, encoder = null, rowsAsText = graph.oracleRowsAsText, reencodeJson = graph.oracleReencodeJson, readsAsText = graph.oracleReadsAsText)
+            Store.ORACLE -> OracleCypherCompiler(graph.name, graph.nullsEqualStored, graph.eraStored, graph.indexedProperties, encoder = null, rowsAsText = graph.oracleRowsAsText, reencodeJson = graph.oracleReencodeJson, readsAsText = graph.oracleReadsAsText, temporalArithmeticStored = graph.temporalArithmeticStored)
             Store.SQLITE -> SqliteCypherCompiler(graph.name)
         }
         compiler.vectorIndexes = graph.vectorIndexes
@@ -185,7 +188,7 @@ object CypherCompiler {
      * null elsewhere.
      */
     internal fun storedFunctions(compiler: SqlCypherCompiler): StoredFunctions? =
-        (compiler as? OracleCypherCompiler)?.let { StoredFunctions(it.callsStoredNullsEqual, it.callsStoredEra) }
+        (compiler as? OracleCypherCompiler)?.let { StoredFunctions(it.callsStoredNullsEqual, it.callsStoredEra, it.callsStoredTemporalArithmetic) }
 
     /**
      * A Postgres statement that writes, split into the function it makes and the call of it. The compiler writes them as one

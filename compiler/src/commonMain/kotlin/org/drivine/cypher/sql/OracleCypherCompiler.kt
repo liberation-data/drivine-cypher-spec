@@ -35,6 +35,9 @@ import org.drivine.cypher.store.schema.SqlText
  * beside the graph's tables, [nullsEqualName]: see [nullsEqual].
  * @param eraStored whether a text or a timestamp whose year may be BC is renumbered by the functions the store keeps beside
  * the graph's tables, [eraName] and [eraDateName]: see [OracleTemporalSql.era].
+ * @param temporalArithmeticStored whether `+`, `-`, `*` and `/` of a temporal value read from the store are worked out by the
+ * function the store keeps beside the graph's tables, [TemporalArithmeticFunction.name]: where it is not, they fail by name
+ * as the statement runs (drivine4j#418).
  */
 class OracleCypherCompiler(
     graph: String,
@@ -66,9 +69,22 @@ class OracleCypherCompiler(
      * constructors leave it.
      */
     private val readsAsText: Boolean,
+    temporalArithmeticStored: Boolean,
 ) : SqlCypherCompiler(graph, encoder) {
 
     override val searchStore = org.drivine.cypher.api.SearchStore.ORACLE
+
+    // The constructor with readsAsText and without temporalArithmeticStored, kept so that what was compiled against it still links.
+    constructor(
+        graph: String,
+        nullsEqualStored: Boolean,
+        eraStored: Boolean,
+        indexedProperties: Set<Pair<String, String>>,
+        encoder: CypherEncoder?,
+        rowsAsText: Boolean,
+        reencodeJson: Boolean,
+        readsAsText: Boolean,
+    ) : this(graph, nullsEqualStored, eraStored, indexedProperties, encoder, rowsAsText, reencodeJson, readsAsText, true)
 
     // The constructor with reencodeJson and without readsAsText, kept so that what was compiled against it still links.
     constructor(
@@ -128,6 +144,20 @@ class OracleCypherCompiler(
      */
     var callsStoredEra = false
         private set
+
+    /** The function the store keeps that works out temporal arithmetic of a value read from it, where it keeps one: see [storedArithmetic]. */
+    private val storedTemporalArithmetic = if (temporalArithmeticStored) TemporalArithmeticFunction.name(graph) else null
+
+    /**
+     * Whether the statement compiled calls [TemporalArithmeticFunction.name]'s function, which a store made by an earlier
+     * version, or by a user who may not make a function, does not have: compiled again with `temporalArithmeticStored = false`,
+     * it calls none, and such arithmetic fails by name as it runs.
+     */
+    var callsStoredTemporalArithmetic = false
+        private set
+
+    override fun storedArithmetic(operator: String, x: String, y: String) =
+        storedTemporalArithmetic?.let { name -> callsStoredTemporalArithmetic = true; "$name('$operator', $x, $y)" }
 
     override fun literalJson(value: Any?) =
         if (value is Double) "JSON_SCALAR(TO_BINARY_DOUBLE(${literal(org.drivine.cypher.json.jvmDoubleText(value))}))"
@@ -1376,8 +1406,8 @@ class OracleCypherCompiler(
      * session (ORA-03113, drivine4j#531, #255).
      */
     override fun nullItem(json: String, entries: Boolean) =
-        "EXISTS (SELECT 1 FROM (SELECT JSON_SERIALIZE($json RETURNING CLOB) AS t FROM DUAL) ni " +
-            "WHERE DBMS_LOB.SUBSTR(ni.t, 1, 1) = '${if (entries) "{" else "["}' AND ${serializedNulls("ni.t", "[[,]null[],]")})"
+        "EXISTS (${predicateQuery("SELECT 1 FROM (SELECT JSON_SERIALIZE($json RETURNING CLOB) AS t FROM DUAL) ni " +
+            "WHERE DBMS_LOB.SUBSTR(ni.t, 1, 1) = '${if (entries) "{" else "["}' AND ${serializedNulls("ni.t", "[[,]null[],]")}")})"
 
     /** Whether JSON's text of [json], its texts and keys taken out, matches [pattern]: see [holdsNull]. */
     private fun serializedHolds(json: String, pattern: String): String {
@@ -1662,7 +1692,7 @@ class OracleCypherCompiler(
         if (idsAsJson) "JSON_EXISTS($list, '\$[*]?(@ == \$id)' PASSING $id AS \"id\")" else "INSTR($list, ',' || $id || ',') > 0"
 
     override fun idsOverlap(a: String, b: String) =
-        "EXISTS (SELECT 1 FROM ${idRows(a, "ov")} WHERE ${if (idsAsJson) idIn("ov.id", b) else "INSTR($b, ',' || ov.id || ',') > 0"})"
+        "EXISTS (${predicateQuery("SELECT 1 FROM ${idRows(a, "ov")} WHERE ${if (idsAsJson) idIn("ov.id", b) else "INSTR($b, ',' || ov.id || ',') > 0"}")})"
 
     override fun idCount(list: String) =
         if (idsAsJson) "JSON_SCALAR(JSON_VALUE($list, '\$.size()' RETURNING NUMBER))" else "JSON_SCALAR(REGEXP_COUNT($list, ',') - 1)"
@@ -1989,6 +2019,16 @@ class OracleCypherCompiler(
      * of the body reads still picks the rows they keep.
      */
     override fun existsQuery(query: String) = "SELECT 1 FROM (\n${indent(query)}\n)"
+
+    /**
+     * Each subquery a condition reads is hinted against Oracle's subquery coalescing, `SELECT /*+ NO_COALESCE_SQ */`, in its
+     * own `SELECT` ([OracleSql.uncoalesced]). Oracle 23.26 merged an `OR` of two correlated subqueries wrongly and kept only
+     * the rows the first one matched: `MATCH (g:GuideUser) WHERE EXISTS { (g)-[:IS_WEB_USER]->(:Anonymous) } OR EXISTS {
+     * (g)-[:IS_WEB_USER]->(:Registered) } RETURN g.uuid` gave one guide where Neo4j gives two (drivine-cypher-spec#252). The
+     * hint helps only in the subquery itself, not given to the statement. `OraclePredicateSubqueryTest` holds every compiled
+     * statement of the spec to it.
+     */
+    override fun predicateQuery(query: String) = OracleSql.uncoalesced(query)
 
     /**
      * Flags the pattern opens with, `(?i)`, are Oracle's match parameter, Java's `s` its `n`. The whole of the text

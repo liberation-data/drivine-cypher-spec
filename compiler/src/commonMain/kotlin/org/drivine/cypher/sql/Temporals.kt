@@ -693,7 +693,9 @@ class Temporals(
     private fun text(parts: Parts): String = shared(listOf(parts.months, parts.days, parts.seconds)) { (m0, d0, s0) ->
         val m = "${sql.trunc}($m0)"
         val d = "${sql.trunc}($d0 + ($m0 - ${sql.trunc}($m0)) * 30.436875)"
-        val s = "($s0 + ($d0 + ($m0 - ${sql.trunc}($m0)) * 30.436875 - $d) * 86400)"
+        // The seconds rounded to the nine places [number] writes before they are split, so a hair under a minute is no `59M60S`,
+        // nor a hair over a whole time a `0S` (#261).
+        val s = sql.round("($s0 + ($d0 + ($m0 - ${sql.trunc}($m0)) * 30.436875 - $d) * 86400)", 9)
         shared(listOf(m, d, s)) { (months, days, seconds) ->
             val years = "${sql.trunc}($months / 12)"
             val hours = "${sql.trunc}($seconds / 3600)"
@@ -752,6 +754,15 @@ class Temporals(
     fun times(duration: String, factor: String): String = shared(listOf(duration, factor)) { (d, f) ->
         val p = parts(d)
         text(Parts("(${p.months} * $f)", "(${p.days} * $f)", "(${p.seconds} * $f)"))
+    }
+
+    /**
+     * The duration text of the duration text [duration] divided by [divisor], a SQL number: each part divided, as Cypher divides
+     * a duration, not times its reciprocal, whose rounding lost a whole month on Postgres (`P1Y / 3`, #260).
+     */
+    fun divided(duration: String, divisor: String): String = shared(listOf(duration, divisor)) { (d, k) ->
+        val p = parts(d)
+        text(Parts(sql.quotient(p.months, k), sql.quotient(p.days, k), sql.quotient(p.seconds, k)))
     }
 
     /** The canonical duration text of the duration text [text]: null where it is none. */

@@ -12,6 +12,16 @@ import org.drivine.schema.SimilarityFunction
 object OracleSql {
     fun literal(text: String): String = "'${text.replace("'", "''")}'"
 
+    /**
+     * [text] as a `CLOB` literal, in pieces a PL/SQL string literal holds (32,767 bytes at most): a function's DDL that
+     * `EXECUTE IMMEDIATE` runs may be longer, as the graph's function of temporal arithmetic is. A text that fits is [literal].
+     */
+    fun clob(text: String): String =
+        if (text.length <= CLOB_PIECE) literal(text) else text.chunked(CLOB_PIECE).joinToString(" || ") { "TO_CLOB(${literal(it)})" }
+
+    /** The characters each piece of [clob] holds: a quarter of a PL/SQL literal's bytes, as a character may take four. */
+    private const val CLOB_PIECE = 8_000
+
     /** One step of a JSON path: a key, quoted when it must be, so a key with a dot in it is one key. */
     fun step(key: String): String =
         if (PLAIN_KEY.matches(key) && key !in JSON_WORDS) key else "\"${key.replace("\\", "\\\\").replace("\"", "\\\"")}\""
@@ -215,6 +225,34 @@ object OracleSql {
 
     /** The columns a row of a node has in the property graph: those of the table, and the map the graph makes of them ([transform]). */
     val NODE_COLUMNS: List<String> = listOf("nid", "labels", "props", "stamp", "doc")
+
+    /**
+     * The query [query] of a subquery that a condition reads, `EXISTS (…)`, `x IN (…)` or the count a `COUNT { … }` or a
+     * quantifier compares, with Oracle's subquery coalescing turned off for it ([NO_COALESCE_SQ]). The hint is written in the
+     * query's first hint comment, beside any it has (`SELECT /*+ CARDINALITY(i1 1) NO_COALESCE_SQ */`), as Oracle reads that
+     * comment alone. A query that does not open with a `SELECT` is read from a derived table whose `SELECT` holds the hint.
+     *
+     * Oracle 23.26 merges two subqueries of one condition into one, and merged an `OR` of two correlated ones wrongly, keeping
+     * only the rows the first one matched: `MATCH (g:GuideUser) WHERE EXISTS { (g)-[:IS_WEB_USER]->(:Anonymous) } OR EXISTS {
+     * (g)-[:IS_WEB_USER]->(:Registered) } RETURN g.uuid` gave one guide where Neo4j gives two (drivine-cypher-spec#252). The
+     * hint helps only where it is written in the subquery itself: given to the statement, it is not, and neither are
+     * `NO_OR_EXPAND`, `NO_UNNEST` or `NO_JSON_TABLE_TRANSFORM`. A query already hinted so is given back as it is.
+     */
+    fun uncoalesced(query: String): String {
+        val hinted = HINTS.find(query)
+        return when {
+            hinted != null && NO_COALESCE_SQ in hinted.groupValues[1].split(' ') -> query
+            hinted != null -> "SELECT /*+ ${hinted.groupValues[1]} $NO_COALESCE_SQ */" + query.substring(hinted.value.length)
+            query.startsWith("SELECT ") -> "SELECT /*+ $NO_COALESCE_SQ */ " + query.removePrefix("SELECT ")
+            else -> "SELECT /*+ $NO_COALESCE_SQ */ * FROM (\n${query.prependIndent("    ")}\n)"
+        }
+    }
+
+    /** The hint that keeps Oracle from merging a subquery with another of the same condition: see [uncoalesced]. */
+    const val NO_COALESCE_SQ = "NO_COALESCE_SQ"
+
+    /** The first hint comment of a query that opens with one, and the hints it holds. */
+    private val HINTS = Regex("""^SELECT /\*\+ (.*?) \*/""")
 
     /** The texts of the JSON array bound as [parameter], as rows of one column, `v`. */
     fun textValues(parameter: String): String = "SELECT v FROM JSON_TABLE($parameter, '$[*]' COLUMNS (v VARCHAR2(4000) PATH '$'))"

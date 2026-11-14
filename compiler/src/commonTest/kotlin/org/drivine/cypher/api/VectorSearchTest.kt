@@ -264,7 +264,7 @@ class VectorSearchTest {
         val vector = "\"vector\": {$base, \"similarity\": \"COSINE\"}"
         for (other in listOf("\"cypher\": \"RETURN 1\"", "\"search\": {}", "\"searchIndex\": {}", "\"settings\": {}")) {
             val request = "{\"store\": \"postgres\", \"graph\": {\"name\": \"g\"}, $vector, $other}"
-            assertEquals("{\"error\":\"A request gives one of cypher, search, searchIndex, vector, settings, fragment, read, temporalKey and layout.\"}", CompileJson.compile(request), request)
+            assertEquals("{\"error\":\"A request gives one of cypher, search, searchIndex, vector, settings, fragment, read, temporalKey, layout and expand.\"}", CompileJson.compile(request), request)
         }
         // A SQL store's search names its graph; a graph engine's needs none.
         assertTrue(CompileJson.compile("{\"store\": \"oracle\", \"vector\": {$base, \"similarity\": \"COSINE\"}}").contains("gives its graph"))

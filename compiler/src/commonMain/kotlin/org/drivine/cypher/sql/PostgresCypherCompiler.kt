@@ -658,6 +658,11 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
 
     override val temporalSql = PostgresTemporalSql(sharedList, graph)
 
+    /** The store's function of temporal arithmetic, which every store this layout makes keeps: see [storedArithmetic]. */
+    private val storedArithmetic = TemporalArithmeticFunction.name(graph)
+
+    override fun storedArithmetic(operator: String, x: String, y: String) = "$storedArithmetic('$operator', $x, $y)"
+
     /**
      * Flags the pattern opens with, `(?i)`, are put before the anchors, where Postgres reads them, after `p`: a dot
      * matches no line break, as Java's does, unless the pattern says `(?s)`. The anchors are `\A` and `\Z`, the text's

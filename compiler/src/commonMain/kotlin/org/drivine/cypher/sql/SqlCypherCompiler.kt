@@ -131,6 +131,15 @@ abstract class SqlCypherCompiler(
      */
     protected open fun calledFunctions(sql: String): List<String> = emptyList()
 
+    /**
+     * The call of the store's function that works out [operator], `+`, `-`, `*` or `/`, of the JSON [x] and [y] where either may
+     * be a tag of a temporal value read from the store, to the tag it gives (drivine4j#418); null where the store has none, as
+     * SQLite, and an Oracle store made by an earlier version, or by a user who may not make a function: such arithmetic then
+     * fails by name as the statement runs. Its body is the compiler's own temporal arithmetic, written for each pair of kinds
+     * ([TemporalArithmeticFunction]).
+     */
+    protected open fun storedArithmetic(operator: String, x: String, y: String): String? = null
+
     /** [compiled] with the functions it calls declared before it. */
     private fun withFunctions(compiled: CompiledCypher): CompiledCypher {
         val all = functions + calledFunctions(compiled.sql).filter { it !in functions }
@@ -510,6 +519,13 @@ abstract class SqlCypherCompiler(
      * give them, which the `EXISTS` asks for none of.
      */
     protected open fun existsQuery(query: String) = query
+
+    /**
+     * The query [query] of a subquery that a condition reads, as the store's planner is given it: the query of an `EXISTS (…)`
+     * or a `NOT EXISTS (…)`, of an `x IN (…)`, and the count a `COUNT { … }` or a quantifier compares. Each such subquery the
+     * compiler writes is given here. A store whose planner merges two of them wrongly keeps it from doing so: see Oracle's.
+     */
+    protected open fun predicateQuery(query: String) = query
 
     /**
      * A `UNION`: each query's rows, in the order of the queries and each query's own order, as a graph engine
@@ -3408,7 +3424,7 @@ abstract class SqlCypherCompiler(
             }
             fun ids(table: String) = targets.filter { it.second == table }.map { it.first }.distinct().ifEmpty { null }?.joinToString(" UNION ALL ") { variable ->
                 val r = alias("r")
-                "SELECT ${idOf(item(r), key(variable))} FROM ${elements(ROWS, r)}"
+                predicateQuery("SELECT ${idOf(item(r), key(variable))} FROM ${elements(ROWS, r)}")
             }
             deleteIds(ids(edges), ids(nodes), delete.detach)
         }
@@ -3418,13 +3434,14 @@ abstract class SqlCypherCompiler(
          * with their relationships where [detach]; without, the statement fails where one has a relationship still.
          */
         private fun deleteIds(relationships: String?, nodeIds: String?, detach: Boolean) {
-            relationships?.let { execute("DELETE FROM $edges WHERE eid IN ($it)") }
+            relationships?.let { execute("DELETE FROM $edges WHERE eid IN (${predicateQuery(it)})") }
             if (nodeIds == null) return
+            val ids = predicateQuery(nodeIds)
             if (!detach) {
-                step(ProcedureStep.Select(COUNT, "count(*)", " FROM $edges WHERE src IN ($nodeIds) OR dst IN ($nodeIds)"))
+                step(ProcedureStep.Select(COUNT, "count(*)", " FROM $edges WHERE src IN ($ids) OR dst IN ($ids)"))
                 branch("$COUNT > 0") { step(ProcedureStep.Raise("A node is deleted that still has relationships: delete them first, or DETACH DELETE it.")) }
             }
-            execute("DELETE FROM $nodes WHERE nid IN ($nodeIds)")
+            execute("DELETE FROM $nodes WHERE nid IN ($ids)")
         }
 
         /**
@@ -4577,9 +4594,9 @@ abstract class SqlCypherCompiler(
             is Expression.PatternPredicate -> exists(listOf(expression.pattern), null, scope)
             is Expression.Exists -> exists(expression.patterns, expression.where, scope)
             is Expression.Subquery -> when (expression.kind) {
-                Expression.Subquery.Kind.EXISTS -> Value.Bool("EXISTS (\n${indent(existsQuery(correlated(expression.query, scope, "EXISTS { … }", identified = false)))}\n)")
+                Expression.Subquery.Kind.EXISTS -> Value.Bool("EXISTS (\n${indent(predicateQuery(existsQuery(correlated(expression.query, scope, "EXISTS { … }", identified = false))))}\n)")
                 Expression.Subquery.Kind.COUNT ->
-                    Value.Json(scalar("(SELECT count(*) FROM (\n${indent(correlated(expression.query, scope, "COUNT { … }"))}\n) ${alias("q")})"))
+                    Value.Json(scalar("(${predicateQuery("SELECT count(*) FROM (\n${indent(correlated(expression.query, scope, "COUNT { … }"))}\n) ${alias("q")}")})"))
             }
             is Expression.Quantifier -> {
                 // Read by a WHERE for its truth alone, a quantifier that is null may be false, as neither keeps a row.
@@ -4588,7 +4605,7 @@ abstract class SqlCypherCompiler(
                 val name = alias("q")
                 fun quantified(from: String, item: Value, listNull: String): String {
                     val inner = scope + (expression.variable to item)
-                    fun exists(condition: String) = "EXISTS (SELECT 1 $from WHERE $condition)"
+                    fun exists(condition: String) = "EXISTS (${predicateQuery("SELECT 1 $from WHERE $condition")})"
                     val kind = expression.kind
                     val value = if (filter && kind != Expression.Quantifier.Kind.SINGLE) {
                         // any() is true where an item's condition is true, and all() where each one's is: each is kept where its condition
@@ -4612,7 +4629,7 @@ abstract class SqlCypherCompiler(
                             // Two items whose condition is true make single() false, whatever the others' are.
                             Expression.Quantifier.Kind.SINGLE -> "WHEN $t > 1 THEN 0 WHEN $u > 0 THEN NULL WHEN $t = 1 THEN 1 ELSE 0"
                         }
-                        "(SELECT CASE $counted END FROM (SELECT $condition AS v $from) $counts) = 1"
+                        "(${predicateQuery("SELECT CASE $counted END FROM (SELECT $condition AS v $from) $counts")}) = 1"
                     }
                     // Of a null list, null, as in Cypher, and its items are not read, where it may be one.
                     return if (present(expression.list)) value else "CASE WHEN NOT ($listNull) THEN $value END"
@@ -4664,7 +4681,7 @@ abstract class SqlCypherCompiler(
             val inner = Select(scope)
             patterns(inner, patterns)
             where?.let { filter(inner, it) }
-            return Value.Bool("EXISTS (${(listOf(inner.head("1")) + inner.from() + listOfNotNull(inner.whereClause())).joinToString(" ")})")
+            return Value.Bool("EXISTS (${predicateQuery((listOf(inner.head("1")) + inner.from() + listOfNotNull(inner.whereClause())).joinToString(" "))})")
         }
 
         /**
@@ -5139,7 +5156,8 @@ abstract class SqlCypherCompiler(
                     r == duration -> tagged(duration, temporals.times(b, number(comparable(json(left)))))
                     else -> null
                 }
-                Operator.DIVIDE -> if (l == duration) tagged(duration, temporals.times(a, "(1.0 / ${number(comparable(json(right)))})")) else null
+                // Each part divided, as Cypher divides a duration: times `1.0 / k` lost a month on Postgres (P1Y / 3, #260).
+                Operator.DIVIDE -> if (l == duration) tagged(duration, temporals.divided(a, number(comparable(json(right))))) else null
                 Operator.EQUALS, Operator.NOT_EQUALS, Operator.LESS_THAN, Operator.GREATER_THAN, Operator.LESS_THAN_OR_EQUAL, Operator.GREATER_THAN_OR_EQUAL -> {
                     val sql = mapOf(
                         Operator.EQUALS to "=", Operator.NOT_EQUALS to "<>", Operator.LESS_THAN to "<", Operator.GREATER_THAN to ">",
@@ -5201,12 +5219,13 @@ abstract class SqlCypherCompiler(
 
         /**
          * [arithmetic], the generic `+`, `-`, `*` or `/` of [binary]'s sides [x] and [y], where the statement knows neither to be a
-         * temporal value: as the statement runs, a side that is one, a tag a property holds (`n.d1 + n.d2`, `n.d * 2`), fails by
-         * name, where the generic arithmetic gave null (drivine4j#418). Temporal arithmetic is written only where a side is known
-         * to be temporal; on two sides read from the store it is not compiled yet. A `+` refuses only a tag beside a tag or a
+         * temporal value: as the statement runs, a side that is one, a tag a property holds (`n.d1 + n.d2`, `n.d * 2`), is worked
+         * out by the store's function of temporal arithmetic ([storedArithmetic]), where the generic arithmetic gave null
+         * (drivine4j#418); where the store keeps none, on SQLite and on an Oracle store without it, it fails by name. Temporal
+         * arithmetic is written inline only where a side is known to be temporal. A `+` tests only a tag beside a tag or a
          * number: beside a text a temporal value is its text, and beside a list an item, as before, so beside a side known to be
-         * a text or a list it is not tested. A side that can't be a tag ([tagFree]) is not tested. The kind named is the tag's on
-         * either side: the other may be a number (`n.n * n.d`).
+         * a text or a list it is not tested. A side that can't be a tag ([tagFree]) is not tested. The kind a failure names is the
+         * tag's on either side: the other may be a number (`n.n * n.d`).
          */
         private fun temporalRefused(binary: Expression.Binary, left: Value, right: Value, x: String, y: String, arithmetic: () -> String): String {
             val sides = listOf(left, right).map { (it as? Value.Json)?.temporal != null }
@@ -5227,8 +5246,11 @@ abstract class SqlCypherCompiler(
             } else {
                 tag.filterIndexed { i, _ -> open[i] }.joinToString(" OR ")
             }
-            val kind = if (open[0] && open[1]) "COALESCE(${tagKind(x)}, ${tagKind(y)})" else if (open[0]) tagKind(x) else tagKind(y)
-            return "CASE WHEN $test THEN ${scalar(textFailure(TEMPORAL_ARITHMETIC, kind))} ELSE ${arithmetic()} END"
+            val worked = storedArithmetic(OPERATOR_WORDS.getValue(binary.operator), x, y) ?: run {
+                val kind = if (open[0] && open[1]) "COALESCE(${tagKind(x)}, ${tagKind(y)})" else if (open[0]) tagKind(x) else tagKind(y)
+                scalar(textFailure(TEMPORAL_ARITHMETIC, kind))
+            }
+            return "CASE WHEN $test THEN $worked ELSE ${arithmetic()} END"
         }
 
         /**
@@ -5982,7 +6004,7 @@ abstract class SqlCypherCompiler(
             comparedKeys.anchors += key
             val i = alias("k")
             val select = fewRows(i)?.let { "SELECT /*+ $it */ " } ?: "SELECT "
-            return "($key IN ($select${keyValue(item(i))} FROM ${elementsOf(list, comparable(list), i)}) AND $within)"
+            return "($key IN (${predicateQuery("$select${keyValue(item(i))} FROM ${elementsOf(list, comparable(list), i)}")}) AND $within)"
         }
 
         /**
@@ -6419,7 +6441,7 @@ abstract class SqlCypherCompiler(
             }
             /** Whether an item of the list [l], read as [i], is equal to the value [v], and [v] meets the store's test where it has one. */
             fun found(l: String, v: String, i: String): String {
-                val exists = "EXISTS (SELECT 1 FROM ${elementsOf(right, l, i)} WHERE ${matches(item(i), v)})"
+                val exists = "EXISTS (${predicateQuery("SELECT 1 FROM ${elementsOf(right, l, i)} WHERE ${matches(item(i), v)}")})"
                 return test?.let { "(${it(v)} AND $exists)" } ?: exists
             }
             val within = isFlat(right)
@@ -6449,7 +6471,7 @@ abstract class SqlCypherCompiler(
                 if (!present(binary.right)) cases += "WHEN ${isJsonNull(l)} THEN NULL"
                 // Null is compared with each item, and is in no empty list.
                 if (!present(binary.left)) cases += "WHEN ${isJsonNull(v)} THEN " +
-                    if (filled) "NULL" else "CASE WHEN EXISTS (SELECT 1 FROM ${elementsOf(right, l, j)}) THEN NULL ELSE FALSE END"
+                    if (filled) "NULL" else "CASE WHEN EXISTS (${predicateQuery("SELECT 1 FROM ${elementsOf(right, l, j)}")}) THEN NULL ELSE FALSE END"
                 // Beside items the statement gives, the answer where none is equal is known here (see givenItemsDecided): a
                 // stored text past 32 KB, taken out as JSON to read its nulls, closed Oracle's session (#475).
                 if (items != null && givenItemsDecided) {
@@ -6462,7 +6484,7 @@ abstract class SqlCypherCompiler(
                 if (!(within && whole)) {
                     val k = alias("i")
                     val undecided = if (id != null) isJsonNull(item(k)) else "(${nullableEquals(item(k), v, equals)}) IS NULL"
-                    cases += "WHEN EXISTS (SELECT 1 FROM ${elementsOf(right, l, k)} WHERE $undecided) THEN NULL"
+                    cases += "WHEN EXISTS (${predicateQuery("SELECT 1 FROM ${elementsOf(right, l, k)} WHERE $undecided")}) THEN NULL"
                 }
                 "CASE ${cases.joinToString(" ")} ELSE FALSE END"
             }
@@ -7477,6 +7499,9 @@ abstract class SqlCypherCompiler(
 
         /** The operators of arithmetic, whose value is a number where both operands are: see [Value.Json.known]. */
         val ARITHMETIC = setOf(Operator.ADD, Operator.SUBTRACT, Operator.MULTIPLY, Operator.DIVIDE, Operator.MODULO, Operator.POWER)
+
+        /** The operators a store's function of temporal arithmetic is called with, by the text it is told each by: see [storedArithmetic]. */
+        val OPERATOR_WORDS = mapOf(Operator.ADD to "+", Operator.SUBTRACT to "-", Operator.MULTIPLY to "*", Operator.DIVIDE to "/")
 
         /** The arithmetic that takes numbers alone, and temporal values where the store does: `+` puts texts and lists together too. */
         val NUMERIC_ONLY = ARITHMETIC - Operator.ADD

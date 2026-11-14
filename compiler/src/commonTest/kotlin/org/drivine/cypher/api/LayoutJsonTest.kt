@@ -115,7 +115,7 @@ class LayoutJsonTest {
             "{\"layout\": {\"engine\": \"POSTGRES\", \"graph\": \"g\", \"stamps\": [{\"layout\": 4294967298}], \"foreignNodes\": false}}" to "A layout request's stamp gives its layout as a whole number: 4294967298.",
             "{\"layout\": {\"engine\": \"POSTGRES\", \"graph\": \"g\", \"stamps\": [], \"foreignNodes\": false, \"objects\": {}}}" to "A layout request gives the objects as a list.",
             "{\"layout\": {\"engine\": \"POSTGRES\", \"graph\": \"g\", \"stamps\": [], \"foreignNodes\": false, \"objects\": [\"x\"]}}" to "A layout request's object is a map.",
-            "{\"read\": \"1\", \"cypher\": \"RETURN 1\"}" to "A request gives one of cypher, search, searchIndex, vector, settings, fragment, read, temporalKey and layout.",
+            "{\"read\": \"1\", \"cypher\": \"RETURN 1\"}" to "A request gives one of cypher, search, searchIndex, vector, settings, fragment, read, temporalKey, layout and expand.",
         )) {
             assertEquals(message, answer(request)["error"]?.textValue(), request)
         }
@@ -131,6 +131,20 @@ class LayoutJsonTest {
             val got = answer("{\"layout\": {\"engine\": \"POSTGRES\", \"graph\": \"g\", \"stamps\": [{\"layout\": $layout}], \"foreignNodes\": true, \"objects\": null}}")
             assertEquals("current", got["verdict"]?.textValue(), "layout $layout: $got")
         }
+    }
+
+    @Test
+    fun aStatementOfStoreYamlHasEachGeneratedFunctionExpandedAsTheModuleMakesIt() {
+        val store = CypherJson.readTree(oracleFile("store.json"))
+        val tables = store["tables"]!!
+        val held = listOf(tables["postgres"]!!["ensuring"]!!, tables["oracle"]!!["ensuring"]!!) + (tables["oracle"]!!["functions"] as ArrayNode).toList()
+        val graph = store["graph"]!!.textValue()!!
+        val made = listOf(org.drivine.cypher.store.ddl.PostgresDdl(graph).ensuring, org.drivine.cypher.store.ddl.OracleDdl(graph).ensuring) +
+            org.drivine.cypher.store.ddl.OracleDdl(graph).functions
+        held.zip(made).forEach { (statement, expected) ->
+            assertEquals(expected, answer("{\"expand\": ${json(statement.textValue())}}")["text"]!!.textValue(), "on $target")
+        }
+        assertTrue(answer("{\"expand\": 1}")["error"] != null)
     }
 
     private fun texts(node: JsonNode): List<String> = (node as ArrayNode).map { it.textValue()!! }

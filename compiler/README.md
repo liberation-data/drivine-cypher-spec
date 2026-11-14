@@ -105,7 +105,7 @@ compiled SQL needs, `hostVersion()` and `drivine_host_version()`: see [The host 
 ```
 
 `store` is `postgres`, `oracle` or `sqlite`. `graph` has the graph's `name`; the rest of it is Oracle's, and may be left
-out: `nullsEqualStored` and `eraStored` (true where left out), `indexedProperties`, `oracleRowsAsText`, `oracleReencodeJson` and
+out: `nullsEqualStored`, `eraStored` and `temporalArithmeticStored` (true where left out), `indexedProperties`, `oracleRowsAsText`, `oracleReencodeJson` and
 `oracleReadsAsText` (false where left out, see [Oracle's rows as text](#oracles-rows-as-text),
 [Oracle's documents encoded again](#oracles-documents-encoded-again) and [Oracle's reads as text](#oracles-reads-as-text)). On every store,
 `vectorIndexes`, the graph's vector indexes as its catalog records them, `[{name, label, property, dimensions, similarity}, …]`
@@ -114,10 +114,10 @@ see [Vector search in the module](#vector-search-in-the-module). `typed`, false 
 relationships tagged and for the columns: see [Columns and typed rows](#columns-and-typed-rows). The answer is one of:
 
 - `{"sql": …, "parameters": {…}, "setup": […], "warnings": […], "nonFinite": false}`, and on Oracle
-  `"storedFunctions": {"nullsEqual": …, "era": …}`. Run `setup` first (on Postgres, the function a statement that
+  `"storedFunctions": {"nullsEqual": …, "era": …, "temporalArithmetic": …}`. Run `setup` first (on Postgres, the function a statement that
   writes is), then `sql`, binding `parameters`. `nonFinite` says NaN or an infinity may come back in the rows as
   `{"$numberDouble": "NaN"}`. `storedFunctions` says which of the graph's stored functions the statement calls: a store
-  without them is compiled for again with `nullsEqualStored` or `eraStored` false.
+  without them is compiled for again with `nullsEqualStored`, `eraStored` or `temporalArithmeticStored` false.
   With `typed`, it has `"columns"` too: `[{"name": "p", "kind": "node"}, …]`.
 - `{"refusal": "<message>"}`: the compiler refuses the statement, with the message the spec's refusals pin.
 - `{"error": "<message>"}`: the request is no request.
@@ -191,7 +191,7 @@ FullTextSearch.plan(store, graph, SearchRequest(labels, properties, query, index
 
 Over JSON it is the same entry, `CompileJson.compile` (`compile`, `drivine_compile`): a request with `search` in place of
 `cypher` is a search, and one that gives more than one of `cypher`, `search`, `searchIndex`, `vector`, `settings`,
-`fragment`, `read`, `temporalKey` and `layout` is an error.
+`fragment`, `read`, `temporalKey`, `layout` and `expand` is an error.
 
 ```json
 {"store": "postgres", "graph": {"name": "g"},
@@ -434,7 +434,8 @@ hold to.
 
 A library on store layout 2 (#161) asks the module three things besides a statement, each through the JSON entry as a request
 of its own, so the three libraries read rows, key a temporal value and judge a graph alike. In Kotlin they are
-`ValueLayout.read`, `Temporals.key` and `StoreLayout.verdict`.
+`ValueLayout.read`, `Temporals.key` and `StoreLayout.verdict`. A runner of `store.yaml` asks a fourth, `expand`
+(`GeneratedFunctions.expand`).
 
 ```json
 {"read": "{\"d\":{\"$t\":\"date\",\"v\":\"2024-01-01\",\"s\":\"10000020240101\"},\"$$k\":1}", "typed": false}
@@ -461,6 +462,9 @@ of its own, so the three libraries read rows, key a temporal value and judge a g
   - `{"verdict": "refuse", "message": "…"}`: throw the message.
 
   `marker.yaml`'s `storeLayout` pins it.
+- **`expand`** takes a statement of `store.yaml` and gives it, `{"text": "…"}`, with each marker of a generated function in it
+  (`<TemporalArithmeticFunction.postgres(drivine)>`) written out as the module makes it: `store.yaml` holds the function of
+  temporal arithmetic by its marker (drivine4j#418), so a runner expands each statement before it compares.
 
 ### Fragments
 
@@ -474,7 +478,7 @@ A library's object manager writes its own SQL, and asks for the parts of it that
 
 - `fragment` gives one of `condition`, `value` or `order`, an order with `descending` (false where left out), and `variables`: each a row of the library's SQL, `{"node": "<alias>", "labels": [...]}` or `{"relationship": "<alias>"}`. An alias ends with `_`, as none the compiler gives its own rows does, so a subquery the fragment writes doesn't take the library's row for one of its own (`n1`, `x`): another is refused. A node's columns are the table of nodes' (`nid`, `labels`, `props`, `stamp`); a relationship's, the table of relationships'.
 - A node's `labels` are those the library matched it by. An equality of its property with a value is then written with the index of that label and property, where the store's indexes are a label's: Oracle's, for the properties the graph's `indexedProperties` names. Postgres's and SQLite's indexes answer it without them.
-- The answer is `{"terms": [...], "parameters": {...}, "nonFinite": false, "hints": [...]}`, on Oracle with `storedFunctions` as a statement's answer has it. `hints` are the optimizer hints the library's query that holds the terms puts in its outermost `SELECT` (`SELECT /*+ … */`), on Oracle, `NO_JSON_TABLE_TRANSFORM` always, as a statement that compares a property, reads a list item by its place or reads the graph's tables twice is planned with it, and the library's query reads them beside the fragment's own reads, in a FROM the module doesn't see (without it Oracle 23 may give a comparison the wrong truth, or lose a row's label tests, #415); and `OPT_PARAM('_optimizer_use_feedback' 'false')` where a term tests a node's labels as one read by its key. None on Postgres and SQLite. A library puts in each it is given, as given. A `condition`'s term is for a `WHERE` to keep rows by: it may be false where Cypher's truth is null, as neither keeps the row, so a library never negates it in SQL, and writes `NOT` in the Cypher instead. A `value` is for the library's SQL to group or bind within it, not a column to read back (a statement's columns are, and Oracle re-encodes them as it returns them), nor to compare with SQL's operators, which compare as SQL does and not as Cypher does (temporal values, kinds): a `condition` compares. `typed` beside `fragment` is an error. `nonFinite` is a statement's: where it is true, a value the fragment gives may hold NaN or an infinity as a statement's rows do (`{"$numberDouble": "NaN"}`), and the library reads it back as it reads those. Each parameter `$p` is bound as `_cy_p`, to its JSON text: a library binds them beside its own, under those names, so it names the parameters of two fragments of one statement apart. `{"refusal": …}` is the compiler's refusal of the expression; a fragment that would call a function a statement declares before it is refused, as SQL a library writes declares none, and so is one that aggregates, as that SQL groups no rows for it, and one that calls `randomUUID()` within it (`toUpper(randomUUID())`), which a statement calls first, as a column of each row, so no subquery worked out once gives every row the same UUID: `randomUUID()` alone is called for each row.
+- The answer is `{"terms": [...], "parameters": {...}, "nonFinite": false, "hints": [...]}`, on Oracle with `storedFunctions` as a statement's answer has it. `hints` are the optimizer hints the library's query that holds the terms puts in its outermost `SELECT` (`SELECT /*+ … */`), on Oracle, `NO_JSON_TABLE_TRANSFORM` always, as a statement that compares a property, reads a list item by its place or reads the graph's tables twice is planned with it, and the library's query reads them beside the fragment's own reads, in a FROM the module doesn't see (without it Oracle 23 may give a comparison the wrong truth, or lose a row's label tests, #415); and `OPT_PARAM('_optimizer_use_feedback' 'false')` where a term tests a node's labels as one read by its key. None on Postgres and SQLite. A library puts in each it is given, as given. On Oracle each subquery a term or a statement reads in a condition, an `EXISTS`, an `IN (SELECT …)` or the count of a `COUNT { … }` or a quantifier, carries `NO_COALESCE_SQ` in its own `SELECT`, where alone it helps: Oracle 23.26 merged an `OR` of two of them wrongly and kept only the first one's rows (drivine-cypher-spec#252). A library writes no such hint itself, and keeps the terms' as they are. A `condition`'s term is for a `WHERE` to keep rows by: it may be false where Cypher's truth is null, as neither keeps the row, so a library never negates it in SQL, and writes `NOT` in the Cypher instead. A `value` is for the library's SQL to group or bind within it, not a column to read back (a statement's columns are, and Oracle re-encodes them as it returns them), nor to compare with SQL's operators, which compare as SQL does and not as Cypher does (temporal values, kinds): a `condition` compares. `typed` beside `fragment` is an error. `nonFinite` is a statement's: where it is true, a value the fragment gives may hold NaN or an infinity as a statement's rows do (`{"$numberDouble": "NaN"}`), and the library reads it back as it reads those. Each parameter `$p` is bound as `_cy_p`, to its JSON text: a library binds them beside its own, under those names, so it names the parameters of two fragments of one statement apart. `{"refusal": …}` is the compiler's refusal of the expression; a fragment that would call a function a statement declares before it is refused, as SQL a library writes declares none, and so is one that aggregates, as that SQL groups no rows for it, and one that calls `randomUUID()` within it (`toUpper(randomUUID())`), which a statement calls first, as a column of each row, so no subquery worked out once gives every row the same UUID: `randomUUID()` alone is called for each row.
 
 **The forms a fragment takes** are those the three libraries' object managers write their filters, orders and seeks in, and no other (`FragmentForms`):
 
