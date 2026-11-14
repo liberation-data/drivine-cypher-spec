@@ -518,7 +518,7 @@ table:
       digests: {"postgres": ["8f886d6eec5e961c", "ad8fc1ab2dfbbc5f", "8f376f75d1b18389", "526b8fe4cab1c766"], "oracle": ["8bb167fc6ff0f3bf", "fb363e3f903f23d6", "d1004350f66704a7", "1d825d623c659368"], "sqlite": ["509542754deb1fe3", "aa85264e57769973", "eda0f6527b3e0133", "a9ad22f6f628473a"]}
     - form: "EXISTS { (n)-[:KNOWS]-(:Person)-[:KNOWS]-(m:Person) }"
       rows: [["p1", "p3"], ["p2", "p4", "p5"], ["p1", "p3", "p5"], ["p1", "p3"]]
-      digests: {"postgres": ["d50b6f7529949eca", "6ca9b1fb1e2ba8c8", "7d52435da6106538", "eede1868773529c3"], "oracle": ["b433c569b85808cf", "d743b20abf315d1a", "0ac9035b55434435", "5cfc1649922b2c87"], "sqlite": ["001f9d8ac533d02a", "00c82ac161a0ab59", "2cdcc803e4416580", "3e921716a7d50e74"]}
+      digests: {"postgres": ["d50b6f7529949eca", "6ca9b1fb1e2ba8c8", "7d52435da6106538", "eede1868773529c3"], "oracle": ["65f170cb48dad3cc", "76addfa6bd42c406", "50aa72d1e5242741", "af4c47493e66eec3"], "sqlite": ["001f9d8ac533d02a", "00c82ac161a0ab59", "2cdcc803e4416580", "3e921716a7d50e74"]}
     - form: "EXISTS { MATCH (n)-[:KNOWS]->(m:Person) WHERE m.age > $a }"
       parameters: {"a": 40}
       rows: [["p1"], ["p2", "p3", "p4", "p5"], ["p1", "p5"], ["p1"]]
