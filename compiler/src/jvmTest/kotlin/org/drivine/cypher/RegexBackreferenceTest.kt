@@ -45,7 +45,7 @@ class RegexBackreferenceTest {
         "(a)(?=\\1)a" to "lookaround", "(?=(a))(a)\\2" to "lookaround", "(?<=(a))(a)\\2" to "lookaround",
         // Java reads (?x)(a) ?\1 as (a)?\1: a space may stand between a group and its quantifier.
         "(?x)(a) ?\\1" to "flag x", "(?ix)(a)\\1" to "flag x", "(a)(?x:b)\\1" to "flag x",
-        // Oracle reads no group of its own syntax: (?:x) matches nothing there, so a backreference beside one is refused.
+        // Oracle reads no group of its own syntax: (?: is written ( there (#242), which numbers the groups otherwise, so a backreference beside one is refused.
         "(a)(?:b|c)\\1" to "own syntax", "(?:(a))\\1" to "own syntax", "(?<x>a)\\1" to "own syntax", "(?i-x)(a)\\1" to "own syntax",
         "((?i)a)\\1" to "own syntax", "(?:(a)|b)\\1" to "own syntax", "(?:(a)b)+\\1" to "own syntax",
         // Java reads acc as [[a](b)](c)\1, where Postgres reads the class as [[a], and (b) as the first group.
