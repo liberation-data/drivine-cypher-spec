@@ -2353,7 +2353,7 @@ abstract class SqlCypherCompiler(
                     temporal = itemsOf(list), items = itemItemsOf(list), entries = itemEntriesOf(list), temporals = itemTemporalsOf(list),
                     list = holdsLists(list), flat = isFlat(list),
                     text = holdsTexts(list) || isText(list), fromList = true, jsonNull = !isFlat(list),
-                    known = (unwind.list as? Expression.ListLiteral)?.items?.map { knownKind(it, select.scope) }?.distinct()?.singleOrNull(),
+                    known = itemsKind(unwind.list, select.scope),
                 ),
             )
             select.order += itemNo(name) to false
@@ -4553,6 +4553,8 @@ abstract class SqlCypherCompiler(
                 val listed = expression(expression.list, scope)
                 val list = comparable(json(listed))
                 val own = setOf(expression.accumulator, expression.variable)
+                // Each item is of the kind of the list's items where the statement writes them so; the accumulator's is left open.
+                val known = itemsKind(expression.list, scope)
                 // What the step reads of the row and of the parameters, for a store that works it out where it reads neither.
                 val read = (variablesIn(expression.expression) - own).filter { it in scope }
                 val given = parametersIn(expression.expression)
@@ -4565,14 +4567,14 @@ abstract class SqlCypherCompiler(
                     reduce(
                         alias("f"), initial, list,
                         step = { accumulator, item ->
-                            val inner = scope + mapOf(expression.accumulator to Value.Json(accumulator), expression.variable to Value.Json(item, temporal = itemsOf(listed), temporals = itemTemporalsOf(listed)))
+                            val inner = scope + mapOf(expression.accumulator to Value.Json(accumulator), expression.variable to Value.Json(item, temporal = itemsOf(listed), temporals = itemTemporalsOf(listed), known = known))
                             comparable(json(expression(expression.expression, inner)))
                         },
                         context = context,
                         contextStep = { accumulator, item, map ->
                             // A value read from the map is of the kind the statement made it.
                             val inner = read.associateWith { (scope.getValue(it) as? Value.Json).let { v -> Value.Json(propertyOf(map, it), temporal = v?.temporal, items = v?.items, known = v?.known) } } +
-                                mapOf(expression.accumulator to Value.Json(accumulator), expression.variable to Value.Json(item, temporal = itemsOf(listed), temporals = itemTemporalsOf(listed)))
+                                mapOf(expression.accumulator to Value.Json(accumulator), expression.variable to Value.Json(item, temporal = itemsOf(listed), temporals = itemTemporalsOf(listed), known = known))
                             val was = givenParameters
                             givenParameters = given.associateWith { Value.Json(propertyOf(map, "$$it"), temporal = Temporal.ofValue(parameters.value(it))) }
                             try {
@@ -4831,20 +4833,20 @@ abstract class SqlCypherCompiler(
 
         /**
          * The kind of each item of [list] where the statement writes it as a list whose every item is of one known kind
-         * ([knownKind]), as Neo4j types the variable of a quantifier or a list comprehension over it (#420): `['a', 'b']` is of
+         * ([knownKind]), as Neo4j types the variable of an `UNWIND`, a quantifier, a list comprehension or a `reduce()` over it (#420): `['a', 'b']` is of
          * texts. Null where an item's kind is left open or null, where two are of other kinds, and of an empty list.
          */
         private fun itemsKind(list: Expression, scope: Map<String, Value>): Value.Known? =
             (list as? Expression.ListLiteral)?.items?.map { knownKind(it, scope) }?.distinct()?.singleOrNull()
 
         /**
-         * Refuses `toInteger()` or `toFloat()` of [function] where the statement makes its argument a kind Neo4j refuses
-         * ([knownKind]): a list or a map, and for `toFloat()` a truth value too, which gave null (#420). A parameter, or a value
-         * whose kind is left open, is compiled as before.
+         * Refuses `toInteger()` or `toFloat()` of [function] where the statement makes its argument a kind Neo4j refuses when it
+         * plans the statement ([knownKind]): a map, and for `toFloat()` a truth value too, which gave null (#420). A list Neo4j
+         * plans, and refuses only as the row is read, so it is compiled as before, as is a parameter or a value whose kind is left open.
          */
         private fun conversionOfKind(function: Expression.Function, scope: Map<String, Value>) {
             val (taken, nouns) = CONVERTED_KINDS[function.name.lowercase()] ?: return
-            val kind = function.arguments.singleOrNull()?.let { knownKind(it, scope) } ?: return
+            val kind = function.arguments.singleOrNull()?.let { knownKind(it, scope) }?.takeIf { it != Value.Known.LIST } ?: return
             if (kind !in taken) throw CompilerException("${function.name}() takes $nouns, not ${kind.noun}, as in Neo4j.")
         }
 
