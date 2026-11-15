@@ -499,7 +499,7 @@ table:
     - form: "n.seen.epochMillis / 1000.0 > $s"
       parameters: {"s": 0}
       rows: [["p2", "p3"], ["p1"], ["p2", "p3", "p5"], ["p2", "p3"]]
-      digests: {"postgres": ["f5b8254a844f3f32", "cffc67551656dee3", "8876c3e3d9249cba", "29f8fb7237ea2e05"], "oracle": ["4f738bb05481a8ee", "992a16639889fe74", "0d6e29490356e809", "9dbdfb6634427714"], "sqlite": ["d480cc4ed798cbb0", "80cbdbdcce47ea7a", "d6572d8f5f06e694", "ea46974d7411c3ee"]}
+      digests: {"postgres": ["8d2ce83f06f9a83d", "5e115036fd82fff2", "8b3cc2b230c32f7b", "42b8e4616305b418"], "oracle": ["4c5b14ba89532d03", "f2deea82cf7836e5", "b70c76d344d2d8a3", "7333604cc76d64ac"], "sqlite": ["d480cc4ed798cbb0", "80cbdbdcce47ea7a", "d6572d8f5f06e694", "ea46974d7411c3ee"]}
     - form: "n.age >= $a"
       parameters: {"a": 36}
       rows: [["p1", "p2", "p3"], [], ["p1", "p2", "p3", "p5"], ["p1", "p2", "p3"]]
@@ -568,7 +568,7 @@ table:
       digests: {"postgres": ["f5531b38ba971d1e", "f7fbe70f485dbb42"], "oracle": ["d146051f2c66b1c0", "918b68b578ec8af0"], "sqlite": ["0cac44720491e073", "65753ff2e132a7c5"]}
     - value: "n.seen.epochMillis / 1000.0"
       rows: [["p1", "p2", "p3", "p4", "p5"], ["p4", "p5", "p3", "p2", "p1"]]
-      digests: {"postgres": ["0a5d5684147ed9bf", "c70f56a597d3f6cb"], "oracle": ["0ac270d1b46392ec", "608232dbdb49f622"], "sqlite": ["7d71a128f5bc5b51", "ce2ca25a6c29642d"]}
+      digests: {"postgres": ["1418ad76c4e2aa86", "1b6a772feb20931a"], "oracle": ["504c6b3a26738248", "6e5161ae958b79e7"], "sqlite": ["7d71a128f5bc5b51", "ce2ca25a6c29642d"]}
     - value: "n.bio"
       rows: [["p1", "p2", "p3", "p4", "p5"], ["p3", "p4", "p5", "p2", "p1"]]
       digests: {"postgres": ["500a6da88f8bfaef", "dbe06a40b7e2bfa2"], "oracle": ["ea072f2f14360e88", "2404a7364fd2dcfd"], "sqlite": ["4b0a2d8f891e8b60", "d55857a0441bc7a9"]}
