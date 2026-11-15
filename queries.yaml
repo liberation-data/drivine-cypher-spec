@@ -5026,7 +5026,7 @@ cases:
   # nesting.yaml's cells, to here.
 
   - name: "A CALL in the order of a RETURN that groups or is DISTINCT, and CALL (*) where a projection groups"
-    description: "The same places as refusals.yaml's \"A CALL in the order of a RETURN that groups or is DISTINCT, and CALL (*) where a projection groups\" that Neo4j gives rows for: a CALL (*) there that reads nothing the projection can't, a CALL whose brackets name an item, a projection that groups within the subquery, whose own items a CALL within reads, a comprehension's, a quantifier's, a reduce()'s or a pattern comprehension's own variable that a CALL names, and a procedure's CALL whose WHERE reads a subquery's own variable (drivine4j#681)."
+    description: "The same places as refusals.yaml's \"A CALL in the order of a RETURN that groups or is DISTINCT, and CALL (*) where a projection groups\" that Neo4j gives rows for: a CALL (*) there that reads nothing the projection can't, a CALL whose brackets name an item, a projection that groups within the subquery, whose own items a CALL within reads, a comprehension's, a quantifier's, a reduce()'s or a pattern comprehension's own variable that a CALL names, a subquery's own variable that a CALL in a subquery within it names, in its WHERE or its items, and a procedure's CALL whose WHERE reads a subquery's own variable (drivine4j#681)."
     steps:
       - cypher: "MATCH (p:Person) WITH p AS q RETURN q.name AS name, count(*) AS c ORDER BY EXISTS { CALL (name) { MATCH (n:Person {name: name})-->(m) RETURN m } RETURN m }, name"
         only: [neo4j, sql]
@@ -5408,6 +5408,39 @@ cases:
         only: [neo4j, sql]
         rows: ["Hugo", "Carrie", "Keanu", "Laurence"]
       - cypher: "MATCH (p:Person) WITH DISTINCT p AS q ORDER BY EXISTS { MATCH (q)-->(m1) WHERE EXISTS { MATCH (m1)<--(m2) WHERE size([w IN [m2] WHERE EXISTS { CALL (w) { RETURN w.name AS y } RETURN y }]) > 0 RETURN m2 } RETURN m1 }, q.name RETURN q.name"
+        only: [neo4j, sql]
+        rows: ["Hugo", "Carrie", "Keanu", "Laurence"]
+      - cypher: "MATCH (p:Person) WITH DISTINCT p AS q ORDER BY EXISTS { MATCH (q)-->(m1) WHERE size([m1 IN [q] WHERE EXISTS { CALL (m1) { RETURN m1.name AS y } RETURN y }]) > 0 RETURN m1 }, q.name RETURN q.name"
+        only: [neo4j, sql]
+        rows: ["Hugo", "Carrie", "Keanu", "Laurence"]
+      - cypher: "MATCH (p:Person) WITH DISTINCT p AS q ORDER BY EXISTS { MATCH (q)-->(m1) WHERE size([(m1)<--(x) WHERE EXISTS { CALL (m1) { RETURN m1.title AS y } RETURN y } | 1]) > 0 RETURN m1 }, q.name RETURN q.name"
+        only: [neo4j, sql]
+        rows: ["Hugo", "Carrie", "Keanu", "Laurence"]
+      - cypher: "MATCH (p:Person) WITH DISTINCT p AS q ORDER BY EXISTS { MATCH (q)-->(m1) WHERE EXISTS { CALL (m1) { RETURN m1.title AS y } RETURN y } RETURN m1 }, q.name RETURN q.name"
+        only: [neo4j, sql]
+        rows: ["Hugo", "Carrie", "Keanu", "Laurence"]
+      - cypher: "MATCH (p:Person) WITH DISTINCT p AS q ORDER BY EXISTS { MATCH (q)-->(m1) WHERE COUNT { CALL (m1) { RETURN m1.title AS y } RETURN y } > 0 RETURN m1 }, q.name RETURN q.name"
+        only: [neo4j, sql]
+        rows: ["Hugo", "Carrie", "Keanu", "Laurence"]
+      - cypher: "MATCH (p:Person) WITH DISTINCT p AS q ORDER BY EXISTS { MATCH (q)-->(m1) WHERE CASE WHEN true THEN EXISTS { CALL (m1) { RETURN m1.title AS y } RETURN y } END RETURN m1 }, q.name RETURN q.name"
+        only: [neo4j, sql]
+        rows: ["Hugo", "Carrie", "Keanu", "Laurence"]
+      - cypher: "MATCH (p:Person) WITH DISTINCT p AS q ORDER BY EXISTS { MATCH (q)-->(m1) RETURN CASE WHEN EXISTS { CALL (m1) { RETURN m1.title AS y } RETURN y } THEN 1 END AS z }, q.name RETURN q.name"
+        only: [neo4j, sql]
+        rows: ["Hugo", "Carrie", "Keanu", "Laurence"]
+      - cypher: "MATCH (p:Person) WITH DISTINCT p AS q ORDER BY EXISTS { MATCH (q)-->(m1) WHERE EXISTS { (m1)<--(x) WHERE EXISTS { CALL (m1) { RETURN m1.title AS y } RETURN y } } RETURN m1 }, q.name RETURN q.name"
+        only: [neo4j, sql]
+        rows: ["Hugo", "Carrie", "Keanu", "Laurence"]
+      - cypher: "MATCH (p:Person) WITH p AS q, count(*) AS c WHERE EXISTS { MATCH (q)-->(m1) WHERE EXISTS { CALL (m1) { RETURN m1.title AS y } RETURN y } RETURN m1 } RETURN q.name ORDER BY q.name"
+        only: [neo4j, sql]
+        rows: ["Carrie", "Keanu", "Laurence"]
+      - cypher: "MATCH (p:Person) WITH DISTINCT p AS q ORDER BY EXISTS { MATCH (q)-->(m1) WHERE EXISTS { CALL (*) { RETURN m1.title AS y } RETURN y } RETURN m1 }, q.name RETURN q.name"
+        only: [neo4j, sql]
+        rows: ["Hugo", "Carrie", "Keanu", "Laurence"]
+      - cypher: "MATCH (p:Person) WITH p AS q RETURN q.name AS name, count(*) AS c ORDER BY EXISTS { MATCH (n0:Person {name: name})-->(m1) WHERE EXISTS { CALL (m1) { MATCH (m1)<--(x) RETURN x } RETURN x } RETURN m1 }, name"
+        only: [neo4j, sql]
+        rows: [["Hugo", 1], ["Carrie", 1], ["Keanu", 1], ["Laurence", 1]]
+      - cypher: "MATCH (p:Person) WITH DISTINCT p AS q ORDER BY EXISTS { CALL (q) { MATCH (q)-->(x) WHERE EXISTS { CALL (x) { RETURN x.title AS z } RETURN z } RETURN x } RETURN x }, q.name RETURN q.name"
         only: [neo4j, sql]
         rows: ["Hugo", "Carrie", "Keanu", "Laurence"]
 

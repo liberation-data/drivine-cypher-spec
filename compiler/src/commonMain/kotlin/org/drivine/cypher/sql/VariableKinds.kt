@@ -50,8 +50,8 @@ internal class VariableKinds(private val aggregates: (Expression) -> Boolean) {
      * within it, in a subquery, holds a horizon of its own there, its items and what its subquery reads from outside it. A
      * `CALL (*) { … }` within imports what its horizon doesn't hold too ([hidden]), but Neo4j refuses a read of it there
      * (its 42N44 too), in a pattern or as a value; a procedure's call, `CALL db.labels() YIELD label WHERE …`, does not hide
-     * it. A comprehension's variables, a quantifier's and a `reduce()`'s, and what a pattern comprehension binds, are within
-     * the horizon where they are bound, as Neo4j reads them there.
+     * it. A subquery within, `EXISTS { … }` or `COUNT { … }`, reads as of where it is: what is in scope
+     * there joins its horizon, a comprehension's variable or a subquery's own, but not what a `CALL (*)` hides (see [query]).
      */
     private class Scope(
         val kinds: MutableMap<String, Kind> = LinkedHashMap(),
@@ -62,11 +62,8 @@ internal class VariableKinds(private val aggregates: (Expression) -> Boolean) {
     ) {
         fun copy() = Scope(LinkedHashMap(kinds), LinkedHashSet(dropped), LinkedHashSet(shadowing), horizon, LinkedHashSet(hidden))
 
-        /** A copy, with [names] bound within an expression, as a comprehension's variable, of any kind and within its [horizon]. */
-        fun binding(vararg names: String) = copy().also { scope ->
-            names.forEach { scope[it] = Kind.ANY }
-            scope.horizon = horizon?.plus(names)
-        }
+        /** A copy, with [names] bound within an expression, as a comprehension's variable, of any kind. */
+        fun binding(vararg names: String) = copy().also { scope -> names.forEach { scope[it] = Kind.ANY } }
         operator fun get(name: String) = kinds[name]
         operator fun set(name: String, kind: Kind) {
             kinds[name] = kind
@@ -95,9 +92,13 @@ internal class VariableKinds(private val aggregates: (Expression) -> Boolean) {
     private var inaccessible: CompilerException? = null
 
     /** [query]'s variables, from those of [outer] it reads: what each part of it returns. */
-    private fun query(query: Query, outer: Scope): List<Map<String, Kind>> =
+    private fun query(query: Query, outer: Scope): List<Map<String, Kind>> {
         // Those of [outer] stay in scope after each WITH within, as Neo4j has a subquery read them, but those a WITH outside drops.
-        (listOf(query.clauses) + query.unions.map { it.clauses }).map { clauses(it, outer.copy(), kept = outer.kinds.filterKeys { name -> name !in outer.dropped }) }
+        val kept = outer.kinds.filterKeys { name -> name !in outer.dropped }
+        // Within a horizon, what [outer] reads joins it, but what a CALL (*) hides, as Neo4j reads a CALL's brackets as of where the subquery is (drivine4j#681).
+        val horizon = outer.horizon?.plus(kept.keys - outer.hidden)
+        return (listOf(query.clauses) + query.unions.map { it.clauses }).map { part -> clauses(part, outer.copy().also { it.horizon = horizon }, kept = kept) }
+    }
 
     /**
      * [clauses] in turn, over [scope]: what their `RETURN` returns, of the kinds it returns. Within a `FOREACH`, [foreach],
@@ -438,7 +439,6 @@ internal class VariableKinds(private val aggregates: (Expression) -> Boolean) {
             is Expression.PatternComprehension -> {
                 val inner = scope.copy()
                 matched(expression.pattern, inner, within = true)
-                inner.horizon = inner.horizon?.plus(inner.kinds.keys - scope.kinds.keys)
                 expression.where?.let { expression(it, inner) }
                 expression(expression.projection, inner)
             }
