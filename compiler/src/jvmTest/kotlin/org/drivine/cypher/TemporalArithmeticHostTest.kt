@@ -155,6 +155,38 @@ class TemporalArithmeticHostTest {
     }
 
     /** The Cypher literal of [text] of [kind]. */
+    @Test
+    fun `a duration's fields of its seconds are worked out in whole numbers, not doubles, written or given (#278)`() {
+        // java.time's Duration holds a duration's time as Cypher does: whole seconds, floored, and nanoseconds from 0 up to a
+        // second. The larger units are of the whole seconds, counted toward zero, as Java's / counts.
+        val texts = listOf(
+            "PT87659999H59M59.999999999S", "-PT87659999H59M59.999999999S", "PT-1.5S", "-PT0.000001S", "PT0.5S", "PT1S", "PT0S",
+            "-PT25H0.5S", "-PT1M0.5S", "PT30M0.5S", "PT2562047H47M16.854775807S",
+        )
+        // And a fraction of an hour, a month or a day, which goes to the parts below it, beside a long time.
+        for (text in listOf("PT1.5H", "P0.5M", "P1.5D", "-P0.5M", "P1.5MT87659999H59M59.999999999S", "-P1.5DT0.000000001S")) {
+            assertEquals(inline("toString(duration('$text'))"), inline("toString(duration(\$d))", mapOf("d" to text)), "$text given")
+        }
+        for (text in texts) {
+            // Its text given is the text the compiler writes of it written: the canonical text, worked out as it compiles.
+            assertEquals(inline("toString(duration('$text'))"), inline("toString(duration(\$d))", mapOf("d" to text)), "$text given")
+            val d = java.time.Duration.parse(text)
+            val (s, n) = d.seconds to d.nano.toLong()
+            val want = mapOf(
+                "hours" to s / 3600, "minutes" to s / 60, "seconds" to s, "minutesOfHour" to s / 60 - s / 3600 * 60, "secondsOfMinute" to s - s / 60 * 60,
+                "milliseconds" to s * 1000 + n / 1000000, "microseconds" to s * 1000000 + n / 1000,
+                "nanoseconds" to runCatching { Math.addExact(Math.multiplyExact(s, 1000000000L), n) }.getOrNull(),
+                "millisecondsOfSecond" to n / 1000000, "microsecondsOfSecond" to n / 1000, "nanosecondsOfSecond" to n,
+            )
+            for ((field, value) in want) {
+                // Past a long, Neo4j fails to give the nanoseconds, so they aren't pinned.
+                if (value == null) continue
+                assertEquals(value.toString(), inline("duration('$text').$field"), "$text.$field written")
+                assertEquals(value.toString(), inline("duration(\$d).$field", mapOf("d" to text)), "$text.$field given")
+            }
+        }
+    }
+
     private fun literal(kind: Temporal, text: String) = "${kind.function}('$text')"
 
     /** The tag, as JSON text, of [text] of [kind], as the store holds one. */
