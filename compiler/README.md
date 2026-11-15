@@ -193,7 +193,7 @@ FullTextSearch.plan(store, graph, SearchRequest(labels, properties, query, index
 
 Over JSON it is the same entry, `CompileJson.compile` (`compile`, `drivine_compile`): a request with `search` in place of
 `cypher` is a search, and one that gives more than one of `cypher`, `search`, `searchIndex`, `vector`, `settings`,
-`fragment`, `read`, `temporalKey`, `layout` and `expand` is an error.
+`fragment`, `read`, `temporalKey`, `layout`, `expand`, `write`, `storeStatements` and `schemaPlan` is an error.
 
 ```json
 {"store": "postgres", "graph": {"name": "g"},
@@ -483,6 +483,53 @@ of its own, so the three libraries read rows, key a temporal value and judge a g
 - **`expand`** takes a statement of `store.yaml` and gives it, `{"text": "…"}`, with each marker of a generated function in it
   (`<TemporalArithmeticFunction.postgres(drivine)>`) written out as the module makes it: `store.yaml` holds the function of
   temporal arithmetic by its marker (drivine4j#418), so a runner expands each statement before it compares.
+- **`write`** takes a value as a request's parameters give one, each temporal value marked
+  `{"$temporal": "DATE", "text": "2024-01-01"}`, and gives it as the store layout holds it, `{"value": …}`: each temporal
+  value its tag `{"$t", "v", "s"}`, and each map key that begins with `$` with one more `$` before it, at any depth (#107).
+  It is what drivine4j writes a parameter, its save plan and a node's properties through, so a host writes them as the
+  other libraries do, with no writer of its own.
+
+### The store's own statements and the schema plan
+
+A library makes and stamps a store, and plans its indexes, with the module's own statements (#107, #135), each through the
+JSON entry, so TypeScript and Python run what drivine4j runs from the Kotlin types, with no copy of their own.
+
+```json
+{"storeStatements": {"store": "oracle", "graph": "g"}}
+{"storeStatements": {"store": "postgres", "graph": "g", "stampParameters": {"storeId": "…", "assignedAt": "2026-01-01T00:00:00Z"}}}
+{"schemaPlan": {"store": "postgres", "graph": "g", "start": {"database": "neo4j", "operation": {"type": "enforce", "owners": {"all": true}}, "catalogs": [], "runtime": [], "policy": {"mode": "FAIL_FAST", "recreateOnDrift": false, "recreateOnStartup": false, "violationSampleSize": 10, "replaceBlockingIndex": false}, "buildTimeoutMillis": 60000}, "now": 1700000000000}}
+```
+
+- **`storeStatements`** names a store (`postgres`, `oracle`, `sqlite`, `neo4j`, `memgraph` or `falkordb`) and, on a SQL
+  store, its graph. Its answer:
+  - `engine`, the store as a stamp names it, and `layout`, the layout a stamp of it records;
+  - on a SQL store, `ddl`, the statements that make the graph's tables, indexes and functions, and `ensuring`, the block
+    that makes them where the store's version is not the module's (null on SQLite);
+  - on Oracle, `functions` and `versions` (each function's `-- drivine:<hash>`), and `storedFunctions`, `{"probes": {…}, "noFunction": […]}`:
+    in `probes`, by each compiler flag's name (`nullsEqualStored`, `eraStored`, `temporalArithmeticStored`), the statement
+    that finds whether the session may call the functions the flag names, and in `noFunction`, the Oracle error numbers that
+    mean it may not (904, 942, 1031, 6575).
+    A library compiles with every flag it may call (drivine4j#808, #811);
+  - `stamp` and `marker`, the statements of each node's stamp and of the schema marker, as `marker.yaml` pins them, each with
+    the `constraint` that keeps one, after `prepare`.
+
+  With `stampParameters`, `restamp: true` or `markerParameters`, the answer is `{"parameters": {…}}`, what the stamp's
+  `assignIfAbsent`, its `restampLayout` or the marker's `merge` binds; a request gives one of the three at most.
+  `store.yaml` and `marker.yaml` pin every statement.
+- **`schemaPlan`** names a store, as `storeStatements` does, and one of:
+  - `validate`, a request: `{"refusal": …}`, null where nothing conflicts;
+  - `start`, a request, and `now`, the host's clock in milliseconds, or `resume`, the state the last answer gave, with
+    `outcomes`, what each of its actions did, and `now`: `{"run": [<action>, …], "state": <state>}`, the actions to run in
+    order and the state to resume from, or `{"done": <report>}`. An outcome is `{"type": "rows", "rows": […]}`,
+    `{"type": "ran"}` or `{"type": "failed", "causes": [{"sqlState", "vendorCode", "code", "gqlStatus", "message"}, …]}`, for
+    the actions that ran, up to and with the first that failed;
+  - `runtimeAfter` (`operation`, `runtime`, `databases`) and `runtimeOn` (`database`, `runtime`): the runtime catalogs a
+    library keeps of the items it ensures as it runs, as drivine4j's `SchemaManager` keeps them.
+
+  A request, an action, an outcome, the state and the report are written as `PlanJson` writes them, each key and value as
+  it is, not as `write` gives a value: a row's or a sample's `{"$t": …}` stays `$t`, and a host binds an action's
+  parameters and reads a report as they are given. Every `plans.yaml`
+  case runs through the request, beside the Kotlin planner, round by round.
 
 ### Fragments
 
