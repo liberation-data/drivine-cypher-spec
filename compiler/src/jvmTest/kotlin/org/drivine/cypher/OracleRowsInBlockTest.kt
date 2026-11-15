@@ -75,6 +75,9 @@ class OracleRowsInBlockTest {
         for (rowsAsText in listOf(false, true)) {
             val (read) = returned(sql("MATCH (a:N), (b:M) SET a.x = 1 RETURN a.n + b.n", rowsAsText))
             assertTrue(read.startsWith("SELECT /*+ NO_JSON_TABLE_TRANSFORM */ "), read)
+            // A later end read by its key: planned without statistics feedback too, in the same hint.
+            val (keyedRead) = returned(sql("CREATE (n:N) WITH n MATCH (a:N1)-->(b:N2) RETURN b.n + a.n", rowsAsText))
+            assertTrue(keyedRead.startsWith("SELECT /*+ NO_JSON_TABLE_TRANSFORM ${OracleCypherCompiler.NO_FEEDBACK} */ "), keyedRead)
             val (plainRead) = returned(sql("CREATE (n:N {i: 1}) RETURN n.i", rowsAsText))
             assertTrue(plainRead.startsWith("SELECT COALESCE(") || plainRead.startsWith("SELECT JSON_ARRAYAGG("), plainRead)
         }

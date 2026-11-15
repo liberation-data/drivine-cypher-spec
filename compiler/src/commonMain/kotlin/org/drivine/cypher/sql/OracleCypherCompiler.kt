@@ -2265,7 +2265,10 @@ class OracleCypherCompiler(
      * once the block's writes were done, and committed with auto-commit: a returned item that fails as it runs, a
      * `failure()`, then failed the fetch and kept the writes, where Neo4j, Postgres and SQLite keep nothing. Read in the
      * block, it fails the block, and Oracle's statement-level rollback undoes all of it. The rows are held whole in the
-     * session's memory until the host has read them, as one JSON value, as the rows a write carries ([ROWS]) are held.
+     * session's memory until the host has read them, as one JSON value, as the rows a write carries ([ROWS]) are held. A
+     * `JSON` value is at most 32 MB ("Total size of a JSON type instance: 32M bytes", Oracle's JSON Developer's Guide,
+     * Appendix B, JSON Capabilities Specification), so a write whose returned rows together pass that fails, a row each as
+     * with [rowsAsText], where a row each read by the cursor from [query] did not.
      *
      * A row each, the list holds each row as a list of it, `[value]`, or `[]` where the row is SQL's null, so each is
      * read back as [query] gave it, SQL's null or JSON's, of the type it had; the value is taken out of its list as

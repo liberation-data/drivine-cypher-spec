@@ -341,12 +341,12 @@ Kotlin). A statement that writes and returns rows then returns them all as one r
 a column named `rows:json`:
 
 ```sql
-OPEN cy_cursor FOR
-    SELECT JSON_SERIALIZE(COALESCE(JSON_ARRAYAGG(cy_r.result ORDER BY cy_r.cy_n NULL ON NULL RETURNING JSON), JSON('[]')) RETURNING CLOB EXTENDED) AS "rows:json" FROM (
-        SELECT cy_q.result, ROWNUM AS cy_n FROM (
-            <the rows' query>
-        ) cy_q
-    ) cy_r;
+SELECT COALESCE(JSON_ARRAYAGG(cy_r.result ORDER BY cy_r.cy_n NULL ON NULL RETURNING JSON), JSON('[]')) INTO cy_result FROM (
+    SELECT cy_q.result, ROWNUM AS cy_n FROM (
+        <the rows' query>
+    ) cy_q
+) cy_r;
+OPEN cy_cursor FOR SELECT JSON_SERIALIZE(cy_result RETURNING CLOB EXTENDED) AS "rows:json" FROM DUAL;
 DBMS_SQL.RETURN_RESULT(cy_cursor);
 ```
 
@@ -355,8 +355,9 @@ The text is Oracle's extended JSON, so a float stays a float: an object of the o
 and `"-Inf"`. Every other value is plain JSON, as the `JSON` rows hold it: a whole number in full, a text, a temporal
 value as its ISO 8601 text, a list, a map. A map the statement returns whose one key is `$numberDouble` is written as a
 float is. The host reads the one row while its driver prefetches at least one row (node-oracledb's default is 2). The
-rows are one JSON value, so a write whose rows together pass Oracle's limit on the size of one fails, where a row of
-`JSON` each would not.
+rows are read inside the block either way, before the cursor is opened, so a returned value that fails as it is read fails
+the block and undoes its writes (liberation-data/drivine-cypher-spec#292). Either way they are held as one JSON value, so a
+write whose rows together pass Oracle's limit on the size of one, 32 MB, fails.
 
 Every other statement, a read or a write that returns nothing, compiles alike either way, as does every statement on the
 other stores. The option is temporary: Drivine for TypeScript sets it until a node-oracledb release with
