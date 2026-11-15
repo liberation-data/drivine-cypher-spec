@@ -198,6 +198,11 @@ class CompilerRefusalTest {
                 // As a typed JSON literal: Postgres can't take to_jsonb() of a literal whose type it doesn't know.
                 assertFalse(sql.contains("to_jsonb('"), "${compiler::class.simpleName}: $cypher: $sql")
             }
+            // A map projection of no entries is {}: it gave the SQL '{' ||  || '}', which no store takes.
+            listOf("MATCH (n) RETURN toString(n {})", "MATCH (n) RETURN toString([n {}, n.a])").forEach { cypher ->
+                val empty = compiler.compile(cypher).sql
+                assertFalse(empty.contains("||  ||"), "${compiler::class.simpleName}: $cypher: $empty")
+            }
             // A list read as the statement runs is written item by item, and a map in it fails by name as it is read.
             val sql = compiler.compile("WITH [1, 'a'] AS l RETURN toString(l)").sql
             assertTrue(sql.contains("it holds ") && sql.contains("a map"), "${compiler::class.simpleName}: $sql")

@@ -7095,7 +7095,7 @@ abstract class SqlCypherCompiler(
          * order of their keys ([CODE_POINT_ORDER]), as Neo4j writes a map, not as written.
          */
         private fun entriesText(entries: List<Pair<String, Expression?>>, json: String, scope: Map<String, Value>): String =
-            shared(json) { (x) ->
+            if (entries.isEmpty()) literal("{}") else shared(json) { (x) ->
                 entries.sortedWith(compareBy(CODE_POINT_ORDER) { it.first }).joinToString(" || ', ' || ", prefix = "'{' || ", postfix = " || '}'") { (key, item) -> "${literal("$key: ")} || ${writtenText(item, propertyOf(x, key), scope)}" }
             }
 

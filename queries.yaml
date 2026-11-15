@@ -3130,6 +3130,9 @@ cases:
       - note: "A map projection's entry written key: value and its variable, beside a property it selects, in the order of their keys."
         cypher: "MATCH (p:Person {name: 'Keanu'}) WITH p, 'K' AS s RETURN toString(p {.name, b: p.born, s})"
         rows: ["{b: 1964, name: Keanu, s: K}"]
+      - note: "A map projection of no entries is {}: a SQL store's SQL was no SQL."
+        cypher: "MATCH (p:Person {name: 'Keanu'}) RETURN [toString(p {}), toString([p {}, p.born])]"
+        rows: [["{}", "[{}, 1964]"]]
       - note: "A text the statement makes of one kind, but not as one written, among items of other kinds."
         cypher: "MATCH (p:Person {name: 'Keanu'}) WITH p, 'K' AS s RETURN toString([s, CASE WHEN p.born > 1960 THEN 'old' ELSE 'new' END, p.born])"
         rows: ["[K, old, 1964]"]
