@@ -1424,6 +1424,10 @@ cases:
         cypher: "MATCH (n:CyTemporal) RETURN [n.id, toString(n.day), n.day.year, toString(n.day + duration('P1D')), toString(n.at + duration('P1Y')), n.clock.year] ORDER BY n.id"
         only: [neo4j, sql]
         rows: [["a", "-0044-03-15", -44, "-0044-03-16", "-0043-03-15T12:00:00Z", 0], ["b", "0000-12-31", 0, "0001-01-01", null, null]]
+      - note: "A stored value that may be a time of day or a moment, the base of a time: its year is renumbered once where the store numbers years BC otherwise (drivine4j#421)."
+        cypher: "MATCH (n:CyTemporal {id: 'a'}) RETURN [toString(localtime({time: n.at})), toString(localdatetime({date: n.at, time: n.at})), toString(localdatetime({date: n.clock, time: n.at}))]"
+        only: [neo4j, sql]
+        rows: [["12:00:00", "-0044-03-15T12:00:00", "0000-01-01T12:00:00"]]
       - cypher: "MATCH (n:CyTemporal) WHERE n.day < date('0001-01-01') RETURN n.id ORDER BY n.id"
         only: [neo4j, sql]
         rows: ["a", "b"]
