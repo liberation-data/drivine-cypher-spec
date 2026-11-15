@@ -988,7 +988,7 @@ cases:
         error: "p is not defined: a pattern used as an expression binds no new variable, as in Neo4j. Bind it in a MATCH, or test the pattern with EXISTS { … }."
 
   - name: "Quantified path pattern's group naming a variable bound outside it"
-    description: "A quantified path pattern's group names no variable bound outside it, as its own, as Neo4j refuses (its 42N07, and at the top of a MATCH its 42N59; see \"Quantified path patterns refused\"): in an EXISTS { … }, a COUNT { … } or a CALL { … } too, and in the WHERE of a WITH that neither groups nor is DISTINCT, a variable from before the WITH that it drops, which Neo4j still reads there (drivine4j#681). After one that groups or is DISTINCT, Neo4j reads none there, and the group binds such a name as its own (see queries.yaml, \"Quantified path pattern's group naming a variable a WITH dropped\")."
+    description: "A quantified path pattern's group names no variable bound outside it, as its own, as Neo4j refuses (its 42N07, and at the top of a MATCH its 42N59; see \"Quantified path patterns refused\"): in an EXISTS { … }, a COUNT { … } or a CALL { … } too, and in the WHERE or the ORDER BY of a WITH that neither groups nor is DISTINCT, a variable from before the WITH that it drops, which Neo4j still reads there (drivine4j#681). After one that groups or is DISTINCT, Neo4j reads none there, and the group binds such a name as its own (see queries.yaml, \"Quantified path pattern's group naming a variable a WITH dropped\")."
     steps:
       - cypher: "MATCH (p:Person) MATCH (q:Person) WHERE EXISTS { (q) ((p)-->(b))+ () } RETURN q.name"
         error: "p is bound outside the quantified path pattern that names it."
