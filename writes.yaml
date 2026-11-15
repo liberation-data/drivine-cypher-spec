@@ -252,7 +252,7 @@ cases:
         rows: [null, null, null]
 
   - name: "A write that returns a value made anew each time it is read"
-    description: "On Oracle a write's returned rows are worked out once in its block, to check them, and then again as the host reads them (liberation-data/drivine-cypher-spec#292). What the statement wrote is written once, and what it returns of it is what it wrote; a value made anew, as randomUUID(), is made anew."
+    description: "On Oracle a write's returned rows, a row each, are worked out once in its block, to check them, and then again as the host reads them (liberation-data/drivine-cypher-spec#292). What the statement wrote is written once, and what it returns of it is what it wrote; a value made anew, as randomUUID(), is made anew."
     steps:
       - only: [neo4j, sql]
         cypher: "UNWIND range(1, 3) AS i CREATE (n:CyWrite {i: i, u: randomUUID()}) RETURN [size(n.u), size(randomUUID())]"
