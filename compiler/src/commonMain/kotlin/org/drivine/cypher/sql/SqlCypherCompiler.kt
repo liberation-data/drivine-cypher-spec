@@ -420,7 +420,19 @@ abstract class SqlCypherCompiler(
 
     private fun compiled(query: Query, parameters: Map<String, Any?>): CompiledCypher {
         // A variable used as two kinds, or made where it is bound already, is refused for that, before what is not compiled yet.
-        VariableKinds { contains(it, ::isAggregate) }.check(query)
+        val inaccessible = VariableKinds { contains(it, ::isAggregate) }.check(query) ?: return checked(query, parameters)
+        // One a CALL's brackets name that the projection that groups it can't read is refused after a variable not defined
+        // anywhere, as Neo4j refuses them (its 42N62 before its 42N44), and before anything else (drivine4j#681).
+        try {
+            checked(query, parameters)
+        } catch (e: CompilerException) {
+            if (e.message?.contains(" is not defined: ") == true) throw e
+        }
+        throw inaccessible
+    }
+
+    /** [query] compiled, once [VariableKinds] has checked it. */
+    private fun checked(query: Query, parameters: Map<String, Any?>): CompiledCypher {
         // An aggregate in a WHERE, or in the ORDER BY of a projection that neither aggregates nor is DISTINCT, too.
         Aggregates(::isAggregate, ::children).check(query)
         val given = parameters.values.any { holdsNonFinite(it) }

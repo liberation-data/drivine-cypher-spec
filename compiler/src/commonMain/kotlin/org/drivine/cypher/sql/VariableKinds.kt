@@ -42,13 +42,19 @@ internal class VariableKinds(private val aggregates: (Expression) -> Boolean) {
      * comprehension's variable, is no longer one of them. Of those, the ones a `WITH` that neither groups nor is `DISTINCT`
      * drops that no `WITH` before it had dropped ([shadowing]): Neo4j still reads them there, so a quantified path pattern's group names none of them as its own
      * (see [grouped]).
+     *
+     * Within the `WHERE` or the order of a `WITH` or a `RETURN` that groups or is DISTINCT, in a subquery there at any depth
+     * too, [horizon] holds the names that projection can read, its items and what a subquery reads from outside it: Neo4j
+     * reads the brackets of a `CALL (a) { … }` within as of that projection, and refuses one that names any other (its
+     * 42N44), though it is the subquery's own (see [called]). Null outside any such projection.
      */
     private class Scope(
         val kinds: MutableMap<String, Kind> = LinkedHashMap(),
         val dropped: MutableSet<String> = LinkedHashSet(),
         val shadowing: MutableSet<String> = LinkedHashSet(),
+        val horizon: Set<String>? = null,
     ) {
-        fun copy() = Scope(LinkedHashMap(kinds), LinkedHashSet(dropped), LinkedHashSet(shadowing))
+        fun copy() = Scope(LinkedHashMap(kinds), LinkedHashSet(dropped), LinkedHashSet(shadowing), horizon)
         operator fun get(name: String) = kinds[name]
         operator fun set(name: String, kind: Kind) {
             kinds[name] = kind
@@ -63,9 +69,17 @@ internal class VariableKinds(private val aggregates: (Expression) -> Boolean) {
      * [projected]); where a `WITH` or a `RETURN` names two items alike; and where a pattern is used as a value, not as a
      * condition (see [valued]).
      */
-    fun check(query: Query) {
+    fun check(query: Query): CompilerException? {
         query(query, Scope())
+        return inaccessible
     }
+
+    /**
+     * The first `CALL (a) { … }` whose brackets name a variable the projection that groups it is within can't read (see
+     * [Scope.horizon]): given back by [check], not thrown, as Neo4j refuses a variable not defined anywhere in the statement
+     * before it (its 42N62), and the compiler finds those as it compiles.
+     */
+    private var inaccessible: CompilerException? = null
 
     /** [query]'s variables, from those of [outer] it reads: what each part of it returns. */
     private fun query(query: Query, outer: Scope): List<Map<String, Kind>> =
@@ -133,6 +147,12 @@ internal class VariableKinds(private val aggregates: (Expression) -> Boolean) {
      * with `*`, of the kind it is; any other of the row is a new variable there, as in Neo4j.
      */
     private fun called(call: Clause.Call, scope: Scope): Map<String, Kind> {
+        // In the WHERE or the order of a projection that groups, Neo4j reads the brackets as of that projection (drivine4j#681).
+        scope.horizon?.let { horizon ->
+            call.imports?.firstOrNull { it !in horizon }?.let {
+                inaccessible = inaccessible ?: CompilerException("$it is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used.")
+            }
+        }
         val query = call.query
         val parts = (listOf(query.clauses) + query.unions.map { it.clauses }).map { clauses ->
             val imported = imports(call, clauses, scope.kinds.keys)
@@ -140,7 +160,7 @@ internal class VariableKinds(private val aggregates: (Expression) -> Boolean) {
             // What a WITH outside drops, imported by a CALL within its WHERE, CALL (*) { … }, stays dropped in the call (drivine4j#504).
             val dropped = scope.dropped.filterTo(LinkedHashSet()) { it in imported }
             val shadowing = scope.shadowing.filterTo(LinkedHashSet()) { it in imported }
-            clauses(clauses, Scope(inner, dropped, shadowing), kept = if (call.imports != null || call.importsAll) inner.filterKeys { it !in dropped } else emptyMap())
+            clauses(clauses, Scope(inner, dropped, shadowing, scope.horizon), kept = if (call.imports != null || call.importsAll) inner.filterKeys { it !in dropped } else emptyMap())
         }
         return parts.first().mapValues { (name, kind) -> if (parts.all { it[name] == kind }) kind else Kind.ANY }
     }
@@ -196,18 +216,22 @@ internal class VariableKinds(private val aggregates: (Expression) -> Boolean) {
             valued(it.expression, condition = false)
         }
         // What a WITH outside drops stays dropped after a subquery's own WITH, but for an item that names it again.
-        val next = if (projection.star) scope.copy() else Scope(dropped = LinkedHashSet(scope.dropped), shadowing = LinkedHashSet(scope.shadowing))
+        // The clauses after it are within whatever projection [scope] is within, as it is.
+        val next = if (projection.star) scope.copy() else Scope(dropped = LinkedHashSet(scope.dropped), shadowing = LinkedHashSet(scope.shadowing), horizon = scope.horizon)
         projection.items.forEach { next[it.name] = kindOf(it.expression, scope) }
-        // What an outer WITH's WHERE reads that it drops stays shadowing in a subquery's order, as in its WHERE.
-        val reading = Scope(scope.kinds.mapValuesTo(LinkedHashMap()) { Kind.ANY }.apply { putAll(next.kinds) }, shadowing = LinkedHashSet(next.shadowing))
         val groups = projection.distinct || projection.items.any { aggregates(it.expression) }
+        // Its own WHERE and order are within it, where it groups: they read its items, and what a subquery reads from outside it.
+        val horizon = if (!groups) scope.horizon else (next.kinds.keys + kept).filterTo(LinkedHashSet()) { scope.horizon?.contains(it) ?: true }
+        // What an outer WITH's WHERE reads that it drops stays shadowing in a subquery's order, as in its WHERE, and what a
+        // WITH outside dropped stays dropped there, as after it.
+        val reading = Scope(scope.kinds.mapValuesTo(LinkedHashMap()) { Kind.ANY }.apply { putAll(next.kinds) }, LinkedHashSet(next.dropped), LinkedHashSet(next.shadowing), horizon)
         where?.let {
             val dropped = scope.kinds.keys.filterTo(LinkedHashSet(next.dropped)) { name -> next[name] == null && name !in kept }
             // Not one a WITH before had dropped already, which Neo4j reads here no more than there.
             val shadowing = if (groups) LinkedHashSet(next.shadowing) else dropped.filterTo(LinkedHashSet(next.shadowing)) { it !in scope.dropped }
-            expression(it, Scope(LinkedHashMap(reading.kinds), dropped, shadowing))
+            expression(it, Scope(LinkedHashMap(reading.kinds), dropped, shadowing, horizon))
         }
-        val items = Scope(scope.kinds.filterKeys { it in kept }.mapValuesTo(LinkedHashMap()) { Kind.ANY }.apply { putAll(next.kinds) }, shadowing = LinkedHashSet(next.shadowing))
+        val items = Scope(scope.kinds.filterKeys { it in kept }.mapValuesTo(LinkedHashMap()) { Kind.ANY }.apply { putAll(next.kinds) }, LinkedHashSet(next.dropped), LinkedHashSet(next.shadowing), horizon)
         // Read first, so a pattern that names a variable the order can't read is refused for that (42N29), before as a value (42I34), as Neo4j does.
         projection.orderBy.forEach {
             expression(it.expression, if (groups && !aggregates(it.expression)) items.copy() else reading)
@@ -249,14 +273,15 @@ internal class VariableKinds(private val aggregates: (Expression) -> Boolean) {
     }
 
     /**
-     * A quantified path pattern's [group]: what it names is a list outside it, of whatever it matched. A name a `WITH` that
-     * neither groups nor is DISTINCT drops, in its `WHERE` ([Scope.shadowing]), is bound outside it to Neo4j, which refuses it
-     * (its 42N07), where the compiler, which no longer has it, would take it as the group's own (drivine4j#681). One bound
-     * already is left to the compiler, which refuses it with the same message.
+     * A quantified path pattern's [group]: what it names is a list outside it, of whatever it matched. A name bound outside
+     * it, one Neo4j reads where it is, is refused, as Neo4j refuses it (its 42N07): one in scope, and one a `WITH` that
+     * neither groups nor is DISTINCT drops, in its `WHERE` ([Scope.shadowing]). The compiler, which no longer has the one a
+     * `WITH` dropped, nor in the order of a projection that groups one a subquery reads from outside it, would take it as the
+     * group's own (drivine4j#681). One the `WITH` dropped, in its `WHERE` ([Scope.dropped]), is no longer read there.
      */
     private fun grouped(group: RelationshipPattern.Group, scope: Scope) {
         val names = group.pattern.nodes.mapNotNull { it.variable } + group.pattern.relationships.mapNotNull { it.variable }
-        names.firstOrNull { it in scope.shadowing }?.let { throw CompilerException("$it is bound outside the quantified path pattern that names it.") }
+        names.firstOrNull { (scope[it] != null && it !in scope.dropped) || it in scope.shadowing }?.let { throw CompilerException("$it is bound outside the quantified path pattern that names it.") }
         names.forEach { if (scope[it] == null) scope[it] = Kind.ANY }
     }
 
