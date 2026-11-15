@@ -253,7 +253,7 @@ internal object VariableKinds {
      * already in each of these places, and only one of another kind is refused. [before] is the scope before the clause,
      * and [own] the variables the clause makes (see [madeBy]): a property it makes reads none of them (see [madeHere]), and
      * a pattern in the properties of a node made with no relationship names none of those bound before it either (see
-     * [declared]).
+     * [declared]); and none is a node, a relationship or a path (see [stored]).
      */
     private fun made(pattern: Pattern, scope: Scope, before: Scope, own: Set<String>, made: MutableSet<String>, merging: Boolean, foreach: Boolean) {
         val clause = if (merging) "MERGE" else "CREATE"
@@ -263,6 +263,7 @@ internal object VariableKinds {
                 madeHere(it, own, clause)
                 if (pattern.relationships.isEmpty() && !foreach) declared(it, before)
                 valued(it, condition = false)
+                properties(it, scope)
             }
             val variable = node.variable ?: return@forEach
             val bound = scope[variable]
@@ -284,6 +285,7 @@ internal object VariableKinds {
                 expression(it, scope)
                 madeHere(it, own, clause)
                 valued(it, condition = false)
+                properties(it, scope)
             }
             val variable = relationship.variable ?: return@forEach
             if (foreach) return@forEach scope.set(variable, scope[variable] ?: Kind.RELATIONSHIP)
@@ -338,6 +340,8 @@ internal object VariableKinds {
         fun pattern(pattern: Pattern) {
             names += named(pattern) + listOfNotNull(pattern.variable)
             (pattern.nodes.mapNotNull { it.properties } + pattern.relationships.mapNotNull { it.properties }).forEach { names += mentionsIn(it) }
+            // A quantified path pattern's own pattern and its WHERE.
+            pattern.relationships.forEach { relationship -> relationship.group?.let { group -> pattern(group.pattern); group.where?.let { names += mentionsIn(it) } } }
         }
         when (expression) {
             is Expression.Variable -> names += expression.name
@@ -412,7 +416,9 @@ internal object VariableKinds {
     private fun reads(expression: Expression, names: Set<String>, bound: Set<String>): String? {
         fun read(part: Expression, inner: Set<String> = bound) = reads(part, names, inner)
         fun own(name: String) = name.takeIf { it in names && it !in bound }
-        fun properties(pattern: Pattern) = (pattern.nodes.mapNotNull { it.properties } + pattern.relationships.mapNotNull { it.properties }).firstNotNullOfOrNull { read(it) }
+        fun properties(pattern: Pattern): String? = (pattern.nodes.mapNotNull { it.properties } + pattern.relationships.mapNotNull { it.properties }).firstNotNullOfOrNull { read(it) }
+            // A quantified path pattern's own properties and its WHERE.
+            ?: pattern.relationships.firstNotNullOfOrNull { relationship -> relationship.group?.let { group -> properties(group.pattern) ?: group.where?.let { read(it) } } }
         return when (expression) {
             is Expression.Variable -> own(expression.name)
             is Expression.MapProjection -> own(expression.variable)
@@ -475,6 +481,8 @@ internal object VariableKinds {
             names += named(pattern)
             pattern.nodes.forEach { node -> node.properties?.let(::expression) }
             pattern.relationships.forEach { relationship -> relationship.properties?.let(::expression) }
+            // A quantified path pattern's own pattern and its WHERE.
+            pattern.relationships.forEach { relationship -> relationship.group?.let { group -> pattern(group.pattern); group.where?.let(::expression) } }
         }
         fun projection(projection: Projection) {
             projection.items.forEach { expression(it.expression) }
@@ -557,18 +565,34 @@ internal object VariableKinds {
 
     /**
      * A `SET` item's value, over [scope]: a pattern is no value to set, as Neo4j refuses it (see [valued]); nor is a node, a
-     * relationship or a path, `SET m.f = m`, which Neo4j refuses when it runs (its 22N01, "Property values can only be of
-     * primitive types or arrays thereof"), and the store would hold as a document.
+     * relationship or a path, `SET m.f = m`, a list written of one, `SET m.f = [m]`, or an entry of a map set, `SET n += {f: m}`,
+     * which Neo4j refuses when it runs (its 22N01, "Property values can only be of primitive types or arrays thereof"), and
+     * the store would hold as a document (see [stored]).
      */
     private fun set(item: SetItem, scope: Scope) {
         val value = setValue(item) ?: return
-        if (item is SetItem.Property && value is Expression.Variable) {
-            scope[value.name]?.takeIf { it in setOf(Kind.NODE, Kind.RELATIONSHIP, Kind.RELATIONSHIPS, Kind.PATH) }?.let { kind ->
-                throw CompilerException("${value.name} is ${kind.noun}, and a property holds no node, relationship or path, as in Neo4j: set a property of it, or its elementId(), instead.")
-            }
-        }
+        if (item is SetItem.Property) stored(value, scope) else properties(value, scope)
         expression(value, scope)
         valued(value, condition = false)
+    }
+
+    /**
+     * Refuses [value], a property written, where it is a variable of [scope] bound as a node, a relationship or a path, or a
+     * list written that holds one, `[b]`, as Neo4j refuses it when it runs (its 22N01).
+     */
+    private fun stored(value: Expression, scope: Scope) {
+        when (value) {
+            is Expression.Variable -> scope[value.name]?.takeIf { it in setOf(Kind.NODE, Kind.RELATIONSHIP, Kind.RELATIONSHIPS, Kind.PATH) }?.let { kind ->
+                throw CompilerException("${value.name} is ${kind.noun}, and a property holds no node, relationship or path, as in Neo4j: set a property of it, or its elementId(), instead.")
+            }
+            is Expression.ListLiteral -> value.items.forEach { stored(it, scope) }
+            else -> {}
+        }
+    }
+
+    /** Refuses each entry of [properties], a map written of the properties a write makes or sets, as [stored] refuses a property. */
+    private fun properties(properties: Expression, scope: Scope) {
+        if (properties is Expression.MapLiteral) properties.entries.forEach { stored(it.second, scope) }
     }
 
     /**
