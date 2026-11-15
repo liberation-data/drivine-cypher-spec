@@ -65,11 +65,12 @@ internal object StoreJson {
         CompileJson.error(e.message ?: e.toString())
     }
 
-    private fun ddl(given: ObjectNode): StoreDdl {
+    /** The store [given] names, `{"store": …, "graph": …}`, as every request of a store reads it. */
+    internal fun ddl(given: ObjectNode, kind: String = KIND): StoreDdl {
         val store = given["store"]?.takeIf { it.isTextual }?.textValue()
-            ?: throw IllegalArgumentException("A $KIND request names its store, one of ${STORES.joinToString(", ")}.")
+            ?: throw IllegalArgumentException("A $kind request names its store, one of ${STORES.joinToString(", ")}.")
         fun graph(): String = given["graph"]?.takeIf { it.isTextual }?.textValue()
-            ?: throw IllegalArgumentException("A $KIND request on $store names its graph.")
+            ?: throw IllegalArgumentException("A $kind request on $store names its graph.")
         return when (store) {
             "postgres" -> PostgresDdl(graph())
             "oracle" -> OracleDdl(graph())

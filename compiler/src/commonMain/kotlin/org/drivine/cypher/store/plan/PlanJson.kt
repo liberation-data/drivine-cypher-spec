@@ -37,6 +37,85 @@ internal object PlanJson {
         return PlannerState(request(node.at("request")), node.at("rounds").map(::round))
     }
 
+    // ----- For a host, through the JSON entry (liberation-data/drivine-cypher-spec#107) -----
+
+    /** A request, its operation and catalogs, as a host gives one and as [write] writes one in a state. */
+    fun requestOf(node: JsonNode): PlanRequest = request(node)
+
+    /** [request] as [requestOf] reads it back. */
+    fun requestTree(request: PlanRequest): Map<String, Any?> = request(request)
+
+    /** An operation, as a request writes one. */
+    fun operationOf(node: JsonNode): Operation = operation(node)
+
+    /** [operation] as [operationOf] reads it back. */
+    fun operationTree(operation: Operation): Map<String, Any?> = operation(operation)
+
+    /** An action's outcome, as a host gives it back on resuming: `{"type": "rows", "rows": […]}`, `{"type": "ran"}` or `{"type": "failed", "causes": […]}`. */
+    fun outcomeOf(node: JsonNode): PlanOutcome = outcome(node)
+
+    /** [outcome] as [outcomeOf] reads it back. */
+    fun outcomeTree(outcome: PlanOutcome): Map<String, Any?> = outcome(outcome)
+
+    /** A declared catalog, as a request writes one. */
+    fun catalogOf(node: JsonNode): DeclaredCatalog = catalog(node)
+
+    /** [catalog] as [catalogOf] reads it back. */
+    fun catalogTree(catalog: DeclaredCatalog): Map<String, Any?> = catalog(catalog)
+
+    /** A runtime catalog: its owner, the databases it is on (null for all) and its items. */
+    fun runtimeOf(node: JsonNode): RuntimeCatalog = RuntimeCatalog(
+        node.text("owner"), node["databases"]?.takeUnless { it.isNull }?.map { it.textValue()!! }?.toSet(), node.at("items").map(::spec),
+    )
+
+    /** [catalog] as [runtimeOf] reads it back, its databases in order. */
+    fun runtimeTree(catalog: RuntimeCatalog): Map<String, Any?> =
+        linkedMapOf("owner" to catalog.owner, "databases" to catalog.databases?.sorted(), "items" to catalog.items.map(::spec))
+
+    /**
+     * [report], every field written, null where it has none: each spec written out as [spec] writes it, each item as the store
+     * lists it ([item]), each error by its causes, and the action whose failure ended the plan as [action] writes it.
+     */
+    fun report(report: DatabaseReport): Map<String, Any?> = linkedMapOf(
+        "database" to report.database,
+        "owners" to report.owners.map { owner ->
+            linkedMapOf(
+                "owner" to owner.owner,
+                "results" to owner.results.map { linkedMapOf("spec" to spec(it.spec), "result" to result(it.result)) },
+                "unbuilt" to owner.unbuilt.map { linkedMapOf("spec" to spec(it.spec), "stillBuilding" to it.stillBuilding, "message" to it.message) },
+                "orphans" to owner.orphans,
+                "marker" to owner.marker?.let { linkedMapOf("version" to it.version, "items" to it.items) },
+                "failure" to owner.failure,
+                "removed" to owner.removed?.let { linkedMapOf("dropped" to it.dropped, "kept" to it.kept.map(::spec)) },
+            )
+        },
+        "item" to report.item?.let { linkedMapOf("result" to it.result?.let(::result), "dropped" to it.dropped) },
+        "failure" to report.failure,
+        "rethrown" to report.rethrown?.let {
+            linkedMapOf("action" to action(it.action), "causes" to it.error.causes.map(::cause), "round" to it.round)
+        },
+        "log" to report.log.map { linkedMapOf("level" to it.level.name, "logger" to it.logger, "message" to it.message) },
+    )
+
+    /** What ensuring an item gave, keyed by its kind: `created`, `alreadyMatching`, `drift`, `recreated`, `violation` or `blockedByIndex`. */
+    private fun result(result: org.drivine.schema.EnsureResult): Map<String, Any?> = when (result) {
+        is org.drivine.schema.EnsureResult.Created -> mapOf("created" to item(result.info))
+        is org.drivine.schema.EnsureResult.AlreadyMatching -> mapOf("alreadyMatching" to item(result.info))
+        is org.drivine.schema.EnsureResult.Drift -> mapOf("drift" to linkedMapOf("existing" to item(result.existing), "requested" to spec(result.requested)))
+        is org.drivine.schema.EnsureResult.Recreated -> mapOf("recreated" to linkedMapOf("previous" to item(result.previous), "current" to item(result.current)))
+        is org.drivine.schema.EnsureResult.Violation -> mapOf("violation" to linkedMapOf("requested" to spec(result.requested), "sample" to result.conflictingSample))
+        is org.drivine.schema.EnsureResult.BlockedByIndex -> mapOf("blockedByIndex" to linkedMapOf("requested" to spec(result.requested), "index" to item(result.index)))
+    }
+
+    /** An item as the store lists it, every field written. */
+    fun item(info: org.drivine.schema.SchemaItemInfo?): Map<String, Any?>? = info?.let {
+        linkedMapOf(
+            "kind" to it.kind.name, "label" to it.label, "properties" to it.properties, "name" to it.name, "dimensions" to it.dimensions,
+            "similarity" to it.similarity?.name, "analyzer" to it.analyzer, "status" to it.status, "quantizationEnabled" to it.quantizationEnabled,
+            "hnswM" to it.hnswM, "hnswEfConstruction" to it.hnswEfConstruction,
+        )
+    }
+
     // ----- Writing, as plain values CypherJson writes -----
 
     private fun request(request: PlanRequest): Map<String, Any?> = linkedMapOf(
