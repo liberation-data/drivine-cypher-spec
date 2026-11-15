@@ -80,9 +80,7 @@ class CompiledSizeTest {
             "RETURN " + "datetime.truncate('second', ".repeat(times) + "datetime('2017-10-11T12:31:14+01:00')" + ", {hour: 3})".repeat(times) + ".hour"
         compilers.forEach { compiler ->
             val (two, four) = listOf(2, 4).map { compiler.compile(truncated(it)).sql.length }
-            // 14,000: drivine4j#421 tests a value read in, before a store's timestamp is read of it, for a nanosecond past the
-            // microsecond, which writes about 1,300 more here (12,100 before); drivine-cypher-spec#277 would write none of it.
-            assertTrue(four < 14_000, "${compiler::class.simpleName}: $four characters")
+            assertTrue(four < 13_000, "${compiler::class.simpleName}: $four characters")
             assertTrue(four < 3 * two, "${compiler::class.simpleName}: $two, then $four characters")
         }
     }
@@ -497,9 +495,7 @@ class CompiledSizeTest {
                 val (size, reference) = listOf(over, first).map { compiler.compile(it, emptyMap()).sql.length }
                 // Four sums of a stored value and a duration on Oracle are the most, some 132,000 characters: each a tag of the kind
                 // the stored one names, its sort key by the store's function (#161).
-                // 150,000: drivine4j#421's test of a value read in for a nanosecond past the microsecond writes about 7,000 more
-                // over the four days added (136,000 before); drivine-cypher-spec#277 would write none of it.
-                assertTrue(size < 150_000 && size < reference * 1.2, "${compiler::class.simpleName}: $over: $size characters, $reference with a WITH first")
+                assertTrue(size < 140_000 && size < reference * 1.2, "${compiler::class.simpleName}: $over: $size characters, $reference with a WITH first")
             }
         }
     }
