@@ -5026,7 +5026,7 @@ cases:
   # nesting.yaml's cells, to here.
 
   - name: "A CALL in the order of a RETURN that groups or is DISTINCT, and CALL (*) where a projection groups"
-    description: "The same places as refusals.yaml's \"A CALL in the order of a RETURN that groups or is DISTINCT, and CALL (*) where a projection groups\" that Neo4j gives rows for: a CALL (*) there that reads nothing the projection can't, a CALL whose brackets name an item, a projection that groups within the subquery, whose own items a CALL within reads, a comprehension's, a quantifier's, a reduce()'s or a pattern comprehension's own variable that a CALL names, a subquery's own variable that a CALL in a subquery within it names, in its WHERE or its items, and a procedure's CALL whose WHERE reads a subquery's own variable (drivine4j#681)."
+    description: "The same places as refusals.yaml's \"A CALL in the order of a RETURN that groups or is DISTINCT, and CALL (*) where a projection groups\" that Neo4j gives rows for: a CALL (*) there that reads nothing the projection can't, a CALL whose brackets name an item, a projection that groups within the subquery, whose own items a CALL within reads, a comprehension's, a quantifier's, a reduce()'s or a pattern comprehension's own variable that a CALL names, a subquery's own variable that a CALL in a subquery within it names, in its WHERE or its items, a procedure's CALL whose WHERE reads a subquery's own variable, a subquery in an aggregate of the order, which reads what is bound before the projection, and one in the order or the WHERE of a WITH within the subquery, which reads what is in scope there; and, Neo4j's alone, a variable a WITH within the subquery drops, read in its WHERE (drivine4j#681, #426, #504)."
     steps:
       - cypher: "MATCH (p:Person) WITH p AS q RETURN q.name AS name, count(*) AS c ORDER BY EXISTS { CALL (name) { MATCH (n:Person {name: name})-->(m) RETURN m } RETURN m }, name"
         only: [neo4j, sql]
@@ -5443,6 +5443,49 @@ cases:
       - cypher: "MATCH (p:Person) WITH DISTINCT p AS q ORDER BY EXISTS { CALL (q) { MATCH (q)-->(x) WHERE EXISTS { CALL (x) { RETURN x.title AS z } RETURN z } RETURN x } RETURN x }, q.name RETURN q.name"
         only: [neo4j, sql]
         rows: ["Hugo", "Carrie", "Keanu", "Laurence"]
+      - cypher: "MATCH (p:Person)-[:ACTED_IN]->(m:Movie) RETURN p.name AS name, count(*) AS c ORDER BY sum(COUNT { CALL (m) { MATCH (m)<--(x) RETURN x } RETURN x }) DESC, name"
+        only: [neo4j, sql]
+        rows: [["Keanu", 3], ["Carrie", 2], ["Laurence", 1]]
+      - cypher: "MATCH (p:Person)-[:ACTED_IN]->(m:Movie) RETURN p.name AS name, count(*) AS c ORDER BY sum(COUNT { CALL (*) { MATCH (m)<--(x) RETURN x } RETURN x }) DESC, name"
+        only: [neo4j, sql]
+        rows: [["Keanu", 3], ["Carrie", 2], ["Laurence", 1]]
+      - cypher: "MATCH (p:Person)-[:ACTED_IN]->(m:Movie) WITH p.name AS name, count(*) AS c ORDER BY sum(COUNT { CALL (m) { MATCH (m)<--(x) RETURN x } RETURN x }) DESC, name RETURN name, c"
+        only: [neo4j, sql]
+        rows: [["Keanu", 3], ["Carrie", 2], ["Laurence", 1]]
+      - cypher: "MATCH (p:Person)-[:ACTED_IN]->(m:Movie) RETURN p.name AS name, count(*) AS c ORDER BY sum(COUNT { CALL (p) { MATCH (p)-->(x) RETURN x } RETURN x }) DESC, name"
+        only: [neo4j, sql]
+        rows: [["Keanu", 3], ["Carrie", 2], ["Laurence", 1]]
+      - cypher: "MATCH (p:Person) WITH p AS q RETURN q.name AS name, count(*) AS c ORDER BY COUNT { MATCH (n0:Person {name: name})-->(m1) WITH n0 ORDER BY COUNT { CALL (m1) { MATCH (m1)<--(x) RETURN x } RETURN x } RETURN n0 } DESC, name"
+        only: [neo4j, sql]
+        rows: [["Keanu", 1], ["Carrie", 1], ["Laurence", 1], ["Hugo", 1]]
+      - note: "Neo4j reads a variable the WITH drops in its WHERE, where the SQL stores refuse it, as they refuse a value read from it there (drivine4j#426, #504)."
+        cypher: "MATCH (p:Person) WITH p AS q RETURN q.name AS name, count(*) AS c ORDER BY COUNT { MATCH (n0:Person {name: name})-->(m1) WITH n0 WHERE COUNT { CALL (m1) { MATCH (m1)<--(x) RETURN x } RETURN x } > 1 RETURN n0 } DESC, name"
+        only: [neo4j]
+        rows: [["Carrie", 1], ["Keanu", 1], ["Laurence", 1], ["Hugo", 1]]
+      - note: "Neo4j reads a variable the WITH drops in its WHERE, where the SQL stores refuse it, as they refuse a value read from it there (drivine4j#426, #504)."
+        cypher: "MATCH (p:Person) WITH p AS q RETURN q.name AS name, count(*) AS c ORDER BY COUNT { MATCH (n0:Person {name: name})-->(m1) WITH n0 WHERE COUNT { CALL (*) { MATCH (m1)<--(x) RETURN x } RETURN x } > 1 RETURN n0 } DESC, name"
+        only: [neo4j]
+        rows: [["Carrie", 1], ["Keanu", 1], ["Laurence", 1], ["Hugo", 1]]
+      - note: "Neo4j reads a variable the WITH drops in its WHERE, where the SQL stores refuse it, as they refuse a value read from it there (drivine4j#426, #504)."
+        cypher: "MATCH (p:Person) WITH p AS q RETURN q.name AS name, count(*) AS c ORDER BY COUNT { MATCH (n0:Person {name: name})-->(m1) WITH n0 WHERE COUNT { MATCH (m1)<--(x) RETURN x } > 1 RETURN n0 } DESC, name"
+        only: [neo4j]
+        rows: [["Carrie", 1], ["Keanu", 1], ["Laurence", 1], ["Hugo", 1]]
+      - note: "Neo4j reads a variable the WITH drops in its WHERE, where the SQL stores refuse it, as they refuse a value read from it there (drivine4j#426, #504)."
+        cypher: "MATCH (p:Person) WITH p.name AS name, count(*) AS c WHERE EXISTS { MATCH (n0:Person {name: name})-->(m1) WITH n0 WHERE COUNT { CALL (m1) { MATCH (m1)<--(x) RETURN x } RETURN x } > 1 RETURN n0 } RETURN name, c ORDER BY name"
+        only: [neo4j]
+        rows: [["Carrie", 1], ["Keanu", 1], ["Laurence", 1]]
+      - cypher: "MATCH (p:Person) WITH p AS q RETURN q.name AS name, count(*) AS c ORDER BY COUNT { MATCH (n0:Person {name: name})-->(m1) WITH n0, count(*) AS k ORDER BY sum(COUNT { CALL (m1) { MATCH (m1)<--(x) RETURN x } RETURN x }) RETURN n0 } DESC, name"
+        only: [neo4j, sql]
+        rows: [["Carrie", 1], ["Keanu", 1], ["Laurence", 1], ["Hugo", 1]]
+      - cypher: "MATCH (p:Person) WITH p AS q RETURN q.name AS name, count(*) AS c ORDER BY COUNT { MATCH (n0:Person {name: name})-->(m1) WITH n0 ORDER BY COUNT { CALL (*) { MATCH (m1)<--(x) RETURN x } RETURN x } RETURN n0 } DESC, name"
+        only: [neo4j, sql]
+        rows: [["Keanu", 1], ["Carrie", 1], ["Laurence", 1], ["Hugo", 1]]
+      - cypher: "MATCH (p:Person) WITH p AS q RETURN q.name AS name, count(*) AS c ORDER BY COUNT { MATCH (n0:Person {name: name})-->(m1) WITH * WHERE COUNT { CALL (m1) { MATCH (m1)<--(x) RETURN x } RETURN x } > 1 RETURN n0 } DESC, name"
+        only: [neo4j, sql]
+        rows: [["Carrie", 1], ["Keanu", 1], ["Laurence", 1], ["Hugo", 1]]
+      - cypher: "MATCH (p:Person) WITH p AS q RETURN q.name AS name, count(*) AS c ORDER BY EXISTS { CALL () { MATCH (z:Movie) WHERE EXISTS { CALL (z) { RETURN z.title AS t } RETURN t } RETURN z } RETURN z }, name"
+        only: [neo4j, sql]
+        rows: [["Carrie", 1], ["Hugo", 1], ["Keanu", 1], ["Laurence", 1]]
 
   - name: "Shortest paths"
     description: "shortestPath gives the shortest match, and allShortestPaths every match of that length."
