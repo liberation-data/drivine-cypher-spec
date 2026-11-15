@@ -52,6 +52,9 @@ class OracleReencodeJsonTest {
 
     private val parameters = mapOf("task" to mapOf("id" to 1, "title" to "t"))
 
+    /** How many times [sql] holds its rows' query: twice for a write's rows a row each, counted in the block and then returned (liberation-data/drivine-cypher-spec#292). */
+    private fun queries(sql: String) = if (" COUNT(cy_r.result) + MAX(cy_r.cy_n) INTO cy_count FROM (\n" in sql) 2 else 1
+
     /** [sql] with each `JSON_TRANSFORM(value, KEEP '$') AS result` given back as `value AS result`, read by its parentheses and quotes. */
     private fun unwrapped(sql: String): String {
         val open = "JSON_TRANSFORM("
@@ -86,8 +89,8 @@ class OracleReencodeJsonTest {
             val plain = sql(cypher, reencodeJson = false, rowsAsText)
             val again = sql(cypher, reencodeJson = true, rowsAsText)
             assertTrue("KEEP '\$')" !in plain, cypher)
-            assertEquals(results, Regex("KEEP '\\\$'\\) AS result").findAll(again).count(), "$cypher\n$again")
-            assertEquals(results, Regex("KEEP '\\\$'\\)").findAll(again).count(), "$cypher\n$again")
+            assertEquals(results * queries(again), Regex("KEEP '\\\$'\\) AS result").findAll(again).count(), "$cypher\n$again")
+            assertEquals(results * queries(again), Regex("KEEP '\\\$'\\)").findAll(again).count(), "$cypher\n$again")
             // Taken off again, the SQL is the same query's: nothing but the result is changed, no order term, identity or subquery.
             assertEquals(plain, unwrapped(again), cypher)
         }
@@ -187,8 +190,8 @@ class OracleReencodeJsonTest {
             val plain = typed(cypher, reencodeJson = false, rowsAsText)
             val again = typed(cypher, reencodeJson = true, rowsAsText)
             val wraps = Regex(Regex.escape(", KEEP '\$') AS result")).findAll(again.sql).count()
-            assertEquals(results, wraps, "$cypher, rowsAsText $rowsAsText: ${again.sql}")
-            assertEquals(results, Regex(Regex.escape("KEEP '\$')")).findAll(again.sql).count(), "$cypher, rowsAsText $rowsAsText: ${again.sql}")
+            assertEquals(results * queries(again.sql), wraps, "$cypher, rowsAsText $rowsAsText: ${again.sql}")
+            assertEquals(results * queries(again.sql), Regex(Regex.escape("KEEP '\$')")).findAll(again.sql).count(), "$cypher, rowsAsText $rowsAsText: ${again.sql}")
             assertEquals(plain.sql, unwrapped(again.sql), cypher)
             assertEquals(plain.copy(sql = again.sql), again, cypher)
         }

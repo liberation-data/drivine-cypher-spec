@@ -310,6 +310,9 @@ class OracleCypherCompiler(
 
     override fun number(json: String) = shared(json) { (x) -> "CASE WHEN ${typeOf(x)} = 'number' THEN JSON_VALUE($x, '$' RETURNING NUMBER) END" }
 
+    /** A double or a float is a number too, as [sum] adds it, NaN and the infinities among them, which [number] reads as no `NUMBER`. */
+    override fun notNumber(json: String) = "NVL(${kind(json)}, 'null') NOT IN ('null', 'number', 'double', 'float')"
+
     /** A whole number, and no floating-point number, as Cypher has an integer. */
     override fun integral(json: String) = shared(json) { (x) ->
         "(${kind(x)} = 'number' AND JSON_VALUE($x, '$' RETURNING NUMBER) = TRUNC(JSON_VALUE($x, '$' RETURNING NUMBER)))"
@@ -2233,7 +2236,9 @@ class OracleCypherCompiler(
         "    $CURSOR SYS_REFCURSOR;",
         "    ${OracleTemporalSql.NOW} TIMESTAMP;",
     ) + (1..NESTING).flatMap { listOf("    $SAVED$it JSON;", "    $GATHERED$it JSON;", "    $CALLER$it JSON;") } +
-        kept.filter { it != OUT }.map { "    $it JSON_ARRAY_T;" } + listOf(
+        kept.filter { it != OUT }.map { "    $it JSON_ARRAY_T;" } +
+        // The rows it returns as text, read in the block: see [returnRows].
+        (if (rowsAsText && program.any { it is ProcedureStep.Return }) listOf("    $RESULT JSON;") else emptyList()) + listOf(
         "BEGIN",
         // The clock is read once, by a query: see [OracleTemporalSql.now].
         "    SELECT ${OracleTemporalSql.CLOCK} INTO ${OracleTemporalSql.NOW} FROM DUAL;",
@@ -2257,13 +2262,41 @@ class OracleCypherCompiler(
      * `"-Inf"` for NaN and the infinities), as a whole float written `2` would be read as the whole number 2. One row, as
      * node-oracledb's thin mode gives only the prefetched rows of an implicit result with a `JSON` or a `CLOB` column
      * (oracle/node-oracledb#1795), and a row's text may be longer than a `VARCHAR2`.
+     *
+     * Either way every row's result is worked out inside the block, before the cursor is opened
+     * (liberation-data/drivine-cypher-spec#292). A cursor opened over [query] alone runs it only as the host fetches, once
+     * the block's writes are done and, with auto-commit, committed: a returned item that fails as it runs, a `failure()`,
+     * then fails the fetch and keeps the writes, where Neo4j, Postgres and SQLite keep nothing. Worked out in the block, it
+     * fails the block, and Oracle's statement-level rollback undoes all of it. The rows are read in their order, numbered by
+     * `ROWNUM` over [query]: its `ORDER BY` is kept, so a sort key that fails fails there too, where a count of [query]
+     * alone lets Oracle drop an order it doesn't need, and the key with it.
+     *
+     * A row each, the block counts the rows by their result, which Oracle works out to tell whether it is null, and adds
+     * the last row's number, which keeps the order, into [COUNT]; the cursor then runs [query] a second time, as it did
+     * before, a row of `JSON` each: no value holds them all, so there is no limit on their total size, and the cursor's rows
+     * are what they were. The count and the cursor are two queries, each reading what is committed as it starts, with the
+     * block's own writes: a row another session commits between them, or a value made anew each time, as `rand()` gives,
+     * can still fail only in the cursor, as it did before. As text, they are gathered into the one JSON list [RESULT], in their order, which the cursor
+     * writes out from `DUAL`. A `JSON` value is at most 32 MB ("Total size of a JSON type instance: 32M bytes", Oracle's
+     * JSON Developer's Guide, Appendix B, JSON Capabilities Specification), so with [rowsAsText] a write whose returned rows
+     * together pass that fails, as it did when the cursor gathered them.
      */
     override fun returnRows(query: String): List<String> {
-        if (!rowsAsText) return listOf("OPEN $CURSOR FOR\n${indent(query)};", "DBMS_SQL.RETURN_RESULT($CURSOR);")
+        // The statement's own hints that [query] starts with start the statement too: see [planned]. Its query's own
+        // (`CARDINALITY(r 1)`, `NO_MERGE`) stay where they are, which name its query's sources.
+        val given = LEADING_HINT.find(query)?.groupValues?.get(1).orEmpty()
+        val hints = listOf(NO_JSON_TABLE_TRANSFORM, NO_FEEDBACK).filter { it in given }
+        val head = if (hints.isEmpty()) "SELECT" else "SELECT /*+ ${hints.joinToString(" ")} */"
         val numbered = "SELECT cy_q.result, ROWNUM AS cy_n FROM (\n${indent(query)}\n) cy_q"
+        if (!rowsAsText) return listOf(
+            "$head COUNT(cy_r.result) + MAX(cy_r.cy_n) INTO $COUNT FROM (\n${indent(numbered)}\n) cy_r;",
+            "OPEN $CURSOR FOR\n${indent(query)};",
+            "DBMS_SQL.RETURN_RESULT($CURSOR);",
+        )
         val rows = "COALESCE(JSON_ARRAYAGG(cy_r.result ORDER BY cy_r.cy_n NULL ON NULL RETURNING JSON), JSON('[]'))"
         return listOf(
-            "OPEN $CURSOR FOR\n${indent("SELECT JSON_SERIALIZE($rows RETURNING CLOB EXTENDED) AS \"$ROWS_AS_TEXT\" FROM (\n${indent(numbered)}\n) cy_r")};",
+            "$head $rows INTO $RESULT FROM (\n${indent(numbered)}\n) cy_r;",
+            "OPEN $CURSOR FOR SELECT JSON_SERIALIZE($RESULT RETURNING CLOB EXTENDED) AS \"$ROWS_AS_TEXT\" FROM DUAL;",
             "DBMS_SQL.RETURN_RESULT($CURSOR);",
         )
     }
@@ -2386,6 +2419,9 @@ class OracleCypherCompiler(
 
         /** The cursor a procedure returns its rows by. */
         private const val CURSOR = "cy_cursor"
+
+        /** The rows a procedure returns with `rowsAsText`, a JSON list read in the block before its cursor writes it out: see [returnRows]. */
+        private const val RESULT = "cy_result"
 
         /**
          * The column a statement that writes returns its rows in with `rowsAsText`, as one JSON list's text: see [returnRows].

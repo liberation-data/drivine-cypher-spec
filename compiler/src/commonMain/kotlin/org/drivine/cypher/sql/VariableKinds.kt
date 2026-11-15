@@ -20,8 +20,12 @@ import org.drivine.cypher.ast.SetItem
  * written, and a variable a `WITH` passes on as it is. Any other value (a property, a parameter, an unwound item, a
  * function's result) may be of any kind, and is never refused here as being of another: what it is used as is left to
  * the compiler, as before.
+ *
+ * [aggregates] is the compiler's test of whether an expression aggregates, outside a nested query of its own, passed in
+ * as [Aggregates] has it: after a `WITH` or a `RETURN` that groups, what its `ORDER BY` reads is not what it reads after one
+ * that does not.
  */
-internal object VariableKinds {
+internal class VariableKinds(private val aggregates: (Expression) -> Boolean) {
 
     /** A kind of variable: see [VariableKinds]. [noun] names a variable of it, as a message does; a value's kind is named as in [Value.Known]. */
     private enum class Kind(val noun: String) {
@@ -35,30 +39,66 @@ internal object VariableKinds {
     /**
      * The variables in scope, by name, each of its kind. Of them, those a `WITH` passes on not, read in its `WHERE` ([dropped]):
      * a value there may read them, but a pattern names none of them (see [use]), in a subquery's too. One bound again within, as a
-     * comprehension's variable, is no longer one of them.
+     * comprehension's variable, is no longer one of them. Of those, the ones a `WITH` that neither groups nor is `DISTINCT`
+     * drops that no `WITH` before it had dropped ([shadowing]): Neo4j still reads them there, so a quantified path pattern's group names none of them as its own
+     * (see [grouped]).
+     *
+     * Within the `WHERE` or the order of a `WITH` or a `RETURN` that groups or is DISTINCT, in a subquery there at any depth
+     * too, [horizon] holds the names that projection can read, its items and what a subquery reads from outside it: Neo4j
+     * reads the brackets of a `CALL (a) { … }` within as of that projection, and refuses one that names any other (its
+     * 42N44), though it is the subquery's own (see [called]). Null outside any such projection. A projection that groups
+     * within it, in a subquery, holds a horizon of its own there, its items and what its subquery reads from outside it. A
+     * `CALL (*) { … }` within imports what its horizon doesn't hold too ([hidden]), but Neo4j refuses a read of it there
+     * (its 42N44 too), in a pattern or as a value; a procedure's call, `CALL db.labels() YIELD label WHERE …`, does not hide
+     * it. A subquery within, `EXISTS { … }` or `COUNT { … }`, reads as of where it is: what is in scope
+     * there joins its horizon, a comprehension's variable or a subquery's own, but not what a `CALL (*)` hides (see [query]).
      */
-    private class Scope(val kinds: MutableMap<String, Kind> = LinkedHashMap(), val dropped: MutableSet<String> = LinkedHashSet()) {
-        fun copy() = Scope(LinkedHashMap(kinds), LinkedHashSet(dropped))
+    private class Scope(
+        val kinds: MutableMap<String, Kind> = LinkedHashMap(),
+        val dropped: MutableSet<String> = LinkedHashSet(),
+        val shadowing: MutableSet<String> = LinkedHashSet(),
+        var horizon: Set<String>? = null,
+        val hidden: MutableSet<String> = LinkedHashSet(),
+    ) {
+        fun copy() = Scope(LinkedHashMap(kinds), LinkedHashSet(dropped), LinkedHashSet(shadowing), horizon, LinkedHashSet(hidden))
+
+        /** A copy, with [names] bound within an expression, as a comprehension's variable, of any kind. */
+        fun binding(vararg names: String) = copy().also { scope -> names.forEach { scope[it] = Kind.ANY } }
         operator fun get(name: String) = kinds[name]
         operator fun set(name: String, kind: Kind) {
             kinds[name] = kind
             dropped -= name
+            shadowing -= name
+            hidden -= name
         }
     }
 
     /**
      * Refuses [query] where a variable of it is used as two kinds, or made where it is bound already; where a pattern in a
-     * `WITH`'s `WHERE` names a variable the `WITH` drops (see [Scope]); where a `WITH` or a `RETURN` names two items alike;
-     * and where a pattern is used as a value, not as a condition (see [valued]).
+     * `WITH`'s `WHERE` names a variable the `WITH` drops (see [Scope]), or in the `ORDER BY` of one that groups (see
+     * [projected]); where a `WITH` or a `RETURN` names two items alike; and where a pattern is used as a value, not as a
+     * condition (see [valued]).
      */
-    fun check(query: Query) {
+    fun check(query: Query): CompilerException? {
         query(query, Scope())
+        return inaccessible
     }
 
+    /**
+     * The first `CALL (a) { … }` whose brackets name a variable the projection that groups it is within can't read (see
+     * [Scope.horizon]): given back by [check], not thrown, as Neo4j refuses a variable not defined anywhere in the statement
+     * before it (its 42N62), and the compiler finds those as it compiles.
+     */
+    private var inaccessible: CompilerException? = null
+
     /** [query]'s variables, from those of [outer] it reads: what each part of it returns. */
-    private fun query(query: Query, outer: Scope): List<Map<String, Kind>> =
+    private fun query(query: Query, outer: Scope): List<Map<String, Kind>> {
         // Those of [outer] stay in scope after each WITH within, as Neo4j has a subquery read them, but those a WITH outside drops.
-        (listOf(query.clauses) + query.unions.map { it.clauses }).map { clauses(it, outer.copy(), kept = outer.kinds.filterKeys { name -> name !in outer.dropped }) }
+        val kept = outer.kinds.filterKeys { name -> name !in outer.dropped }
+        // Within a horizon, what [outer] reads joins it, but what a CALL (*) hides, as Neo4j reads a CALL's brackets as of where the subquery is (drivine4j#681).
+        val horizon = outer.horizon?.plus(kept.keys - outer.hidden)
+        return (listOf(query.clauses) + query.unions.map { it.clauses }).map { part -> clauses(part, outer.copy().also { it.horizon = horizon }, kept = kept) }
+    }
 
     /**
      * [clauses] in turn, over [scope]: what their `RETURN` returns, of the kinds it returns. Within a `FOREACH`, [foreach],
@@ -80,9 +120,10 @@ internal object VariableKinds {
                     current[clause.variable] = Kind.ANY
                 }
                 is Clause.With -> current = projected(clause.projection, current, clause.where, kept.keys).also { next ->
-                    kept.forEach { (name, kind) -> if (next[name] == null) next[name] = kind }
+                    // Into its kinds alone, so one an outer WITH's WHERE still reads, kept in a subquery of an order there, stays shadowing (drivine4j#681).
+                    kept.forEach { (name, kind) -> if (next[name] == null) next.kinds[name] = kind }
                 }
-                is Clause.Return -> returned = projected(clause.projection, current, null).kinds
+                is Clause.Return -> returned = projected(clause.projection, current, null, kept.keys).kinds
                 is Clause.Create -> {
                     val made = mutableSetOf<String>()
                     clause.patterns.forEach { made(it, current, made, merging = false, foreach) }
@@ -120,51 +161,67 @@ internal object VariableKinds {
      * with `*`, of the kind it is; any other of the row is a new variable there, as in Neo4j.
      */
     private fun called(call: Clause.Call, scope: Scope): Map<String, Kind> {
+        // In the WHERE or the order of a projection that groups, Neo4j reads the brackets as of that projection (drivine4j#681).
+        scope.horizon?.let { horizon ->
+            call.imports?.firstOrNull { it !in horizon }?.let {
+                inaccessible = inaccessible ?: CompilerException("$it is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used.")
+            }
+        }
         val query = call.query
         val parts = (listOf(query.clauses) + query.unions.map { it.clauses }).map { clauses ->
             val imported = imports(call, clauses, scope.kinds.keys)
             val inner = scope.kinds.filterTo(LinkedHashMap()) { (name, _) -> name in imported }
             // What a WITH outside drops, imported by a CALL within its WHERE, CALL (*) { … }, stays dropped in the call (drivine4j#504).
             val dropped = scope.dropped.filterTo(LinkedHashSet()) { it in imported }
-            clauses(clauses, Scope(inner, dropped), kept = if (call.imports != null || call.importsAll) inner.filterKeys { it !in dropped } else emptyMap())
+            val shadowing = scope.shadowing.filterTo(LinkedHashSet()) { it in imported }
+            // What CALL (*) imports there that the projection can't read, is refused where it is read (drivine4j#681); not a procedure's.
+            val hidden = imported.filterTo(LinkedHashSet()) { it in scope.hidden || (call.importsAll && !call.procedure && scope.horizon?.contains(it) == false) }
+            clauses(clauses, Scope(inner, dropped, shadowing, scope.horizon, hidden), kept = if (call.imports != null || call.importsAll) inner.filterKeys { it !in dropped } else emptyMap())
         }
         return parts.first().mapValues { (name, kind) -> if (parts.all { it[name] == kind }) kind else Kind.ANY }
     }
 
-    /**
-     * The variables of the row, of [names], that the query [clauses] of [call] imports, as Neo4j has it: those its brackets
-     * name, `CALL (a, b) { … }`, or each with `CALL (*) { … }`; with no brackets, those its leading `WITH` names as they are,
-     * or each with `WITH *`; none where it has neither, `CALL () { … }` or `CALL { MATCH … }`. The compiler reads a call's
-     * scope from it too, so the two agree. Refuses a bracketed name not of the row, and, as Neo4j does (its 42I28), a leading
-     * `WITH` that names a variable of the row, or `*`, with anything more: such a `WITH` imports, and one that names none is
-     * any `WITH`, `CALL { WITH 1 AS one WHERE … }`.
-     */
-    fun imports(call: Clause.Call, clauses: List<Clause>, names: Collection<String>): Set<String> {
-        val all = names.toSet()
-        if (call.importsAll) return all
-        call.imports?.let { imports ->
-            imports.firstOrNull { it !in all }?.let { throw CompilerException("$it is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used.") }
-            return imports.toSet()
+    companion object {
+        /**
+         * The variables of the row, of [names], that the query [clauses] of [call] imports, as Neo4j has it: those its brackets
+         * name, `CALL (a, b) { … }`, or each with `CALL (*) { … }`; with no brackets, those its leading `WITH` names as they are,
+         * or each with `WITH *`; none where it has neither, `CALL () { … }` or `CALL { MATCH … }`. The compiler reads a call's
+         * scope from it too, so the two agree. Refuses a bracketed name not of the row, and, as Neo4j does (its 42I28), a leading
+         * `WITH` that names a variable of the row, or `*`, with anything more: such a `WITH` imports, and one that names none is
+         * any `WITH`, `CALL { WITH 1 AS one WHERE … }`.
+         */
+        fun imports(call: Clause.Call, clauses: List<Clause>, names: Collection<String>): Set<String> {
+            val all = names.toSet()
+            if (call.importsAll) return all
+            call.imports?.let { imports ->
+                imports.firstOrNull { it !in all }?.let { throw CompilerException("$it is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used.") }
+                return imports.toSet()
+            }
+            val with = clauses.firstOrNull() as? Clause.With ?: return emptySet()
+            val leading = with.projection
+            if (!leading.star && leading.items.none { (it.expression as? Expression.Variable)?.name in all }) return emptySet()
+            val plain = leading.items.all { (it.expression as? Expression.Variable)?.name == it.name }
+            if (!plain || with.where != null || leading.distinct || leading.orderBy.isNotEmpty() || leading.skip != null || leading.limit != null) {
+                throw CompilerException(
+                    "The importing WITH of a CALL { … } names variables of the row alone, as in Cypher: no alias, expression, DISTINCT, WHERE, ORDER BY, SKIP " +
+                        "or LIMIT. Import them with CALL (a, b) { … }, and work on them in a WITH after."
+                )
+            }
+            return if (leading.star) all else all intersect leading.items.map { it.name }.toSet()
         }
-        val with = clauses.firstOrNull() as? Clause.With ?: return emptySet()
-        val leading = with.projection
-        if (!leading.star && leading.items.none { (it.expression as? Expression.Variable)?.name in all }) return emptySet()
-        val plain = leading.items.all { (it.expression as? Expression.Variable)?.name == it.name }
-        if (!plain || with.where != null || leading.distinct || leading.orderBy.isNotEmpty() || leading.skip != null || leading.limit != null) {
-            throw CompilerException(
-                "The importing WITH of a CALL { … } names variables of the row alone, as in Cypher: no alias, expression, DISTINCT, WHERE, ORDER BY, SKIP " +
-                    "or LIMIT. Import them with CALL (a, b) { … }, and work on them in a WITH after."
-            )
-        }
-        return if (leading.star) all else all intersect leading.items.map { it.name }.toSet()
     }
 
     /**
      * The scope after a `WITH` or a `RETURN` of [projection] over [scope]: each item of the kind its expression is, and with
      * `*` each variable in scope. Its `WHERE`, [where], and its order read the items, and a variable before it as of any kind;
      * but a pattern in the `WHERE` names only what the `WITH` passes on, and what a `CALL`'s brackets import or a subquery
-     * reads from outside it, [kept], as Neo4j has it after a `WITH` that groups or is DISTINCT (drivine4j#504). Refuses two
-     * items of one name (Neo4j's 42N38).
+     * reads from outside it, [kept], as Neo4j has it after a `WITH` that groups or is DISTINCT (drivine4j#504). After one
+     * that neither groups nor is DISTINCT, Neo4j reads in the `WHERE` what it drops, but what a `WITH` before had dropped already, so a quantified path pattern's group there
+     * names none of them as its own (Neo4j's 42N07, drivine4j#681). After one that groups or is DISTINCT, a term of its order
+     * that doesn't aggregate reads only the items, and [kept]: a pattern used as an expression there that names a variable
+     * from before is refused, as Neo4j refuses it (its 42N29), where the compiler would read it as a new node that matches every
+     * row; an `EXISTS { … }`, a `COUNT { … }` or a pattern comprehension binds such a variable as its own, as Neo4j does
+     * (drivine4j#680). Refuses two items of one name (Neo4j's 42N38).
      */
     private fun projected(projection: Projection, scope: Scope, where: Expression?, kept: Set<String> = emptySet()): Scope {
         projection.items.groupBy { it.name }.entries.firstOrNull { it.value.size > 1 }?.let { (name, _) ->
@@ -175,15 +232,26 @@ internal object VariableKinds {
             valued(it.expression, condition = false)
         }
         // What a WITH outside drops stays dropped after a subquery's own WITH, but for an item that names it again.
-        val next = if (projection.star) scope.copy() else Scope(dropped = LinkedHashSet(scope.dropped))
+        // The clauses after it are within whatever projection [scope] is within, as it is.
+        val next = if (projection.star) scope.copy() else Scope(dropped = LinkedHashSet(scope.dropped), shadowing = LinkedHashSet(scope.shadowing), horizon = scope.horizon, hidden = LinkedHashSet(scope.hidden))
         projection.items.forEach { next[it.name] = kindOf(it.expression, scope) }
-        val reading = Scope(scope.kinds.mapValuesTo(LinkedHashMap()) { Kind.ANY }.apply { putAll(next.kinds) })
+        val groups = projection.distinct || projection.items.any { aggregates(it.expression) }
+        // Its own WHERE and order are within it, where it groups: they read its items, and what a subquery reads from outside it,
+        // within a projection that groups outside it too (drivine4j#681).
+        val horizon = if (!groups) scope.horizon else (next.kinds.keys + kept).toSet()
+        // What an outer WITH's WHERE reads that it drops stays shadowing in a subquery's order, as in its WHERE, and what a
+        // WITH outside dropped stays dropped there, as after it.
+        val reading = Scope(scope.kinds.mapValuesTo(LinkedHashMap()) { Kind.ANY }.apply { putAll(next.kinds) }, LinkedHashSet(next.dropped), LinkedHashSet(next.shadowing), horizon, LinkedHashSet(next.hidden))
         where?.let {
             val dropped = scope.kinds.keys.filterTo(LinkedHashSet(next.dropped)) { name -> next[name] == null && name !in kept }
-            expression(it, Scope(LinkedHashMap(reading.kinds), dropped))
+            // Not one a WITH before had dropped already, which Neo4j reads here no more than there.
+            val shadowing = if (groups) LinkedHashSet(next.shadowing) else dropped.filterTo(LinkedHashSet(next.shadowing)) { it !in scope.dropped }
+            expression(it, Scope(LinkedHashMap(reading.kinds), dropped, shadowing, horizon, LinkedHashSet(next.hidden)))
         }
+        val items = Scope(scope.kinds.filterKeys { it in kept }.mapValuesTo(LinkedHashMap()) { Kind.ANY }.apply { putAll(next.kinds) }, LinkedHashSet(next.dropped), LinkedHashSet(next.shadowing), horizon, LinkedHashSet(next.hidden))
+        // Read first, so a pattern that names a variable the order can't read is refused for that (42N29), before as a value (42I34), as Neo4j does.
         projection.orderBy.forEach {
-            expression(it.expression, reading)
+            expression(it.expression, if (groups && !aggregates(it.expression)) items.copy() else reading)
             valued(it.expression, condition = false)
         }
         projection.skip?.let { expression(it, scope) }
@@ -221,9 +289,16 @@ internal object VariableKinds {
         }
     }
 
-    /** A quantified path pattern's [group]: what it names is a list outside it, of whatever it matched. */
+    /**
+     * A quantified path pattern's [group]: what it names is a list outside it, of whatever it matched. A name bound outside
+     * it, one Neo4j reads where it is, is refused, as Neo4j refuses it (its 42N07): one in scope, and one a `WITH` that
+     * neither groups nor is DISTINCT drops, in its `WHERE` ([Scope.shadowing]). The compiler, which no longer has the one a
+     * `WITH` dropped, nor in the order of a projection that groups one a subquery reads from outside it, would take it as the
+     * group's own (drivine4j#681). One the `WITH` dropped, in its `WHERE` ([Scope.dropped]), is no longer read there.
+     */
     private fun grouped(group: RelationshipPattern.Group, scope: Scope) {
         val names = group.pattern.nodes.mapNotNull { it.variable } + group.pattern.relationships.mapNotNull { it.variable }
+        names.firstOrNull { (scope[it] != null && it !in scope.dropped) || it in scope.shadowing }?.let { throw CompilerException("$it is bound outside the quantified path pattern that names it.") }
         names.forEach { if (scope[it] == null) scope[it] = Kind.ANY }
     }
 
@@ -231,8 +306,14 @@ internal object VariableKinds {
     private fun use(variable: String, kind: Kind, scope: Scope) {
         // One a WITH does not pass on, in its WHERE: read there as a new node, it would match every row (drivine4j#504).
         if (variable in scope.dropped) throw CompilerException("$variable is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used.")
+        read(variable, scope)
         val bound = scope[variable] ?: return scope.set(variable, kind)
         if (!fits(bound, kind)) throw conflict(variable, bound, kind)
+    }
+
+    /** [variable] read where it is: one [Scope.hidden] is refused, after a variable not defined anywhere (see [inaccessible]). */
+    private fun read(variable: String, scope: Scope) {
+        if (variable in scope.hidden) inaccessible = inaccessible ?: CompilerException("$variable is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used.")
     }
 
     /** Whether a variable bound as [bound] may be used where a pattern takes [kind]. */
@@ -305,12 +386,19 @@ internal object VariableKinds {
      */
     private fun expression(expression: Expression, scope: Scope) {
         when (expression) {
-            is Expression.Literal, is Expression.Parameter, is Expression.Variable, Expression.CountStar -> {}
+            is Expression.Literal, is Expression.Parameter, Expression.CountStar -> {}
+            is Expression.Variable -> read(expression.name, scope)
             is Expression.Property -> expression(expression.subject, scope)
             is Expression.HasLabels -> expression(expression.subject, scope)
             is Expression.ListLiteral -> expression.items.forEach { expression(it, scope) }
             is Expression.MapLiteral -> expression.entries.forEach { expression(it.second, scope) }
-            is Expression.MapProjection -> expression.elements.forEach { if (it is Expression.MapProjection.Element.Entry) expression(it.value, scope) }
+            is Expression.MapProjection -> {
+                read(expression.variable, scope)
+                expression.elements.forEach {
+                    if (it is Expression.MapProjection.Element.Entry) expression(it.value, scope)
+                    if (it is Expression.MapProjection.Element.Variable) read(it.name, scope)
+                }
+            }
             is Expression.Binary -> {
                 expression(expression.left, scope)
                 expression(expression.right, scope)
@@ -334,21 +422,18 @@ internal object VariableKinds {
             }
             is Expression.ListComprehension -> {
                 expression(expression.list, scope)
-                val inner = scope.copy().also { it[expression.variable] = Kind.ANY }
+                val inner = scope.binding(expression.variable)
                 listOfNotNull(expression.where, expression.projection).forEach { expression(it, inner) }
             }
             is Expression.Quantifier -> {
                 expression(expression.list, scope)
-                val inner = scope.copy().also { it[expression.variable] = Kind.ANY }
+                val inner = scope.binding(expression.variable)
                 expression.where?.let { expression(it, inner) }
             }
             is Expression.Reduce -> {
                 expression(expression.initial, scope)
                 expression(expression.list, scope)
-                val inner = scope.copy().also {
-                    it[expression.accumulator] = Kind.ANY
-                    it[expression.variable] = Kind.ANY
-                }
+                val inner = scope.binding(expression.accumulator, expression.variable)
                 expression(expression.expression, inner)
             }
             is Expression.PatternComprehension -> {
