@@ -50,7 +50,8 @@ internal object VariableKinds {
      * Refuses [query] where a variable of it is used as two kinds, or made where it is bound already; where a pattern in a
      * `WITH`'s `WHERE` names a variable the `WITH` drops (see [Scope]); where a `WITH` or a `RETURN` names two items alike;
      * where a pattern is used as a value, not as a condition (see [valued]); and where a pattern or a subquery is in a
-     * property a `CREATE` or a `MERGE` makes, or a value a `MERGE` sets, where Neo4j refuses it (see [made] and [merged]).
+     * property a `CREATE` or a `MERGE` makes, or a value a `MERGE` sets, where Neo4j refuses it (see [made] and [merged]), and
+     * as not compiled yet where one is in a `CREATE`'s properties or a `MERGE`'s relationship's (see [timed]).
      */
     fun check(query: Query) {
         query(query, Scope())
@@ -89,11 +90,13 @@ internal object VariableKinds {
                     val before = current.copy()
                     val own = madeBy(clause.patterns, before)
                     clause.patterns.forEach { made(it, current, before, own, made, merging = false, foreach) }
+                    clause.patterns.forEach { pattern -> (pattern.nodes.mapNotNull { it.properties } + pattern.relationships.mapNotNull { it.properties }).forEach(::timed) }
                 }
                 is Clause.Merge -> {
                     merged(clause, current)
                     made(clause.pattern, current, current.copy(), madeBy(listOf(clause.pattern), current), mutableSetOf(), merging = true, foreach)
                     (clause.onCreate + clause.onMatch).forEach { set(it, current) }
+                    clause.pattern.relationships.mapNotNull { it.properties }.forEach(::timed)
                 }
                 is Clause.Set -> clause.items.forEach { set(it, current) }
                 is Clause.Remove -> {}
@@ -331,17 +334,39 @@ internal object VariableKinds {
     }
 
     /**
+     * Refuses [properties], a `CREATE`'s or a `MERGE`'s relationship's, as not compiled yet where it holds, at any depth, a
+     * pattern, a pattern comprehension, `EXISTS { … }` or `COUNT { … }` (drivine4j#814). Neo4j reads such a read of the graph
+     * at another moment than a SQL store, which writes a row and a pattern at a time and reads each before it writes it: a
+     * `CREATE`'s before it writes any of its rows, so `UNWIND [1, 2] AS i CREATE (m:M {c: COUNT { (:M) }})` stores 0 and 0,
+     * not 0 and 1, and what an earlier pattern of it makes not at all, within a `FOREACH` too, where a SQL store reads what
+     * an earlier node of the same pattern makes; and a `MERGE`'s relationship's after it makes the relationship, so
+     * `MERGE (n)-[r:R {f: NOT (n)-->()}]->(m)` stores false. A `MERGE`'s nodes' are left compiled, as a SQL store reads them
+     * as Neo4j does, a row at a time before it makes them. Read after what Neo4j refuses of the clause.
+     */
+    private fun timed(properties: Expression) {
+        val reads = mutableListOf<Expression>()
+        mentionsIn(properties, reads)
+        if (reads.isNotEmpty()) {
+            throw CompilerException("A pattern or a subquery in the properties of a CREATE, or of a MERGE's relationship, is Cypher, and is not compiled to SQL yet. Work it out in a WITH before the clause.")
+        }
+    }
+
+    /**
      * Every name [expression] holds, at any depth, whatever binds it: each variable it reads, each a comprehension, a
      * quantifier or `reduce()` binds, each a pattern names, a map projection's and its selectors, and each a subquery's query
-     * holds (see [mentionsIn]).
+     * holds (see [mentionsIn]). Each pattern, pattern comprehension, `EXISTS { … }` and `COUNT { … }` it holds, at any depth,
+     * is added to [reads] (see [timed]).
      */
-    private fun mentionsIn(expression: Expression): Set<String> {
+    private fun mentionsIn(expression: Expression, reads: MutableList<Expression>? = null): Set<String> {
         val names = LinkedHashSet<String>()
         fun pattern(pattern: Pattern) {
             names += named(pattern) + listOfNotNull(pattern.variable)
-            (pattern.nodes.mapNotNull { it.properties } + pattern.relationships.mapNotNull { it.properties }).forEach { names += mentionsIn(it) }
+            (pattern.nodes.mapNotNull { it.properties } + pattern.relationships.mapNotNull { it.properties }).forEach { names += mentionsIn(it, reads) }
             // A quantified path pattern's own pattern and its WHERE.
-            pattern.relationships.forEach { relationship -> relationship.group?.let { group -> pattern(group.pattern); group.where?.let { names += mentionsIn(it) } } }
+            pattern.relationships.forEach { relationship -> relationship.group?.let { group -> pattern(group.pattern); group.where?.let { names += mentionsIn(it, reads) } } }
+        }
+        if (expression is Expression.PatternPredicate || expression is Expression.PatternComprehension || expression is Expression.Exists || expression is Expression.Subquery) {
+            reads?.add(expression)
         }
         when (expression) {
             is Expression.Variable -> names += expression.name
@@ -355,17 +380,17 @@ internal object VariableKinds {
             is Expression.ListComprehension -> names += expression.variable
             is Expression.Quantifier -> names += expression.variable
             is Expression.Reduce -> names += listOf(expression.accumulator, expression.variable)
-            is Expression.Subquery -> names += mentionsIn(expression.query)
+            is Expression.Subquery -> names += mentionsIn(expression.query, reads)
             else -> {}
         }
-        parts(expression).forEach { names += mentionsIn(it) }
+        parts(expression).forEach { names += mentionsIn(it, reads) }
         return names
     }
 
     /** Every name [query] holds, at any depth, as [mentionsIn] reads an expression: what each clause binds or reads. */
-    private fun mentionsIn(query: Query): Set<String> {
+    private fun mentionsIn(query: Query, reads: MutableList<Expression>? = null): Set<String> {
         val names = LinkedHashSet<String>()
-        fun expression(expression: Expression?) { if (expression != null) names += mentionsIn(expression) }
+        fun expression(expression: Expression?) { if (expression != null) names += mentionsIn(expression, reads) }
         fun pattern(pattern: Pattern) = expression(Expression.PatternPredicate(pattern))
         fun projection(projection: Projection) {
             projection.items.forEach { names += it.name; expression(it.expression) }
@@ -396,7 +421,7 @@ internal object VariableKinds {
                     is Clause.Delete -> clause.expressions.forEach(::expression)
                     is Clause.VectorSearch -> { names += listOfNotNull(clause.node, clause.score); expression(clause.k); expression(clause.vector); expression(clause.where) }
                     is Clause.Foreach -> { names += clause.variable; expression(clause.list); clauses(clause.clauses) }
-                    is Clause.Call -> { names += clause.imports.orEmpty(); names += mentionsIn(clause.query) }
+                    is Clause.Call -> { names += clause.imports.orEmpty(); names += mentionsIn(clause.query, reads) }
                 }
             }
         }

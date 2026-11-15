@@ -54,7 +54,7 @@ class WriteValuesTableTest {
         for (cell in spec["cells"]!!) {
             val stored = text(cell, "neo4j") == "stored"
             val notYet = cell["ours"]?.textValue() == "not compiled yet"
-            if (notYet && (!stored || text(cell, "error") != NOT_YET)) wrong += "${text(cell, "position")}, ${text(cell, "form")}: not compiled yet where Neo4j gives ${text(cell, "neo4j")}, or with another message"
+            if (notYet && (!stored || text(cell, "error") !in NOT_YET)) wrong += "${text(cell, "position")}, ${text(cell, "form")}: not compiled yet where Neo4j gives ${text(cell, "neo4j")}, or with another message"
             val pinned = if (stored && !notYet) null else text(cell, "error")
             for (store in STORES) {
                 val refused = verdict(cell["cypher"]!!, store)
@@ -92,6 +92,10 @@ class WriteValuesTableTest {
 
     private companion object {
         val STORES = listOf("postgres", "oracle", "sqlite")
-        const val NOT_YET = "A variable a CREATE or a MERGE makes, read inside a pattern or a comprehension in its own properties, is Cypher, and is not compiled to SQL yet."
+        /** What is not compiled yet: a variable the clause makes, read within (checked first), and any read of the graph where Neo4j reads it at another moment. */
+        val NOT_YET = setOf(
+            "A variable a CREATE or a MERGE makes, read inside a pattern or a comprehension in its own properties, is Cypher, and is not compiled to SQL yet.",
+            "A pattern or a subquery in the properties of a CREATE, or of a MERGE's relationship, is Cypher, and is not compiled to SQL yet. Work it out in a WITH before the clause.",
+        )
     }
 }
