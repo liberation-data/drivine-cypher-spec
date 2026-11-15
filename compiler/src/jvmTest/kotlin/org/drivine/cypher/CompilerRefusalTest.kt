@@ -835,7 +835,7 @@ class CompilerRefusalTest {
             refused("RETURN toString([1, 2])"), refused("RETURN toString([1, 2.5])"), refused("RETURN toString(['a', 'b'])"),
             refused("RETURN toString([1.0E20, 0.001])"), refused("RETURN toString([date('2024-01-02')])"),
             refused("RETURN toString([[1], ['a']])"), refused("RETURN toString([[1], [2]])"), refused("RETURN toString([{a: 1}, {b: 2}])"),
-            // collect() of anything, a property or a node, bound by a WITH or not, DISTINCT or not.
+            // collect() of a property, a node or a value of one kind, bound by a WITH or not, DISTINCT or not.
             refused("MATCH (p:Person) WITH p ORDER BY p.name RETURN toString(collect(p.born))"),
             refused("MATCH (p:Person) WITH collect(p.born) AS c RETURN toString(c)"),
             refused("MATCH (p:Person) WITH collect(p.name) AS c RETURN toString(c)"),
@@ -904,6 +904,9 @@ class CompilerRefusalTest {
             // kind of the value compiled, temporal values of one kind (Json.items) or nodes (Entities), before it reads the null item.
             refused("RETURN toString([date('2024-01-02'), null])"), refused("MATCH (n) RETURN toString([n, null])"),
             refused("MATCH (n) WITH [n, null] AS l RETURN toString(l)"),
+            // Not captured: Neo4j probably takes collect() of a value of any kind, a parameter or an item unwound from a list of
+            // items of many kinds, as it takes [x IN \$l | x]. The compiler refuses collect() of any value it leaves open (Items.ONE).
+            ToStringList("RETURN toString(collect(\$p))", refused = true, parameters = mapOf("p" to 1)), refused("UNWIND [1, 'a'] AS x RETURN toString(collect(x))"),
         )
     }
 }

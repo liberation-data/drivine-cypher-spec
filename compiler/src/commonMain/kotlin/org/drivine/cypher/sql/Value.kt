@@ -74,7 +74,7 @@ sealed interface Value {
         val known: Known? = null,
         /**
          * Where Neo4j types it as a list narrower than `List<Any>`, the one kind ([Items]) of its items: a list written of them, a
-         * list a function such as `keys()` or `range()` gives, a list comprehension of items of one kind, `collect()` of anything, or a variable a `WITH`
+         * list a function such as `keys()` or `range()` gives, a list comprehension of items of one kind, `collect()` of a property, a node or a value of one kind, or a variable a `WITH`
          * binds to one. Neo4j refuses `toString()` of such a list when it plans the statement, and so does the compiler
          * (drivine4j#420, liberation-data/drivine-cypher-spec#296). Null where an item's kind is left open, as a property's, or two differ.
          */

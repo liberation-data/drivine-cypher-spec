@@ -6789,7 +6789,7 @@ cases:
         rows: [["2.5", "3", "a", "4.0"]]
 
   - name: "toString() of a list or a map"
-    description: "toString() of a list of items of many kinds, or of a map, that the statement makes is its text, as Neo4j's Cypher 25 writes it, where the SQL stores refused it (liberation-data/drivine4j#420): each item as toString() writes it, a text without quotes, null as null, after ', ', and each entry as key: value, in the order of the keys' code points, as Neo4j orders them, not as written. A list Neo4j types as narrower than List<Any>, of items of one kind or collect() of anything, is refused, as Neo4j refuses it (see \"toString of a list or a map\")."
+    description: "toString() of a list of items of many kinds, or of a map, that the statement makes is its text, as Neo4j's Cypher 25 writes it, where the SQL stores refused it (liberation-data/drivine4j#420): each item as toString() writes it, a text without quotes, null as null, after ', ', and each entry as key: value, in the order of the keys' code points, as Neo4j orders them, not as written. A list Neo4j types as narrower than List<Any>, of items of one kind or collect() of a property, is refused, as Neo4j refuses it (see \"toString of a list or a map\")."
     steps:
       - note: "Neo4j 2026.10.1 gives these three."
         cypher: "RETURN [toString([1, 'a']), size(toString([1, 'a'])), toString({a: 1, b: 'x'}), toString([1.0, true, null])]"
@@ -6799,7 +6799,7 @@ cases:
         rows: [["[[1, x], {k: [true, 2.5]}, [], {}]", "[]", "{}", "{a: 2, b: 1}"]]
       - cypher: "RETURN toString({b: 'x', a: [{d: 1, c: 2.5}], c: null})"
         rows: ["{a: [{c: 2.5, d: 1}], b: x, c: null}"]
-      - note: "Neo4j 2026.10.1 refuses toString() of collect() of anything when it plans the statement, as it types it a list of one kind or another, never List<Any>: Type mismatch: expected … List<Any> … but was List<Boolean>, List<Float>, … (liberation-data/drivine-cypher-spec#296). A SQL store gave its text."
+      - note: "Neo4j 2026.10.1 refuses toString() of collect() of a property when it plans the statement, as it types it a list of one kind or another, never List<Any>: Type mismatch: expected … List<Any> … but was List<Boolean>, List<Float>, … (liberation-data/drivine-cypher-spec#296). A SQL store gave its text."
         only: [neo4j]
         cypher: "MATCH (p:Person) WITH p ORDER BY p.name RETURN toString(collect(p.born))"
         error: true
@@ -8271,7 +8271,7 @@ cases:
         error: "Two lists compared with <, <=, > or >= do not run on Oracle in the step of a reduce(): its function calls no function of the query's from SQL."
 
   - name: "toString of a list or a map"
-    description: "toString() of a list Neo4j types as narrower than List<Any> is refused, as Neo4j refuses it when it plans the statement: a list written of items of one kind, integers and floats both numbers, a list of lists or of maps, collect() of anything, a list of maps, nodes or relationships, a list keys(), labels(), split(), range(), nodes() or relationships() gives, a comprehension of items of one kind, a pattern comprehension, tail(), reverse() or a slice of such a list, head(), last() or an item [i] of a list of such lists, two such lists of one kind joined by + or given to coalesce(), a CASE each of whose values, its ELSE too, is such a list of one kind, a UNION's column each of whose queries gives such a list, or one a WITH binds (liberation-data/drivine-cypher-spec#296); of a map, its text (liberation-data/drivine4j#420); and of a value whose kind the statement leaves open, as a list with a property or a null among its items, it is run."
+    description: "toString() of a list Neo4j types as narrower than List<Any> is refused, as Neo4j refuses it when it plans the statement: a list written of items of one kind, integers and floats both numbers, a list of lists or of maps, collect() of a property, a node or a list, a list of maps, nodes or relationships, a list keys(), labels(), split(), range(), nodes() or relationships() gives, a comprehension of items of one kind, a pattern comprehension, tail(), reverse() or a slice of such a list, head(), last() or an item [i] of a list of such lists, two such lists of one kind joined by + or given to coalesce(), a CASE each of whose values, its ELSE too, is such a list of one kind, a UNION's column each of whose queries gives such a list, or one a WITH binds (liberation-data/drivine-cypher-spec#296); of a map, its text (liberation-data/drivine4j#420); and of a value whose kind the statement leaves open, as a list with a property or a null among its items, it is run."
     steps:
       - note: "Neo4j refuses both under Cypher 5. Neo4j 2026.10's default language, Cypher 25, gives toString({a: 1}) as '{a: 1}', and toString([1, 'a']) as '[1, a]' though it refuses toString([1, 2])."
         only: [neo4j]
@@ -8317,7 +8317,7 @@ cases:
       - only: [sql]
         cypher: "UNWIND [1964, 1967] AS b WITH collect(b) AS c RETURN toString(c)"
         error: "toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j."
-      - note: "Neo4j 2026.10.1 refuses each of these when it plans them, as it types each a list narrower than List<Any>: of numbers, integers and floats alike, of lists of any items, of maps, collect() of anything, keys(), labels(), split(), range(), a comprehension, and an item unwound from a list of lists of integers (liberation-data/drivine-cypher-spec#296). A SQL store gave the text of some of them."
+      - note: "Neo4j 2026.10.1 refuses each of these when it plans them, as it types each a list narrower than List<Any>: of numbers, integers and floats alike, of lists of any items, of maps, collect() of a property, keys(), labels(), split(), range(), a comprehension, and an item unwound from a list of lists of integers (liberation-data/drivine-cypher-spec#296). A SQL store gave the text of some of them."
         only: [neo4j]
         cypher: "RETURN toString([1, 2.5])"
         error: true
