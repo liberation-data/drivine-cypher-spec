@@ -94,6 +94,28 @@ class TemporalArithmeticHostTest {
     }
 
     @Test
+    fun `a nanosecond past the microsecond fails on both but for a date's duration (drivine4j#421)`() {
+        val past = mapOf(
+            Temporal.LOCAL_TIME to "12:00:00.000000001", Temporal.TIME to "12:00:00.123456789+02:00",
+            Temporal.LOCAL_DATE_TIME to "2024-01-01T00:00:00.1234567", Temporal.DATE_TIME to "2024-01-01T00:00:00.000000001Z",
+        )
+        val differ = mutableListOf<String>()
+        fun check(op: String, x: String, y: String, fails: Boolean) {
+            val (inline, host) = inline("$x $op $y") to host(op, x, y)
+            if (inline != host || (inline == "fails") != fails) differ += "$x $op $y: inline $inline, host $host"
+        }
+        past.forEach { (kind, text) -> listOf("PT1S", "P1D", "PT0.000001S").forEach { d ->
+            check("+", literal(kind, text), literal(Temporal.DURATION, d), fails = true)
+            check("-", literal(kind, text), literal(Temporal.DURATION, d), fails = true)
+        } }
+        moments.forEach { (kind, texts) -> listOf("PT0.000000001S", "-PT1.0000001S").forEach { d ->
+            check("+", literal(kind, texts.first()), literal(Temporal.DURATION, d), fails = kind != Temporal.DATE)
+            check("+", literal(Temporal.DURATION, d), literal(kind, texts.first()), fails = kind != Temporal.DATE)
+        } }
+        assertTrue(differ.isEmpty(), differ.joinToString("\n"))
+    }
+
+    @Test
     fun `null gives null, and a pair Cypher has no arithmetic of fails by name`() {
         assertEquals(null, call("+", tag(Temporal.DURATION, "P1D"), null))
         assertEquals(null, call("-", "null", tag(Temporal.DURATION, "P1D")))

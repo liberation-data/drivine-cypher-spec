@@ -24,6 +24,9 @@ class SqliteTemporalSql(shared: (List<String>, (List<String>) -> String) -> Stri
     override val textType = "TEXT"
     override fun local(text: String, kind: Temporal) = temporal("local", text, "'${kind.name}'")
 
+    /** The host function's `local` and `utc` of a text that is no temporal value fail, quoting it: see [microsWritten]. */
+    override fun heldMicros(text: String, kinds: List<Temporal>) = microsWritten(text)
+
     override fun utc(text: String, kind: Temporal) = temporal("utc", text, "'${kind.name}'")
 
     /**

@@ -483,7 +483,10 @@ abstract class SqlCypherCompiler(
     protected fun bound(vararg values: String, body: (List<String>) -> String): String {
         val alias = "sh${++shares}"
         val columns = values.withIndex().joinToString(", ") { (i, value) -> "$value AS v${i + 1}" }
-        return "(SELECT ${body(values.indices.map { "$alias.v${it + 1}" })} FROM (${boundSelect(columns)}) $alias)"
+        val names = values.indices.map { "$alias.v${it + 1}" }
+        // A temporal text the compiler wrote is one by name too, so it isn't tested again where it is read (drivine4j#421).
+        temporals.carry(values.toList(), names)
+        return "(SELECT ${body(names)} FROM (${boundSelect(columns)}) $alias)"
     }
 
     /**

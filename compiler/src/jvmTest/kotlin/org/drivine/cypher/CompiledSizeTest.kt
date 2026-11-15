@@ -53,8 +53,9 @@ class CompiledSizeTest {
             val (one, two, four) = listOf(1, 2, 4).map { compiler.compile(added(it)).sql.length }
             // A sum that may be a text writes each side as toString does, a float as Java writes it: on Oracle twice, the
             // second time for a text past 4,000 bytes (#298). On Postgres the sum's key is cut from its text where it can be,
-            // beside the store's function (#161).
-            assertTrue(one < 32_000, "${compiler::class.simpleName}: $one characters")
+            // beside the store's function (#161). 33,000: on Postgres drivine4j#421 reads the value through the store's _held
+            // function, for a nanosecond past the microsecond, which writes about 1,000 more here (31,060 before).
+            assertTrue(one < 33_000, "${compiler::class.simpleName}: $one characters")
             assertTrue(four < 3 * two, "${compiler::class.simpleName}: $two, then $four characters")
         }
     }
@@ -331,15 +332,18 @@ class CompiledSizeTest {
     fun `a sort by a property on Postgres is by its JSON and its text, and only a list the statement makes is walked as a list`() {
         // Walked as a list, a term costs thousands a row in the planner's estimate, which brings in its JIT for the whole
         // statement past a few dozen rows. A text sorts by its code points (#273), and a temporal value's tag by its kind and its
-        // key (#161), in the same row, with no subquery; a list, by its items read in one pass, not walked (drivine4j#271).
+        // key (#161), in the same row, with no subquery; a list, by its items read in one pass, not walked (drivine4j#271), by the
+        // store's function, whose cost the planner takes as declared (#284).
         val compiler = PostgresCypherCompiler("g")
         val property = compiler.compile("MATCH (c:Claim) RETURN c.name ORDER BY c.name").sql.substringAfter("ORDER BY ")
-        val flatList = Regex("""WHEN jsonb_typeof\(p2\.s1\) = 'array' THEN CAST\(\(SELECT .* FROM jsonb_array_elements\(p2\.s1\) WITH ORDINALITY fe \(item, item_no\)\) AS jsonb\) """)
+        // The kind read once (#284): a number reaches its own value with one test, not three.
+        val flatList = Regex("""WHEN 'array' THEN CAST\(g_list_key\(p2\.s1\) AS jsonb\) """)
         assertTrue(flatList.containsMatchIn(property) && "RECURSIVE" !in property, property)
+        assertEquals(1, Regex("jsonb_typeof").findAll(property.substringBefore(", (CASE")).count(), property)
         assertEquals(
-            "ROW(CASE WHEN jsonb_typeof(p2.s1) = 'string' THEN '\"\"'::jsonb " +
-                "WHEN (p2.s1 ->> '\$t') IS NOT NULL THEN jsonb_build_object('k', CASE (p2.s1 ->> '\$t') WHEN 'datetime' THEN 1 WHEN 'localdatetime' THEN 2 " +
-                "WHEN 'date' THEN 3 WHEN 'time' THEN 4 WHEN 'localtime' THEN 5 WHEN 'duration' THEN 6 ELSE 0 END, 's', COALESCE(p2.s1 -> 's', p2.s1 -> 'v')) " +
+            "ROW(CASE jsonb_typeof(p2.s1) WHEN 'string' THEN '\"\"'::jsonb " +
+                "WHEN 'object' THEN CASE WHEN (p2.s1 ->> '\$t') IS NOT NULL THEN jsonb_build_object('k', CASE (p2.s1 ->> '\$t') WHEN 'datetime' THEN 1 WHEN 'localdatetime' THEN 2 " +
+                "WHEN 'date' THEN 3 WHEN 'time' THEN 4 WHEN 'localtime' THEN 5 WHEN 'duration' THEN 6 ELSE 0 END, 's', COALESCE(p2.s1 -> 's', p2.s1 -> 'v')) ELSE p2.s1 END " +
                 "ELSE NULLIF(p2.s1, 'null'::jsonb) END, " +
                 "(CASE WHEN jsonb_typeof(p2.s1) = 'string' THEN (p2.s1 #>> '{}') END) COLLATE \"C\")",
             property.replace(flatList, ""),

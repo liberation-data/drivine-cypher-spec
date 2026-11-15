@@ -1,5 +1,6 @@
 package org.drivine.cypher.store.ddl
 
+import org.drivine.cypher.sql.PostgresCypherCompiler
 import org.drivine.cypher.sql.TemporalArithmeticFunction
 import org.drivine.DrivineInternalApi
 import org.drivine.cypher.sql.Temporals.Companion.NANOS
@@ -106,11 +107,56 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
         "CREATE INDEX IF NOT EXISTS $countDeltasIndex ON $countDeltas (kind, name)",
         lockTable,
         lockSeed,
-    ).map { it.trimIndent() } + writes.ddl + temporalKeyFunction() + TemporalArithmeticFunction.postgres(name) + "COMMENT ON TABLE $nodes IS '$VERSION'" }
+    ).map { it.trimIndent() } + writes.ddl + temporalKeyFunction() + heldFunction() + TemporalArithmeticFunction.postgres(name) + listKeyFunction() + "COMMENT ON TABLE $nodes IS '$VERSION'" }
 
     override val lockTable: String get() = "CREATE TABLE IF NOT EXISTS $lock (name text PRIMARY KEY)"
 
     override val lockSeed: String get() = "INSERT INTO $lock (name) VALUES ('$lockRow') ON CONFLICT DO NOTHING"
+
+    /** The function compiled Cypher reads a temporal value's text through before a timestamp is read of it: see [heldFunction]. */
+    val held: String = heldName(name)
+
+    /**
+     * Makes [held]: the text `t` as it is, or the statement failing by name where its fraction of a second has a seventh,
+     * eighth or ninth digit that isn't 0, which a timestamp's microseconds would round away (drivine4j#421). The digits are
+     * read one by one from the point, to the first that is none, an offset's sign or `Z`, or the text's end: no regular
+     * expression, whose `REGEXP_REPLACE` cost Postgres some 60 µs a row, and a text with no point is given back at once. Its
+     * message is [org.drivine.cypher.sql.Temporals.SUB_MICRO], as the test the SQL writes where the store keeps no such function.
+     */
+    private fun heldFunction(): String = quotedBody("""
+        CREATE OR REPLACE FUNCTION ${heldName(name)}(t text) RETURNS text LANGUAGE plpgsql IMMUTABLE PARALLEL SAFE AS '
+        DECLARE
+            p int := strpos(t, '.');
+            c text;
+        BEGIN
+            IF p = 0 THEN
+                RETURN t;
+            END IF;
+            FOR i IN 1 .. 9 LOOP
+                c := substr(t, p + i, 1);
+                EXIT WHEN c = '' OR c < '0' OR c > '9';
+                IF i > 6 AND c <> '0' THEN
+                    RAISE EXCEPTION '% %', '${org.drivine.cypher.sql.Temporals.SUB_MICRO.replace("'", "''")}', t;
+                END IF;
+            END LOOP;
+            RETURN t;
+        END
+        '
+    """.trimIndent())
+
+    /** The function compiled Cypher sorts a list of a kind the statement leaves open by: see [listKeyFunction]. */
+    val listKey: String = listKeyName(name)
+
+    /**
+     * Makes [listKey]: the sort key, as text, of a list whose kind the statement leaves open, as one read from a property, the
+     * query the compiler writes for it (`PostgresCypherCompiler.flatListKeyBody`) over its argument. SQL, which the planner
+     * doesn't write out where it is called, as it holds a query: so it costs the call as declared, low, where the query written
+     * out in a sort key was costed on every row, brought in its JIT and ruled out a parallel plan (drivine-cypher-spec#284).
+     * Its body is a text in quotes, not dollars, so the block [ensuring] makes the store in reads it as one statement.
+     */
+    private fun listKeyFunction(): String =
+        "CREATE OR REPLACE FUNCTION $listKey(cy_list jsonb) RETURNS text LANGUAGE sql IMMUTABLE PARALLEL SAFE COST 5 AS '" +
+            PostgresCypherCompiler(name).flatListKeyBody("cy_list").replace("'", "''") + "'"
 
     /** The function compiled Cypher works out a temporal value's sort key by: see [temporalKeyFunction]. */
     val temporalKey: String = temporalKeyName(name)
@@ -205,9 +251,12 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
                 lpad(CAST(o + $OFFSET_BIAS AS text), 6, '0');
         END
         '
-    """.trimIndent().let { function ->
+    """.trimIndent().let(::quotedBody)
+
+    /** [function] with each quote of its body, between `AS '` and the last line's `'`, written twice, as Postgres reads a body in quotes. */
+    private fun quotedBody(function: String): String {
         val (start, end) = function.indexOf("AS '\n") + 5 to function.lastIndexOf("\n'")
-        function.substring(0, start) + function.substring(start, end).replace("'", "''") + function.substring(end)
+        return function.substring(0, start) + function.substring(start, end).replace("'", "''") + function.substring(end)
     }
 
     /**
@@ -442,12 +491,19 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
          * What the node table's comment says of a store this version made. A store an earlier version made has its functions
          * made again when it is ensured: 9 finds a node by its id's JSON (#245), and 10 keeps the function of temporal arithmetic
          * (drivine4j#418), whose body changes with the compiler's: a change of the DDL bumps it (`store.yaml`'s `generated`), as
-         * 11 does, the function cutting a duration's quotients with `div` (drivine-cypher-spec#275).
+         * 11 does, the function cutting a duration's quotients with `div` (drivine-cypher-spec#275), the `_held` function made beside it
+         * (drivine4j#421), and the `_list_key` function a sort calls (drivine-cypher-spec#284).
          */
         const val VERSION = "drivine:11"
 
         /** The function the store of the graph [graph] keeps that works out a temporal value's sort key: see [temporalKey]. */
         fun temporalKeyName(graph: String) = "${graph}_temporal_key"
+
+        /** The function the store of the graph [graph] keeps that refuses a nanosecond past the microsecond: see [held]. */
+        fun heldName(graph: String) = "${graph}_held"
+
+        /** [listKey]'s name, for the graph [graph]: what it adds to the name is at most 16 long, as each name the store gives is. */
+        fun listKeyName(graph: String) = "${graph}_list_key"
 
         /** Why [name] cannot name a graph here; null where it can (see [SqlStoreDdl.refusal]). */
         fun refusal(name: String): String? = SqlStoreDdl.refusal(name, ENGINE, MAX_OBJECT_NAME)
