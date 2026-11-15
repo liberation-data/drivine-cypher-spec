@@ -225,6 +225,45 @@ cases:
       - cypher: "MATCH (:CyWrite)-[r]-() RETURN r"
         rows: []
 
+  - name: "A write whose returned rows fail as they are read"
+    description: "A statement that writes and returns a row that fails as the statement runs keeps nothing it wrote or deleted. On Oracle a compiled write's block returned its rows by a cursor whose query ran only as the host read it, after the block's writes were done, and so kept them (liberation-data/drivine-cypher-spec#292)."
+    steps:
+      - cypher: "CREATE (:CyWrite {num: 1})"
+      - note: "keys() of a number read from data fails as the statement runs."
+        cypher: "MATCH (n:CyWrite) SET n.x = 1 RETURN keys(n.num)"
+        error: true
+      - cypher: "MATCH (n:CyWrite) RETURN n.x"
+        rows: [null]
+      - cypher: "MATCH (n:CyWrite) WITH n, n.num AS num DETACH DELETE n RETURN keys(num)"
+        error: true
+      - cypher: "MATCH (n:CyWrite) RETURN count(n)"
+        rows: [1]
+      - note: "A sort key that fails fails the statement as well, though it isn't returned: on Oracle the block reads the rows in their order."
+        only: [neo4j, sql]
+        cypher: "MATCH (n:CyWrite) SET n.x = 1 RETURN n.num ORDER BY left('a', -n.num)"
+        error: true
+      - only: [neo4j, sql]
+        cypher: "MATCH (n:CyWrite) RETURN n.x"
+        rows: [null]
+      - note: "Rows that don't fail are still returned in their order, a null one as null."
+        cypher: "UNWIND [2, 3] AS i CREATE (n:CyWrite {num: i}) RETURN n.none, n.num ORDER BY n.num DESC"
+        rows: [[null, 3], [null, 2]]
+      - cypher: "MATCH (n:CyWrite) SET n.x = n.num RETURN n.none ORDER BY n.num"
+        rows: [null, null, null]
+
+  - name: "A write that returns a value made anew each time it is read"
+    description: "On Oracle a write's returned rows, a row each, are worked out once in its block, to check them, and then again as the host reads them (liberation-data/drivine-cypher-spec#292). What the statement wrote is written once, and what it returns of it is what it wrote; a value made anew, as randomUUID(), is made anew."
+    steps:
+      - only: [neo4j, sql]
+        cypher: "UNWIND range(1, 3) AS i CREATE (n:CyWrite {i: i, u: randomUUID()}) RETURN [size(n.u), size(randomUUID())]"
+        rows: [[36, 36], [36, 36], [36, 36]]
+      - only: [neo4j, sql]
+        cypher: "MATCH (n:CyWrite) RETURN count(n), count(DISTINCT n.u)"
+        rows: [[3, 3]]
+      - only: [neo4j, sql]
+        cypher: "MATCH (n:CyWrite {i: 1}) SET n.v = randomUUID() RETURN n.v = n.v, size(n.v)"
+        rows: [[true, 36]]
+
   - name: "A write after a DELETE"
     description: "What a statement makes after it deletes is made anew, with no id of what it deleted, and a read after the DELETE finds none of it."
     steps:
@@ -263,6 +302,93 @@ cases:
         rows: [[false, false]]
       - cypher: "MATCH (:CyWrite {k: 'a'})-[:T]->(c:CyWrite) RETURN c.k"
         rows: ["c"]
+
+  - name: "A node read after the statement deletes it"
+    description: "A property or the labels of a node the statement deleted earlier fail, as Neo4j fails them, where the node is there to delete; the node itself is still bound, with no keys and no properties (liberation-data/drivine4j#420). Over no rows nothing fails."
+    steps:
+      - cypher: "MATCH (n:CyWrite) DELETE n RETURN n.num"
+        rows: []
+      - cypher: "MATCH (n:CyWrite) DELETE n RETURN labels(n)"
+        rows: []
+      - cypher: "CREATE (:CyWrite {num: 1})"
+      - note: "A SQL store gave null (drivine4j#420). Neo4j 2026.10.1: Node with id N has been deleted in this transaction."
+        only: [neo4j, sql]
+        cypher: "MATCH (n:CyWrite) DELETE n RETURN n.num"
+        error: true
+      - note: "The statement failed, so the node is still there; Oracle kept it deleted until liberation-data/drivine-cypher-spec#292."
+        only: [neo4j, sql]
+        cypher: "MATCH (n:CyWrite) RETURN count(n)"
+        rows: [1]
+      - cypher: "MATCH (n:CyWrite) DETACH DELETE n"
+      - cypher: "CREATE (:CyWrite {num: 1})"
+      - only: [neo4j, sql]
+        cypher: "MATCH (n:CyWrite) DELETE n WITH n RETURN n.num"
+        error: true
+      - cypher: "MATCH (n:CyWrite) DETACH DELETE n"
+      - cypher: "CREATE (:CyWrite {num: 1})"
+      - only: [neo4j, sql]
+        cypher: "MATCH (n:CyWrite) DELETE n RETURN labels(n)"
+        error: true
+      - cypher: "MATCH (n:CyWrite) DETACH DELETE n"
+      - cypher: "CREATE (:CyWrite {num: 1})"
+      - note: "A SQL store gave null for each of these (drivine4j#420)."
+        only: [neo4j, sql]
+        cypher: "MATCH (n:CyWrite) DELETE n RETURN keys(n)"
+        rows: [[]]
+      - cypher: "CREATE (:CyWrite {num: 1})"
+      - only: [neo4j, sql]
+        cypher: "MATCH (n:CyWrite) DELETE n RETURN properties(n)"
+        rows: [{}]
+      - cypher: "CREATE (:CyWrite {num: 1})"
+      - only: [neo4j, sql]
+        cypher: "MATCH (n:CyWrite) DELETE n RETURN n"
+        rows: [{}]
+      - cypher: "MATCH (n:CyWrite) RETURN count(n)"
+        rows: [0]
+
+  - name: "A relationship read after the statement deletes it"
+    description: "type() of a relationship the statement deleted earlier, or whose node it deleted with DETACH DELETE, is still its type, and a property of it fails, as in Neo4j (liberation-data/drivine4j#420, liberation-data/drivine4j#427). Over no rows nothing fails."
+    steps:
+      - cypher: "MATCH (:CyWrite)-[r]->() DELETE r RETURN type(r)"
+        rows: []
+      - cypher: "MATCH (:CyWrite)-[r]->() DELETE r RETURN r.num"
+        rows: []
+      - cypher: "CREATE (:CyWrite)-[:T {num: 1}]->(:CyWrite)"
+      - note: "A SQL store gave null (drivine4j#420). Neo4j 2026.10.1: Relationship with id N has been deleted in this transaction."
+        only: [neo4j, sql]
+        cypher: "MATCH (:CyWrite)-[r]->() DELETE r RETURN r.num"
+        error: true
+      - note: "The statement failed, so the relationship is still there; Oracle kept it deleted until liberation-data/drivine-cypher-spec#292."
+        only: [neo4j, sql]
+        cypher: "MATCH (:CyWrite)-[r]->() RETURN count(r)"
+        rows: [1]
+      - cypher: "MATCH (n:CyWrite) DETACH DELETE n"
+      - cypher: "CREATE (:CyWrite)-[:T {num: 1}]->(:CyWrite)"
+      - only: [neo4j, sql]
+        cypher: "MATCH (a:CyWrite)-[r]->() DETACH DELETE a RETURN r.num"
+        error: true
+      - cypher: "MATCH (n:CyWrite) DETACH DELETE n"
+      - cypher: "CREATE (:CyWrite)-[:T {num: 1}]->(:CyWrite)"
+      - note: "A SQL store gave null: its rows held the relationship's id alone, and its row was gone (drivine4j#427)."
+        only: [neo4j, sql]
+        cypher: "MATCH (a:CyWrite)-[r]->() DETACH DELETE a RETURN type(r)"
+        rows: ["T"]
+      - cypher: "CREATE (:CyWrite)-[:T {num: 1}]->(:CyWrite)"
+      - only: [neo4j, sql]
+        cypher: "MATCH (:CyWrite)-[r]->() DELETE r RETURN type(r)"
+        rows: ["T"]
+      - cypher: "CREATE (:CyWrite)-[:T {num: 1}]->(:CyWrite)"
+      - note: "A SQL store gave null here too: the type is held by the relationship, whatever name a WITH gives it."
+        only: [neo4j, sql]
+        cypher: "MATCH (:CyWrite)-[r]->() DELETE r WITH r AS x RETURN type(x)"
+        rows: ["T"]
+      - cypher: "CREATE (:CyWrite {num: 2})-[:T {num: 1}]->(:CyWrite)"
+      - note: "A node the statement didn't delete still reads, and so does a relationship OPTIONAL MATCH found none of."
+        only: [neo4j, sql]
+        cypher: "MATCH (a:CyWrite {num: 2})-[r]->() OPTIONAL MATCH (a)-[s:NONE]->() DELETE r, s RETURN [a.num, s.num, type(s)]"
+        rows: [[2, null, null]]
+      - cypher: "MATCH (:CyWrite)-[r]->() RETURN count(r)"
+        rows: [0]
 
   - name: "An id is not used again by a later statement"
     description: "On the SQL stores, a node or relationship made after another was deleted, in a later statement, never takes the deleted one's id."
@@ -2199,3 +2325,29 @@ cases:
         rows: ["r", "q", "p"]
       - cypher: "MATCH (n:CyWrite) WHERE n.id IN ['p', 'q', 'r'] WITH min(n.l) AS lo, max(n.l) AS hi RETURN [size(lo), toString(lo[0]), toString(hi[0])]"
         rows: [[1, "2020-01-01", "2020-01-02"]]
+
+  - name: "A walk and a list of relationships bound before"
+    description: "A walk compared to a list of relationships bound before it finds the walk the list is. Neo4j walks such a list named as the walk's own variable, `-[rs*]->`, which the compiler refuses as not compiled yet (see refusals.yaml, \"Read not compiled yet\", drivine4j#427)."
+    steps:
+      - cypher: "CREATE (a:CyWrite {id: 'a'}), (b:CyWrite {id: 'b'}), (c:CyWrite {id: 'c'}) CREATE (a)-[:Y]->(b), (b)-[:Y]->(c)"
+      - cypher: "MATCH ()-[r1]->()-[r2]->() WITH [r1, r2] AS rs LIMIT 1 MATCH (first)-[r*]->(second) WHERE r = rs RETURN first.id, second.id"
+        only: [neo4j, sql]
+        rows: [["a", "c"]]
+      - cypher: "MATCH ()-[r1]->()-[r2]->() WITH [r1, r2] AS rs LIMIT 1 MATCH p = (first)-[*]->(second) WHERE relationships(p) = rs RETURN first.id, second.id"
+        only: [neo4j, sql]
+        rows: [["a", "c"]]
+      - cypher: "MATCH ()-[r1]->()-[r2]->() WITH [r1, r2] AS rs LIMIT 1 MATCH (first)-[r*]->(second) WHERE size(r) = size(rs) AND all(i IN range(0, size(rs) - 1) WHERE r[i] = rs[i]) RETURN first.id, second.id"
+        only: [neo4j, sql]
+        rows: [["a", "c"]]
+      - cypher: "MATCH (first)-[r*]->(second) WITH r MATCH (x)-[r2*]->(y) WHERE r2 = r RETURN count(*)"
+        only: [neo4j, sql]
+        rows: [3]
+      - cypher: "MATCH (first)-[r*]->(second) RETURN first.id, second.id, size(r) AS n ORDER BY n, first.id"
+        only: [neo4j, sql]
+        rows: [["a", "b", 1], ["b", "c", 1], ["a", "c", 2]]
+      - cypher: "MATCH p = (first)-[r*]->(second) WHERE size(r) = 2 RETURN first.id, second.id"
+        only: [neo4j, sql]
+        rows: [["a", "c"]]
+      - cypher: "MATCH (first {id: 'a'})-[r*]->(second) RETURN second.id ORDER BY size(r)"
+        only: [neo4j, sql]
+        rows: ["b", "c"]

@@ -111,6 +111,26 @@ class StoreDdlTest {
     }
 
     /**
+     * The Postgres function a sort of a list of a kind left open calls is the compiler's own query of it, so the two can't drift,
+     * declared cheap and parallel safe; and a compiled sort calls it, with no subquery of the list's items written out, which the
+     * planner costs on every row (#284).
+     */
+    @Test
+    fun theListKeyFunctionIsTheCompilersQueryAndASortCallsIt() {
+        val name = PostgresDdl.listKeyName(graph)
+        val made = postgres.ddl.single { it.startsWith("CREATE OR REPLACE FUNCTION $name(") }
+        val head = "CREATE OR REPLACE FUNCTION $name(cy_list jsonb) RETURNS text LANGUAGE sql IMMUTABLE PARALLEL SAFE COST 5 AS '"
+        assertTrue(made.startsWith(head) && made.endsWith("'"), made.take(200))
+        val compiler = org.drivine.cypher.sql.PostgresCypherCompiler(graph)
+        assertEquals(compiler.flatListKeyBody("cy_list"), made.substring(head.length, made.length - 1).replace("''", "'"))
+        assertEquals(postgres.listKey, name)
+
+        val sql = compiler.compile("MATCH (n:Person) RETURN n.name ORDER BY n.name DESC LIMIT 100").sql
+        assertTrue("$name(" in sql, sql)
+        assertTrue("jsonb_array_elements(" !in sql, sql)
+    }
+
+    /**
      * Oracle keeps a function's text from `FUNCTION` on, so the version comment ends its first line in `user_source`, outside
      * any literal, and [OracleDdl.ensuring] makes again each function whose line 1 lacks it (#251).
      */

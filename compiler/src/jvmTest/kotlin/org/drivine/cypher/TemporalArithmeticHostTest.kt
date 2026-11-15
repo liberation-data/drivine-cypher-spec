@@ -1,10 +1,5 @@
 package org.drivine.cypher
 
-import org.drivine.cypher.host.HostArgs
-import org.drivine.cypher.host.HostFunction
-import org.drivine.cypher.host.HostFunctions
-import org.drivine.cypher.host.HostResult
-import org.drivine.cypher.host.SqlType
 import org.drivine.cypher.json.CypherJson
 import org.drivine.cypher.sql.SqliteCypherCompiler
 import org.drivine.cypher.sql.Temporal
@@ -14,10 +9,7 @@ import org.drivine.cypher.store.ValueLayout
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
-import org.sqlite.Function
-import org.sqlite.core.Codes
 import java.sql.Connection
-import java.sql.DriverManager
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
@@ -32,13 +24,7 @@ import kotlin.test.assertTrue
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class TemporalArithmeticHostTest {
 
-    private val connection: Connection = DriverManager.getConnection("jdbc:sqlite::memory:").also { c ->
-        HostFunctions.all.forEach { register(c, it) }
-        // drivine_fail, which each library registers itself, as a refusal the SQL writes calls it (#263's among them).
-        Function.create(c, org.drivine.cypher.store.SqliteFunctions.FAIL, object : Function() {
-            override fun xFunc() = error(value_text(0) ?: "failed")
-        }, 1, 0)
-    }
+    private val connection: Connection = SqliteHost.connection()
 
     @AfterAll
     fun close() = connection.close()
@@ -91,6 +77,28 @@ class TemporalArithmeticHostTest {
         }
         assertTrue(differ.isEmpty(), "${differ.size} of ${cases.size} differ, such as:\n${differ.take(25).joinToString("\n")}")
         assertTrue(cases.size > 2000, "${cases.size}")
+    }
+
+    @Test
+    fun `a nanosecond past the microsecond fails on both but for a date's duration (drivine4j#421)`() {
+        val past = mapOf(
+            Temporal.LOCAL_TIME to "12:00:00.000000001", Temporal.TIME to "12:00:00.123456789+02:00",
+            Temporal.LOCAL_DATE_TIME to "2024-01-01T00:00:00.1234567", Temporal.DATE_TIME to "2024-01-01T00:00:00.000000001Z",
+        )
+        val differ = mutableListOf<String>()
+        fun check(op: String, x: String, y: String, fails: Boolean) {
+            val (inline, host) = inline("$x $op $y") to host(op, x, y)
+            if (inline != host || (inline == "fails") != fails) differ += "$x $op $y: inline $inline, host $host"
+        }
+        past.forEach { (kind, text) -> listOf("PT1S", "P1D", "PT0.000001S").forEach { d ->
+            check("+", literal(kind, text), literal(Temporal.DURATION, d), fails = true)
+            check("-", literal(kind, text), literal(Temporal.DURATION, d), fails = true)
+        } }
+        moments.forEach { (kind, texts) -> listOf("PT0.000000001S", "-PT1.0000001S").forEach { d ->
+            check("+", literal(kind, texts.first()), literal(Temporal.DURATION, d), fails = kind != Temporal.DATE)
+            check("+", literal(Temporal.DURATION, d), literal(kind, texts.first()), fails = kind != Temporal.DATE)
+        } }
+        assertTrue(differ.isEmpty(), differ.joinToString("\n"))
     }
 
     @Test
@@ -154,6 +162,43 @@ class TemporalArithmeticHostTest {
         }
     }
 
+    @Test
+    fun `a duration's fields of its seconds are worked out in whole numbers, not doubles, written or given (#278)`() {
+        // java.time's Duration holds a duration's time as Cypher does: whole seconds, floored, and nanoseconds from 0 up to a
+        // second. The larger units are of the whole seconds, counted toward zero, as Java's / counts.
+        val texts = listOf(
+            "PT87659999H59M59.999999999S", "-PT87659999H59M59.999999999S", "PT-1.5S", "-PT0.000001S", "PT0.5S", "PT1S", "PT0S",
+            "-PT25H0.5S", "-PT1M0.5S", "PT30M0.5S", "PT2562047H47M16.854775807S",
+        )
+        // And a fraction of an hour, a month or a day, which goes to the parts below it, beside a long time.
+        // A fraction of an hour or a minute leaves a fraction of a second, which a text given keeps as the compiler's does.
+        for (text in listOf("PT1.5H", "P0.5M", "P1.5D", "-P0.5M", "P1.5MT87659999H59M59.999999999S", "-P1.5DT0.000000001S",
+            "PT0.0001H", "PT0.01M", "-PT0.0001H", "PT1.0000001H", "PT0.0001H-1S", "PT-0.01M0.5S")) {
+            assertEquals(inline("toString(duration('$text'))"), inline("toString(duration(\$d))", mapOf("d" to text)), "$text given")
+            for (field in listOf("seconds", "milliseconds", "nanoseconds", "secondsOfMinute", "nanosecondsOfSecond")) {
+                assertEquals(inline("duration('$text').$field"), inline("duration(\$d).$field", mapOf("d" to text)), "$text.$field given")
+            }
+        }
+        for (text in texts) {
+            // Its text given is the text the compiler writes of it written: the canonical text, worked out as it compiles.
+            assertEquals(inline("toString(duration('$text'))"), inline("toString(duration(\$d))", mapOf("d" to text)), "$text given")
+            val d = java.time.Duration.parse(text)
+            val (s, n) = d.seconds to d.nano.toLong()
+            val want = mapOf(
+                "hours" to s / 3600, "minutes" to s / 60, "seconds" to s, "minutesOfHour" to s / 60 - s / 3600 * 60, "secondsOfMinute" to s - s / 60 * 60,
+                "milliseconds" to s * 1000 + n / 1000000, "microseconds" to s * 1000000 + n / 1000,
+                "nanoseconds" to runCatching { Math.addExact(Math.multiplyExact(s, 1000000000L), n) }.getOrNull(),
+                "millisecondsOfSecond" to n / 1000000, "microsecondsOfSecond" to n / 1000, "nanosecondsOfSecond" to n,
+            )
+            for ((field, value) in want) {
+                // Past a long, Neo4j fails to give the nanoseconds, so they aren't pinned.
+                if (value == null) continue
+                assertEquals(value.toString(), inline("duration('$text').$field"), "$text.$field written")
+                assertEquals(value.toString(), inline("duration(\$d).$field", mapOf("d" to text)), "$text.$field given")
+            }
+        }
+    }
+
     /** The Cypher literal of [text] of [kind]. */
     private fun literal(kind: Temporal, text: String) = "${kind.function}('$text')"
 
@@ -192,47 +237,5 @@ class TemporalArithmeticHostTest {
         is org.drivine.cypher.json.ObjectNode -> node.fieldNames().asSequence().toList().sorted().associateWith { sorted(node[it]!!) }.toSortedMap()
         is org.drivine.cypher.json.ArrayNode -> node.map { sorted(it) }
         else -> CypherJson.writeValueAsString(node)
-    }
-
-    /** [function] registered on [connection], as drivine4j's `SqliteHostFunction` registers each. */
-    private fun register(connection: Connection, function: HostFunction) =
-        Function.create(connection, function.name, Host(function), function.arity, if (function.deterministic) Function.FLAG_DETERMINISTIC else 0)
-
-    /** A host function as xerial's driver calls one: drivine4j's `SqliteHostFunction`, for the test. */
-    private class Host(private val function: HostFunction) : Function() {
-        override fun xFunc() {
-            try {
-                function.body.call(args, args(), result)
-            } catch (e: Exception) {
-                error(e.message ?: e.javaClass.simpleName)
-            }
-        }
-
-        private val args = object : HostArgs {
-            override fun type(i: Int) = when (value_type(i)) {
-                Codes.SQLITE_INTEGER -> SqlType.INTEGER
-                Codes.SQLITE_FLOAT -> SqlType.FLOAT
-                Codes.SQLITE_TEXT -> SqlType.TEXT
-                Codes.SQLITE_BLOB -> SqlType.BLOB
-                else -> SqlType.NULL
-            }
-            override fun long(i: Int) = value_long(i)
-            override fun int(i: Int) = value_int(i)
-            override fun double(i: Int) = value_double(i)
-            override fun text(i: Int): String? = value_text(i)
-            override fun text16(i: Int): String? = value_text(i)
-            override fun blob(i: Int): ByteArray? = value_blob(i)
-        }
-
-        private val result = object : HostResult {
-            override fun nullValue() = result()
-            override fun long(value: Long) = result(value)
-            override fun int(value: Int) = result(value)
-            override fun double(value: Double) = result(value)
-            override fun text(value: String) = result(value)
-            override fun text16(value: String) = result(value)
-            override fun blob(value: ByteArray) = result(value)
-            override fun error(message: String) = this@Host.error(message)
-        }
     }
 }

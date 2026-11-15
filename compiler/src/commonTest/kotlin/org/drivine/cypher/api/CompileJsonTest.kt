@@ -214,7 +214,7 @@ class CompileJsonTest {
         assertEquals(json, write("{\"name\": \"g\", \"oracleRowsAsText\": null}"))
         assertTrue("DBMS_SQL.RETURN_RESULT(cy_cursor)" in json && "rows:json" !in json, json)
         val text = write("{\"name\": \"g\", \"oracleRowsAsText\": true}")
-        assertTrue("RETURNING CLOB EXTENDED) AS \\\"rows:json\\\" FROM (" in text, text)
+        assertTrue("RETURNING CLOB EXTENDED) AS \\\"rows:json\\\" FROM DUAL;" in text, text)
         // Meaningful on Oracle only: the other stores compile alike either way.
         for (store in listOf("postgres", "sqlite")) {
             assertEquals(write("{\"name\": \"g\"}", store), write("{\"name\": \"g\", \"oracleRowsAsText\": true}", store), store)

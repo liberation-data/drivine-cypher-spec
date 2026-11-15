@@ -20,6 +20,12 @@ cases:
                   minutes: localdatetime({year: 2024, month: 1, day: 1, hour: 9, minute: 45}).minute}
         rows: [{leap: 60, noon: 1704110400, local: 10, zoned: 30, minutes: 45}]
 
+  - name: "The day of the quarter"
+    description: "dayOfQuarter of a date, a local moment and a moment is the day of its quarter, counted from 1, as Neo4j 2026.10.1 gives it (liberation-data/drivine4j#427)."
+    steps:
+      - cypher: "RETURN [date('1984-10-11').dayOfQuarter, localdatetime('1984-10-11T12:31:14').dayOfQuarter, datetime('1984-10-11T12:31:14+01:00').dayOfQuarter]"
+        rows: [[11, 11, 11]]
+
   - name: "Fields of a duration"
     description: "A duration made from text or a map gives its fields."
     steps:
@@ -45,13 +51,12 @@ cases:
       - note: "Exactly, a nanosecond beside ten thousand years of hours: SQLite added the parts in doubles and lost it (#275)."
         cypher: "RETURN [toString(duration('PT87660000H') + duration('PT0.000000001S')), toString(duration('PT87660000H') - duration('PT0.000000001S')), toString(duration('P10000Y') - duration('-P10000Y'))]"
         rows: [["PT87660000H0.000000001S", "PT87659999H59M59.999999999S", "P20000Y"]]
-      - note: "A long duration a hair under a whole unit is cut toward zero, not rounded up by Postgres's numeric division to the next: in its text and its fields (#275). SQLite works the fields out in doubles, which round it up (#278)."
-        only: [neo4j, postgres, oracle]
+      - note: "A long duration a hair under a whole unit is cut toward zero, not rounded up to the next: in its text and its fields, by Postgres's numeric division (#275) and SQLite's doubles (#278)."
         cypher: "WITH duration('PT87659999H59M59.999999999S') AS d RETURN [d.hours, d.minutes, d.minutesOfHour, d.secondsOfMinute, toString(d)]"
         rows: [[87659999, 5259599999, 59, 59, "PT87659999H59M59.999999999S"]]
-      - only: [sqlite]
-        cypher: "RETURN toString(duration('PT87659999H59M59.999999999S'))"
-        rows: ["PT87659999H59M59.999999999S"]
+      - note: "Its seconds and the fraction of a second past them, whole numbers each; and the same of one below zero, whose seconds are floored and whose fraction is counted up from them (#278)."
+        cypher: "UNWIND [duration('PT87659999H59M59.999999999S'), duration('-PT87659999H59M59.999999999S')] AS d RETURN [d.seconds, d.secondsOfMinute, d.millisecondsOfSecond, d.microsecondsOfSecond, d.nanosecondsOfSecond, d.hours, d.minutesOfHour]"
+        rows: [[315575999999, 59, 999, 999999, 999999999, 87659999, 59], [-315576000000, 0, 0, 0, 1, -87660000, 0]]
       - note: "And the whole days a date takes of one: Oracle fails a hundred thousand days with ORA-01873 (#279)."
         only: [neo4j, postgres, sqlite]
         cypher: "RETURN toString(date('2024-01-01') + duration('PT2399999H59M59.999999999S'))"
@@ -1131,6 +1136,176 @@ cases:
         cypher: "RETURN toString(date('-9999-01-15') - duration('P1M'))"
         error: true
 
+  - name: "A nanosecond past the microsecond"
+    description: "A temporal value keeps its nanoseconds in its text on every store, written, stored and read back, compared and sorted by its key, and its fields read off its text. No store's timestamp keeps a nanosecond past the microsecond: Postgres's holds microseconds, Oracle's is written FF6, SQLite's to six places. So where a value is worked out through one, made of a nanosecond field, moved by a duration, truncated, converted, measured by duration.between, or a field read off it, as its week, day of the week or epochSeconds is, a nanosecond past the microsecond fails by name on the SQL stores, where they cut or rounded it away (drivine4j#421). Working it out exactly is drivine-cypher-spec#246. A date takes the whole days of a duration's time alone, so a duration's nanoseconds are no matter beside one."
+    steps:
+      - note: "Kept: written, its text, its fields and its order."
+        only: [neo4j, sql]
+        cypher: "RETURN [toString(localtime('12:31:14.645876123')), toString(localdatetime('2024-01-01T00:00:00.000000001')), localtime('12:00:00.000000002') > localtime('12:00:00.000000001'), localtime('12:00:00.645876123').nanosecond, toString(duration({seconds: 1, nanoseconds: 1})), toString(date('2024-01-01') + duration('PT0.000000001S'))]"
+        rows: [["12:31:14.645876123", "2024-01-01T00:00:00.000000001", true, 645876123, "PT1.000000001S", "2024-01-01"]]
+      - only: [neo4j, sql]
+        cypher: "UNWIND [localtime('12:00:00.000000002'), localtime('12:00:00.000000001'), localtime('12:00:00.000000003')] AS t RETURN toString(t) ORDER BY t"
+        rows: ["12:00:00.000000001", "12:00:00.000000002", "12:00:00.000000003"]
+      - note: "Kept: a value made of whole microseconds."
+        only: [neo4j, sql]
+        cypher: "RETURN toString(localtime({hour: 12, minute: 0, second: 0, nanosecond: 645876000}))"
+        rows: ["12:00:00.645876"]
+      - note: "Refused: made of a nanosecond past the microsecond, written or bound."
+        only: [sql]
+        cypher: "RETURN localtime({hour: 12, minute: 0, second: 0, nanosecond: 645876123})"
+        error: true
+      - only: [sql]
+        cypher: "RETURN localtime({hour: 12, minute: 0, second: 0, nanosecond: $n})"
+        parameters: {n: 645876123}
+        error: true
+      - note: "Refused: a moment moved by a duration of a nanosecond past the microsecond, or a moment of one moved."
+        only: [sql]
+        cypher: "RETURN localdatetime('2024-01-01T00:00:00') + duration('PT0.000000001S')"
+        error: true
+      - only: [sql]
+        cypher: "RETURN localdatetime('2024-01-01T00:00:00.000000001') + duration('PT1S')"
+        error: true
+      - note: "Stored, as data another engine wrote would be: kept where it is read as it is."
+        only: [neo4j, sql]
+        cypher: "CREATE (:CyTemporal {id: 'ns', t: localtime('12:00:00.000000001'), at: localdatetime('2024-01-01T00:00:00.000000001'), d: duration('PT0.000000001S')})"
+      - only: [neo4j, sql]
+        cypher: "MATCH (n:CyTemporal {id: 'ns'}) RETURN [toString(n.t), n.t.nanosecond, toString(n.at), toString(n.d)]"
+        rows: [["12:00:00.000000001", 1, "2024-01-01T00:00:00.000000001", "PT0.000000001S"]]
+      - note: "Stored: refused as the statement runs through each path that reads a store's timestamp of it."
+        only: [sql]
+        cypher: "MATCH (n:CyTemporal {id: 'ns'}) RETURN n.at + duration('PT1S')"
+        error: true
+      - only: [sql]
+        cypher: "MATCH (n:CyTemporal {id: 'ns'}) RETURN localdatetime('2024-01-01T00:00:00') + n.d"
+        error: true
+      - only: [sql]
+        cypher: "MATCH (n:CyTemporal {id: 'ns'}) RETURN n.at + n.d"
+        error: true
+      - only: [sql]
+        cypher: "MATCH (n:CyTemporal {id: 'ns'}) RETURN localtime.truncate('second', n.t)"
+        error: true
+      - only: [sql]
+        cypher: "MATCH (n:CyTemporal {id: 'ns'}) RETURN date(n.at)"
+        error: true
+      - only: [sql]
+        cypher: "MATCH (n:CyTemporal {id: 'ns'}) RETURN duration.between(n.at, localdatetime('2024-01-02T00:00:00'))"
+        error: true
+      - only: [sql]
+        cypher: "MATCH (n:CyTemporal {id: 'ns'}) RETURN localtime({time: n.t})"
+        error: true
+      - note: "A field read off the store's timestamp, not off the text."
+        only: [sql]
+        cypher: "MATCH (n:CyTemporal {id: 'ns'}) RETURN n.at.dayOfWeek"
+        error: true
+      - only: [sql]
+        cypher: "MATCH (n:CyTemporal {id: 'ns'}) RETURN n.at.epochSeconds"
+        error: true
+      - note: "A fraction of one to nine digits, beside an offset or Z: refused only where a seventh to ninth digit isn't 0, read as the store reads the text."
+        only: [neo4j, sql]
+        cypher: "CREATE (:CyTemporal {id: 'ns2', a: datetime('2024-01-01T00:00:00.123456789+10:00'), b: datetime('2024-01-01T00:00:00.5Z'), c: localdatetime('2024-01-01T00:00:00.1234560'), e: datetime('2024-01-01T00:00:00.12345+10:00'), f: localtime('12:00:00.123456001'), g: time('12:00:00.000000001Z')})"
+      - only: [neo4j, sql]
+        cypher: "MATCH (n:CyTemporal {id: 'ns2'}) RETURN [(n.b + duration('PT1S')).millisecond, (n.c + duration('PT1S')).microsecond, (n.e + duration('PT1S')).microsecond, (n.e + duration('PT1S')).timezone, (n.e + duration('PT1S')).second]"
+        rows: [[500, 123456, 123450, "+10:00", 1]]
+      - only: [sql]
+        cypher: "MATCH (n:CyTemporal {id: 'ns2'}) RETURN n.a + duration('PT1S')"
+        error: true
+      - only: [sql]
+        cypher: "MATCH (n:CyTemporal {id: 'ns2'}) RETURN n.f + duration('PT1S')"
+        error: true
+      - only: [sql]
+        cypher: "MATCH (n:CyTemporal {id: 'ns2'}) RETURN n.g + duration('PT1S')"
+        error: true
+
+  - name: "A sum or an average of durations, or of other kinds"
+    description: "Neo4j's sum() and avg() take integers, floats and durations, and pass nulls by: a duration's they work out, and any other kind fails. The SQL stores' sum adds numbers alone, so it gave 0, and the average null, for any other item (#281). Now each fails by name there: a duration as not yet worked out (#282), any other kind as Neo4j fails it. Where the statement makes the items, it fails as it compiles; where it reads one from the store or is given it, as it runs."
+    steps:
+      - note: "Neo4j gives each a duration."
+        only: [neo4j]
+        cypher: "UNWIND [duration('PT0.1S'), duration('PT0.2S')] AS d RETURN [toString(sum(d)), toString(avg(d))]"
+        rows: [["PT0.3S", "PT0.15S"]]
+      - note: "The SQL stores fail on each."
+        only: [sql]
+        cypher: "UNWIND [duration('PT0.1S'), duration('PT0.2S')] AS d RETURN sum(d)"
+        error: true
+      - only: [sql]
+        cypher: "UNWIND [duration('PT0.1S'), duration('PT0.2S')] AS d RETURN avg(d)"
+        error: true
+      - only: [neo4j, sql]
+        cypher: "CREATE (:CyTemporal {id: 'a', d: duration('PT87660000H'), n: 1, s: 'a', b: true, l: [1], day: date('2024-01-01'), at: localdatetime('2024-01-01T00:00'), f: 0.5}), (:CyTemporal {id: 'b', d: duration('PT0.000000001S'), n: 2, f: 2.25})"
+      - note: "Read from the store, of a kind the statement doesn't know."
+        only: [neo4j]
+        cypher: "MATCH (n:CyTemporal) RETURN toString(sum(n.d))"
+        rows: ["PT87660000H0.000000001S"]
+      - only: [sql]
+        cypher: "MATCH (n:CyTemporal) RETURN sum(n.d)"
+        error: true
+      - only: [sql]
+        cypher: "MATCH (n:CyTemporal) RETURN avg(n.d)"
+        error: true
+      - only: [sql]
+        cypher: "MATCH (n:CyTemporal) RETURN sum(DISTINCT n.d)"
+        error: true
+      - note: "Any other kind fails on every store, read from the store: a text, a truth value, a list, a date, a moment."
+        only: [neo4j, sql]
+        cypher: "MATCH (n:CyTemporal) RETURN sum(n.s)"
+        error: true
+      - only: [neo4j, sql]
+        cypher: "MATCH (n:CyTemporal) RETURN avg(n.b)"
+        error: true
+      - only: [neo4j, sql]
+        cypher: "MATCH (n:CyTemporal) RETURN sum(n.l)"
+        error: true
+      - only: [neo4j, sql]
+        cypher: "MATCH (n:CyTemporal) RETURN sum(n.day)"
+        error: true
+      - only: [neo4j, sql]
+        cypher: "MATCH (n:CyTemporal) RETURN avg(n.at)"
+        error: true
+      - note: "Or written: a text, a truth value, a list, a map, a date, a time."
+        only: [neo4j, sql]
+        cypher: "UNWIND ['a'] AS x RETURN sum(x)"
+        error: true
+      - only: [neo4j, sql]
+        cypher: "UNWIND [true] AS x RETURN avg(x)"
+        error: true
+      - only: [neo4j, sql]
+        cypher: "UNWIND [[1]] AS x RETURN sum(x)"
+        error: true
+      - only: [neo4j, sql]
+        cypher: "UNWIND [{a: 1}] AS x RETURN sum(x)"
+        error: true
+      - only: [neo4j, sql]
+        cypher: "UNWIND [date('2024-01-01')] AS x RETURN sum(x)"
+        error: true
+      - only: [neo4j, sql]
+        cypher: "UNWIND [time('12:00Z')] AS x RETURN avg(x)"
+        error: true
+      - note: "Beside a number: a text or a duration fails on every store."
+        only: [neo4j, sql]
+        cypher: "UNWIND [1, 'a'] AS x RETURN sum(x)"
+        error: true
+      - only: [neo4j, sql]
+        cypher: "MATCH (n:CyTemporal) UNWIND [n.d, n.n] AS x RETURN sum(x)"
+        error: true
+      - note: "Numbers alone are summed and averaged as before, nulls passed by, and none is 0 and null."
+        only: [neo4j, sql]
+        cypher: "MATCH (n:CyTemporal) RETURN [sum(n.n), avg(n.n)]"
+        rows: [[3, 1.5]]
+      - note: "Floats read from the store, which Oracle holds as doubles, are numbers too."
+        only: [neo4j, sql]
+        cypher: "MATCH (n:CyTemporal) RETURN [sum(n.f), avg(n.f)]"
+        rows: [[2.75, 1.375]]
+      - only: [neo4j, sql]
+        cypher: "UNWIND [1, null, 2.5] AS x RETURN [sum(x), avg(x)]"
+        rows: [[3.5, 1.75]]
+      - only: [neo4j, sql]
+        cypher: "MATCH (n:CyTemporal) WHERE n.id = 'none' RETURN [sum(n.d), avg(n.s)]"
+        rows: [[0, null]]
+      - note: "An item of a list with none is no text nor list to refuse: its sum is 0, written as such."
+        only: [neo4j, sql]
+        cypher: "UNWIND [] AS x RETURN [sum(x), avg(x), toString(sum(x))]"
+        rows: [[0, null, "0"]]
+
   - name: "A duration divided, and its seconds written"
     description: "A duration divided by a number is each of its parts divided, as Cypher divides it, not times the number's reciprocal, whose rounding lost a whole month on Postgres (#260). Its seconds are rounded to the nine places a duration's text writes before they are split into hours and minutes, so a hair under a whole minute is no 59M60S, nor a hair over a whole time a 0S (#261)."
     steps:
@@ -1354,6 +1529,10 @@ cases:
         cypher: "MATCH (n:CyTemporal) RETURN [n.id, toString(n.day), n.day.year, toString(n.day + duration('P1D')), toString(n.at + duration('P1Y')), n.clock.year] ORDER BY n.id"
         only: [neo4j, sql]
         rows: [["a", "-0044-03-15", -44, "-0044-03-16", "-0043-03-15T12:00:00Z", 0], ["b", "0000-12-31", 0, "0001-01-01", null, null]]
+      - note: "A stored value that may be a time of day or a moment, the base of a time: its year is renumbered once where the store numbers years BC otherwise (drivine4j#421)."
+        cypher: "MATCH (n:CyTemporal {id: 'a'}) RETURN [toString(localtime({time: n.at})), toString(localdatetime({date: n.at, time: n.at})), toString(localdatetime({date: n.clock, time: n.at}))]"
+        only: [neo4j, sql]
+        rows: [["12:00:00", "-0044-03-15T12:00:00", "0000-01-01T12:00:00"]]
       - cypher: "MATCH (n:CyTemporal) WHERE n.day < date('0001-01-01') RETURN n.id ORDER BY n.id"
         only: [neo4j, sql]
         rows: ["a", "b"]

@@ -341,12 +341,12 @@ Kotlin). A statement that writes and returns rows then returns them all as one r
 a column named `rows:json`:
 
 ```sql
-OPEN cy_cursor FOR
-    SELECT JSON_SERIALIZE(COALESCE(JSON_ARRAYAGG(cy_r.result ORDER BY cy_r.cy_n NULL ON NULL RETURNING JSON), JSON('[]')) RETURNING CLOB EXTENDED) AS "rows:json" FROM (
-        SELECT cy_q.result, ROWNUM AS cy_n FROM (
-            <the rows' query>
-        ) cy_q
-    ) cy_r;
+SELECT COALESCE(JSON_ARRAYAGG(cy_r.result ORDER BY cy_r.cy_n NULL ON NULL RETURNING JSON), JSON('[]')) INTO cy_result FROM (
+    SELECT cy_q.result, ROWNUM AS cy_n FROM (
+        <the rows' query>
+    ) cy_q
+) cy_r;
+OPEN cy_cursor FOR SELECT JSON_SERIALIZE(cy_result RETURNING CLOB EXTENDED) AS "rows:json" FROM DUAL;
 DBMS_SQL.RETURN_RESULT(cy_cursor);
 ```
 
@@ -355,8 +355,24 @@ The text is Oracle's extended JSON, so a float stays a float: an object of the o
 and `"-Inf"`. Every other value is plain JSON, as the `JSON` rows hold it: a whole number in full, a text, a temporal
 value as its ISO 8601 text, a list, a map. A map the statement returns whose one key is `$numberDouble` is written as a
 float is. The host reads the one row while its driver prefetches at least one row (node-oracledb's default is 2). The
-rows are one JSON value, so a write whose rows together pass Oracle's limit on the size of one fails, where a row of
-`JSON` each would not.
+rows are one JSON value, so a write whose rows together pass Oracle's limit on the size of one, 32 MB, fails, where a row
+of `JSON` each would not.
+
+Either way every row's result is worked out inside the block, before the cursor is opened, so a returned value that fails
+as it runs fails the block and Oracle undoes its writes (liberation-data/drivine-cypher-spec#292). A cursor over the rows'
+query alone ran it only as the host fetched, after the writes. Without the option, the block counts the rows, numbered in
+their order so that a sort key that fails fails there too, and the cursor then runs the query again as before:
+
+```sql
+SELECT COUNT(cy_r.result) + MAX(cy_r.cy_n) INTO cy_count FROM (
+    SELECT cy_q.result, ROWNUM AS cy_n FROM (
+        <the rows' query>
+    ) cy_q
+) cy_r;
+OPEN cy_cursor FOR
+    <the rows' query>;
+DBMS_SQL.RETURN_RESULT(cy_cursor);
+```
 
 Every other statement, a read or a write that returns nothing, compiles alike either way, as does every statement on the
 other stores. The option is temporary: Drivine for TypeScript sets it until a node-oracledb release with
@@ -590,7 +606,7 @@ on a text that is no JSON, and takes an empty one as no value, as drivine4j's do
 | `drivine_regex_group(text, pattern, group)` | the text the group of that number matches where the pattern first matches (0 the whole match), as Postgres's `regexp_match` gives it; null where it matches nowhere, the group takes no part or is past the pattern's, or the text or pattern is null. A null group is 0; a negative one fails the statement. Deterministic. |
 | `drivine_regexp_replace(text, pattern, replacement)` | the text with each match replaced, `\1` in the replacement naming a group as Postgres's and Oracle's do, anything else itself; null where any is null. A match whose replacement names a group the pattern hasn't fails the statement, as Java's does. Deterministic. |
 | `drivine_temporal(operation, …)` | what compiled SQL works out of a timestamp, the text of a wall clock to the microsecond (`2024-03-15T10:30:00.000000`), as java.time works it out, by its operation: `local(text, kind)` and `utc(text, kind)`, the wall clock an ISO text of a kind (`DATE_TIME` …) reads, its offset (`Z`, `±hh:mm` or `±hhmm`; one with seconds is none) left out or moved to UTC; `extract(timestamp, field)`, `YEAR`, `MONTH`, `DAY`, `HOUR`, `MINUTE` or `NANOSECOND_OF_MINUTE` (no `SECOND`); `day_of_week(timestamp)`; `add_months(timestamp, months)`; `add_time(timestamp, days, seconds, nanos)`, added as Java's `plusDays`, `plusSeconds` and `plusNanos` add them; `months_between(from, to)`; `seconds_between(from, to)`, whole seconds, floored, and `nanos_between(from, to)`, the nanoseconds past them, 0 to 999,999,999, so the two are exact over the whole range of years; `truncate(timestamp, unit)`. Whole numbers each, but for the timestamps; a count given as a float or a text is read as a decimal rounded half away from zero. A timestamp it writes keeps the microsecond, cut, never rounded. Null where an argument after the operation is null; a text that is no temporal value fails the statement, naming it. Deterministic. |
-| `drivine_temporal_arithmetic(operator, x, y)` | Cypher's `x + y`, `x - y`, `x * y` or `x / y` where either is the tag of a temporal value read from the store, as JSON text, or a duration the statement scales by a number or two durations it adds or takes one from the other, which SQLite's SQL worked out in doubles (#262, #275), as Postgres and Oracle work it out by the function they keep (`TemporalArithmeticFunction`, drivine4j#418): a moment moved by a duration, as the inline SQLite SQL moves one, to the microsecond; two durations added or taken away, and a duration times or divided by a number, exactly, each part to nine places; a duration divided by zero fails (`/ by zero`), as on the other stores. `x` and `y` are JSON texts or SQL numbers; null where either is null, SQL's or JSON's, and NaN or an infinity fails, as no number a duration is scaled by. A pair Cypher has no arithmetic of fails the statement, naming it, as does a date or a moment with a date moved past the year 9999 or before -9999, as the inline SQL fails (#263). The wasm build exports it as `temporalArithmetic(operator, x, y)`, a JSON text or null for each side, which throws where the function fails. Deterministic. |
+| `drivine_temporal_arithmetic(operator, x, y)` | Cypher's `x + y`, `x - y`, `x * y` or `x / y` where either is the tag of a temporal value read from the store, as JSON text, or a duration the statement scales by a number or two durations it adds or takes one from the other, which SQLite's SQL worked out in doubles (#262, #275), as Postgres and Oracle work it out by the function they keep (`TemporalArithmeticFunction`, drivine4j#418): a moment moved by a duration, as the inline SQLite SQL moves one, to the microsecond, and a moment or a duration of a nanosecond past the microsecond fails, naming it, as the inline SQL fails it (drivine4j#421), but for a date, which takes a duration's whole days alone; two durations added or taken away, and a duration times or divided by a number, exactly, each part to nine places; a duration divided by zero fails (`/ by zero`), as on the other stores. `x` and `y` are JSON texts or SQL numbers; null where either is null, SQL's or JSON's, and NaN or an infinity fails, as no number a duration is scaled by. A pair Cypher has no arithmetic of fails the statement, naming it, as does a date or a moment with a date moved past the year 9999 or before -9999, as the inline SQL fails (#263). The wasm build exports it as `temporalArithmetic(operator, x, y)`, a JSON text or null for each side, which throws where the function fails. Deterministic. |
 | `drivine_trunc(number)` | the number with its fraction cut off, a whole number where one holds it, as Postgres's and Oracle's `TRUNC` give it; a float within two units of its last place of a whole number is that whole number (SQLite's binary misses `33.001 * 1e6` by that much); past a whole number's range, the float. Null of null. Deterministic. |
 | `drivine_to_char(value, pattern)` | a timestamp in a pattern of `YYYY`, `MM`, `DD`, `HH24`, `MI`, `SS`, `IYYY`, `IW`, `DDD` and quoted text, its year signed before 0 (`-0044`), or a number in an `FM` pattern (`FM0000`, `FM9999999999990.999999999`), rounded half away from zero, as Postgres's and Oracle's `to_char` write those compiled SQL writes; null where either is null. Deterministic. |
 | `drivine_host_version()` | the version of these functions' forms, `SqliteFunctions.HOST_VERSION`, which a host checks: see below. Deterministic. |
@@ -635,9 +651,10 @@ target, its result exactly and of its type, or its failure, and `jvmOracle` chec
 java.time first. A step noted `drivine4j#421 (layout 2)` needs nine-digit timestamps, and must fail until they are the store's.
 
 On SQLite the compiler reads no float of seconds: a duration is added as whole seconds and nanoseconds read from its text,
-`duration.between`, `epochSeconds` and `epochMillis` are worked out of `seconds_between` and `nanos_between`, and a
-clock's `second`, `millisecond`, `microsecond` and `nanosecond` of `NANOSECOND_OF_MINUTE`, whole numbers each
-(`TemporalSql.exactTime`). Postgres's and Oracle's SQL is unchanged.
+`duration.between`, `epochSeconds` and `epochMillis` are worked out of `seconds_between` and `nanos_between`, a
+clock's `second`, `millisecond`, `microsecond` and `nanosecond` of `NANOSECOND_OF_MINUTE`, and a duration's fields of
+its seconds (`hours` to `nanosecondsOfSecond`) and the canonical text of a duration text (`duration($d)`) of its whole
+seconds and nanoseconds read from its text (#278), whole numbers each (`TemporalSql.exactTime`). Postgres's and Oracle's SQL is unchanged.
 
 A direct-only function changes the process's state, so SQLite lets only the host's own statements call it, never a
 trigger or view of the database's. A function that throws fails its statement with its message (`drivine_gc_heap: the
@@ -922,6 +939,8 @@ The JVM is the oracle. `./gradlew jvmOracle` writes, into `build/oracle`:
   inventories it must write and read back, the version tokens, and the node stamps `Stamps` must read and write.
 - `writevalues.json`: the spec's `writevalues.yaml` as JSON, which `WriteValuesTableTest` reads on every target: the
   verdict each SQL store's compiler gives each value a write makes, by position and form.
+- `nesting.json`: the spec's `nesting.yaml` as JSON, which `NestingTableTest` reads on every target: the verdict
+  each SQL store's compiler gives each nesting of a dropped variable, and the lists the cells are built from.
 - `plans.json`: the spec's `plans.yaml` as JSON, which `StorePlanTest` reads on every target: each case's rounds that
   `org.drivine.cypher.store.plan`'s planner must give on each store, the answers it is given back, and its report.
 - `host.json`: the spec's `host.yaml` as JSON, which `HostSpecTest` reads on every target: the `function` steps the
