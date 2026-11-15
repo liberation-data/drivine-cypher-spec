@@ -469,7 +469,6 @@ class CompilerRefusalTest {
                 "MATCH (a) FOREACH (x IN [1] | MERGE (a)-[:R]->())",
                 "MATCH (a) WITH a SKIP 0 MERGE (a)-[:R]->()",
                 "MATCH (a) CALL { CREATE (a) RETURN 1 AS x } RETURN x",
-                "MATCH (a)-[r*]->() WITH r MATCH ()-[r*]->() RETURN r",
                 "MATCH (a) RETURN [(a)-->(a) | 1] AS l",
                 "WITH 1 AS p RETURN [p = ()-->() | length(p)] AS l",
                 "MATCH (a), (a)-->() RETURN a",
@@ -496,14 +495,19 @@ class CompilerRefusalTest {
                 "MATCH (a) WITH a, 1 AS b ORDER BY size([(a)-->(x) | x]) RETURN b",
                 "MATCH (a) MATCH p = (a)-->() RETURN nodes(p)",
                 "MATCH ()-[r*]->() RETURN size(r)",
-                "WITH [] AS r MATCH ()-[r*]-() RETURN r",
                 "MATCH (a) WITH collect(a) AS ns UNWIND ns AS n MATCH (n)-->(m) RETURN m",
+                // A quantified path pattern's group in a subquery's WITH naming what a WITH before dropped already (#681).
+                "MATCH (p) WITH DISTINCT p AS q WHERE EXISTS { MATCH (q)-->(m) WITH m WHERE EXISTS { (m) ((p)-->(b))+ () } RETURN m } RETURN q",
+                "MATCH (p) WITH p AS q, count(*) AS c WHERE EXISTS { MATCH (q)-->(m) WITH m WHERE EXISTS { (m) ((p)-->(b))+ () } RETURN m } RETURN q",
             ).forEach { compiler().compile(it) }
             // Neo4j takes these too, and the compiler refuses them for what it does not compile yet, as before. So it refuses a
             // relationship bound before a CREATE or a MERGE that makes it again, as the spec has it, which Neo4j refuses as bound already.
             listOf(
                 "MATCH ()-[r]->() WITH r MATCH ()-[r]->() RETURN r" to "A relationship variable bound before its pattern is Cypher, and is not compiled to SQL yet.",
                 "MATCH (a)-[r]->() RETURN EXISTS { (a)-[r]->() } AS e" to "A relationship variable bound before its pattern is Cypher, and is not compiled to SQL yet.",
+                // A variable-length one's too, a list of relationships that Neo4j walks as it is (drivine4j#427).
+                "MATCH (a)-[r*]->() WITH r MATCH ()-[r*]->() RETURN r" to "A relationship variable bound before its pattern is Cypher, and is not compiled to SQL yet.",
+                "WITH [] AS r MATCH ()-[r*]-() RETURN r" to "A relationship variable bound before its pattern is Cypher, and is not compiled to SQL yet.",
                 "MATCH (a)-[r]->(b) MERGE (a)-[r]->(b)" to "A relationship variable bound before its pattern is Cypher, and is not compiled to SQL yet.",
                 "MATCH ()-[r]->() FOREACH (x IN [1] | CREATE ()-[r:T]->())" to "A relationship variable bound before its pattern is Cypher, and is not compiled to SQL yet.",
                 "MATCH (a) CALL { WITH a RETURN a AS b UNION WITH a MATCH ()-[b]->() RETURN b } RETURN b" to

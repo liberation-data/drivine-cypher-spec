@@ -35,9 +35,9 @@ sealed interface Clause {
      * bound for the clauses after; with [optional], a row it gives none for is kept, with nulls. [imports] are the
      * variables its brackets import, `CALL (a, b) { … }`, and with [importsAll] it imports each, `CALL (*) { … }`, as a
      * procedure's call does, `CALL db.labels() YIELD label WHERE …`, whose `WHERE` reads each variable around it; with
-     * no brackets, null, its first `WITH` imports them.
+     * no brackets, null, its first `WITH` imports them. [procedure] where it is such a procedure's call.
      */
-    data class Call(val optional: Boolean, val query: Query, val imports: List<String>? = null, val importsAll: Boolean = false) : Clause
+    data class Call(val optional: Boolean, val query: Query, val imports: List<String>? = null, val importsAll: Boolean = false, val procedure: Boolean = false) : Clause
 
     /**
      * `CALL db.index.vector.queryNodes(index, k, vector) YIELD node, score`: the [k] nodes of the vector index named [index]
