@@ -68,6 +68,15 @@ class SchemaPlanJsonTest {
     }
 
     @Test
+    fun theReadmesStartIsAnswered() {
+        // compiler/README.md's example, as a host would send it: a first round to run.
+        val request = "{\"schemaPlan\": {\"store\": \"postgres\", \"graph\": \"g\", \"start\": {\"database\": \"neo4j\", \"operation\": {\"type\": \"enforce\", \"owners\": {\"all\": true}}, \"catalogs\": [], \"runtime\": [], " +
+            "\"policy\": {\"mode\": \"FAIL_FAST\", \"recreateOnDrift\": false, \"recreateOnStartup\": false, \"violationSampleSize\": 10, \"replaceBlockingIndex\": false}, \"buildTimeoutMillis\": 60000}, \"now\": 1700000000000}}"
+        val got = CypherJson.readTree(CompileJson.compile(request))
+        assertTrue(got["run"] != null || got["done"] != null, "on $target: $got")
+    }
+
+    @Test
     fun aRequestThePlannerCantAnswerIsAnError() {
         val request = json(PlanJson.requestTree(PlanRequest("neo4j", Operation.Enforce(Owners.All))))
         for ((rest, message) in listOf(
@@ -76,6 +85,14 @@ class SchemaPlanJsonTest {
             "\"resume\": ${json(mapOf("request" to PlanJson.requestTree(PlanRequest("neo4j", Operation.Enforce(Owners.All))), "rounds" to emptyList<Any>()))}, \"outcomes\": 1, \"now\": 1" to "A resume gives its outcomes as a list",
             "\"runtimeOn\": {\"runtime\": []}" to "runtimeOn gives its database as text",
             "\"plan\": 1" to "A schemaPlan request gives one of validate",
+            "\"validate\": $request, \"start\": $request, \"now\": 1" to "A schemaPlan request gives one of validate",
+            "\"runtimeAfter\": 1" to "runtimeAfter gives {",
+            "\"runtimeAfter\": {\"runtime\": []}" to "runtimeAfter gives its operation",
+            "\"runtimeAfter\": {\"operation\": {\"type\": \"ensure\", \"owner\": \"a\", \"items\": []}}" to "runtimeAfter gives runtime as a list",
+            "\"runtimeAfter\": {\"operation\": {\"type\": \"ensure\", \"owner\": \"a\", \"items\": []}, \"runtime\": [], \"databases\": [1]}" to "runtimeAfter's databases are names",
+            "\"runtimeOn\": 1" to "runtimeOn gives {",
+            "\"runtimeOn\": {\"database\": \"neo4j\"}" to "runtimeOn gives runtime as a list",
+            "\"start\": $request, \"now\": 1.5" to "A start or a resume gives now",
         )) {
             val error = ask(rest)["error"]?.textValue()
             assertTrue(error != null && error.startsWith(message), "on $target, $rest: $error")

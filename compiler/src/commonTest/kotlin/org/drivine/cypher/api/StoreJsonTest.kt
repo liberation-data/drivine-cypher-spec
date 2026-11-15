@@ -165,6 +165,15 @@ class StoreJsonTest {
             "{\"storeStatements\": {\"store\": \"sqlite\", \"graph\": \"g\", \"stampParameters\": {\"storeId\": 1}}}" to "stampParameters gives storeId as text",
             "{\"storeStatements\": {\"store\": \"sqlite\", \"graph\": \"g\", \"markerParameters\": {\"scope\": \"s\", \"items\": \"\", \"appliedAt\": 1.5}}}" to "markerParameters gives appliedAt",
             "{\"storeStatements\": {\"store\": \"sqlite\", \"graph\": \"g\"}, \"cypher\": \"RETURN 1\"}" to "A request gives one of",
+            "{\"storeStatements\": {\"store\": \"oracle\", \"graph\": \"1g\"}}" to OracleDdl.refusal("1g")!!,
+            "{\"storeStatements\": {\"store\": \"postgres\", \"graph\": \"g\", \"stampParameters\": {\"storeId\": \"s\"}}}" to "stampParameters gives assignedAt as text",
+            "{\"storeStatements\": {\"store\": \"postgres\", \"graph\": \"g\", \"stampParameters\": 1}}" to "stampParameters gives storeId as text",
+            "{\"storeStatements\": {\"store\": \"postgres\", \"graph\": \"g\", \"restamp\": false}}" to "restamp is true",
+            "{\"storeStatements\": {\"store\": \"postgres\", \"graph\": \"g\", \"restamp\": true, \"markerParameters\": {}}}" to "A storeStatements request gives one of stampParameters, restamp and markerParameters",
+            "{\"storeStatements\": {\"store\": \"sqlite\", \"graph\": \"g\", \"markerParameters\": 1}}" to "markerParameters gives {",
+            "{\"storeStatements\": {\"store\": \"sqlite\", \"graph\": \"g\", \"markerParameters\": {\"items\": \"\", \"appliedAt\": 1}}}" to "markerParameters gives scope as text",
+            "{\"storeStatements\": {\"store\": \"sqlite\", \"graph\": \"g\", \"markerParameters\": {\"scope\": \"s\", \"version\": 1, \"items\": \"\", \"appliedAt\": 1}}}" to "markerParameters gives version as text or null",
+            "{\"storeStatements\": {\"store\": \"sqlite\", \"graph\": \"g\", \"markerParameters\": {\"scope\": \"s\", \"appliedAt\": 1}}}" to "markerParameters gives items as text",
         )) {
             val error = answer(request)["error"]?.textValue()
             assertTrue(error != null && error.startsWith(message), "on $target, $request: $error")

@@ -497,7 +497,7 @@ JSON entry, so TypeScript and Python run what drivine4j runs from the Kotlin typ
 ```json
 {"storeStatements": {"store": "oracle", "graph": "g"}}
 {"storeStatements": {"store": "postgres", "graph": "g", "stampParameters": {"storeId": "…", "assignedAt": "2026-01-01T00:00:00Z"}}}
-{"schemaPlan": {"store": "postgres", "graph": "g", "start": {"database": "neo4j", "operation": {"type": "enforce", "owners": {"all": true}}, "catalogs": [], "runtime": [], "policy": {…}, "buildTimeoutMillis": 60000}, "now": 1700000000000}}
+{"schemaPlan": {"store": "postgres", "graph": "g", "start": {"database": "neo4j", "operation": {"type": "enforce", "owners": {"all": true}}, "catalogs": [], "runtime": [], "policy": {"mode": "FAIL_FAST", "recreateOnDrift": false, "recreateOnStartup": false, "violationSampleSize": 10, "replaceBlockingIndex": false}, "buildTimeoutMillis": 60000}, "now": 1700000000000}}
 ```
 
 - **`storeStatements`** names a store (`postgres`, `oracle`, `sqlite`, `neo4j`, `memgraph` or `falkordb`) and, on a SQL
@@ -513,7 +513,8 @@ JSON entry, so TypeScript and Python run what drivine4j runs from the Kotlin typ
     the `constraint` that keeps one, after `prepare`.
 
   With `stampParameters`, `restamp: true` or `markerParameters`, the answer is `{"parameters": {…}}`, what the stamp's
-  `assignIfAbsent`, its `restampLayout` or the marker's `merge` binds. `store.yaml` and `marker.yaml` pin every statement.
+  `assignIfAbsent`, its `restampLayout` or the marker's `merge` binds; a request gives one of the three at most.
+  `store.yaml` and `marker.yaml` pin every statement.
 - **`schemaPlan`** names a store, as `storeStatements` does, and one of:
   - `validate`, a request: `{"refusal": …}`, null where nothing conflicts;
   - `start`, a request, and `now`, the host's clock in milliseconds, or `resume`, the state the last answer gave, with

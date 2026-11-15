@@ -174,5 +174,38 @@ class LayoutJsonTest {
         assertTrue(answer("{\"write\": ${"[".repeat(65) + "]".repeat(65)}}")["error"] != null, "a value nested past MAX_DEPTH is refused")
     }
 
+    @Test
+    fun aValueWrittenReadsEachTaggedForm() {
+        // A float, bytes and a map of `$` keys, each as a request's parameter gives one, beside the Kotlin value it stands for.
+        for ((given, value) in listOf(
+            "{\"\$float\": \"2.0\"}" to 2.0,
+            "{\"\$float\": 3}" to 3.0,
+            "{\"\$bytes\": \"AQI=\"}" to byteArrayOf(1, 2),
+            "{\"\$map\": {\"\$t\": 1, \"\$\$y\": {\"\$temporal\": \"DATE\", \"text\": \"2024-01-01\"}}}" to
+                mapOf("\$t" to 1L, "\$\$y" to org.drivine.cypher.json.TemporalValue(org.drivine.cypher.sql.Temporal.DATE, "2024-01-01")),
+            // Valid text of another form is written as its kind's canonical text, as drivine4j writes a java.time value.
+            "{\"\$temporal\": \"DATE_TIME\", \"text\": \"2024-01-01T10:00+0200\"}" to
+                org.drivine.cypher.json.TemporalValue(org.drivine.cypher.sql.Temporal.DATE_TIME, "2024-01-01T10:00:00+02:00"),
+        )) {
+            val got = answer("{\"write\": $given}")
+            assertEquals(json(value), got["value"]?.let(CypherJson::writeValueAsString), "on $target, $given: $got")
+        }
+    }
+
+    @Test
+    fun aWriteOfNoValueOfItsKindIsAnError() {
+        // A temporal value whose text is no value of its kind is refused, not written as a text the layout reads as one.
+        for ((request, message) in listOf(
+            "{\"write\": {\"\$temporal\": \"DATE\", \"text\": \"2024-1-1\"}}" to "No DATE is 2024-1-1",
+            "{\"write\": [{\"a\": {\"\$temporal\": \"DURATION\", \"text\": \"1 day\"}}]}" to "No DURATION is 1 day",
+            "{\"write\": {\"\$temporal\": \"DAY\", \"text\": \"2024-01-01\"}}" to "No temporal kind DAY",
+            "{\"write\": {\"\$bytes\": 1}}" to "{\"\$bytes\": …} holds base64 text.",
+            "{\"write\": {\"\$map\": 1}}" to "{\"\$map\": …} holds a map.",
+        )) {
+            val error = answer(request)["error"]?.textValue()
+            assertTrue(error != null && error.startsWith(message), "on $target, $request: $error")
+        }
+    }
+
     private fun texts(node: JsonNode): List<String> = (node as ArrayNode).map { it.textValue()!! }
 }

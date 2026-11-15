@@ -33,15 +33,21 @@ import org.drivine.cypher.store.schema.StoreSchema
  *   Answered `{"runtime": [<runtime catalog>, …]}`.
  * - `"runtimeOn": {"database": <name>, "runtime": [<runtime catalog>, …]}`: the runtime catalogs that hold on the database,
  *   as a request's `runtime` takes them ([SchemaPlanner.runtimeOn]). Answered `{"catalogs": [<catalog>, …]}`.
+ *
+ * A request that gives more than one of them is an error.
  */
 @DrivineInternalApi
 internal object SchemaPlanJson {
 
     const val KIND = "schemaPlan"
 
+    private val QUESTIONS = listOf("validate", "start", "resume", "runtimeAfter", "runtimeOn")
+
     /** The answer to [tree], a request that gives [KIND]. */
     fun answer(tree: ObjectNode): String = try {
         val given = tree[KIND] as? ObjectNode ?: throw IllegalArgumentException("A $KIND request gives {\"store\": …, …}.")
+        // A request asks one thing: one that gives two would have the other read past.
+        if (QUESTIONS.count { given.has(it) } != 1) throw IllegalArgumentException("A $KIND request gives one of ${QUESTIONS.dropLast(1).joinToString()} and ${QUESTIONS.last()}.")
         val result: Map<String, Any?> = when {
             given.has("runtimeAfter") -> runtimeAfter(given["runtimeAfter"])
             given.has("runtimeOn") -> runtimeOn(given["runtimeOn"])
@@ -55,7 +61,7 @@ internal object SchemaPlanJson {
                         val outcomes = (given["outcomes"] as? ArrayNode ?: throw IllegalArgumentException("A resume gives its outcomes as a list.")).map(PlanJson::outcomeOf)
                         step(planner.resume(state, outcomes, now(given)))
                     }
-                    else -> throw IllegalArgumentException("A $KIND request gives one of validate, start, resume, runtimeAfter and runtimeOn.")
+                    else -> throw IllegalStateException("unreachable: ${QUESTIONS.joinToString()}")
                 }
             }
         }

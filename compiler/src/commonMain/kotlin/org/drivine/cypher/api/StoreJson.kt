@@ -46,7 +46,8 @@ import org.drivine.schema.made
  * - The same request with `stampParameters: {"storeId": …, "assignedAt": …}`, `restamp: true` or
  *   `markerParameters: {"scope": …, "version": …, "items": …, "appliedAt": <ms>}` is answered `{"parameters": {…}}`, what
  *   the stamp's `assignIfAbsent`, its `restampLayout` or the marker's `merge` binds ([StoreStamp.assignParameters],
- *   [StoreStamp.restampParameters], [MarkerStatements.mergeParameters]), so a host binds them as drivine4j does.
+ *   [StoreStamp.restampParameters], [MarkerStatements.mergeParameters]), so a host binds them as drivine4j does. A request
+ *   that gives more than one of the three is an error.
  */
 @DrivineInternalApi
 internal object StoreJson {
@@ -57,9 +58,16 @@ internal object StoreJson {
     fun answer(tree: ObjectNode): String = try {
         val given = tree[KIND] as? ObjectNode ?: throw IllegalArgumentException("A $KIND request gives {\"store\": …, \"graph\": …}.")
         val ddl = ddl(given)
+        // One set of parameters a request: one that gives two would have the other read past.
+        if (PARAMETER_SETS.count { given.has(it) } > 1) {
+            throw IllegalArgumentException("A $KIND request gives one of ${PARAMETER_SETS.dropLast(1).joinToString()} and ${PARAMETER_SETS.last()}.")
+        }
         when {
             given.has("stampParameters") -> parameters(stampParameters(ddl, given["stampParameters"]))
-            given.has("restamp") -> parameters(StoreStamp.restampParameters(StoreStamp.engine(ddl)))
+            given.has("restamp") -> {
+                require(given["restamp"]!!.let { it.isBoolean && it.booleanValue() }) { "restamp is true where it is given." }
+                parameters(StoreStamp.restampParameters(StoreStamp.engine(ddl)))
+            }
             given.has("markerParameters") -> parameters(markerParameters(ddl, given["markerParameters"]))
             else -> statements(ddl)
         }
@@ -154,6 +162,8 @@ internal object StoreJson {
 
     private fun parameters(parameters: Map<String, Any?>): String =
         CypherJson.writeValueAsString(CypherJson.valueToTree(mapOf("parameters" to parameters)))
+
+    private val PARAMETER_SETS = listOf("stampParameters", "restamp", "markerParameters")
 
     private val STORES = listOf("postgres", "oracle", "sqlite", "neo4j", "memgraph", "falkordb")
 
