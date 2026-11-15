@@ -368,11 +368,15 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
      * values of several temporal kinds sort by kind first, as Cypher sorts them: as its own object, `jsonb` compares a tag's
      * keys in its own order, its sort key `s` first, and so sorted by time alone, whatever its kind. A list is its items as
      * [flatListKey] writes them, as `jsonb` orders a list the shorter first (drivine4j#271).
+     *
+     * The kind is read once, by one `jsonb_typeof`, and the tag only of an object: a number or a truth value, the commonest
+     * kinds sorted after texts, went through three tests before its own value, and a sort of 100,000 numbers to its first 100
+     * took a fifth as long again as one of texts (#284). A map that is no tag is itself, as `jsonb` orders it.
      */
     override fun sortKey(json: String) = shared(json) { (x) ->
-        "ROW(CASE WHEN jsonb_typeof($x) = 'string' THEN '\"\"'::jsonb " +
-            "WHEN ${tagKind(x)} IS NOT NULL THEN jsonb_build_object('k', ${tagRank(x, "0") { "$it" }}, 's', COALESCE($x -> 's', $x -> 'v')) " +
-            "WHEN jsonb_typeof($x) = 'array' THEN CAST(${flatListKey(x)} AS jsonb) " +
+        "ROW(CASE jsonb_typeof($x) WHEN 'string' THEN '\"\"'::jsonb " +
+            "WHEN 'object' THEN CASE WHEN ${tagKind(x)} IS NOT NULL THEN jsonb_build_object('k', ${tagRank(x, "0") { "$it" }}, 's', COALESCE($x -> 's', $x -> 'v')) ELSE $x END " +
+            "WHEN 'array' THEN CAST(${flatListKey(x)} AS jsonb) " +
             "ELSE ${nullIfJsonNull(x)} END, ${codePointText(x)})"
     }
 
