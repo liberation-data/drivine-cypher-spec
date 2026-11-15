@@ -822,8 +822,8 @@ class CompilerRefusalTest {
         private fun taken(cypher: String, text: String? = null, parameters: Map<String, Any?> = emptyMap()) = ToStringList(cypher, false, text, parameters)
 
         /**
-         * The list forms of Neo4j 2026.10.1's capture (liberation-data/drivine-cypher-spec#296), and others the compiler types as
-         * it does: a list Neo4j types as narrower than List<Any> is refused, one of any items taken. A function that gives a list
+         * The list forms of Neo4j 2026.10.1's three captures (liberation-data/drivine-cypher-spec#296), and others the compiler types
+         * as it does ([org.drivine.cypher.sql.SqlCypherCompiler]'s `listItems`): a list Neo4j types as narrower than List<Any> is refused, one of any items taken. A function that gives a list
          * needs only a row here.
          */
         val TO_STRING_LISTS = listOf(
@@ -883,6 +883,13 @@ class CompilerRefusalTest {
             // tail(), a slice and reverse() keep their list's kind, and two lists of one kind joined by + or given to coalesce() are of it.
             refused("RETURN toString(tail([1, 2]))"), refused("RETURN toString([1, 2][0..1])"), refused("RETURN toString(reverse([1, 2]))"),
             refused("RETURN toString([1] + [2])"), refused("RETURN toString(coalesce([1, 2], [3]))"),
+            // head(), last() and an item [i] of a list of lists of one kind are a list of it, and so is a CASE each of whose values,
+            // its ELSE too, is a list of one kind.
+            refused("RETURN toString(head([[1], [2]]))"), refused("RETURN toString(last([[1], [2]]))"), refused("RETURN toString([[1], [2]][0])"),
+            refused("RETURN toString(CASE WHEN true THEN [1, 2] ELSE [3] END)"),
+            // A CASE one of whose values is a list of any items, or with no ELSE, which may be null, and coalesce() with a null.
+            taken("RETURN toString(CASE WHEN true THEN [1, 2] ELSE [1, 'a'] END)"), taken("RETURN toString(CASE WHEN true THEN [1, 2] END)"),
+            taken("RETURN toString(coalesce(null, [1, 2]))"),
         )
     }
 }

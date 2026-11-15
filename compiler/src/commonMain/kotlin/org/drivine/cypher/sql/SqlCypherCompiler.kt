@@ -2372,7 +2372,7 @@ abstract class SqlCypherCompiler(
                     list = holdsLists(list), flat = isFlat(list),
                     text = holdsTexts(list) || isText(list), fromList = true, jsonNull = !isFlat(list),
                     known = itemsKind(unwind.list, select.scope),
-                    itemsKnown = (unwind.list as? Expression.ListLiteral)?.items?.map { listItems(it, select.scope) }?.distinct()?.singleOrNull(),
+                    itemsKnown = innerItems(unwind.list, select.scope),
                 ),
             )
             select.order += itemNo(name) to false
@@ -4896,16 +4896,33 @@ abstract class SqlCypherCompiler(
             (list as? Expression.ListLiteral)?.items?.map { knownKind(it, scope) }?.distinct()?.singleOrNull()
 
         /**
-         * The one kind ([Value.Items]) of the items of [list] where Neo4j types it as a list narrower than `List<Any>` when it
-         * plans the statement (liberation-data/drivine-cypher-spec#296): a list written whose every item is of one kind ([itemOf]),
-         * a number and a float both numbers; `collect()` of anything, and a pattern comprehension; `keys()`, `labels()` and `split()`,
-         * of texts; `range()`, of numbers; `nodes()` and `relationships()`, of nodes or relationships, as maps are; a list comprehension
-         * of what it gives; `tail()`, `reverse()` and a slice of a list of one kind; two lists of one kind joined by `+`, and
-         * `coalesce()` of such lists alone; and a variable bound to one. Neo4j wasn't captured with `reverse()` or `coalesce()` of a
-         * list of one kind: they are typed as `tail()` is. Null where an item's kind is left open, as a property's, a
-         * parameter's or null's, where two differ, of an empty list, and of anything else.
+         * Neo4j's static type of [list] where it is `List<one kind>`, narrower than `List<Any>`, as it infers it when it plans the
+         * statement: the one kind ([Value.Items]) of its items. Neo4j refuses `toString()` of such a list, and so does the compiler
+         * (liberation-data/drivine-cypher-spec#296); every form that makes a list is typed here, and what it gives is carried as
+         * [Value.Json.itemsKnown]. Each form, as it is typed:
+         *
+         * - a list written: the kind its items share ([itemOf]), integers and floats both numbers, maps, nodes and relationships all
+         *   maps; none where an item is null or of a kind left open, two differ, or it is empty;
+         * - `collect()`, `DISTINCT` or not: its argument's kind, and [Value.Items.ONE] where that is left open, as of a property;
+         * - a pattern comprehension: [Value.Items.ONE];
+         * - `keys()`, `labels()` and `split()`: texts; `range()`: numbers; `nodes()` and `relationships()`: maps;
+         * - a list comprehension: its list's kind with no projection or the variable as it, else its projection's kind ([itemOf])
+         *   with the variable of its list's items' kind;
+         * - `tail()`, `reverse()` and a slice: their list's kind;
+         * - `+` of two lists: their kind where both are of one, the same;
+         * - `coalesce()`: the kind every argument is of, the same; a null among them is of any kind, so none;
+         * - `head()`, `last()` and an item `[i]`: of a list whose items are lists of one kind, that kind ([innerItems]);
+         * - a `CASE`: the kind each of its values is of, its `ELSE` too; none with no `ELSE`, which may give null;
+         * - a variable: the kind of the list it is bound to, by a `WITH`, by an `UNWIND` of a list of lists of one kind ([innerItems]),
+         *   or by a `UNION` each of whose queries makes it such a list ([unionItems]); a list of nodes or relationships, maps;
+         * - and, where [compiled], the value compiled of it, is given: that value's kind where it is a list of nodes or relationships
+         *   (maps), of temporal values of one kind ([Value.Items.TEMPORAL], from [Value.Json.items]), or one already typed.
+         *
+         * Null where [list] is of any items, or no list.
          */
-        private fun listItems(list: Expression, scope: Map<String, Value>): Value.Items? = when (list) {
+        private fun listItems(list: Expression, scope: Map<String, Value>, compiled: Value? = null): Value.Items? =
+            if (compiled is Value.Entities) Value.Items.MAP
+            else (compiled as? Value.Json)?.let { json -> json.itemsKnown ?: Value.Items.TEMPORAL.takeIf { json.items != null } } ?: when (list) {
             is Expression.ListLiteral -> list.items.map { itemOf(it, scope) }.distinct().singleOrNull()
             is Expression.Variable -> when (val bound = scope[list.name]) {
                 is Value.Entities -> Value.Items.MAP
@@ -4919,8 +4936,11 @@ abstract class SqlCypherCompiler(
                 "nodes", "relationships" -> Value.Items.MAP
                 "tail", "reverse", DISTINCT_ITEMS -> list.arguments.singleOrNull()?.let { listItems(it, scope) }
                 "coalesce" -> list.arguments.map { listItems(it, scope) }.distinct().singleOrNull()
+                "head", "last" -> list.arguments.singleOrNull()?.let { innerItems(it, scope) }
                 else -> null
             }
+            is Expression.Index -> innerItems(list.subject, scope)
+            is Expression.Case -> list.otherwise?.let { otherwise -> (list.alternatives.map { it.second } + otherwise).map { listItems(it, scope) }.distinct().singleOrNull() }
             is Expression.Slice -> listItems(list.subject, scope)
             is Expression.Binary ->
                 if (list.operator != Operator.ADD) null
@@ -4933,10 +4953,23 @@ abstract class SqlCypherCompiler(
         }
 
         /**
+         * Of [list], a list whose every item is a list of one kind ([listItems]), that kind: the kind of the list `head()`, `last()`
+         * or an item `[i]` of it gives, and an `UNWIND` of it binds, as Neo4j 2026.10.1 refuses `toString(head([[1], [2]]))` and
+         * `UNWIND [[1], [2]] AS x RETURN toString(x)` (liberation-data/drivine-cypher-spec#296).
+         * Known of a list written, and of `tail()`, `reverse()` or a slice of one; null of anything else.
+         */
+        private fun innerItems(list: Expression, scope: Map<String, Value>): Value.Items? = when (list) {
+            is Expression.ListLiteral -> list.items.map { listItems(it, scope) }.distinct().singleOrNull()
+            is Expression.Function -> list.arguments.singleOrNull()?.takeIf { list.name.lowercase() in setOf("tail", "reverse") }?.let { innerItems(it, scope) }
+            is Expression.Slice -> innerItems(list.subject, scope)
+            else -> null
+        }
+
+        /**
          * The kind of the items of a `UNION`'s column whose queries give it lists of the kinds [kinds] ([Value.Json.itemsKnown]): a
          * list Neo4j types as narrower than `List<Any>` where every query's is, of one kind or of [Value.Items.ONE] where they differ,
          * as Neo4j 2026.10.1 refuses `toString()` of one of `[1, 2]` and `['a']` (liberation-data/drivine-cypher-spec#296). Null
-         * where any query's is of any items.
+         * where any query's is of any items. Each query's is [listItems]'s; [listItems] reads the column's as a variable's.
          */
         private fun unionItems(kinds: List<Value.Items?>): Value.Items? =
             if (kinds.any { it == null }) null else kinds.distinct().singleOrNull() ?: Value.Items.ONE
@@ -6868,7 +6901,7 @@ abstract class SqlCypherCompiler(
                     // What holds a node or a relationship, a map or a list of them, is gathered beside its identity too.
                     else -> Value.Json(
                         collected(gathered), ordered = true, items = (gathered as? Value.Json)?.temporal, itemItems = itemsOf(gathered),
-                        itemsKnown = itemOf(function.arguments.single(), scope) ?: Value.Items.ONE,
+                        itemsKnown = listItems(function, scope),
                         itemEntries = (gathered as? Value.Json)?.entries, list = true,
                         itemLists = isList(gathered), texts = isText(gathered), temporals = hasTemporals(gathered),
                         identity = identityOf(gathered)?.let { comparable(Value.Json(collect(it, rowOrder), ordered = true)) },
@@ -7120,7 +7153,7 @@ abstract class SqlCypherCompiler(
         private fun textOfList(function: Expression.Function, value: Value, scope: Map<String, Value>): Value.Json? {
             val written = function.arguments.single()
             // Neo4j's Cypher 25 refuses a list it types as narrower than List<Any>, as [1, 2], collect(…) or keys(n), and takes one of many, as [1, 'a'].
-            if (listItems(written, scope) != null || value is Value.Entities || (value as? Value.Json)?.items != null || (value as? Value.Json)?.itemsKnown != null) {
+            if (listItems(written, scope, value) != null) {
                 throw CompilerException("${function.name}() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j.")
             }
             val map = written is Expression.MapLiteral || written is Expression.MapProjection

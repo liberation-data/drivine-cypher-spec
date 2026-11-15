@@ -3273,6 +3273,13 @@ cases:
         only: [neo4j]
         cypher: "RETURN [toString([date('2024-01-02'), 1]), toString(coalesce([1, 'a'], [2]))]"
         rows: [["[2024-01-02, 1]", "[1, a]"]]
+      - note: "Neo4j 2026.10.1 gives coalesce() with a null among its arguments as a list of any items (liberation-data/drivine-cypher-spec#296). A SQL store gives its JSON text, as it gives toString() of a value whose kind is left open (liberation-data/drivine-cypher-spec#297)."
+        only: [neo4j]
+        cypher: "RETURN toString(coalesce(null, [1, 2]))"
+        rows: ["[1, 2]"]
+      - note: "Neo4j 2026.10.1 gives a CASE one of whose values is a list of any items as a list of any items (liberation-data/drivine-cypher-spec#296)."
+        cypher: "RETURN toString(CASE WHEN true THEN [1, 2] ELSE [1, 'a'] END)"
+        rows: ["[1, 2]"]
       - note: "Neo4j 2026.10.1 gives a map a WITH binds as it gives one written; a SQL store refuses it by name, as it knows no keys of it when compiling (see refusals.yaml)."
         only: [neo4j]
         cypher: "WITH {a: 1} AS m RETURN toString(m)"
@@ -4687,7 +4694,7 @@ cases:
         error: "Two lists compared with <, <=, > or >= do not run on Oracle in the step of a reduce(): its function calls no function of the query's from SQL."
 
   - name: "toString of a list or a map"
-    description: "toString() of a list Neo4j types as narrower than List<Any> is refused, as Neo4j refuses it when it plans the statement: a list written of items of one kind, integers and floats both numbers, a list of lists or of maps, collect() of anything, a list of maps, nodes or relationships, a list keys(), labels(), split(), range(), nodes() or relationships() gives, a comprehension of items of one kind, a pattern comprehension, tail() or a slice of such a list, and reverse() of one as a SQL store types it, two such lists of one kind joined by +, a UNION's column each of whose queries gives such a list, or one a WITH binds (liberation-data/drivine-cypher-spec#296); of a map, its text (liberation-data/drivine4j#420); and of a value whose kind the statement leaves open, as a list with a property or a null among its items, it is run."
+    description: "toString() of a list Neo4j types as narrower than List<Any> is refused, as Neo4j refuses it when it plans the statement: a list written of items of one kind, integers and floats both numbers, a list of lists or of maps, collect() of anything, a list of maps, nodes or relationships, a list keys(), labels(), split(), range(), nodes() or relationships() gives, a comprehension of items of one kind, a pattern comprehension, tail(), reverse() or a slice of such a list, head(), last() or an item [i] of a list of such lists, two such lists of one kind joined by + or given to coalesce(), a CASE each of whose values, its ELSE too, is such a list of one kind, a UNION's column each of whose queries gives such a list, or one a WITH binds (liberation-data/drivine-cypher-spec#296); of a map, its text (liberation-data/drivine4j#420); and of a value whose kind the statement leaves open, as a list with a property or a null among its items, it is run."
     steps:
       - note: "Neo4j refuses both under Cypher 5. Neo4j 2026.10's default language, Cypher 25, gives toString({a: 1}) as '{a: 1}', and toString([1, 'a']) as '[1, a]' though it refuses toString([1, 2])."
         only: [neo4j]
@@ -4811,7 +4818,7 @@ cases:
         rows: ["{a: 1}"]
       - cypher: "UNWIND [1, 'a'] AS x RETURN toString(x)"
         rows: ["1", "a"]
-      - note: "Neo4j 2026.10.1 refuses each of these too when it plans them (liberation-data/drivine-cypher-spec#296): a map, a node and a relationship are of one kind here, as it says List<Map>, List<Node>, List<Relationship>; nodes(), relationships(), a variable-length relationship and a pattern comprehension are narrower than List<Any>, as collect() is; tail() and a slice keep their list's kind, two lists of one kind joined by + are of it, and a UNION's column is narrower than List<Any> where each of its queries' is, whatever their kinds."
+      - note: "Neo4j 2026.10.1 refuses each of these too when it plans them (liberation-data/drivine-cypher-spec#296): a map, a node and a relationship are of one kind here, as it says List<Map>, List<Node>, List<Relationship>; nodes(), relationships(), a variable-length relationship and a pattern comprehension are narrower than List<Any>, as collect() is; tail() and a slice keep their list's kind (and reverse(), below), two lists of one kind joined by + are of it, and a UNION's column is narrower than List<Any> where each of its queries' is, whatever their kinds."
         only: [neo4j]
         cypher: "MATCH (p:Person {name: 'Keanu'})-[r:KNOWS]->() RETURN toString([p, r])"
         error: true
@@ -4920,9 +4927,36 @@ cases:
       - only: [sql]
         cypher: "CALL { RETURN [1, 2] AS l UNION RETURN ['a'] AS l } RETURN toString(l)"
         error: "toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j."
-      - note: "Neo4j 2026.10.1 wasn't captured with reverse() of a list of one kind; a SQL store refuses it, as tail() of one is refused."
-        only: [sql]
+      - note: "Neo4j 2026.10.1 refuses each of these when it plans them, as List<Integer> (liberation-data/drivine-cypher-spec#296): reverse() keeps its list's kind, coalesce() of lists of one kind is of it, head() or an item [i] of a list of lists of one kind is a list of it, and a CASE each of whose values, its ELSE too, is a list of one kind is of it."
+        only: [neo4j]
         cypher: "RETURN toString(reverse([1, 2]))"
+        error: true
+      - only: [neo4j]
+        cypher: "RETURN toString(coalesce([1, 2], [3]))"
+        error: true
+      - only: [neo4j]
+        cypher: "RETURN toString(head([[1], [2]]))"
+        error: true
+      - only: [neo4j]
+        cypher: "RETURN toString([[1], [2]][0])"
+        error: true
+      - only: [neo4j]
+        cypher: "RETURN toString(CASE WHEN true THEN [1, 2] ELSE [3] END)"
+        error: true
+      - only: [sql]
+        cypher: "RETURN toString(reverse([1, 2]))"
+        error: "toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j."
+      - only: [sql]
+        cypher: "RETURN toString(coalesce([1, 2], [3]))"
+        error: "toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j."
+      - only: [sql]
+        cypher: "RETURN toString(head([[1], [2]]))"
+        error: "toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j."
+      - only: [sql]
+        cypher: "RETURN toString([[1], [2]][0])"
+        error: "toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j."
+      - only: [sql]
+        cypher: "RETURN toString(CASE WHEN true THEN [1, 2] ELSE [3] END)"
         error: "toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j."
 
   - name: "A keyword as a variable"
