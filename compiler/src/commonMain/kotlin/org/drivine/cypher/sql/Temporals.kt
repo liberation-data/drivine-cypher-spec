@@ -506,6 +506,7 @@ class Temporals(
     fun field(text: String, kind: Temporal, name: String): Field? {
         if (kind == Temporal.DURATION) {
             if (durationField(parts("NULL"), name) == null) return null
+            if (sql.exactTime && name in SECONDS_FIELDS) return Field(shared(listOf(text)) { (t) -> exactDurationField(t, name) }, text = false)
             return Field(shared(listOf(text)) { (t) -> durationField(parts(t), name)!! }, text = false)
         }
         if (kind.zoned && name in setOf("timezone", "offset", "offsetMinutes", "offsetSeconds")) return zoneField(text, name)
@@ -787,9 +788,11 @@ class Temporals(
      * [body] of the parts of the duration text [text], as [parts] reads them, but its time as whole seconds and nanoseconds,
      * whole numbers each, for a store whose time is exact ([TemporalSql.exactTime]): the seconds part's digits before its
      * point and the nine after it are read as text, never through a float. Its hours and minutes are whole, as a duration's
-     * text writes them; a fraction of one is cut to the whole second.
+     * text writes them; a fraction of one is cut to the whole second, unless [fractions]: then the time a fraction of an hour
+     * or a minute leaves past its whole seconds goes to the nanoseconds, rounded to one, as a duration given as text may have
+     * one (`PT0.0001H` is `PT0.36S`), and the nanoseconds are of fewer than a second.
      */
-    private fun exactParts(text: String, body: (months: String, days: String, wholeSeconds: String, nanos: String) -> String): String {
+    private fun exactParts(text: String, fractions: Boolean = false, body: (months: String, days: String, wholeSeconds: String, nanos: String) -> String): String {
         val parts = parts(text)
         fun group(name: String) = Temporal.DURATION_PARTS.getValue(name).let { (pattern, group) -> sql.group(text, literal(sql.regex(pattern)), group) }
         fun part(name: String) = "COALESCE(${sql.number(group(name))}, 0)"
@@ -797,9 +800,16 @@ class Temporals(
         return shared(listOf(group("seconds"))) { (g) ->
             val point = "INSTR($g, '.')"
             val fraction = "CASE WHEN $point > 0 THEN CAST(SUBSTR(SUBSTR($g, $point + 1) || '000000000', 1, 9) AS INTEGER) ELSE 0 END"
-            val whole = "${sql.trunc}($sign * (${part("hours")} * 3600 + ${part("minutes")} * 60 + COALESCE(CAST($g AS INTEGER), 0)))"
             val nanos = "($sign * CASE WHEN SUBSTR($g, 1, 1) = '-' THEN -1 ELSE 1 END * $fraction)"
-            body(parts.months, parts.days, whole, nanos)
+            if (!fractions) {
+                val whole = "${sql.trunc}($sign * (${part("hours")} * 3600 + ${part("minutes")} * 60 + COALESCE(CAST($g AS INTEGER), 0)))"
+                return@shared body(parts.months, parts.days, whole, nanos)
+            }
+            shared(listOf("($sign * (${part("hours")} * 3600 + ${part("minutes")} * 60))")) { (hm) ->
+                val whole = "(${sql.trunc}($hm) + $sign * COALESCE(CAST($g AS INTEGER), 0))"
+                val past = "CAST(${sql.round("($hm - ${sql.trunc}($hm)) * 1000000000", 0)} AS INTEGER)"
+                shared(listOf(whole, "($nanos + $past)")) { (w, f) -> body(parts.months, parts.days, "($w + $f / 1000000000)", "($f % 1000000000)") }
+            }
         }
     }
 
@@ -871,6 +881,33 @@ class Temporals(
         }
     }
 
+    /**
+     * [durationField] [name], one of [SECONDS_FIELDS], of the duration text [text] on a store whose time is exact
+     * ([TemporalSql.exactTime]): of its whole seconds and nanoseconds read as whole numbers ([exactParts]), never through a
+     * float, whose 15 or so digits rounded a duration a hair under a whole hour up to it (`PT87659999H59M59.999999999S`'s
+     * hours were 87660000, drivine-cypher-spec#278), a fraction of an hour or a minute among them. The seconds floored, as [durationField] has them, a fraction below zero
+     * taking a second from them; the larger units of them counted toward zero, as SQLite's `/` of whole numbers counts.
+     */
+    private fun exactDurationField(text: String, name: String): String = exactParts(text, fractions = true) { _, _, wholeSeconds, nanos ->
+        shared(listOf(wholeSeconds, nanos)) { (w, f) ->
+            shared(listOf("($w - ($f < 0))", "($f + ($f < 0) * 1000000000)")) { (s, n) ->
+                when (name) {
+                    "hours" -> "($s / 3600)"
+                    "minutes" -> "($s / 60)"
+                    "seconds" -> s
+                    "milliseconds" -> "($s * 1000 + $n / 1000000)"
+                    "microseconds" -> "($s * 1000000 + $n / 1000)"
+                    "nanoseconds" -> "($s * 1000000000 + $n)"
+                    "minutesOfHour" -> "($s / 60 - $s / 3600 * 60)"
+                    "secondsOfMinute" -> "($s - $s / 60 * 60)"
+                    "millisecondsOfSecond" -> "($n / 1000000)"
+                    "microsecondsOfSecond" -> "($n / 1000)"
+                    else -> n
+                }
+            }
+        }
+    }
+
     /** The duration text of the sum of the duration texts [a] and [b], or with [sign] -1 their difference. */
     fun sum(a: String, b: String, sign: Int): String = shared(listOf(a, b)) { (x, y) ->
         val (p, q) = parts(x) to parts(y)
@@ -894,7 +931,31 @@ class Temporals(
     }
 
     /** The canonical duration text of the duration text [text]: null where it is none. */
-    fun duration(text: String): String = shared(listOf(text)) { (t) -> "CASE WHEN ${isKind(t, Temporal.DURATION)} THEN ${text(parts(t))} END" }
+    fun duration(text: String): String = shared(listOf(text)) { (t) ->
+        "CASE WHEN ${isKind(t, Temporal.DURATION)} THEN ${if (sql.exactTime) exactCanonical(t) else text(parts(t))} END"
+    }
+
+    /**
+     * The canonical duration text of the duration text [text] on a store whose time is exact ([TemporalSql.exactTime]): its time
+     * of its whole seconds and nanoseconds read as whole numbers ([exactParts]), so a long duration a hair under a whole hour
+     * isn't rounded up to it in doubles (drivine-cypher-spec#278). A fraction of a month, a day, an hour or a minute goes to the
+     * parts below it as [text] gives it, the time it leaves as nanoseconds, rounded to the nanosecond.
+     */
+    private fun exactCanonical(text: String): String = exactParts(text, fractions = true) { m0, d0, wholeSeconds, nanos ->
+        shared(listOf(m0, d0)) { (mo, dy) ->
+            val months = "${sql.trunc}($mo)"
+            val days = "$dy + ($mo - ${sql.trunc}($mo)) * 30.436875"
+            shared(listOf(days)) { (d) ->
+                val spill = "CAST(${sql.round("($d - ${sql.trunc}($d)) * 86400000000000", 0)} AS INTEGER)"
+                shared(listOf("($nanos + $spill)")) { (f) ->
+                    // Whole seconds and nanoseconds of one sign each, then floored, as exactText takes them.
+                    shared(listOf("($wholeSeconds + $f / 1000000000)", "($f % 1000000000)")) { (w, n) ->
+                        exactText(months, "${sql.trunc}($d)", "($w - ($n < 0))", "($n + ($n < 0) * 1000000000)")
+                    }
+                }
+            }
+        }
+    }
 
     /**
      * `duration.between`: the duration from the text [from] of [kind] to the text [to] of [toKind], in whole months
@@ -977,6 +1038,12 @@ class Temporals(
     private fun literal(text: String) = "'${text.replace("'", "''")}'"
 
     companion object {
+        /** The fields of a duration read of its seconds, which [exactDurationField] works out where the store's time is exact. */
+        private val SECONDS_FIELDS = setOf(
+            "hours", "minutes", "seconds", "milliseconds", "microseconds", "nanoseconds", "minutesOfHour", "secondsOfMinute",
+            "millisecondsOfSecond", "microsecondsOfSecond", "nanosecondsOfSecond",
+        )
+
         /** Why a temporal value whose fraction of a second goes past the microsecond fails: see `held`. */
         const val SUB_MICRO = "A fraction of a second past the microsecond isn't kept by the store's time, so isn't worked out yet (drivine4j#421, drivine-cypher-spec#246):"
 

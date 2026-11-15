@@ -51,13 +51,12 @@ cases:
       - note: "Exactly, a nanosecond beside ten thousand years of hours: SQLite added the parts in doubles and lost it (#275)."
         cypher: "RETURN [toString(duration('PT87660000H') + duration('PT0.000000001S')), toString(duration('PT87660000H') - duration('PT0.000000001S')), toString(duration('P10000Y') - duration('-P10000Y'))]"
         rows: [["PT87660000H0.000000001S", "PT87659999H59M59.999999999S", "P20000Y"]]
-      - note: "A long duration a hair under a whole unit is cut toward zero, not rounded up by Postgres's numeric division to the next: in its text and its fields (#275). SQLite works the fields out in doubles, which round it up (#278)."
-        only: [neo4j, postgres, oracle]
+      - note: "A long duration a hair under a whole unit is cut toward zero, not rounded up to the next: in its text and its fields, by Postgres's numeric division (#275) and SQLite's doubles (#278)."
         cypher: "WITH duration('PT87659999H59M59.999999999S') AS d RETURN [d.hours, d.minutes, d.minutesOfHour, d.secondsOfMinute, toString(d)]"
         rows: [[87659999, 5259599999, 59, 59, "PT87659999H59M59.999999999S"]]
-      - only: [sqlite]
-        cypher: "RETURN toString(duration('PT87659999H59M59.999999999S'))"
-        rows: ["PT87659999H59M59.999999999S"]
+      - note: "Its seconds and the fraction of a second past them, whole numbers each; and the same of one below zero, whose seconds are floored and whose fraction is counted up from them (#278)."
+        cypher: "UNWIND [duration('PT87659999H59M59.999999999S'), duration('-PT87659999H59M59.999999999S')] AS d RETURN [d.seconds, d.secondsOfMinute, d.millisecondsOfSecond, d.microsecondsOfSecond, d.nanosecondsOfSecond, d.hours, d.minutesOfHour]"
+        rows: [[315575999999, 59, 999, 999999, 999999999, 87659999, 59], [-315576000000, 0, 0, 0, 1, -87660000, 0]]
       - note: "And the whole days a date takes of one: Oracle fails a hundred thousand days with ORA-01873 (#279)."
         only: [neo4j, postgres, sqlite]
         cypher: "RETURN toString(date('2024-01-01') + duration('PT2399999H59M59.999999999S'))"
