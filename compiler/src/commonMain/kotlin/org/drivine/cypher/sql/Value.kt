@@ -73,6 +73,12 @@ sealed interface Value {
          */
         val known: Known? = null,
         /**
+         * Where the statement makes it a list whose every item is of one [known] kind, that kind: a list written of them, a
+         * variable a `WITH` binds to one, or `collect()` of a value of one. Neo4j refuses `toString()` of such a list when it
+         * plans the statement, and so does the compiler (drivine4j#420). Null where an item's kind is left open, or two differ.
+         */
+        val itemsKnown: Known? = null,
+        /**
          * Whether it may be JSON's null: a value read out of a map or a list that may hold a null, as `x.a` of `{a: null}` is, an
          * entry of a parameter, a null written, a `reduce()`, or a `CASE` that may give one of them. A key that is missing reads as
          * SQL's null, and the two compare apart, where Cypher has one null: so a projection that groups its rows or keeps them
@@ -132,7 +138,8 @@ sealed interface Value {
 
     /**
      * A relationship: the columns of its row. With [deletable], as a [Node]'s: [eid] is the id the row holds, and [type]
-     * the type it holds beside it where the statement reads it, so `type()` of one deleted is still its type (drivine4j#427).
+     * the type it holds beside it where the statement reads `type()` or returns, so `type()` of one deleted is still its
+     * type (drivine4j#427).
      */
     data class Relationship(val eid: String, val src: String, val dst: String, val type: String, val props: String, val deletable: Boolean = false) : Value
 

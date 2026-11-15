@@ -187,6 +187,10 @@ class CompilerRefusalTest {
             listOf(
                 "RETURN toString({a: 1, b: 'x'})" to "{a: 1, b: x}",
                 "RETURN toString([1, 'a', [true, null], {}])" to "[1, a, [true, null], {}]",
+                // A map's keys in the order of their code points, at any depth, as Neo4j 2026.10.1 writes them, not as written:
+                // U+FF01 is before U+1F600, whose UTF-16 surrogate U+D83D String.compareTo puts first.
+                "RETURN toString({b: 1, a: [{d: true, c: 'x'}]})" to "{a: [{c: x, d: true}], b: 1}",
+                "RETURN toString({`\uD83D\uDE00`: 1, `\uFF01`: 2, z: 3})" to "{z: 3, \uFF01: 2, \uD83D\uDE00: 1}",
             ).forEach { (cypher, text) ->
                 val sql = compiler.compile(cypher).sql
                 assertTrue(sql.contains("'$text'"), "${compiler::class.simpleName}: $cypher: $sql")
@@ -195,13 +199,23 @@ class CompilerRefusalTest {
             val sql = compiler.compile("WITH [1, 'a'] AS l RETURN toString(l)").sql
             assertTrue(sql.contains("it holds ") && sql.contains("a map"), "${compiler::class.simpleName}: $sql")
             // A list written of items of one kind is refused still, as Neo4j's Cypher 25 refuses it.
-            listOf("RETURN toString([1, 2])", "RETURN toString([[1], [2]])").forEach { cypher ->
+            // So is one a WITH binds or collect() gathers of one kind, as Neo4j 2026.10.1 refuses them.
+            listOf(
+                "RETURN toString([1, 2])", "RETURN toString([[1], [2]])", "RETURN toString([1.0E20, 0.001])", "RETURN toString([date('2024-01-02')])",
+                "WITH [1, 2] AS l RETURN toString(l)", "UNWIND [1964, 1967] AS b WITH collect(b) AS c RETURN toString(c)",
+                "UNWIND [1, 2] AS b RETURN toString(collect(b))",
+            ).forEach { cypher ->
                 val refused = assertThrows<CompilerException>("${compiler::class.simpleName}: $cypher") { compiler.compile(cypher) }.message!!
                 assertEquals("toString() takes a number, a text, a truth value or a temporal value, not a list of one kind, as in Neo4j.", refused)
             }
             // A value whose kind the statement leaves open is compiled as before, as Neo4j plans it.
             compiler.compile("UNWIND [1, 'a'] AS x RETURN toString(x)")
             compiler.compile("MATCH (n) RETURN toString(n.x)")
+            // And a list Neo4j takes: of properties, collect() of one, of many kinds, and empty.
+            listOf(
+                "MATCH (n) RETURN toString([n.x, n.y]), toString(collect(n.x))", "MATCH (n) WITH collect(n.x) AS c RETURN toString(c)",
+                "WITH [1, 'a'] AS l WITH l RETURN toString(l)", "RETURN toString([])",
+            ).forEach(compiler::compile)
         }
     }
 

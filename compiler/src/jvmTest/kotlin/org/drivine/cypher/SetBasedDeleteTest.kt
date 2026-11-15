@@ -148,4 +148,22 @@ class SetBasedDeleteTest {
             }
         }
     }
+
+    @Test
+    fun `a statement that deletes and reads on holds each relationship's type in its rows, by whatever name a WITH gives it`() {
+        // drivine4j#427: type() of a relationship the statement deleted is read from its rows, as its row is gone. Held only by
+        // the name type() read, one a WITH renamed was null, and so was the type of one returned typed. A statement that reads
+        // nothing after its DELETE holds none, which would only lengthen each row.
+        val typeKey = Regex("""\bv\d+t\b""")
+        compilers.forEach { compiler ->
+            listOf(
+                "MATCH ()-[r]->() DELETE r WITH r AS x RETURN type(x)",
+                "MATCH ()-[r]->() DELETE r RETURN r",
+                "MATCH ()-[r]->() DELETE r CREATE (:Log {t: type(r)})",
+            ).forEach { cypher -> assertTrue(typeKey.containsMatchIn(compiler.compile(cypher).sql), "${compiler::class.simpleName}: $cypher") }
+            listOf("MATCH (a)-[r]->() DELETE r SET a.x = 1", "MATCH (a)-[r]->() SET a.x = 1 RETURN type(r)").forEach { cypher ->
+                assertFalse(typeKey.containsMatchIn(compiler.compile(cypher).sql), "${compiler::class.simpleName}: $cypher")
+            }
+        }
+    }
 }

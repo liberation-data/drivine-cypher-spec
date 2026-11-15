@@ -2313,7 +2313,7 @@ abstract class SqlCypherCompiler(
                     itemItems = all.map { it?.itemItems }.distinct().singleOrNull(), temporals = all.any { it?.temporals == true },
                     entries = all.map { it?.entries }.distinct().singleOrNull(), itemEntries = all.map { it?.itemEntries }.distinct().singleOrNull(),
                     text = all.all { it?.text == true }, texts = all.all { it?.texts == true },
-                    known = all.map { it?.known }.distinct().singleOrNull(), jsonNull = all.any { it?.jsonNull == true },
+                    known = all.map { it?.known }.distinct().singleOrNull(), itemsKnown = all.map { it?.itemsKnown }.distinct().singleOrNull(), jsonNull = all.any { it?.jsonNull == true },
                     list = all.all { it?.list == true }, itemLists = all.all { it?.itemLists == true }, flat = all.all { it?.flat == true },
                     // Its identity is the column beside it where any query gives one, the first query's own or its value's.
                     identity = if (variable in byProperties) null else value.identity ?: first[variable]?.let { (column, _) -> "$PENDING.${column}_identity" },
@@ -2850,15 +2850,16 @@ abstract class SqlCypherCompiler(
         private var deleted = false
 
         /**
-         * The relationships whose type a row holds beside its id, at [typeKey]: in a statement that deletes, each variable that
-         * `type()` reads, so the type of one deleted is still read after its row is gone (drivine4j#427). No other row holds it.
+         * Whether a row holds the type of each relationship beside its id, at [typeKey]: in a statement that deletes, and reads
+         * `type()` or returns, so the type of one deleted is still read after its row is gone, by whatever name a `WITH` gives
+         * it after, and given where it is returned (drivine4j#427). No other row holds it.
          */
-        private var heldTypes = emptySet<String>()
+        private var holdsTypes = false
 
         /** The steps of the procedure [query] is: its reads, a loop over its rows for each write, and what it returns. */
         fun procedure(query: Query): List<ProcedureStep> {
             give(query)
-            heldTypes = typesRead(query)
+            holdsTypes = typesRead(query)
             var select = Select(emptyMap())
             val clauses = creates(query.clauses)
             clauses.forEachIndexed { i, clause ->
@@ -2915,20 +2916,20 @@ abstract class SqlCypherCompiler(
 
         private fun key(variable: String) = keys.getOrPut(variable) { "v${keys.size + 1}" }
 
-        /** The key a row holds the type of the relationship [variable] at, of [heldTypes]: no variable's key ends in a letter. */
+        /** The key a row holds the type of the relationship [variable] at, where it [holdsTypes]: no variable's key ends in a letter. */
         private fun typeKey(variable: String) = "${key(variable)}t"
 
-        /** [heldTypes] of [query]: where it deletes anywhere, each variable `type()` reads; none where it doesn't. */
-        private fun typesRead(query: Query): Set<String> {
+        /** [holdsTypes] of [query]: whether it deletes anywhere, and reads `type()` or returns. */
+        private fun typesRead(query: Query): Boolean {
             fun deletes(clauses: List<Clause>): Boolean = clauses.any { clause ->
                 clause is Clause.Delete || clause is Clause.Foreach && deletes(clause.clauses) ||
                     clause is Clause.Call && (clause.query.clauses + clause.query.unions.flatMap { it.clauses }).let(::deletes)
             }
-            if (!deletes(query.clauses + query.unions.flatMap { it.clauses })) return emptySet()
-            val read = mutableSetOf<String>()
-            Texts(mutableSetOf()) { expression ->
-                if (expression is Expression.Function && expression.name.lowercase() == "type") (expression.arguments.singleOrNull() as? Expression.Variable)?.let { read += it.name }
-            }.query(query)
+            val clauses = query.clauses + query.unions.flatMap { it.clauses }
+            if (!deletes(clauses)) return false
+            if (clauses.any { it is Clause.Return }) return true
+            var read = false
+            Texts(mutableSetOf()) { expression -> if (expression is Expression.Function && expression.name.lowercase() == "type") read = true }.query(query)
             return read
         }
 
@@ -2946,7 +2947,7 @@ abstract class SqlCypherCompiler(
                     is Value.Entities -> if (value.relationships) Kind.RELATIONSHIPS else Kind.NODES
                     is Value.Path -> Kind.PATH
                 }
-                listOf(key(variable) to held(value)) + listOfNotNull((value as? Value.Relationship)?.takeIf { variable in heldTypes }?.let { typeKey(variable) to scalar(it.type) })
+                listOf(key(variable) to held(value)) + listOfNotNull((value as? Value.Relationship)?.takeIf { holdsTypes }?.let { typeKey(variable) to scalar(it.type) })
             }.flatten()
             val list = comparable(Value.Json(aggregateList(jsonObject(entries), orderOf(select)), ordered = true))
             // Its hints ([Select.head]) stand before the list: the step is written `SELECT <list> INTO …`.
@@ -3009,7 +3010,7 @@ abstract class SqlCypherCompiler(
                     Kind.RELATIONSHIP -> {
                         val e = alias("e")
                         select.join(keyJoin(edges, e, "eid", idOf(row, key)))
-                        val type = if (deleted && variable in heldTypes) "COALESCE($e.type, ${text(propertyOf(row, typeKey(variable)))})" else "$e.type"
+                        val type = if (deleted && holdsTypes) "COALESCE($e.type, ${text(propertyOf(row, typeKey(variable)))})" else "$e.type"
                         select.bind(variable, Value.Relationship(if (deleted) idOf(row, key) else "$e.eid", "$e.src", "$e.dst", type, "$e.props", deletable = deleted))
                     }
                     Kind.VALUE -> select.bind(
@@ -3021,6 +3022,7 @@ abstract class SqlCypherCompiler(
                             list = values[variable]?.list == true, itemLists = values[variable]?.itemLists == true,
                             text = values[variable]?.text == true, texts = values[variable]?.texts == true,
                             rowKeys = if (written) listOf(key) else null, fromList = !written, known = values[variable]?.known,
+                            itemsKnown = values[variable]?.itemsKnown,
                         ),
                     )
                     // A list or a path that is null is held as JSON's null, and read as SQL's.
@@ -4459,7 +4461,8 @@ abstract class SqlCypherCompiler(
                 filtering = outer
                 conjoining = conjunct
             }
-            val value = if (evaluated is Value.Json && evaluated.known == null) knownKind(expression, scope)?.let { evaluated.copy(known = it) } ?: evaluated else evaluated
+            val kinded = if (evaluated is Value.Json && evaluated.known == null) knownKind(expression, scope)?.let { evaluated.copy(known = it) } ?: evaluated else evaluated
+            val value = if (kinded is Value.Json && kinded.itemsKnown == null) itemsKind(expression, scope)?.let { kinded.copy(itemsKnown = it) } ?: kinded else kinded
             return when {
                 value is Value.Json && !value.flat && flat(expression, scope) -> value.copy(flat = true)
                 value is Value.Entities && !value.flat && flat(expression, scope) -> value.copy(flat = true)
@@ -4890,8 +4893,8 @@ abstract class SqlCypherCompiler(
         /**
          * Refuses `toInteger()` or `toFloat()` of [function] where the statement makes its argument a kind Neo4j refuses when it
          * plans the statement ([knownKind]): a map, and for `toFloat()` a truth value or a list too, which gave null (#420). A list
-         * given to `toInteger()` Neo4j plans, and refuses only as the row is read, so it is compiled as before, as is a parameter or
-         * a value whose kind is left open.
+         * given to `toInteger()` Neo4j plans, and refuses only as the row is read, so it is compiled to fail each row ([integerOfList]);
+         * a parameter or a value whose kind is left open is compiled as before.
          */
         private fun conversionOfKind(function: Expression.Function, scope: Map<String, Value>) {
             val (taken, nouns) = CONVERTED_KINDS[function.name.lowercase()] ?: return
@@ -6795,6 +6798,7 @@ abstract class SqlCypherCompiler(
                     // What holds a node or a relationship, a map or a list of them, is gathered beside its identity too.
                     else -> Value.Json(
                         collected(gathered), ordered = true, items = (gathered as? Value.Json)?.temporal, itemItems = itemsOf(gathered),
+                        itemsKnown = (gathered as? Value.Json)?.known,
                         itemEntries = (gathered as? Value.Json)?.entries, list = true,
                         itemLists = isList(gathered), texts = isText(gathered), temporals = hasTemporals(gathered),
                         identity = identityOf(gathered)?.let { comparable(Value.Json(collect(it, rowOrder), ordered = true)) },
@@ -6860,10 +6864,11 @@ abstract class SqlCypherCompiler(
                     temporals = holdsTemporals(one()))
                 // A text is read as Cypher reads it, its case and the spaces around it aside; a number is true but for 0.
                 "toboolean" -> {
-                    conversionOfEntity(name, one())
+                    conversionOfEntity(function, one())
                     // Neo4j takes a truth value, an integer or a text, and refuses another kind it knows (#420).
-                    function.arguments.singleOrNull()?.let { givenKind(it, scope) }?.takeIf { it in setOf(Value.Known.LIST, Value.Known.MAP, Value.Known.FLOAT) }?.let { kind ->
-                        throw CompilerException("toBoolean() takes a truth value, an integer or a text, not ${kind.noun}, as in Neo4j.")
+                    val (taken, nouns) = CONVERTED_KINDS.getValue(name)
+                    function.arguments.singleOrNull()?.let { givenKind(it, scope) }?.takeIf { it !in taken }?.let { kind ->
+                        throw CompilerException("toBoolean() takes $nouns, not ${kind.noun}, as in Neo4j.")
                     }
                     Value.Json(shared(comparable(json(one()))) { (x) ->
                     "CASE WHEN ${typeOf(x)} = 'boolean' THEN $x " +
@@ -6967,7 +6972,7 @@ abstract class SqlCypherCompiler(
                 else -> {
                     // A function the store has no SQL for is named before its arguments are counted.
                     if (function(name, "NULL") == null) unsupported("The function ${function.name}()")
-                    if (name == "tointeger" || name == "tofloat") conversionOfEntity(name, one())
+                    if (name == "tointeger" || name == "tofloat") conversionOfEntity(function, one())
                     if (name == "tointeger") integerOfList(function, one(), scope)?.let { return it }
                     if (name == "tostring") textOfList(function, one(), scope)?.let { return it }
                     conversionOfKind(function, scope)
@@ -7005,17 +7010,17 @@ abstract class SqlCypherCompiler(
         }
 
         /**
-         * Refuses `toInteger`, `toFloat` or `toBoolean` ([name]) of [value] where it is a node or a relationship, as Neo4j refuses
-         * it when it plans the statement, even over no rows; of its properties, a map, the SQL gave null (drivine4j#420).
+         * Refuses `toInteger`, `toFloat` or `toBoolean` ([function]) of [value] where it is a node or a relationship, as Neo4j
+         * refuses it when it plans the statement, even over no rows, naming what it takes as [CONVERTED_KINDS] does; of its
+         * properties, a map, the SQL gave null (drivine4j#420).
          */
-        private fun conversionOfEntity(name: String, value: Value) {
+        private fun conversionOfEntity(function: Expression.Function, value: Value) {
             val entity = when (value) {
                 is Value.Node -> "a node"
                 is Value.Relationship -> "a relationship"
                 else -> return
             }
-            val (function, takes) = CONVERSIONS.getValue(name)
-            throw CompilerException("$function() takes $takes, not $entity, as in Neo4j.")
+            throw CompilerException("${function.name}() takes ${CONVERTED_KINDS.getValue(function.name.lowercase()).second}, not $entity, as in Neo4j.")
         }
 
         /**
@@ -7030,10 +7035,11 @@ abstract class SqlCypherCompiler(
 
         /**
          * `toString` of [value], the argument of [function], where the statement makes it a list or writes it as a map: its text as
-         * Neo4j 2026.09 and later writes it, where Neo4j before refused it, and so did this (drivine4j#420); a list written of items of
-         * one kind it knows, `[1, 2]` or `[date(…)]`, it refuses still, and so does this. Each item is written as
-         * `toString` writes it, a text without quotes, null as `null`, a list or a map within as one is, the items after `, ` and
-         * each entry `key: value`, in the order the statement writes its keys, as Neo4j keeps them: `[1, a]`, `{a: 1, b: x}`. Of a
+         * Neo4j 2026.09 and later writes it, where Neo4j before refused it, and so did this (drivine4j#420); a list of items of one kind
+         * it knows, written, `[1, 2]` or `[date(…)]`, bound by a `WITH` or gathered by `collect()` ([Value.Json.itemsKnown]), it refuses
+         * still, and so does this. Each item is written as `toString` writes it, a text without quotes, null as `null`, a list or a
+         * map within as one is, the items after `, ` and each entry `key: value`, in the order of the keys ([CODE_POINT_ORDER]), as
+         * Neo4j orders them: `[1, a]`, `{a: 2, b: x}` of `{b: 'x', a: 2}`. Of a
          * list that is null, null. What the text of is not known here is refused by name: a list or a map that holds a temporal
          * value, a node or a relationship, a map whose keys the statement doesn't write ([textOf]), or a map read as the statement
          * runs, which fails as it is read ([itemText]). Null where [value] is no list or map the statement makes: compiled as before.
@@ -7046,8 +7052,7 @@ abstract class SqlCypherCompiler(
                 return null
             }
             // Neo4j's Cypher 25 refuses a list whose items it knows to be of one kind, as [1, 2], and takes one of many, as [1, 'a'].
-            val kinds = (written as? Expression.ListLiteral)?.items?.map { knownKind(it, scope) }
-            if (kinds != null && kinds.isNotEmpty() && kinds.distinct().singleOrNull() != null || (value as? Value.Json)?.items != null) {
+            if (itemsKind(written, scope) != null || (value as? Value.Json)?.items != null || (value as? Value.Json)?.itemsKnown != null) {
                 throw CompilerException("${function.name}() takes a number, a text, a truth value or a temporal value, not a list of one kind, as in Neo4j.")
             }
             if (value is Value.Entities) unsupported("toString() of a list of nodes or relationships")
@@ -7058,7 +7063,7 @@ abstract class SqlCypherCompiler(
 
         /**
          * The text, as [textOfList] writes it, of the JSON list or map [json], not null, that [written] gives: of a list or a map the
-         * statement writes, item by item, or entry by entry in the order written, as [writtenText] writes each; of any other list,
+         * statement writes, item by item, or entry by entry in the order of their keys, as [writtenText] writes each; of any other list,
          * item by item as it runs, as [itemText] writes each.
          */
         private fun textOf(written: Expression, json: String, scope: Map<String, Value>): String = constantText(written)?.let(::literal) ?: when (written) {
@@ -7081,10 +7086,13 @@ abstract class SqlCypherCompiler(
             else -> listText(json, 1)
         }
 
-        /** The text of the JSON map [json], not null, whose [entries] the statement writes, each its key and what gives it. */
+        /**
+         * The text of the JSON map [json], not null, whose [entries] the statement writes, each its key and what gives it: in the
+         * order of their keys ([CODE_POINT_ORDER]), as Neo4j writes a map, not as written.
+         */
         private fun entriesText(entries: List<Pair<String, Expression?>>, json: String, scope: Map<String, Value>): String =
             shared(json) { (x) ->
-                entries.joinToString(" || ', ' || ", prefix = "'{' || ", postfix = " || '}'") { (key, item) -> "${literal("$key: ")} || ${writtenText(item, propertyOf(x, key), scope)}" }
+                entries.sortedWith(compareBy(CODE_POINT_ORDER) { it.first }).joinToString(" || ', ' || ", prefix = "'{' || ", postfix = " || '}'") { (key, item) -> "${literal("$key: ")} || ${writtenText(item, propertyOf(x, key), scope)}" }
             }
 
         /**
@@ -7120,7 +7128,8 @@ abstract class SqlCypherCompiler(
                 else -> null
             }
             is Expression.ListLiteral -> written.items.map { constantText(it) ?: return null }.joinToString(", ", "[", "]")
-            is Expression.MapLiteral -> written.entries.map { (key, item) -> "$key: ${constantText(item) ?: return null}" }.joinToString(", ", "{", "}")
+            is Expression.MapLiteral -> written.entries.sortedWith(compareBy(CODE_POINT_ORDER) { it.first })
+                .map { (key, item) -> "$key: ${constantText(item) ?: return null}" }.joinToString(", ", "{", "}")
             else -> null
         }
 
@@ -7322,11 +7331,17 @@ abstract class SqlCypherCompiler(
             else -> json(value)
         }
 
-        private fun taggedNode(node: Value.Node): String =
-            "CASE WHEN ${node.nid} IS NOT NULL THEN ${jsonObject(listOf(TAG to literalJson("node"), "labels" to node.labels, "properties" to nodeJson(node)))} END"
+        /** One the statement deleted ([Value.Node.deletable]) has no labels and no properties, as [json] gives it (drivine4j#420). */
+        private fun taggedNode(node: Value.Node): String {
+            val labels = if (node.deletable) "CASE WHEN ${isDeleted(node)} THEN ${literalJson(emptyList<Any>())} ELSE ${node.labels} END" else node.labels
+            return "CASE WHEN ${node.nid} IS NOT NULL THEN ${jsonObject(listOf(TAG to literalJson("node"), "labels" to labels, "properties" to json(node).sql))} END"
+        }
 
-        private fun taggedRelationship(relationship: Value.Relationship): String =
-            "CASE WHEN ${relationship.eid} IS NOT NULL THEN ${jsonObject(listOf(TAG to literalJson("relationship"), "type" to scalar(relationship.type), "properties" to relationship.props))} END"
+        /** One the statement deleted ([Value.Relationship.deletable]) has no properties, as [json] gives it (drivine4j#420). */
+        private fun taggedRelationship(relationship: Value.Relationship): String {
+            val properties = if (relationship.deletable) json(relationship).sql else relationship.props
+            return "CASE WHEN ${relationship.eid} IS NOT NULL THEN ${jsonObject(listOf(TAG to literalJson("relationship"), "type" to scalar(relationship.type), "properties" to properties))} END"
+        }
 
         /** The columns [names] of a statement's last `RETURN`, their values [read] as its outer query reads them: see [CompiledCypher.columns]. */
         private fun columnsReturned(names: List<String>, read: List<Value>): List<ResultColumn> {
@@ -7588,18 +7603,21 @@ abstract class SqlCypherCompiler(
          */
         const val TEXT_OF_HELD = "toString() of a list or a map that holds a map read as the statement runs, a temporal value or a list nested deeper is not compiled to SQL yet: it holds"
 
+        /**
+         * Texts in the order of their Unicode code points, as Neo4j orders a map's keys where `toString()` writes it: UTF-16's
+         * order, which [String.compareTo] is, but for a surrogate, whose code point is past every other's.
+         */
+        val CODE_POINT_ORDER = Comparator<String> { a, b ->
+            val at = (0 until minOf(a.length, b.length)).firstOrNull { a[it] != b[it] } ?: return@Comparator a.length.compareTo(b.length)
+            fun rank(c: Char) = if (c.isSurrogate()) c.code + 0x10000 else c.code
+            rank(a[at]).compareTo(rank(b[at]))
+        }
+
         /** How many lists deep `toString()` writes a list read as the statement runs: see `itemText`. */
         const val TEXT_DEPTH = 3
 
         /** What `toInteger()` of a list fails with as the statement runs, before the kind of JSON the list is, as Neo4j fails it (drivine4j#420). */
-        const val INTEGER_OF_LIST = "toInteger() takes a truth value, a float, an integer or a text, not a list, as in Neo4j. Its JSON is an"
-
-        /** Each conversion Neo4j refuses a node or a relationship of, by its name in lower case: its name as written, and what it takes. */
-        val CONVERSIONS = mapOf(
-            "tointeger" to ("toInteger" to "a truth value, a float, an integer or a text"),
-            "tofloat" to ("toFloat" to "a float, an integer or a text"),
-            "toboolean" to ("toBoolean" to "a truth value, an integer or a text"),
-        )
+        const val INTEGER_OF_LIST = "toInteger() takes a truth value, an integer, a float or a text, not a list, as in Neo4j. Its JSON is an"
 
         /** What a map, a node or a relationship read by a number fails with, before its kind: see listItem. */
         const val NUMBER_KEY_OF_MAP = "A map, a node or a relationship is read by a text key, as in Neo4j, not a"
@@ -7808,10 +7826,14 @@ abstract class SqlCypherCompiler(
         /** The arithmetic that takes numbers alone, and temporal values where the store does: `+` puts texts and lists together too. */
         val NUMERIC_ONLY = ARITHMETIC - Operator.ADD
 
-        /** The kinds `toInteger()` and `toFloat()` take, as Neo4j documents them, and how a refusal names them: see [conversionOfKind]. */
+        /**
+         * The kinds `toInteger()`, `toFloat()` and `toBoolean()` take, as Neo4j documents them, and how a refusal names them: see
+         * [conversionOfKind], [conversionOfEntity] and `toBoolean`'s own refusal.
+         */
         val CONVERTED_KINDS = mapOf(
             "tointeger" to (setOf(Value.Known.BOOLEAN, Value.Known.INTEGER, Value.Known.FLOAT, Value.Known.TEXT) to "a truth value, an integer, a float or a text"),
             "tofloat" to (setOf(Value.Known.INTEGER, Value.Known.FLOAT, Value.Known.TEXT) to "an integer, a float or a text"),
+            "toboolean" to (setOf(Value.Known.BOOLEAN, Value.Known.INTEGER, Value.Known.TEXT) to "a truth value, an integer or a text"),
         )
 
         /** How the statement writes each of [NUMERIC_ONLY], for a refusal to name it. */

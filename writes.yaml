@@ -324,6 +324,16 @@ cases:
       - only: [neo4j, sql]
         cypher: "MATCH (:CyWrite)-[r]->() DELETE r RETURN type(r)"
         rows: ["T"]
+      - cypher: "CREATE (:CyWrite)-[:T {num: 1}]->(:CyWrite)"
+      - note: "A SQL store held the type of a relationship only by the name type() read it by, so one a WITH renamed was null."
+        only: [neo4j, sql]
+        cypher: "MATCH (:CyWrite)-[r]->() DELETE r WITH r AS x RETURN type(x)"
+        rows: ["T"]
+      - cypher: "CREATE (:CyWrite {num: 2})-[:T {num: 1}]->(:CyWrite)"
+      - note: "A node the statement didn't delete still reads, and so does one OPTIONAL MATCH found none of."
+        only: [neo4j, sql]
+        cypher: "MATCH (a:CyWrite {num: 2})-[r]->() OPTIONAL MATCH (a)-[s:NONE]->() DELETE r, s RETURN [a.num, s.num, type(s)]"
+        rows: [[2, null, null]]
       - cypher: "MATCH (:CyWrite)-[r]->() RETURN count(r)"
         rows: [0]
 
