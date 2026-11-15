@@ -5026,7 +5026,7 @@ cases:
   # nesting.yaml's cells, to here.
 
   - name: "A CALL in the order of a RETURN that groups or is DISTINCT, and CALL (*) where a projection groups"
-    description: "The same places as refusals.yaml's \"A CALL in the order of a RETURN that groups or is DISTINCT, and CALL (*) where a projection groups\" that Neo4j gives rows for: a CALL (*) there that reads nothing the projection can't, a CALL whose brackets name an item, and a projection that groups within the subquery, whose own items a CALL within reads (drivine4j#681)."
+    description: "The same places as refusals.yaml's \"A CALL in the order of a RETURN that groups or is DISTINCT, and CALL (*) where a projection groups\" that Neo4j gives rows for: a CALL (*) there that reads nothing the projection can't, a CALL whose brackets name an item, a projection that groups within the subquery, whose own items a CALL within reads, a comprehension's, a quantifier's, a reduce()'s or a pattern comprehension's own variable that a CALL names, and a procedure's CALL whose WHERE reads a subquery's own variable (drivine4j#681)."
     steps:
       - cypher: "MATCH (p:Person) WITH p AS q RETURN q.name AS name, count(*) AS c ORDER BY EXISTS { CALL (name) { MATCH (n:Person {name: name})-->(m) RETURN m } RETURN m }, name"
         only: [neo4j, sql]
@@ -5377,6 +5377,39 @@ cases:
       - cypher: "MATCH (m1:Movie) CALL () { MATCH (m1:Person) RETURN m1 AS z } RETURN m1.title, z.name ORDER BY m1.title, z.name"
         only: [neo4j, sql]
         rows: [["Johnny Mnemonic", "Carrie"], ["Johnny Mnemonic", "Hugo"], ["Johnny Mnemonic", "Keanu"], ["Johnny Mnemonic", "Laurence"], ["The Matrix", "Carrie"], ["The Matrix", "Hugo"], ["The Matrix", "Keanu"], ["The Matrix", "Laurence"], ["The Matrix Reloaded", "Carrie"], ["The Matrix Reloaded", "Hugo"], ["The Matrix Reloaded", "Keanu"], ["The Matrix Reloaded", "Laurence"]]
+      - cypher: "MATCH (p:Person) WITH DISTINCT p AS q ORDER BY EXISTS { MATCH (q)-->(m1) CALL db.labels() YIELD label WHERE label IN labels(m1) RETURN label }, q.name RETURN q.name"
+        only: [neo4j, sql]
+        rows: ["Hugo", "Carrie", "Keanu", "Laurence"]
+      - cypher: "MATCH (p:Person) WITH DISTINCT p AS q ORDER BY EXISTS { MATCH (q)-->(m1) CALL db.labels() YIELD label WHERE m1.title IS NOT NULL RETURN label }, q.name RETURN q.name"
+        only: [neo4j, sql]
+        rows: ["Hugo", "Carrie", "Keanu", "Laurence"]
+      - cypher: "MATCH (p:Person) WITH p AS q, count(*) AS c WHERE COUNT { MATCH (q)-->(m1) CALL db.relationshipTypes() YIELD relationshipType WHERE m1.title IS NOT NULL RETURN relationshipType } > 0 RETURN q.name ORDER BY q.name"
+        only: [neo4j, sql]
+        rows: ["Carrie", "Keanu", "Laurence"]
+      - cypher: "MATCH (p:Person) WITH DISTINCT p AS q ORDER BY EXISTS { MATCH (q)-->(m1) WHERE size([w IN [m1] WHERE EXISTS { CALL (w) { RETURN w.title AS y } RETURN y }]) > 0 RETURN m1 }, q.name RETURN q.name"
+        only: [neo4j, sql]
+        rows: ["Hugo", "Carrie", "Keanu", "Laurence"]
+      - cypher: "MATCH (p:Person) WITH DISTINCT p AS q ORDER BY EXISTS { MATCH (q)-->(m1) WHERE any(w IN [m1] WHERE EXISTS { CALL (w) { RETURN w.title AS y } RETURN y }) RETURN m1 }, q.name RETURN q.name"
+        only: [neo4j, sql]
+        rows: ["Hugo", "Carrie", "Keanu", "Laurence"]
+      - cypher: "MATCH (p:Person) WITH DISTINCT p AS q ORDER BY EXISTS { MATCH (q)-->(m1) WHERE reduce(a = 0, w IN [m1] | a + COUNT { CALL (w) { RETURN w.title AS y } RETURN y }) > 0 RETURN m1 }, q.name RETURN q.name"
+        only: [neo4j, sql]
+        rows: ["Hugo", "Carrie", "Keanu", "Laurence"]
+      - cypher: "MATCH (p:Person) WITH DISTINCT p AS q ORDER BY EXISTS { MATCH (q)-->(m1) WHERE size([(m1)<--(x) WHERE EXISTS { CALL (x) { RETURN x.name AS y } RETURN y } | 1]) > 0 RETURN m1 }, q.name RETURN q.name"
+        only: [neo4j, sql]
+        rows: ["Hugo", "Carrie", "Keanu", "Laurence"]
+      - cypher: "MATCH (p:Person) WITH DISTINCT p AS q ORDER BY size([w IN [q] WHERE EXISTS { CALL (w) { RETURN w.name AS y } RETURN y }]), q.name RETURN q.name"
+        only: [neo4j, sql]
+        rows: ["Carrie", "Hugo", "Keanu", "Laurence"]
+      - cypher: "MATCH (p:Person) WITH p AS q, count(*) AS c WHERE size([w IN [q] WHERE EXISTS { CALL (w) { RETURN w.name AS y } RETURN y }]) > 0 RETURN q.name ORDER BY q.name"
+        only: [neo4j, sql]
+        rows: ["Carrie", "Hugo", "Keanu", "Laurence"]
+      - cypher: "MATCH (p:Person) WITH DISTINCT p AS q ORDER BY EXISTS { MATCH (q)-->(m1) WHERE size([w IN [m1] WHERE EXISTS { CALL (*) { RETURN w.title AS y } RETURN y }]) > 0 RETURN m1 }, q.name RETURN q.name"
+        only: [neo4j, sql]
+        rows: ["Hugo", "Carrie", "Keanu", "Laurence"]
+      - cypher: "MATCH (p:Person) WITH DISTINCT p AS q ORDER BY EXISTS { MATCH (q)-->(m1) WHERE EXISTS { MATCH (m1)<--(m2) WHERE size([w IN [m2] WHERE EXISTS { CALL (w) { RETURN w.name AS y } RETURN y }]) > 0 RETURN m2 } RETURN m1 }, q.name RETURN q.name"
+        only: [neo4j, sql]
+        rows: ["Hugo", "Carrie", "Keanu", "Laurence"]
 
   - name: "Shortest paths"
     description: "shortestPath gives the shortest match, and allShortestPaths every match of that length."

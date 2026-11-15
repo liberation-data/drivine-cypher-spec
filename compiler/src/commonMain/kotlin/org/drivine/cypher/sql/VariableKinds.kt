@@ -49,16 +49,24 @@ internal class VariableKinds(private val aggregates: (Expression) -> Boolean) {
      * 42N44), though it is the subquery's own (see [called]). Null outside any such projection. A projection that groups
      * within it, in a subquery, holds a horizon of its own there, its items and what its subquery reads from outside it. A
      * `CALL (*) { … }` within imports what its horizon doesn't hold too ([hidden]), but Neo4j refuses a read of it there
-     * (its 42N44 too), in a pattern or as a value.
+     * (its 42N44 too), in a pattern or as a value; a procedure's call, `CALL db.labels() YIELD label WHERE …`, does not hide
+     * it. A comprehension's variables, a quantifier's and a `reduce()`'s, and what a pattern comprehension binds, are within
+     * the horizon where they are bound, as Neo4j reads them there.
      */
     private class Scope(
         val kinds: MutableMap<String, Kind> = LinkedHashMap(),
         val dropped: MutableSet<String> = LinkedHashSet(),
         val shadowing: MutableSet<String> = LinkedHashSet(),
-        val horizon: Set<String>? = null,
+        var horizon: Set<String>? = null,
         val hidden: MutableSet<String> = LinkedHashSet(),
     ) {
         fun copy() = Scope(LinkedHashMap(kinds), LinkedHashSet(dropped), LinkedHashSet(shadowing), horizon, LinkedHashSet(hidden))
+
+        /** A copy, with [names] bound within an expression, as a comprehension's variable, of any kind and within its [horizon]. */
+        fun binding(vararg names: String) = copy().also { scope ->
+            names.forEach { scope[it] = Kind.ANY }
+            scope.horizon = horizon?.plus(names)
+        }
         operator fun get(name: String) = kinds[name]
         operator fun set(name: String, kind: Kind) {
             kinds[name] = kind
@@ -165,8 +173,8 @@ internal class VariableKinds(private val aggregates: (Expression) -> Boolean) {
             // What a WITH outside drops, imported by a CALL within its WHERE, CALL (*) { … }, stays dropped in the call (drivine4j#504).
             val dropped = scope.dropped.filterTo(LinkedHashSet()) { it in imported }
             val shadowing = scope.shadowing.filterTo(LinkedHashSet()) { it in imported }
-            // What CALL (*) imports there that the projection can't read, is refused where it is read (drivine4j#681).
-            val hidden = imported.filterTo(LinkedHashSet()) { it in scope.hidden || (call.importsAll && scope.horizon?.contains(it) == false) }
+            // What CALL (*) imports there that the projection can't read, is refused where it is read (drivine4j#681); not a procedure's.
+            val hidden = imported.filterTo(LinkedHashSet()) { it in scope.hidden || (call.importsAll && !call.procedure && scope.horizon?.contains(it) == false) }
             clauses(clauses, Scope(inner, dropped, shadowing, scope.horizon, hidden), kept = if (call.imports != null || call.importsAll) inner.filterKeys { it !in dropped } else emptyMap())
         }
         return parts.first().mapValues { (name, kind) -> if (parts.all { it[name] == kind }) kind else Kind.ANY }
@@ -413,26 +421,24 @@ internal class VariableKinds(private val aggregates: (Expression) -> Boolean) {
             }
             is Expression.ListComprehension -> {
                 expression(expression.list, scope)
-                val inner = scope.copy().also { it[expression.variable] = Kind.ANY }
+                val inner = scope.binding(expression.variable)
                 listOfNotNull(expression.where, expression.projection).forEach { expression(it, inner) }
             }
             is Expression.Quantifier -> {
                 expression(expression.list, scope)
-                val inner = scope.copy().also { it[expression.variable] = Kind.ANY }
+                val inner = scope.binding(expression.variable)
                 expression.where?.let { expression(it, inner) }
             }
             is Expression.Reduce -> {
                 expression(expression.initial, scope)
                 expression(expression.list, scope)
-                val inner = scope.copy().also {
-                    it[expression.accumulator] = Kind.ANY
-                    it[expression.variable] = Kind.ANY
-                }
+                val inner = scope.binding(expression.accumulator, expression.variable)
                 expression(expression.expression, inner)
             }
             is Expression.PatternComprehension -> {
                 val inner = scope.copy()
                 matched(expression.pattern, inner, within = true)
+                inner.horizon = inner.horizon?.plus(inner.kinds.keys - scope.kinds.keys)
                 expression.where?.let { expression(it, inner) }
                 expression(expression.projection, inner)
             }

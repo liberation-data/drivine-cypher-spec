@@ -2640,7 +2640,7 @@ cases:
   # nesting.yaml's cells, to here.
 
   - name: "A CALL in the order of a RETURN that groups or is DISTINCT, and CALL (*) where a projection groups"
-    description: "Within the WHERE or the order of a WITH or a RETURN that groups or is DISTINCT, Neo4j reads a CALL's brackets as of that projection, so refuses a subquery's own variable there (its 42N44), and a CALL (*) imports it but refuses a read of it within, in a pattern or as a value; a projection that groups within the subquery reads its own items. Captured on Neo4j 2026.10.1 (drivine4j#681; see queries.yaml, \"A CALL in the order of a RETURN that groups or is DISTINCT, and CALL (*) where a projection groups\")."
+    description: "Within the WHERE or the order of a WITH or a RETURN that groups or is DISTINCT, Neo4j reads a CALL's brackets as of that projection, so refuses a subquery's own variable there (its 42N44), and a CALL (*) imports it but refuses a read of it within, in a pattern or as a value; a projection that groups within the subquery reads its own items, and a comprehension or a pattern comprehension its own variables, but not a subquery's within it, nor what a procedure's CALL yields. Captured on Neo4j 2026.10.1 (drivine4j#681; see queries.yaml, \"A CALL in the order of a RETURN that groups or is DISTINCT, and CALL (*) where a projection groups\")."
     steps:
       - cypher: "MATCH (p:Person) WITH p AS q RETURN q.name AS name, count(*) AS c ORDER BY EXISTS { MATCH (n0:Person {name: name})-->(m1) CALL (m1) { MATCH (m1)-->(x) RETURN count(x) AS y } RETURN m1 }, name"
         error: "m1 is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used."
@@ -2932,6 +2932,10 @@ cases:
         error: "m1 is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used."
       - cypher: "MATCH (p:Person) WITH DISTINCT p AS q ORDER BY EXISTS { MATCH (q)-->(m1) WITH m1, count(*) AS k CALL (*) { RETURN m1.title AS y } RETURN y }, q.name RETURN q.name"
         error: "m1 is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used."
+      - cypher: "MATCH (p:Person) WITH DISTINCT p AS q ORDER BY EXISTS { MATCH (q)-->(m1) CALL db.labels() YIELD label WHERE label IN labels(m1) CALL (label) { RETURN label AS z } RETURN z }, q.name RETURN q.name"
+        error: "label is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used."
+      - cypher: "MATCH (p:Person) WITH DISTINCT p AS q ORDER BY EXISTS { MATCH (q)-->(m1) WHERE size([w IN [m1] WHERE EXISTS { MATCH (w)-->(m2) CALL (m2) { RETURN m2.name AS y } RETURN y }]) > 0 RETURN m1 }, q.name RETURN q.name"
+        error: "m2 is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used."
 
   - name: "Two items of one name"
     description: "A WITH or a RETURN names each item once, as Neo4j has it (its 42N38, \"column name conflict\"): an item's name is its alias, or its expression as written, and a variable's or a map projection's is its variable's (drivine4j#499)."
