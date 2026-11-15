@@ -206,6 +206,11 @@ class CompilerRefusalTest {
             // A list read as the statement runs is written item by item, and a map in it fails by name as it is read.
             val sql = compiler.compile("WITH [1, 'a'] AS l RETURN toString(l)").sql
             assertTrue(sql.contains("it holds ") && sql.contains("a map"), "${compiler::class.simpleName}: $sql")
+            // So does a node or a relationship among items of other kinds, held as its properties, a map (refusals.yaml).
+            listOf("MATCH (n) RETURN toString([n, 1])", "MATCH ()-[r]->() RETURN toString([r, 'a'])").forEach { cypher ->
+                val among = compiler.compile(cypher).sql
+                assertTrue(among.contains("it holds ") && among.contains("a map"), "${compiler::class.simpleName}: $cypher: $among")
+            }
             // So is a list given as a parameter, of one kind or many, as Neo4j plans a parameter of any kind: it gave the store's
             // JSON text, [1,2] on SQLite. A map given as one, whose keys aren't written, is refused by name.
             listOf(listOf(1, 2), listOf(1, "a")).forEach { l ->

@@ -7233,8 +7233,8 @@ abstract class SqlCypherCompiler(
          * map within as one is, the items after `, ` and each entry `key: value`, in the order of the keys ([CODE_POINT_ORDER]), as
          * Neo4j orders them: `[1, a]`, `{a: 2, b: x}` of `{b: 'x', a: 2}`. Of a
          * list that is null, null. What the text of is not known here is refused by name: a list or a map that holds a temporal
-         * value, a node or a relationship, a map whose keys the statement doesn't write ([textOf]), or a map read as the statement
-         * runs, which fails as it is read ([itemText]). A list given as a parameter ([givenKind]) is written item by item as it runs,
+         * value, a map whose keys the statement doesn't write ([textOf]), or a map read as the statement runs, a node or a
+         * relationship among items of other kinds too, which fails as it is read ([itemText]). A list given as a parameter ([givenKind]) is written item by item as it runs,
          * as Neo4j plans a parameter of any kind, and a map given as one is refused by name: both gave the store's JSON text. Null
          * where [value] is no list or map the statement makes or is given: compiled as before.
          */
