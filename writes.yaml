@@ -474,6 +474,39 @@ cases:
       - cypher: "MATCH (n:CyWrite) FOREACH (i IN [1] | CREATE (m:CyMade {c: i})) WITH count(*) AS k UNWIND [1, 2] AS j WITH j, COUNT { (:CyMade) } AS c CREATE (:CyMade {c: c}) RETURN c ORDER BY c"
         rows: [4, 4]
 
+  - name: "When a write reads a property its own rows set"
+    description: "A plain read of a property in what a CREATE or a MERGE makes or sets, of a node the same statement changes, gives Neo4j 2026.10.1's rows (liberation-data/drivine4j#814): a CREATE reads every row's before the SET after it writes any, and a MERGE reads, a row at a time, what the rows before it set, in the properties it matches and in its ON CREATE and ON MATCH SET. Each from the graph alone."
+    steps:
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "A SET after a CREATE reads the graph after the CREATE has made every row's node."
+        cypher: "UNWIND [1, 2] AS i CREATE (m:CyMade {i: i}) SET m.c = COUNT { (:CyMade) } RETURN [m.i, m.c] ORDER BY m.i"
+        rows: [[1, 2], [2, 2]]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "A CREATE reads a property before the SET after it changes it, on every row, and the SET reads what the row before it set."
+        cypher: "MATCH (n:CyWrite {id: 'a'}) UNWIND [1, 2] AS i CREATE (m:CyMade {f: coalesce(n.c, 0)}) SET n.c = coalesce(n.c, 0) + 1 RETURN [i, m.f, n.c] ORDER BY i"
+        rows: [[1, 0, 2], [2, 0, 2]]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "A MERGE's node reads what the row before set in its ON CREATE SET."
+        cypher: "MATCH (n:CyWrite {id: 'a'}) UNWIND [1, 2] AS i MERGE (m:CyMade {f: coalesce(n.c, 0)}) ON CREATE SET n.c = coalesce(n.c, 0) + 1 RETURN [i, m.f, n.c] ORDER BY i"
+        rows: [[1, 0, 2], [2, 1, 2]]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "A MERGE's relationship likewise."
+        cypher: "MATCH (n:CyWrite {id: 'a'}) UNWIND [1, 2] AS i MERGE (n)-[r:CyR {f: coalesce(n.c, 0)}]->(m:CyMade) ON CREATE SET n.c = coalesce(n.c, 0) + 1 RETURN [i, r.f, n.c] ORDER BY i"
+        rows: [[1, 0, 2], [2, 1, 2]]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "An ON CREATE SET reads what its own items before set, and what the row before set."
+        cypher: "MATCH (n:CyWrite {id: 'a'}) UNWIND [1, 2] AS i MERGE (m:CyMade {k: i}) ON CREATE SET n.c = coalesce(n.c, 0) + 1, m.c = n.c RETURN [m.k, m.c, n.c] ORDER BY m.k"
+        rows: [[1, 1, 2], [2, 2, 2]]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "An ON MATCH SET reads what the row before set in its ON CREATE SET."
+        cypher: "MATCH (n:CyWrite {id: 'a'}) UNWIND [1, 2] AS i MERGE (m:CyMade {k: 1}) ON CREATE SET n.c = 1, m.c = 0 ON MATCH SET m.c = n.c RETURN [i, m.c] ORDER BY i"
+        rows: [[1, 1], [2, 1]]
+
   - name: "Values a write makes: CREATE, a node made alone"
     description: "Each cell of writevalues.yaml in this position that Neo4j 2026.10.1 stores and the SQL stores compile, with its rows, each from the graph alone (liberation-data/drivine4j#814, #817): the cells refused are in refusals.yaml, \"Values a write makes, by position and form\", \"Variable a write makes, read inside a pattern or a comprehension in its properties\" and \"Pattern or subquery in the properties of a CREATE or a MERGE\"."
     steps:
