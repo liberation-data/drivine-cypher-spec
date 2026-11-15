@@ -9,8 +9,8 @@ import org.drivine.cypher.text.JavaText
 
 /**
  * What a range index or a uniqueness constraint of the store layout 2 is made over a property by, and what a lookup by
- * that property must compare with it, in one place: the index's DDL, the compiler's keyed MATCH and the libraries' lookups
- * by id all read it here (liberation-data/drivine-cypher-spec#286).
+ * that property must compare with it, in one place: the compiler's keyed MATCH reads it here, and [column] gives the
+ * expressions the index's DDL is made over (liberation-data/drivine-cypher-spec#286).
  *
  * On Oracle and SQLite the index holds a property's class and key ([column]: `OracleSql.indexClass` and `indexKey`,
  * `SqliteSql.indexClass` and `indexKey`). A lookup compares them with the value's own class and key. Where the value is given
@@ -37,6 +37,8 @@ object IndexKey {
      * - a text of 1 to [SHORT_TEXT] bytes: `string` on Oracle, as `type()` names it, `text` on SQLite, and the text;
      * - a truth value: `boolean`, and `true` or `false` on Oracle, `1` or `0` on SQLite, as `->>` reads one;
      * - a whole number held as a long: `number`, and its decimal digits, as `TO_CHAR(…, 'TM9')` writes an integer.
+     *
+     * SQLite's index holds the key of a number or a truth value as an integer, as `->>` reads it: its digits here.
      *
      * A float, a decimal, a list, a map, null, an empty text and one past [SHORT_TEXT] bytes give null: Oracle's index holds no
      * key of such a text, and SQLite's is left to its SQL alike. Postgres compares a value's JSON, so it gives null too.

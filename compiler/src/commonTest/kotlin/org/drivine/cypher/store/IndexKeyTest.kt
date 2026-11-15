@@ -128,4 +128,13 @@ class IndexKeyTest {
             assertEquals(row["stored"]?.textValue() ?: key, ValueLayout.escape(key))
         }
     }
+
+    @Test
+    fun theColumnsARunnerChecksAreTheOnesTheIndexIsMadeOver() {
+        for (row in table["keys"]!!.toList()) {
+            val stored = row["stored"]?.textValue() ?: row["key"]!!.textValue()!!
+            assertEquals(org.drivine.cypher.store.ddl.OracleDdl("g").sharedColumns(listOf(stored)), IndexKey.column(Store.ORACLE, "", stored))
+            assertEquals(org.drivine.cypher.store.ddl.SqliteDdl("g").indexColumns(listOf(stored)), IndexKey.column(Store.SQLITE, "", stored))
+        }
+    }
 }
