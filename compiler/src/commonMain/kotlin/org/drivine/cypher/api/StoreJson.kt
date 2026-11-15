@@ -32,9 +32,10 @@ import org.drivine.schema.made
  *   - on a SQL store, `ddl`, the statements that make the graph's tables, indexes and functions, in order; `ensuring`, the
  *     block that makes them only where the store's version is not the module's (null on SQLite, whose `ddl` is all
  *     `IF NOT EXISTS`); and on Oracle, `functions`, each function's own statement, and `versions`, each function's
- *     `-- drivine:<hash>` by name, which `ensuring` reads to make again a function of another version; and `storedFunctions`, the statement that
- *     finds whether the session may call the functions each compiler flag names, by the flag's name (`nullsEqualStored`,
- *     `eraStored`, `temporalArithmeticStored`), and `noFunction`, the error numbers a probe fails with where it finds none
+ *     `-- drivine:<hash>` by name, which `ensuring` reads to make again a function of another version; and `storedFunctions`, `{"probes": {…}, "noFunction": […]}`:
+ *     in `probes`, the statement that finds whether the session may call the functions each compiler flag names, by the
+ *     flag's name (`nullsEqualStored`, `eraStored`, `temporalArithmeticStored`), and in `noFunction`, the error numbers a
+ *     probe fails with where it finds none
  *     ([OracleFunctionProbes]);
  *   - `stamp`, [StoreStampStatements.of] the store: `prepare`, `assignIfAbsent`, `readStamps`, `foreignNodes`,
  *     `restampLayout`, `layoutObjects` and `constraint`, the statements that make the stamp's uniqueness constraint after

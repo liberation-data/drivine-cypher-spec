@@ -505,9 +505,10 @@ JSON entry, so TypeScript and Python run what drivine4j runs from the Kotlin typ
   - `engine`, the store as a stamp names it, and `layout`, the layout a stamp of it records;
   - on a SQL store, `ddl`, the statements that make the graph's tables, indexes and functions, and `ensuring`, the block
     that makes them where the store's version is not the module's (null on SQLite);
-  - on Oracle, `functions` and `versions` (each function's `-- drivine:<hash>`), and `storedFunctions`: the statement that
-    finds whether the session may call the functions each compiler flag names (`nullsEqualStored`, `eraStored`,
-    `temporalArithmeticStored`), and `noFunction`, the Oracle error numbers that mean it may not (904, 942, 1031, 6575).
+  - on Oracle, `functions` and `versions` (each function's `-- drivine:<hash>`), and `storedFunctions`, `{"probes": {…}, "noFunction": […]}`:
+    in `probes`, by each compiler flag's name (`nullsEqualStored`, `eraStored`, `temporalArithmeticStored`), the statement
+    that finds whether the session may call the functions the flag names, and in `noFunction`, the Oracle error numbers that
+    mean it may not (904, 942, 1031, 6575).
     A library compiles with every flag it may call (drivine4j#808, #811);
   - `stamp` and `marker`, the statements of each node's stamp and of the schema marker, as `marker.yaml` pins them, each with
     the `constraint` that keeps one, after `prepare`.

@@ -126,7 +126,8 @@ class StorePlanTest {
         // and the report must be the Kotlin planner's, written as PlanJson writes them.
         val store = "\"store\": \"$id\", \"graph\": ${CypherJson.writeValueAsString(CypherJson.valueToTree(graph))}"
         fun ask(rest: String): JsonNode = CypherJson.readTree(org.drivine.cypher.api.CompileJson.compile("{\"schemaPlan\": {$store, $rest}}"))
-        fun json(value: Any?): String = CypherJson.writeValueAsString(CypherJson.valueToTree(value))
+        // As a host writes them, plain: a row's `$t` stays as it is, not as the layout writes a value.
+        fun json(value: Any?): String = PlanJson.writePlain(value)
         var answer = ask("\"start\": ${json(PlanJson.requestTree(request))}, \"now\": $first")
         for ((r, round) in rounds.withIndex()) {
             val run = assertIs<PlanStep.Run>(step, "$name: round $r is planned")
