@@ -445,9 +445,18 @@ internal object VariableKinds {
         is SetItem.Labels -> null
     }
 
-    /** A `SET` item's value, over [scope]: a pattern is no value to set, as Neo4j refuses it (see [valued]). */
+    /**
+     * A `SET` item's value, over [scope]: a pattern is no value to set, as Neo4j refuses it (see [valued]); nor is a node, a
+     * relationship or a path, `SET m.f = m`, which Neo4j refuses when it runs (its 22N01, "Property values can only be of
+     * primitive types or arrays thereof"), and the store would hold as a document.
+     */
     private fun set(item: SetItem, scope: Scope) {
         val value = setValue(item) ?: return
+        if (item is SetItem.Property && value is Expression.Variable) {
+            scope[value.name]?.takeIf { it in setOf(Kind.NODE, Kind.RELATIONSHIP, Kind.RELATIONSHIPS, Kind.PATH) }?.let { kind ->
+                throw CompilerException("${value.name} is ${kind.noun}, and a property holds no node, relationship or path, as in Neo4j: set a property of it, or its elementId(), instead.")
+            }
+        }
         expression(value, scope)
         valued(value, condition = false)
     }
