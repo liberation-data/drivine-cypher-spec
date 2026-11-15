@@ -3211,6 +3211,42 @@ cases:
         parameters: {f: 2.0}
         rows: [["2.5", "3", "a", "4.0"]]
 
+  - name: "toString() of a list or a map"
+    description: "toString() of a list of items of many kinds, or of a map, that the statement makes is its text, as Neo4j's Cypher 25 writes it, where the SQL stores refused it (liberation-data/drivine4j#420): each item as toString() writes it, a text without quotes, null as null, after ', ', and each entry as key: value, in the order of the keys' code points, as Neo4j orders them, not as written. A list of items of one kind is refused, as Neo4j refuses it (see \"toString of a list or a map\")."
+    steps:
+      - note: "Neo4j 2026.10.1 gives these three."
+        cypher: "RETURN [toString([1, 'a']), size(toString([1, 'a'])), toString({a: 1, b: 'x'}), toString([1.0, true, null])]"
+        rows: [["[1, a]", 6, "{a: 1, b: x}", "[1.0, true, null]"]]
+      - note: "Neo4j 2026.10.1 gives these, its map's keys sorted."
+        cypher: "RETURN [toString([[1, 'x'], {k: [true, 2.5]}, [], {}]), toString([]), toString({}), toString({b: 1, a: 2})]"
+        rows: [["[[1, x], {k: [true, 2.5]}, [], {}]", "[]", "{}", "{a: 2, b: 1}"]]
+      - cypher: "RETURN toString({b: 'x', a: [{d: 1, c: 2.5}], c: null})"
+        rows: ["{a: [{c: 2.5, d: 1}], b: x, c: null}"]
+      - cypher: "MATCH (p:Person) WITH p ORDER BY p.name RETURN toString(collect(p.born))"
+        rows: ["[1967, 1964, 1961]"]
+      - cypher: "MATCH (p:Person {name: 'Keanu'}) RETURN [toString([p.name, p.born, p.born / 2.0, p.nope]), toString(p {.name}), toString({n: p.name, l: [p.born]})]"
+        rows: [["[Keanu, 1964, 982.0, null]", "{name: Keanu}", "{l: [1964], n: Keanu}"]]
+      - note: "A map projection's entry written key: value and its variable, beside a property it selects, in the order of their keys."
+        cypher: "MATCH (p:Person {name: 'Keanu'}) WITH p, 'K' AS s RETURN toString(p {.name, b: p.born, s})"
+        rows: ["{b: 1964, name: Keanu, s: K}"]
+      - note: "A map projection of no entries is {}: a SQL store's SQL was no SQL."
+        cypher: "MATCH (p:Person {name: 'Keanu'}) RETURN [toString(p {}), toString([p {}, p.born])]"
+        rows: [["{}", "[{}, 1964]"]]
+      - note: "A text the statement makes of one kind, but not as one written, among items of other kinds."
+        cypher: "MATCH (p:Person {name: 'Keanu'}) WITH p, 'K' AS s RETURN toString([s, CASE WHEN p.born > 1960 THEN 'old' ELSE 'new' END, p.born])"
+        rows: ["[K, old, 1964]"]
+      - cypher: "MATCH (p:Person {name: 'Keanu'}) RETURN toString(CASE WHEN p.born > 2000 THEN [1, 'a'] END)"
+        rows: [null]
+      - note: "A list given as a parameter, of one kind or many, as Neo4j plans a parameter of any kind; a SQL store gave its JSON text."
+        only: [neo4j, sql]
+        cypher: "RETURN [toString($l), toString($k)]"
+        parameters: {l: [1, "a", [2, [true, null]], 2.5], k: [1, 2]}
+        rows: [["[1, a, [2, [true, null]], 2.5]", "[1, 2]"]]
+      - note: "Neo4j 2026.10.1 gives a map a WITH binds as it gives one written; a SQL store refuses it by name, as it knows no keys of it when compiling (see refusals.yaml)."
+        only: [neo4j]
+        cypher: "WITH {a: 1} AS m RETURN toString(m)"
+        rows: ["{a: 1}"]
+
   - name: "A walk sorted in a WITH"
     description: "A walk sorted by an expression of where it ends in a WITH, skipped and limited, keeps that order in the query that reads it."
     steps:
@@ -3744,8 +3780,8 @@ cases:
         cypher: "RETURN [toInteger($p), toInteger($i) = 9223372036854775807, toInteger($n) < -9223372036854775807, toFloat($p), toFloat($i), toFloat($n)]"
         parameters: {p: {$float: "NaN"}, i: {$float: "Infinity"}, n: {$float: "-Infinity"}}
         rows: [[0, true, true, {$float: "NaN"}, {$float: "Infinity"}, {$float: "-Infinity"}]]
-      - note: "SQLite writes a list's text as its JSON, and Oracle gives none."
-        only: [neo4j, postgres]
+      - note: "SQLite wrote a list's text as its JSON before liberation-data/drivine4j#420. Oracle's is not checked yet."
+        only: [neo4j, postgres, sqlite]
         cypher: "RETURN toString($l)"
         parameters: {l: [1.0, {$float: "NaN"}, {$float: "Infinity"}, {$float: "-Infinity"}]}
         rows: ["[1.0, NaN, Infinity, -Infinity]"]
@@ -4324,6 +4360,23 @@ cases:
         cypher: "RETURN [1.0 / toFloat('-0'), 1.0 / toFloat('-0.0'), 1.0 / toFloat('-0x0p0')]"
         rows: [[{$float: "-Infinity"}, {$float: "-Infinity"}, {$float: "-Infinity"}]]
 
+  - name: "toInteger() of a list"
+    description: "toInteger() of a list the statement makes fails each row it reads, as Neo4j plans it and fails it, where the SQL stores gave null (liberation-data/drivine4j#420); over no rows nothing fails, and of a list that is null it is null. Neo4j 2026.10.1: Invalid input for function 'toInteger()': Expected a String, Float, Integer or Boolean, got: List{…}."
+    steps:
+      - cypher: "RETURN toInteger([])"
+        error: true
+      - cypher: "WITH [1] AS l RETURN toInteger(l)"
+        error: true
+      - cypher: "RETURN [x IN [[1]] | toInteger(x)]"
+        error: true
+      - cypher: "MATCH (n:None) RETURN toInteger([])"
+        rows: []
+      - cypher: "MATCH (p:Person {name: 'Keanu'}) RETURN toInteger(CASE WHEN p.born > 2000 THEN [1] END)"
+        rows: [null]
+      - note: "Neo4j 2026.10.1 gives null."
+        cypher: "RETURN toInteger(CASE WHEN false THEN [1] END)"
+        rows: [null]
+
   - name: "Round by a mode"
     description: "round(value, precision, mode) rounds in decimal by one of Java's rounding modes, as Neo4j does, so 2.345 is halfway; a null gives null."
     steps:
@@ -4603,21 +4656,55 @@ cases:
         error: "Two lists compared with <, <=, > or >= do not run on Oracle in the step of a reduce(): its function calls no function of the query's from SQL."
 
   - name: "toString of a list or a map"
-    description: "toString() of a list or a map the statement makes is refused, as Neo4j refuses it, and of a value whose kind it leaves open is run."
+    description: "toString() of a list of items of one kind is refused, as Neo4j refuses it, written, bound by a WITH or gathered by collect(); of a map, its text (liberation-data/drivine4j#420); and of a value whose kind the statement leaves open, as a list of properties, it is run."
     steps:
-      - note: "The compiler refuses both as Neo4j refuses them under Cypher 5. Neo4j 2026.10's default language, Cypher 25, gives toString({a: 1}) as '{a: 1}', and toString([1, 'a']) as '[1, a]' though it refuses toString([1, 2])."
+      - note: "Neo4j refuses both under Cypher 5. Neo4j 2026.10's default language, Cypher 25, gives toString({a: 1}) as '{a: 1}', and toString([1, 'a']) as '[1, a]' though it refuses toString([1, 2])."
         only: [neo4j]
         cypher: "CYPHER 5 RETURN toString([1, 2])"
         error: true
       - only: [neo4j]
         cypher: "CYPHER 5 RETURN toString({a: 1})"
         error: true
+      - only: [neo4j]
+        cypher: "RETURN toString([1, 2])"
+        error: true
       - only: [sql]
         cypher: "RETURN toString([1, 2])"
-        error: "toString() takes a number, a text, a truth value or a temporal value, not a list, as in Neo4j."
+        error: "toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j."
+      - note: "Neo4j 2026.10.1 refuses each of these when it plans them: Type mismatch: expected Boolean, Float, Integer, Point, String, …, List<Any>, Map, Node, Relationship or Path but was List<Integer>. A SQL store refused each of them, as it refused any list."
+        only: [neo4j]
+        cypher: "RETURN toString(['a', 'b'])"
+        error: true
+      - only: [neo4j]
+        cypher: "RETURN toString([1.0E20, 0.001, -2.5, 1.0E-7])"
+        error: true
+      - only: [neo4j]
+        cypher: "RETURN toString([date('2024-01-02')])"
+        error: true
+      - only: [neo4j]
+        cypher: "WITH [1, 2] AS l RETURN toString(l)"
+        error: true
+      - only: [neo4j]
+        cypher: "UNWIND [1964, 1967] AS b WITH collect(b) AS c RETURN toString(c)"
+        error: true
       - only: [sql]
+        cypher: "RETURN toString(['a', 'b'])"
+        error: "toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j."
+      - only: [sql]
+        cypher: "RETURN toString([1.0E20, 0.001, -2.5, 1.0E-7])"
+        error: "toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j."
+      - only: [sql]
+        cypher: "RETURN toString([date('2024-01-02')])"
+        error: "toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j."
+      - only: [sql]
+        cypher: "WITH [1, 2] AS l RETURN toString(l)"
+        error: "toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j."
+      - only: [sql]
+        cypher: "UNWIND [1964, 1967] AS b WITH collect(b) AS c RETURN toString(c)"
+        error: "toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j."
+      - only: [neo4j, sql]
         cypher: "RETURN toString({a: 1})"
-        error: "toString() takes a number, a text, a truth value or a temporal value, not a map, as in Neo4j."
+        rows: ["{a: 1}"]
       - cypher: "UNWIND [1, 'a'] AS x RETURN toString(x)"
         rows: ["1", "a"]
 
