@@ -2372,6 +2372,7 @@ abstract class SqlCypherCompiler(
                     list = holdsLists(list), flat = isFlat(list),
                     text = holdsTexts(list) || isText(list), fromList = true, jsonNull = !isFlat(list),
                     known = itemsKind(unwind.list, select.scope),
+                    itemsKnown = (unwind.list as? Expression.ListLiteral)?.items?.map { listItems(it, select.scope) }?.distinct()?.singleOrNull(),
                 ),
             )
             select.order += itemNo(name) to false
@@ -4465,7 +4466,7 @@ abstract class SqlCypherCompiler(
                 conjoining = conjunct
             }
             val kinded = if (evaluated is Value.Json && evaluated.known == null) knownKind(expression, scope)?.let { evaluated.copy(known = it) } ?: evaluated else evaluated
-            val value = if (kinded is Value.Json && kinded.itemsKnown == null) itemsKind(expression, scope)?.let { kinded.copy(itemsKnown = it) } ?: kinded else kinded
+            val value = if (kinded is Value.Json && kinded.itemsKnown == null) listItems(expression, scope)?.let { kinded.copy(itemsKnown = it) } ?: kinded else kinded
             return when {
                 value is Value.Json && !value.flat && flat(expression, scope) -> value.copy(flat = true)
                 value is Value.Entities && !value.flat && flat(expression, scope) -> value.copy(flat = true)
@@ -4893,6 +4894,55 @@ abstract class SqlCypherCompiler(
          */
         private fun itemsKind(list: Expression, scope: Map<String, Value>): Value.Known? =
             (list as? Expression.ListLiteral)?.items?.map { knownKind(it, scope) }?.distinct()?.singleOrNull()
+
+        /**
+         * The one kind ([Value.Items]) of the items of [list] where Neo4j types it as a list narrower than `List<Any>` when it
+         * plans the statement (liberation-data/drivine-cypher-spec#296): a list written whose every item is of one kind ([itemOf]),
+         * a number and a float both numbers; `collect()` of anything; `keys()`, `labels()` and `split()`, of texts; `range()`, of
+         * numbers; `nodes()` and `relationships()`; a list comprehension of what it gives; and a variable bound to one. Null where an
+         * item's kind is left open, as a property's, a parameter's or null's, where two differ, of an empty list, and of anything else.
+         */
+        private fun listItems(list: Expression, scope: Map<String, Value>): Value.Items? = when (list) {
+            is Expression.ListLiteral -> list.items.map { itemOf(it, scope) }.distinct().singleOrNull()
+            is Expression.Variable -> when (val bound = scope[list.name]) {
+                is Value.Entities -> if (bound.relationships) Value.Items.RELATIONSHIP else Value.Items.NODE
+                is Value.Json -> bound.itemsKnown
+                else -> null
+            }
+            is Expression.Function -> when (list.name.lowercase()) {
+                "collect" -> list.arguments.singleOrNull()?.let { itemOf(it, scope) ?: Value.Items.ONE }
+                "keys", "labels", "split" -> Value.Items.TEXT
+                "range" -> Value.Items.NUMBER
+                "nodes" -> Value.Items.NODE
+                "relationships" -> Value.Items.RELATIONSHIP
+                DISTINCT_ITEMS -> list.arguments.singleOrNull()?.let { listItems(it, scope) }
+                else -> null
+            }
+            is Expression.ListComprehension ->
+                if (list.projection == null || list.projection == Expression.Variable(list.variable)) listItems(list.list, scope)
+                else itemOf(list.projection, scope + (list.variable to Value.Json("NULL", known = itemsKind(list.list, scope))))
+            else -> null
+        }
+
+        /**
+         * The kind ([Value.Items]) Neo4j types [item], an item of a list, as when it plans the statement: a value of a kind the
+         * statement makes ([knownKind]), a map projection, a node, a relationship, or a list [listItems] knows the items of. Null
+         * where it is left open.
+         */
+        private fun itemOf(item: Expression, scope: Map<String, Value>): Value.Items? = when (knownKind(item, scope)) {
+            Value.Known.INTEGER, Value.Known.FLOAT -> Value.Items.NUMBER
+            Value.Known.TEXT -> Value.Items.TEXT
+            Value.Known.BOOLEAN -> Value.Items.BOOLEAN
+            Value.Known.LIST -> Value.Items.LIST
+            Value.Known.MAP -> Value.Items.MAP
+            null -> when {
+                item is Expression.MapProjection -> Value.Items.MAP
+                item is Expression.Variable && scope[item.name] is Value.Node -> Value.Items.NODE
+                item is Expression.Variable && scope[item.name] is Value.Relationship -> Value.Items.RELATIONSHIP
+                listItems(item, scope) != null -> Value.Items.LIST
+                else -> null
+            }
+        }
 
         /**
          * Refuses `toInteger()` or `toFloat()` of [function] where the statement makes its argument a kind Neo4j refuses when it
@@ -6802,7 +6852,7 @@ abstract class SqlCypherCompiler(
                     // What holds a node or a relationship, a map or a list of them, is gathered beside its identity too.
                     else -> Value.Json(
                         collected(gathered), ordered = true, items = (gathered as? Value.Json)?.temporal, itemItems = itemsOf(gathered),
-                        itemsKnown = (gathered as? Value.Json)?.known,
+                        itemsKnown = itemOf(function.arguments.single(), scope) ?: Value.Items.ONE,
                         itemEntries = (gathered as? Value.Json)?.entries, list = true,
                         itemLists = isList(gathered), texts = isText(gathered), temporals = hasTemporals(gathered),
                         identity = identityOf(gathered)?.let { comparable(Value.Json(collect(it, rowOrder), ordered = true)) },
@@ -7039,9 +7089,10 @@ abstract class SqlCypherCompiler(
 
         /**
          * `toString` of [value], the argument of [function], where the statement makes it a list or writes it as a map: its text as
-         * Neo4j's Cypher 25 writes it, where its Cypher 5 refuses it, and so did this (drivine4j#420); a list of items of one kind
-         * it knows, written, `[1, 2]` or `[date(…)]`, bound by a `WITH` or gathered by `collect()` ([Value.Json.itemsKnown]), it refuses
-         * still, and so does this. Each item is written as `toString` writes it, a text without quotes, null as `null`, a list or a
+         * Neo4j's Cypher 25 writes it, where its Cypher 5 refuses it, and so did this (drivine4j#420); a list it types as narrower
+         * than `List<Any>`, of items of one kind, written, `[1, 2]`, `[1, 2.5]` or `[date(…)]`, given by a function such as `keys()`, a
+         * comprehension or `collect()` of anything, or bound by a `WITH` ([listItems], [Value.Json.itemsKnown]), or a list of nodes or
+         * relationships, it refuses still, and so does this (liberation-data/drivine-cypher-spec#296). Each item is written as `toString` writes it, a text without quotes, null as `null`, a list or a
          * map within as one is, the items after `, ` and each entry `key: value`, in the order of the keys ([CODE_POINT_ORDER]), as
          * Neo4j orders them: `[1, a]`, `{a: 2, b: x}` of `{b: 'x', a: 2}`. Of a
          * list that is null, null. What the text of is not known here is refused by name: a list or a map that holds a temporal
@@ -7052,17 +7103,16 @@ abstract class SqlCypherCompiler(
          */
         private fun textOfList(function: Expression.Function, value: Value, scope: Map<String, Value>): Value.Json? {
             val written = function.arguments.single()
+            // Neo4j's Cypher 25 refuses a list it types as narrower than List<Any>, as [1, 2], collect(…) or keys(n), and takes one of many, as [1, 'a'].
+            if (listItems(written, scope) != null || value is Value.Entities || (value as? Value.Json)?.items != null || (value as? Value.Json)?.itemsKnown != null) {
+                throw CompilerException("${function.name}() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j.")
+            }
             val map = written is Expression.MapLiteral || written is Expression.MapProjection
             val given = givenKind(written, scope)
             if (!isList(value) && !map && given != Value.Known.LIST) {
                 if ((value as? Value.Json)?.known == Value.Known.MAP || given == Value.Known.MAP) unsupported("toString() of a map the statement doesn't write in its argument")
                 return null
             }
-            // Neo4j's Cypher 25 refuses a list whose items it knows to be of one kind, as [1, 2], and takes one of many, as [1, 'a'].
-            if (itemsKind(written, scope) != null || (value as? Value.Json)?.items != null || (value as? Value.Json)?.itemsKnown != null) {
-                throw CompilerException("${function.name}() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j.")
-            }
-            if (value is Value.Entities) unsupported("toString() of a list of nodes or relationships")
             if (hasTemporals(value)) unsupported("toString() of a list or a map that holds a temporal value")
             constantText(written)?.let { return Value.Json(literalJson(it), text = true) }
             return Value.Json(scalar(shared(comparable(json(value))) { (x) -> "CASE WHEN ${typeOf(x)} IN ('array', 'object') THEN ${textOf(written, x, scope)} END" }), text = true)

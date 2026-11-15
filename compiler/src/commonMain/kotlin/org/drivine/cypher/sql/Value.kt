@@ -73,11 +73,12 @@ sealed interface Value {
          */
         val known: Known? = null,
         /**
-         * Where the statement makes it a list whose every item is of one [known] kind, that kind: a list written of them, a
-         * variable a `WITH` binds to one, or `collect()` of a value of one. Neo4j refuses `toString()` of such a list when it
-         * plans the statement, and so does the compiler (drivine4j#420). Null where an item's kind is left open, or two differ.
+         * Where Neo4j types it as a list narrower than `List<Any>`, the one kind ([Items]) of its items: a list written of them, a
+         * list a function such as `keys()` or `range()` gives, a list comprehension, `collect()` of anything, or a variable a `WITH`
+         * binds to one. Neo4j refuses `toString()` of such a list when it plans the statement, and so does the compiler
+         * (drivine4j#420, liberation-data/drivine-cypher-spec#296). Null where an item's kind is left open, as a property's, or two differ.
          */
-        val itemsKnown: Known? = null,
+        val itemsKnown: Items? = null,
         /**
          * Whether it may be JSON's null: a value read out of a map or a list that may hold a null, as `x.a` of `{a: null}` is, an
          * entry of a parameter, a null written, a `reduce()`, or a `CASE` that may give one of them. A key that is missing reads as
@@ -125,6 +126,13 @@ sealed interface Value {
             }
         }
     }
+
+    /**
+     * The kind Neo4j types every item of a list as, where it types the list narrower than `List<Any>` (see [Json.itemsKnown]): an
+     * integer and a float are both numbers, as `[1, 2.5]` is refused as `[1, 2]` is, and [ONE] is of a kind it doesn't name here,
+     * as `collect()` of a property, which Neo4j types as a list of one kind or another, never of any.
+     */
+    enum class Items { NUMBER, TEXT, BOOLEAN, LIST, MAP, NODE, RELATIONSHIP, ONE }
 
     /** A truth value: SQL's boolean, with its null for Cypher's. */
     data class Bool(val sql: String) : Value

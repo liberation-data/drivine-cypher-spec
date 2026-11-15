@@ -220,29 +220,21 @@ class CompilerRefusalTest {
             // A text past 4,000 bytes among the items, which Oracle reads as null, fails by name there, as it would be written as nothing.
             val long = compiler.compile("MATCH (n) RETURN toString([n.name, 1])").sql.contains("that holds a text past 4,000 bytes is not compiled to SQL on Oracle yet")
             assertEquals(compiler is OracleCypherCompiler, long, "${compiler::class.simpleName}")
-            // A list written of items of one kind is refused still, as Neo4j's Cypher 25 refuses it.
-            // So is one a WITH binds or collect() gathers of one kind, as Neo4j 2026.10.1 refuses them.
-            listOf(
-                "RETURN toString([1, 2])", "RETURN toString([[1], [2]])", "RETURN toString([1.0E20, 0.001])", "RETURN toString([date('2024-01-02')])",
-                "WITH [1, 2] AS l RETURN toString(l)", "UNWIND [1964, 1967] AS b WITH collect(b) AS c RETURN toString(c)",
-                "UNWIND [1, 2] AS b RETURN toString(collect(b))",
-                // Held in a write's rows past it, the list is still of one kind.
-                "WITH [1, 2] AS l CREATE (n) RETURN toString(l)",
-            ).forEach { cypher ->
-                val refused = assertThrows<CompilerException>("${compiler::class.simpleName}: $cypher") { compiler.compile(cypher) }.message!!
-                assertEquals("toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j.", refused)
+            // Each list form, refused or taken as Neo4j 2026.10.1's Cypher 25 refuses or takes it when it plans the statement
+            // (liberation-data/drivine-cypher-spec#296): a list it types as narrower than List<Any> is refused, and one of any items is
+            // compiled, with its text where the compiler works it out when compiling.
+            TO_STRING_LISTS.forEach { form ->
+                val label = "${compiler::class.simpleName}: ${form.cypher}"
+                if (form.refused) {
+                    val refused = assertThrows<CompilerException>(label) { compiler.compile(form.cypher, form.parameters) }.message!!
+                    assertEquals("toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j.", refused, label)
+                } else {
+                    val sql = compiler.compile(form.cypher, form.parameters).sql
+                    form.text?.let { assertTrue(sql.contains(it), "$label: $sql") }
+                }
             }
             // A value whose kind the statement leaves open is compiled as before, as Neo4j plans it.
-            compiler.compile("UNWIND [1, 'a'] AS x RETURN toString(x)")
             compiler.compile("MATCH (n) RETURN toString(n.x)")
-            // And a list Neo4j takes: of properties, collect() of one, of many kinds, and empty.
-            listOf(
-                "MATCH (n) RETURN toString([n.x, n.y]), toString(collect(n.x))", "MATCH (n) WITH collect(n.x) AS c RETURN toString(c)",
-                "WITH [1, 'a'] AS l WITH l RETURN toString(l)", "RETURN toString([])", "WITH 'K' AS s, 1.5 AS f RETURN toString([s, f, true])",
-                // A UNION whose queries make it lists of different kinds of item, or of one and of many, makes it of no one kind.
-                "CALL { RETURN [1, 2] AS l UNION RETURN [1, 'a'] AS l } RETURN toString(l)",
-                "CALL { RETURN [1, 2] AS l UNION RETURN ['a'] AS l } RETURN toString(l)",
-            ).forEach(compiler::compile)
         }
     }
 
@@ -820,5 +812,53 @@ class CompilerRefusalTest {
                 "MATCH (p:Person)-[:ACTED_IN]->(m) RETURN toUpper(p.name) AS u, COUNT(m) AS c ORDER BY toUpper(p.name) + count(m) DESC",
             ).forEach { compiler.compile(it) }
         }
+    }
+
+    /** A list given to `toString()`, [refused] or not, with the [text] the compiler works out when compiling, where it does. */
+    private data class ToStringList(val cypher: String, val refused: Boolean, val text: String? = null, val parameters: Map<String, Any?> = emptyMap())
+
+    private companion object {
+        private fun refused(cypher: String) = ToStringList(cypher, true)
+        private fun taken(cypher: String, text: String? = null, parameters: Map<String, Any?> = emptyMap()) = ToStringList(cypher, false, text, parameters)
+
+        /**
+         * The list forms of Neo4j 2026.10.1's capture (liberation-data/drivine-cypher-spec#296), and others the compiler types as
+         * it does: a list Neo4j types as narrower than List<Any> is refused, one of any items taken. A function that gives a list
+         * needs only a row here.
+         */
+        val TO_STRING_LISTS = listOf(
+            // Written of items of one kind: integers and floats are numbers alike, and a list of lists or of maps is of one kind.
+            refused("RETURN toString([1, 2])"), refused("RETURN toString([1, 2.5])"), refused("RETURN toString(['a', 'b'])"),
+            refused("RETURN toString([1.0E20, 0.001])"), refused("RETURN toString([date('2024-01-02')])"),
+            refused("RETURN toString([[1], ['a']])"), refused("RETURN toString([[1], [2]])"), refused("RETURN toString([{a: 1}, {b: 2}])"),
+            // collect() of anything, a property or a node, bound by a WITH or not, DISTINCT or not.
+            refused("MATCH (p:Person) WITH p ORDER BY p.name RETURN toString(collect(p.born))"),
+            refused("MATCH (p:Person) WITH collect(p.born) AS c RETURN toString(c)"),
+            refused("MATCH (p:Person) WITH collect(p.name) AS c RETURN toString(c)"),
+            refused("MATCH (p:Person) RETURN toString(collect(DISTINCT p.born))"),
+            refused("MATCH (p:Person) RETURN toString(collect(p))"),
+            refused("UNWIND [1964, 1967] AS b WITH collect(b) AS c RETURN toString(c)"), refused("UNWIND [1, 2] AS b RETURN toString(collect(b))"),
+            // A function that gives a list of one kind, and a comprehension.
+            refused("MATCH (p:Person {name: 'Keanu'}) RETURN toString(keys(p))"), refused("MATCH (p:Person {name: 'Keanu'}) RETURN toString(labels(p))"),
+            refused("RETURN toString(range(1, 3))"), refused("RETURN toString(split('a,b', ','))"), refused("RETURN toString([x IN [1, 2] | x])"),
+            // Bound by a WITH or unwound, held in a write's rows past it.
+            refused("WITH [1, 2] AS l RETURN toString(l)"), refused("UNWIND [[1], [2]] AS x RETURN toString(x)"),
+            refused("WITH [1, 2] AS l CREATE (n) RETURN toString(l)"),
+            // Of items of many kinds, empty, or with a null, a property or a parameter among them, which is of any kind.
+            taken("RETURN toString([1, 'a'])", "[1, a]"), taken("RETURN toString([])", "[]"),
+            taken("RETURN toString([null, null])", "[null, null]"), taken("RETURN toString([1, null])", "[1, null]"),
+            taken("RETURN toString(\$l)", parameters = mapOf("l" to listOf(1, 2))), taken("RETURN toString(\$l)", parameters = mapOf("l" to listOf(1, "a"))),
+            taken("WITH \$m AS m RETURN toString(m.l)", parameters = mapOf("m" to mapOf("l" to listOf(1, 2)))),
+            taken("MATCH (p:Person {name: 'Keanu'}) RETURN toString([p.born, p.born])"),
+            taken("MATCH (p:Person {name: 'Keanu'}) RETURN toString([p.name, p.born, p.born / 2.0, p.nope])"),
+            taken("MATCH (p:Person {name: 'Keanu'}) RETURN toString([p {}, p.born])"),
+            taken("MATCH (p:Person {name: 'Keanu'}) WITH p, 'K' AS s RETURN toString([s, CASE WHEN p.born > 1960 THEN 'old' ELSE 'new' END, p.born])"),
+            taken("MATCH (p:Person {name: 'Keanu'}) RETURN toString(CASE WHEN p.born > 2000 THEN [1, 'a'] END)"),
+            taken("WITH [1, 'a'] AS l RETURN toString(l)"), taken("WITH [1, 'a'] AS l WITH l RETURN toString(l)"),
+            taken("UNWIND [1, 'a'] AS x RETURN toString(x)"), taken("WITH 'K' AS s, 1.5 AS f RETURN toString([s, f, true])"),
+            // A UNION whose queries make it lists of different kinds of item, or of one and of many, makes it of no one kind.
+            taken("CALL { RETURN [1, 2] AS l UNION RETURN [1, 'a'] AS l } RETURN toString(l)"),
+            taken("CALL { RETURN [1, 2] AS l UNION RETURN ['a'] AS l } RETURN toString(l)"),
+        )
     }
 }
