@@ -154,7 +154,6 @@ class TemporalArithmeticHostTest {
         }
     }
 
-    /** The Cypher literal of [text] of [kind]. */
     @Test
     fun `a duration's fields of its seconds are worked out in whole numbers, not doubles, written or given (#278)`() {
         // java.time's Duration holds a duration's time as Cypher does: whole seconds, floored, and nanoseconds from 0 up to a
@@ -164,8 +163,13 @@ class TemporalArithmeticHostTest {
             "-PT25H0.5S", "-PT1M0.5S", "PT30M0.5S", "PT2562047H47M16.854775807S",
         )
         // And a fraction of an hour, a month or a day, which goes to the parts below it, beside a long time.
-        for (text in listOf("PT1.5H", "P0.5M", "P1.5D", "-P0.5M", "P1.5MT87659999H59M59.999999999S", "-P1.5DT0.000000001S")) {
+        // A fraction of an hour or a minute leaves a fraction of a second, which a text given keeps as the compiler's does.
+        for (text in listOf("PT1.5H", "P0.5M", "P1.5D", "-P0.5M", "P1.5MT87659999H59M59.999999999S", "-P1.5DT0.000000001S",
+            "PT0.0001H", "PT0.01M", "-PT0.0001H", "PT1.0000001H", "PT0.0001H-1S", "PT-0.01M0.5S")) {
             assertEquals(inline("toString(duration('$text'))"), inline("toString(duration(\$d))", mapOf("d" to text)), "$text given")
+            for (field in listOf("seconds", "milliseconds", "nanoseconds", "secondsOfMinute", "nanosecondsOfSecond")) {
+                assertEquals(inline("duration('$text').$field"), inline("duration(\$d).$field", mapOf("d" to text)), "$text.$field given")
+            }
         }
         for (text in texts) {
             // Its text given is the text the compiler writes of it written: the canonical text, worked out as it compiles.
@@ -187,6 +191,7 @@ class TemporalArithmeticHostTest {
         }
     }
 
+    /** The Cypher literal of [text] of [kind]. */
     private fun literal(kind: Temporal, text: String) = "${kind.function}('$text')"
 
     /** The tag, as JSON text, of [text] of [kind], as the store holds one. */
