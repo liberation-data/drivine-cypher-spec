@@ -91,7 +91,7 @@ internal object VariableKinds {
                     clause.patterns.forEach { made(it, current, before, own, made, merging = false, foreach) }
                 }
                 is Clause.Merge -> {
-                    merged(clause)
+                    merged(clause, current)
                     made(clause.pattern, current, current.copy(), madeBy(listOf(clause.pattern), current), mutableSetOf(), merging = true, foreach)
                     (clause.onCreate + clause.onMatch).forEach { set(it, current) }
                 }
@@ -322,6 +322,83 @@ internal object VariableKinds {
                     "only reference variables created in earlier clauses. Make it in a clause before, or SET the property after."
             )
         }
+        // Any other name of the clause's own, at any depth, is one Neo4j reads as a variable bound anew there (drivine4j#814).
+        if (mentionsIn(properties).any { it in own }) {
+            throw CompilerException("A variable a CREATE or a MERGE makes, read inside a pattern or a comprehension in its own properties, is Cypher, and is not compiled to SQL yet.")
+        }
+    }
+
+    /**
+     * Every name [expression] holds, at any depth, whatever binds it: each variable it reads, each a comprehension, a
+     * quantifier or `reduce()` binds, each a pattern names, a map projection's and its selectors, and each a subquery's query
+     * holds (see [mentionsIn]).
+     */
+    private fun mentionsIn(expression: Expression): Set<String> {
+        val names = LinkedHashSet<String>()
+        fun pattern(pattern: Pattern) {
+            names += named(pattern) + listOfNotNull(pattern.variable)
+            (pattern.nodes.mapNotNull { it.properties } + pattern.relationships.mapNotNull { it.properties }).forEach { names += mentionsIn(it) }
+        }
+        when (expression) {
+            is Expression.Variable -> names += expression.name
+            is Expression.MapProjection -> {
+                names += expression.variable
+                expression.elements.forEach { if (it is Expression.MapProjection.Element.Variable) names += it.name }
+            }
+            is Expression.PatternPredicate -> pattern(expression.pattern)
+            is Expression.PatternComprehension -> pattern(expression.pattern)
+            is Expression.Exists -> expression.patterns.forEach(::pattern)
+            is Expression.ListComprehension -> names += expression.variable
+            is Expression.Quantifier -> names += expression.variable
+            is Expression.Reduce -> names += listOf(expression.accumulator, expression.variable)
+            is Expression.Subquery -> names += mentionsIn(expression.query)
+            else -> {}
+        }
+        parts(expression).forEach { names += mentionsIn(it) }
+        return names
+    }
+
+    /** Every name [query] holds, at any depth, as [mentionsIn] reads an expression: what each clause binds or reads. */
+    private fun mentionsIn(query: Query): Set<String> {
+        val names = LinkedHashSet<String>()
+        fun expression(expression: Expression?) { if (expression != null) names += mentionsIn(expression) }
+        fun pattern(pattern: Pattern) = expression(Expression.PatternPredicate(pattern))
+        fun projection(projection: Projection) {
+            projection.items.forEach { names += it.name; expression(it.expression) }
+            projection.orderBy.forEach { expression(it.expression) }
+            expression(projection.skip)
+            expression(projection.limit)
+        }
+        fun item(item: SetItem) {
+            names += when (item) {
+                is SetItem.Property -> item.variable
+                is SetItem.Replace -> item.variable
+                is SetItem.Add -> item.variable
+                is SetItem.Labels -> item.variable
+            }
+            expression(setValue(item))
+        }
+        fun clauses(clauses: List<Clause>) {
+            clauses.forEach { clause ->
+                when (clause) {
+                    is Clause.Match -> { clause.patterns.forEach(::pattern); expression(clause.where) }
+                    is Clause.Unwind -> { names += clause.variable; expression(clause.list) }
+                    is Clause.With -> { projection(clause.projection); expression(clause.where) }
+                    is Clause.Return -> projection(clause.projection)
+                    is Clause.Create -> clause.patterns.forEach(::pattern)
+                    is Clause.Merge -> { pattern(clause.pattern); (clause.onCreate + clause.onMatch).forEach(::item) }
+                    is Clause.Set -> clause.items.forEach(::item)
+                    is Clause.Remove -> {}
+                    is Clause.Delete -> clause.expressions.forEach(::expression)
+                    is Clause.VectorSearch -> { names += listOfNotNull(clause.node, clause.score); expression(clause.k); expression(clause.vector); expression(clause.where) }
+                    is Clause.Foreach -> { names += clause.variable; expression(clause.list); clauses(clause.clauses) }
+                    is Clause.Call -> { names += clause.imports.orEmpty(); names += mentionsIn(clause.query) }
+                }
+            }
+        }
+        clauses(query.clauses)
+        query.unions.forEach { clauses(it.clauses) }
+        return names
     }
 
     /**
@@ -370,7 +447,8 @@ internal object VariableKinds {
                     expression.elements.forEach { if (it is Expression.MapProjection.Element.Variable) name(it.name) }
                 }
                 is Expression.PatternPredicate -> named(expression.pattern).forEach(::name)
-                is Expression.PatternComprehension -> named(expression.pattern).forEach(::name)
+                // What its pattern names it binds anew, as at the top of a write's properties (drivine4j#814); its WHERE and projection are read below.
+                is Expression.PatternComprehension -> {}
                 is Expression.Exists -> expression.patterns.forEach { named(it).forEach(::name) }
                 is Expression.Subquery -> namedIn(expression.query).forEach(::name)
                 is Expression.ListComprehension -> {
@@ -449,9 +527,16 @@ internal object VariableKinds {
      * value its `ON CREATE` or `ON MATCH` sets. Read before the rest of it, as Neo4j does: `MERGE (m {f: NOT (n)-->(), g:
      * EXISTS { … }})` is refused for this. A pattern in a property it matches is read as in a `CREATE` (see [made]).
      */
-    private fun merged(merge: Clause.Merge) {
+    private fun merged(merge: Clause.Merge, scope: Scope) {
         val properties = merge.pattern.nodes.mapNotNull { it.properties } + merge.pattern.relationships.mapNotNull { it.properties }
         val values = (merge.onCreate + merge.onMatch).mapNotNull { setValue(it) }
+        // A pattern in an ON CREATE or ON MATCH SET that names a variable bound nowhere is refused for that first, as Neo4j does (its 42N29).
+        val bound = madeBy(listOf(merge.pattern), scope)
+        values.forEach { value ->
+            patternsIn(value, emptySet()) { pattern, comprehension, inner ->
+                if (!comprehension) named(pattern).firstOrNull { it !in inner && scope[it] == null && it !in bound }?.let { throw undefined(it) }
+            }
+        }
         if (properties.any { holds(it, ::subquery) } || values.any { value -> holds(value) { subquery(it) || it is Expression.PatternPredicate || it is Expression.PatternComprehension } }) {
             throw CompilerException(
                 "Subqueries are not allowed in a MERGE clause, as in Neo4j: no EXISTS { … } or COUNT { … } in what it matches, and no pattern, " +

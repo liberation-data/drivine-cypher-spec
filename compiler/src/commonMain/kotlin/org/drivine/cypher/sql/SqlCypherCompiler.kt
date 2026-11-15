@@ -418,11 +418,9 @@ abstract class SqlCypherCompiler(
     /** The statement [compiled] as the store runs it, after the last pass the store makes over it: none here. */
     protected open fun finished(compiled: CompiledCypher): CompiledCypher = compiled
 
-    private fun compiled(statement: Query, parameters: Map<String, Any?>): CompiledCypher {
+    private fun compiled(query: Query, parameters: Map<String, Any?>): CompiledCypher {
         // A variable used as two kinds, or made where it is bound already, is refused for that, before what is not compiled yet.
-        VariableKinds.check(statement)
-        // What a pattern comprehension in a write's properties names, of what the write makes, is a name of its own there.
-        val query = MadeNames.rebound(statement)
+        VariableKinds.check(query)
         // An aggregate in a WHERE, or in the ORDER BY of a projection that neither aggregates nor is DISTINCT, too.
         Aggregates(::isAggregate, ::children).check(query)
         val given = parameters.values.any { holdsNonFinite(it) }
