@@ -83,7 +83,8 @@ class Temporals(
 
     /**
      * The duration text [text], or the statement failing by name where its seconds go past the microsecond, as it moves a
-     * moment ([add]): a store's own read takes no duration, so it is tested here, a written one as it compiles.
+     * moment ([add]): a store's [local] and [utc] take no duration, so it is read through the store's function where it
+     * keeps one ([TemporalSql.heldDurationMicros]), else tested here, a written one as it compiles.
      */
     private fun heldDuration(text: String): String {
         val refusing = refuse ?: return text

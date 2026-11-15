@@ -53,10 +53,14 @@ class OracleTemporalSql(
      * Where the store keeps the era functions, its era function refuses a nanosecond past the microsecond as it reads the
      * text, once (drivine4j#421): a moment's text is read through it where the test of a year from 1000 on leaves it, which
      * a text past the microsecond is ([Temporal.adPattern]), and a time of day's, which has no such test, is given through it.
+     * A text that may be either is tested by [Temporals] instead: the function renumbers a moment's year BC, which [local]
+     * would renumber again, so `-0044-02-29` read as a time of day's base was `-0046-02-29`, no date.
      */
     override fun heldMicros(text: String, kinds: List<Temporal>): String? {
         val era = storedEraText ?: return null
-        if (kinds.none { it == Temporal.LOCAL_TIME || it == Temporal.TIME }) return text
+        val times = kinds.filter { it == Temporal.LOCAL_TIME || it == Temporal.TIME }
+        if (times.isEmpty()) return text
+        if (times.size < kinds.size) return null
         callsStored()
         return "$era($text)"
     }

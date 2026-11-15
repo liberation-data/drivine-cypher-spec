@@ -55,6 +55,17 @@ class HeldFunctionTest {
     }
 
     @Test
+    fun `Oracle renumbers a stored year BC once where a time of day may be a moment`() {
+        // A base that gives the time may be a time of day or a moment: its era function renumbers a moment's year BC each time
+        // it reads it, so the text read through it is not read through it again, where `-0044-02-29` would be `-0046-02-29`.
+        for (cypher in listOf("MATCH (n) RETURN localtime({time: n.at})", "MATCH (n) RETURN localdatetime({date: n.at, time: n.at})")) {
+            val sql = OracleCypherCompiler("g").compile(cypher).sql
+            assertFalse("g_era(g_era(" in sql || "g_era(REGEXP_REPLACE(g_era(" in sql, sql)
+            assertTrue(Temporals.SUB_MICRO.replace("'", "''") in sql, sql)
+        }
+    }
+
+    @Test
     fun `the test of a year from 1000 on turns a nanosecond past the microsecond away, to where the store refuses it`() {
         val pattern = Regex(org.drivine.cypher.sql.Temporal.LOCAL_DATE_TIME.adPattern!!)
         listOf("2024-01-01T00:00:00", "2024-01-01T00:00:00.5", "2024-01-01T00:00:00.123456", "2024-01-01T00:00:00.123456000", "2024-01-01T00:00")
