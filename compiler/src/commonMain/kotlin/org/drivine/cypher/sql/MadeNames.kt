@@ -5,46 +5,53 @@ import org.drivine.cypher.ast.Expression
 import org.drivine.cypher.ast.NodePattern
 import org.drivine.cypher.ast.Pattern
 import org.drivine.cypher.ast.Query
-import org.drivine.cypher.ast.Union
 
 /**
  * A pattern comprehension in a property a `CREATE` or a `MERGE` makes binds anew what its pattern names, as Neo4j reads
  * it, a variable the same clause makes among them: in `CREATE (a), (m {f: size([(a)-->(x) | x])})` its `a` is any node,
  * not the node made (liberation-data/drivine4j#814). The compiler reads such a name as the node made, so each one is given
- * a name of its own here, unused in the statement, before the statement is compiled: `[(a_1)-->(x) | x]`. Read after
- * [VariableKinds] has checked the statement, so only the names each clause has bound are followed: what a `MATCH`, an
- * `UNWIND`, a `WITH`, a `CALL`, a vector search, a `FOREACH`, a `CREATE` or a `MERGE` binds. A statement with no such
- * comprehension is given back as it is.
+ * a name of its own here, unused in the statement, before the statement is compiled: `[(a_1)-->(x) | x]`, and so is the
+ * same name in a pattern comprehension within it, which reads that one. Read after [VariableKinds] has checked the
+ * statement, so only the names each clause has bound are followed: what a `MATCH`, an `UNWIND`, a `WITH`, a `CALL`, a
+ * vector search, a `FOREACH`, a `CREATE` or a `MERGE` binds, and within a `CALL` what it imports alone. A statement with
+ * no such comprehension is given back as it is.
  */
 internal object MadeNames {
 
     fun rebound(query: Query): Query {
         val used = LinkedHashSet<String>()
-        val fresh = { name: String -> generateSequence(1) { it + 1 }.map { "${name}_$it" }.first { it !in used }.also { used += it } }
-        used += VariableKinds.namesIn(query)
-        return Rebinder(fresh).query(query, emptySet()).first
+        // No name the statement holds anywhere, a variable bound or read, a label or a text: the AST's text holds each.
+        val held by lazy { query.toString() }
+        val fresh = { name: String -> generateSequence(1) { it + 1 }.map { "${name}_$it" }.first { it !in used && it !in held }.also { used += it } }
+        val rebinder = Rebinder(fresh)
+        return Query(rebinder.clauses(query.clauses, emptySet()).first, query.unions.map { it.copy(clauses = rebinder.clauses(it.clauses, emptySet()).first) })
     }
 
     private class Rebinder(val fresh: (String) -> String) {
 
-        /** [query] rebound, over the names [outer] binds, and the names its first part returns. */
-        fun query(query: Query, outer: Set<String>): Pair<Query, Set<String>> {
-            val (clauses, returned) = clauses(query.clauses, outer)
-            val unions = query.unions.map { it.copy(clauses = clauses(it.clauses, outer).first) }
-            return Query(clauses, unions) to returned
-        }
-
-        fun clauses(clauses: List<Clause>, outer: Set<String>): Pair<List<Clause>, Set<String>> {
+        /**
+         * [clauses] rebound, over the names [outer] binds, and the names their `RETURN` returns. [kept] stay bound after each
+         * `WITH` that drops them, as what a `CALL`'s brackets import does (see [VariableKinds]).
+         */
+        fun clauses(clauses: List<Clause>, outer: Set<String>, kept: Set<String> = emptySet()): Pair<List<Clause>, Set<String>> {
             var bound = outer
             var returned = emptySet<String>()
             val out = clauses.map { clause ->
                 when (clause) {
                     is Clause.Match -> clause.also { bound = bound + clause.patterns.flatMap(::names) }
                     is Clause.Unwind -> clause.also { bound = bound + clause.variable }
-                    is Clause.With -> clause.also { bound = (if (clause.projection.star) bound else emptySet()) + clause.projection.items.map { it.name } }
+                    is Clause.With -> clause.also { bound = (if (clause.projection.star) bound else emptySet()) + clause.projection.items.map { it.name } + kept }
                     is Clause.Return -> clause.also { returned = clause.projection.items.map { it.name }.toSet() }
                     is Clause.VectorSearch -> clause.also { bound = bound + listOfNotNull(clause.node, clause.score) }
-                    is Clause.Call -> query(clause.query, bound).let { (query, names) -> clause.copy(query = query).also { bound = bound + names } }
+                    is Clause.Call -> {
+                        // Each part of the call over what it imports alone, as VariableKinds reads it.
+                        val parts = (listOf(clause.query.clauses) + clause.query.unions.map { it.clauses }).map { part ->
+                            val imported = VariableKinds.imports(clause, part, bound)
+                            clauses(part, imported, if (clause.imports != null || clause.importsAll) imported else emptySet())
+                        }
+                        val query = Query(parts.first().first, clause.query.unions.zip(parts.drop(1)) { union, part -> union.copy(clauses = part.first) })
+                        clause.copy(query = query).also { bound = bound + parts.first().second }
+                    }
                     is Clause.Foreach -> clause.copy(clauses = clauses(clause.clauses, bound + clause.variable).first)
                     is Clause.Create -> {
                         val own = clause.patterns.flatMap(::names).filterTo(LinkedHashSet()) { it !in bound }
@@ -118,7 +125,8 @@ internal object MadeNames {
                 is Expression.Reduce -> if (part.variable == from || part.accumulator == from) {
                     part.copy(initial = references(part.initial, from, to, pattern), list = references(part.list, from, to, pattern))
                 } else null
-                is Expression.PatternComprehension -> if (from in names(part.pattern)) part else null
+                // One within that names it again reads the same variable, as Neo4j has it.
+                is Expression.PatternComprehension -> renamed(part, from, to)
                 else -> null
             }
         }

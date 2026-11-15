@@ -887,6 +887,53 @@ cases:
         cypher: "MATCH (n:CyWrite) MERGE (m:CyWrite {id: n.id}) ON MATCH SET m.f = n.id RETURN [n.id, m.f] ORDER BY n.id"
         rows: [["a", "a"], ["b", "b"], ["c", "c"], ["d", "d"]]
 
+  - name: "Variables a comprehension in a write's properties binds anew"
+    description: "A comprehension's or a quantifier's variable in a subquery in a property a CREATE makes, of the name of a variable the clause makes, is bound anew there, and a pattern comprehension's pattern binds anew what it names of what the clause makes, a pattern comprehension within it reading the same variable, as Neo4j 2026.10.1 has it (liberation-data/drivine4j#814, #817): each from the graph alone. Within a CALL only what it imports is bound before. A subquery that names the variable otherwise is refused (see refusals.yaml, \"Variable a write makes, read in a subquery in its properties\")."
+    steps:
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "A quantifier's variable in a subquery in a node made alone, of the name of a variable the clause makes, is bound anew."
+        cypher: "MATCH (n:CyWrite) CREATE (a:CyNew {name: 'x'}), (m:CyMade {f: COUNT { MATCH (y:CyWrite) WHERE any(a IN [1] WHERE a = 1) RETURN y }}) RETURN [n.id, m.f] ORDER BY n.id"
+        rows: [["a", 4], ["b", 4], ["c", 4], ["d", 4]]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "In a relationship's endpoint too."
+        cypher: "MATCH (n:CyWrite) CREATE (a:CyNew {name: 'x'})-[:CyR]->(m:CyMade {f: COUNT { MATCH (y:CyWrite) WHERE any(a IN [1] WHERE a = 1) RETURN y }}) RETURN [n.id, m.f] ORDER BY n.id"
+        rows: [["a", 4], ["b", 4], ["c", 4], ["d", 4]]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "And in EXISTS { … } of a query."
+        cypher: "MATCH (n:CyWrite) CREATE (a:CyNew {name: 'x'}), (m:CyMade {f: EXISTS { MATCH (y:CyWrite) WHERE any(a IN [1] WHERE a = 1) }}) RETURN [n.id, m.f] ORDER BY n.id"
+        rows: [["a", true], ["b", true], ["c", true], ["d", true]]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "A pattern comprehension within one that names a variable the clause makes reads the outer one's: a, of two NEXT."
+        cypher: "MATCH (n:CyWrite) CREATE (a:CyNew {name: 'x'})-[:CyR]->(m:CyMade {f: size([(a)-[:NEXT]->(x) WHERE size([(a)-[:NEXT]->(y) | y]) = 2 | x])}) RETURN [n.id, m.f] ORDER BY n.id"
+        rows: [["a", 2], ["b", 2], ["c", 2], ["d", 2]]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "The name the comprehension's variable is given is none the statement holds: a_1 is bound already."
+        cypher: "UNWIND [1] AS a_1 MATCH (n:CyWrite) CREATE (a:CyNew {name: 'x'}), (m:CyMade {f: size([(a)-[:NEXT]->(x) | x])}) RETURN [n.id, m.f] ORDER BY n.id"
+        rows: [["a", 3], ["b", 3], ["c", 3], ["d", 3]]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "A FOREACH's variable too."
+        cypher: "MATCH (n:CyWrite) FOREACH (a_1 IN [1] | CREATE (a:CyNew {name: 'x'}), (m:CyMade {f: size([(a)-[:NEXT]->(x) | x])})) WITH count(*) AS c MATCH (m:CyMade) RETURN m.f ORDER BY m.f"
+        rows: [3, 3, 3, 3]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "A CALL that imports nothing makes a new a, whatever is bound outside it."
+        cypher: "MATCH (a:CyWrite {id: 'a'}) CALL () { CREATE (a:CyNew {name: 'x'}), (m:CyMade {f: size([(a)-[:NEXT]->(x) | x])}) RETURN m } RETURN m.f"
+        rows: [3]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "A CALL that imports a joins it up, past a WITH that does not name it: the comprehension reads a, of two NEXT."
+        cypher: "MATCH (a:CyWrite {id: 'a'}) CALL (a) { WITH 1 AS one CREATE (a)-[:CyR]->(m:CyMade {f: size([(a)-[:NEXT]->(x) | x])}) RETURN m } RETURN m.f"
+        rows: [2]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - cypher: "MATCH (a:CyWrite {id: 'a'}) CALL (a) { CREATE (a)-[:CyR]->(m:CyMade {f: size([(a)-[:NEXT]->(x) | x])}) RETURN m } RETURN m.f"
+        rows: [2]
+
   - name: "SET and MERGE with EXISTS { } over UNWIND"
     description: "An EXISTS { } whose body unwinds a list, in a write's WHERE, SET or MERGE, reads the row being written (drivine4j#449)."
     steps:

@@ -1511,6 +1511,37 @@ cases:
         cypher: "MATCH (n:CyWrite) MERGE (m:CyWrite {id: n.id}) ON MATCH SET m.f = size([(m)-[:NEXT]->(x) | x]) RETURN [n.id, m.f] ORDER BY n.id"
         error: "Subqueries are not allowed in a MERGE clause, as in Neo4j: no EXISTS { … } or COUNT { … } in what it matches, and no pattern, pattern comprehension or subquery in its ON CREATE or ON MATCH SET. Work the value out in a WITH before the MERGE, or SET it after."
 
+  - name: "Variable a write makes, read in a subquery in its properties"
+    description: "A subquery in a property a CREATE makes that binds a variable the same clause makes, by MATCH, UNWIND or WITH, reads it, and so does one within a pattern comprehension whose pattern names it: refused as Neo4j 2026.10.1 refuses them (its 42I58, liberation-data/drivine4j#817). A comprehension's or a quantifier's variable within the subquery is bound anew, and is taken (see writes.yaml, \"Variables a comprehension in a write's properties binds anew\")."
+    steps:
+      - note: "MATCH in the subquery binding a: Neo4j's 42I58."
+        cypher: "MATCH (n:CyWrite) CREATE (a:CyNew {name: 'x'}), (m:CyMade {f: COUNT { MATCH (a:CyWrite)-[:NEXT]->() RETURN a }}) RETURN [n.id, m.f] ORDER BY n.id"
+        error: "Creating an entity (a) and referencing that entity in a property definition in the same CREATE is not allowed, as in Neo4j: only reference variables created in earlier clauses. Make it in a clause before, or SET the property after."
+      - note: "UNWIND … AS a."
+        cypher: "MATCH (n:CyWrite) CREATE (a:CyNew {name: 'x'}), (m:CyMade {f: COUNT { UNWIND [1, 2] AS a RETURN a }}) RETURN [n.id, m.f] ORDER BY n.id"
+        error: "Creating an entity (a) and referencing that entity in a property definition in the same CREATE is not allowed, as in Neo4j: only reference variables created in earlier clauses. Make it in a clause before, or SET the property after."
+      - note: "WITH … AS a."
+        cypher: "MATCH (n:CyWrite) CREATE (a:CyNew {name: 'x'}), (m:CyMade {f: COUNT { MATCH (y:CyWrite) WITH y AS a RETURN a }}) RETURN [n.id, m.f] ORDER BY n.id"
+        error: "Creating an entity (a) and referencing that entity in a property definition in the same CREATE is not allowed, as in Neo4j: only reference variables created in earlier clauses. Make it in a clause before, or SET the property after."
+      - note: "A subquery within a pattern comprehension whose pattern names a reads the a the clause makes: EXISTS { … } of a query."
+        cypher: "MATCH (n:CyWrite) CREATE (a:CyNew {name: 'x'}), (m:CyMade {f: size([(a)-[:NEXT]->(x) WHERE EXISTS { MATCH (a)-[:NEXT]->(:CyWrite {id: 'c'}) } | x])}) RETURN [n.id, m.f] ORDER BY n.id"
+        error: "Creating an entity (a) and referencing that entity in a property definition in the same CREATE is not allowed, as in Neo4j: only reference variables created in earlier clauses. Make it in a clause before, or SET the property after."
+      - note: "COUNT { … }."
+        cypher: "MATCH (n:CyWrite) CREATE (a:CyNew {name: 'x'}), (m:CyMade {f: size([(a)-[:NEXT]->(x) WHERE COUNT { MATCH (a)-[:NEXT]->() RETURN 1 } = 2 | x])}) RETURN [n.id, m.f] ORDER BY n.id"
+        error: "Creating an entity (a) and referencing that entity in a property definition in the same CREATE is not allowed, as in Neo4j: only reference variables created in earlier clauses. Make it in a clause before, or SET the property after."
+      - note: "EXISTS { … } of a pattern."
+        cypher: "MATCH (n:CyWrite) CREATE (a:CyNew {name: 'x'}), (m:CyMade {f: size([(a)-[:NEXT]->(x) WHERE EXISTS { (a)-[:NEXT]->(:CyWrite {id: 'c'}) } | x])}) RETURN [n.id, m.f] ORDER BY n.id"
+        error: "Creating an entity (a) and referencing that entity in a property definition in the same CREATE is not allowed, as in Neo4j: only reference variables created in earlier clauses. Make it in a clause before, or SET the property after."
+
+  - name: "Node or relationship set as a property"
+    description: "A SET of a property to a node or a relationship is refused, as Neo4j 2026.10.1 refuses it when it runs (its 22N01, \"Expected the value … to be of type BOOLEAN, STRING, INTEGER, FLOAT, …\"): the store would hold it as a document. A MERGE's ON CREATE or ON MATCH SET is refused alike (see \"Values a write makes, by position and form\")."
+    steps:
+      - note: "Neo4j's 22N01 when it runs."
+        cypher: "MATCH (n:CyWrite {id: 'a'}), (b:CyWrite {id: 'b'}) SET n.p = b RETURN n.p"
+        error: "b is a node, and a property holds no node, relationship or path, as in Neo4j: set a property of it, or its elementId(), instead."
+      - cypher: "MATCH (n:CyWrite {id: 'a'})-[r:NEXT]->(:CyWrite {id: 'b'}) SET n.p = r RETURN n.p"
+        error: "r is a relationship, and a property holds no node, relationship or path, as in Neo4j: set a property of it, or its elementId(), instead."
+
   - name: "Aggregate in a WHERE"
     description: "An aggregate in a WHERE is refused, as Neo4j refuses it (its 42I24, \"invalid use of aggregate function\"): of a MATCH or a WITH that groups nothing, a pattern comprehension, a list comprehension, a quantifier, a quantified path pattern, EXISTS { … } and COUNT { … }, in a subquery's or a CALL { … }'s query too, and in a comprehension's, a quantifier's or a pattern's own WHERE or body within the WHERE of a WITH that groups. The WHERE of a WITH that aggregates, or is DISTINCT, holds an aggregate, and so does one after a subquery or a CALL that aggregates in its own projection (see queries.yaml, \"Aggregate in the WHERE of a WITH that groups\" and \"Aggregate beside a WHERE\")."
     steps:

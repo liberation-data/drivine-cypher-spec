@@ -327,10 +327,12 @@ internal object VariableKinds {
      * The first of [names] that [expression] reads, and that is not bound anew within it ([bound]): as a variable, a map
      * projection's, or named in `EXISTS { … }`'s patterns or in a subquery's query (any variable it names there, see
      * [namedIn]). Not in a pattern used as an expression, which [madeHere] reads first, or a pattern comprehension's pattern.
+     * A subquery within a pattern comprehension reads the clause's variable, not the one the comprehension's pattern names
+     * anew, as Neo4j has it: only a comprehension's, a quantifier's or `reduce()`'s variable is bound there ([scoped]).
      */
-    private fun reads(expression: Expression, names: Set<String>, bound: Set<String>): String? {
-        fun read(part: Expression, inner: Set<String> = bound) = reads(part, names, inner)
-        fun own(name: String) = name.takeIf { it in names && it !in bound }
+    private fun reads(expression: Expression, names: Set<String>, bound: Set<String>, scoped: Set<String> = bound): String? {
+        fun read(part: Expression, inner: Set<String> = bound, within: Set<String> = scoped) = reads(part, names, inner, within)
+        fun own(name: String, inner: Set<String> = bound) = name.takeIf { it in names && it !in inner }
         return when (expression) {
             is Expression.Variable -> own(expression.name)
             is Expression.MapProjection -> own(expression.variable) ?: parts(expression).firstNotNullOfOrNull { read(it) }
@@ -340,36 +342,52 @@ internal object VariableKinds {
                 listOfNotNull(expression.where, expression.projection).firstNotNullOfOrNull { read(it, inner) }
             }
             is Expression.ListComprehension ->
-                read(expression.list) ?: listOfNotNull(expression.where, expression.projection).firstNotNullOfOrNull { read(it, bound + expression.variable) }
-            is Expression.Quantifier -> read(expression.list) ?: expression.where?.let { read(it, bound + expression.variable) }
-            is Expression.Reduce ->
-                read(expression.initial) ?: read(expression.list) ?: read(expression.expression, bound + expression.accumulator + expression.variable)
-            is Expression.Exists -> expression.patterns.flatMap { named(it) }.firstNotNullOfOrNull { own(it) } ?: expression.where?.let { read(it) }
-            is Expression.Subquery -> namedIn(expression.query).firstNotNullOfOrNull { own(it) }
+                read(expression.list) ?: listOfNotNull(expression.where, expression.projection).firstNotNullOfOrNull { read(it, bound + expression.variable, scoped + expression.variable) }
+            is Expression.Quantifier -> read(expression.list) ?: expression.where?.let { read(it, bound + expression.variable, scoped + expression.variable) }
+            is Expression.Reduce -> read(expression.initial) ?: read(expression.list) ?: (bound + expression.accumulator + expression.variable).let { inner ->
+                read(expression.expression, inner, scoped + expression.accumulator + expression.variable)
+            }
+            is Expression.Exists -> expression.patterns.flatMap { named(it) }.firstNotNullOfOrNull { own(it, scoped) } ?: expression.where?.let { read(it, scoped) }
+            is Expression.Subquery -> namedIn(expression.query).firstNotNullOfOrNull { own(it, scoped) }
             else -> parts(expression).firstNotNullOfOrNull { read(it) }
         }
     }
 
-    /** Each variable [query] names anywhere, as [namedIn] reads it. */
-    fun namesIn(query: Query): Set<String> = namedIn(query)
-
     /**
      * Each variable [query] names, in its patterns and its expressions, a subquery's within among them, whether it binds it
-     * anew or not: as much as Neo4j may read from outside it.
+     * anew or not, but a comprehension's, a quantifier's or `reduce()`'s variable where they bind it: as much as Neo4j may
+     * read from outside it. It reads a variable a clause within binds, `UNWIND [1] AS a RETURN a`, as the one outside.
      */
     private fun namedIn(query: Query): Set<String> {
         val names = LinkedHashSet<String>()
-        fun expression(expression: Expression) {
+        fun expression(expression: Expression, bound: Set<String> = emptySet()) {
+            fun name(name: String) { if (name !in bound) names += name }
             when (expression) {
-                is Expression.Variable -> names += expression.name
-                is Expression.MapProjection -> names += expression.variable
-                is Expression.PatternPredicate -> names += named(expression.pattern)
-                is Expression.PatternComprehension -> names += named(expression.pattern)
-                is Expression.Exists -> expression.patterns.forEach { names += named(it) }
-                is Expression.Subquery -> names += namedIn(expression.query)
+                is Expression.Variable -> name(expression.name)
+                is Expression.MapProjection -> name(expression.variable)
+                is Expression.PatternPredicate -> named(expression.pattern).forEach(::name)
+                is Expression.PatternComprehension -> named(expression.pattern).forEach(::name)
+                is Expression.Exists -> expression.patterns.forEach { named(it).forEach(::name) }
+                is Expression.Subquery -> namedIn(expression.query).forEach(::name)
+                is Expression.ListComprehension -> {
+                    expression(expression.list, bound)
+                    listOfNotNull(expression.where, expression.projection).forEach { expression(it, bound + expression.variable) }
+                    return
+                }
+                is Expression.Quantifier -> {
+                    expression(expression.list, bound)
+                    expression.where?.let { expression(it, bound + expression.variable) }
+                    return
+                }
+                is Expression.Reduce -> {
+                    expression(expression.initial, bound)
+                    expression(expression.list, bound)
+                    expression(expression.expression, bound + expression.accumulator + expression.variable)
+                    return
+                }
                 else -> {}
             }
-            parts(expression).forEach(::expression)
+            parts(expression).forEach { expression(it, bound) }
         }
         fun pattern(pattern: Pattern) {
             names += named(pattern)
