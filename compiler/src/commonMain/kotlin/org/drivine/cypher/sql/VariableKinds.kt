@@ -92,7 +92,8 @@ internal class VariableKinds(private val aggregates: (Expression) -> Boolean) {
                     current[clause.variable] = Kind.ANY
                 }
                 is Clause.With -> current = projected(clause.projection, current, clause.where, kept.keys).also { next ->
-                    kept.forEach { (name, kind) -> if (next[name] == null) next[name] = kind }
+                    // Into its kinds alone, so one an outer WITH's WHERE still reads, kept in a subquery of an order there, stays shadowing (drivine4j#681).
+                    kept.forEach { (name, kind) -> if (next[name] == null) next.kinds[name] = kind }
                 }
                 is Clause.Return -> returned = projected(clause.projection, current, null, kept.keys).kinds
                 is Clause.Create -> {
