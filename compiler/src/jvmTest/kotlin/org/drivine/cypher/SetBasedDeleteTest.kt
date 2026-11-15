@@ -151,9 +151,9 @@ class SetBasedDeleteTest {
 
     @Test
     fun `a statement that deletes and reads on holds each relationship's type in its rows, by whatever name a WITH gives it`() {
-        // drivine4j#427: type() of a relationship the statement deleted is read from its rows, as its row is gone. Held only by
-        // the name type() read, one a WITH renamed was null, and so was the type of one returned typed. A statement that reads
-        // nothing after its DELETE holds none, which would only lengthen each row.
+        // drivine4j#427: type() of a relationship the statement deleted is read from its rows, as its row is gone. It is held by
+        // the relationship, so one a WITH renames, or one returned typed, keeps it. A statement that reads nothing after its
+        // DELETE holds none, which would only lengthen each row.
         val typeKey = Regex("""\bv\d+t\b""")
         compilers.forEach { compiler ->
             listOf(

@@ -325,7 +325,7 @@ cases:
         cypher: "MATCH (:CyWrite)-[r]->() DELETE r RETURN type(r)"
         rows: ["T"]
       - cypher: "CREATE (:CyWrite)-[:T {num: 1}]->(:CyWrite)"
-      - note: "A SQL store held the type of a relationship only by the name type() read it by, so one a WITH renamed was null."
+      - note: "A SQL store gave null here too: the type is held by the relationship, whatever name a WITH gives it."
         only: [neo4j, sql]
         cypher: "MATCH (:CyWrite)-[r]->() DELETE r WITH r AS x RETURN type(x)"
         rows: ["T"]

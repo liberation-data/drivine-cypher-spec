@@ -4569,7 +4569,7 @@ cases:
       - only: [sql]
         cypher: "RETURN toString([1, 2])"
         error: "toString() takes a number, a text, a truth value or a temporal value, not a list of one kind, as in Neo4j."
-      - note: "Neo4j 2026.10.1 refuses each of these when it plans them: Type mismatch: expected Boolean, Float, Integer, Point, String, …, List<Any>, Map, Node, Relationship or Path but was List<Integer>. A SQL store gave the text of the last two."
+      - note: "Neo4j 2026.10.1 refuses each of these when it plans them: Type mismatch: expected Boolean, Float, Integer, Point, String, …, List<Any>, Map, Node, Relationship or Path but was List<Integer>. A SQL store refused each of them, as it refused any list."
         only: [neo4j]
         cypher: "RETURN toString(['a', 'b'])"
         error: true
