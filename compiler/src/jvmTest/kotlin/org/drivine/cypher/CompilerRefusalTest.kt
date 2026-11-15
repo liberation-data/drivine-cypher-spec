@@ -179,17 +179,27 @@ class CompilerRefusalTest {
     }
 
     @Test
-    fun `toString of a list or a map the statement makes is refused, as Neo4j refuses it`() {
-        // #349: Postgres and SQLite gave the list's JSON text, each spaced its own way, and Oracle null. The spec's refusals hold the rest.
+    fun `toString of a list or a map the statement makes is its text, as Neo4j 2026_09 and later writes it`() {
+        // #349: Postgres and SQLite gave the list's JSON text, each spaced its own way, and Oracle null, so it was refused, as Neo4j
+        // refused it then. Neo4j 2026.09 takes it (drivine4j#420): what each store gives is the spec's, in queries.yaml.
         listOf(PostgresCypherCompiler("g"), OracleCypherCompiler("g"), SqliteCypherCompiler("g")).forEach { compiler ->
+            // Written out of texts, integers, truth values and null alone, the text is worked out when compiling.
             listOf(
-                "WITH [1, 2] AS l RETURN toString(l)" to "list",
-                "RETURN toString({a: 1})" to "map",
-            ).forEach { (cypher, kind) ->
-                val refused = assertThrows<CompilerException>("${compiler::class.simpleName}: $cypher") { compiler.compile(cypher) }.message!!
-                assertEquals("toString() takes a number, a text, a truth value or a temporal value, not a $kind, as in Neo4j.", refused)
+                "RETURN toString({a: 1, b: 'x'})" to "{a: 1, b: x}",
+                "RETURN toString([1, 'a', [true, null], {}])" to "[1, a, [true, null], {}]",
+            ).forEach { (cypher, text) ->
+                val sql = compiler.compile(cypher).sql
+                assertTrue(sql.contains("'$text'"), "${compiler::class.simpleName}: $cypher: $sql")
             }
-            // A value whose kind the statement leaves open is compiled, as Neo4j plans it.
+            // A list read as the statement runs is written item by item, and a map in it fails by name as it is read.
+            val sql = compiler.compile("WITH [1, 'a'] AS l RETURN toString(l)").sql
+            assertTrue(sql.contains("it holds ") && sql.contains("a map"), "${compiler::class.simpleName}: $sql")
+            // A list written of items of one kind is refused still, as Neo4j's Cypher 25 refuses it.
+            listOf("RETURN toString([1, 2])", "RETURN toString([[1], [2]])").forEach { cypher ->
+                val refused = assertThrows<CompilerException>("${compiler::class.simpleName}: $cypher") { compiler.compile(cypher) }.message!!
+                assertEquals("toString() takes a number, a text, a truth value or a temporal value, not a list of one kind, as in Neo4j.", refused)
+            }
+            // A value whose kind the statement leaves open is compiled as before, as Neo4j plans it.
             compiler.compile("UNWIND [1, 'a'] AS x RETURN toString(x)")
             compiler.compile("MATCH (n) RETURN toString(n.x)")
         }

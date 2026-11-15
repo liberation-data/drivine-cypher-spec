@@ -122,11 +122,18 @@ sealed interface Value {
     /** A truth value: SQL's boolean, with its null for Cypher's. */
     data class Bool(val sql: String) : Value
 
-    /** A node: the columns of its row. */
-    data class Node(val nid: String, val labels: String, val props: String, val stamp: String) : Value
+    /**
+     * A node: the columns of its row. With [deletable], it is read from the rows a statement carries past a `DELETE`, which
+     * may have deleted it: [nid] is then the id the row holds, and its other columns null where its row is gone, so it is
+     * still bound, as Neo4j keeps it bound, and a read of it can tell it was deleted (drivine4j#420).
+     */
+    data class Node(val nid: String, val labels: String, val props: String, val stamp: String, val deletable: Boolean = false) : Value
 
-    /** A relationship: the columns of its row. */
-    data class Relationship(val eid: String, val src: String, val dst: String, val type: String, val props: String) : Value
+    /**
+     * A relationship: the columns of its row. With [deletable], as a [Node]'s: [eid] is the id the row holds, and [type]
+     * the type it holds beside it where the statement reads it, so `type()` of one deleted is still its type (drivine4j#427).
+     */
+    data class Relationship(val eid: String, val src: String, val dst: String, val type: String, val props: String, val deletable: Boolean = false) : Value
 
     /**
      * A list of nodes, or with [relationships] of relationships: [ids], the JSON list of their ids, in order. It is
