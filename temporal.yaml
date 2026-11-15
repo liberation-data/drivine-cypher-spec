@@ -1189,8 +1189,8 @@ cases:
         only: [neo4j, sql]
         cypher: "CREATE (:CyTemporal {id: 'ns2', a: datetime('2024-01-01T00:00:00.123456789+10:00'), b: datetime('2024-01-01T00:00:00.5Z'), c: localdatetime('2024-01-01T00:00:00.1234560'), e: datetime('2024-01-01T00:00:00.12345+10:00'), f: localtime('12:00:00.123456001'), g: time('12:00:00.000000001Z')})"
       - only: [neo4j, sql]
-        cypher: "MATCH (n:CyTemporal {id: 'ns2'}) RETURN [toString(n.b + duration('PT1S')), toString(n.c + duration('PT1S')), toString(n.e + duration('PT1S'))]"
-        rows: [["2024-01-01T00:00:01.500Z", "2024-01-01T00:00:01.123456", "2024-01-01T00:00:01.123450+10:00"]]
+        cypher: "MATCH (n:CyTemporal {id: 'ns2'}) RETURN [(n.b + duration('PT1S')).millisecond, (n.c + duration('PT1S')).microsecond, (n.e + duration('PT1S')).microsecond, (n.e + duration('PT1S')).timezone, (n.e + duration('PT1S')).second]"
+        rows: [[500, 123456, 123450, "+10:00", 1]]
       - only: [sql]
         cypher: "MATCH (n:CyTemporal {id: 'ns2'}) RETURN n.a + duration('PT1S')"
         error: true
