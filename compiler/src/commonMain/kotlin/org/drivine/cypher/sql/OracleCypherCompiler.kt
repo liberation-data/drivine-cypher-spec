@@ -2271,7 +2271,9 @@ class OracleCypherCompiler(
      * A row each, the block counts the rows by their result, which Oracle works out to tell whether it is null, and adds
      * the last row's number, which keeps the order, into [COUNT]; the cursor then runs [query] a second time, as it did
      * before, a row of `JSON` each: no value holds them all, so there is no limit on their total size, and the cursor's rows
-     * are what they were. As text, they are gathered into the one JSON list [RESULT], in their order, which the cursor
+     * are what they were. The count and the cursor are two queries, each reading what is committed as it starts, with the
+     * block's own writes: a row another session commits between them, or a value made anew each time, as `rand()` gives,
+     * can still fail only in the cursor, as it did before. As text, they are gathered into the one JSON list [RESULT], in their order, which the cursor
      * writes out from `DUAL`. A `JSON` value is at most 32 MB ("Total size of a JSON type instance: 32M bytes", Oracle's
      * JSON Developer's Guide, Appendix B, JSON Capabilities Specification), so with [rowsAsText] a write whose returned rows
      * together pass that fails, as it did when the cursor gathered them.
