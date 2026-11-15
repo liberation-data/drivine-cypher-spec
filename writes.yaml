@@ -276,9 +276,17 @@ cases:
         only: [neo4j, sql]
         cypher: "MATCH (n:CyWrite) DELETE n RETURN n.num"
         error: true
+      - note: "The statement failed, so the node is still there. Oracle keeps it deleted (liberation-data/drivine-cypher-spec#292), so each step that fails starts from a node it creates."
+        only: [neo4j, postgres, sqlite]
+        cypher: "MATCH (n:CyWrite) RETURN count(n)"
+        rows: [1]
+      - cypher: "MATCH (n:CyWrite) DETACH DELETE n"
+      - cypher: "CREATE (:CyWrite {num: 1})"
       - only: [neo4j, sql]
         cypher: "MATCH (n:CyWrite) DELETE n WITH n RETURN n.num"
         error: true
+      - cypher: "MATCH (n:CyWrite) DETACH DELETE n"
+      - cypher: "CREATE (:CyWrite {num: 1})"
       - only: [neo4j, sql]
         cypher: "MATCH (n:CyWrite) DELETE n RETURN labels(n)"
         error: true
@@ -311,6 +319,12 @@ cases:
         only: [neo4j, sql]
         cypher: "MATCH (:CyWrite)-[r]->() DELETE r RETURN r.num"
         error: true
+      - note: "The statement failed, so the relationship is still there. Oracle keeps it deleted (liberation-data/drivine-cypher-spec#292), so each step that fails starts from a relationship it creates."
+        only: [neo4j, postgres, sqlite]
+        cypher: "MATCH (:CyWrite)-[r]->() RETURN count(r)"
+        rows: [1]
+      - cypher: "MATCH (n:CyWrite) DETACH DELETE n"
+      - cypher: "CREATE (:CyWrite)-[:T {num: 1}]->(:CyWrite)"
       - only: [neo4j, sql]
         cypher: "MATCH (a:CyWrite)-[r]->() DETACH DELETE a RETURN r.num"
         error: true
