@@ -2596,7 +2596,7 @@ cases:
         rows: [2, 1, 0]
 
   - name: "Pattern as a condition in a projection"
-    description: "In a WITH's or a RETURN's items and order, a pattern is a condition where Neo4j takes one: an operand of NOT, AND or OR, a CASE's WHEN, and a comprehension's or a quantifier's WHERE; a pattern comprehension, EXISTS { … } and COUNT { … } give its matches. Elsewhere a pattern as a value is refused (see refusals.yaml, \"Pattern used as a value\")."
+    description: "In a WITH's or a RETURN's items and order, a pattern is a condition where Neo4j takes one: an operand of NOT, AND, OR or XOR, a searched CASE's WHEN, and a comprehension's, a quantifier's or a subquery's WHERE, within a reduce()'s step too; a pattern comprehension, EXISTS { … } and COUNT { … } give its matches. Elsewhere a pattern as a value is refused (see refusals.yaml, \"Pattern used as a value\")."
     steps:
       - cypher: "MATCH (n:Person) RETURN NOT (n)-[:KNOWS]->() AS p ORDER BY n.name"
         rows: [true, true, false, false]
@@ -2618,6 +2618,18 @@ cases:
         rows: [["Carrie", 0], ["Hugo", 0], ["Keanu", 1], ["Laurence", 1]]
       - cypher: "MATCH (n:Person) RETURN n.name, [(n)-[:KNOWS]->(m) | m.name] AS k ORDER BY n.name"
         rows: [["Carrie", []], ["Hugo", []], ["Keanu", ["Carrie"]], ["Laurence", ["Keanu"]]]
+      - note: "Unordered: the rows come in the order the nodes are read."
+        cypher: "MATCH (n:Person) RETURN (n)-->() XOR n.born > 1960 AS c"
+        unordered: true
+        rows: [false, false, false, null]
+      - note: "On Oracle a reduce()'s step runs as a function of its own, which reads no node of the row's: there the compiler refuses it, saying n is not a node."
+        cypher: "MATCH (n:Person) RETURN reduce(a = false, x IN [1] | a OR (n)-->()) AS c"
+        except: [oracle]
+        unordered: true
+        rows: [true, true, true, false]
+      - cypher: "MATCH (n:Person) RETURN EXISTS { MATCH (n)-->(m) WHERE (m)-->() } AS c"
+        unordered: true
+        rows: [true, false, true, false]
 
   - name: "Aggregate beside a WHERE"
     description: "A WHERE over what an aggregate gave, and one in a subquery's or a CALL's own query, which aggregates in its projection, filters as Neo4j does. An aggregate in the WHERE of a WITH that groups is in \"Aggregate in the WHERE of a WITH that groups\"; in any other WHERE it is refused (see refusals.yaml, \"Aggregate in a WHERE\")."
