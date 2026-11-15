@@ -58,4 +58,31 @@ class HeldFunctionTest {
         assertTrue("COALESCE(SUBSTR(" in oracle && ", 27, 1), 'x') NOT BETWEEN '0' AND '9'" in oracle, oracle)
     }
 
+    @Test
+    fun `a store with no such function tests a stored text inline`() {
+        // Oracle without its era functions: the CASE names the refusal itself.
+        val oracle = OracleCypherCompiler("g", eraStored = false).compile("MATCH (n) RETURN n.at + duration('PT1S')").sql
+        assertTrue(Temporals.SUB_MICRO.replace("'", "''") in oracle && "g_era(" !in oracle, oracle)
+        // SQLite: the host function's read fails on the text, the nanoseconds replaced by words that say why.
+        val sqlite = org.drivine.cypher.sql.SqliteCypherCompiler("g").compile("MATCH (n) RETURN localtime.truncate('second', n.t)").sql
+        assertTrue("past the microsecond (drivine4j#421)" in sqlite, sqlite)
+    }
+
+    @Test
+    fun `a value written in the statement or made of its fields is refused but a date's duration is not`() {
+        fun postgres(cypher: String) = PostgresCypherCompiler("g").compile(cypher, mapOf("n" to 645876123)).sql
+        // A time of day and a duration written in the statement are read through the store's function, which refuses them as
+        // the statement runs.
+        val time = postgres("RETURN localtime.truncate('second', localtime('12:00:00.000000001'))")
+        assertTrue("g_held(CAST('12:00:00.000000001' AS text))" in time, time)
+        val moved = postgres("RETURN localdatetime('2024-01-01T00:00:00') + duration('PT0.000000001S')")
+        assertTrue("g_held(CAST('PT0.000000001S' AS text))" in moved, moved)
+        // A date takes the whole days of a duration's time alone: its nanoseconds are not tested.
+        val date = postgres("RETURN date('2024-01-01') + duration('PT0.000000001S')")
+        assertFalse("g_held(CAST('PT0.000000001S' AS text))" in date, date)
+        // A nanosecond field is tested by the SQL's own CASE, naming the refusal.
+        val made = postgres("RETURN localtime({hour: 12, minute: 0, second: 0, nanosecond: \$n})")
+        assertTrue(Temporals.SUB_MICRO.replace("'", "''") in made, made)
+    }
+
 }

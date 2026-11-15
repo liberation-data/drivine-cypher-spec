@@ -47,7 +47,7 @@ class Temporals(
         LITERAL.matchEntire(text)?.let { quoted ->
             return if (SUB_MICRO_REGEX.containsMatchIn(quoted.groupValues[1].replace("''", "'"))) refusing(SUB_MICRO, text) else text
         }
-        // A store whose own read of the text refuses it reads it once ([TemporalSql.holdsMicros]); else it is tested here,
+        // A store whose own read of the text refuses it reads it once ([TemporalSql.heldMicros]); else it is tested here,
         // the message naming no text, so where nothing binds it the text is written out twice, not three times.
         if (kinds.all { it == Temporal.DATE }) return text
         sql.heldMicros(text, kinds)?.let { return it }
@@ -62,12 +62,21 @@ class Temporals(
     private val written = mutableSetOf<String>()
 
     /** Each of [names], bound to [values] by the compiler's own sharing, marked [written] where its value is. */
-    fun carry(values: List<String>, names: List<String>) = values.zip(names).forEach { (value, name) -> if (value in written) written += name }
+    fun carry(values: List<String>, names: List<String>) = values.zip(names).forEach { (value, name) -> mark(name, value) }
 
     /** [sharing], each name a [written] text is bound to written too, so [held] reads it as it reads the text. */
     private fun shared(texts: List<String>, body: (List<String>) -> String): String = sharing(texts) { names ->
-        names.zip(texts).forEach { (name, text) -> if (text in written) written += name }
+        names.zip(texts).forEach { (name, text) -> mark(name, text) }
         body(names)
+    }
+
+    /**
+     * [name] [written] where [value], the value it is bound to, is, and not otherwise: a name is taken again for another value
+     * where the compiler gives back the names a compile only to see took, or a probe's, so one marked for an earlier value
+     * would leave a stored text bound to it untested.
+     */
+    private fun mark(name: String, value: String) {
+        if (value in written) written += name else written -= name
     }
 
     private fun written(text: String) = text.also { written += it }
@@ -967,11 +976,6 @@ class Temporals(
     private fun literal(text: String) = "'${text.replace("'", "''")}'"
 
     companion object {
-        /**
-         * What a statement that works out a date or a moment whose year the store can't hold fails with, the year or the moment
-         * after it: past 9999, or before the store's first, -4712 on Postgres, -4711 on Oracle and -9999 on SQLite (README.md,
-         * Values). Short, as a statement that makes many such values writes it for each.
-         */
         /** Why a temporal value whose fraction of a second goes past the microsecond fails: see `held`. */
         const val SUB_MICRO = "A fraction of a second past the microsecond isn't kept by the store's time, so isn't worked out yet (drivine4j#421, drivine-cypher-spec#246):"
 
@@ -986,6 +990,11 @@ class Temporals(
         /** A SQL text literal, its text in the group, each `'` written twice. */
         private val LITERAL = Regex("""'((?:[^']|'')*)'""")
 
+        /**
+         * What a statement that works out a date or a moment whose year the store can't hold fails with, the year or the moment
+         * after it: past 9999, or before the store's first, -4712 on Postgres, -4711 on Oracle and -9999 on SQLite (README.md,
+         * Values). Short, as a statement that makes many such values writes it for each.
+         */
         const val LONG_YEAR = "A year the store doesn't hold, past 9999 or before its first, isn't worked out yet (drivine-cypher-spec#263, #264):"
 
         /**

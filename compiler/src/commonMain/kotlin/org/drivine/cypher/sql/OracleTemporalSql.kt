@@ -42,11 +42,6 @@ class OracleTemporalSql(
         Temporal.DURATION -> error("a duration is no moment")
     }
 
-    /**
-     * Where the store keeps the era functions, its era function refuses a nanosecond past the microsecond as it reads the
-     * text, once (drivine4j#421): a moment's text is read through it where the test of a year from 1000 on leaves it, which
-     * a text past the microsecond is ([Temporal.adPattern]), and a time of day's, which has no such test, is given through it.
-     */
     /** Through the era function too, which refuses a duration's nanoseconds as a moment's and leaves its text as it is. */
     override fun heldDurationMicros(text: String): String? {
         val era = storedEraText ?: return null
@@ -54,6 +49,11 @@ class OracleTemporalSql(
         return "$era($text)"
     }
 
+    /**
+     * Where the store keeps the era functions, its era function refuses a nanosecond past the microsecond as it reads the
+     * text, once (drivine4j#421): a moment's text is read through it where the test of a year from 1000 on leaves it, which
+     * a text past the microsecond is ([Temporal.adPattern]), and a time of day's, which has no such test, is given through it.
+     */
     override fun heldMicros(text: String, kinds: List<Temporal>): String? {
         val era = storedEraText ?: return null
         if (kinds.none { it == Temporal.LOCAL_TIME || it == Temporal.TIME }) return text
