@@ -567,13 +567,14 @@ internal object VariableKinds {
      * A `SET` item's value, over [scope]: a pattern is no value to set, as Neo4j refuses it (see [valued]); nor is a node, a
      * relationship or a path, `SET m.f = m`, a list written of one, `SET m.f = [m]`, or an entry of a map set, `SET n += {f: m}`,
      * which Neo4j refuses when it runs (its 22N01, "Property values can only be of primitive types or arrays thereof"), and
-     * the store would hold as a document (see [stored]).
+     * the store would hold as a document (see [stored]). Read after the rest of it, as Neo4j refuses what it refuses before
+     * it runs first: `SET n.p = [b, zz]` is refused for `zz`, which is not defined.
      */
     private fun set(item: SetItem, scope: Scope) {
         val value = setValue(item) ?: return
-        if (item is SetItem.Property) stored(value, scope) else properties(value, scope)
         expression(value, scope)
         valued(value, condition = false)
+        if (item is SetItem.Property) stored(value, scope) else properties(value, scope)
     }
 
     /**

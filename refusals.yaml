@@ -1774,7 +1774,7 @@ cases:
         error: "Creating an entity (a) and referencing that entity in a property definition in the same CREATE is not allowed, as in Neo4j: only reference variables created in earlier clauses. Make it in a clause before, or SET the property after."
 
   - name: "Node or relationship set as a property"
-    description: "A SET of a property to a node or a relationship, or to a list written that holds one, an entry of a map a SET sets, and a property a CREATE or a MERGE makes of one, is refused, as Neo4j 2026.10.1 refuses it when it runs (its 22N01, \"Expected the value … to be of type BOOLEAN, STRING, INTEGER, FLOAT, …\"): the store would hold it as a document. A MERGE's ON CREATE or ON MATCH SET is refused alike (see \"Values a write makes, by position and form\")."
+    description: "A SET of a property to a node or a relationship, or to a list written that holds one, an entry of a map a SET sets, and a property a CREATE or a MERGE makes of one, and so a path or a variable-length relationship's list, is refused, as Neo4j 2026.10.1 refuses it when it runs (its 22N01, \"Expected the value … to be of type BOOLEAN, STRING, INTEGER, FLOAT, …\"): the store would hold it as a document. A MERGE's ON CREATE or ON MATCH SET is refused alike (see \"Values a write makes, by position and form\"). What Neo4j refuses before it runs, a pattern used as a value beside one among it, is refused for that first."
     steps:
       - note: "Neo4j's 22N01 when it runs."
         cypher: "MATCH (n:CyWrite {id: 'a'}), (b:CyWrite {id: 'b'}) SET n.p = b RETURN n.p"
@@ -1796,6 +1796,18 @@ cases:
         error: "b is a node, and a property holds no node, relationship or path, as in Neo4j: set a property of it, or its elementId(), instead."
       - cypher: "MATCH (n:CyWrite {id: 'a'})-[r:NEXT]->(b:CyWrite {id: 'b'}) CREATE (n)-[s:CyR {p: r}]->(b) RETURN s.p"
         error: "r is a relationship, and a property holds no node, relationship or path, as in Neo4j: set a property of it, or its elementId(), instead."
+      - note: "A path, and a variable-length relationship's list, by SET and by CREATE."
+        cypher: "MATCH p = (n:CyWrite {id: 'a'})-[:NEXT]->(:CyWrite {id: 'b'}) SET n.q = p RETURN n.q"
+        error: "p is a path, and a property holds no node, relationship or path, as in Neo4j: set a property of it, or its elementId(), instead."
+      - cypher: "MATCH (n:CyWrite {id: 'a'})-[rs:NEXT*1..2]->(:CyWrite {id: 'c'}) SET n.q = rs RETURN n.q"
+        error: "rs is a list of relationships, and a property holds no node, relationship or path, as in Neo4j: set a property of it, or its elementId(), instead."
+      - cypher: "MATCH p = (n:CyWrite {id: 'a'})-[:NEXT]->(:CyWrite {id: 'b'}) CREATE (m:CyMade {q: p}) RETURN m.q"
+        error: "p is a path, and a property holds no node, relationship or path, as in Neo4j: set a property of it, or its elementId(), instead."
+      - note: "What Neo4j refuses before it runs comes first: a pattern used as a value beside one (its 42I34)."
+        cypher: "MATCH (n:CyWrite {id: 'a'}), (b:CyWrite {id: 'b'}) SET n.p = [b, (n)-->()] RETURN n.p"
+        error: "A pattern expression can only be used to test the existence of a pattern, as in Neo4j: as a condition, as in a WHERE. Use a pattern comprehension instead, as in [(a)-->(b) | b], or EXISTS { … } or COUNT { … }."
+      - cypher: "MATCH (n:CyWrite {id: 'a'}), (b:CyWrite {id: 'b'}) SET n += {p: b, q: (n)-->()} RETURN n.p"
+        error: "A pattern expression can only be used to test the existence of a pattern, as in Neo4j: as a condition, as in a WHERE. Use a pattern comprehension instead, as in [(a)-->(b) | b], or EXISTS { … } or COUNT { … }."
 
   - name: "Aggregate in a WHERE"
     description: "An aggregate in a WHERE is refused, as Neo4j refuses it (its 42I24, \"invalid use of aggregate function\"): of a MATCH or a WITH that groups nothing, a pattern comprehension, a list comprehension, a quantifier, a quantified path pattern, EXISTS { … } and COUNT { … }, in a subquery's or a CALL { … }'s query too, and in a comprehension's, a quantifier's or a pattern's own WHERE or body within the WHERE of a WITH that groups. The WHERE of a WITH that aggregates, or is DISTINCT, holds an aggregate, and so does one after a subquery or a CALL that aggregates in its own projection (see queries.yaml, \"Aggregate in the WHERE of a WITH that groups\" and \"Aggregate beside a WHERE\")."
