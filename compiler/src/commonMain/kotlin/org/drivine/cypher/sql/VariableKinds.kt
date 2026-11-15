@@ -350,6 +350,9 @@ internal object VariableKinds {
         }
     }
 
+    /** Each variable [query] names anywhere, as [namedIn] reads it. */
+    fun namesIn(query: Query): Set<String> = namedIn(query)
+
     /**
      * Each variable [query] names, in its patterns and its expressions, a subquery's within among them, whether it binds it
      * anew or not: as much as Neo4j may read from outside it.
