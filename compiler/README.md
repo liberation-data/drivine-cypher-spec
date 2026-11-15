@@ -525,7 +525,9 @@ JSON entry, so TypeScript and Python run what drivine4j runs from the Kotlin typ
   - `runtimeAfter` (`operation`, `runtime`, `databases`) and `runtimeOn` (`database`, `runtime`): the runtime catalogs a
     library keeps of the items it ensures as it runs, as drivine4j's `SchemaManager` keeps them.
 
-  A request, an action, an outcome, the state and the report are written as `PlanJson` writes them. Every `plans.yaml`
+  A request, an action, an outcome, the state and the report are written as `PlanJson` writes them, each key and value as
+  it is, not as `write` gives a value: a row's or a sample's `{"$t": …}` stays `$t`, and a host binds an action's
+  parameters and reads a report as they are given. Every `plans.yaml`
   case runs through the request, beside the Kotlin planner, round by round.
 
 ### Fragments

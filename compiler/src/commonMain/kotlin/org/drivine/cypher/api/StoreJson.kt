@@ -1,7 +1,6 @@
 package org.drivine.cypher.api
 
 import org.drivine.DrivineInternalApi
-import org.drivine.cypher.json.CypherJson
 import org.drivine.cypher.json.JsonNode
 import org.drivine.cypher.json.ObjectNode
 import org.drivine.cypher.store.ddl.FalkorDbDdl
@@ -17,6 +16,7 @@ import org.drivine.cypher.store.marker.SchemaMarker
 import org.drivine.cypher.store.marker.StoreLayout
 import org.drivine.cypher.store.marker.StoreStamp
 import org.drivine.cypher.store.marker.StoreStampStatements
+import org.drivine.cypher.store.plan.PlanJson
 import org.drivine.schema.made
 
 /**
@@ -119,7 +119,7 @@ internal object StoreJson {
             "itemsMark" to marker.storedItems(""),
             "constraint" to constraint(ddl, SchemaMarker.CONSTRAINT),
         )
-        return CypherJson.writeValueAsString(CypherJson.valueToTree(answer))
+        return PlanJson.writePlain(answer)
     }
 
     /**
@@ -161,7 +161,7 @@ internal object StoreJson {
     }
 
     private fun parameters(parameters: Map<String, Any?>): String =
-        CypherJson.writeValueAsString(CypherJson.valueToTree(mapOf("parameters" to parameters)))
+        PlanJson.writePlain(mapOf("parameters" to parameters))
 
     private val PARAMETER_SETS = listOf("stampParameters", "restamp", "markerParameters")
 

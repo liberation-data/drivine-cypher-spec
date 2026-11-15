@@ -28,9 +28,24 @@ import org.drivine.schema.VectorIndexSpec
  */
 internal object PlanJson {
 
-    fun write(state: PlannerState): String = CypherJson.writeValueAsString(
-        mapOf("request" to request(state.request), "rounds" to state.rounds.map(::round)),
-    )
+    fun write(state: PlannerState): String =
+        writePlain(mapOf("request" to request(state.request), "rounds" to state.rounds.map(::round)))
+
+    /**
+     * [value], a plain value, as JSON text with every key and value as it is: not as the store layout writes a value
+     * ([CypherJson.valueToTree] doubles a `$` that begins a key and turns a temporal value into its tag). A row a host gives
+     * back, an action's parameters and a violation's sample are values a host binds or reads as they are, as drivine4j's
+     * planner holds them: a sampled date is a tag with `$t`, which the layout's writing would make `$$t`.
+     */
+    fun writePlain(value: Any?): String = CypherJson.writeValueAsString(plainTree(value))
+
+    private fun plainTree(value: Any?): JsonNode = when (value) {
+        // A tree is written as it is: a JsonNode is Iterable, over its values.
+        is JsonNode -> value
+        is Map<*, *> -> ObjectNode().apply { value.forEach { (k, v) -> set<JsonNode>(k.toString(), plainTree(v)) } }
+        is Iterable<*> -> ArrayNode().apply { value.forEach { add(plainTree(it)) } }
+        else -> CypherJson.valueToTree(value)
+    }
 
     fun readState(text: String): PlannerState {
         val node = CypherJson.readTree(text)

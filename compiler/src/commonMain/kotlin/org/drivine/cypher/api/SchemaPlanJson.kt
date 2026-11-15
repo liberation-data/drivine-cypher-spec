@@ -65,7 +65,8 @@ internal object SchemaPlanJson {
                 }
             }
         }
-        CypherJson.writeValueAsString(CypherJson.valueToTree(result))
+        // As the planner holds each value: a sample's or a row's `$t` is not the layout's to escape (PlanJson.writePlain).
+        PlanJson.writePlain(result)
     } catch (e: Exception) {
         // As every other request answers a failure: a host is answered, never thrown at.
         CompileJson.error(e.message ?: e.toString())
