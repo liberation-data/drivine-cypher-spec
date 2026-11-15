@@ -194,7 +194,9 @@ class CompilerRefusalTest {
                 "RETURN toString({`\uD83D\uDE00`: 1, `\uFF01`: 2, z: 3})" to "{z: 3, \uFF01: 2, \uD83D\uDE00: 1}",
             ).forEach { (cypher, text) ->
                 val sql = compiler.compile(cypher).sql
-                assertTrue(sql.contains("'$text'"), "${compiler::class.simpleName}: $cypher: $sql")
+                assertTrue(sql.contains(text), "${compiler::class.simpleName}: $cypher: $sql")
+                // As a typed JSON literal: Postgres can't take to_jsonb() of a literal whose type it doesn't know.
+                assertFalse(sql.contains("to_jsonb('"), "${compiler::class.simpleName}: $cypher: $sql")
             }
             // A list read as the statement runs is written item by item, and a map in it fails by name as it is read.
             val sql = compiler.compile("WITH [1, 'a'] AS l RETURN toString(l)").sql

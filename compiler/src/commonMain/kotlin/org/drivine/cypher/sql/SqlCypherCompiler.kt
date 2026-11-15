@@ -7061,7 +7061,7 @@ abstract class SqlCypherCompiler(
             }
             if (value is Value.Entities) unsupported("toString() of a list of nodes or relationships")
             if (hasTemporals(value)) unsupported("toString() of a list or a map that holds a temporal value")
-            constantText(written)?.let { return Value.Json(scalar(literal(it)), text = true) }
+            constantText(written)?.let { return Value.Json(literalJson(it), text = true) }
             return Value.Json(scalar(shared(comparable(json(value))) { (x) -> "CASE WHEN ${typeOf(x)} IN ('array', 'object') THEN ${textOf(written, x, scope)} END" }), text = true)
         }
 
