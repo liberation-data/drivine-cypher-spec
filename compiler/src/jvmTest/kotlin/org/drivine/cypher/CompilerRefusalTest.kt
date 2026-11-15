@@ -229,7 +229,7 @@ class CompilerRefusalTest {
             // And a list Neo4j takes: of properties, collect() of one, of many kinds, and empty.
             listOf(
                 "MATCH (n) RETURN toString([n.x, n.y]), toString(collect(n.x))", "MATCH (n) WITH collect(n.x) AS c RETURN toString(c)",
-                "WITH [1, 'a'] AS l WITH l RETURN toString(l)", "RETURN toString([])",
+                "WITH [1, 'a'] AS l WITH l RETURN toString(l)", "RETURN toString([])", "WITH 'K' AS s, 1.5 AS f RETURN toString([s, f, true])",
             ).forEach(compiler::compile)
         }
     }
