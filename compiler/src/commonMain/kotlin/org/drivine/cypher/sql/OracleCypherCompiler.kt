@@ -318,6 +318,14 @@ class OracleCypherCompiler(
     /** A `VARCHAR2`, which holds 4,000 bytes: a longer text is null. See [texts], which reads one as a CLOB. */
     override fun text(json: String) = shared(json) { (x) -> "CASE WHEN ${kind(x)} = 'string' THEN JSON_VALUE($x, '$') END" }
 
+    /**
+     * A text past 4,000 bytes, which [text] reads as null, fails by name, where `toString()` of a list or a map would write it
+     * as nothing (drivine4j#420); an empty one, null as both, is empty (#416).
+     */
+    override fun wholeText(json: String) = shared(json) { (x) ->
+        "COALESCE(${text(x)}, CASE WHEN LENGTH(${longText(x)}) > 0 THEN TO_CHAR(${failure(LONG_ITEM_TEXT, "LENGTH(${longText(x)})")}) END)"
+    }
+
     /** The JSON [json] as a CLOB, where it is a string: a text of any length, slower to read than [text]'s `VARCHAR2`. */
     private fun longText(json: String) = shared(json) { (x) -> "CASE WHEN ${kind(x)} = 'string' THEN JSON_VALUE($x, '$' RETURNING CLOB) END" }
 
@@ -2355,6 +2363,9 @@ class OracleCypherCompiler(
     companion object {
         /** A hint a query starts with: `SELECT /*+ … */ `. */
         private val LEADING_HINT = Regex("""^SELECT (/\*\+.*?\*/) """)
+
+        /** What `toString()` of a list or a map that holds a text past 4,000 bytes fails with, before its length: see [wholeText]. */
+        private const val LONG_ITEM_TEXT = "toString() of a list or a map that holds a text past 4,000 bytes is not compiled to SQL on Oracle yet: its length is"
 
         /** How the last function a query declares before it ends (see [readAsText]): its `END;`, on a line of its own. */
         private const val DECLARED_END = "\nEND;\n"

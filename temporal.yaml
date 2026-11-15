@@ -20,6 +20,12 @@ cases:
                   minutes: localdatetime({year: 2024, month: 1, day: 1, hour: 9, minute: 45}).minute}
         rows: [{leap: 60, noon: 1704110400, local: 10, zoned: 30, minutes: 45}]
 
+  - name: "The day of the quarter"
+    description: "dayOfQuarter of a date, a local moment and a moment is the day of its quarter, counted from 1, as Neo4j 2026.10.1 gives it (liberation-data/drivine4j#427)."
+    steps:
+      - cypher: "RETURN [date('1984-10-11').dayOfQuarter, localdatetime('1984-10-11T12:31:14').dayOfQuarter, datetime('1984-10-11T12:31:14+01:00').dayOfQuarter]"
+        rows: [[11, 11, 11]]
+
   - name: "Fields of a duration"
     description: "A duration made from text or a map gives its fields."
     steps:
