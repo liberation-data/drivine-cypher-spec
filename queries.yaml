@@ -3127,6 +3127,9 @@ cases:
         rows: ["[1967, 1964, 1961]"]
       - cypher: "MATCH (p:Person {name: 'Keanu'}) RETURN [toString([p.name, p.born, p.born / 2.0, p.nope]), toString(p {.name}), toString({n: p.name, l: [p.born]})]"
         rows: [["[Keanu, 1964, 982.0, null]", "{name: Keanu}", "{l: [1964], n: Keanu}"]]
+      - note: "A map projection's entry written key: value and its variable, beside a property it selects, in the order of their keys."
+        cypher: "MATCH (p:Person {name: 'Keanu'}) WITH p, 'K' AS s RETURN toString(p {.name, b: p.born, s})"
+        rows: ["{b: 1964, name: Keanu, s: K}"]
       - note: "A text the statement makes of one kind, but not as one written, among items of other kinds."
         cypher: "MATCH (p:Person {name: 'Keanu'}) WITH p, 'K' AS s RETURN toString([s, CASE WHEN p.born > 1960 THEN 'old' ELSE 'new' END, p.born])"
         rows: ["[K, old, 1964]"]
