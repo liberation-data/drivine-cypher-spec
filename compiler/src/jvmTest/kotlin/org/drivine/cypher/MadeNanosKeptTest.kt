@@ -47,6 +47,8 @@ class MadeNanosKeptTest {
         // It wrote 01:00:00.000000-001, which is no temporal value's text.
         assertEquals("refused", sqlite("RETURN localtime({hour: 1, nanosecond: \$n}) AS r", mapOf("n" to -1)))
         assertEquals("refused", sqlite("RETURN localtime({hour: 1, nanosecond: 1000000001}) AS r"))
+        // Beside a millisecond its fraction went past the second: it wrote 01:00:00.1004999999.
+        assertEquals("refused", sqlite("RETURN localtime({hour: 1, millisecond: 5, nanosecond: 999999999}) AS r"))
     }
 
     @Test

@@ -106,7 +106,7 @@ class HeldFunctionTest {
         // function only where it is worked out (drivine-cypher-spec#302); the refusal it writes is of a nanosecond out of range.
         val made = postgres("RETURN localtime({hour: 12, minute: 0, second: 0, nanosecond: \$n})")
         assertFalse("g_held(" in made, made)
-        assertTrue("< 0 OR " in made && " > 999999999 THEN " in made, made)
+        assertTrue("< 0 OR " in made && " > 999999999 OR " in made && " > 999999 THEN " in made, made)
         val madeMoved = postgres("RETURN localtime({hour: 12, minute: 0, second: 0, nanosecond: \$n}) + duration('PT1S')")
         assertTrue("g_held(" in madeMoved, madeMoved)
     }

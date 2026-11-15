@@ -336,8 +336,9 @@ class Temporals(
                 val nine = "${sql.toChar}($micros, 'FM000000') || ${sql.toChar}(${sql.mod(n, "1000")}, 'FM000')"
                 // The fraction after the seconds, the text's first `:mm:ss`, written again of nine digits.
                 val kept = sql.replace(t, literal(sql.regex(SECONDS)), "('\\1.' || $nine)")
-                // A nanosecond out of its range would write no fraction a temporal text has, so fails as it did (drivine4j#421).
-                val range = refuse?.let { refusing -> " WHEN $n < 0 OR $n > 999999999 THEN ${refusing(SUB_MICRO, "CAST($n AS ${sql.textType})")}" } ?: ""
+                // A nanosecond out of its range, or a fraction past the second beside a millisecond or a microsecond, would write no
+                // fraction a temporal text has, so fails as it did (drivine4j#421).
+                val range = refuse?.let { refusing -> " WHEN $n < 0 OR $n > 999999999 OR $micros < 0 OR $micros > 999999 THEN ${refusing(SUB_MICRO, "CAST($n AS ${sql.textType})")}" } ?: ""
                 "CASE WHEN ${sql.mod(n, "1000")} = 0 THEN $t$range ELSE $kept END"
             }
         }
