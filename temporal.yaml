@@ -1185,6 +1185,16 @@ cases:
       - only: [sql]
         cypher: "MATCH (n:CyTemporal {id: 'ns'}) RETURN duration.between(n.at, localdatetime('2024-01-02T00:00:00'))"
         error: true
+      - only: [sql]
+        cypher: "MATCH (n:CyTemporal {id: 'ns'}) RETURN localtime({time: n.t})"
+        error: true
+      - note: "A field read off the store's timestamp, not off the text."
+        only: [sql]
+        cypher: "MATCH (n:CyTemporal {id: 'ns'}) RETURN n.at.dayOfWeek"
+        error: true
+      - only: [sql]
+        cypher: "MATCH (n:CyTemporal {id: 'ns'}) RETURN n.at.epochSeconds"
+        error: true
       - note: "A fraction of one to nine digits, beside an offset or Z: refused only where a seventh to ninth digit isn't 0, read as the store reads the text."
         only: [neo4j, sql]
         cypher: "CREATE (:CyTemporal {id: 'ns2', a: datetime('2024-01-01T00:00:00.123456789+10:00'), b: datetime('2024-01-01T00:00:00.5Z'), c: localdatetime('2024-01-01T00:00:00.1234560'), e: datetime('2024-01-01T00:00:00.12345+10:00'), f: localtime('12:00:00.123456001'), g: time('12:00:00.000000001Z')})"
