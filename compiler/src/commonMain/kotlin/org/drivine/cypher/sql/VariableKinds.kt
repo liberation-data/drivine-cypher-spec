@@ -249,14 +249,16 @@ internal object VariableKinds {
      * up, and each relationship new: a node a pattern of the same `CREATE` made before it is bound already. [made] holds
      * the relationships the clause made before. A relationship bound before the clause, as one, is left to the compiler,
      * which refuses it as not compiled yet, as the spec has it. Within a `FOREACH`, [foreach], Neo4j takes a variable bound
-     * already in each of these places, and only one of another kind is refused. [before] is the scope before the clause: a
-     * pattern in the properties of a node made with no relationship names none of its variables (see [declared]).
+     * already in each of these places, and only one of another kind is refused. [before] is the scope before the clause:
+     * a pattern in a property it makes names none of the clause's own variables (see [madeHere]), and, of a node made with
+     * no relationship, none of those bound before it either (see [declared]).
      */
     private fun made(pattern: Pattern, scope: Scope, before: Scope, made: MutableSet<String>, merging: Boolean, foreach: Boolean) {
         val clause = if (merging) "MERGE" else "CREATE"
         pattern.nodes.forEach { node ->
             node.properties?.let {
                 expression(it, scope)
+                madeHere(it, scope, before)
                 if (pattern.relationships.isEmpty() && !foreach) declared(it, before)
                 valued(it, condition = false)
             }
@@ -278,6 +280,7 @@ internal object VariableKinds {
         pattern.relationships.forEach { relationship ->
             relationship.properties?.let {
                 expression(it, scope)
+                madeHere(it, scope, before)
                 valued(it, condition = false)
             }
             val variable = relationship.variable ?: return@forEach
@@ -291,6 +294,17 @@ internal object VariableKinds {
         }
         pattern.variable?.let { variable -> if (scope[variable] == null) scope[variable] = Kind.PATH }
     }
+
+    /**
+     * Refuses a pattern in [properties], a property a `CREATE` or a `MERGE` makes, that names a variable the same clause
+     * makes, one of [scope] not of [before], as Neo4j refuses it (its 42N29): `CREATE (a), (b {f: NOT (a)-->()})`. A pattern
+     * comprehension binds such a name anew, as in Neo4j, and is not refused for it.
+     */
+    private fun madeHere(properties: Expression, scope: Scope, before: Scope) =
+        patternsIn(properties, emptySet()) { pattern, comprehension, inner ->
+            if (comprehension) return@patternsIn
+            named(pattern).firstOrNull { it !in inner && scope[it] != null && before[it] == null }?.let { throw undefined(it) }
+        }
 
     /**
      * Refuses a pattern in [properties], a property of a node a `CREATE` or a `MERGE` makes with no relationship, that names
