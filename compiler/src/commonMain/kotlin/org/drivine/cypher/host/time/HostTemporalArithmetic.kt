@@ -90,6 +90,14 @@ internal object HostTemporalArithmetic {
         val kind = moment.kind!!
         val text = moment.v!!
         val (months, days, wholeSeconds, nanos) = exactParts(duration.v!!, sign)
+        // A fraction of a second past the microsecond, the moment's or the duration's, fails by name, as the inline SQL fails it:
+        // each step writes SQLite's timestamp, which keeps microseconds (drivine4j#421). A date takes the whole days of the
+        // duration's time alone, so the duration's fraction is no matter there.
+        if ((kind != Temporal.DATE && nanos % 1000 != 0L) || SUB_MICRO.containsMatchIn(text)) {
+            // Named by what holds the nanoseconds: the moment's text, or the duration's seconds.
+            val holds = if (SUB_MICRO.containsMatchIn(text)) text else SECONDS.find(duration.v)?.value ?: duration.v
+            throw IllegalArgumentException("${Temporals.SUB_MICRO} $holds")
+        }
         var clock = HostTemporal.local(text, kind)
         clock = timestamp(LocalDateTime(JavaTime.plusMonths(clock.date, months), clock.time))
         val (seconds, fraction) = if (kind == Temporal.DATE) {
@@ -202,6 +210,12 @@ internal object HostTemporalArithmetic {
         val (m, d, s) = Temporals.durationParts(duration.v!!)
         return Temporals.durationText(m.divide(divisor, QUOTIENT), d.divide(divisor, QUOTIENT), s.divide(divisor, QUOTIENT), PLACES)
     }
+
+    /** A fraction of a second with a digit past the sixth that isn't 0: see [Temporals.SUB_MICRO_DIGITS]. */
+    private val SUB_MICRO = Regex(Temporals.SUB_MICRO_DIGITS)
+
+    /** A duration text's seconds, as it ends with them. */
+    private val SECONDS = Regex("""-?[0-9.]+S$""")
 
     /** The groups of [Temporal.DURATION] of its years, months, weeks, days, hours and minutes. */
     private val WHOLE_GROUPS = listOf(3, 5, 7, 9, 12, 14)

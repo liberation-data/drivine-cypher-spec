@@ -440,7 +440,7 @@ table:
     - form: "n.born.year > $y"
       parameters: {"y": 1900}
       rows: [["p2", "p4"], ["p1", "p3"], ["p2", "p4", "p5"], ["p2"]]
-      digests: {"postgres": ["dfaa534b699aac86", "52a80e5ae63f16e0", "8eedb9bb80a1c1e0", "21243ef0043e6ed4"], "oracle": ["9e79bdb35c12d046", "04888a4e25e42d0b", "08b0d0492f486b31", "cd522a77c6949d82"], "sqlite": ["e3b183d72d77a2c5", "e91a2020ee72abe7", "19abc9b66a3f30df", "0f52332e0590783c"]}
+      digests: {"postgres": ["2dcbae4e2e53e955", "3d4f1bab37bd2e23", "91787c7de055ef92", "2713aa37ca6feb2b"], "oracle": ["9156354d614bc836", "fe6d9bf0384bd4f4", "19900685b48f0bed", "6b25e98a87ecb9c9"], "sqlite": ["e86832a837a1745b", "1a513f76b2309599", "b1784a437235d486", "927761449008e3fe"]}
     - form: "n.born < $d"
       parameters: {"d": {"$temporal": "DATE", "text": "1900-01-01"}}
       rows: [["p1"], ["p2"], ["p1", "p5"], ["p1"]]
@@ -499,7 +499,7 @@ table:
     - form: "n.seen.epochMillis / 1000.0 > $s"
       parameters: {"s": 0}
       rows: [["p2", "p3"], ["p1"], ["p2", "p3", "p5"], ["p2", "p3"]]
-      digests: {"postgres": ["c70a713b319848a5", "4a3e62ae25599623", "7c638d0d95a99a68", "e9b0eb31b59abe21"], "oracle": ["13e44e1a360a69f9", "19afe4baf6e42629", "20569c5fe5f32952", "1a629133b6658b69"], "sqlite": ["f76ca3d2ad14e995", "6f82e7a6c9b6754f", "d87b21417fca8f74", "657532e242d241c4"]}
+      digests: {"postgres": ["8d2ce83f06f9a83d", "5e115036fd82fff2", "8b3cc2b230c32f7b", "42b8e4616305b418"], "oracle": ["4c5b14ba89532d03", "f2deea82cf7836e5", "b70c76d344d2d8a3", "7333604cc76d64ac"], "sqlite": ["d480cc4ed798cbb0", "80cbdbdcce47ea7a", "d6572d8f5f06e694", "ea46974d7411c3ee"]}
     - form: "n.age >= $a"
       parameters: {"a": 36}
       rows: [["p1", "p2", "p3"], [], ["p1", "p2", "p3", "p5"], ["p1", "p2", "p3"]]
@@ -568,7 +568,7 @@ table:
       digests: {"postgres": ["823972fb83578801", "43c7bddd79db9b48"], "oracle": ["d146051f2c66b1c0", "918b68b578ec8af0"], "sqlite": ["0cac44720491e073", "65753ff2e132a7c5"]}
     - value: "n.seen.epochMillis / 1000.0"
       rows: [["p1", "p2", "p3", "p4", "p5"], ["p4", "p5", "p3", "p2", "p1"]]
-      digests: {"postgres": ["e0b80784c64cf3ad", "b9ef1f3f416c5178"], "oracle": ["9889c2cda589a6d4", "d239c64c27ea7088"], "sqlite": ["8539e52004754101", "a78c988c7eec61a3"]}
+      digests: {"postgres": ["6962bd231d2420e8", "2608211fc557881b"], "oracle": ["504c6b3a26738248", "6e5161ae958b79e7"], "sqlite": ["7d71a128f5bc5b51", "ce2ca25a6c29642d"]}
     - value: "n.bio"
       rows: [["p1", "p2", "p3", "p4", "p5"], ["p3", "p4", "p5", "p2", "p1"]]
       digests: {"postgres": ["0b2c2488831e2468", "f3d6dd2e122f8f39"], "oracle": ["ea072f2f14360e88", "2404a7364fd2dcfd"], "sqlite": ["4b0a2d8f891e8b60", "d55857a0441bc7a9"]}

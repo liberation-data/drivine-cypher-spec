@@ -19,7 +19,7 @@ import kotlinx.datetime.number
  */
 class Temporals(
     private val sql: TemporalSql,
-    private val shared: (List<String>, (List<String>) -> String) -> String,
+    private val sharing: (List<String>, (List<String>) -> String) -> String,
     /** The statement failing by name, with a message and a SQL text it names, as it runs: see [format]. */
     private val refuse: ((message: String, text: String) -> String)? = null,
     /** Whether [shared] binds a long value in a subquery where the SQL is being written, rather than writing it out. */
@@ -33,6 +33,74 @@ class Temporals(
 
     /** Whether the text [text] is of [kind]. */
     fun isKind(text: String, kind: Temporal): String = sql.matches(text, literal(sql.regex(kind.pattern)))
+
+    /**
+     * The text [text] of a temporal value, or the statement failing by name ([SUB_MICRO]) where its fraction of a second goes
+     * past the microsecond, which no store's timestamp keeps: Postgres's holds microseconds, Oracle's is written `FF6`, and
+     * SQLite's is written to six places, so each cut or rounded the rest away (drivine4j#421). A store's timestamp is read only
+     * of a text held so ([local], [utc]); the text itself keeps its nine digits, compared and sorted by its key.
+     */
+    private fun held(text: String, kinds: List<Temporal>): String {
+        val refusing = refuse ?: return text
+        // A text the compiler writes holds six digits at most ([written]), and one written in the statement is read as it compiles.
+        if (text in written || text == "NULL") return text
+        LITERAL.matchEntire(text)?.let { quoted ->
+            return if (SUB_MICRO_REGEX.containsMatchIn(quoted.groupValues[1].replace("''", "'"))) refusing(SUB_MICRO, text) else text
+        }
+        // A store whose own read of the text refuses it reads it once ([TemporalSql.heldMicros]); else it is tested here,
+        // the message naming no text, so where nothing binds it the text is written out twice, not three times.
+        if (kinds.all { it == Temporal.DATE }) return text
+        sql.heldMicros(text, kinds)?.let { return it }
+        return shared(listOf(text)) { (t) -> "CASE WHEN ${sql.matches(t, literal(sql.regex(SUB_MICRO_DIGITS)))} THEN ${refusing(SUB_MICRO, "''")} ELSE $t END" }
+    }
+
+    /**
+     * The texts this compiler writes of a store's timestamp ([format]) or of fields ([of]): six digits of a second at most,
+     * so [held] reads them as they are, and a value worked out of another, as `(n.at + d) + d` is, is tested once, where
+     * it is read, not at each step.
+     */
+    private val written = mutableSetOf<String>()
+
+    /** Each of [names], bound to [values] by the compiler's own sharing, marked [written] where its value is. */
+    fun carry(values: List<String>, names: List<String>) = values.zip(names).forEach { (value, name) -> mark(name, value) }
+
+    /** [sharing], each name a [written] text is bound to written too, so [held] reads it as it reads the text. */
+    private fun shared(texts: List<String>, body: (List<String>) -> String): String = sharing(texts) { names ->
+        names.zip(texts).forEach { (name, text) -> mark(name, text) }
+        body(names)
+    }
+
+    /**
+     * [name] [written] where [value], the value it is bound to, is, and not otherwise: a name is taken again for another value
+     * where the compiler gives back the names a compile only to see took, or a probe's, so one marked for an earlier value
+     * would leave a stored text bound to it untested.
+     */
+    private fun mark(name: String, value: String) {
+        if (value in written) written += name else written -= name
+    }
+
+    private fun written(text: String) = text.also { written += it }
+
+    /**
+     * The duration text [text], or the statement failing by name where its seconds go past the microsecond, as it moves a
+     * moment ([add]): a store's [local] and [utc] take no duration, so it is read through the store's function where it
+     * keeps one ([TemporalSql.heldDurationMicros]), else tested here, a written one as it compiles.
+     */
+    private fun heldDuration(text: String): String {
+        val refusing = refuse ?: return text
+        if (text == "NULL") return text
+        LITERAL.matchEntire(text)?.let { quoted ->
+            return if (SUB_MICRO_REGEX.containsMatchIn(quoted.groupValues[1].replace("''", "'"))) refusing(SUB_MICRO, text) else text
+        }
+        sql.heldDurationMicros(text)?.let { return it }
+        return shared(listOf(text)) { (t) -> "CASE WHEN ${sql.matches(t, literal(sql.regex(SUB_MICRO_DIGITS)))} THEN ${refusing(SUB_MICRO, "''")} ELSE $t END" }
+    }
+
+    /** The store's timestamp of the text [text] of [kind] on its wall clock, of a text [held] to the microsecond. */
+    private fun local(text: String, kind: Temporal) = sql.local(held(text, listOf(kind)), kind)
+
+    /** The store's timestamp of the moment the text [text] of [kind] is, in UTC, of a text [held] to the microsecond. */
+    private fun utc(text: String, kind: Temporal) = sql.utc(held(text, listOf(kind)), kind)
 
     /**
      * [body] of the kind among [kinds] that the text [text] is, as its shape tells, and of the text, written once:
@@ -68,7 +136,9 @@ class Temporals(
             // A tag's text is of its kind: the year's test alone tells it is from 1000 on.
             val tag = tagged?.let { "${it(kind)} AND " }.orEmpty()
             // A tag's canonical text is of its year from 1000 on where it opens with four digits, the first not 0: no pattern is read.
-            val isAd: (String) -> String = if (tagged != null) { t -> "SUBSTR($t, 1, 1) IN ('1', '2', '3', '4', '5', '6', '7', '8', '9') AND SUBSTR($t, 5, 1) = '-'" }
+            // Nor of a nanosecond past the microsecond: a canonical fraction is of three, six or nine digits, so one of nine has a
+            // digit 27th, and is read where the store's era function is, which refuses it (drivine4j#421).
+            val isAd: (String) -> String = if (tagged != null) { t -> "SUBSTR($t, 1, 1) IN ('1', '2', '3', '4', '5', '6', '7', '8', '9') AND SUBSTR($t, 5, 1) = '-' AND COALESCE(SUBSTR($t, 27, 1), 'x') NOT BETWEEN '0' AND '9'" }
                 else { t -> sql.matches(t, literal(sql.regex(ad ?: ""))) }
             if (read && ad != null && (binding() || plain.length <= TemporalSql.GUARDED_UP_TO)) first += "WHEN " + tag + whens(isAd, plain).removePrefix("WHEN ")
             own += if (tagged != null) "WHEN ${tagged(kind)} THEN ${if (read) body(kind) else plain}" else whens({ isKind(it, kind) }, if (read) body(kind) else plain)
@@ -149,7 +219,9 @@ class Temporals(
      * [timestamp] is null, which Oracle would otherwise write out as the text's punctuation alone (`.`, `.Z`), for its
      * null joins a text as the empty text.
      */
-    fun format(timestamp: String, kind: Temporal, offset: String? = null): String = shared(listOf(timestamp)) { (t) -> sql.asAd(timestamp, listOf(t)) {
+    fun format(timestamp: String, kind: Temporal, offset: String? = null): String = written(formatted(timestamp, kind, offset))
+
+    private fun formatted(timestamp: String, kind: Temporal, offset: String? = null): String = shared(listOf(timestamp)) { (t) -> sql.asAd(timestamp, listOf(t)) {
         val time = "${sql.toChar}($t, 'HH24:MI:SS') || ${fraction(t)}"
         val text = when (kind) {
             Temporal.DATE -> sql.date(t)
@@ -188,10 +260,10 @@ class Temporals(
     private fun offset(text: String, from: Temporal, to: Temporal): String? = if (to.zoned) (if (from.zoned) offset(text) else "'Z'") else null
 
     /** The text of [to] the text [text] of [from] is: a moment's date, a date's midnight, a local value's in UTC. */
-    fun convert(text: String, from: Temporal, to: Temporal): String = shared(listOf(text)) { (t) ->
+    fun convert(text: String, from: Temporal, to: Temporal): String = written(shared(listOf(held(text, listOf(from)))) { (t) ->
         // The wall clock kept is of the text's year, so is written as one from 1000 on where the text's is.
         sql.local(t, from).let { clock -> sql.asAd(t, listOf(clock)) { format(clock, to, offset(t, from, to)) } }
-    }
+    })
 
     /** The text of [to] the text [text] is, whatever kind its shape tells: null where it is none. */
     fun convert(text: String, to: Temporal): String = byKind(text) { from, t -> convert(t, from, to) }
@@ -208,8 +280,21 @@ class Temporals(
         val year = fields["year"]
         // A year the statement gives is tested, bound once and the text made of the bound name, so the test writes no second
         // copy (#263). One read off a value the store holds, as a truncation or a date's own reads it, is held already.
-        if (refuse != null && year != null && givenYear) return yearHeld(year) { y -> made(fields + ("year" to y), timezone, kind) }
-        return made(fields, timezone, kind)
+        if (refuse != null && year != null && givenYear) return written(yearHeld(year) { y -> nanosHeld(fields + ("year" to y), timezone, kind) })
+        return written(nanosHeld(fields, timezone, kind))
+    }
+
+    /**
+     * [made], where the fields' nanoseconds are whole microseconds: a value made of a `nanosecond` past them fails by name
+     * ([SUB_MICRO]), as the store's timestamp it is made through keeps microseconds (drivine4j#421).
+     */
+    private fun nanosHeld(fields: Map<String, String>, timezone: String?, kind: Temporal): String {
+        val refusing = refuse
+        val nanos = fields["nanosecond"] ?: return made(fields, timezone, kind)
+        if (refusing == null) return made(fields, timezone, kind)
+        return shared(listOf(nanos)) { (n) ->
+            "CASE WHEN ${sql.mod(n, "1000")} <> 0 THEN ${refusing(SUB_MICRO, "CAST($n AS ${sql.textType})")} ELSE ${made(fields + ("nanosecond" to n), timezone, kind)} END"
+        }
     }
 
     /** [of], its fields as they are. */
@@ -334,7 +419,7 @@ class Temporals(
      */
     fun over(date: Base?, time: Base?, fields: Map<String, String>, timezone: String?, kind: Temporal): String {
         val bases = listOfNotNull(date, time).distinct()
-        return shared(bases.map { it.text }) { texts ->
+        return written(shared(bases.map { held(it.text, it.kinds) }) { texts ->
             fun text(base: Base) = texts[bases.indexOf(base)]
             val clocks = bases.map { clock(text(it), it.kinds) }
             shared(clocks) { bound ->
@@ -365,7 +450,7 @@ class Temporals(
                     "CASE WHEN $given THEN $value ELSE ${of(mapOf("day" to "CASE WHEN $given THEN 1 ELSE 0 END"), null, Temporal.DATE)} END"
                 }
             }
-        }
+        })
     }
 
     /** The wall clock the text [text] reads, of the one of [kinds] it is: null where it is none. */
@@ -411,7 +496,7 @@ class Temporals(
 
     /** The text of [kind], zoned, the same moment as the text [text] of it at the offset's text [timezone]. */
     private fun moved(text: String, kind: Temporal, timezone: String): String = shared(listOf(text, timezone)) { (t, z) ->
-        format(sql.addTime(sql.utc(t, kind), "0", zoneField(z, "offsetSeconds").sql), kind, offset(z))
+        format(sql.addTime(utc(t, kind), "0", zoneField(z, "offsetSeconds").sql), kind, offset(z))
     }
 
     /**
@@ -425,16 +510,16 @@ class Temporals(
         }
         if (kind.zoned && name in setOf("timezone", "offset", "offsetMinutes", "offsetSeconds")) return zoneField(text, name)
         val epoch = sql.epoch
-        if (sql.exactTime && (name == "epochSeconds" || name == "epochMillis")) return Field(exactEpoch(sql.utc(text, kind), name), text = false)
+        if (sql.exactTime && (name == "epochSeconds" || name == "epochMillis")) return Field(exactEpoch(utc(text, kind), name), text = false)
         when (name) {
-            "epochSeconds" -> return Field("${sql.trunc}(${sql.secondsBetween(epoch, sql.utc(text, kind))})", text = false)
-            "epochMillis" -> return Field("${sql.trunc}(${sql.secondsBetween(epoch, sql.utc(text, kind))} * 1000)", text = false)
+            "epochSeconds" -> return Field("${sql.trunc}(${sql.secondsBetween(epoch, utc(text, kind))})", text = false)
+            "epochMillis" -> return Field("${sql.trunc}(${sql.secondsBetween(epoch, utc(text, kind))} * 1000)", text = false)
         }
         if (name !in INSTANT_FIELDS) return null
         textField(text, kind, name)?.let { return Field(it, text = false) }
         if (name == "year") sql.textYear(text, kind)?.let { return Field(it, text = false) }
         // A field read from the timestamp once is read where it is: bound, a stored date's year was a subquery for each row.
-        val local = sql.local(text, kind)
+        val local = local(text, kind)
         return Field(if (name in READ_ONCE) clockField(local, name) else shared(listOf(local)) { (t) -> clockField(t, name) }, text = false)
     }
 
@@ -544,9 +629,12 @@ class Temporals(
     )
 
     /** The text of [kind] the duration text [duration] after the text [text] of it, or with [sign] -1 before: a zoned value keeps its offset. */
-    fun add(text: String, kind: Temporal, duration: String, sign: Int): String = shared(listOf(text, duration)) { (t, d) ->
-        format(moved(sql.local(t, kind), d, sign, if (kind == Temporal.DATE) "1 = 1" else null), kind, offset(t, kind, kind))
-    }
+    fun add(text: String, kind: Temporal, duration: String, sign: Int): String =
+        // A duration's seconds past the microsecond are refused too, the moment moved by them being a store's timestamp; a date
+        // takes the whole days of a duration's time alone, so its fraction is no matter there (drivine4j#421).
+        written(shared(listOf(held(text, listOf(kind)), if (kind == Temporal.DATE) duration else heldDuration(duration))) { (t, d) ->
+            format(moved(sql.local(t, kind), d, sign, if (kind == Temporal.DATE) "1 = 1" else null), kind, offset(t, kind, kind))
+        })
 
     /**
      * [add] for a text of whatever kind its shape tells: read as a wall clock once, whatever its kind, the duration
@@ -600,11 +688,11 @@ class Temporals(
         if (sql.truncate(unit, "NULL") == null) return null
         if (overrides == null || (overrides.fields.isEmpty() && overrides.timezone == null)) {
             // A truncation of a year from 1000 on is of one too, so is written as such.
-            return shared(listOf(text)) { (t) -> sql.truncate(unit, sql.local(t, from))!!.let { cut -> sql.asAd(t, listOf(cut)) { format(cut, to, offset(t, from, to)) } } }
+            return written(shared(listOf(held(text, listOf(from)))) { (t) -> sql.truncate(unit, sql.local(t, from))!!.let { cut -> sql.asAd(t, listOf(cut)) { format(cut, to, offset(t, from, to)) } } })
         }
-        return shared(listOf(text)) { (t) ->
+        return written(shared(listOf(held(text, listOf(from)))) { (t) ->
             shared(listOf(sql.truncate(unit, sql.local(t, from))!!)) { (cut) -> overridden(cut, unit, to, overrides, overrides.timezone ?: offset(t, from, to)) }
-        }
+        })
     }
 
     /**
@@ -630,14 +718,14 @@ class Temporals(
         val made = of(own.mapValues { (name, value) -> given[name] ?: value } + ("microsecond" to fraction), offset, kind, givenYear = "year" in given)
         val day = given["dayOfWeek"] ?: return made
         return shared(listOf(made)) { (m) ->
-            shared(listOf(sql.local(m, kind))) { (clock) ->
+            shared(listOf(local(m, kind))) { (clock) ->
                 format(sql.addTime(clock, "$day - ${sql.dayOfWeek(clock)}", "0"), kind, if (kind.zoned) offset(m) else null)
             }
         }
     }
 
     /** What the text [text] of [kind] sorts by: the moment it is, whatever its offset, as a timestamp. */
-    fun moment(text: String, kind: Temporal): String = sql.utc(text, kind)
+    fun moment(text: String, kind: Temporal): String = utc(text, kind)
 
     /** Whether the text [a] stands to the text [b], both of [kind], as [operator] says: null where either is no such text. */
     fun compare(a: String, b: String, kind: Temporal, operator: String): String = shared(listOf(a, b)) { (x, y) ->
@@ -650,10 +738,10 @@ class Temporals(
             }
         } else if (kind.zoned && (operator == "=" || operator == "<>")) {
             // Two zoned values are equal where they are the same moment at the same offset, as Neo4j has them.
-            val equal = "(${sql.utc(x, kind)} = ${sql.utc(y, kind)} AND ${offset(x)} = ${offset(y)})"
+            val equal = "(${utc(x, kind)} = ${utc(y, kind)} AND ${offset(x)} = ${offset(y)})"
             if (operator == "=") equal else "NOT $equal"
         } else {
-            "${sql.utc(x, kind)} $operator ${sql.utc(y, kind)}"
+            "${utc(x, kind)} $operator ${utc(y, kind)}"
         }
         ofKinds(listOf(x, y), listOf(kind)) { test() }
     }
@@ -820,7 +908,7 @@ class Temporals(
         val times = kind in TIMES || toKind in TIMES
         val (a, aKind) = if (times && kind !in TIMES) convert(from, kind, toKind) to toKind else from to kind
         val (b, bKind) = if (times && toKind !in TIMES) convert(to, toKind, kind) to kind else to to toKind
-        fun read(text: String, of: Temporal) = if (zoned) sql.utc(text, of) else sql.local(text, of)
+        fun read(text: String, of: Temporal) = if (zoned) utc(text, of) else local(text, of)
         return between(read(a, aKind), read(b, bKind), times, unit)
     }
 
@@ -889,6 +977,20 @@ class Temporals(
     private fun literal(text: String) = "'${text.replace("'", "''")}'"
 
     companion object {
+        /** Why a temporal value whose fraction of a second goes past the microsecond fails: see `held`. */
+        const val SUB_MICRO = "A fraction of a second past the microsecond isn't kept by the store's time, so isn't worked out yet (drivine4j#421, drivine-cypher-spec#246):"
+
+        /**
+         * A fraction of a second with a seventh, eighth or ninth digit that isn't 0: a nanosecond past the microsecond. A digit
+         * past the ninth is none, as a temporal value holds nanoseconds and Neo4j drops it.
+         */
+        const val SUB_MICRO_DIGITS = "[.][0-9]{6}[0-9]{0,2}[1-9]"
+
+        private val SUB_MICRO_REGEX = Regex(SUB_MICRO_DIGITS)
+
+        /** A SQL text literal, its text in the group, each `'` written twice. */
+        private val LITERAL = Regex("""'((?:[^']|'')*)'""")
+
         /**
          * What a statement that works out a date or a moment whose year the store can't hold fails with, the year or the moment
          * after it: past 9999, or before the store's first, -4712 on Postgres, -4711 on Oracle and -9999 on SQLite (README.md,
