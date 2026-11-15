@@ -55,8 +55,8 @@ class Temporals(
     }
 
     /**
-     * The texts this compiler writes of a store's timestamp ([format]) or of fields ([of]): six digits of a second at most,
-     * so [held] reads them as they are, and a value worked out of another, as `(n.at + d) + d` is, is tested once, where
+     * The texts this compiler writes of a store's timestamp ([format]) or of fields ([of], [over]) but a `nanosecond`'s: six
+     * digits of a second at most, so [held] reads them as they are, and a value worked out of another, as `(n.at + d) + d` is, is tested once, where
      * it is read, not at each step.
      */
     private val written = mutableSetOf<String>()
@@ -83,8 +83,8 @@ class Temporals(
 
     /**
      * The text [text] cut to the microsecond, its fraction's seventh to ninth digits left out: what a truncation reads in
-     * place of [held], as every unit it cuts to is a microsecond or coarser, so those digits change nothing it gives
-     * (drivine-cypher-spec#302). A text the compiler writes holds six digits at most ([written]), and one written in the
+     * place of [held], as every unit it cuts to is a microsecond or coarser, so those digits change nothing it gives, as a
+     * conversion ([convert]) and a base that gives only a date ([over]) read it (drivine-cypher-spec#302). A text the compiler writes holds six digits at most ([written]), and one written in the
      * statement is cut as it compiles.
      */
     private fun toMicros(text: String): String {
@@ -336,7 +336,9 @@ class Temporals(
                 val nine = "${sql.toChar}($micros, 'FM000000') || ${sql.toChar}(${sql.mod(n, "1000")}, 'FM000')"
                 // The fraction after the seconds, the text's first `:mm:ss`, written again of nine digits.
                 val kept = sql.replace(t, literal(sql.regex("^([^:]*:[0-9]{2}:[0-9]{2})([.][0-9]+)?")), "('\\1.' || $nine)")
-                "CASE WHEN ${sql.mod(n, "1000")} = 0 THEN $t ELSE $kept END"
+                // A nanosecond out of its range would write no fraction a temporal text has, so fails as it did (drivine4j#421).
+                val range = refuse?.let { refusing -> " WHEN $n < 0 OR $n > 999999999 THEN ${refusing(SUB_MICRO, "CAST($n AS ${sql.textType})")}" } ?: ""
+                "CASE WHEN ${sql.mod(n, "1000")} = 0 THEN $t$range ELSE $kept END"
             }
         }
     }
@@ -466,7 +468,9 @@ class Temporals(
         // A base that gives only the date, or one of a value that is a date, gives nothing of a fraction of a second: it is read
         // cut to the microsecond, not refused. One that gives the time is held, as its fraction is the value's (#302).
         fun read(base: Base) = if (kind == Temporal.DATE || base != time) toMicros(base.text) else held(base.text, base.kinds)
-        return written(shared(bases.map(::read)) { texts ->
+        // A `nanosecond` laid over may go past the microsecond, so the value is not [written], as [of]'s is not.
+        val mark: (String) -> String = if ("nanosecond" in fields && kind != Temporal.DATE) { text -> text } else ::written
+        return mark(shared(bases.map(::read)) { texts ->
             fun text(base: Base) = texts[bases.indexOf(base)]
             val clocks = bases.map { clock(text(it), it.kinds) }
             shared(clocks) { bound ->

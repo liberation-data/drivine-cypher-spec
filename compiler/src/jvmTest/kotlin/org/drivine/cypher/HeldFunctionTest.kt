@@ -103,9 +103,10 @@ class HeldFunctionTest {
         val date = postgres("RETURN date('2024-01-01') + duration('PT0.000000001S')")
         assertFalse("g_held(CAST('PT0.000000001S' AS text))" in date, date)
         // A value made of a nanosecond field keeps its nine digits, written into its text, and is read through the store's
-        // function only where it is worked out (drivine-cypher-spec#302).
+        // function only where it is worked out (drivine-cypher-spec#302); the refusal it writes is of a nanosecond out of range.
         val made = postgres("RETURN localtime({hour: 12, minute: 0, second: 0, nanosecond: \$n})")
-        assertFalse(Temporals.SUB_MICRO.replace("'", "''") in made || "g_held(" in made, made)
+        assertFalse("g_held(" in made, made)
+        assertTrue("< 0 OR " in made && " > 999999999 THEN " in made, made)
         val madeMoved = postgres("RETURN localtime({hour: 12, minute: 0, second: 0, nanosecond: \$n}) + duration('PT1S')")
         assertTrue("g_held(" in madeMoved, madeMoved)
     }
