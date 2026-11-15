@@ -30,6 +30,8 @@ import java.time.format.DateTimeFormatter
  * - `fragments.json`: the spec's `fragments.yaml`, the fragments a library writes itself, as JSON likewise. See `FragmentsTest`.
  * - `nesting.json`: the spec's `nesting.yaml`, a dropped variable's nestings and Neo4j's verdict on each, as JSON likewise. See
  *   `NestingTableTest`.
+ * - `rebinding.json`: the spec's `rebinding.yaml`, a variable from outside a subquery bound again within it, and Neo4j's
+ *   verdict on each, as JSON likewise. See `RebindingTableTest`.
  * - `typed-values-golden.json`: the module's golden of the store layout's typed values compiled (`src/commonTest/resources`),
  *   for each target's `TypedValuesGoldenTest`.
  * - `host.json`: the spec's `host.yaml`, as JSON likewise: the host functions' cases, its sort keys and its reads of the store
@@ -73,6 +75,8 @@ object Oracle {
         File(out, "fragments.json").writeText(json.writeValueAsString(yaml.readTree(File(spec, "fragments.yaml"))))
         // A dropped variable's nestings, for each target's NestingTableTest.
         File(out, "nesting.json").writeText(json.writeValueAsString(yaml.readTree(File(spec, "nesting.yaml"))))
+        // A variable from outside a subquery bound again within it, for each target's RebindingTableTest.
+        File(out, "rebinding.json").writeText(json.writeValueAsString(yaml.readTree(File(spec, "rebinding.yaml"))))
         // The schema plan's cases, for each target's StorePlanTest.
         File(out, "plans.json").writeText(json.writeValueAsString(yaml.readTree(File(spec, "plans.yaml"))))
         // The host's functions and readers, for each target's HostSpecTest and ValueLayoutTest.
