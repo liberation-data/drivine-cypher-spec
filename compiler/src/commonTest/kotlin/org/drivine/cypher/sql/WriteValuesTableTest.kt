@@ -95,7 +95,7 @@ class WriteValuesTableTest {
         /** What is not compiled yet: a variable the clause makes, read within (checked first), and any read of the graph where Neo4j reads it at another moment. */
         val NOT_YET = setOf(
             "A variable a CREATE or a MERGE makes, read inside a pattern or a comprehension in its own properties, is Cypher, and is not compiled to SQL yet.",
-            "A pattern or a subquery in the properties of a CREATE, or of a MERGE's relationship, is Cypher, and is not compiled to SQL yet. Work it out in a WITH before the clause.",
+            "A pattern or a subquery in the properties a CREATE or a MERGE makes is Cypher, and is not compiled to SQL yet. Work it out in a WITH before the clause.",
         )
     }
 }

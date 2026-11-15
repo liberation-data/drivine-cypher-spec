@@ -51,7 +51,7 @@ internal object VariableKinds {
      * `WITH`'s `WHERE` names a variable the `WITH` drops (see [Scope]); where a `WITH` or a `RETURN` names two items alike;
      * where a pattern is used as a value, not as a condition (see [valued]); and where a pattern or a subquery is in a
      * property a `CREATE` or a `MERGE` makes, or a value a `MERGE` sets, where Neo4j refuses it (see [made] and [merged]), and
-     * as not compiled yet where one is in a `CREATE`'s properties or a `MERGE`'s relationship's (see [timed]).
+     * as not compiled yet where one is in the properties a `CREATE` or a `MERGE` makes (see [timed]).
      */
     fun check(query: Query) {
         query(query, Scope())
@@ -96,7 +96,7 @@ internal object VariableKinds {
                     merged(clause, current)
                     made(clause.pattern, current, current.copy(), madeBy(listOf(clause.pattern), current), mutableSetOf(), merging = true, foreach)
                     (clause.onCreate + clause.onMatch).forEach { set(it, current) }
-                    clause.pattern.relationships.mapNotNull { it.properties }.forEach(::timed)
+                    (clause.pattern.nodes.mapNotNull { it.properties } + clause.pattern.relationships.mapNotNull { it.properties }).forEach(::timed)
                 }
                 is Clause.Set -> clause.items.forEach { set(it, current) }
                 is Clause.Remove -> {}
@@ -334,20 +334,19 @@ internal object VariableKinds {
     }
 
     /**
-     * Refuses [properties], a `CREATE`'s or a `MERGE`'s relationship's, as not compiled yet where it holds, at any depth, a
-     * pattern, a pattern comprehension, `EXISTS { … }` or `COUNT { … }` (drivine4j#814). Neo4j reads such a read of the graph
-     * at another moment than a SQL store, which writes a row and a pattern at a time and reads each before it writes it: a
-     * `CREATE`'s before it writes any of its rows, so `UNWIND [1, 2] AS i CREATE (m:M {c: COUNT { (:M) }})` stores 0 and 0,
-     * not 0 and 1, and what an earlier pattern of it makes not at all, within a `FOREACH` too, where a SQL store reads what
-     * an earlier node of the same pattern makes; and a `MERGE`'s relationship's after it makes the relationship, so
-     * `MERGE (n)-[r:R {f: NOT (n)-->()}]->(m)` stores false. A `MERGE`'s nodes' are left compiled, as a SQL store reads them
-     * as Neo4j does, a row at a time before it makes them. Read after what Neo4j refuses of the clause.
+     * Refuses [properties], those of any node or relationship a `CREATE` or a `MERGE` makes, within a `FOREACH` too, as not
+     * compiled yet where it holds, at any depth, a pattern, a pattern comprehension, `EXISTS { … }` or `COUNT { … }`
+     * (drivine4j#814). No position is kept: Neo4j reads such a read of the graph at another moment than a SQL store, which
+     * reads each row's before it writes it. Neo4j reads a `CREATE`'s before it writes any of its rows, so `UNWIND [1, 2] AS i
+     * CREATE (m:M {c: COUNT { (:M) }})` stores 0 and 0, not 0 and 1; and a `MERGE`'s after it makes the element, so
+     * `MERGE (n)-[r:R {f: NOT (n)-->()}]->(m)` stores false, and `UNWIND [1, 2, 3] AS i MERGE (m:M {f: size([(x:M)-[*0..1]->()
+     * | x])})` makes one node, counting itself, where a SQL store makes three. Read after what Neo4j refuses of the clause.
      */
     private fun timed(properties: Expression) {
         val reads = mutableListOf<Expression>()
         mentionsIn(properties, reads)
         if (reads.isNotEmpty()) {
-            throw CompilerException("A pattern or a subquery in the properties of a CREATE, or of a MERGE's relationship, is Cypher, and is not compiled to SQL yet. Work it out in a WITH before the clause.")
+            throw CompilerException("A pattern or a subquery in the properties a CREATE or a MERGE makes is Cypher, and is not compiled to SQL yet. Work it out in a WITH before the clause.")
         }
     }
 

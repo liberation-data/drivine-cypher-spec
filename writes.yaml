@@ -451,35 +451,31 @@ cases:
       - cypher: "MATCH (n:CyWrite) RETURN [n.id, n.f] ORDER BY n.id"
         rows: [["a", false], ["b", false], ["c", true], ["d", true]]
 
-  - name: "When a write reads its own properties"
-    description: "A read of the graph in a MERGE's nodes' properties, which the SQL stores read as Neo4j 2026.10.1 does, a row at a time, before the MERGE makes the node, and after it makes the nodes before it in the pattern, so compile (liberation-data/drivine4j#814). A CREATE's, in a FOREACH too, and a MERGE's relationship's, are refused (see refusals.yaml, \"When a write reads its own properties\"). Each from the graph alone; where what a row reads depends on the rows before it, its values are given in order, as the order of MATCH's rows is not fixed."
+  - name: "Work a read out in a WITH before the write"
+    description: "A read of the graph that a CREATE or a MERGE would make a property of, worked out in a WITH before it, as the refusal of one in its properties says (liberation-data/drivine4j#814): the WITH reads the graph over its rows before the write makes any, as Neo4j 2026.10.1 does, so the SQL stores give its rows. Each from the graph alone."
     steps:
       - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
-      - note: "a MERGE's node, read a row at a time before it makes it, what the rows before made."
-        cypher: "MATCH (n:CyWrite) MERGE (a:CyNew {name: 'x'})-[:CyR]->(m:CyMade {f: NOT ()-[:CyR]->()}) RETURN m.f ORDER BY m.f"
-        rows: [false, false, false, true]
+      - cypher: "UNWIND [1, 2, 3] AS i WITH i, COUNT { (:CyMade) } AS c CREATE (m:CyMade {c: c}) RETURN m.c ORDER BY m.c"
+        rows: [0, 0, 0]
       - cypher: "MATCH (x) DETACH DELETE x"
       - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
-      - note: "an endpoint's, reading the node before it in the pattern, which it has made."
-        cypher: "MATCH (n:CyWrite) MERGE (a:CyNew {id: n.id})-[:CyR]->(m:CyMade {f: size([(x:CyNew)-[:NEXT*0..1]->(y) | x])}) RETURN m.f ORDER BY m.f"
-        rows: [1, 2, 3, 4]
+      - cypher: "MATCH (n:CyWrite) WITH n, COUNT { ()-[:CyR]->() } AS c CREATE (n)-[r:CyR {c: c}]->(:CyMade) RETURN [n.id, r.c] ORDER BY n.id"
+        rows: [["a", 0], ["b", 0], ["c", 0], ["d", 0]]
       - cypher: "MATCH (x) DETACH DELETE x"
       - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
-      - cypher: "MATCH (n:CyWrite) MERGE (a:CyNew {id: n.id})-[:CyR]->(m:CyMade {f: NOT (:CyNew {id: n.id})-[:NEXT*0..1]->()}) RETURN [n.id, m.f] ORDER BY n.id"
-        rows: [["a", false], ["b", false], ["c", false], ["d", false]]
+      - cypher: "MATCH (n:CyWrite) WITH n, NOT (n)-->() AS f MERGE (n)-[r:CyR {f: f}]->(m) RETURN [n.id, r.f] ORDER BY n.id"
+        rows: [["a", false], ["b", false], ["c", true], ["d", true]]
       - cypher: "MATCH (x) DETACH DELETE x"
       - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
-      - note: "likewise within a FOREACH."
-        cypher: "MATCH (n:CyWrite) FOREACH (i IN [1] | MERGE (a:CyNew {id: n.id})-[:CyR]->(m:CyMade {f: size([(x:CyNew)-[:NEXT*0..1]->(y) | x])})) WITH count(*) AS c MATCH (m:CyMade) RETURN m.f ORDER BY m.f"
-        rows: [1, 2, 3, 4]
+      - cypher: "MATCH (n:CyWrite {id: 'a'}) WITH n, EXISTS { (:CyNew) } AS f CREATE (a:CyNew {name: 'x'}), (m:CyMade {f: f}) RETURN m.f"
+        rows: [false]
       - cypher: "MATCH (x) DETACH DELETE x"
       - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
-      - note: "the first node's, reading the label of the one after it, made by the rows before."
-        cypher: "MATCH (n:CyWrite) MERGE (a:CyNew {id: n.id, f: size([(x:CyMade)-[:NEXT*0..1]->(y) | x])})-[:CyR]->(m:CyMade) RETURN a.f ORDER BY a.f"
-        rows: [0, 1, 2, 3]
+      - cypher: "MATCH (n:CyWrite) FOREACH (i IN [1] | CREATE (m:CyMade {c: i})) WITH count(*) AS k UNWIND [1, 2] AS j WITH j, COUNT { (:CyMade) } AS c CREATE (:CyMade {c: c}) RETURN c ORDER BY c"
+        rows: [4, 4]
 
   - name: "Values a write makes: CREATE, a node made alone"
-    description: "Each cell of writevalues.yaml in this position that Neo4j 2026.10.1 stores and the SQL stores compile, with its rows, each from the graph alone (liberation-data/drivine4j#814, #817): the cells refused are in refusals.yaml, \"Values a write makes, by position and form\", \"Variable a write makes, read inside a pattern or a comprehension in its properties\" and \"Pattern or subquery in the properties of a CREATE, or of a MERGE's relationship\"."
+    description: "Each cell of writevalues.yaml in this position that Neo4j 2026.10.1 stores and the SQL stores compile, with its rows, each from the graph alone (liberation-data/drivine4j#814, #817): the cells refused are in refusals.yaml, \"Values a write makes, by position and form\", \"Variable a write makes, read inside a pattern or a comprehension in its properties\" and \"Pattern or subquery in the properties of a CREATE or a MERGE\"."
     steps:
       - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
       - note: "a variable bound before, plainly."
@@ -487,7 +483,7 @@ cases:
         rows: [["a", "a"], ["b", "b"], ["c", "c"], ["d", "d"]]
 
   - name: "Values a write makes: CREATE, a relationship's endpoint"
-    description: "Each cell of writevalues.yaml in this position that Neo4j 2026.10.1 stores and the SQL stores compile, with its rows, each from the graph alone (liberation-data/drivine4j#814, #817): the cells refused are in refusals.yaml, \"Values a write makes, by position and form\", \"Variable a write makes, read inside a pattern or a comprehension in its properties\" and \"Pattern or subquery in the properties of a CREATE, or of a MERGE's relationship\"."
+    description: "Each cell of writevalues.yaml in this position that Neo4j 2026.10.1 stores and the SQL stores compile, with its rows, each from the graph alone (liberation-data/drivine4j#814, #817): the cells refused are in refusals.yaml, \"Values a write makes, by position and form\", \"Variable a write makes, read inside a pattern or a comprehension in its properties\" and \"Pattern or subquery in the properties of a CREATE or a MERGE\"."
     steps:
       - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
       - note: "a variable bound before, plainly."
@@ -495,7 +491,7 @@ cases:
         rows: [["a", "a"], ["b", "b"], ["c", "c"], ["d", "d"]]
 
   - name: "Values a write makes: CREATE, a relationship"
-    description: "Each cell of writevalues.yaml in this position that Neo4j 2026.10.1 stores and the SQL stores compile, with its rows, each from the graph alone (liberation-data/drivine4j#814, #817): the cells refused are in refusals.yaml, \"Values a write makes, by position and form\", \"Variable a write makes, read inside a pattern or a comprehension in its properties\" and \"Pattern or subquery in the properties of a CREATE, or of a MERGE's relationship\"."
+    description: "Each cell of writevalues.yaml in this position that Neo4j 2026.10.1 stores and the SQL stores compile, with its rows, each from the graph alone (liberation-data/drivine4j#814, #817): the cells refused are in refusals.yaml, \"Values a write makes, by position and form\", \"Variable a write makes, read inside a pattern or a comprehension in its properties\" and \"Pattern or subquery in the properties of a CREATE or a MERGE\"."
     steps:
       - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
       - note: "a variable bound before, plainly."
@@ -503,7 +499,7 @@ cases:
         rows: [["a", "a"], ["b", "b"], ["c", "c"], ["d", "d"]]
 
   - name: "Values a write makes: FOREACH CREATE, a node made alone"
-    description: "Each cell of writevalues.yaml in this position that Neo4j 2026.10.1 stores and the SQL stores compile, with its rows, each from the graph alone (liberation-data/drivine4j#814, #817): the cells refused are in refusals.yaml, \"Values a write makes, by position and form\", \"Variable a write makes, read inside a pattern or a comprehension in its properties\" and \"Pattern or subquery in the properties of a CREATE, or of a MERGE's relationship\"."
+    description: "Each cell of writevalues.yaml in this position that Neo4j 2026.10.1 stores and the SQL stores compile, with its rows, each from the graph alone (liberation-data/drivine4j#814, #817): the cells refused are in refusals.yaml, \"Values a write makes, by position and form\", \"Variable a write makes, read inside a pattern or a comprehension in its properties\" and \"Pattern or subquery in the properties of a CREATE or a MERGE\"."
     steps:
       - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
       - note: "a variable bound before, plainly."
@@ -511,7 +507,7 @@ cases:
         rows: ["a", "b", "c", "d"]
 
   - name: "Values a write makes: FOREACH CREATE, a relationship's endpoint"
-    description: "Each cell of writevalues.yaml in this position that Neo4j 2026.10.1 stores and the SQL stores compile, with its rows, each from the graph alone (liberation-data/drivine4j#814, #817): the cells refused are in refusals.yaml, \"Values a write makes, by position and form\", \"Variable a write makes, read inside a pattern or a comprehension in its properties\" and \"Pattern or subquery in the properties of a CREATE, or of a MERGE's relationship\"."
+    description: "Each cell of writevalues.yaml in this position that Neo4j 2026.10.1 stores and the SQL stores compile, with its rows, each from the graph alone (liberation-data/drivine4j#814, #817): the cells refused are in refusals.yaml, \"Values a write makes, by position and form\", \"Variable a write makes, read inside a pattern or a comprehension in its properties\" and \"Pattern or subquery in the properties of a CREATE or a MERGE\"."
     steps:
       - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
       - note: "a variable bound before, plainly."
@@ -519,7 +515,7 @@ cases:
         rows: ["a", "b", "c", "d"]
 
   - name: "Values a write makes: FOREACH CREATE, a relationship"
-    description: "Each cell of writevalues.yaml in this position that Neo4j 2026.10.1 stores and the SQL stores compile, with its rows, each from the graph alone (liberation-data/drivine4j#814, #817): the cells refused are in refusals.yaml, \"Values a write makes, by position and form\", \"Variable a write makes, read inside a pattern or a comprehension in its properties\" and \"Pattern or subquery in the properties of a CREATE, or of a MERGE's relationship\"."
+    description: "Each cell of writevalues.yaml in this position that Neo4j 2026.10.1 stores and the SQL stores compile, with its rows, each from the graph alone (liberation-data/drivine4j#814, #817): the cells refused are in refusals.yaml, \"Values a write makes, by position and form\", \"Variable a write makes, read inside a pattern or a comprehension in its properties\" and \"Pattern or subquery in the properties of a CREATE or a MERGE\"."
     steps:
       - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
       - note: "a variable bound before, plainly."
@@ -527,43 +523,23 @@ cases:
         rows: ["a", "b", "c", "d"]
 
   - name: "Values a write makes: MERGE, a node made alone"
-    description: "Each cell of writevalues.yaml in this position that Neo4j 2026.10.1 stores and the SQL stores compile, with its rows, each from the graph alone (liberation-data/drivine4j#814, #817): the cells refused are in refusals.yaml, \"Values a write makes, by position and form\", \"Variable a write makes, read inside a pattern or a comprehension in its properties\" and \"Pattern or subquery in the properties of a CREATE, or of a MERGE's relationship\"."
+    description: "Each cell of writevalues.yaml in this position that Neo4j 2026.10.1 stores and the SQL stores compile, with its rows, each from the graph alone (liberation-data/drivine4j#814, #817): the cells refused are in refusals.yaml, \"Values a write makes, by position and form\", \"Variable a write makes, read inside a pattern or a comprehension in its properties\" and \"Pattern or subquery in the properties of a CREATE or a MERGE\"."
     steps:
-      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
-      - note: "a pattern of new variables only."
-        cypher: "MATCH (n:CyWrite) MERGE (m:CyMade {f: NOT ()-[:NEXT]->()}) RETURN [n.id, m.f] ORDER BY n.id"
-        rows: [["a", false], ["b", false], ["c", false], ["d", false]]
-      - cypher: "MATCH (x) DETACH DELETE x"
       - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
       - note: "a variable bound before, plainly."
         cypher: "MATCH (n:CyWrite) MERGE (m:CyMade {f: n.id}) RETURN [n.id, m.f] ORDER BY n.id"
         rows: [["a", "a"], ["b", "b"], ["c", "c"], ["d", "d"]]
 
   - name: "Values a write makes: MERGE, a relationship's endpoint"
-    description: "Each cell of writevalues.yaml in this position that Neo4j 2026.10.1 stores and the SQL stores compile, with its rows, each from the graph alone (liberation-data/drivine4j#814, #817): the cells refused are in refusals.yaml, \"Values a write makes, by position and form\", \"Variable a write makes, read inside a pattern or a comprehension in its properties\" and \"Pattern or subquery in the properties of a CREATE, or of a MERGE's relationship\"."
+    description: "Each cell of writevalues.yaml in this position that Neo4j 2026.10.1 stores and the SQL stores compile, with its rows, each from the graph alone (liberation-data/drivine4j#814, #817): the cells refused are in refusals.yaml, \"Values a write makes, by position and form\", \"Variable a write makes, read inside a pattern or a comprehension in its properties\" and \"Pattern or subquery in the properties of a CREATE or a MERGE\"."
     steps:
-      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
-      - note: "a pattern naming a variable bound before."
-        cypher: "MATCH (n:CyWrite) MERGE (a:CyNew {name: 'x'})-[:CyR]->(m:CyMade {f: NOT (n)-[:NEXT]->()}) RETURN [n.id, m.f] ORDER BY n.id"
-        rows: [["a", false], ["b", false], ["c", true], ["d", true]]
-      - cypher: "MATCH (x) DETACH DELETE x"
-      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
-      - note: "a pattern of new variables only."
-        cypher: "MATCH (n:CyWrite) MERGE (a:CyNew {name: 'x'})-[:CyR]->(m:CyMade {f: NOT ()-[:NEXT]->()}) RETURN [n.id, m.f] ORDER BY n.id"
-        rows: [["a", false], ["b", false], ["c", false], ["d", false]]
-      - cypher: "MATCH (x) DETACH DELETE x"
-      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
-      - note: "a pattern comprehension naming a variable bound before."
-        cypher: "MATCH (n:CyWrite) MERGE (a:CyNew {name: 'x'})-[:CyR]->(m:CyMade {f: size([(n)-[:NEXT]->(x) | x])}) RETURN [n.id, m.f] ORDER BY n.id"
-        rows: [["a", 2], ["b", 1], ["c", 0], ["d", 0]]
-      - cypher: "MATCH (x) DETACH DELETE x"
       - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
       - note: "a variable bound before, plainly."
         cypher: "MATCH (n:CyWrite) MERGE (a:CyNew {name: 'x'})-[:CyR]->(m:CyMade {f: n.id}) RETURN [n.id, m.f] ORDER BY n.id"
         rows: [["a", "a"], ["b", "b"], ["c", "c"], ["d", "d"]]
 
   - name: "Values a write makes: MERGE, a relationship"
-    description: "Each cell of writevalues.yaml in this position that Neo4j 2026.10.1 stores and the SQL stores compile, with its rows, each from the graph alone (liberation-data/drivine4j#814, #817): the cells refused are in refusals.yaml, \"Values a write makes, by position and form\", \"Variable a write makes, read inside a pattern or a comprehension in its properties\" and \"Pattern or subquery in the properties of a CREATE, or of a MERGE's relationship\"."
+    description: "Each cell of writevalues.yaml in this position that Neo4j 2026.10.1 stores and the SQL stores compile, with its rows, each from the graph alone (liberation-data/drivine4j#814, #817): the cells refused are in refusals.yaml, \"Values a write makes, by position and form\", \"Variable a write makes, read inside a pattern or a comprehension in its properties\" and \"Pattern or subquery in the properties of a CREATE or a MERGE\"."
     steps:
       - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
       - note: "a variable bound before, plainly."
@@ -571,53 +547,23 @@ cases:
         rows: [["a", "a"], ["b", "b"], ["c", "c"], ["d", "d"]]
 
   - name: "Values a write makes: FOREACH MERGE, a node made alone"
-    description: "Each cell of writevalues.yaml in this position that Neo4j 2026.10.1 stores and the SQL stores compile, with its rows, each from the graph alone (liberation-data/drivine4j#814, #817): the cells refused are in refusals.yaml, \"Values a write makes, by position and form\", \"Variable a write makes, read inside a pattern or a comprehension in its properties\" and \"Pattern or subquery in the properties of a CREATE, or of a MERGE's relationship\"."
+    description: "Each cell of writevalues.yaml in this position that Neo4j 2026.10.1 stores and the SQL stores compile, with its rows, each from the graph alone (liberation-data/drivine4j#814, #817): the cells refused are in refusals.yaml, \"Values a write makes, by position and form\", \"Variable a write makes, read inside a pattern or a comprehension in its properties\" and \"Pattern or subquery in the properties of a CREATE or a MERGE\"."
     steps:
-      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
-      - note: "a pattern naming a variable bound before."
-        cypher: "MATCH (n:CyWrite) FOREACH (i IN [1] | MERGE (m:CyMade {f: NOT (n)-[:NEXT]->()})) WITH count(*) AS c MATCH (m:CyMade) RETURN m.f ORDER BY m.f"
-        rows: [false, true]
-      - cypher: "MATCH (x) DETACH DELETE x"
-      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
-      - note: "a pattern of new variables only."
-        cypher: "MATCH (n:CyWrite) FOREACH (i IN [1] | MERGE (m:CyMade {f: NOT ()-[:NEXT]->()})) WITH count(*) AS c MATCH (m:CyMade) RETURN m.f ORDER BY m.f"
-        rows: [false]
-      - cypher: "MATCH (x) DETACH DELETE x"
-      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
-      - note: "a pattern comprehension naming a variable bound before."
-        cypher: "MATCH (n:CyWrite) FOREACH (i IN [1] | MERGE (m:CyMade {f: size([(n)-[:NEXT]->(x) | x])})) WITH count(*) AS c MATCH (m:CyMade) RETURN m.f ORDER BY m.f"
-        rows: [0, 1, 2]
-      - cypher: "MATCH (x) DETACH DELETE x"
       - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
       - note: "a variable bound before, plainly."
         cypher: "MATCH (n:CyWrite) FOREACH (i IN [1] | MERGE (m:CyMade {f: n.id})) WITH count(*) AS c MATCH (m:CyMade) RETURN m.f ORDER BY m.f"
         rows: ["a", "b", "c", "d"]
 
   - name: "Values a write makes: FOREACH MERGE, a relationship's endpoint"
-    description: "Each cell of writevalues.yaml in this position that Neo4j 2026.10.1 stores and the SQL stores compile, with its rows, each from the graph alone (liberation-data/drivine4j#814, #817): the cells refused are in refusals.yaml, \"Values a write makes, by position and form\", \"Variable a write makes, read inside a pattern or a comprehension in its properties\" and \"Pattern or subquery in the properties of a CREATE, or of a MERGE's relationship\"."
+    description: "Each cell of writevalues.yaml in this position that Neo4j 2026.10.1 stores and the SQL stores compile, with its rows, each from the graph alone (liberation-data/drivine4j#814, #817): the cells refused are in refusals.yaml, \"Values a write makes, by position and form\", \"Variable a write makes, read inside a pattern or a comprehension in its properties\" and \"Pattern or subquery in the properties of a CREATE or a MERGE\"."
     steps:
-      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
-      - note: "a pattern naming a variable bound before."
-        cypher: "MATCH (n:CyWrite) FOREACH (i IN [1] | MERGE (a:CyNew {name: 'x'})-[:CyR]->(m:CyMade {f: NOT (n)-[:NEXT]->()})) WITH count(*) AS c MATCH (m:CyMade) RETURN m.f ORDER BY m.f"
-        rows: [false, true]
-      - cypher: "MATCH (x) DETACH DELETE x"
-      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
-      - note: "a pattern of new variables only."
-        cypher: "MATCH (n:CyWrite) FOREACH (i IN [1] | MERGE (a:CyNew {name: 'x'})-[:CyR]->(m:CyMade {f: NOT ()-[:NEXT]->()})) WITH count(*) AS c MATCH (m:CyMade) RETURN m.f ORDER BY m.f"
-        rows: [false]
-      - cypher: "MATCH (x) DETACH DELETE x"
-      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
-      - note: "a pattern comprehension naming a variable bound before."
-        cypher: "MATCH (n:CyWrite) FOREACH (i IN [1] | MERGE (a:CyNew {name: 'x'})-[:CyR]->(m:CyMade {f: size([(n)-[:NEXT]->(x) | x])})) WITH count(*) AS c MATCH (m:CyMade) RETURN m.f ORDER BY m.f"
-        rows: [0, 1, 2]
-      - cypher: "MATCH (x) DETACH DELETE x"
       - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
       - note: "a variable bound before, plainly."
         cypher: "MATCH (n:CyWrite) FOREACH (i IN [1] | MERGE (a:CyNew {name: 'x'})-[:CyR]->(m:CyMade {f: n.id})) WITH count(*) AS c MATCH (m:CyMade) RETURN m.f ORDER BY m.f"
         rows: ["a", "b", "c", "d"]
 
   - name: "Values a write makes: FOREACH MERGE, a relationship"
-    description: "Each cell of writevalues.yaml in this position that Neo4j 2026.10.1 stores and the SQL stores compile, with its rows, each from the graph alone (liberation-data/drivine4j#814, #817): the cells refused are in refusals.yaml, \"Values a write makes, by position and form\", \"Variable a write makes, read inside a pattern or a comprehension in its properties\" and \"Pattern or subquery in the properties of a CREATE, or of a MERGE's relationship\"."
+    description: "Each cell of writevalues.yaml in this position that Neo4j 2026.10.1 stores and the SQL stores compile, with its rows, each from the graph alone (liberation-data/drivine4j#814, #817): the cells refused are in refusals.yaml, \"Values a write makes, by position and form\", \"Variable a write makes, read inside a pattern or a comprehension in its properties\" and \"Pattern or subquery in the properties of a CREATE or a MERGE\"."
     steps:
       - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
       - note: "a variable bound before, plainly."
@@ -625,7 +571,7 @@ cases:
         rows: ["a", "b", "c", "d"]
 
   - name: "Values a write makes: MERGE, ON CREATE SET"
-    description: "Each cell of writevalues.yaml in this position that Neo4j 2026.10.1 stores and the SQL stores compile, with its rows, each from the graph alone (liberation-data/drivine4j#814, #817): the cells refused are in refusals.yaml, \"Values a write makes, by position and form\", \"Variable a write makes, read inside a pattern or a comprehension in its properties\" and \"Pattern or subquery in the properties of a CREATE, or of a MERGE's relationship\"."
+    description: "Each cell of writevalues.yaml in this position that Neo4j 2026.10.1 stores and the SQL stores compile, with its rows, each from the graph alone (liberation-data/drivine4j#814, #817): the cells refused are in refusals.yaml, \"Values a write makes, by position and form\", \"Variable a write makes, read inside a pattern or a comprehension in its properties\" and \"Pattern or subquery in the properties of a CREATE or a MERGE\"."
     steps:
       - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
       - note: "a property of a variable the clause makes."
@@ -638,7 +584,7 @@ cases:
         rows: [["a", "a"], ["b", "b"], ["c", "c"], ["d", "d"]]
 
   - name: "Values a write makes: MERGE, ON MATCH SET"
-    description: "Each cell of writevalues.yaml in this position that Neo4j 2026.10.1 stores and the SQL stores compile, with its rows, each from the graph alone (liberation-data/drivine4j#814, #817): the cells refused are in refusals.yaml, \"Values a write makes, by position and form\", \"Variable a write makes, read inside a pattern or a comprehension in its properties\" and \"Pattern or subquery in the properties of a CREATE, or of a MERGE's relationship\"."
+    description: "Each cell of writevalues.yaml in this position that Neo4j 2026.10.1 stores and the SQL stores compile, with its rows, each from the graph alone (liberation-data/drivine4j#814, #817): the cells refused are in refusals.yaml, \"Values a write makes, by position and form\", \"Variable a write makes, read inside a pattern or a comprehension in its properties\" and \"Pattern or subquery in the properties of a CREATE or a MERGE\"."
     steps:
       - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
       - note: "a property of a variable the clause makes."
@@ -683,7 +629,7 @@ cases:
         rows: [2]
 
   - name: "Values a write makes: depth-3 canaries"
-    description: "Each canary of writevalues.yaml, three constructs nested in a write's own properties, that the SQL stores compile, with Neo4j 2026.10.1's rows, each from the graph alone (liberation-data/drivine4j#814): the others are refused (see refusals.yaml, \"Values a write makes: depth-3 canaries refused\", and \"Pattern or subquery in the properties of a CREATE, or of a MERGE's relationship\")."
+    description: "Each canary of writevalues.yaml, three constructs nested in a write's own properties, that the SQL stores compile, with Neo4j 2026.10.1's rows, each from the graph alone (liberation-data/drivine4j#814): the others are refused (see refusals.yaml, \"Values a write makes: depth-3 canaries refused\", and \"Pattern or subquery in the properties of a CREATE or a MERGE\")."
     steps:
       - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
       - note: "MERGE, ON CREATE SET; list comprehension > reduce > list comprehension."
