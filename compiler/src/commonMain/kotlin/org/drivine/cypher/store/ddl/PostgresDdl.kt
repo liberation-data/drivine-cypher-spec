@@ -1,5 +1,6 @@
 package org.drivine.cypher.store.ddl
 
+import org.drivine.cypher.sql.PostgresCypherCompiler
 import org.drivine.cypher.sql.TemporalArithmeticFunction
 import org.drivine.DrivineInternalApi
 import org.drivine.cypher.sql.Temporals.Companion.NANOS
@@ -106,11 +107,25 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
         "CREATE INDEX IF NOT EXISTS $countDeltasIndex ON $countDeltas (kind, name)",
         lockTable,
         lockSeed,
-    ).map { it.trimIndent() } + writes.ddl + temporalKeyFunction() + TemporalArithmeticFunction.postgres(name) + "COMMENT ON TABLE $nodes IS '$VERSION'" }
+    ).map { it.trimIndent() } + writes.ddl + temporalKeyFunction() + TemporalArithmeticFunction.postgres(name) + listKeyFunction() + "COMMENT ON TABLE $nodes IS '$VERSION'" }
 
     override val lockTable: String get() = "CREATE TABLE IF NOT EXISTS $lock (name text PRIMARY KEY)"
 
     override val lockSeed: String get() = "INSERT INTO $lock (name) VALUES ('$lockRow') ON CONFLICT DO NOTHING"
+
+    /** The function compiled Cypher sorts a list of a kind the statement leaves open by: see [listKeyFunction]. */
+    val listKey: String = listKeyName(name)
+
+    /**
+     * Makes [listKey]: the sort key, as text, of a list whose kind the statement leaves open, as one read from a property, the
+     * query the compiler writes for it (`PostgresCypherCompiler.flatListKeyBody`) over its argument. SQL, which the planner
+     * doesn't write out where it is called, as it holds a query: so it costs the call as declared, low, where the query written
+     * out in a sort key was costed on every row, brought in its JIT and ruled out a parallel plan (drivine-cypher-spec#284).
+     * Its body is a text in quotes, not dollars, so the block [ensuring] makes the store in reads it as one statement.
+     */
+    private fun listKeyFunction(): String =
+        "CREATE OR REPLACE FUNCTION $listKey(cy_list jsonb) RETURNS text LANGUAGE sql IMMUTABLE PARALLEL SAFE COST 5 AS '" +
+            PostgresCypherCompiler(name).flatListKeyBody("cy_list").replace("'", "''") + "'"
 
     /** The function compiled Cypher works out a temporal value's sort key by: see [temporalKeyFunction]. */
     val temporalKey: String = temporalKeyName(name)
@@ -448,6 +463,9 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
 
         /** The function the store of the graph [graph] keeps that works out a temporal value's sort key: see [temporalKey]. */
         fun temporalKeyName(graph: String) = "${graph}_temporal_key"
+
+        /** [listKey]'s name, for the graph [graph]: what it adds to the name is at most 16 long, as each name the store gives is. */
+        fun listKeyName(graph: String) = "${graph}_list_key"
 
         /** Why [name] cannot name a graph here; null where it can (see [SqlStoreDdl.refusal]). */
         fun refusal(name: String): String? = SqlStoreDdl.refusal(name, ENGINE, MAX_OBJECT_NAME)
