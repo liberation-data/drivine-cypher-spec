@@ -1165,6 +1165,10 @@ cases:
         only: [neo4j, sql]
         cypher: "WITH localdatetime({year: 1984, month: 11, day: 11, hour: 12, minute: 31, second: 14, nanosecond: 645876123}) AS o RETURN [toString(date.truncate('millennium', o)), toString(localdatetime.truncate('second', o)), toString(localtime.truncate('microsecond', o)), toString(date(o)), toString(localtime(o)), toString(localdatetime(o))]"
         rows: [["1000-01-01", "1984-11-11T12:31:14", "12:31:14.645876", "1984-11-11", "12:31:14.645876123", "1984-11-11T12:31:14.645876123"]]
+      - note: "Kept: a date of a map whose date is of one (#302)."
+        only: [neo4j, sql]
+        cypher: "WITH localdatetime({year: 1984, month: 11, day: 11, hour: 12, minute: 31, second: 14, nanosecond: 645876123}) AS o RETURN [toString(date({date: o})), toString(date({date: o, day: 28})), toString(localdatetime({date: o, hour: 1}))]"
+        rows: [["1984-11-11", "1984-11-28", "1984-11-11T01:00"]]
       - note: "Refused: worked out through the store's timestamp, a moment made of one moved."
         only: [sql]
         cypher: "RETURN localtime({hour: 12, minute: 0, second: 0, nanosecond: 645876123}) + duration('PT1S')"

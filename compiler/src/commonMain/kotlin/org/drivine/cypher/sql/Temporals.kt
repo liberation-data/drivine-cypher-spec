@@ -463,7 +463,10 @@ class Temporals(
      */
     fun over(date: Base?, time: Base?, fields: Map<String, String>, timezone: String?, kind: Temporal): String {
         val bases = listOfNotNull(date, time).distinct()
-        return written(shared(bases.map { held(it.text, it.kinds) }) { texts ->
+        // A base that gives only the date, or one of a value that is a date, gives nothing of a fraction of a second: it is read
+        // cut to the microsecond, not refused. One that gives the time is held, as its fraction is the value's (#302).
+        fun read(base: Base) = if (kind == Temporal.DATE || base != time) toMicros(base.text) else held(base.text, base.kinds)
+        return written(shared(bases.map(::read)) { texts ->
             fun text(base: Base) = texts[bases.indexOf(base)]
             val clocks = bases.map { clock(text(it), it.kinds) }
             shared(clocks) { bound ->
