@@ -71,7 +71,7 @@ class StoreJsonTest {
                 listOf("prepare", "merge", "deleteAllButNewest", "delete", "scopes", "itemsMark").map { text(markers[it]) },
                 "on $target, $store: the marker's statements",
             )
-            for (property in listOf("version", "items", "appliedAt")) {
+            for (property in listOf("version", "items")) {
                 assertEquals(marker.read(property), text(markers["read"]!![property]), "on $target, $store: the marker's read of $property")
             }
         }
@@ -108,6 +108,35 @@ class StoreJsonTest {
             pinned["ensuring"]?.let { assertEquals(org.drivine.cypher.store.ddl.GeneratedFunctions.expand(it.textValue()!!), text(got["ensuring"]), "on $target, $engine: the ensuring block") }
             pinned["functions"]?.let { assertEquals(expanded(it), texts(got["functions"]), "on $target, $engine: the functions") }
         }
+    }
+
+    @Test
+    fun eachStoresMarkerAndStampStatementsAreWhatMarkerYamlPins() {
+        // marker.yaml's statements, beside the answer's: each but `prepare`, which it names (ensuring, the DDL's first) and
+        // eachStoresStatementsAreTheModulesOwn checks against the Kotlin value.
+        val marker = CypherJson.readTree(oracleFile("marker.json"))
+        val graph = marker["graph"]!!.textValue()!!
+        fun pinned(node: JsonNode?): String? = node?.takeUnless { it.isNull }?.let {
+            if (it.isTextual) org.drivine.cypher.store.ddl.GeneratedFunctions.expand(it.textValue()!!) else CypherJson.writeValueAsString(it)
+        }
+        fun given(node: JsonNode?): String? = node?.takeUnless { it.isNull }?.let { if (it.isTextual) it.textValue() else CypherJson.writeValueAsString(it) }
+        var checked = 0
+        for (store in stores.keys) {
+            val got = answer("{\"storeStatements\": {\"store\": ${json(store)}, \"graph\": ${json(graph)}}}")
+            val markers = marker["marker"]!!["stores"]!![store]!!
+            for (field in listOf("read", "merge", "deleteAllButNewest", "delete", "scopes", "itemsMark", "constraint")) {
+                assertEquals(pinned(markers[field]), given(got["marker"]!![field]), "on $target, $store: the marker's $field")
+                checked++
+            }
+            val stamps = marker["storeStamp"]!!["stores"]!![store]!!
+            for (field in listOf("assignIfAbsent", "readStamps", "foreignNodes", "restampLayout", "layoutObjects", "constraint")) {
+                assertEquals(pinned(stamps[field]), given(got["stamp"]!![field]), "on $target, $store: the stamp's $field")
+                checked++
+            }
+            assertEquals(stamps["engine"]!!.textValue(), got["engine"]!!.textValue(), "on $target, $store")
+            assertEquals(stamps["layout"]!!.longValue(), got["layout"]!!.longValue(), "on $target, $store")
+        }
+        assertTrue(checked == 6 * 13, "every store's statements were checked: $checked")
     }
 
     @Test

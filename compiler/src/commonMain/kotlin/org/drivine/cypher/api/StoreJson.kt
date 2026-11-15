@@ -17,6 +17,7 @@ import org.drivine.cypher.store.marker.SchemaMarker
 import org.drivine.cypher.store.marker.StoreLayout
 import org.drivine.cypher.store.marker.StoreStamp
 import org.drivine.cypher.store.marker.StoreStampStatements
+import org.drivine.schema.made
 
 /**
  * A store's own statements for a host with no Kotlin types, asked of the JSON entry ([CompileJson]) in place of a statement
@@ -36,10 +37,12 @@ import org.drivine.cypher.store.marker.StoreStampStatements
  *     `eraStored`, `temporalArithmeticStored`), and `noFunction`, the error numbers a probe fails with where it finds none
  *     ([OracleFunctionProbes]);
  *   - `stamp`, [StoreStampStatements.of] the store: `prepare`, `assignIfAbsent`, `readStamps`, `foreignNodes`,
- *     `restampLayout` and `layoutObjects`, each null where the store has none;
+ *     `restampLayout`, `layoutObjects` and `constraint`, the statements that make the stamp's uniqueness constraint after
+ *     `prepare`, each null where the store has none;
  *   - `marker`, [MarkerStatements.of] the store: `prepare`, `read` (the statement that reads each of the marker's
- *     properties, by its name), `merge`, `deleteAllButNewest`, `delete`, `scopes` and `itemsMark`, the text the store keeps
- *     before a marker's items ([MarkerStatements.storedItems]), empty where it keeps them as they are.
+ *     properties, by its name), `merge`, `deleteAllButNewest`, `delete`, `scopes`, `itemsMark`, the text the store keeps
+ *     before a marker's items ([MarkerStatements.storedItems]), empty where it keeps them as they are, and `constraint`,
+ *     the statements that make the marker's uniqueness constraint after `prepare`.
  * - The same request with `stampParameters: {"storeId": …, "assignedAt": …}`, `restamp: true` or
  *   `markerParameters: {"scope": …, "version": …, "items": …, "appliedAt": <ms>}` is answered `{"parameters": {…}}`, what
  *   the stamp's `assignIfAbsent`, its `restampLayout` or the marker's `merge` binds ([StoreStamp.assignParameters],
@@ -99,14 +102,38 @@ internal object StoreJson {
         answer["stamp"] = linkedMapOf(
             "prepare" to stamp.prepare, "assignIfAbsent" to stamp.assignIfAbsent, "readStamps" to stamp.readStamps,
             "foreignNodes" to stamp.foreignNodes, "restampLayout" to stamp.restampLayout, "layoutObjects" to stamp.layoutObjects,
+            "constraint" to constraint(ddl, StoreStamp.CONSTRAINT),
         )
         answer["marker"] = linkedMapOf(
             "prepare" to marker.prepare,
             "read" to MARKER_PROPERTIES.associateWith(marker::read),
             "merge" to marker.merge, "deleteAllButNewest" to marker.deleteAllButNewest, "delete" to marker.delete, "scopes" to marker.scopes,
             "itemsMark" to marker.storedItems(""),
+            "constraint" to constraint(ddl, SchemaMarker.CONSTRAINT),
         )
         return CypherJson.writeValueAsString(CypherJson.valueToTree(answer))
+    }
+
+    /**
+     * The statements that make [spec], the stamp's or the marker's uniqueness constraint, on the store [ddl] makes, after its
+     * `prepare`: each a text, or a store's native command as `{"native": [<arg>, …]}` (FalkorDB's), as a plan's action writes one.
+     */
+    private fun constraint(ddl: StoreDdl, spec: org.drivine.schema.UniquenessConstraintSpec): List<Any> {
+        val made = ddl.createConstraint(spec.made()).map {
+            when (it) {
+                is org.drivine.cypher.store.ddl.DdlStatement.Text -> it.statement
+                is org.drivine.cypher.store.ddl.DdlStatement.Native -> mapOf("native" to it.args)
+            }
+        }
+        // A SQL store's create makes the store first, as `prepare` does: those statements are left out, as `marker.yaml` pins them.
+        val prefix: List<String> = when (ddl) {
+            is PostgresDdl -> listOf(ddl.ensuring)
+            is OracleDdl -> listOf(ddl.ensuring)
+            is SqliteDdl -> ddl.ddl
+            else -> emptyList()
+        }
+        check(made.take(prefix.size) == prefix) { "The constraint's create on ${StoreStamp.engine(ddl)} doesn't make the store first" }
+        return made.drop(prefix.size)
     }
 
     private fun stampParameters(ddl: StoreDdl, given: JsonNode?): Map<String, Any?> {
@@ -131,5 +158,5 @@ internal object StoreJson {
     private val STORES = listOf("postgres", "oracle", "sqlite", "neo4j", "memgraph", "falkordb")
 
     /** The marker's properties a host reads, each by [MarkerStatements.read]. */
-    private val MARKER_PROPERTIES = listOf(SchemaMarker.VERSION, SchemaMarker.ITEMS, SchemaMarker.APPLIED_AT)
+    private val MARKER_PROPERTIES = listOf(SchemaMarker.VERSION, SchemaMarker.ITEMS)
 }
