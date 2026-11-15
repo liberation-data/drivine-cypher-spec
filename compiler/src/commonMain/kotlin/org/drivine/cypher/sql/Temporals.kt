@@ -271,11 +271,33 @@ class Temporals(
     /** The offset a value of [to] made of the text [text] of [from] has: its own, or UTC's where it has none; none where [to] is local. */
     private fun offset(text: String, from: Temporal, to: Temporal): String? = if (to.zoned) (if (from.zoned) offset(text) else "'Z'") else null
 
-    /** The text of [to] the text [text] of [from] is: a moment's date, a date's midnight, a local value's in UTC. */
-    fun convert(text: String, from: Temporal, to: Temporal): String = written(shared(listOf(held(text, listOf(from)))) { (t) ->
-        // The wall clock kept is of the text's year, so is written as one from 1000 on where the text's is.
-        sql.local(t, from).let { clock -> sql.asAd(t, listOf(clock)) { format(clock, to, offset(t, from, to)) } }
-    })
+    /**
+     * The text of [to] the text [text] of [from] is: a moment's date, a date's midnight, a local value's in UTC. The store's
+     * timestamp is read of the text cut to the microsecond ([toMicros]), and where [to] has a time and the text's fraction
+     * goes past the microsecond, the converted text takes the text's own fraction back: a conversion moves a value by whole
+     * seconds at most, an offset's, so its fraction is the value's (drivine-cypher-spec#302).
+     */
+    fun convert(text: String, from: Temporal, to: Temporal): String = convert(text, from, to, keepFraction = true)
+
+    /** [convert], the fraction kept only where [keepFraction]: [made] writes a value's nanoseconds into it itself ([nanosKept]). */
+    private fun convert(text: String, from: Temporal, to: Temporal, keepFraction: Boolean): String {
+        // [made]'s text is of numbers of six digits at most, so is read as it is.
+        fun converted(of: String) = shared(listOf(if (keepFraction) toMicros(of) else of)) { (t) ->
+            // The wall clock kept is of the text's year, so is written as one from 1000 on where the text's is.
+            sql.local(t, from).let { clock -> sql.asAd(t, listOf(clock)) { format(clock, to, offset(t, from, to)) } }
+        }
+        if (!keepFraction || to == Temporal.DATE || from == Temporal.DATE || refuse == null || text in written || text == "NULL") return written(converted(text))
+        LITERAL.matchEntire(text)?.let { quoted ->
+            if (!SUB_MICRO_REGEX.containsMatchIn(quoted.groupValues[1].replace("''", "'"))) return written(converted(text))
+        }
+        return shared(listOf(text)) { (o) ->
+            shared(listOf(converted(o))) { (c) ->
+                val fraction = sql.group(o, literal(sql.regex("([.][0-9]+)")), 1)
+                val kept = sql.replace(c, literal(sql.regex("^([^:]*:[0-9]{2}:[0-9]{2})([.][0-9]+)?")), "('\\1' || $fraction)")
+                "CASE WHEN ${sql.matches(o, literal(sql.regex(SUB_MICRO_DIGITS)))} THEN $kept ELSE $c END"
+            }
+        }
+    }
 
     /** The text of [to] the text [text] is, whatever kind its shape tells: null where it is none. */
     fun convert(text: String, to: Temporal): String = byKind(text) { from, t -> convert(t, from, to) }
@@ -334,7 +356,7 @@ class Temporals(
             Temporal.TIME -> "$time || $zone"
             Temporal.DURATION -> error("a duration is made of its own fields")
         }
-        return convert(text, kind, kind)
+        return convert(text, kind, kind, keepFraction = false)
     }
 
     /**

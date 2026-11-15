@@ -47,7 +47,7 @@ class HeldFunctionTest {
     fun `Oracle reads a stored time of day and a stored duration through its era function`() {
         // Its era function refuses either as it reads the text: a time of day has no year's test to leave it there, and a
         // duration no store's read of its own.
-        val time = OracleCypherCompiler("g").compile("MATCH (n) RETURN localtime.truncate('second', n.t)").sql
+        val time = OracleCypherCompiler("g").compile("MATCH (n) RETURN n.t + duration('PT1S')").sql
         assertTrue("'1970-01-01T' || g_era(JSON_VALUE(n1.props, '\$.t.v'))" in time, time)
         val moved = OracleCypherCompiler("g").compile("MATCH (n) RETURN localdatetime('2024-01-01T00:00:00') + n.d").sql
         assertTrue("g_era(JSON_VALUE(n1.props, '\$.d.v'))" in moved, moved)
@@ -86,25 +86,28 @@ class HeldFunctionTest {
         val oracle = OracleCypherCompiler("g", eraStored = false).compile("MATCH (n) RETURN n.at + duration('PT1S')").sql
         assertTrue(Temporals.SUB_MICRO.replace("'", "''") in oracle && "g_era(" !in oracle, oracle)
         // SQLite: the host function's read fails on the text, the nanoseconds replaced by words that say why.
-        val sqlite = org.drivine.cypher.sql.SqliteCypherCompiler("g").compile("MATCH (n) RETURN localtime.truncate('second', n.t)").sql
+        val sqlite = org.drivine.cypher.sql.SqliteCypherCompiler("g").compile("MATCH (n) RETURN n.t + duration('PT1S')").sql
         assertTrue("past the microsecond (drivine4j#421)" in sqlite, sqlite)
     }
 
     @Test
-    fun `a value written in the statement or made of its fields is refused but a date's duration is not`() {
+    fun `a value written in the statement or made of its fields is refused where it is worked out but a date's duration is not`() {
         fun postgres(cypher: String) = PostgresCypherCompiler("g").compile(cypher, mapOf("n" to 645876123)).sql
         // A time of day and a duration written in the statement are read through the store's function, which refuses them as
         // the statement runs.
-        val time = postgres("RETURN localtime.truncate('second', localtime('12:00:00.000000001'))")
+        val time = postgres("RETURN localtime('12:00:00.000000001') + duration('PT1S')")
         assertTrue("g_held(CAST('12:00:00.000000001' AS text))" in time, time)
         val moved = postgres("RETURN localdatetime('2024-01-01T00:00:00') + duration('PT0.000000001S')")
         assertTrue("g_held(CAST('PT0.000000001S' AS text))" in moved, moved)
         // A date takes the whole days of a duration's time alone: its nanoseconds are not tested.
         val date = postgres("RETURN date('2024-01-01') + duration('PT0.000000001S')")
         assertFalse("g_held(CAST('PT0.000000001S' AS text))" in date, date)
-        // A nanosecond field is tested by the SQL's own CASE, naming the refusal.
+        // A value made of a nanosecond field keeps its nine digits, written into its text, and is read through the store's
+        // function only where it is worked out (drivine-cypher-spec#302).
         val made = postgres("RETURN localtime({hour: 12, minute: 0, second: 0, nanosecond: \$n})")
-        assertTrue(Temporals.SUB_MICRO.replace("'", "''") in made, made)
+        assertFalse(Temporals.SUB_MICRO.replace("'", "''") in made || "g_held(" in made, made)
+        val madeMoved = postgres("RETURN localtime({hour: 12, minute: 0, second: 0, nanosecond: \$n}) + duration('PT1S')")
+        assertTrue("g_held(" in madeMoved, madeMoved)
     }
 
     @Test
