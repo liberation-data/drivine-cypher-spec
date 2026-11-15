@@ -4901,7 +4901,8 @@ abstract class SqlCypherCompiler(
          * a number and a float both numbers; `collect()` of anything, and a pattern comprehension; `keys()`, `labels()` and `split()`,
          * of texts; `range()`, of numbers; `nodes()` and `relationships()`, of nodes or relationships, as maps are; a list comprehension
          * of what it gives; `tail()`, `reverse()` and a slice of a list of one kind; two lists of one kind joined by `+`, and
-         * `coalesce()` of such lists alone; and a variable bound to one. Null where an item's kind is left open, as a property's, a
+         * `coalesce()` of such lists alone; and a variable bound to one. Neo4j wasn't captured with `reverse()` or `coalesce()` of a
+         * list of one kind: they are typed as `tail()` is. Null where an item's kind is left open, as a property's, a
          * parameter's or null's, where two differ, of an empty list, and of anything else.
          */
         private fun listItems(list: Expression, scope: Map<String, Value>): Value.Items? = when (list) {
@@ -7106,7 +7107,7 @@ abstract class SqlCypherCompiler(
          * `toString` of [value], the argument of [function], where the statement makes it a list or writes it as a map: its text as
          * Neo4j's Cypher 25 writes it, where its Cypher 5 refuses it, and so did this (drivine4j#420); a list it types as narrower
          * than `List<Any>`, of items of one kind, written, `[1, 2]`, `[1, 2.5]` or `[date(…)]`, given by a function such as `keys()`, a
-         * comprehension or `collect()` of anything, or bound by a `WITH` ([listItems], [Value.Json.itemsKnown]), or a list of nodes or
+         * comprehension of items of one kind or `collect()` of anything, or bound by a `WITH` ([listItems], [Value.Json.itemsKnown]), or a list of nodes or
          * relationships, it refuses still, and so does this (liberation-data/drivine-cypher-spec#296). Each item is written as `toString` writes it, a text without quotes, null as `null`, a list or a
          * map within as one is, the items after `, ` and each entry `key: value`, in the order of the keys ([CODE_POINT_ORDER]), as
          * Neo4j orders them: `[1, a]`, `{a: 2, b: x}` of `{b: 'x', a: 2}`. Of a
