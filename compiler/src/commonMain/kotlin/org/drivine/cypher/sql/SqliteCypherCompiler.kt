@@ -621,6 +621,14 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
         "(${storedArithmetic(operator, tagged(Temporal.DURATION, duration).sql, number)} ->> '\$.v')"
 
     /**
+     * Two durations added or taken one from the other, by the host function too: SQLite's SQL adds their parts in doubles, which
+     * lost a nanosecond beside seconds as many as ten thousand years of hours hold (`PT87660000H + PT0.000000001S` was
+     * `PT87660000H`), where the host function adds them in decimals as Postgres and Oracle do (drivine-cypher-spec#275).
+     */
+    override fun summed(a: String, b: String, sign: Int) =
+        "(${storedArithmetic(if (sign < 0) "-" else "+", tagged(Temporal.DURATION, a).sql, tagged(Temporal.DURATION, b).sql)} ->> '\$.v')"
+
+    /**
      * The whole of the text matches, as `=~` asks: `REGEXP` finds a match anywhere. It ends at `\z`, the text's end,
      * where Java's `$` would match before a line break that ends the text too.
      */

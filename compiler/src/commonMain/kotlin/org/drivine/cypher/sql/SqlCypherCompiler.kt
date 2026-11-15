@@ -147,6 +147,15 @@ abstract class SqlCypherCompiler(
      */
     protected open fun scaled(operator: String, duration: String, number: String): String? = null
 
+    /**
+     * The duration text of the duration texts [a] and [b] added, or with [sign] -1 [b] taken from [a], where the store works it
+     * out otherwise than [Temporals.sum]: see SQLite's. Null where the store's SQL works it out exactly.
+     */
+    protected open fun summed(a: String, b: String, sign: Int): String? = null
+
+    /** [a] and [b] added, or with [sign] -1 [b] taken from [a]: by [summed] where the store gives one, else by [Temporals.sum]. */
+    private fun durationSum(a: String, b: String, sign: Int) = summed(a, b, sign) ?: temporals.sum(a, b, sign)
+
     /** [compiled] with the functions it calls declared before it. */
     private fun withFunctions(compiled: CompiledCypher): CompiledCypher {
         val all = functions + calledFunctions(compiled.sql).filter { it !in functions }
@@ -2353,7 +2362,7 @@ abstract class SqlCypherCompiler(
                     temporal = itemsOf(list), items = itemItemsOf(list), entries = itemEntriesOf(list), temporals = itemTemporalsOf(list),
                     list = holdsLists(list), flat = isFlat(list),
                     text = holdsTexts(list) || isText(list), fromList = true, jsonNull = !isFlat(list),
-                    known = (unwind.list as? Expression.ListLiteral)?.items?.map { knownKind(it, select.scope) }?.distinct()?.singleOrNull(),
+                    known = itemsKind(unwind.list, select.scope),
                 ),
             )
             select.order += itemNo(name) to false
@@ -2728,7 +2737,10 @@ abstract class SqlCypherCompiler(
             val name = alias("x")
             val inner = scope + (
                 comprehension.variable to
-                    Value.Json(item(name), temporal = itemsOf(listed), items = itemItemsOf(listed), temporals = itemTemporalsOf(listed), list = holdsLists(listed))
+                    Value.Json(
+                        item(name), temporal = itemsOf(listed), items = itemItemsOf(listed), temporals = itemTemporalsOf(listed), list = holdsLists(listed),
+                        known = itemsKind(comprehension.list, scope),
+                    )
                 )
             val projected = comprehension.projection?.let { member(it, inner, routed) }
             val projection = projected?.let { json(it).sql } ?: item(name)
@@ -4550,6 +4562,8 @@ abstract class SqlCypherCompiler(
                 val listed = expression(expression.list, scope)
                 val list = comparable(json(listed))
                 val own = setOf(expression.accumulator, expression.variable)
+                // Each item is of the kind of the list's items where the statement writes them so; the accumulator's is left open.
+                val known = itemsKind(expression.list, scope)
                 // What the step reads of the row and of the parameters, for a store that works it out where it reads neither.
                 val read = (variablesIn(expression.expression) - own).filter { it in scope }
                 val given = parametersIn(expression.expression)
@@ -4562,14 +4576,14 @@ abstract class SqlCypherCompiler(
                     reduce(
                         alias("f"), initial, list,
                         step = { accumulator, item ->
-                            val inner = scope + mapOf(expression.accumulator to Value.Json(accumulator), expression.variable to Value.Json(item, temporal = itemsOf(listed), temporals = itemTemporalsOf(listed)))
+                            val inner = scope + mapOf(expression.accumulator to Value.Json(accumulator), expression.variable to Value.Json(item, temporal = itemsOf(listed), temporals = itemTemporalsOf(listed), known = known))
                             comparable(json(expression(expression.expression, inner)))
                         },
                         context = context,
                         contextStep = { accumulator, item, map ->
                             // A value read from the map is of the kind the statement made it.
                             val inner = read.associateWith { (scope.getValue(it) as? Value.Json).let { v -> Value.Json(propertyOf(map, it), temporal = v?.temporal, items = v?.items, known = v?.known) } } +
-                                mapOf(expression.accumulator to Value.Json(accumulator), expression.variable to Value.Json(item, temporal = itemsOf(listed), temporals = itemTemporalsOf(listed)))
+                                mapOf(expression.accumulator to Value.Json(accumulator), expression.variable to Value.Json(item, temporal = itemsOf(listed), temporals = itemTemporalsOf(listed), known = known))
                             val was = givenParameters
                             givenParameters = given.associateWith { Value.Json(propertyOf(map, "$$it"), temporal = Temporal.ofValue(parameters.value(it))) }
                             try {
@@ -4659,7 +4673,10 @@ abstract class SqlCypherCompiler(
                 Value.Bool(
                     // Over a list of nodes or relationships, each item is the node or the relationship, read from its table.
                     if (listed is Value.Entities) shared(listed.ids) { (ids) -> entityItems(ids, listed.relationships, name).let { (from, item) -> quantified(from, item, "$ids IS NULL") } }
-                    else shared(comparable(json(listed))) { (items) -> quantified("FROM ${elementsOf(listed, items, name)}", Value.Json(item(name), temporal = itemsOf(listed), temporals = itemTemporalsOf(listed)), isJsonNull(items)) }
+                    else shared(comparable(json(listed))) { (items) ->
+                        val item = Value.Json(item(name), temporal = itemsOf(listed), temporals = itemTemporalsOf(listed), known = itemsKind(expression.list, scope))
+                        quantified("FROM ${elementsOf(listed, items, name)}", item, isJsonNull(items))
+                    }
                 )
             }
         }
@@ -4822,6 +4839,27 @@ abstract class SqlCypherCompiler(
                     else -> Value.Known.of(value)
                 }
             }
+
+        /**
+         * The kind of each item of [list] where the statement writes it as a list whose every item is of one known kind
+         * ([knownKind]), as Neo4j types the variable of an `UNWIND`, a quantifier, a list comprehension or a `reduce()` over it (#420): `['a', 'b']` is of
+         * texts. Null where an item's kind is left open or null, where two are of other kinds, and of an empty list.
+         */
+        private fun itemsKind(list: Expression, scope: Map<String, Value>): Value.Known? =
+            (list as? Expression.ListLiteral)?.items?.map { knownKind(it, scope) }?.distinct()?.singleOrNull()
+
+        /**
+         * Refuses `toInteger()` or `toFloat()` of [function] where the statement makes its argument a kind Neo4j refuses when it
+         * plans the statement ([knownKind]): a map, and for `toFloat()` a truth value or a list too, which gave null (#420). A list
+         * given to `toInteger()` Neo4j plans, and refuses only as the row is read, so it is compiled as before, as is a parameter or
+         * a value whose kind is left open.
+         */
+        private fun conversionOfKind(function: Expression.Function, scope: Map<String, Value>) {
+            val (taken, nouns) = CONVERTED_KINDS[function.name.lowercase()] ?: return
+            val kind = function.arguments.singleOrNull()?.let { knownKind(it, scope) } ?: return
+            if (kind == Value.Known.LIST && function.name.lowercase() == "tointeger") return
+            if (kind !in taken) throw CompilerException("${function.name}() takes $nouns, not ${kind.noun}, as in Neo4j.")
+        }
 
         /**
          * Refuses [binary], `-`, `*`, `/`, `%` or `^`, where a side is known to be a text, a truth value, a list or a map
@@ -5153,11 +5191,11 @@ abstract class SqlCypherCompiler(
                     fun isDuration(json: String) = "${tagKind(json)} = '${duration.function}'"
                     // The value of the kind a stored tag names [x], with the duration [d], a tag's text, added or taken away.
                     fun addTo(x: String, d: String, sign: Int, whole: Boolean) = temporals.byTag(tagKind(x), tagText(x), Temporal.instants + duration) { kind, t ->
-                        if (kind == duration) temporals.sum(t, d, sign) else temporals.add(t, kind, d, sign)
+                        if (kind == duration) durationSum(t, d, sign) else temporals.add(t, kind, d, sign)
                     }.let { text -> if (whole) taggedOf(tagKind(x), text) else inflightOf(tagKind(x), text) }
                     fun Value.Json.of(whole: Boolean) = if (whole) sql else inflight!!
                     when {
-                        l == duration && r == duration -> tagged(duration, temporals.sum(a, b, sign))
+                        l == duration && r == duration -> tagged(duration, durationSum(a, b, sign))
                         l != null && l.instant && r == duration -> tagged(l, temporals.add(a, l, b, sign))
                         l == duration && r != null && r.instant && sign > 0 -> tagged(r, temporals.add(b, r, a, 1))
                         // A value read from the store, its kind named by its tag, and a duration the statement gives.
@@ -5165,7 +5203,7 @@ abstract class SqlCypherCompiler(
                         l == duration && r == null && sign > 0 -> read(null, byDuration = true) { x, y, whole -> addTo(y, v(x, 0), 1, whole) }
                         // A duration read from the store, taken from a duration or added to a moment the statement gives. A sum is of
                         // no kind, for what is read may be a list, which the moment is added to as any value is.
-                        l == duration && r == null -> read(duration) { x, y, whole -> "CASE WHEN ${isDuration(y)} THEN ${tagged(duration, temporals.sum(v(x, 0), tagText(y), sign)).of(whole)} END" }
+                        l == duration && r == null -> read(duration) { x, y, whole -> "CASE WHEN ${isDuration(y)} THEN ${tagged(duration, durationSum(v(x, 0), tagText(y), sign)).of(whole)} END" }
                         l != null && l.instant && r == null ->
                             read(l.takeIf { sign < 0 }) { x, y, whole -> "CASE WHEN ${isDuration(y)} THEN ${tagged(l, temporals.add(v(x, 0), l, tagText(y), sign)).of(whole)} END" }
                         l == null && r != null && r.instant && sign > 0 ->
@@ -6870,6 +6908,7 @@ abstract class SqlCypherCompiler(
                     // A function the store has no SQL for is named before its arguments are counted.
                     if (function(name, "NULL") == null) unsupported("The function ${function.name}()")
                     if (name == "tostring") textOfKind(function, one())
+                    conversionOfKind(function, scope)
                     // A temporal value's text is its tag's.
                     if (name == "tostring") (one() as? Value.Json)?.takeIf { it.temporal != null }?.let { return Value.Json(scalar(tagTextOf(it)), text = true) }
                     // A function that gives a number, a text or a truth value of its argument, never the argument, reads it in flight.
@@ -7549,6 +7588,12 @@ abstract class SqlCypherCompiler(
 
         /** The arithmetic that takes numbers alone, and temporal values where the store does: `+` puts texts and lists together too. */
         val NUMERIC_ONLY = ARITHMETIC - Operator.ADD
+
+        /** The kinds `toInteger()` and `toFloat()` take, as Neo4j documents them, and how a refusal names them: see [conversionOfKind]. */
+        val CONVERTED_KINDS = mapOf(
+            "tointeger" to (setOf(Value.Known.BOOLEAN, Value.Known.INTEGER, Value.Known.FLOAT, Value.Known.TEXT) to "a truth value, an integer, a float or a text"),
+            "tofloat" to (setOf(Value.Known.INTEGER, Value.Known.FLOAT, Value.Known.TEXT) to "an integer, a float or a text"),
+        )
 
         /** How the statement writes each of [NUMERIC_ONLY], for a refusal to name it. */
         val NUMERIC_SYMBOLS = mapOf(Operator.SUBTRACT to "-", Operator.MULTIPLY to "*", Operator.DIVIDE to "/", Operator.MODULO to "%", Operator.POWER to "^")
