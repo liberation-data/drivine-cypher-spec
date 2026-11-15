@@ -1200,6 +1200,21 @@ abstract class SqlCypherCompiler(
      */
     protected open fun sum(json: String, distinct: String) = scalar("COALESCE(sum($distinct${number(json)}), 0)")
 
+    /**
+     * [aggregate], a `sum` or an `avg` of the JSON values [json] of a group, or the statement failing by name where any of them is
+     * not a number nor null: a store's sum adds the numbers alone, so it gave 0, and the average null, where Neo4j gives a duration
+     * or fails (drivine-cypher-spec#281). A duration fails as not yet worked out (#282), any other kind as Neo4j fails it. The kinds
+     * are told once, in one aggregate, so the test is read once a group.
+     */
+    private fun ofNumbers(json: String, aggregate: String): String {
+        // A number, as most items are, is told by its kind alone: a tag's kind is read only of an item that is none.
+        val kind = "max(CASE WHEN ${notNumber(json)} THEN CASE WHEN ${tagKind(json)} = '${Temporal.DURATION.function}' THEN 2 ELSE 1 END END)"
+        return "CASE $kind WHEN 2 THEN ${scalar(failure(DURATION_SUM, "''"))} WHEN 1 THEN ${scalar(failure(NOT_SUMMED, "''"))} ELSE $aggregate END"
+    }
+
+    /** Whether the JSON value [json] is neither a number, as [number] reads one, nor null: what a `sum` passes by. */
+    protected open fun notNumber(json: String): String = "(NOT ${isJsonNull(json)} AND ${number(json)} IS NULL)"
+
     /** `avg` of the JSON values [json] of a group, as [sum] adds them, as a float: null where there are none. */
     protected open fun avg(json: String, distinct: String) = scalar(float("avg($distinct${number(json)})"))
 
@@ -5324,6 +5339,47 @@ abstract class SqlCypherCompiler(
         }
 
         /**
+         * Why `sum` or `avg` ([name]) of [value], written as [written], is refused as the statement compiles, where its kind is known
+         * to be one they don't take: a duration, not yet worked out (#282); a truth value, a node, a relationship, a path, a temporal
+         * value of another kind, or a text, a list or a map written, which Neo4j refuses (drivine-cypher-spec#281). Null where it
+         * may be a number, and where it is a text or a list the statement makes, which is tested as it runs ([ofNumbers]).
+         */
+        private fun refusedSum(name: String, value: Value, written: Expression, scope: Map<String, Value>): String? {
+            fun not(noun: String) = "$NOT_SUMMED $name() of ${noun}."
+            return when (value) {
+                is Value.Bool -> not("a truth value")
+                is Value.Node -> not("a node")
+                is Value.Relationship -> not("a relationship")
+                is Value.Entities -> not("a list")
+                is Value.Path -> not("a path")
+                is Value.Json -> when {
+                    value.temporal == Temporal.DURATION -> "$DURATION_SUM $name() of a duration."
+                    value.temporal != null -> not("a ${value.temporal.function}")
+                    // Not by [Value.Json.text] or [Value.Json.list]: an item of a list with none is either, vacuously, where Neo4j sums
+                    // it as 0 (`UNWIND [] AS x RETURN sum(x)`). Such a value is tested as the statement runs.
+                    else -> when (val known = value.known ?: knownKind(written, scope)) {
+                        null, Value.Known.INTEGER, Value.Known.FLOAT -> null
+                        else -> not(known.noun)
+                    }
+                }
+            }
+        }
+
+        /**
+         * Whether [value], written as [written], is known to be a number or null, so a `sum` or an `avg` of it is not tested as the
+         * statement runs ([ofNumbers]): a number written or given, arithmetic of known numbers, `count(*)`, a `COUNT` subquery, or a
+         * function that gives a number ([NUMBER_FUNCTIONS]).
+         */
+        private fun summedNumber(value: Value.Json, written: Expression, scope: Map<String, Value>): Boolean =
+            (value.known ?: knownKind(written, scope)).let { it == Value.Known.INTEGER || it == Value.Known.FLOAT } || given(written) is Number ||
+                when (written) {
+                    Expression.CountStar -> true
+                    is Expression.Subquery -> written.kind == Expression.Subquery.Kind.COUNT
+                    is Expression.Function -> written.name.lowercase() in NUMBER_FUNCTIONS
+                    else -> false
+                }
+
+        /**
          * Whether [value], written as [written], can't be a tag of a temporal value, so that [temporalRefused] need not test it as the
          * statement runs. A closed set; every other side is tested, though a test costs: beside a walk on Oracle, a side tested
          * was worked out again, and a statement took twice as long, past the store's PGA limit (drivine4j#809). It can't where:
@@ -6823,8 +6879,18 @@ abstract class SqlCypherCompiler(
                     )
                     else -> Value.Json(distinctItems(comparable(json(list))), ordered = true)
                 }
-                "sum" -> Value.Json(sum(comparable(json(one())), distinct))
-                "avg" -> Value.Json(avg(comparable(json(one())), distinct))
+                "sum", "avg" -> {
+                    val written = function.arguments.single()
+                    val raw = one()
+                    // Neo4j sums and averages integers, floats and durations alone, nulls passed by; a store's sum adds the numbers
+                    // alone, so it gave 0 or null where an item was any other (#281). A kind the statement knows is refused as it
+                    // compiles, a duration as not yet worked out (#282); one it leaves open is tested as it runs.
+                    refusedSum(name, raw, written, scope)?.let { throw CompilerException(it) }
+                    val value = json(raw)
+                    val items = comparable(value)
+                    val aggregate = if (name == "sum") sum(items, distinct) else avg(items, distinct)
+                    Value.Json(if (summedNumber(value, written, scope)) aggregate else ofNumbers(items, aggregate))
+                }
                 // Temporal values by their tags' sort keys, a zoned one as the moment it is, then its offset, and lists of them item by
                 // item so; of a temporal kind,
                 // still of it, and a list of the kinds of list it was. A list the statement makes item by item, as an ORDER BY sorts it: a store's
@@ -7806,6 +7872,12 @@ abstract class SqlCypherCompiler(
         val TRUNCATION_LEAST = mapOf("month" to 1, "day" to 1, "dayOfWeek" to 1)
 
         val AGGREGATES = setOf("count", "collect", "sum", "avg", "min", "max")
+
+        /** Why a `sum` or an `avg` of durations fails: see `ofNumbers`. */
+        const val DURATION_SUM = "A sum or an average of durations isn't worked out yet (drivine-cypher-spec#281, #282):"
+
+        /** Why a `sum` or an `avg` of a value that is no number nor duration fails, as it fails in Neo4j: see `ofNumbers`. */
+        const val NOT_SUMMED = "sum() and avg() take integers, floats and durations alone, as in Neo4j:"
 
 
         /** The function that keeps each item of a list once, where it is first: see [Writer.aggregatesFirst]. No statement can name it. */

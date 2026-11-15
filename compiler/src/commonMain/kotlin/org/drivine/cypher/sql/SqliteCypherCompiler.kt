@@ -108,6 +108,15 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
 
     override fun number(json: String) = shared(json) { (x) -> "CASE WHEN json_type($x) IN ('integer', 'real') THEN $x ->> '$' END" }
 
+    /**
+     * Where the statement is given or works out NaN ([nonFinite]), NaN is a number too, as [sum] gives it, which SQLite's JSON holds
+     * as an object ([isNaN]). [isNaN] is null for an object with no such key, so it is read as false there: else a map would pass as
+     * a number.
+     */
+    override fun notNumber(json: String) = shared(json) { (x) ->
+        "(COALESCE(json_type($x), 'null') NOT IN ('null', 'integer', 'real')" + (if (nonFinite) " AND NOT COALESCE(${isNaN(x)}, FALSE)" else "") + ")"
+    }
+
     override fun integral(json: String) = "(json_type($json) = 'integer')"
 
     override fun text(json: String) = shared(json) { (x) -> "CASE WHEN json_type($x) = 'text' THEN $x ->> '$' END" }

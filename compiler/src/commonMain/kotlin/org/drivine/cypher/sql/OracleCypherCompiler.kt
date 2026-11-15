@@ -310,6 +310,9 @@ class OracleCypherCompiler(
 
     override fun number(json: String) = shared(json) { (x) -> "CASE WHEN ${typeOf(x)} = 'number' THEN JSON_VALUE($x, '$' RETURNING NUMBER) END" }
 
+    /** A double or a float is a number too, as [sum] adds it, NaN and the infinities among them, which [number] reads as no `NUMBER`. */
+    override fun notNumber(json: String) = "NVL(${kind(json)}, 'null') NOT IN ('null', 'number', 'double', 'float')"
+
     /** A whole number, and no floating-point number, as Cypher has an integer. */
     override fun integral(json: String) = shared(json) { (x) ->
         "(${kind(x)} = 'number' AND JSON_VALUE($x, '$' RETURNING NUMBER) = TRUNC(JSON_VALUE($x, '$' RETURNING NUMBER)))"

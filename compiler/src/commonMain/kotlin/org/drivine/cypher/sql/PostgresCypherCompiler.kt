@@ -98,6 +98,9 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
             "WHEN $x >= '$INFINITE'::jsonb THEN 'Infinity'::numeric WHEN $x <= '-$INFINITE'::jsonb THEN '-Infinity'::numeric ELSE $read END END"
     }
 
+    /** By its JSON type alone: NaN and the infinities, as a statement given one writes them, are JSON numbers too ([number]). */
+    override fun notNumber(json: String) = "COALESCE(jsonb_typeof($json), 'null') NOT IN ('null', 'number')"
+
     /** Whether the JSON [json] is NaN, as a statement given one writes it: see the class. */
     private fun isNaN(json: String) = "($json = $NOT_A_NUMBER_JSON)"
 
