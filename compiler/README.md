@@ -635,9 +635,10 @@ target, its result exactly and of its type, or its failure, and `jvmOracle` chec
 java.time first. A step noted `drivine4j#421 (layout 2)` needs nine-digit timestamps, and must fail until they are the store's.
 
 On SQLite the compiler reads no float of seconds: a duration is added as whole seconds and nanoseconds read from its text,
-`duration.between`, `epochSeconds` and `epochMillis` are worked out of `seconds_between` and `nanos_between`, and a
-clock's `second`, `millisecond`, `microsecond` and `nanosecond` of `NANOSECOND_OF_MINUTE`, whole numbers each
-(`TemporalSql.exactTime`). Postgres's and Oracle's SQL is unchanged.
+`duration.between`, `epochSeconds` and `epochMillis` are worked out of `seconds_between` and `nanos_between`, a
+clock's `second`, `millisecond`, `microsecond` and `nanosecond` of `NANOSECOND_OF_MINUTE`, and a duration's fields of
+its seconds (`hours` to `nanosecondsOfSecond`) and the canonical text of a duration text (`duration($d)`) of its whole
+seconds and nanoseconds read from its text (#278), whole numbers each (`TemporalSql.exactTime`). Postgres's and Oracle's SQL is unchanged.
 
 A direct-only function changes the process's state, so SQLite lets only the host's own statements call it, never a
 trigger or view of the database's. A function that throws fails its statement with its message (`drivine_gc_heap: the
