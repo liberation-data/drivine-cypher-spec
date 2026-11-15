@@ -442,6 +442,15 @@ cases:
       - cypher: "MATCH (n:CyWrite) SET n.degree = COUNT { (n)--() }, n.leaf = NOT EXISTS { MATCH (n)-[:NEXT]->() } RETURN [n.id, n.degree, n.leaf] ORDER BY n.id"
         rows: [["a", 2, false], ["b", 2, false], ["c", 1, true], ["d", 1, true]]
 
+  - name: "SET from a pattern as a condition"
+    description: "A SET's value holds a pattern as a condition, as Neo4j 2026.10.1 takes it (liberation-data/drivine4j#714): as a value it is refused (see refusals.yaml, \"Pattern used as a value\")."
+    steps:
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - cypher: "MATCH (n:CyWrite) SET n.f = NOT (n)-->() RETURN count(n)"
+        rows: [4]
+      - cypher: "MATCH (n:CyWrite) RETURN [n.id, n.f] ORDER BY n.id"
+        rows: [["a", false], ["b", false], ["c", true], ["d", true]]
+
   - name: "SET and MERGE with EXISTS { } over UNWIND"
     description: "An EXISTS { } whose body unwinds a list, in a write's WHERE, SET or MERGE, reads the row being written (drivine4j#449)."
     steps:
