@@ -2019,6 +2019,15 @@ cases:
         only: [neo4j, sql]
         unordered: true
         rows: ["Keanu", "Laurence"]
+      - note: "In a CALL within the WHERE of a WITH that neither groups nor is DISTINCT, a variable the WITH drops that the CALL doesn't import is the group's own."
+        cypher: "MATCH (p:Person) WITH p AS q WHERE EXISTS { CALL (q) { MATCH (q) ((p)-->(b))+ () RETURN 1 AS x } RETURN x } RETURN q.name"
+        only: [neo4j, sql]
+        unordered: true
+        rows: ["Keanu", "Carrie", "Laurence"]
+      - cypher: "MATCH (p:Person) WITH p AS q WHERE EXISTS { CALL { MATCH (q) ((p)-->(b))+ () RETURN 1 AS x } RETURN x } RETURN q.name"
+        only: [neo4j, sql]
+        unordered: true
+        rows: ["Keanu", "Carrie", "Laurence", "Hugo"]
       - note: "A variable bound outside the group may be a node beside it."
         cypher: "MATCH (p:Person) MATCH (q:Person) WHERE EXISTS { (q) ((a)-->(b))+ (p) } RETURN q.name, p.name ORDER BY q.name, p.name"
         only: [neo4j, sql]
@@ -2603,6 +2612,10 @@ cases:
         rows: [["Carrie", 2], ["Keanu", 3], ["Laurence", 1]]
       - note: "A variable a CALL imports, read in its grouping RETURN's order."
         cypher: "MATCH (p:Person) CALL (p) { MATCH (x:Movie) RETURN x, count(*) AS c ORDER BY EXISTS { (p)-->() }, x.title } RETURN count(*)"
+        only: [neo4j, sql]
+        rows: [12]
+      - note: "And one its leading WITH imports, which the RETURN drops."
+        cypher: "MATCH (p:Person) CALL { WITH p MATCH (x:Movie) RETURN x, count(*) AS c ORDER BY EXISTS { (p)-->() }, x.title } RETURN count(*)"
         only: [neo4j, sql]
         rows: [12]
       - note: "A term that is an item's expression is read as the item."

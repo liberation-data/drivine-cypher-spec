@@ -197,7 +197,8 @@ internal class VariableKinds(private val aggregates: (Expression) -> Boolean) {
         // What a WITH outside drops stays dropped after a subquery's own WITH, but for an item that names it again.
         val next = if (projection.star) scope.copy() else Scope(dropped = LinkedHashSet(scope.dropped), shadowing = LinkedHashSet(scope.shadowing))
         projection.items.forEach { next[it.name] = kindOf(it.expression, scope) }
-        val reading = Scope(scope.kinds.mapValuesTo(LinkedHashMap()) { Kind.ANY }.apply { putAll(next.kinds) })
+        // What an outer WITH's WHERE reads that it drops stays shadowing in a subquery's order, as in its WHERE.
+        val reading = Scope(scope.kinds.mapValuesTo(LinkedHashMap()) { Kind.ANY }.apply { putAll(next.kinds) }, shadowing = LinkedHashSet(next.shadowing))
         val groups = projection.distinct || projection.items.any { aggregates(it.expression) }
         where?.let {
             val dropped = scope.kinds.keys.filterTo(LinkedHashSet(next.dropped)) { name -> next[name] == null && name !in kept }
@@ -205,7 +206,7 @@ internal class VariableKinds(private val aggregates: (Expression) -> Boolean) {
             val shadowing = if (groups) LinkedHashSet(next.shadowing) else dropped.filterTo(LinkedHashSet(next.shadowing)) { it !in scope.dropped }
             expression(it, Scope(LinkedHashMap(reading.kinds), dropped, shadowing))
         }
-        val items = Scope(scope.kinds.filterKeys { it in kept }.mapValuesTo(LinkedHashMap()) { Kind.ANY }.apply { putAll(next.kinds) })
+        val items = Scope(scope.kinds.filterKeys { it in kept }.mapValuesTo(LinkedHashMap()) { Kind.ANY }.apply { putAll(next.kinds) }, shadowing = LinkedHashSet(next.shadowing))
         // Read first, so a pattern that names a variable the order can't read is refused for that (42N29), before as a value (42I34), as Neo4j does.
         projection.orderBy.forEach {
             expression(it.expression, if (groups && !aggregates(it.expression)) items.copy() else reading)
