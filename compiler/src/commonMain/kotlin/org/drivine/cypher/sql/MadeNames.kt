@@ -41,7 +41,7 @@ internal object MadeNames {
                     is Clause.Match -> clause.also { bound = bound + clause.patterns.flatMap(::names) }
                     is Clause.Unwind -> clause.also { bound = bound + clause.variable }
                     is Clause.With -> clause.also { bound = (if (clause.projection.star) bound else emptySet()) + clause.projection.items.map { it.name } + kept }
-                    is Clause.Return -> clause.also { returned = clause.projection.items.map { it.name }.toSet() }
+                    is Clause.Return -> clause.also { returned = (if (clause.projection.star) bound else emptySet()) + clause.projection.items.map { it.name } }
                     is Clause.VectorSearch -> clause.also { bound = bound + listOfNotNull(clause.node, clause.score) }
                     is Clause.Call -> {
                         // Each part of the call over what it imports alone, as VariableKinds reads it.

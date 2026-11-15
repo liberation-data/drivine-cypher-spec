@@ -307,7 +307,8 @@ internal object VariableKinds {
      * (m {f: NOT (a)-->()})`; and anywhere else (its 42I58), as the variable, a property of it or in `EXISTS { … }` or
      * `COUNT { … }`, `CREATE (a {name: 'x'}), (m {f: a.name})`, the node itself `CREATE (m {f: m.k})` among them. A
      * comprehension's variable, and what a pattern comprehension's pattern names, are bound anew, as in Neo4j, and are not
-     * refused for it: `[(a)-->(x) | x]` matches any node as `a`.
+     * refused for it: `[(a)-->(x) | x]` matches any node as `a`, and so does a pattern in its `WHERE` that names it; any
+     * other read of it there is refused (see [reads]).
      */
     private fun madeHere(properties: Expression, own: Set<String>, clause: String) {
         if (own.isEmpty()) return
@@ -325,30 +326,30 @@ internal object VariableKinds {
 
     /**
      * The first of [names] that [expression] reads, and that is not bound anew within it ([bound]): as a variable, a map
-     * projection's, or named in `EXISTS { … }`'s patterns or in a subquery's query (any variable it names there, see
-     * [namedIn]). Not in a pattern used as an expression, which [madeHere] reads first, or a pattern comprehension's pattern.
-     * A subquery within a pattern comprehension reads the clause's variable, not the one the comprehension's pattern names
-     * anew, as Neo4j has it: only a comprehension's, a quantifier's or `reduce()`'s variable is bound there ([scoped]).
+     * projection's or its variable selector's, `x {a}`, in a pattern's properties, or named in `EXISTS { … }`'s patterns or
+     * in a subquery's query (any variable it names there, see [namedIn]). Not the names of a pattern used as an expression,
+     * which [madeHere] reads first, or of a pattern comprehension's pattern, which binds them anew; its `WHERE` and its
+     * projection still read the clause's variable, `[(a)-->(x) WHERE a.id = 'b' | x]`, as Neo4j has it: only a
+     * comprehension's, a quantifier's or `reduce()`'s variable is bound within.
      */
-    private fun reads(expression: Expression, names: Set<String>, bound: Set<String>, scoped: Set<String> = bound): String? {
-        fun read(part: Expression, inner: Set<String> = bound, within: Set<String> = scoped) = reads(part, names, inner, within)
-        fun own(name: String, inner: Set<String> = bound) = name.takeIf { it in names && it !in inner }
+    private fun reads(expression: Expression, names: Set<String>, bound: Set<String>): String? {
+        fun read(part: Expression, inner: Set<String> = bound) = reads(part, names, inner)
+        fun own(name: String) = name.takeIf { it in names && it !in bound }
+        fun properties(pattern: Pattern) = (pattern.nodes.mapNotNull { it.properties } + pattern.relationships.mapNotNull { it.properties }).firstNotNullOfOrNull { read(it) }
         return when (expression) {
             is Expression.Variable -> own(expression.name)
-            is Expression.MapProjection -> own(expression.variable) ?: parts(expression).firstNotNullOfOrNull { read(it) }
-            is Expression.PatternPredicate -> null
-            is Expression.PatternComprehension -> {
-                val inner = bound + named(expression.pattern) + listOfNotNull(expression.pattern.variable)
-                listOfNotNull(expression.where, expression.projection).firstNotNullOfOrNull { read(it, inner) }
-            }
+            is Expression.MapProjection -> own(expression.variable)
+                ?: expression.elements.firstNotNullOfOrNull { (it as? Expression.MapProjection.Element.Variable)?.let { element -> own(element.name) } }
+                ?: parts(expression).firstNotNullOfOrNull { read(it) }
+            is Expression.PatternPredicate -> properties(expression.pattern)
+            is Expression.PatternComprehension -> properties(expression.pattern) ?: parts(expression).firstNotNullOfOrNull { read(it) }
             is Expression.ListComprehension ->
-                read(expression.list) ?: listOfNotNull(expression.where, expression.projection).firstNotNullOfOrNull { read(it, bound + expression.variable, scoped + expression.variable) }
-            is Expression.Quantifier -> read(expression.list) ?: expression.where?.let { read(it, bound + expression.variable, scoped + expression.variable) }
-            is Expression.Reduce -> read(expression.initial) ?: read(expression.list) ?: (bound + expression.accumulator + expression.variable).let { inner ->
-                read(expression.expression, inner, scoped + expression.accumulator + expression.variable)
-            }
-            is Expression.Exists -> expression.patterns.flatMap { named(it) }.firstNotNullOfOrNull { own(it, scoped) } ?: expression.where?.let { read(it, scoped) }
-            is Expression.Subquery -> namedIn(expression.query).firstNotNullOfOrNull { own(it, scoped) }
+                read(expression.list) ?: listOfNotNull(expression.where, expression.projection).firstNotNullOfOrNull { read(it, bound + expression.variable) }
+            is Expression.Quantifier -> read(expression.list) ?: expression.where?.let { read(it, bound + expression.variable) }
+            is Expression.Reduce -> read(expression.initial) ?: read(expression.list) ?: read(expression.expression, bound + expression.accumulator + expression.variable)
+            is Expression.Exists -> expression.patterns.flatMap { named(it) }.firstNotNullOfOrNull { own(it) }
+                ?: expression.patterns.firstNotNullOfOrNull { properties(it) } ?: expression.where?.let { read(it) }
+            is Expression.Subquery -> namedIn(expression.query).firstNotNullOfOrNull { own(it) }
             else -> parts(expression).firstNotNullOfOrNull { read(it) }
         }
     }
@@ -364,7 +365,10 @@ internal object VariableKinds {
             fun name(name: String) { if (name !in bound) names += name }
             when (expression) {
                 is Expression.Variable -> name(expression.name)
-                is Expression.MapProjection -> name(expression.variable)
+                is Expression.MapProjection -> {
+                    name(expression.variable)
+                    expression.elements.forEach { if (it is Expression.MapProjection.Element.Variable) name(it.name) }
+                }
                 is Expression.PatternPredicate -> named(expression.pattern).forEach(::name)
                 is Expression.PatternComprehension -> named(expression.pattern).forEach(::name)
                 is Expression.Exists -> expression.patterns.forEach { named(it).forEach(::name) }
