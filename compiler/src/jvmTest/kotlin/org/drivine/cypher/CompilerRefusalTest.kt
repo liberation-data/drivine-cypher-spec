@@ -97,7 +97,7 @@ class CompilerRefusalTest {
                 "MATCH (n) UNWIND [n] AS x MATCH (m) WHERE (m)-->(x) RETURN m",
                 "MATCH (n) CALL (n) { MATCH (m) WHERE (n)-->(m) RETURN m } RETURN m",
                 "MATCH (n) CALL { WITH n MATCH (m) WHERE (n)-->(m) RETURN m } RETURN m",
-                "MATCH (n) RETURN CASE WHEN (n)-->() THEN 1 ELSE 0 END, (n)-->() AS has ORDER BY (n)-->()",
+                "MATCH (n) RETURN CASE WHEN (n)-->() THEN 1 ELSE 0 END, NOT (n)-->() AS none ORDER BY EXISTS { (n)-->() }",
             ).forEach { cypher -> compiler.compile(cypher) }
         }
     }

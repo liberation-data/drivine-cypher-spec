@@ -2610,6 +2610,105 @@ cases:
         only: [neo4j, sql]
         rows: ["Hugo", "Carrie", "Keanu", "Laurence"]
 
+  - name: "Items of a WITH named without AS"
+    description: "A variable, one in parentheses, and a map projection are items of a WITH without an alias, named after their variable, as Neo4j takes them; any other item has one (see refusals.yaml, \"Expression in WITH without an alias\")."
+    steps:
+      - cypher: "MATCH (p:Person) WITH (p) RETURN p.name ORDER BY p.name"
+        rows: ["Carrie", "Hugo", "Keanu", "Laurence"]
+      - cypher: "MATCH (p:Person) WITH p {.name} RETURN 1"
+        rows: [1, 1, 1, 1]
+      - cypher: "MATCH (p:Person) WITH p, p.born + 1 AS b RETURN p.name, b ORDER BY p.name"
+        rows: [["Carrie", 1968], ["Hugo", null], ["Keanu", 1965], ["Laurence", 1962]]
+
+  - name: "Order by a key's expression beside an aggregate"
+    description: "The ORDER BY of a WITH or a RETURN that aggregates, or is DISTINCT, orders by a term that holds an aggregate beside a key's expression written out, a key's item, or a variable or an expression the items don't keep within an aggregate, as Neo4j 2026.10.1 takes each (liberation-data/drivine4j#714; the openCypher TCK expects ReturnOrderBy6 [5] and WithOrderBy4 [13], [14] and [20] refused)."
+    steps:
+      - note: "The openCypher TCK's ReturnOrderBy6 [5]."
+        cypher: "MATCH (me:Person)--(you:Person) RETURN me.born + you.born, count(*) AS cnt ORDER BY me.born + you.born + count(*)"
+        rows: [[3925, 2], [3931, 2]]
+      - note: "The openCypher TCK's WithOrderBy4 [20], its key named."
+        cypher: "MATCH (me:Person)--(you:Person) WITH me.born + you.born AS s, count(*) AS cnt ORDER BY me.born + you.born + count(*) RETURN s, cnt"
+        rows: [[3925, 2], [3931, 2]]
+      - cypher: "MATCH (me:Person)--(you:Person) RETURN DISTINCT me.born + you.born AS s ORDER BY me.born + you.born + count(*)"
+        rows: [3925, 3931]
+      - cypher: "MATCH (me:Person)--(you:Person) RETURN me.born + you.born AS s, count(*) AS cnt ORDER BY (me.born + you.born) * count(*)"
+        rows: [[3925, 2], [3931, 2]]
+      - cypher: "MATCH (me:Person)--(you:Person) RETURN me.born + you.born AS s, count(*) AS cnt ORDER BY [me.born + you.born, count(*)]"
+        rows: [[3925, 2], [3931, 2]]
+      - cypher: "MATCH (me:Person)--(you:Person) RETURN me.born + you.born AS s, count(*) AS cnt ORDER BY s + count(*)"
+        rows: [[3925, 2], [3931, 2]]
+      - cypher: "MATCH (me:Person)--(you:Person) RETURN me.born AS b, count(*) AS cnt ORDER BY me.born + count(*)"
+        rows: [[1961, 1], [1964, 2], [1967, 1]]
+      - cypher: "MATCH (me:Person)--(you:Person) RETURN me, count(*) AS cnt ORDER BY me.born + count(*)"
+        rows: [[{name: "Laurence", born: 1961}, 1], [{name: "Keanu", born: 1964}, 2], [{name: "Carrie", born: 1967}, 1]]
+      - cypher: "MATCH (p:Person)-[:ACTED_IN]->(m) RETURN toUpper(p.name) AS u, count(*) AS c ORDER BY toUpper(p.name) + count(*)"
+        rows: [["CARRIE", 2], ["KEANU", 3], ["LAURENCE", 1]]
+      - cypher: "MATCH (p:Person)-[:ACTED_IN]->(m) RETURN p.name AS n, count(*) AS c ORDER BY p.name + toString(count(*))"
+        rows: [["Carrie", 2], ["Keanu", 3], ["Laurence", 1]]
+      - cypher: "MATCH (p:Person)-[:ACTED_IN]->(m) RETURN p, count(*) AS c ORDER BY p.name + toString(count(*))"
+        rows: [[{name: "Carrie", born: 1967}, 2], [{name: "Keanu", born: 1964}, 3], [{name: "Laurence", born: 1961}, 1]]
+      - cypher: "MATCH (p:Person)-[:ACTED_IN]->(m) WITH p, count(*) AS c ORDER BY p.born + count(*) RETURN p.name, c"
+        rows: [["Laurence", 1], ["Keanu", 3], ["Carrie", 2]]
+      - cypher: "MATCH (p:Person)-[:ACTED_IN]->(m) RETURN p.name AS n, count(*) AS c ORDER BY min(m.released) + count(*), n"
+        rows: [["Keanu", 3], ["Laurence", 1], ["Carrie", 2]]
+      - cypher: "MATCH (p:Person)-[:ACTED_IN]->(m) RETURN p.name AS n, count(*) AS c ORDER BY max(p.born), n"
+        rows: [["Laurence", 1], ["Keanu", 3], ["Carrie", 2]]
+      - cypher: "MATCH (p:Person)-[:ACTED_IN]->(m) RETURN p.name AS n, collect(m.title) AS ts ORDER BY size(collect(m.title)), n"
+        unorderedLists: true
+        rows: [["Laurence", ["The Matrix"]], ["Carrie", ["The Matrix", "The Matrix Reloaded"]], ["Keanu", ["The Matrix", "The Matrix Reloaded", "Johnny Mnemonic"]]]
+      - note: "The openCypher TCK's WithOrderBy4 [13], over its graph's values: a variable the WITH drops, aggregated."
+        cypher: "UNWIND [{num: 1, num2: 4}, {num: 5, num2: 2}, {num: 9, num2: 0}, {num: 3, num2: 3}, {num: 7, num2: 1}] AS a WITH a, a.num + a.num2 AS sum WITH a.num2 % 3 AS mod, min(sum) AS min ORDER BY sum(sum) LIMIT 2 RETURN mod, min"
+        rows: [[2, 7], [1, 5]]
+      - note: "The openCypher TCK's WithOrderBy4 [14]: an expression the WITH drops, aggregated."
+        cypher: "UNWIND [{num: 1, num2: 4}, {num: 5, num2: 2}, {num: 9, num2: 0}, {num: 3, num2: 3}, {num: 7, num2: 1}] AS a WITH a.num2 % 3 AS mod, min(a.num + a.num2) AS min ORDER BY sum(a.num + a.num2) LIMIT 2 RETURN mod, min"
+        rows: [[2, 7], [1, 5]]
+      - cypher: "UNWIND [{num: 1, num2: 4}, {num: 5, num2: 2}, {num: 9, num2: 0}, {num: 3, num2: 3}, {num: 7, num2: 1}] AS a WITH a, a.num + a.num2 AS sum RETURN a.num2 % 3 AS mod, min(sum) AS min ORDER BY sum(sum) LIMIT 2"
+        rows: [[2, 7], [1, 5]]
+      - cypher: "UNWIND [{num: 1, num2: 4}, {num: 5, num2: 2}, {num: 9, num2: 0}, {num: 3, num2: 3}, {num: 7, num2: 1}] AS a RETURN a.num2 % 3 AS mod, min(a.num + a.num2) AS min ORDER BY sum(a.num + a.num2) LIMIT 2"
+        rows: [[2, 7], [1, 5]]
+      - cypher: "UNWIND [{num: 1, num2: 4}, {num: 5, num2: 2}, {num: 9, num2: 0}, {num: 3, num2: 3}, {num: 7, num2: 1}] AS a WITH a.num2 % 3 AS mod, min(a.num) AS min ORDER BY sum(a.num2) LIMIT 2 RETURN mod, min"
+        rows: [[2, 5], [0, 3]]
+      - cypher: "UNWIND [{num: 1, num2: 4}, {num: 5, num2: 2}, {num: 9, num2: 0}, {num: 3, num2: 3}, {num: 7, num2: 1}] AS a WITH a.num2 % 3 AS mod, count(*) AS c ORDER BY sum(a.num) LIMIT 2 RETURN mod, c"
+        rows: [[2, 1], [1, 2]]
+      - cypher: "UNWIND [{num: 1, num2: 4}, {num: 5, num2: 2}, {num: 9, num2: 0}, {num: 3, num2: 3}, {num: 7, num2: 1}] AS a WITH DISTINCT a.num2 % 3 AS mod ORDER BY sum(a.num + a.num2) RETURN mod"
+        rows: [2, 1, 0]
+
+  - name: "Pattern as a condition in a projection"
+    description: "In a WITH's or a RETURN's items and order, a pattern is a condition where Neo4j takes one: an operand of NOT, AND, OR or XOR, a searched CASE's WHEN, and a comprehension's, a quantifier's or a subquery's WHERE, within a reduce()'s step too; a pattern comprehension, EXISTS { … } and COUNT { … } give its matches. Elsewhere a pattern as a value is refused (see refusals.yaml, \"Pattern used as a value\")."
+    steps:
+      - cypher: "MATCH (n:Person) RETURN NOT (n)-[:KNOWS]->() AS p ORDER BY n.name"
+        rows: [true, true, false, false]
+      - cypher: "MATCH (n:Person) RETURN (n)-[:KNOWS]->() AND true AS p ORDER BY n.name"
+        rows: [false, false, true, true]
+      - cypher: "MATCH (n:Person) RETURN (n)-[:KNOWS]->() OR (n)<-[:KNOWS]-() AS p ORDER BY n.name"
+        rows: [true, false, true, true]
+      - cypher: "MATCH (n:Person) RETURN CASE WHEN (n)-[:KNOWS]->() THEN 1 ELSE 0 END AS p ORDER BY n.name"
+        rows: [0, 0, 1, 1]
+      - cypher: "MATCH (n:Person) RETURN [x IN [1] WHERE (n)-[:KNOWS]->()] AS p ORDER BY n.name"
+        rows: [[], [], [1], [1]]
+      - cypher: "MATCH (n:Person) RETURN any(x IN [1] WHERE (n)-[:KNOWS]->()) AS p ORDER BY n.name"
+        rows: [false, false, true, true]
+      - cypher: "MATCH (n:Person) WITH n, NOT (n)-[:KNOWS]->() AS k RETURN n.name, k ORDER BY n.name"
+        rows: [["Carrie", true], ["Hugo", true], ["Keanu", false], ["Laurence", false]]
+      - cypher: "MATCH (n:Person) RETURN n.name, EXISTS { (n)-[:KNOWS]->() } AS k ORDER BY n.name"
+        rows: [["Carrie", false], ["Hugo", false], ["Keanu", true], ["Laurence", true]]
+      - cypher: "MATCH (n:Person) RETURN n.name, COUNT { (n)-[:KNOWS]->() } AS k ORDER BY n.name"
+        rows: [["Carrie", 0], ["Hugo", 0], ["Keanu", 1], ["Laurence", 1]]
+      - cypher: "MATCH (n:Person) RETURN n.name, [(n)-[:KNOWS]->(m) | m.name] AS k ORDER BY n.name"
+        rows: [["Carrie", []], ["Hugo", []], ["Keanu", ["Carrie"]], ["Laurence", ["Keanu"]]]
+      - note: "Unordered: the rows come in the order the nodes are read."
+        cypher: "MATCH (n:Person) RETURN (n)-->() XOR n.born > 1960 AS c"
+        unordered: true
+        rows: [false, false, false, null]
+      - note: "On Oracle a reduce()'s step runs as a function of its own, which reads no node of the row's: there the compiler refuses it, saying n is not a node."
+        cypher: "MATCH (n:Person) RETURN reduce(a = false, x IN [1] | a OR (n)-->()) AS c"
+        except: [oracle]
+        unordered: true
+        rows: [true, true, true, false]
+      - cypher: "MATCH (n:Person) RETURN EXISTS { MATCH (n)-->(m) WHERE (m)-->() } AS c"
+        unordered: true
+        rows: [true, false, true, false]
+
   - name: "Aggregate beside a WHERE"
     description: "A WHERE over what an aggregate gave, and one in a subquery's or a CALL's own query, which aggregates in its projection, filters as Neo4j does. An aggregate in the WHERE of a WITH that groups is in \"Aggregate in the WHERE of a WITH that groups\"; in any other WHERE it is refused (see refusals.yaml, \"Aggregate in a WHERE\")."
     steps:
