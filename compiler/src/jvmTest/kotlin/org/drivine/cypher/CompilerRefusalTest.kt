@@ -849,6 +849,7 @@ class CompilerRefusalTest {
             taken("RETURN toString([null, null])", "[null, null]"), taken("RETURN toString([1, null])", "[1, null]"),
             taken("RETURN toString(\$l)", parameters = mapOf("l" to listOf(1, 2))), taken("RETURN toString(\$l)", parameters = mapOf("l" to listOf(1, "a"))),
             taken("WITH \$m AS m RETURN toString(m.l)", parameters = mapOf("m" to mapOf("l" to listOf(1, 2)))),
+            taken("WITH {l: [1, [2, 'x'], {k: 1}]} AS m RETURN toString(m.l)"),
             taken("MATCH (p:Person {name: 'Keanu'}) RETURN toString([p.born, p.born])"),
             taken("MATCH (p:Person {name: 'Keanu'}) RETURN toString([p.name, p.born, p.born / 2.0, p.nope])"),
             taken("MATCH (p:Person {name: 'Keanu'}) RETURN toString([p {}, p.born])"),
@@ -874,6 +875,11 @@ class CompilerRefusalTest {
             refused("MATCH path = (:Person)-[:KNOWS]->() RETURN toString(nodes(path))"),
             refused("MATCH path = (:Person)-[:KNOWS]->() RETURN toString(relationships(path))"),
             refused("MATCH (:Person)-[r:KNOWS*]->() RETURN toString(r)"),
+            // As captured, past a WITH that limits the rows.
+            refused("MATCH (p:Person {name: 'Keanu'})-[r]->(m) WITH p, r LIMIT 1 RETURN toString([p, r])"),
+            refused("MATCH path = (p:Person)-[:ACTED_IN]->() WITH path LIMIT 1 RETURN toString(nodes(path))"),
+            refused("MATCH path = (p:Person)-[:ACTED_IN]->() WITH path LIMIT 1 RETURN toString(relationships(path))"),
+            refused("MATCH (p:Person)-[r*1..2]->() WITH r LIMIT 1 RETURN toString(r)"),
             refused("MATCH (p:Person) RETURN toString([(p)-[:ACTED_IN]->(m) | m.title])"),
             refused("MATCH (p:Person) RETURN toString(collect([p.born, 'x']))"),
             // A list of lists of one kind, one a WITH binds, a CASE of texts among texts, floats alone, a comprehension of numbers.
