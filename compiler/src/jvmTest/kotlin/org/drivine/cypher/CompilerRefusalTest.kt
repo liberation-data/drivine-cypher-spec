@@ -219,6 +219,8 @@ class CompilerRefusalTest {
                 "RETURN toString([1, 2])", "RETURN toString([[1], [2]])", "RETURN toString([1.0E20, 0.001])", "RETURN toString([date('2024-01-02')])",
                 "WITH [1, 2] AS l RETURN toString(l)", "UNWIND [1964, 1967] AS b WITH collect(b) AS c RETURN toString(c)",
                 "UNWIND [1, 2] AS b RETURN toString(collect(b))",
+                // Held in a write's rows past it, the list is still of one kind.
+                "WITH [1, 2] AS l CREATE (n) RETURN toString(l)",
             ).forEach { cypher ->
                 val refused = assertThrows<CompilerException>("${compiler::class.simpleName}: $cypher") { compiler.compile(cypher) }.message!!
                 assertEquals("toString() takes a number, a text, a truth value or a temporal value, not a list of one kind, as in Neo4j.", refused)
@@ -230,6 +232,9 @@ class CompilerRefusalTest {
             listOf(
                 "MATCH (n) RETURN toString([n.x, n.y]), toString(collect(n.x))", "MATCH (n) WITH collect(n.x) AS c RETURN toString(c)",
                 "WITH [1, 'a'] AS l WITH l RETURN toString(l)", "RETURN toString([])", "WITH 'K' AS s, 1.5 AS f RETURN toString([s, f, true])",
+                // A UNION whose queries make it lists of different kinds of item, or of one and of many, makes it of no one kind.
+                "CALL { RETURN [1, 2] AS l UNION RETURN [1, 'a'] AS l } RETURN toString(l)",
+                "CALL { RETURN [1, 2] AS l UNION RETURN ['a'] AS l } RETURN toString(l)",
             ).forEach(compiler::compile)
         }
     }
