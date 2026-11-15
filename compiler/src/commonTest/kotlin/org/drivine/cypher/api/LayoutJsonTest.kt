@@ -115,7 +115,7 @@ class LayoutJsonTest {
             "{\"layout\": {\"engine\": \"POSTGRES\", \"graph\": \"g\", \"stamps\": [{\"layout\": 4294967298}], \"foreignNodes\": false}}" to "A layout request's stamp gives its layout as a whole number: 4294967298.",
             "{\"layout\": {\"engine\": \"POSTGRES\", \"graph\": \"g\", \"stamps\": [], \"foreignNodes\": false, \"objects\": {}}}" to "A layout request gives the objects as a list.",
             "{\"layout\": {\"engine\": \"POSTGRES\", \"graph\": \"g\", \"stamps\": [], \"foreignNodes\": false, \"objects\": [\"x\"]}}" to "A layout request's object is a map.",
-            "{\"read\": \"1\", \"cypher\": \"RETURN 1\"}" to "A request gives one of cypher, search, searchIndex, vector, settings, fragment, read, temporalKey, layout and expand.",
+            "{\"read\": \"1\", \"cypher\": \"RETURN 1\"}" to "A request gives one of cypher, search, searchIndex, vector, settings, fragment, read, temporalKey, layout, expand, write and storeStatements.",
         )) {
             assertEquals(message, answer(request)["error"]?.textValue(), request)
         }
@@ -145,6 +145,33 @@ class LayoutJsonTest {
             assertEquals(expected, answer("{\"expand\": ${json(statement.textValue())}}")["text"]!!.textValue(), "on $target")
         }
         assertTrue(answer("{\"expand\": 1}")["error"] != null)
+    }
+
+    @Test
+    fun aValueWrittenIsAsDrivine4jWritesItThroughValueToTree() {
+        // Each request's value beside the Kotlin value drivine4j gives valueToTree: the same JSON, on every target.
+        val date = org.drivine.cypher.json.TemporalValue(org.drivine.cypher.sql.Temporal.DATE, "2024-01-01")
+        val at = org.drivine.cypher.json.TemporalValue(org.drivine.cypher.sql.Temporal.DATE_TIME, "2024-01-01T10:00:00+02:00")
+        val cases = listOf(
+            "{\"\$temporal\": \"DATE\", \"text\": \"2024-01-01\"}" to date,
+            "{\"a\": {\"\$temporal\": \"DATE_TIME\", \"text\": \"2024-01-01T10:00:00+02:00\"}, \"\$k\": [1, {\"\$\$x\": true}]}" to
+                mapOf("a" to at, "\$k" to listOf(1L, mapOf("\$\$x" to true))),
+            "[{\"\$temporal\": \"DURATION\", \"text\": \"PT1S\"}, \"x\", null]" to
+                listOf(org.drivine.cypher.json.TemporalValue(org.drivine.cypher.sql.Temporal.DURATION, "PT1S"), "x", null),
+            "9007199254740993" to 9007199254740993L,
+            "1.5" to 1.5,
+            "\"\$t\"" to "\$t",
+            "null" to null,
+        )
+        for ((given, value) in cases) {
+            val got = answer("{\"write\": $given}")
+            assertEquals(json(value), got["value"]?.let(CypherJson::writeValueAsString), "on $target, $given: $got")
+        }
+        // A temporal value's tag holds its sort key, and a key that begins with `$` is escaped, however deep.
+        val written = answer("{\"write\": {\"m\": {\"\$x\": {\"\$temporal\": \"DATE\", \"text\": \"2024-01-01\"}}}}")["value"]!!
+        assertEquals("date", written["m"]!!["\$\$x"]!!["\$t"]!!.textValue(), "on $target: $written")
+        assertTrue(written["m"]!!["\$\$x"]!!["s"]!!.isTextual, "on $target: $written")
+        assertTrue(answer("{\"write\": ${"[".repeat(65) + "]".repeat(65)}}")["error"] != null, "a value nested past MAX_DEPTH is refused")
     }
 
     private fun texts(node: JsonNode): List<String> = (node as ArrayNode).map { it.textValue()!! }

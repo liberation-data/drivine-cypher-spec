@@ -35,6 +35,12 @@ import org.drivine.cypher.store.marker.StoreLayout
  *   run the drops, then the restamp with the parameters, or where `assign`, the stamp's `assignIfAbsent` with its own
  *   parameters, as the graph has no stamp to give the layout, then read the stamps, list the objects again, and ask again; or
  *   `{"verdict": "refuse", "message": "…"}`.
+ * - `{"write": <a value>}`: the value as the store layout holds it (liberation-data/drivine-cypher-spec#107), as drivine4j
+ *   writes a parameter or a node's properties through [CypherJson.valueToTree]: each temporal value, given as a request's
+ *   parameter gives one (`{"$temporal": "DATE", "text": "2024-01-01"}`, its kind as [org.drivine.cypher.sql.Temporal] names it), its tag `{"$t", "v", "s"}`, and each map key that
+ *   begins with `$` escaped, at any depth. Every other value is written as the request gives it, a whole number past 2^53
+ *   exactly. Answered `{"value": <the value as JSON>}`, so a host that writes its parameters, its save plan or a node's
+ *   properties in layout 2 writes them as the other libraries do, with no writer of its own.
  * - `{"expand": "<a statement of store.yaml's>"}`: [GeneratedFunctions.expand], each marker of a generated function in it
  *   (`<TemporalArithmeticFunction.postgres(drivine)>`) written out as the module makes it, as a runner of `store.yaml` reads
  *   the statements it compares. Answered `{"text": "…"}`.
@@ -43,7 +49,7 @@ import org.drivine.cypher.store.marker.StoreLayout
 internal object LayoutJson {
 
     /** The request kinds this answers, each the key a request gives in place of `cypher`. */
-    val KINDS = listOf("read", "temporalKey", "layout", "expand")
+    val KINDS = listOf("read", "temporalKey", "layout", "expand", "write")
 
     /** The answer to [tree], a request that gives one of [KINDS]. */
     fun answer(tree: ObjectNode): String = try {
@@ -51,6 +57,7 @@ internal object LayoutJson {
             tree.has("read") -> read(tree)
             tree.has("temporalKey") -> temporalKey(tree["temporalKey"])
             tree.has("expand") -> expand(tree["expand"])
+            tree.has("write") -> write(tree["write"])
             else -> layout(tree["layout"])
         }
     } catch (e: Exception) {
@@ -69,6 +76,12 @@ internal object LayoutJson {
             throw IllegalArgumentException("A read request's column is no JSON: ${e.message}")
         }
         return "{\"value\":${CypherJson.writeValueAsString(ValueLayout.read(value, typed?.booleanValue() ?: false))}}"
+    }
+
+    private fun write(given: JsonNode?): String {
+        // As a parameter is read: the value is at 2, inside the request's object.
+        val value = TypedJson.value(given ?: throw IllegalArgumentException("A write request gives the value."), depth = 2)
+        return "{\"value\":${CypherJson.writeValueAsString(CypherJson.valueToTree(value))}}"
     }
 
     private fun expand(given: JsonNode?): String {
