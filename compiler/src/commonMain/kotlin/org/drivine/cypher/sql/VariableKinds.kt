@@ -40,7 +40,7 @@ internal class VariableKinds(private val aggregates: (Expression) -> Boolean) {
      * The variables in scope, by name, each of its kind. Of them, those a `WITH` passes on not, read in its `WHERE` ([dropped]):
      * a value there may read them, but a pattern names none of them (see [use]), in a subquery's too. One bound again within, as a
      * comprehension's variable, is no longer one of them. Of those, the ones a `WITH` that neither groups nor is `DISTINCT`
-     * drops ([shadowing]): Neo4j still reads them there, so a quantified path pattern's group names none of them as its own
+     * drops that no `WITH` before it had dropped ([shadowing]): Neo4j still reads them there, so a quantified path pattern's group names none of them as its own
      * (see [grouped]).
      */
     private class Scope(
@@ -179,7 +179,7 @@ internal class VariableKinds(private val aggregates: (Expression) -> Boolean) {
      * `*` each variable in scope. Its `WHERE`, [where], and its order read the items, and a variable before it as of any kind;
      * but a pattern in the `WHERE` names only what the `WITH` passes on, and what a `CALL`'s brackets import or a subquery
      * reads from outside it, [kept], as Neo4j has it after a `WITH` that groups or is DISTINCT (drivine4j#504). After one
-     * that neither groups nor is DISTINCT, Neo4j reads in the `WHERE` what it drops, so a quantified path pattern's group there
+     * that neither groups nor is DISTINCT, Neo4j reads in the `WHERE` what it drops, but what a `WITH` before had dropped already, so a quantified path pattern's group there
      * names none of them as its own (Neo4j's 42N07, drivine4j#681). After one that groups or is DISTINCT, a term of its order
      * that doesn't aggregate reads only the items, and [kept]: a pattern used as an expression there that names a variable
      * from before is refused, as Neo4j refuses it (its 42N29), where the compiler would read it as a new node that matches every
@@ -201,7 +201,8 @@ internal class VariableKinds(private val aggregates: (Expression) -> Boolean) {
         val groups = projection.distinct || projection.items.any { aggregates(it.expression) }
         where?.let {
             val dropped = scope.kinds.keys.filterTo(LinkedHashSet(next.dropped)) { name -> next[name] == null && name !in kept }
-            val shadowing = if (groups) LinkedHashSet(next.shadowing) else dropped.toCollection(LinkedHashSet(next.shadowing))
+            // Not one a WITH before had dropped already, which Neo4j reads here no more than there.
+            val shadowing = if (groups) LinkedHashSet(next.shadowing) else dropped.filterTo(LinkedHashSet(next.shadowing)) { it !in scope.dropped }
             expression(it, Scope(LinkedHashMap(reading.kinds), dropped, shadowing))
         }
         val items = Scope(scope.kinds.filterKeys { it in kept }.mapValuesTo(LinkedHashMap()) { Kind.ANY }.apply { putAll(next.kinds) })

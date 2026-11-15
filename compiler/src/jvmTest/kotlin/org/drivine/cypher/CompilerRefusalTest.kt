@@ -439,6 +439,9 @@ class CompilerRefusalTest {
                 "MATCH (a) MATCH p = (a)-->() RETURN nodes(p)",
                 "MATCH ()-[r*]->() RETURN size(r)",
                 "MATCH (a) WITH collect(a) AS ns UNWIND ns AS n MATCH (n)-->(m) RETURN m",
+                // A quantified path pattern's group in a subquery's WITH naming what a WITH before dropped already (#681).
+                "MATCH (p) WITH DISTINCT p AS q WHERE EXISTS { MATCH (q)-->(m) WITH m WHERE EXISTS { (m) ((p)-->(b))+ () } RETURN m } RETURN q",
+                "MATCH (p) WITH p AS q, count(*) AS c WHERE EXISTS { MATCH (q)-->(m) WITH m WHERE EXISTS { (m) ((p)-->(b))+ () } RETURN m } RETURN q",
             ).forEach { compiler().compile(it) }
             // Neo4j takes these too, and the compiler refuses them for what it does not compile yet, as before. So it refuses a
             // relationship bound before a CREATE or a MERGE that makes it again, as the spec has it, which Neo4j refuses as bound already.

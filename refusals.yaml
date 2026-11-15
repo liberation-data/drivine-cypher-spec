@@ -954,7 +954,7 @@ cases:
         error: "p is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used."
 
   - name: "Pattern in the ORDER BY of a projection that groups, naming a variable it drops"
-    description: "After a WITH or a RETURN that aggregates or is DISTINCT, a pattern used as an expression in a term of its ORDER BY that doesn't aggregate names only the items, and what a comprehension or a pattern around it binds, there or within an EXISTS { … }'s or a COUNT { … }'s WHERE. One that names a variable from before that no item is, a key it renames among them, is refused, as Neo4j refuses it (its 42N29): read as a new node, it would match every row (drivine4j#680). An EXISTS { … }, a COUNT { … } or a pattern comprehension there binds such a variable as its own, as Neo4j does (see queries.yaml, \"Pattern in the ORDER BY of a projection that groups\"). A term that aggregates is checked as before (see \"Implicit grouping key in a body or an ORDER BY\")."
+    description: "After a WITH or a RETURN that aggregates or is DISTINCT, a pattern used as an expression in a term of its ORDER BY that doesn't aggregate names only the items, what its CALL imports or its subquery reads from outside it, and what a comprehension or a pattern around it binds, there or within an EXISTS { … }'s or a COUNT { … }'s WHERE. One that names a variable from before that no item is, a key it renames among them, is refused, as Neo4j refuses it (its 42N29): read as a new node, it would match every row (drivine4j#680). An EXISTS { … }, a COUNT { … } or a pattern comprehension there binds such a variable as its own, as Neo4j does (see queries.yaml, \"Pattern in the ORDER BY of a projection that groups\"). A term that aggregates is checked as before (see \"Implicit grouping key in a body or an ORDER BY\")."
     steps:
       - cypher: "MATCH (p:Person) WITH p AS q, count(*) AS c ORDER BY (p)-->() RETURN q.name"
         error: "p is not defined: a pattern used as an expression binds no new variable, as in Neo4j. Bind it in a MATCH, or test the pattern with EXISTS { … }."
@@ -1214,6 +1214,9 @@ cases:
         cypher: "MATCH (n:Person) RETURN n.name ORDER BY (n)-[:KNOWS]->(), n.name"
         error: "A pattern expression can only be used to test the existence of a pattern, as in Neo4j: as a condition, as in a WHERE. Use a pattern comprehension instead, as in [(a)-->(b) | b], or EXISTS { … } or COUNT { … }."
       - cypher: "MATCH (n:Person) WITH n ORDER BY (n)-[:KNOWS]->(), n.name RETURN n.name"
+        error: "A pattern expression can only be used to test the existence of a pattern, as in Neo4j: as a condition, as in a WHERE. Use a pattern comprehension instead, as in [(a)-->(b) | b], or EXISTS { … } or COUNT { … }."
+      - note: "A grouping subquery's, naming a variable its CALL imports, which its order reads as a value (drivine4j#680)."
+        cypher: "MATCH (p:Person) CALL (p) { MATCH (x) RETURN x, count(*) AS c ORDER BY (p)-->(), x } RETURN count(*)"
         error: "A pattern expression can only be used to test the existence of a pattern, as in Neo4j: as a condition, as in a WHERE. Use a pattern comprehension instead, as in [(a)-->(b) | b], or EXISTS { … } or COUNT { … }."
       - note: "An UNWIND's list."
         cypher: "MATCH (n:Person) UNWIND [(n)-[:KNOWS]->()] AS x RETURN x"

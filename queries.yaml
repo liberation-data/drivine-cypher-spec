@@ -2010,6 +2010,15 @@ cases:
       - cypher: "MATCH (p:Person) WITH p AS q MATCH (q) ((p)-->(b))+ () RETURN DISTINCT q.name ORDER BY q.name"
         only: [neo4j, sql]
         rows: ["Carrie", "Keanu", "Laurence"]
+      - note: "In a subquery's WITH in the WHERE, one the WITH before had dropped already, which Neo4j reads there no more."
+        cypher: "MATCH (p:Person) WITH DISTINCT p AS q WHERE EXISTS { MATCH (q)-->(m) WITH m WHERE EXISTS { (m) ((p)-->(b))+ () } RETURN m } RETURN q.name"
+        only: [neo4j, sql]
+        unordered: true
+        rows: ["Keanu", "Laurence"]
+      - cypher: "MATCH (p:Person) WITH p AS q, count(*) AS c WHERE EXISTS { MATCH (q)-->(m) WITH m WHERE EXISTS { (m) ((p)-->(b))+ () } RETURN m } RETURN q.name"
+        only: [neo4j, sql]
+        unordered: true
+        rows: ["Keanu", "Laurence"]
       - note: "A variable bound outside the group may be a node beside it."
         cypher: "MATCH (p:Person) MATCH (q:Person) WHERE EXISTS { (q) ((a)-->(b))+ (p) } RETURN q.name, p.name ORDER BY q.name, p.name"
         only: [neo4j, sql]
@@ -2559,7 +2568,7 @@ cases:
         rows: [["X", 2], ["Y", 1]]
 
   - name: "Pattern in the ORDER BY of a projection that groups"
-    description: "After a WITH or a RETURN that aggregates or is DISTINCT, an EXISTS { … }, a COUNT { … } or a pattern comprehension in its ORDER BY that names a variable from before that no item is binds it as its own, as Neo4j does, so it matches any node; a pattern used as an expression there may name only the items (see refusals.yaml, \"Pattern in the ORDER BY of a projection that groups, naming a variable it drops\", drivine4j#680). After one that neither groups nor is DISTINCT, Neo4j reads the variable from before it."
+    description: "After a WITH or a RETURN that aggregates or is DISTINCT, an EXISTS { … }, a COUNT { … } or a pattern comprehension in its ORDER BY that names a variable from before that no item is binds it as its own, as Neo4j does, so it matches any node, but where the term is an item's expression, which is read as the item; a pattern used as an expression there may name only the items (see refusals.yaml, \"Pattern in the ORDER BY of a projection that groups, naming a variable it drops\", drivine4j#680). After one that neither groups nor is DISTINCT, Neo4j reads the variable from before it."
     steps:
       - note: "A new variable, so each row is ordered alike, by the name after it."
         cypher: "MATCH (p:Person) WITH p AS q, count(*) AS c ORDER BY COUNT { (p)-->() }, q.name RETURN q.name"
@@ -2592,6 +2601,17 @@ cases:
       - cypher: "MATCH (p:Person)-[:ACTED_IN]->(m) WITH p, count(*) AS c ORDER BY COUNT { (m)<--() }, p.name RETURN p.name, c"
         only: [neo4j, sql]
         rows: [["Carrie", 2], ["Keanu", 3], ["Laurence", 1]]
+      - note: "A variable a CALL imports, read in its grouping RETURN's order."
+        cypher: "MATCH (p:Person) CALL (p) { MATCH (x:Movie) RETURN x, count(*) AS c ORDER BY EXISTS { (p)-->() }, x.title } RETURN count(*)"
+        only: [neo4j, sql]
+        rows: [12]
+      - note: "A term that is an item's expression is read as the item."
+        cypher: "MATCH (p:Person) RETURN DISTINCT COUNT { (p)-->() } AS k ORDER BY COUNT { (p)-->() }"
+        only: [neo4j, sql]
+        rows: [0, 2, 4]
+      - cypher: "MATCH (p:Person) RETURN COUNT { (p)-->() } AS k, count(*) AS c ORDER BY COUNT { (p)-->() }"
+        only: [neo4j, sql]
+        rows: [[0, 1], [2, 2], [4, 1]]
       - note: "An item is read as the item, in a pattern used as an expression too."
         cypher: "MATCH (p:Person) WITH p, count(*) AS c ORDER BY COUNT { (p)-->() }, p.name RETURN p.name, c"
         only: [neo4j, sql]
