@@ -896,6 +896,9 @@ class CompilerRefusalTest {
             // head(), last() and an item [i] of a list of lists of one kind are a list of it, and so is a CASE each of whose values,
             // its ELSE too, is a list of one kind.
             refused("RETURN toString(head([[1], [2]]))"), refused("RETURN toString(last([[1], [2]]))"), refused("RETURN toString([[1], [2]][0])"),
+            // Not captured: so is one of tail(), reverse() or a slice of such a list, which keep its kind (innerItems).
+            refused("RETURN toString(tail([[1], [2]])[0])"), refused("RETURN toString(head(reverse([[1], [2]])))"),
+            refused("RETURN toString([[1], [2]][0..2][0])"),
             refused("RETURN toString(CASE WHEN true THEN [1, 2] ELSE [3] END)"),
             // A CASE one of whose values is a list of any items, or with no ELSE, which may be null, and coalesce() with a null.
             taken("RETURN toString(CASE WHEN true THEN [1, 2] ELSE [1, 'a'] END)"), taken("RETURN toString(CASE WHEN true THEN [1, 2] END)"),
