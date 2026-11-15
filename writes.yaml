@@ -827,6 +827,38 @@ cases:
         cypher: "MATCH (n:CyWrite) MERGE (m:CyWrite {id: n.id}) ON MATCH SET m.f = n.id RETURN [n.id, m.f] ORDER BY n.id"
         rows: [["a", "a"], ["b", "b"], ["c", "c"], ["d", "d"]]
 
+  - name: "A value worked out of a node, a relationship or a path, set as a property"
+    description: "What Neo4j 2026.10.1 stores of a node, a relationship or a path written as a property: a property of it, in a list or a map written, what a function or a test gives of it, and a list comprehension mapping each to a property, by SET and in what a CREATE makes. The node, the relationship or the path itself is refused (see refusals.yaml, \"Node or relationship set as a property\"), and these are not (drivine4j#814)."
+    steps:
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "A property of a node, in a list written and in a map set."
+        cypher: "MATCH (n:CyWrite {id: 'a'}), (b:CyWrite {id: 'b'}) SET n.p = [b.id, 'x'] RETURN n.p"
+        rows: [[["b", "x"]]]
+      - cypher: "MATCH (n:CyWrite {id: 'a'}), (b:CyWrite {id: 'b'}) SET n += {p: b.id} RETURN n.p"
+        rows: [["b"]]
+      - note: "What a function or a test gives of a node."
+        cypher: "MATCH (n:CyWrite {id: 'a'}), (b:CyWrite {id: 'b'}) SET n.p = labels(b) RETURN n.p"
+        rows: [[["CyWrite"]]]
+      - cypher: "MATCH (n:CyWrite {id: 'a'}), (b:CyWrite {id: 'b'}) SET n.p = b IS NULL RETURN n.p"
+        rows: [[false]]
+      - cypher: "MATCH (n:CyWrite {id: 'a'}), (b:CyWrite {id: 'b'}) SET n.p = elementId(b) RETURN n.p = elementId(b)"
+        rows: [[true]]
+      - cypher: "MATCH (n:CyWrite {id: 'a'}), (b:CyWrite {id: 'b'}) SET n.p = size(keys(properties(b))) RETURN n.p"
+        rows: [[1]]
+      - note: "A list comprehension of nodes to a property of each."
+        cypher: "MATCH (n:CyWrite {id: 'a'}), (b:CyWrite {id: 'b'}) SET n.p = [x IN [b] | x.id] RETURN n.p"
+        rows: [[["b"]]]
+      - note: "A property a CREATE makes, of a node and of a relationship."
+        cypher: "MATCH (n:CyWrite {id: 'a'}), (b:CyWrite {id: 'b'}) CREATE (m:CyMade {p: [b.id], q: size(labels(b)), r: b IS NOT NULL}) RETURN [m.p, m.q, m.r]"
+        rows: [[[["b"], 1, true]]]
+      - cypher: "MATCH (n:CyWrite {id: 'a'})-[r:NEXT]->(b:CyWrite {id: 'b'}) CREATE (n)-[s:CyR {p: type(r), q: [b.id]}]->(b) RETURN [s.p, s.q]"
+        rows: [[["NEXT", ["b"]]]]
+      - note: "What a function gives of a path and of a variable-length relationship's list."
+        cypher: "MATCH p = (n:CyWrite {id: 'a'})-[:NEXT]->(:CyWrite {id: 'b'}) SET n.q = length(p) RETURN n.q"
+        rows: [[1]]
+      - cypher: "MATCH (n:CyWrite {id: 'a'})-[rs:NEXT*1..2]->(:CyWrite {id: 'c'}) SET n.q = size(rs) RETURN n.q"
+        rows: [[2]]
+
   - name: "Variables a comprehension in a write's properties binds anew"
     description: "A comprehension's or a quantifier's variable in a subquery in a property a CREATE makes, of the name of a variable the clause makes, is bound anew there, and a pattern comprehension's pattern binds anew what it names of what the clause makes, a pattern comprehension within it reading the same variable, as Neo4j 2026.10.1 has it (liberation-data/drivine4j#814, #817): each from the graph alone. Within a CALL only what it imports is bound before. A subquery that names the variable otherwise is refused, and so is a read of it in the comprehension's WHERE, its projection or a pattern's properties (see refusals.yaml, \"Variable a write makes, read in a subquery in its properties\"). Where the name a comprehension or a pattern binds is one the clause makes, the SQL stores refuse it as not compiled yet (see refusals.yaml, \"Variable a write makes, read inside a pattern or a comprehension in its properties\")."
     steps:
