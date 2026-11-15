@@ -82,6 +82,18 @@ class Temporals(
     private fun written(text: String) = text.also { written += it }
 
     /**
+     * The text [text] cut to the microsecond, its fraction's seventh to ninth digits left out: what a truncation reads in
+     * place of [held], as every unit it cuts to is a microsecond or coarser, so those digits change nothing it gives
+     * (drivine-cypher-spec#302). A text the compiler writes holds six digits at most ([written]), and one written in the
+     * statement is cut as it compiles.
+     */
+    private fun toMicros(text: String): String {
+        if (refuse == null || text in written || text == "NULL") return text
+        LITERAL.matchEntire(text)?.let { quoted -> return literal(PAST_MICROS.replace(quoted.groupValues[1].replace("''", "'"), "$1")) }
+        return sql.replace(text, literal(sql.regex(PAST_MICROS.pattern)), "'\\1'")
+    }
+
+    /**
      * The duration text [text], or the statement failing by name where its seconds go past the microsecond, as it moves a
      * moment ([add]): a store's [local] and [utc] take no duration, so it is read through the store's function where it
      * keeps one ([TemporalSql.heldDurationMicros]), else tested here, a written one as it compiles.
@@ -280,20 +292,30 @@ class Temporals(
         val year = fields["year"]
         // A year the statement gives is tested, bound once and the text made of the bound name, so the test writes no second
         // copy (#263). One read off a value the store holds, as a truncation or a date's own reads it, is held already.
-        if (refuse != null && year != null && givenYear) return written(yearHeld(year) { y -> nanosHeld(fields + ("year" to y), timezone, kind) })
-        return written(nanosHeld(fields, timezone, kind))
+        // A value made of a `nanosecond` may hold one past the microsecond, so its text is not [written]: where a store's
+        // timestamp is read of it, [held] tests it (drivine-cypher-spec#302).
+        val mark: (String) -> String = if (fields["nanosecond"] != null) { text -> text } else ::written
+        if (refuse != null && year != null && givenYear) return mark(yearHeld(year) { y -> nanosKept(fields + ("year" to y), timezone, kind) })
+        return mark(nanosKept(fields, timezone, kind))
     }
 
     /**
-     * [made], where the fields' nanoseconds are whole microseconds: a value made of a `nanosecond` past them fails by name
-     * ([SUB_MICRO]), as the store's timestamp it is made through keeps microseconds (drivine4j#421).
+     * [made], its text holding every nanosecond of the fields (drivine-cypher-spec#302). [made] is worked out through the
+     * store's timestamp, which keeps microseconds, so where the `nanosecond` field goes past them its last three digits are
+     * written into the text after: a value made, compared, sorted, written or read as it is keeps them, as on Neo4j, and one
+     * worked out through a store's timestamp ([held]) fails by name, as drivine4j#421 has it.
      */
-    private fun nanosHeld(fields: Map<String, String>, timezone: String?, kind: Temporal): String {
-        val refusing = refuse
-        val nanos = fields["nanosecond"] ?: return made(fields, timezone, kind)
-        if (refusing == null) return made(fields, timezone, kind)
+    private fun nanosKept(fields: Map<String, String>, timezone: String?, kind: Temporal): String {
+        val nanos = fields["nanosecond"]
+        if (nanos == null || kind == Temporal.DATE) return made(fields, timezone, kind)
         return shared(listOf(nanos)) { (n) ->
-            "CASE WHEN ${sql.mod(n, "1000")} <> 0 THEN ${refusing(SUB_MICRO, "CAST($n AS ${sql.textType})")} ELSE ${made(fields + ("nanosecond" to n), timezone, kind)} END"
+            shared(listOf(made(fields + ("nanosecond" to n), timezone, kind))) { (t) ->
+                val micros = "${sql.trunc}(${fields["millisecond"] ?: "0"} * 1000 + ${fields["microsecond"] ?: "0"} + $n / 1000)"
+                val nine = "${sql.toChar}($micros, 'FM000000') || ${sql.toChar}(${sql.mod(n, "1000")}, 'FM000')"
+                // The fraction after the seconds, the text's first `:mm:ss`, written again of nine digits.
+                val kept = sql.replace(t, literal(sql.regex("^([^:]*:[0-9]{2}:[0-9]{2})([.][0-9]+)?")), "('\\1.' || $nine)")
+                "CASE WHEN ${sql.mod(n, "1000")} = 0 THEN $t ELSE $kept END"
+            }
         }
     }
 
@@ -689,9 +711,9 @@ class Temporals(
         if (sql.truncate(unit, "NULL") == null) return null
         if (overrides == null || (overrides.fields.isEmpty() && overrides.timezone == null)) {
             // A truncation of a year from 1000 on is of one too, so is written as such.
-            return written(shared(listOf(held(text, listOf(from)))) { (t) -> sql.truncate(unit, sql.local(t, from))!!.let { cut -> sql.asAd(t, listOf(cut)) { format(cut, to, offset(t, from, to)) } } })
+            return written(shared(listOf(toMicros(text))) { (t) -> sql.truncate(unit, sql.local(t, from))!!.let { cut -> sql.asAd(t, listOf(cut)) { format(cut, to, offset(t, from, to)) } } })
         }
-        return written(shared(listOf(held(text, listOf(from)))) { (t) ->
+        return written(shared(listOf(toMicros(text))) { (t) ->
             shared(listOf(sql.truncate(unit, sql.local(t, from))!!)) { (cut) -> overridden(cut, unit, to, overrides, overrides.timezone ?: offset(t, from, to)) }
         })
     }
@@ -1054,6 +1076,9 @@ class Temporals(
         const val SUB_MICRO_DIGITS = "[.][0-9]{6}[0-9]{0,2}[1-9]"
 
         private val SUB_MICRO_REGEX = Regex(SUB_MICRO_DIGITS)
+
+        /** A fraction of a second past six digits, its first six in the group: see `toMicros`. */
+        private val PAST_MICROS = Regex("([.][0-9]{6})[0-9]+")
 
         /** A SQL text literal, its text in the group, each `'` written twice. */
         private val LITERAL = Regex("""'((?:[^']|'')*)'""")
