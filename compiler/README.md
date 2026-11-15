@@ -984,6 +984,8 @@ The JVM is the oracle. `./gradlew jvmOracle` writes, into `build/oracle`:
 - `marker.json`: the spec's `marker.yaml` as JSON, which `StoreMarkerTest` reads on every target: each store's
   statements for the schema marker and the store's stamp that `org.drivine.cypher.store.marker` must give, the
   inventories it must write and read back, the version tokens, and the node stamps `Stamps` must read and write.
+- `writevalues.json`: the spec's `writevalues.yaml` as JSON, which `WriteValuesTableTest` reads on every target: the
+  verdict each SQL store's compiler gives each value a write makes, by position and form.
 - `nesting.json`: the spec's `nesting.yaml` as JSON, which `NestingTableTest` reads on every target: the verdict
   each SQL store's compiler gives each nesting of a dropped variable, and the lists the cells are built from.
 - `plans.json`: the spec's `plans.yaml` as JSON, which `StorePlanTest` reads on every target: each case's rounds that
