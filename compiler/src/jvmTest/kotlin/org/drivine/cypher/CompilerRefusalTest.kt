@@ -895,6 +895,8 @@ class CompilerRefusalTest {
             refused("MATCH (p:Person) RETURN toString([keys(p), keys(p)])"), refused("MATCH (p:Person) WITH keys(p) AS k RETURN toString(k)"),
             refused("MATCH (p:Person) RETURN toString([CASE WHEN p.born > 1960 THEN 'a' ELSE 'b' END, 'c'])"),
             refused("RETURN toString([1.5, 2.5])"), refused("RETURN toString([x IN [1, 2] | x + 1])"),
+            // A comprehension with a WHERE and no projection keeps its list's kind, as one with its variable as the projection does.
+            refused("RETURN toString([x IN [1, 2] WHERE x > 1])"),
             // tail(), a slice and reverse() keep their list's kind, and two lists of one kind joined by + or given to coalesce() are of it.
             refused("RETURN toString(tail([1, 2]))"), refused("RETURN toString([1, 2][0..1])"), refused("RETURN toString(reverse([1, 2]))"),
             refused("RETURN toString([1] + [2])"), refused("RETURN toString(coalesce([1, 2], [3]))"),
@@ -915,6 +917,9 @@ class CompilerRefusalTest {
             // Not captured: Neo4j probably takes collect() of a value of any kind, a parameter or an item unwound from a list of
             // items of many kinds, as it takes [x IN \$l | x]. The compiler refuses collect() of any value it leaves open (Items.ONE).
             ToStringList("RETURN toString(collect(\$p))", refused = true, parameters = mapOf("p" to 1)), refused("UNWIND [1, 'a'] AS x RETURN toString(collect(x))"),
+            // Not captured: Neo4j probably takes collect() of two properties joined by +, as it takes [1] + ['a']. The compiler
+            // refuses it, as it takes Items.ONE of each to be the same kind.
+            refused("MATCH (p:Person) RETURN toString(collect(p.born) + collect(p.name))"),
         )
     }
 }
