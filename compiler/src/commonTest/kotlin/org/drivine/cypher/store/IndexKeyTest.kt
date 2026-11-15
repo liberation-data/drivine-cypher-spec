@@ -61,6 +61,9 @@ class IndexKeyTest {
         val two = compiler.compile("MATCH (p:Person {id: \$a}), (q:Person {id: \$b}) RETURN p.name, q.name", mapOf("a" to "x", "b" to "y"))
         assertEquals("x", two.parameters["_cyk_a"])
         assertEquals("y", two.parameters["_cyk_b"])
+        // Bound only where an index answers it: a property no index holds binds no key, as its SQL names none.
+        val unindexed = compiler.compile("MATCH (p:Person {name: \$n}) RETURN p.id", mapOf("n" to "Ada"))
+        assertTrue(unindexed.parameters.keys.none { it.startsWith("_cyk_") }, unindexed.parameters.keys.toString())
         // A literal's key is written as the literal is, binding nothing of the compiler's.
         val literal = compiler.compile("MATCH (p:Person {id: 'p-1'}) RETURN p.name", emptyMap())
         assertTrue(literal.parameters.keys.none { it.startsWith("_cyk_") } && "= 'p-1'" in literal.sql, literal.sql)

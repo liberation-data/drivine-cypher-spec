@@ -934,6 +934,12 @@ abstract class SqlCypherCompiler(
     protected open fun indexedKeyEquality(property: String, kind: String, key: String, of: IndexedProperty? = null): String? = null
 
     /**
+     * Whether an index answers [indexedKeyEquality] for the property [of] names: the key is bound only where it is compared,
+     * so no statement binds a name its SQL doesn't hold.
+     */
+    protected open fun indexAnswers(of: IndexedProperty?): Boolean = false
+
+    /**
      * Whether the store's index holds the value [given], a text or a truth value, as a text a test of [indexedEquality] finds:
      * where it doesn't, the comparison stands alone. Oracle's reads an empty text, and one past 4,000 bytes, as null (#617).
      */
@@ -6267,7 +6273,7 @@ abstract class SqlCypherCompiler(
             val indexed = when {
                 // A number and a temporal value too, where the index holds a value's class and key (see ValueLayout).
                 given != null && (given is String || given is Boolean || given is Number || Temporal.ofValue(given) != null) && indexHolds(given) ->
-                    boundKey(written, given)?.let { (kind, key) -> indexedKeyEquality(a, kind, key, of) } ?: indexedEquality(a, b, of)
+                    (if (indexAnswers(of)) boundKey(written, given) else null)?.let { (kind, key) -> indexedKeyEquality(a, kind, key, of) } ?: indexedEquality(a, b, of)
                 // A temporal value the statement works out, by its kind and its key.
                 given == null && (right as? Value.Json)?.temporal?.takeIf { it != Temporal.DURATION } != null ->
                     (right as Value.Json).let { tag -> indexedTagEquality(a, tag.temporal!!, tagKeyOf(tag), of) }

@@ -832,6 +832,8 @@ class OracleCypherCompiler(
     override fun indexedKeyEquality(property: String, kind: String, key: String, of: IndexedProperty?): String? =
         labelledHeld(of, listOf(OracleSql.literal(kind), key))
 
+    override fun indexAnswers(of: IndexedProperty?) = labelledHeld(of, emptyList()) != null
+
     /** A temporal value the statement works out: the labelled indexes' class and key columns beside its kind's word and its key. */
     override fun indexedTagEquality(property: String, kind: Temporal, key: String, of: IndexedProperty?): String? =
         labelledHeld(of, listOf("'${kind.function}'", if (binds(key)) "(SELECT $key FROM dual)" else key))
