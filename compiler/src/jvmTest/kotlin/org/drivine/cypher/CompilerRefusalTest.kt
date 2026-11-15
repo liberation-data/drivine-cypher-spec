@@ -880,9 +880,9 @@ class CompilerRefusalTest {
             refused("MATCH (p:Person) RETURN toString([keys(p), keys(p)])"), refused("MATCH (p:Person) WITH keys(p) AS k RETURN toString(k)"),
             refused("MATCH (p:Person) RETURN toString([CASE WHEN p.born > 1960 THEN 'a' ELSE 'b' END, 'c'])"),
             refused("RETURN toString([1.5, 2.5])"), refused("RETURN toString([x IN [1, 2] | x + 1])"),
-            // tail(), a slice and reverse() keep their list's kind, and two lists of one kind joined by + are of it.
+            // tail(), a slice and reverse() keep their list's kind, and two lists of one kind joined by + or given to coalesce() are of it.
             refused("RETURN toString(tail([1, 2]))"), refused("RETURN toString([1, 2][0..1])"), refused("RETURN toString(reverse([1, 2]))"),
-            refused("RETURN toString([1] + [2])"),
+            refused("RETURN toString([1] + [2])"), refused("RETURN toString(coalesce([1, 2], [3]))"),
         )
     }
 }
