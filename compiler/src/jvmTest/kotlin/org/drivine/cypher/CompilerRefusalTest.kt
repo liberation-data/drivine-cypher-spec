@@ -55,6 +55,25 @@ class CompilerRefusalTest {
     }
 
     @Test
+    fun `a pattern as a property a CREATE or a MERGE makes is refused, as a SET's value is`() {
+        // Not in the spec yet: Neo4j refuses a SET's value so (42I34, refusals.yaml), and these extend that rule until Neo4j's
+        // answer for them is captured.
+        listOf(PostgresCypherCompiler("g"), OracleCypherCompiler("g"), SqliteCypherCompiler("g")).forEach { compiler ->
+            listOf(
+                "MATCH (n) CREATE (m {f: (n)-->()})",
+                "MATCH (n) CREATE (n)-[:R {f: (n)-->()}]->(m)",
+                "MATCH (n) MERGE (m {f: (n)-->()})",
+                "MATCH (n) MERGE (m {k: 1}) ON CREATE SET m.f = (n)-->()",
+                "MATCH (n) SET n += {f: (n)-->()}",
+            ).forEach { cypher ->
+                val refused = assertThrows<CompilerException>("${compiler::class.simpleName}: $cypher") { compiler.compile(cypher) }.message!!
+                assertTrue(refused.startsWith("A pattern expression can only be used to test the existence of a pattern, as in Neo4j"), "$cypher: $refused")
+            }
+            compiler.compile("MATCH (n) CREATE (m {f: NOT (n)-->()})")
+        }
+    }
+
+    @Test
     fun `a pattern used as an expression that names a variable not bound is refused, as Neo4j refuses it`() {
         // Neo4j (2026.x): 42N29 "Pattern expressions are not allowed to introduce new variables: `r`." The TCK's Pattern1 [10].
         listOf(PostgresCypherCompiler("g"), OracleCypherCompiler("g"), SqliteCypherCompiler("g")).forEach { compiler ->

@@ -103,6 +103,7 @@ internal object VariableKinds {
                 }
                 is Clause.Foreach -> {
                     expression(clause.list, current)
+                    valued(clause.list, condition = false)
                     val inner = current.copy()
                     inner[clause.variable] = Kind.ANY
                     clauses(clause.clauses, inner, foreach = true)
@@ -250,7 +251,10 @@ internal object VariableKinds {
     private fun made(pattern: Pattern, scope: Scope, made: MutableSet<String>, merging: Boolean, foreach: Boolean) {
         val clause = if (merging) "MERGE" else "CREATE"
         pattern.nodes.forEach { node ->
-            node.properties?.let { expression(it, scope) }
+            node.properties?.let {
+                expression(it, scope)
+                valued(it, condition = false)
+            }
             val variable = node.variable ?: return@forEach
             val bound = scope[variable]
             if (bound == null) {
@@ -267,7 +271,10 @@ internal object VariableKinds {
             if (!fits(bound, Kind.NODE)) throw conflict(variable, bound, Kind.NODE)
         }
         pattern.relationships.forEach { relationship ->
-            relationship.properties?.let { expression(it, scope) }
+            relationship.properties?.let {
+                expression(it, scope)
+                valued(it, condition = false)
+            }
             val variable = relationship.variable ?: return@forEach
             if (foreach) return@forEach scope.set(variable, scope[variable] ?: Kind.RELATIONSHIP)
             val bound = scope[variable]
@@ -280,13 +287,16 @@ internal object VariableKinds {
         pattern.variable?.let { variable -> if (scope[variable] == null) scope[variable] = Kind.PATH }
     }
 
+    /** A `SET` item's value, over [scope]: a pattern is no value to set, as Neo4j refuses it (see [valued]). */
     private fun set(item: SetItem, scope: Scope) {
-        when (item) {
-            is SetItem.Property -> expression(item.value, scope)
-            is SetItem.Replace -> expression(item.value, scope)
-            is SetItem.Add -> expression(item.value, scope)
-            is SetItem.Labels -> {}
+        val value = when (item) {
+            is SetItem.Property -> item.value
+            is SetItem.Replace -> item.value
+            is SetItem.Add -> item.value
+            is SetItem.Labels -> return
         }
+        expression(value, scope)
+        valued(value, condition = false)
     }
 
     /**
@@ -372,10 +382,10 @@ internal object VariableKinds {
     }
 
     /**
-     * Refuses a pattern used as a value in [expression], an item of a `WITH` or a `RETURN`, an order term or an `UNWIND`'s
-     * list, as Neo4j refuses it (its 42I34): `RETURN (n)-->()`. A pattern is only a condition there, where [condition] is,
-     * as Neo4j takes one: an operand of `NOT`, `AND`, `OR` or `XOR`, a `CASE`'s `WHEN`, the `WHERE` of a comprehension, a
-     * quantifier or a pattern. Read after [expression], so `size()` of one is refused for that first (see
+     * Refuses a pattern used as a value in [expression], an item of a `WITH` or a `RETURN`, an order term, an `UNWIND`'s or a
+     * `FOREACH`'s list, a `SET` item's value, or a property a `CREATE` or a `MERGE` makes, as Neo4j refuses it (its 42I34):
+     * `RETURN (n)-->()`. A pattern is only a condition there, where [condition] is, as Neo4j takes one: an operand of `NOT`,
+     * `AND`, `OR` or `XOR`, a searched `CASE`'s `WHEN`, the `WHERE` of a comprehension, a quantifier or a pattern. Read after [expression], so `size()` of one is refused for that first (see
      * [function]); a subquery's own items are read as its own projection's.
      */
     private fun valued(expression: Expression, condition: Boolean) {
