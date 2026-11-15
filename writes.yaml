@@ -225,6 +225,25 @@ cases:
       - cypher: "MATCH (:CyWrite)-[r]-() RETURN r"
         rows: []
 
+  - name: "A write whose returned rows fail as they are read"
+    description: "A statement that writes and returns a row that fails as the statement runs keeps nothing it wrote or deleted. On Oracle a compiled write's block returned its rows by a cursor whose query ran only as the host read it, after the block's writes were done, and so kept them (liberation-data/drivine-cypher-spec#292)."
+    steps:
+      - cypher: "CREATE (:CyWrite {num: 1})"
+      - note: "keys() of a number read from data fails as the statement runs."
+        cypher: "MATCH (n:CyWrite) SET n.x = 1 RETURN keys(n.num)"
+        error: true
+      - cypher: "MATCH (n:CyWrite) RETURN n.x"
+        rows: [null]
+      - cypher: "MATCH (n:CyWrite) WITH n, n.num AS num DETACH DELETE n RETURN keys(num)"
+        error: true
+      - cypher: "MATCH (n:CyWrite) RETURN count(n)"
+        rows: [1]
+      - note: "Rows that don't fail are still returned in their order, a null one as null."
+        cypher: "UNWIND [2, 3] AS i CREATE (n:CyWrite {num: i}) RETURN n.none, n.num ORDER BY n.num DESC"
+        rows: [[null, 3], [null, 2]]
+      - cypher: "MATCH (n:CyWrite) SET n.x = n.num RETURN n.none ORDER BY n.num"
+        rows: [null, null, null]
+
   - name: "A write after a DELETE"
     description: "What a statement makes after it deletes is made anew, with no id of what it deleted, and a read after the DELETE finds none of it."
     steps:

@@ -18,6 +18,7 @@ DECLARE
     cy_saved3 JSON;
     cy_gathered3 JSON;
     cy_caller3 JSON;
+    cy_result JSON;
 BEGIN
     SELECT CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS TIMESTAMP) INTO cy_now FROM DUAL;
     SELECT COALESCE(JSON_ARRAYAGG(JSON('{}') NULL ON NULL RETURNING JSON), JSON('[]')) INTO cy_rows
@@ -32,14 +33,18 @@ BEGIN
         cy_out.append(cy_row);
     END LOOP;
     cy_rows := cy_out.to_json;
-    OPEN cy_cursor FOR
-        SELECT p4.c1 AS result
-        FROM (
-            SELECT CASE WHEN CASE WHEN JSON_VALUE(n3.props, '$.day.type()') = 'object' THEN JSON_VALUE(n3.props, '$.day."$t"') END IS NOT NULL THEN JSON_SCALAR(JSON_VALUE(n3.props, '$.day.v')) ELSE COALESCE(JSON_SCALAR(CASE WHEN JSON_VALUE(n3.props, '$.day.type()') = 'double' AND JSON_VALUE(n3.props, '$.day') IN ('Nan', 'Inf', '-Inf') THEN DECODE(JSON_VALUE(n3.props, '$.day'), 'Nan', 'NaN', 'Inf', 'Infinity', '-Infinity') WHEN JSON_VALUE(n3.props, '$.day.type()') = 'double' OR (JSON_VALUE(n3.props, '$.day.type()') = 'number' AND NOT (JSON_VALUE(n3.props, '$.day.type()') = 'number' AND JSON_VALUE(n3.props, '$.day' RETURNING NUMBER) = TRUNC(JSON_VALUE(n3.props, '$.day' RETURNING NUMBER)))) THEN CASE WHEN JSON_VALUE(n3.props, '$.day' RETURNING BINARY_DOUBLE) = 0 THEN '0.0' WHEN ABS(TO_NUMBER(JSON_VALUE(n3.props, '$.day') DEFAULT NULL ON CONVERSION ERROR)) >= 0.001 AND ABS(TO_NUMBER(JSON_VALUE(n3.props, '$.day') DEFAULT NULL ON CONVERSION ERROR)) < 10000000 THEN TO_CHAR(TO_NUMBER(JSON_VALUE(n3.props, '$.day') DEFAULT NULL ON CONVERSION ERROR), 'FM9999990.0999999999999999999999') ELSE REGEXP_REPLACE(REPLACE(NVL(TO_CHAR(NULLIF(TO_NUMBER(JSON_VALUE(n3.props, '$.day') DEFAULT NULL ON CONVERSION ERROR), 0), 'FM9.9999999999999999EEEE'), REGEXP_REPLACE(JSON_VALUE(n3.props, '$.day'), '^(-?[0-9]+)E', '\1.0E')), '.E', '.0E'), 'E\+?(-?)0*([0-9])', 'E\1\2') END ELSE JSON_VALUE(n3.props, '$.day') END), JSON_SCALAR(CASE WHEN JSON_VALUE(n3.props, '$.day.type()') = 'string' THEN JSON_VALUE(n3.props, '$.day' RETURNING CLOB) END), CASE WHEN JSON_VALUE(n3.props, '$.day.type()') = 'string' THEN JSON('""') END) END AS c1,
-                   r2.item_no AS o1
-            FROM JSON_TABLE(cy_rows, '$[*]' COLUMNS (item_no FOR ORDINALITY, item JSON PATH '$')) r2
-            LEFT JOIN g_node n3 ON n3.nid = JSON_VALUE(r2.item, '$.v1' RETURNING NUMBER)
-        ) p4
-        ORDER BY p4.o1;
+    SELECT JSON_ARRAYAGG(JSON_ARRAY(cy_r.result ABSENT ON NULL RETURNING JSON) ORDER BY cy_r.cy_n RETURNING JSON) INTO cy_result FROM (
+        SELECT cy_q.result, ROWNUM AS cy_n FROM (
+            SELECT p4.c1 AS result
+            FROM (
+                SELECT CASE WHEN CASE WHEN JSON_VALUE(n3.props, '$.day.type()') = 'object' THEN JSON_VALUE(n3.props, '$.day."$t"') END IS NOT NULL THEN JSON_SCALAR(JSON_VALUE(n3.props, '$.day.v')) ELSE COALESCE(JSON_SCALAR(CASE WHEN JSON_VALUE(n3.props, '$.day.type()') = 'double' AND JSON_VALUE(n3.props, '$.day') IN ('Nan', 'Inf', '-Inf') THEN DECODE(JSON_VALUE(n3.props, '$.day'), 'Nan', 'NaN', 'Inf', 'Infinity', '-Infinity') WHEN JSON_VALUE(n3.props, '$.day.type()') = 'double' OR (JSON_VALUE(n3.props, '$.day.type()') = 'number' AND NOT (JSON_VALUE(n3.props, '$.day.type()') = 'number' AND JSON_VALUE(n3.props, '$.day' RETURNING NUMBER) = TRUNC(JSON_VALUE(n3.props, '$.day' RETURNING NUMBER)))) THEN CASE WHEN JSON_VALUE(n3.props, '$.day' RETURNING BINARY_DOUBLE) = 0 THEN '0.0' WHEN ABS(TO_NUMBER(JSON_VALUE(n3.props, '$.day') DEFAULT NULL ON CONVERSION ERROR)) >= 0.001 AND ABS(TO_NUMBER(JSON_VALUE(n3.props, '$.day') DEFAULT NULL ON CONVERSION ERROR)) < 10000000 THEN TO_CHAR(TO_NUMBER(JSON_VALUE(n3.props, '$.day') DEFAULT NULL ON CONVERSION ERROR), 'FM9999990.0999999999999999999999') ELSE REGEXP_REPLACE(REPLACE(NVL(TO_CHAR(NULLIF(TO_NUMBER(JSON_VALUE(n3.props, '$.day') DEFAULT NULL ON CONVERSION ERROR), 0), 'FM9.9999999999999999EEEE'), REGEXP_REPLACE(JSON_VALUE(n3.props, '$.day'), '^(-?[0-9]+)E', '\1.0E')), '.E', '.0E'), 'E\+?(-?)0*([0-9])', 'E\1\2') END ELSE JSON_VALUE(n3.props, '$.day') END), JSON_SCALAR(CASE WHEN JSON_VALUE(n3.props, '$.day.type()') = 'string' THEN JSON_VALUE(n3.props, '$.day' RETURNING CLOB) END), CASE WHEN JSON_VALUE(n3.props, '$.day.type()') = 'string' THEN JSON('""') END) END AS c1,
+                       r2.item_no AS o1
+                FROM JSON_TABLE(cy_rows, '$[*]' COLUMNS (item_no FOR ORDINALITY, item JSON PATH '$')) r2
+                LEFT JOIN g_node n3 ON n3.nid = JSON_VALUE(r2.item, '$.v1' RETURNING NUMBER)
+            ) p4
+            ORDER BY p4.o1
+        ) cy_q
+    ) cy_r;
+    OPEN cy_cursor FOR SELECT CASE WHEN JSON_VALUE(cy_l.item, '$[0].type()') = 'string' THEN JSON(JSON_QUERY(JSON_SERIALIZE(cy_l.item RETURNING CLOB), '$[0]' RETURNING CLOB)) ELSE JSON_QUERY(cy_l.item, '$[0]' RETURNING JSON) END AS result FROM JSON_TABLE(cy_result, '$[*]' COLUMNS (cy_n FOR ORDINALITY, item JSON PATH '$')) cy_l ORDER BY cy_l.cy_n;
     DBMS_SQL.RETURN_RESULT(cy_cursor);
 END;
