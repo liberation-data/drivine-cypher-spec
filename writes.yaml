@@ -451,6 +451,40 @@ cases:
       - cypher: "MATCH (n:CyWrite) RETURN [n.id, n.f] ORDER BY n.id"
         rows: [["a", false], ["b", false], ["c", true], ["d", true]]
 
+  - name: "Pattern or subquery in the properties a CREATE or a MERGE makes"
+    description: "A node a CREATE makes holds EXISTS { } and COUNT { } in its properties, and a pattern of new variables alone, as Neo4j 2026.10.1 takes them (liberation-data/drivine4j#814): a pattern there that names a variable bound before it is refused, and in a MERGE a subquery is (see refusals.yaml, \"Pattern in the properties of a node made alone\" and \"Subquery in a MERGE\")."
+    steps:
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - cypher: "MATCH (n:CyWrite) CREATE (m:CyMade {id: n.id, e: EXISTS { (n)-->() }, c: COUNT { (n)-->() }}) RETURN [m.id, m.e, m.c] ORDER BY m.id"
+        rows: [["a", true, 2], ["b", true, 1], ["c", false, 0], ["d", false, 0]]
+      - cypher: "MATCH (n:CyWrite) CREATE (m:CyMade {id: n.id, e: EXISTS { MATCH (n)-[:NEXT]->(x) WHERE x.id IN ['b', 'c'] }, c: COUNT { MATCH (n)--() }}) RETURN [m.id, m.e, m.c] ORDER BY m.id"
+        rows: [["a", true, 2], ["b", true, 2], ["c", false, 1], ["d", false, 1]]
+      - cypher: "MATCH (n:CyWrite) CREATE (m:CyMade {id: n.id, f: NOT ()-->(:CyMade)}) RETURN [m.id, m.f] ORDER BY m.id"
+        rows: [["a", true], ["b", true], ["c", true], ["d", true]]
+      - cypher: "MATCH (n:CyWrite) CREATE (m:CyMade {id: n.id, f: size([(:CyWrite {id: 'a'})-->(x) | x.id])}) RETURN [m.id, m.f] ORDER BY m.id"
+        rows: [["a", 2], ["b", 2], ["c", 2], ["d", 2]]
+
+  - name: "Pattern in the properties of a relationship a CREATE makes"
+    description: "A relationship a CREATE makes holds a pattern as a condition in its properties, read before the relationship is made, as Neo4j 2026.10.1 takes it (liberation-data/drivine4j#814)."
+    steps:
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - cypher: "MATCH (n:CyWrite) CREATE (n)-[r:CyR {f: NOT (n)-->()}]->(:CyMade) RETURN [n.id, r.f] ORDER BY n.id"
+        rows: [["a", false], ["b", false], ["c", true], ["d", true]]
+
+  - name: "Pattern comprehension in the properties of a relationship a CREATE makes"
+    description: "A relationship a CREATE makes holds a pattern comprehension of a variable bound before it in its properties, as Neo4j 2026.10.1 takes it (liberation-data/drivine4j#814)."
+    steps:
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - cypher: "MATCH (n:CyWrite) CREATE (n)-[r:CyR {f: size([(n)-->(x) | x.id])}]->(:CyMade) RETURN [n.id, r.f] ORDER BY n.id"
+        rows: [["a", 2], ["b", 1], ["c", 0], ["d", 0]]
+
+  - name: "Pattern in the properties of a relationship a MERGE makes"
+    description: "A relationship a MERGE makes holds a pattern as a condition in its properties, as Neo4j 2026.10.1 takes it (liberation-data/drivine4j#814)."
+    steps:
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - cypher: "MATCH (n:CyWrite) MERGE (n)-[r:CyR {f: NOT (n)-->()}]->(m) RETURN count(r)"
+        rows: [4]
+
   - name: "SET and MERGE with EXISTS { } over UNWIND"
     description: "An EXISTS { } whose body unwinds a list, in a write's WHERE, SET or MERGE, reads the row being written (drivine4j#449)."
     steps:

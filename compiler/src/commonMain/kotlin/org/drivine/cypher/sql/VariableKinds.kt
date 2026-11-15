@@ -49,7 +49,8 @@ internal object VariableKinds {
     /**
      * Refuses [query] where a variable of it is used as two kinds, or made where it is bound already; where a pattern in a
      * `WITH`'s `WHERE` names a variable the `WITH` drops (see [Scope]); where a `WITH` or a `RETURN` names two items alike;
-     * and where a pattern is used as a value, not as a condition (see [valued]).
+     * where a pattern is used as a value, not as a condition (see [valued]); and where a pattern or a subquery is in a
+     * property a `CREATE` or a `MERGE` makes, or a value a `MERGE` sets, where Neo4j refuses it (see [made] and [merged]).
      */
     fun check(query: Query) {
         query(query, Scope())
@@ -85,10 +86,12 @@ internal object VariableKinds {
                 is Clause.Return -> returned = projected(clause.projection, current, null).kinds
                 is Clause.Create -> {
                     val made = mutableSetOf<String>()
-                    clause.patterns.forEach { made(it, current, made, merging = false, foreach) }
+                    val before = current.copy()
+                    clause.patterns.forEach { made(it, current, before, made, merging = false, foreach) }
                 }
                 is Clause.Merge -> {
-                    made(clause.pattern, current, mutableSetOf(), merging = true, foreach)
+                    merged(clause)
+                    made(clause.pattern, current, current.copy(), mutableSetOf(), merging = true, foreach)
                     (clause.onCreate + clause.onMatch).forEach { set(it, current) }
                 }
                 is Clause.Set -> clause.items.forEach { set(it, current) }
@@ -246,13 +249,15 @@ internal object VariableKinds {
      * up, and each relationship new: a node a pattern of the same `CREATE` made before it is bound already. [made] holds
      * the relationships the clause made before. A relationship bound before the clause, as one, is left to the compiler,
      * which refuses it as not compiled yet, as the spec has it. Within a `FOREACH`, [foreach], Neo4j takes a variable bound
-     * already in each of these places, and only one of another kind is refused.
+     * already in each of these places, and only one of another kind is refused. [before] is the scope before the clause: a
+     * pattern in the properties of a node made with no relationship names none of its variables (see [declared]).
      */
-    private fun made(pattern: Pattern, scope: Scope, made: MutableSet<String>, merging: Boolean, foreach: Boolean) {
+    private fun made(pattern: Pattern, scope: Scope, before: Scope, made: MutableSet<String>, merging: Boolean, foreach: Boolean) {
         val clause = if (merging) "MERGE" else "CREATE"
         pattern.nodes.forEach { node ->
             node.properties?.let {
                 expression(it, scope)
+                if (pattern.relationships.isEmpty() && !foreach) declared(it, before)
                 valued(it, condition = false)
             }
             val variable = node.variable ?: return@forEach
@@ -287,14 +292,53 @@ internal object VariableKinds {
         pattern.variable?.let { variable -> if (scope[variable] == null) scope[variable] = Kind.PATH }
     }
 
+    /**
+     * Refuses a pattern in [properties], a property of a node a `CREATE` or a `MERGE` makes with no relationship, that names
+     * a variable bound before it, of [before] or a comprehension's within, as Neo4j refuses it (its 42N59, which reads such a
+     * pattern as declaring the variable again): `MATCH (n) CREATE (m {f: NOT (n)-->()})`, and a pattern comprehension's
+     * pattern, `[(n)-->(x) | x]`. A pattern of new variables alone is taken, and so are `EXISTS { … }` and `COUNT { … }`, in
+     * a `CREATE` (a `MERGE` refuses them: see [merged]), and a relationship's properties, as Neo4j takes them.
+     */
+    private fun declared(properties: Expression, before: Scope) =
+        patternsIn(properties, emptySet()) { pattern, _, inner ->
+            named(pattern).firstOrNull { it in inner || before[it] != null }?.let {
+                throw CompilerException(
+                    "Variable `$it` already declared, as in Neo4j: a pattern in the properties of a node that a CREATE or a MERGE makes with no " +
+                        "relationship names no variable bound before it. Work the value out in a WITH before, as in WITH n, EXISTS { (n)-->() } AS f CREATE (m {f: f})."
+                )
+            }
+        }
+
+    /**
+     * Refuses [merge] where Neo4j refuses a subquery in a `MERGE` (its 42I48): an `EXISTS { … }` or a `COUNT { … }` in a
+     * property it matches or makes, a node's or a relationship's, and a pattern, a pattern comprehension or a subquery in a
+     * value its `ON CREATE` or `ON MATCH` sets. Read before the rest of it, as Neo4j does: `MERGE (m {f: NOT (n)-->(), g:
+     * EXISTS { … }})` is refused for this. A pattern in a property it matches is read as in a `CREATE` (see [made]).
+     */
+    private fun merged(merge: Clause.Merge) {
+        val properties = merge.pattern.nodes.mapNotNull { it.properties } + merge.pattern.relationships.mapNotNull { it.properties }
+        val values = (merge.onCreate + merge.onMatch).mapNotNull { setValue(it) }
+        if (properties.any { holds(it, ::subquery) } || values.any { value -> holds(value) { subquery(it) || it is Expression.PatternPredicate || it is Expression.PatternComprehension } }) {
+            throw CompilerException(
+                "Subqueries are not allowed in a MERGE clause, as in Neo4j: no EXISTS { … } or COUNT { … } in what it matches, and no pattern, " +
+                    "pattern comprehension or subquery in its ON CREATE or ON MATCH SET. Work the value out in a WITH before the MERGE, or SET it after."
+            )
+        }
+    }
+
+    private fun subquery(expression: Expression) = expression is Expression.Exists || expression is Expression.Subquery
+
+    /** A `SET` item's value, or none for one that sets labels. */
+    private fun setValue(item: SetItem): Expression? = when (item) {
+        is SetItem.Property -> item.value
+        is SetItem.Replace -> item.value
+        is SetItem.Add -> item.value
+        is SetItem.Labels -> null
+    }
+
     /** A `SET` item's value, over [scope]: a pattern is no value to set, as Neo4j refuses it (see [valued]). */
     private fun set(item: SetItem, scope: Scope) {
-        val value = when (item) {
-            is SetItem.Property -> item.value
-            is SetItem.Replace -> item.value
-            is SetItem.Add -> item.value
-            is SetItem.Labels -> return
-        }
+        val value = setValue(item) ?: return
         expression(value, scope)
         valued(value, condition = false)
     }
@@ -375,10 +419,72 @@ internal object VariableKinds {
      * (its 42N29), as such a pattern only tests for a match, and binds nothing.
      */
     private fun predicated(pattern: Pattern, scope: Scope) {
-        val names = pattern.nodes.indices.flatMap { i -> listOfNotNull(pattern.nodes[i].variable, pattern.relationships.getOrNull(i)?.variable) }
-        names.firstOrNull { scope[it] == null }?.let {
-            throw CompilerException("$it is not defined: a pattern used as an expression binds no new variable, as in Neo4j. Bind it in a MATCH, or test the pattern with EXISTS { … }.")
+        named(pattern).firstOrNull { scope[it] == null }?.let { throw undefined(it) }
+    }
+
+    private fun undefined(variable: String) =
+        CompilerException("$variable is not defined: a pattern used as an expression binds no new variable, as in Neo4j. Bind it in a MATCH, or test the pattern with EXISTS { … }.")
+
+    /** The variables [pattern] names, its nodes' and its relationships', in the order written. */
+    private fun named(pattern: Pattern) =
+        pattern.nodes.indices.flatMap { i -> listOfNotNull(pattern.nodes[i].variable, pattern.relationships.getOrNull(i)?.variable) }
+
+    /**
+     * Each pattern within [expression], to [visit]: a pattern used as a condition, and a pattern comprehension's
+     * (`comprehension`), each with the names bound within [expression] around it (`inner`), from [bound]: a comprehension's or
+     * a quantifier's variable, `reduce()`'s, and what a pattern comprehension's pattern names, in its `WHERE` and its
+     * projection. Not within `EXISTS { … }` or `COUNT { … }`, a query of its own.
+     */
+    private fun patternsIn(expression: Expression, bound: Set<String>, visit: (pattern: Pattern, comprehension: Boolean, inner: Set<String>) -> Unit) {
+        fun walk(part: Expression, inner: Set<String> = bound) = patternsIn(part, inner, visit)
+        when (expression) {
+            is Expression.PatternPredicate -> visit(expression.pattern, false, bound)
+            is Expression.PatternComprehension -> {
+                visit(expression.pattern, true, bound)
+                val inner = bound + named(expression.pattern) + listOfNotNull(expression.pattern.variable)
+                expression.where?.let { walk(it, inner) }
+                walk(expression.projection, inner)
+            }
+            is Expression.ListComprehension -> {
+                walk(expression.list)
+                listOfNotNull(expression.where, expression.projection).forEach { walk(it, bound + expression.variable) }
+            }
+            is Expression.Quantifier -> {
+                walk(expression.list)
+                expression.where?.let { walk(it, bound + expression.variable) }
+            }
+            is Expression.Reduce -> {
+                walk(expression.initial)
+                walk(expression.list)
+                walk(expression.expression, bound + expression.accumulator + expression.variable)
+            }
+            is Expression.Exists, is Expression.Subquery -> {}
+            else -> parts(expression).forEach { walk(it) }
         }
+    }
+
+    /** Whether [expression], or any expression within it, a comprehension's and a subquery's `WHERE` among them, is one [test] takes. */
+    private fun holds(expression: Expression, test: (Expression) -> Boolean): Boolean = test(expression) || parts(expression).any { holds(it, test) }
+
+    /** The expressions directly within [expression], but those of a pattern or a subquery's query. */
+    private fun parts(expression: Expression): List<Expression> = when (expression) {
+        is Expression.Literal, is Expression.Parameter, is Expression.Variable, Expression.CountStar, is Expression.PatternPredicate, is Expression.Subquery -> emptyList()
+        is Expression.Property -> listOf(expression.subject)
+        is Expression.HasLabels -> listOf(expression.subject)
+        is Expression.ListLiteral -> expression.items
+        is Expression.MapLiteral -> expression.entries.map { it.second }
+        is Expression.MapProjection -> expression.elements.mapNotNull { (it as? Expression.MapProjection.Element.Entry)?.value }
+        is Expression.Binary -> listOf(expression.left, expression.right)
+        is Expression.Unary -> listOf(expression.operand)
+        is Expression.Index -> listOf(expression.subject, expression.index)
+        is Expression.Slice -> listOfNotNull(expression.subject, expression.from, expression.to)
+        is Expression.Function -> expression.arguments
+        is Expression.Case -> listOfNotNull(expression.subject, expression.otherwise) + expression.alternatives.flatMap { listOf(it.first, it.second) }
+        is Expression.ListComprehension -> listOfNotNull(expression.list, expression.where, expression.projection)
+        is Expression.Quantifier -> listOfNotNull(expression.list, expression.where)
+        is Expression.Reduce -> listOf(expression.initial, expression.list, expression.expression)
+        is Expression.PatternComprehension -> listOfNotNull(expression.where, expression.projection)
+        is Expression.Exists -> listOfNotNull(expression.where)
     }
 
     /**
