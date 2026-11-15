@@ -3129,6 +3129,11 @@ cases:
         rows: [["[Keanu, 1964, 982.0, null]", "{name: Keanu}", "{l: [1964], n: Keanu}"]]
       - cypher: "MATCH (p:Person {name: 'Keanu'}) RETURN toString(CASE WHEN p.born > 2000 THEN [1, 'a'] END)"
         rows: [null]
+      - note: "A list given as a parameter, of one kind or many, as Neo4j plans a parameter of any kind; a SQL store gave its JSON text."
+        only: [neo4j, sql]
+        cypher: "RETURN [toString($l), toString($k)]"
+        parameters: {l: [1, "a", [2, [true, null]], 2.5], k: [1, 2]}
+        rows: [["[1, a, [2, [true, null]], 2.5]", "[1, 2]"]]
       - note: "Neo4j 2026.10.1 gives a map a WITH binds as it gives one written; a SQL store refuses it by name, as it knows no keys of it when compiling (see refusals.yaml)."
         only: [neo4j]
         cypher: "WITH {a: 1} AS m RETURN toString(m)"
@@ -3667,8 +3672,8 @@ cases:
         cypher: "RETURN [toInteger($p), toInteger($i) = 9223372036854775807, toInteger($n) < -9223372036854775807, toFloat($p), toFloat($i), toFloat($n)]"
         parameters: {p: {$float: "NaN"}, i: {$float: "Infinity"}, n: {$float: "-Infinity"}}
         rows: [[0, true, true, {$float: "NaN"}, {$float: "Infinity"}, {$float: "-Infinity"}]]
-      - note: "SQLite writes a list's text as its JSON, and Oracle gives none."
-        only: [neo4j, postgres]
+      - note: "SQLite wrote a list's text as its JSON before liberation-data/drivine4j#420. Oracle's is not checked yet."
+        only: [neo4j, postgres, sqlite]
         cypher: "RETURN toString($l)"
         parameters: {l: [1.0, {$float: "NaN"}, {$float: "Infinity"}, {$float: "-Infinity"}]}
         rows: ["[1.0, NaN, Infinity, -Infinity]"]

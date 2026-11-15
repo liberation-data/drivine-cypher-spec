@@ -198,6 +198,20 @@ class CompilerRefusalTest {
             // A list read as the statement runs is written item by item, and a map in it fails by name as it is read.
             val sql = compiler.compile("WITH [1, 'a'] AS l RETURN toString(l)").sql
             assertTrue(sql.contains("it holds ") && sql.contains("a map"), "${compiler::class.simpleName}: $sql")
+            // So is a list given as a parameter, of one kind or many, as Neo4j plans a parameter of any kind: it gave the store's
+            // JSON text, [1,2] on SQLite. A map given as one, whose keys aren't written, is refused by name.
+            listOf(listOf(1, 2), listOf(1, "a")).forEach { l ->
+                val given = compiler.compile("RETURN toString(\$l)", mapOf("l" to l)).sql
+                assertTrue(given.contains("it holds ") && given.contains("a map"), "${compiler::class.simpleName}: $given")
+            }
+            val map = assertThrows<CompilerException> { compiler.compile("RETURN toString(\$m)", mapOf("m" to mapOf("a" to 1))) }.message
+            assertEquals("toString() of a map the statement doesn't write in its argument is Cypher, and is not compiled to SQL yet.", map)
+            // A list read as it runs is written three lists deep, and one deeper fails by name, as a map in it does.
+            val deep = compiler.compile("WITH [1, [2, ['b', [true, 'q']]], 'a'] AS l RETURN toString(l)").sql
+            assertTrue(deep.contains("it holds ") && deep.contains("a list 3 deep"), "${compiler::class.simpleName}: $deep")
+            // A text past 4,000 bytes among the items, which Oracle reads as null, fails by name there, as it would be written as nothing.
+            val long = compiler.compile("MATCH (n) RETURN toString([n.name, 1])").sql.contains("that holds a text past 4,000 bytes is not compiled to SQL on Oracle yet")
+            assertEquals(compiler is OracleCypherCompiler, long, "${compiler::class.simpleName}")
             // A list written of items of one kind is refused still, as Neo4j's Cypher 25 refuses it.
             // So is one a WITH binds or collect() gathers of one kind, as Neo4j 2026.10.1 refuses them.
             listOf(

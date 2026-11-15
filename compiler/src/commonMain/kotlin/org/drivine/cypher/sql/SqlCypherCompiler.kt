@@ -7030,7 +7030,7 @@ abstract class SqlCypherCompiler(
          */
         private fun integerOfList(function: Expression.Function, value: Value, scope: Map<String, Value>): Value.Json? {
             if (function.arguments.singleOrNull()?.let { givenKind(it, scope) } != Value.Known.LIST && !isList(value)) return null
-            return Value.Json(shared(comparable(json(value))) { (x) -> "CASE WHEN ${typeOf(x)} = 'array' THEN ${scalar(failure(INTEGER_OF_LIST, typeOf(x)))} END" })
+            return Value.Json(shared(comparable(json(value))) { (x) -> "CASE WHEN ${typeOf(x)} = 'array' THEN ${scalar(textFailure(INTEGER_OF_LIST, typeOf(x)))} END" })
         }
 
         /**
@@ -7042,13 +7042,16 @@ abstract class SqlCypherCompiler(
          * Neo4j orders them: `[1, a]`, `{a: 2, b: x}` of `{b: 'x', a: 2}`. Of a
          * list that is null, null. What the text of is not known here is refused by name: a list or a map that holds a temporal
          * value, a node or a relationship, a map whose keys the statement doesn't write ([textOf]), or a map read as the statement
-         * runs, which fails as it is read ([itemText]). Null where [value] is no list or map the statement makes: compiled as before.
+         * runs, which fails as it is read ([itemText]). A list given as a parameter ([givenKind]) is written item by item as it runs,
+         * as Neo4j plans a parameter of any kind, and a map given as one is refused by name: both gave the store's JSON text. Null
+         * where [value] is no list or map the statement makes or is given: compiled as before.
          */
         private fun textOfList(function: Expression.Function, value: Value, scope: Map<String, Value>): Value.Json? {
             val written = function.arguments.single()
             val map = written is Expression.MapLiteral || written is Expression.MapProjection
-            if (!isList(value) && !map) {
-                if ((value as? Value.Json)?.known == Value.Known.MAP) unsupported("toString() of a map the statement doesn't write in its argument")
+            val given = givenKind(written, scope)
+            if (!isList(value) && !map && given != Value.Known.LIST) {
+                if ((value as? Value.Json)?.known == Value.Known.MAP || given == Value.Known.MAP) unsupported("toString() of a map the statement doesn't write in its argument")
                 return null
             }
             // Neo4j's Cypher 25 refuses a list whose items it knows to be of one kind, as [1, 2], and takes one of many, as [1, 'a'].
@@ -7133,8 +7136,8 @@ abstract class SqlCypherCompiler(
             else -> null
         }
 
-        /** [failure] as a SQL text, of [message] and the text [what], as a text's `CASE` gives it. */
-        private fun textFailing(message: String, what: String) = "('' || ${failure(message, literal(what))})"
+        /** [textFailure] as a SQL text, of [message] and the text [what], as a text's `CASE` gives it. */
+        private fun textFailing(message: String, what: String) = "('' || ${textFailure(message, literal(what))})"
 
         /**
          * The text of the item [json] of a list or a map read as the statement runs, [depth] lists deep: as `toString` writes a
