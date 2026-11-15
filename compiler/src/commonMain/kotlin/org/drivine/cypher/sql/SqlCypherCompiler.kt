@@ -6411,24 +6411,29 @@ abstract class SqlCypherCompiler(
             else -> false
         }
 
-        /** The parameter [name]'s value as the JSON it is bound as; null where it is null. */
         /**
          * The class of the value [given] and its key where the store's index holds a property's class and key and they are
          * worked out here ([indexKeyStore], `IndexKey.of`): a parameter's key bound once beside it ([Parameters.derived]), a
-         * literal's written as a literal, as the literal is. Null where they are not worked out, where the parameters are bound
-         * as one map, which has no place for the key, and where [written] is neither, as an entry of a parameter that is a map.
+         * literal's written as a literal, as the literal is, where Oracle takes it as one. Null where they are not worked out,
+         * where the parameters are bound as one map, which has no place for the key, and where [written] is neither, as an
+         * entry of a parameter that is a map.
          */
         private fun boundKey(written: Expression?, given: Any): Pair<String, String>? {
             val store = indexKeyStore ?: return null
             val key = org.drivine.cypher.store.IndexKey.of(store, CypherJson.valueToTree(given, encoder)) ?: return null
             val marker = when (written) {
                 is Expression.Parameter -> parameters.derived(written.name, key.key) ?: return null
-                is Expression.Literal -> "'${key.key.replace("'", "''")}'"
+                // Written in one literal, so within the 4,000 bytes Oracle takes of one, its quotes doubled (ORA-01704,
+                // drivine4j#419): a longer one is left to the SQL over the literal's JSON, which is written in pieces.
+                is Expression.Literal -> textLiteralOf(key.key).takeIf {
+                    org.drivine.cypher.text.JavaText.utf8(key.key).size + key.key.count { it == '\'' } <= org.drivine.cypher.store.IndexKey.SHORT_TEXT
+                } ?: return null
                 else -> return null
             }
             return key.kind to marker
         }
 
+        /** The parameter [name]'s value as the JSON it is bound as; null where it is null. */
         private fun parameterTree(name: String): JsonNode? = parameterTrees.getOrPut(name) {
             CypherJson.valueToTree(parameters.value(name), encoder).takeUnless { it.isNull || it.isMissingNode }
         }

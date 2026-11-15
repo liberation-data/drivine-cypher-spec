@@ -72,6 +72,48 @@ class IndexKeyTest {
     }
 
     @Test
+    fun aLiteralsKeyIsWrittenQuotedAndOneOracleTakesNoLiteralOfIsLeftToTheSql() {
+        val compiler = OracleCypherCompiler("g", true, true, setOf("Person" to "id"))
+        // A quote in the key is doubled, as the literal's own is.
+        val quoted = compiler.compile("MATCH (p:Person {id: 'it\\'s'}) RETURN p.name", emptyMap()).sql
+        assertTrue("= 'it''s'" in quoted, quoted)
+        // 4,000 bytes with a quote among them is a literal of 4,001, which Oracle refuses (ORA-01704, drivine4j#419): the key is
+        // left to the SQL over the literal's JSON, which is written in pieces.
+        val text = "x".repeat(3_999) + "'"
+        val long = compiler.compile("MATCH (p:Person {id: '${text.replace("'", "\\'")}'}) RETURN p.name", emptyMap()).sql
+        assertTrue("'${text.replace("'", "''")}'" !in long, long.take(200))
+    }
+
+    @Test
+    fun aTemporalParameterBindsItsSortKeyAndAMapsEntryBindsNone() {
+        val compiler = OracleCypherCompiler("g", true, true, setOf("Person" to "born"))
+        val given = org.drivine.cypher.json.TemporalValue(org.drivine.cypher.sql.Temporal.DATE, "2026-01-02")
+        val compiled = compiler.compile("MATCH (p:Person {born: \$d}) RETURN p.name", mapOf("d" to given))
+        assertEquals("10000020260102", compiled.parameters["_cyk_d"], compiled.parameters.toString())
+        assertTrue("'date', \$_cyk_d" in compiled.sql || "= \$_cyk_d" in compiled.sql, compiled.sql)
+        // An entry of a parameter that is a map has no marker of its own to be named after: the SQL over it is compared.
+        val entry = compiler.compile("MATCH (p:Person {born: \$m.d}) RETURN p.name", mapOf("m" to mapOf("d" to given)))
+        assertTrue(entry.parameters.keys.none { it.startsWith("_cyk_") }, entry.parameters.keys.toString())
+    }
+
+    @Test
+    fun aParameterComparedTwiceBindsOneKeyThatEachComparisonReads() {
+        val compiler = OracleCypherCompiler("g", true, true, setOf("Person" to "id", "Person" to "code"))
+        val compiled = compiler.compile("MATCH (p:Person {id: \$x}), (q:Person {code: \$x}) RETURN p.name, q.name", mapOf("x" to "k"))
+        assertEquals(listOf("_cyk_x"), compiled.parameters.keys.filter { it.startsWith("_cyk_") })
+        assertEquals(4, Regex("= \\\$_cyk_x\\b").findAll(compiled.sql).count(), compiled.sql)
+    }
+
+    @Test
+    fun postgresAndSqliteBindNoKey() {
+        val statement = "MATCH (p:Person {id: \$id}) RETURN p.name"
+        for (sql in listOf(org.drivine.cypher.sql.PostgresCypherCompiler("g"), org.drivine.cypher.sql.SqliteCypherCompiler("g"))) {
+            val compiled = sql.compile(statement, mapOf("id" to "p-1"))
+            assertTrue(compiled.parameters.keys.none { it.startsWith("_cyk_") } && "_cyk_" !in compiled.sql, compiled.sql)
+        }
+    }
+
+    @Test
     fun aWriteWhoseParametersAreOneMapComparesTheKeyWrittenOverTheValue() {
         // A procedure binds its parameters as one map (Parameters.inObject), which holds no key of the compiler's.
         val compiled = OracleCypherCompiler("g", true, true, setOf("Person" to "id"))
