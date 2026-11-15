@@ -46,20 +46,25 @@ internal class VariableKinds(private val aggregates: (Expression) -> Boolean) {
      * Within the `WHERE` or the order of a `WITH` or a `RETURN` that groups or is DISTINCT, in a subquery there at any depth
      * too, [horizon] holds the names that projection can read, its items and what a subquery reads from outside it: Neo4j
      * reads the brackets of a `CALL (a) { … }` within as of that projection, and refuses one that names any other (its
-     * 42N44), though it is the subquery's own (see [called]). Null outside any such projection.
+     * 42N44), though it is the subquery's own (see [called]). Null outside any such projection. A projection that groups
+     * within it, in a subquery, holds a horizon of its own there, its items and what its subquery reads from outside it. A
+     * `CALL (*) { … }` within imports what its horizon doesn't hold too ([hidden]), but Neo4j refuses a read of it there
+     * (its 42N44 too), in a pattern or as a value.
      */
     private class Scope(
         val kinds: MutableMap<String, Kind> = LinkedHashMap(),
         val dropped: MutableSet<String> = LinkedHashSet(),
         val shadowing: MutableSet<String> = LinkedHashSet(),
         val horizon: Set<String>? = null,
+        val hidden: MutableSet<String> = LinkedHashSet(),
     ) {
-        fun copy() = Scope(LinkedHashMap(kinds), LinkedHashSet(dropped), LinkedHashSet(shadowing), horizon)
+        fun copy() = Scope(LinkedHashMap(kinds), LinkedHashSet(dropped), LinkedHashSet(shadowing), horizon, LinkedHashSet(hidden))
         operator fun get(name: String) = kinds[name]
         operator fun set(name: String, kind: Kind) {
             kinds[name] = kind
             dropped -= name
             shadowing -= name
+            hidden -= name
         }
     }
 
@@ -160,7 +165,9 @@ internal class VariableKinds(private val aggregates: (Expression) -> Boolean) {
             // What a WITH outside drops, imported by a CALL within its WHERE, CALL (*) { … }, stays dropped in the call (drivine4j#504).
             val dropped = scope.dropped.filterTo(LinkedHashSet()) { it in imported }
             val shadowing = scope.shadowing.filterTo(LinkedHashSet()) { it in imported }
-            clauses(clauses, Scope(inner, dropped, shadowing, scope.horizon), kept = if (call.imports != null || call.importsAll) inner.filterKeys { it !in dropped } else emptyMap())
+            // What CALL (*) imports there that the projection can't read, is refused where it is read (drivine4j#681).
+            val hidden = imported.filterTo(LinkedHashSet()) { it in scope.hidden || (call.importsAll && scope.horizon?.contains(it) == false) }
+            clauses(clauses, Scope(inner, dropped, shadowing, scope.horizon, hidden), kept = if (call.imports != null || call.importsAll) inner.filterKeys { it !in dropped } else emptyMap())
         }
         return parts.first().mapValues { (name, kind) -> if (parts.all { it[name] == kind }) kind else Kind.ANY }
     }
@@ -217,21 +224,22 @@ internal class VariableKinds(private val aggregates: (Expression) -> Boolean) {
         }
         // What a WITH outside drops stays dropped after a subquery's own WITH, but for an item that names it again.
         // The clauses after it are within whatever projection [scope] is within, as it is.
-        val next = if (projection.star) scope.copy() else Scope(dropped = LinkedHashSet(scope.dropped), shadowing = LinkedHashSet(scope.shadowing), horizon = scope.horizon)
+        val next = if (projection.star) scope.copy() else Scope(dropped = LinkedHashSet(scope.dropped), shadowing = LinkedHashSet(scope.shadowing), horizon = scope.horizon, hidden = LinkedHashSet(scope.hidden))
         projection.items.forEach { next[it.name] = kindOf(it.expression, scope) }
         val groups = projection.distinct || projection.items.any { aggregates(it.expression) }
-        // Its own WHERE and order are within it, where it groups: they read its items, and what a subquery reads from outside it.
-        val horizon = if (!groups) scope.horizon else (next.kinds.keys + kept).filterTo(LinkedHashSet()) { scope.horizon?.contains(it) ?: true }
+        // Its own WHERE and order are within it, where it groups: they read its items, and what a subquery reads from outside it,
+        // within a projection that groups outside it too (drivine4j#681).
+        val horizon = if (!groups) scope.horizon else (next.kinds.keys + kept).toSet()
         // What an outer WITH's WHERE reads that it drops stays shadowing in a subquery's order, as in its WHERE, and what a
         // WITH outside dropped stays dropped there, as after it.
-        val reading = Scope(scope.kinds.mapValuesTo(LinkedHashMap()) { Kind.ANY }.apply { putAll(next.kinds) }, LinkedHashSet(next.dropped), LinkedHashSet(next.shadowing), horizon)
+        val reading = Scope(scope.kinds.mapValuesTo(LinkedHashMap()) { Kind.ANY }.apply { putAll(next.kinds) }, LinkedHashSet(next.dropped), LinkedHashSet(next.shadowing), horizon, LinkedHashSet(next.hidden))
         where?.let {
             val dropped = scope.kinds.keys.filterTo(LinkedHashSet(next.dropped)) { name -> next[name] == null && name !in kept }
             // Not one a WITH before had dropped already, which Neo4j reads here no more than there.
             val shadowing = if (groups) LinkedHashSet(next.shadowing) else dropped.filterTo(LinkedHashSet(next.shadowing)) { it !in scope.dropped }
-            expression(it, Scope(LinkedHashMap(reading.kinds), dropped, shadowing, horizon))
+            expression(it, Scope(LinkedHashMap(reading.kinds), dropped, shadowing, horizon, LinkedHashSet(next.hidden)))
         }
-        val items = Scope(scope.kinds.filterKeys { it in kept }.mapValuesTo(LinkedHashMap()) { Kind.ANY }.apply { putAll(next.kinds) }, LinkedHashSet(next.dropped), LinkedHashSet(next.shadowing), horizon)
+        val items = Scope(scope.kinds.filterKeys { it in kept }.mapValuesTo(LinkedHashMap()) { Kind.ANY }.apply { putAll(next.kinds) }, LinkedHashSet(next.dropped), LinkedHashSet(next.shadowing), horizon, LinkedHashSet(next.hidden))
         // Read first, so a pattern that names a variable the order can't read is refused for that (42N29), before as a value (42I34), as Neo4j does.
         projection.orderBy.forEach {
             expression(it.expression, if (groups && !aggregates(it.expression)) items.copy() else reading)
@@ -289,8 +297,14 @@ internal class VariableKinds(private val aggregates: (Expression) -> Boolean) {
     private fun use(variable: String, kind: Kind, scope: Scope) {
         // One a WITH does not pass on, in its WHERE: read there as a new node, it would match every row (drivine4j#504).
         if (variable in scope.dropped) throw CompilerException("$variable is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used.")
+        read(variable, scope)
         val bound = scope[variable] ?: return scope.set(variable, kind)
         if (!fits(bound, kind)) throw conflict(variable, bound, kind)
+    }
+
+    /** [variable] read where it is: one [Scope.hidden] is refused, after a variable not defined anywhere (see [inaccessible]). */
+    private fun read(variable: String, scope: Scope) {
+        if (variable in scope.hidden) inaccessible = inaccessible ?: CompilerException("$variable is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used.")
     }
 
     /** Whether a variable bound as [bound] may be used where a pattern takes [kind]. */
@@ -363,12 +377,19 @@ internal class VariableKinds(private val aggregates: (Expression) -> Boolean) {
      */
     private fun expression(expression: Expression, scope: Scope) {
         when (expression) {
-            is Expression.Literal, is Expression.Parameter, is Expression.Variable, Expression.CountStar -> {}
+            is Expression.Literal, is Expression.Parameter, Expression.CountStar -> {}
+            is Expression.Variable -> read(expression.name, scope)
             is Expression.Property -> expression(expression.subject, scope)
             is Expression.HasLabels -> expression(expression.subject, scope)
             is Expression.ListLiteral -> expression.items.forEach { expression(it, scope) }
             is Expression.MapLiteral -> expression.entries.forEach { expression(it.second, scope) }
-            is Expression.MapProjection -> expression.elements.forEach { if (it is Expression.MapProjection.Element.Entry) expression(it.value, scope) }
+            is Expression.MapProjection -> {
+                read(expression.variable, scope)
+                expression.elements.forEach {
+                    if (it is Expression.MapProjection.Element.Entry) expression(it.value, scope)
+                    if (it is Expression.MapProjection.Element.Variable) read(it.name, scope)
+                }
+            }
             is Expression.Binary -> {
                 expression(expression.left, scope)
                 expression(expression.right, scope)
