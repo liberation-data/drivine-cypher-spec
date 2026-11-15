@@ -2508,10 +2508,14 @@ abstract class SqlCypherCompiler(
          * which the shortest between each two nodes it joins is kept, or every one of the least length. Its
          * relationship is a walk, so a path of it takes no relationship twice, as Cypher's shortest path takes none.
          * The paths are those that meet [where], the `WHERE` of its `MATCH`, as Cypher's shortest path is the least of those.
+         * Its relationship's variable bound before is refused, as Neo4j refuses it (its 42N66, drivine4j#427).
          */
         private fun shortest(select: Select, pattern: Pattern, where: Expression?) {
             val relationship = pattern.relationships.singleOrNull()
             if (relationship?.range == null || relationship.group != null) unsupported("A shortest path of anything but one variable-length relationship")
+            relationship.variable?.takeIf { select.scope[it] != null }?.let {
+                throw CompilerException("$it is bound already, and a shortest path walks no relationship bound before it, as in Neo4j.")
+            }
             val inner = Select(select.scope).also { it.afterGrouping = select.afterGrouping }
             val hops = mutableListOf<Hop>()
             // Its ends named, to find the shortest between each two of them where they were not bound before it.
@@ -2568,8 +2572,11 @@ abstract class SqlCypherCompiler(
          * from [from] that takes a relationship no more than once, as Cypher takes it, to a depth from
          * `min` (1 if left out) to `max` (any if left out), its rows each way it reaches [to]. Walked
          * [backwards], from the pattern's later node, it keeps its nodes and relationships in the pattern's order.
+         * Its variable bound before, a list of relationships that Neo4j walks as it is, is refused rather than bound again
+         * to any walk (drivine4j#427), in a shortest path too, which walks through here.
          */
         private fun walk(select: Select, relationship: RelationshipPattern, from: String, to: String, backwards: Boolean, seed: ((String) -> String)?): Hop {
+            if (relationship.variable != null && select.scope[relationship.variable] != null) unsupported("A relationship variable bound before its pattern")
             val range = relationship.range!!
             val edge = alias("e")
             val conditions = listOfNotNull(
