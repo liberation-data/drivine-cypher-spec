@@ -491,8 +491,8 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
          * What the node table's comment says of a store this version made. A store an earlier version made has its functions
          * made again when it is ensured: 9 finds a node by its id's JSON (#245), and 10 keeps the function of temporal arithmetic
          * (drivine4j#418), whose body changes with the compiler's: a change of the DDL bumps it (`store.yaml`'s `generated`), as
-         * 11 does, the function cutting a duration's quotients with `div` (drivine-cypher-spec#275), and the `_held` function made beside it
-         * (drivine4j#421).
+         * 11 does, the function cutting a duration's quotients with `div` (drivine-cypher-spec#275), the `_held` function made beside it
+         * (drivine4j#421), and the `_list_key` function a sort calls (drivine-cypher-spec#284).
          */
         const val VERSION = "drivine:11"
 
