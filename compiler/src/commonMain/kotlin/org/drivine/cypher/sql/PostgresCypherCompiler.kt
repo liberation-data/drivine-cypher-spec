@@ -10,6 +10,7 @@ import org.drivine.cypher.ast.RelationshipPattern
 import org.drivine.cypher.json.CypherEncoder
 import org.drivine.cypher.json.CypherJson
 import org.drivine.cypher.store.PostgresSql
+import org.drivine.cypher.store.ddl.PostgresDdl
 import org.drivine.cypher.store.Stamps
 import com.ionspin.kotlin.bignum.decimal.BigDecimal
 import org.drivine.cypher.json.jvmDoubleText
@@ -380,11 +381,22 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
      * as [listSortKey] writes it, each item where its kind comes, the item, and what follows it, read in one pass over its items,
      * not walked: a property's list holds no list, and the walk the planner costs at thousands a row. An item that is a list is
      * compared as `jsonb` compares it, the shorter first (drivine4j#271).
+     *
+     * A call of the store's function (`PostgresDdl.listKey`), whose body is [flatListKeyBody], and not that query written out:
+     * the planner costs a subquery in a sort key on every row, though no row holds a list, and so brings in its JIT and gives up
+     * a parallel plan, which made a sort of 100,000 rows to the first 100 four times as slow (drivine-cypher-spec#284). The
+     * function's cost is declared low, and it is parallel safe.
      */
-    private fun flatListKey(list: String) =
-        "(SELECT COALESCE(string_agg('[' || ${itemRank("fe.item")} || ', ' || CASE jsonb_typeof(fe.item) " +
+    private fun flatListKey(list: String) = "$storedListKey($list)"
+
+    /** The store's function [flatListKey] calls. */
+    private val storedListKey = PostgresDdl.listKeyName(graph)
+
+    /** The query [flatListKey]'s function gives, of the list [list]: its body, as `PostgresDdl.listKey` makes it. */
+    internal fun flatListKeyBody(list: String) =
+        "SELECT COALESCE(string_agg('[' || ${itemRank("fe.item")} || ', ' || CASE jsonb_typeof(fe.item) " +
             "WHEN 'string' THEN ${codePoints("(fe.item #>> '{}')")} ELSE CAST(fe.item AS text) END || ', ', '' ORDER BY fe.item_no), '') " +
-            "|| '[]' || repeat(']', COUNT(*)::int) FROM jsonb_array_elements($list) WITH ORDINALITY fe (item, item_no))"
+            "|| '[]' || repeat(']', COUNT(*)::int) FROM jsonb_array_elements($list) WITH ORDINALITY fe (item, item_no)"
 
     /** A text as [sortKey] sorts it, by its code points: a value the statement makes a text is no tag, so none is read apart. */
     override fun textSortKey(json: String) = shared(json) { (x) ->
