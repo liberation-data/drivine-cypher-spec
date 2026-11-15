@@ -2316,7 +2316,7 @@ abstract class SqlCypherCompiler(
                     itemItems = all.map { it?.itemItems }.distinct().singleOrNull(), temporals = all.any { it?.temporals == true },
                     entries = all.map { it?.entries }.distinct().singleOrNull(), itemEntries = all.map { it?.itemEntries }.distinct().singleOrNull(),
                     text = all.all { it?.text == true }, texts = all.all { it?.texts == true },
-                    known = all.map { it?.known }.distinct().singleOrNull(), itemsKnown = all.map { it?.itemsKnown }.distinct().singleOrNull(), jsonNull = all.any { it?.jsonNull == true },
+                    known = all.map { it?.known }.distinct().singleOrNull(), itemsKnown = unionItems(all.map { it?.itemsKnown }), jsonNull = all.any { it?.jsonNull == true },
                     list = all.all { it?.list == true }, itemLists = all.all { it?.itemLists == true }, flat = all.all { it?.flat == true },
                     // Its identity is the column beside it where any query gives one, the first query's own or its value's.
                     identity = if (variable in byProperties) null else value.identity ?: first[variable]?.let { (column, _) -> "$PENDING.${column}_identity" },
@@ -4898,14 +4898,16 @@ abstract class SqlCypherCompiler(
         /**
          * The one kind ([Value.Items]) of the items of [list] where Neo4j types it as a list narrower than `List<Any>` when it
          * plans the statement (liberation-data/drivine-cypher-spec#296): a list written whose every item is of one kind ([itemOf]),
-         * a number and a float both numbers; `collect()` of anything; `keys()`, `labels()` and `split()`, of texts; `range()`, of
-         * numbers; `nodes()` and `relationships()`; a list comprehension of what it gives; and a variable bound to one. Null where an
-         * item's kind is left open, as a property's, a parameter's or null's, where two differ, of an empty list, and of anything else.
+         * a number and a float both numbers; `collect()` of anything, and a pattern comprehension; `keys()`, `labels()` and `split()`,
+         * of texts; `range()`, of numbers; `nodes()` and `relationships()`, of nodes or relationships, as maps are; a list comprehension
+         * of what it gives; `tail()`, `reverse()` and a slice of a list of one kind; two lists of one kind joined by `+`, and
+         * `coalesce()` of such lists alone; and a variable bound to one. Null where an item's kind is left open, as a property's, a
+         * parameter's or null's, where two differ, of an empty list, and of anything else.
          */
         private fun listItems(list: Expression, scope: Map<String, Value>): Value.Items? = when (list) {
             is Expression.ListLiteral -> list.items.map { itemOf(it, scope) }.distinct().singleOrNull()
             is Expression.Variable -> when (val bound = scope[list.name]) {
-                is Value.Entities -> if (bound.relationships) Value.Items.RELATIONSHIP else Value.Items.NODE
+                is Value.Entities -> Value.Items.MAP
                 is Value.Json -> bound.itemsKnown
                 else -> null
             }
@@ -4913,11 +4915,16 @@ abstract class SqlCypherCompiler(
                 "collect" -> list.arguments.singleOrNull()?.let { itemOf(it, scope) ?: Value.Items.ONE }
                 "keys", "labels", "split" -> Value.Items.TEXT
                 "range" -> Value.Items.NUMBER
-                "nodes" -> Value.Items.NODE
-                "relationships" -> Value.Items.RELATIONSHIP
-                DISTINCT_ITEMS -> list.arguments.singleOrNull()?.let { listItems(it, scope) }
+                "nodes", "relationships" -> Value.Items.MAP
+                "tail", "reverse", DISTINCT_ITEMS -> list.arguments.singleOrNull()?.let { listItems(it, scope) }
+                "coalesce" -> list.arguments.map { listItems(it, scope) }.distinct().singleOrNull()
                 else -> null
             }
+            is Expression.Slice -> listItems(list.subject, scope)
+            is Expression.Binary ->
+                if (list.operator != Operator.ADD) null
+                else listItems(list.left, scope)?.takeIf { it == listItems(list.right, scope) }
+            is Expression.PatternComprehension -> Value.Items.ONE
             is Expression.ListComprehension ->
                 if (list.projection == null || list.projection == Expression.Variable(list.variable)) listItems(list.list, scope)
                 else itemOf(list.projection, scope + (list.variable to Value.Json("NULL", known = itemsKind(list.list, scope))))
@@ -4925,8 +4932,17 @@ abstract class SqlCypherCompiler(
         }
 
         /**
+         * The kind of the items of a `UNION`'s column whose queries give it lists of the kinds [kinds] ([Value.Json.itemsKnown]): a
+         * list Neo4j types as narrower than `List<Any>` where every query's is, of one kind or of [Value.Items.ONE] where they differ,
+         * as Neo4j 2026.10.1 refuses `toString()` of one of `[1, 2]` and `['a']` (liberation-data/drivine-cypher-spec#296). Null
+         * where any query's is of any items.
+         */
+        private fun unionItems(kinds: List<Value.Items?>): Value.Items? =
+            if (kinds.any { it == null }) null else kinds.distinct().singleOrNull() ?: Value.Items.ONE
+
+        /**
          * The kind ([Value.Items]) Neo4j types [item], an item of a list, as when it plans the statement: a value of a kind the
-         * statement makes ([knownKind]), a map projection, a node, a relationship, or a list [listItems] knows the items of. Null
+         * statement makes ([knownKind]), a map projection, a node or a relationship, all three maps, or a list [listItems] knows the items of. Null
          * where it is left open.
          */
         private fun itemOf(item: Expression, scope: Map<String, Value>): Value.Items? = when (knownKind(item, scope)) {
@@ -4937,8 +4953,7 @@ abstract class SqlCypherCompiler(
             Value.Known.MAP -> Value.Items.MAP
             null -> when {
                 item is Expression.MapProjection -> Value.Items.MAP
-                item is Expression.Variable && scope[item.name] is Value.Node -> Value.Items.NODE
-                item is Expression.Variable && scope[item.name] is Value.Relationship -> Value.Items.RELATIONSHIP
+                item is Expression.Variable && (scope[item.name] is Value.Node || scope[item.name] is Value.Relationship) -> Value.Items.MAP
                 listItems(item, scope) != null -> Value.Items.LIST
                 else -> null
             }

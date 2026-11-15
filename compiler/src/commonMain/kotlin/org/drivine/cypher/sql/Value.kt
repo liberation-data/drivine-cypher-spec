@@ -129,10 +129,11 @@ sealed interface Value {
 
     /**
      * The kind Neo4j types every item of a list as, where it types the list narrower than `List<Any>` (see [Json.itemsKnown]): an
-     * integer and a float are both numbers, as `[1, 2.5]` is refused as `[1, 2]` is, and [ONE] is of a kind it doesn't name here,
-     * as `collect()` of a property, which Neo4j types as a list of one kind or another, never of any.
+     * integer and a float are both numbers, as `[1, 2.5]` is refused as `[1, 2]` is; a map, a node and a relationship are all
+     * [MAP], as `[n, r]` and `[n, {a: 1}]` are refused as `[{a: 1}, {b: 2}]` is; and [ONE] is of a kind it doesn't name here, as
+     * `collect()` of a property, which Neo4j types as a list of one kind or another, never of any.
      */
-    enum class Items { NUMBER, TEXT, BOOLEAN, LIST, MAP, NODE, RELATIONSHIP, ONE }
+    enum class Items { NUMBER, TEXT, BOOLEAN, LIST, MAP, ONE }
 
     /** A truth value: SQL's boolean, with its null for Cypher's. */
     data class Bool(val sql: String) : Value

@@ -856,9 +856,33 @@ class CompilerRefusalTest {
             taken("MATCH (p:Person {name: 'Keanu'}) RETURN toString(CASE WHEN p.born > 2000 THEN [1, 'a'] END)"),
             taken("WITH [1, 'a'] AS l RETURN toString(l)"), taken("WITH [1, 'a'] AS l WITH l RETURN toString(l)"),
             taken("UNWIND [1, 'a'] AS x RETURN toString(x)"), taken("WITH 'K' AS s, 1.5 AS f RETURN toString([s, f, true])"),
-            // A UNION whose queries make it lists of different kinds of item, or of one and of many, makes it of no one kind.
+            // A UNION whose queries make it a list of one kind and one of any items makes it of any items.
             taken("CALL { RETURN [1, 2] AS l UNION RETURN [1, 'a'] AS l } RETURN toString(l)"),
-            taken("CALL { RETURN [1, 2] AS l UNION RETURN ['a'] AS l } RETURN toString(l)"),
+            // An item unwound from a list of lists of two kinds, a comprehension over a parameter, tail(), a slice and reverse() of
+            // a list of any items, two lists of two kinds joined, coalesce() of lists of two kinds, and items of two kinds.
+            taken("UNWIND [[1], ['a']] AS x RETURN toString(x)"), taken("RETURN toString([x IN \$l | x])", parameters = mapOf("l" to listOf(1, 2))),
+            taken("RETURN toString(tail([1, 'a', 2]))"), taken("RETURN toString([1, 'a', 2][0..2])"), taken("RETURN toString(reverse([1, 'a']))"),
+            taken("RETURN toString([1] + ['a'])"), taken("RETURN toString(coalesce([1, 'a'], [2]))"),
+            taken("RETURN toString([true, 1])", "[true, 1]"), taken("RETURN toString([[1], 1])", "[[1], 1]"), taken("RETURN toString([{a: 1}, 1])", "[{a: 1}, 1]"),
+            // A UNION each of whose queries makes it a list of one kind, of one kind or of two, as Neo4j 2026.10.1 refuses it.
+            refused("CALL { RETURN [1, 2] AS l UNION RETURN [1.5] AS l } RETURN toString(l)"),
+            refused("CALL { RETURN [1, 2] AS l UNION RETURN ['a'] AS l } RETURN toString(l)"),
+            // Maps, nodes and relationships are of one kind; nodes(), relationships(), a variable-length relationship and a
+            // pattern comprehension are lists of one kind, as collect() is.
+            refused("MATCH (p:Person)-[r:KNOWS]->() RETURN toString([p, r])"), refused("MATCH (p:Person) RETURN toString([p, {a: 1}])"),
+            refused("MATCH (p:Person) RETURN toString([p {}, p {.name}])"),
+            refused("MATCH path = (:Person)-[:KNOWS]->() RETURN toString(nodes(path))"),
+            refused("MATCH path = (:Person)-[:KNOWS]->() RETURN toString(relationships(path))"),
+            refused("MATCH (:Person)-[r:KNOWS*]->() RETURN toString(r)"),
+            refused("MATCH (p:Person) RETURN toString([(p)-[:ACTED_IN]->(m) | m.title])"),
+            refused("MATCH (p:Person) RETURN toString(collect([p.born, 'x']))"),
+            // A list of lists of one kind, one a WITH binds, a CASE of texts among texts, floats alone, a comprehension of numbers.
+            refused("MATCH (p:Person) RETURN toString([keys(p), keys(p)])"), refused("MATCH (p:Person) WITH keys(p) AS k RETURN toString(k)"),
+            refused("MATCH (p:Person) RETURN toString([CASE WHEN p.born > 1960 THEN 'a' ELSE 'b' END, 'c'])"),
+            refused("RETURN toString([1.5, 2.5])"), refused("RETURN toString([x IN [1, 2] | x + 1])"),
+            // tail(), a slice and reverse() keep their list's kind, and two lists of one kind joined by + are of it.
+            refused("RETURN toString(tail([1, 2]))"), refused("RETURN toString([1, 2][0..1])"), refused("RETURN toString(reverse([1, 2]))"),
+            refused("RETURN toString([1] + [2])"),
         )
     }
 }
