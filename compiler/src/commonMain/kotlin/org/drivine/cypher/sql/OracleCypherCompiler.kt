@@ -2234,8 +2234,8 @@ class OracleCypherCompiler(
         "    ${OracleTemporalSql.NOW} TIMESTAMP;",
     ) + (1..NESTING).flatMap { listOf("    $SAVED$it JSON;", "    $GATHERED$it JSON;", "    $CALLER$it JSON;") } +
         kept.filter { it != OUT }.map { "    $it JSON_ARRAY_T;" } +
-        // The rows it returns, read in the block: see [returnRows].
-        (if (program.any { it is ProcedureStep.Return }) listOf("    $RESULT JSON;") else emptyList()) + listOf(
+        // The rows it returns as text, read in the block: see [returnRows].
+        (if (rowsAsText && program.any { it is ProcedureStep.Return }) listOf("    $RESULT JSON;") else emptyList()) + listOf(
         "BEGIN",
         // The clock is read once, by a query: see [OracleTemporalSql.now].
         "    SELECT ${OracleTemporalSql.CLOCK} INTO ${OracleTemporalSql.NOW} FROM DUAL;",
@@ -2260,20 +2260,21 @@ class OracleCypherCompiler(
      * node-oracledb's thin mode gives only the prefetched rows of an implicit result with a `JSON` or a `CLOB` column
      * (oracle/node-oracledb#1795), and a row's text may be longer than a `VARCHAR2`.
      *
-     * The rows are read inside the block, into the JSON list [RESULT], in their order, and the cursor is opened over that
-     * list (liberation-data/drivine-cypher-spec#292). A cursor opened over [query] itself ran it only as the host fetched,
-     * once the block's writes were done, and committed with auto-commit: a returned item that fails as it runs, a
-     * `failure()`, then failed the fetch and kept the writes, where Neo4j, Postgres and SQLite keep nothing. Read in the
-     * block, it fails the block, and Oracle's statement-level rollback undoes all of it. The rows are held whole in the
-     * session's memory until the host has read them, as one JSON value, as the rows a write carries ([ROWS]) are held. A
-     * `JSON` value is at most 32 MB ("Total size of a JSON type instance: 32M bytes", Oracle's JSON Developer's Guide,
-     * Appendix B, JSON Capabilities Specification), so a write whose returned rows together pass that fails, a row each as
-     * with [rowsAsText], where a row each read by the cursor from [query] did not.
+     * Either way every row's result is worked out inside the block, before the cursor is opened
+     * (liberation-data/drivine-cypher-spec#292). A cursor opened over [query] alone runs it only as the host fetches, once
+     * the block's writes are done and, with auto-commit, committed: a returned item that fails as it runs, a `failure()`,
+     * then fails the fetch and keeps the writes, where Neo4j, Postgres and SQLite keep nothing. Worked out in the block, it
+     * fails the block, and Oracle's statement-level rollback undoes all of it. The rows are read in their order, numbered by
+     * `ROWNUM` over [query]: its `ORDER BY` is kept, so a sort key that fails fails there too, where a count of [query]
+     * alone lets Oracle drop an order it doesn't need, and the key with it.
      *
-     * A row each, the list holds each row as a list of it, `[value]`, or `[]` where the row is SQL's null, so each is
-     * read back as [query] gave it, SQL's null or JSON's, of the type it had; the value is taken out of its list as
-     * [listItem] takes one, a text through its text, as a text past 32 KB taken out as JSON, over two rows, crashes the
-     * session (see [itemProperty]). As text, the one row is the list written out, as before.
+     * A row each, the block counts the rows by their result, which Oracle works out to tell whether it is null, and adds
+     * the last row's number, which keeps the order, into [COUNT]; the cursor then runs [query] a second time, as it did
+     * before, a row of `JSON` each: no value holds them all, so there is no limit on their total size, and the cursor's rows
+     * are what they were. As text, they are gathered into the one JSON list [RESULT], in their order, which the cursor
+     * writes out from `DUAL`. A `JSON` value is at most 32 MB ("Total size of a JSON type instance: 32M bytes", Oracle's
+     * JSON Developer's Guide, Appendix B, JSON Capabilities Specification), so with [rowsAsText] a write whose returned rows
+     * together pass that fails, as it did when the cursor gathered them.
      */
     override fun returnRows(query: String): List<String> {
         // The statement's own hints that [query] starts with start the statement too: see [planned]. Its query's own
@@ -2281,23 +2282,18 @@ class OracleCypherCompiler(
         val given = LEADING_HINT.find(query)?.groupValues?.get(1).orEmpty()
         val hints = listOf(NO_JSON_TABLE_TRANSFORM, NO_FEEDBACK).filter { it in given }
         val head = if (hints.isEmpty()) "SELECT" else "SELECT /*+ ${hints.joinToString(" ")} */"
-        // A row each: every row's result is worked out once in the block, so one that fails fails the block, and the
-        // cursor then reads the rows as before, one value each, with no limit on their total size.
+        val numbered = "SELECT cy_q.result, ROWNUM AS cy_n FROM (\n${indent(query)}\n) cy_q"
         if (!rowsAsText) return listOf(
-            "$head COUNT(cy_q.result) INTO $COUNT FROM (\n${indent(query)}\n) cy_q;",
+            "$head COUNT(cy_r.result) + MAX(cy_r.cy_n) INTO $COUNT FROM (\n${indent(numbered)}\n) cy_r;",
             "OPEN $CURSOR FOR\n${indent(query)};",
             "DBMS_SQL.RETURN_RESULT($CURSOR);",
         )
-        val numbered = "SELECT cy_q.result, ROWNUM AS cy_n FROM (\n${indent(query)}\n) cy_q"
-        val (rows, cursor) = if (rowsAsText) {
-            "COALESCE(JSON_ARRAYAGG(cy_r.result ORDER BY cy_r.cy_n NULL ON NULL RETURNING JSON), JSON('[]'))" to
-                "SELECT JSON_SERIALIZE($RESULT RETURNING CLOB EXTENDED) AS \"$ROWS_AS_TEXT\" FROM DUAL"
-        } else {
-            "JSON_ARRAYAGG(JSON_ARRAY(cy_r.result ABSENT ON NULL RETURNING JSON) ORDER BY cy_r.cy_n RETURNING JSON)" to
-                "SELECT ${listItem("cy_l.item", "'\$[0]'")} AS result " +
-                "FROM JSON_TABLE($RESULT, '\$[*]' COLUMNS (cy_n FOR ORDINALITY, item JSON PATH '\$')) cy_l ORDER BY cy_l.cy_n"
-        }
-        return listOf("$head $rows INTO $RESULT FROM (\n${indent(numbered)}\n) cy_r;", "OPEN $CURSOR FOR $cursor;", "DBMS_SQL.RETURN_RESULT($CURSOR);")
+        val rows = "COALESCE(JSON_ARRAYAGG(cy_r.result ORDER BY cy_r.cy_n NULL ON NULL RETURNING JSON), JSON('[]'))"
+        return listOf(
+            "$head $rows INTO $RESULT FROM (\n${indent(numbered)}\n) cy_r;",
+            "OPEN $CURSOR FOR SELECT JSON_SERIALIZE($RESULT RETURNING CLOB EXTENDED) AS \"$ROWS_AS_TEXT\" FROM DUAL;",
+            "DBMS_SQL.RETURN_RESULT($CURSOR);",
+        )
     }
 
     /**
@@ -2419,7 +2415,7 @@ class OracleCypherCompiler(
         /** The cursor a procedure returns its rows by. */
         private const val CURSOR = "cy_cursor"
 
-        /** The rows a procedure returns, a JSON list read in the block before its cursor is opened over it: see [returnRows]. */
+        /** The rows a procedure returns with `rowsAsText`, a JSON list read in the block before its cursor writes it out: see [returnRows]. */
         private const val RESULT = "cy_result"
 
         /**

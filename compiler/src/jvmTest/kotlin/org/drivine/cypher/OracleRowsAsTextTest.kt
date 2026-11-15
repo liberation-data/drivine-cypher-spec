@@ -41,15 +41,15 @@ class OracleRowsAsTextTest {
         for (cypher in writes) {
             val plain = sql(cypher, rowsAsText = false)
             val text = sql(cypher, rowsAsText = true)
-            // Both read the same query's rows into the block's list, and differ in how the list holds them and the cursor gives them.
-            val rows = "JSON_ARRAYAGG(JSON_ARRAY(cy_r.result ABSENT ON NULL RETURNING JSON) ORDER BY cy_r.cy_n RETURNING JSON) INTO cy_result FROM (\n"
-            val cursor = "\n    OPEN cy_cursor FOR SELECT CASE WHEN JSON_VALUE(cy_l.item, '\$[0].type()') = 'string' " +
-                "THEN JSON(JSON_QUERY(JSON_SERIALIZE(cy_l.item RETURNING CLOB), '\$[0]' RETURNING CLOB)) ELSE JSON_QUERY(cy_l.item, '\$[0]' RETURNING JSON) END AS result " +
-                "FROM JSON_TABLE(cy_result, '\$[*]' COLUMNS (cy_n FOR ORDINALITY, item JSON PATH '\$')) cy_l ORDER BY cy_l.cy_n;\n"
-            assertTrue(rows in plain && cursor in plain, "$cypher: $plain")
+            // Both read the same query's rows in the block, the one to count them, the other to gather them as one list,
+            // which its cursor writes out where the other's runs the query again.
+            val query = plain.substringAfter("\n    OPEN cy_cursor FOR\n").substringBefore(";\n    DBMS_SQL.RETURN_RESULT(cy_cursor);\n")
+            val count = " COUNT(cy_r.result) + MAX(cy_r.cy_n) INTO cy_count FROM (\n"
+            assertTrue(count in plain, "$cypher: $plain")
             val expected = plain
-                .replace(rows, "COALESCE(JSON_ARRAYAGG(cy_r.result ORDER BY cy_r.cy_n NULL ON NULL RETURNING JSON), JSON('[]')) INTO cy_result FROM (\n")
-                .replace(cursor, "\n    OPEN cy_cursor FOR SELECT JSON_SERIALIZE(cy_result RETURNING CLOB EXTENDED) AS \"rows:json\" FROM DUAL;\n")
+                .replace("\nBEGIN\n", "\n    cy_result JSON;\nBEGIN\n")
+                .replace(count, " COALESCE(JSON_ARRAYAGG(cy_r.result ORDER BY cy_r.cy_n NULL ON NULL RETURNING JSON), JSON('[]')) INTO cy_result FROM (\n")
+                .replace("\n    OPEN cy_cursor FOR\n$query;\n", "\n    OPEN cy_cursor FOR SELECT JSON_SERIALIZE(cy_result RETURNING CLOB EXTENDED) AS \"rows:json\" FROM DUAL;\n")
             assertTrue(expected != plain, cypher)
             assertEquals(expected, text, cypher)
         }
@@ -58,8 +58,8 @@ class OracleRowsAsTextTest {
     @Test
     fun `without the option a write's rows are a row of JSON each, as before`() {
         val sql = OracleCypherCompiler("g").compile("UNWIND [1, 2] AS i CREATE (n:N {i: i}) RETURN n.i").sql
-        assertTrue("\n    OPEN cy_cursor FOR SELECT " in sql && "\n    DBMS_SQL.RETURN_RESULT(cy_cursor);\n" in sql, sql)
-        assertTrue("rows:json" !in sql && "JSON_SERIALIZE(COALESCE(JSON_ARRAYAGG(cy_r.result" !in sql, sql)
+        assertTrue("\n    OPEN cy_cursor FOR\n        SELECT " in sql && "\n    DBMS_SQL.RETURN_RESULT(cy_cursor);\n" in sql, sql)
+        assertTrue("rows:json" !in sql && "JSON_ARRAYAGG(cy_r.result" !in sql && "cy_result" !in sql, sql)
         for (cypher in writes) {
             assertEquals(sql(cypher, rowsAsText = false), OracleCypherCompiler("g").compile(cypher, parameters).sql, cypher)
             assertEquals(compiled(cypher, GraphOptions("g")), compiled(cypher, GraphOptions("g", oracleRowsAsText = false)), cypher)

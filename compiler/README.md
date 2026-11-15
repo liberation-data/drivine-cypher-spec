@@ -355,9 +355,24 @@ The text is Oracle's extended JSON, so a float stays a float: an object of the o
 and `"-Inf"`. Every other value is plain JSON, as the `JSON` rows hold it: a whole number in full, a text, a temporal
 value as its ISO 8601 text, a list, a map. A map the statement returns whose one key is `$numberDouble` is written as a
 float is. The host reads the one row while its driver prefetches at least one row (node-oracledb's default is 2). The
-rows are read inside the block either way, before the cursor is opened, so a returned value that fails as it is read fails
-the block and undoes its writes (liberation-data/drivine-cypher-spec#292). Either way they are held as one JSON value, so a
-write whose rows together pass Oracle's limit on the size of one, 32 MB, fails.
+rows are one JSON value, so a write whose rows together pass Oracle's limit on the size of one, 32 MB, fails, where a row
+of `JSON` each would not.
+
+Either way every row's result is worked out inside the block, before the cursor is opened, so a returned value that fails
+as it runs fails the block and Oracle undoes its writes (liberation-data/drivine-cypher-spec#292). A cursor over the rows'
+query alone ran it only as the host fetched, after the writes. Without the option, the block counts the rows, numbered in
+their order so that a sort key that fails fails there too, and the cursor then runs the query again as before:
+
+```sql
+SELECT COUNT(cy_r.result) + MAX(cy_r.cy_n) INTO cy_count FROM (
+    SELECT cy_q.result, ROWNUM AS cy_n FROM (
+        <the rows' query>
+    ) cy_q
+) cy_r;
+OPEN cy_cursor FOR
+    <the rows' query>;
+DBMS_SQL.RETURN_RESULT(cy_cursor);
+```
 
 Every other statement, a read or a write that returns nothing, compiles alike either way, as does every statement on the
 other stores. The option is temporary: Drivine for TypeScript sets it until a node-oracledb release with
