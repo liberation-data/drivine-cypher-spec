@@ -318,6 +318,14 @@ class OracleCypherCompiler(
     /** A `VARCHAR2`, which holds 4,000 bytes: a longer text is null. See [texts], which reads one as a CLOB. */
     override fun text(json: String) = shared(json) { (x) -> "CASE WHEN ${kind(x)} = 'string' THEN JSON_VALUE($x, '$') END" }
 
+    /**
+     * A text past 4,000 bytes, which [text] reads as null, fails by name, where `toString()` of a list or a map would write it
+     * as nothing (drivine4j#420); an empty one, null as both, is empty (#416).
+     */
+    override fun wholeText(json: String) = shared(json) { (x) ->
+        "COALESCE(${text(x)}, CASE WHEN LENGTH(${longText(x)}) > 0 THEN TO_CHAR(${failure(LONG_ITEM_TEXT, "LENGTH(${longText(x)})")}) END)"
+    }
+
     /** The JSON [json] as a CLOB, where it is a string: a text of any length, slower to read than [text]'s `VARCHAR2`. */
     private fun longText(json: String) = shared(json) { (x) -> "CASE WHEN ${kind(x)} = 'string' THEN JSON_VALUE($x, '$' RETURNING CLOB) END" }
 
@@ -2356,6 +2364,9 @@ class OracleCypherCompiler(
         /** A hint a query starts with: `SELECT /*+ … */ `. */
         private val LEADING_HINT = Regex("""^SELECT (/\*\+.*?\*/) """)
 
+        /** What `toString()` of a list or a map that holds a text past 4,000 bytes fails with, before its length: see [wholeText]. */
+        private const val LONG_ITEM_TEXT = "toString() of a list or a map that holds a text past 4,000 bytes is not compiled to SQL on Oracle yet: its length is"
+
         /** How the last function a query declares before it ends (see [readAsText]): its `END;`, on a line of its own. */
         private const val DECLARED_END = "\nEND;\n"
 
@@ -2664,8 +2675,9 @@ class OracleCypherCompiler(
 
         /**
          * The function [name], which gives the ISO 8601 text `t` of a date or a moment whose year may be BC as Oracle numbers
-         * that year, with no year 0: the year `0000` (1 BC) as `-0001`, and `-0044` (45 BC) as `-0045`. Any other text, and
-         * null, it gives as it is. A text whose first character's code is below [TemporalSql.BC_BELOW] starts with `-` or `0`,
+         * that year, with no year 0: the year `0000` (1 BC) as `-0001`, and `-0044` (45 BC) as `-0045`. A text whose fraction of
+         * a second goes past the microsecond, which Oracle's timestamp would drop, it refuses, raising -20421 with
+         * [Temporals.SUB_MICRO] and the text (drivine4j#421). Any other text, and null, it gives as it is. A text whose first character's code is below [TemporalSql.BC_BELOW] starts with `-` or `0`,
          * as one with a year BC does. See `OracleTemporalSql.era`, which calls it where the store keeps it: the text is
          * written once, where the test and the regular expression it stands for wrote it four times, and Oracle's hard parse
          * of a statement grows with each copy (drivine#572).
@@ -2679,6 +2691,10 @@ class OracleCypherCompiler(
         fun eraFunction(name: String): String = listOf(
             "FUNCTION $name(t VARCHAR2) RETURN VARCHAR2 DETERMINISTIC IS",
             "BEGIN",
+            // A nanosecond past the microsecond, which Oracle's timestamp as it is written (FF6) would drop: drivine4j#421.
+            "    IF INSTR(t, '.') > 0 AND REGEXP_LIKE(t, '${Temporals.SUB_MICRO_DIGITS}') THEN",
+            "        RAISE_APPLICATION_ERROR(-20421, '${Temporals.SUB_MICRO.replace("'", "''")} ' || t);",
+            "    END IF;",
             "    IF ASCII(t) < ${TemporalSql.BC_BELOW} THEN",
             "        RETURN REGEXP_REPLACE(t, '^(-[0-9]{4}|0000)', TO_CHAR(TO_NUMBER(REGEXP_SUBSTR(t, '^-?[0-9]{4}')) - 1, 'FM0000'));",
             "    END IF;",

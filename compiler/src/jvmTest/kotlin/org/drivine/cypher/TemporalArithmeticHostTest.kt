@@ -94,6 +94,28 @@ class TemporalArithmeticHostTest {
     }
 
     @Test
+    fun `a nanosecond past the microsecond fails on both but for a date's duration (drivine4j#421)`() {
+        val past = mapOf(
+            Temporal.LOCAL_TIME to "12:00:00.000000001", Temporal.TIME to "12:00:00.123456789+02:00",
+            Temporal.LOCAL_DATE_TIME to "2024-01-01T00:00:00.1234567", Temporal.DATE_TIME to "2024-01-01T00:00:00.000000001Z",
+        )
+        val differ = mutableListOf<String>()
+        fun check(op: String, x: String, y: String, fails: Boolean) {
+            val (inline, host) = inline("$x $op $y") to host(op, x, y)
+            if (inline != host || (inline == "fails") != fails) differ += "$x $op $y: inline $inline, host $host"
+        }
+        past.forEach { (kind, text) -> listOf("PT1S", "P1D", "PT0.000001S").forEach { d ->
+            check("+", literal(kind, text), literal(Temporal.DURATION, d), fails = true)
+            check("-", literal(kind, text), literal(Temporal.DURATION, d), fails = true)
+        } }
+        moments.forEach { (kind, texts) -> listOf("PT0.000000001S", "-PT1.0000001S").forEach { d ->
+            check("+", literal(kind, texts.first()), literal(Temporal.DURATION, d), fails = kind != Temporal.DATE)
+            check("+", literal(Temporal.DURATION, d), literal(kind, texts.first()), fails = kind != Temporal.DATE)
+        } }
+        assertTrue(differ.isEmpty(), differ.joinToString("\n"))
+    }
+
+    @Test
     fun `null gives null, and a pair Cypher has no arithmetic of fails by name`() {
         assertEquals(null, call("+", tag(Temporal.DURATION, "P1D"), null))
         assertEquals(null, call("-", "null", tag(Temporal.DURATION, "P1D")))
@@ -151,6 +173,43 @@ class TemporalArithmeticHostTest {
         listOf("duration('P1D') * toFloat('Infinity')", "duration('P1D') / toFloat('-Infinity')").forEach {
             val failed = inline(it, failure = true)
             assertTrue(TemporalArithmeticFunction.UNDEFINED in failed && "Infinity" in failed, "$it: $failed")
+        }
+    }
+
+    @Test
+    fun `a duration's fields of its seconds are worked out in whole numbers, not doubles, written or given (#278)`() {
+        // java.time's Duration holds a duration's time as Cypher does: whole seconds, floored, and nanoseconds from 0 up to a
+        // second. The larger units are of the whole seconds, counted toward zero, as Java's / counts.
+        val texts = listOf(
+            "PT87659999H59M59.999999999S", "-PT87659999H59M59.999999999S", "PT-1.5S", "-PT0.000001S", "PT0.5S", "PT1S", "PT0S",
+            "-PT25H0.5S", "-PT1M0.5S", "PT30M0.5S", "PT2562047H47M16.854775807S",
+        )
+        // And a fraction of an hour, a month or a day, which goes to the parts below it, beside a long time.
+        // A fraction of an hour or a minute leaves a fraction of a second, which a text given keeps as the compiler's does.
+        for (text in listOf("PT1.5H", "P0.5M", "P1.5D", "-P0.5M", "P1.5MT87659999H59M59.999999999S", "-P1.5DT0.000000001S",
+            "PT0.0001H", "PT0.01M", "-PT0.0001H", "PT1.0000001H", "PT0.0001H-1S", "PT-0.01M0.5S")) {
+            assertEquals(inline("toString(duration('$text'))"), inline("toString(duration(\$d))", mapOf("d" to text)), "$text given")
+            for (field in listOf("seconds", "milliseconds", "nanoseconds", "secondsOfMinute", "nanosecondsOfSecond")) {
+                assertEquals(inline("duration('$text').$field"), inline("duration(\$d).$field", mapOf("d" to text)), "$text.$field given")
+            }
+        }
+        for (text in texts) {
+            // Its text given is the text the compiler writes of it written: the canonical text, worked out as it compiles.
+            assertEquals(inline("toString(duration('$text'))"), inline("toString(duration(\$d))", mapOf("d" to text)), "$text given")
+            val d = java.time.Duration.parse(text)
+            val (s, n) = d.seconds to d.nano.toLong()
+            val want = mapOf(
+                "hours" to s / 3600, "minutes" to s / 60, "seconds" to s, "minutesOfHour" to s / 60 - s / 3600 * 60, "secondsOfMinute" to s - s / 60 * 60,
+                "milliseconds" to s * 1000 + n / 1000000, "microseconds" to s * 1000000 + n / 1000,
+                "nanoseconds" to runCatching { Math.addExact(Math.multiplyExact(s, 1000000000L), n) }.getOrNull(),
+                "millisecondsOfSecond" to n / 1000000, "microsecondsOfSecond" to n / 1000, "nanosecondsOfSecond" to n,
+            )
+            for ((field, value) in want) {
+                // Past a long, Neo4j fails to give the nanoseconds, so they aren't pinned.
+                if (value == null) continue
+                assertEquals(value.toString(), inline("duration('$text').$field"), "$text.$field written")
+                assertEquals(value.toString(), inline("duration(\$d).$field", mapOf("d" to text)), "$text.$field given")
+            }
         }
     }
 

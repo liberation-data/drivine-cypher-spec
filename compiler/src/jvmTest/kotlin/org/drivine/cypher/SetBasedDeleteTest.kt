@@ -148,4 +148,43 @@ class SetBasedDeleteTest {
             }
         }
     }
+
+    @Test
+    fun `a statement that deletes and reads on holds each relationship's type in its rows, by whatever name a WITH gives it`() {
+        // drivine4j#427: type() of a relationship the statement deleted is read from its rows, as its row is gone. It is held by
+        // the relationship, so one a WITH renames, or one returned typed, keeps it. A statement that reads nothing after its
+        // DELETE holds none, which would only lengthen each row.
+        val typeKey = Regex("""\bv\d+t\b""")
+        compilers.forEach { compiler ->
+            listOf(
+                "MATCH ()-[r]->() DELETE r WITH r AS x RETURN type(x)",
+                "MATCH ()-[r]->() DELETE r RETURN r",
+                "MATCH ()-[r]->() DELETE r CREATE (:Log {t: type(r)})",
+            ).forEach { cypher -> assertTrue(typeKey.containsMatchIn(compiler.compile(cypher).sql), "${compiler::class.simpleName}: $cypher") }
+            listOf("MATCH (a)-[r]->() DELETE r SET a.x = 1", "MATCH (a)-[r]->() SET a.x = 1 RETURN type(r)").forEach { cypher ->
+                assertFalse(typeKey.containsMatchIn(compiler.compile(cypher).sql), "${compiler::class.simpleName}: $cypher")
+            }
+        }
+    }
+
+    @Test
+    fun `a read of a property or the labels of a node or a relationship the statement deleted fails, by each way it is read`() {
+        // drivine4j#420: its row is gone, so each read gave null, where Neo4j fails it. One the statement didn't delete, or read
+        // in a statement that deletes nothing before it, is read as before.
+        val node = "A node the statement deleted has no properties or labels to read"
+        val relationship = "A relationship the statement deleted has no properties to read"
+        compilers.forEach { compiler ->
+            listOf(
+                "MATCH (n) DELETE n RETURN n.num" to node, "MATCH (n) DELETE n RETURN labels(n)" to node,
+                "MATCH (n) DELETE n RETURN coalesce(n.num, 0)" to node, "MATCH (n) DELETE n WITH n AS m RETURN m.num" to node,
+                "MATCH (n) DELETE n CREATE (:Log {num: n.num})" to node, "MATCH (n) DELETE n WITH n, 'num' AS k RETURN n[k]" to node,
+                "MATCH ()-[r]->() DELETE r WITH r, 'num' AS k RETURN r[k]" to relationship,
+                "MATCH ()-[r]->() DELETE r RETURN r.num" to relationship, "MATCH (a)-[r]->() DETACH DELETE a RETURN coalesce(r.num, 0)" to relationship,
+            ).forEach { (cypher, failure) -> assertTrue(failure in compiler.compile(cypher).sql, "${compiler::class.simpleName}: $cypher") }
+            listOf("MATCH (n) SET n.x = 1 RETURN n.num, labels(n)", "MATCH ()-[r]->() SET r.x = 1 RETURN r.num").forEach { cypher ->
+                val sql = compiler.compile(cypher).sql
+                assertFalse(node in sql || relationship in sql, "${compiler::class.simpleName}: $cypher")
+            }
+        }
+    }
 }

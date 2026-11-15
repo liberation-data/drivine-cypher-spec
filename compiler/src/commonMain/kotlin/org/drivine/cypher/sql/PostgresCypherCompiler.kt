@@ -10,6 +10,7 @@ import org.drivine.cypher.ast.RelationshipPattern
 import org.drivine.cypher.json.CypherEncoder
 import org.drivine.cypher.json.CypherJson
 import org.drivine.cypher.store.PostgresSql
+import org.drivine.cypher.store.ddl.PostgresDdl
 import org.drivine.cypher.store.Stamps
 import com.ionspin.kotlin.bignum.decimal.BigDecimal
 import org.drivine.cypher.json.jvmDoubleText
@@ -367,11 +368,15 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
      * values of several temporal kinds sort by kind first, as Cypher sorts them: as its own object, `jsonb` compares a tag's
      * keys in its own order, its sort key `s` first, and so sorted by time alone, whatever its kind. A list is its items as
      * [flatListKey] writes them, as `jsonb` orders a list the shorter first (drivine4j#271).
+     *
+     * The kind is read once, by one `jsonb_typeof`, and the tag only of an object: a number or a truth value, the commonest
+     * kinds sorted after texts, went through three tests before its own value, and a sort of 100,000 numbers to its first 100
+     * took a fifth as long again as one of texts (#284). A map that is no tag is itself, as `jsonb` orders it.
      */
     override fun sortKey(json: String) = shared(json) { (x) ->
-        "ROW(CASE WHEN jsonb_typeof($x) = 'string' THEN '\"\"'::jsonb " +
-            "WHEN ${tagKind(x)} IS NOT NULL THEN jsonb_build_object('k', ${tagRank(x, "0") { "$it" }}, 's', COALESCE($x -> 's', $x -> 'v')) " +
-            "WHEN jsonb_typeof($x) = 'array' THEN CAST(${flatListKey(x)} AS jsonb) " +
+        "ROW(CASE jsonb_typeof($x) WHEN 'string' THEN '\"\"'::jsonb " +
+            "WHEN 'object' THEN CASE WHEN ${tagKind(x)} IS NOT NULL THEN jsonb_build_object('k', ${tagRank(x, "0") { "$it" }}, 's', COALESCE($x -> 's', $x -> 'v')) ELSE $x END " +
+            "WHEN 'array' THEN CAST(${flatListKey(x)} AS jsonb) " +
             "ELSE ${nullIfJsonNull(x)} END, ${codePointText(x)})"
     }
 
@@ -380,11 +385,22 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
      * as [listSortKey] writes it, each item where its kind comes, the item, and what follows it, read in one pass over its items,
      * not walked: a property's list holds no list, and the walk the planner costs at thousands a row. An item that is a list is
      * compared as `jsonb` compares it, the shorter first (drivine4j#271).
+     *
+     * A call of the store's function (`PostgresDdl.listKey`), whose body is [flatListKeyBody], and not that query written out:
+     * the planner costs a subquery in a sort key on every row, though no row holds a list, and so brings in its JIT and gives up
+     * a parallel plan, which made a sort of 100,000 rows to the first 100 four times as slow (drivine-cypher-spec#284). The
+     * function's cost is declared low, and it is parallel safe.
      */
-    private fun flatListKey(list: String) =
-        "(SELECT COALESCE(string_agg('[' || ${itemRank("fe.item")} || ', ' || CASE jsonb_typeof(fe.item) " +
+    private fun flatListKey(list: String) = "$storedListKey($list)"
+
+    /** The store's function [flatListKey] calls. */
+    private val storedListKey = PostgresDdl.listKeyName(graph)
+
+    /** The query [flatListKey]'s function gives, of the list [list]: its body, as `PostgresDdl.listKey` makes it. */
+    internal fun flatListKeyBody(list: String) =
+        "SELECT COALESCE(string_agg('[' || ${itemRank("fe.item")} || ', ' || CASE jsonb_typeof(fe.item) " +
             "WHEN 'string' THEN ${codePoints("(fe.item #>> '{}')")} ELSE CAST(fe.item AS text) END || ', ', '' ORDER BY fe.item_no), '') " +
-            "|| '[]' || repeat(']', COUNT(*)::int) FROM jsonb_array_elements($list) WITH ORDINALITY fe (item, item_no))"
+            "|| '[]' || repeat(']', COUNT(*)::int) FROM jsonb_array_elements($list) WITH ORDINALITY fe (item, item_no)"
 
     /** A text as [sortKey] sorts it, by its code points: a value the statement makes a text is no tag, so none is read apart. */
     override fun textSortKey(json: String) = shared(json) { (x) ->
