@@ -896,6 +896,10 @@ class CompilerRefusalTest {
             // A CASE one of whose values is a list of any items, or with no ELSE, which may be null, and coalesce() with a null.
             taken("RETURN toString(CASE WHEN true THEN [1, 2] ELSE [1, 'a'] END)"), taken("RETURN toString(CASE WHEN true THEN [1, 2] END)"),
             taken("RETURN toString(coalesce(null, [1, 2]))"),
+            // Not captured: Neo4j probably takes these, as it takes [1, null]. The compiler refuses them, as listItems trusts the
+            // kind of the value compiled, temporal values of one kind (Json.items) or nodes (Entities), before it reads the null item.
+            refused("RETURN toString([date('2024-01-02'), null])"), refused("MATCH (n) RETURN toString([n, null])"),
+            refused("MATCH (n) WITH [n, null] AS l RETURN toString(l)"),
         )
     }
 }

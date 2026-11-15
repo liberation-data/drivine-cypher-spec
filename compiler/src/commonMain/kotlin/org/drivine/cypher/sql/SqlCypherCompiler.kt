@@ -4902,7 +4902,7 @@ abstract class SqlCypherCompiler(
          * [Value.Json.itemsKnown]. Each form, as it is typed:
          *
          * - a list written: the kind its items share ([itemOf]), integers and floats both numbers, maps, nodes and relationships all
-         *   maps; none where an item is null or of a kind left open, two differ, or it is empty;
+         *   maps; none where an item is null or of a kind left open, two differ, or it is empty, unless [compiled] gives one (below);
          * - `collect()`, `DISTINCT` or not: its argument's kind, and [Value.Items.ONE] where that is left open, as of a property;
          * - a pattern comprehension: [Value.Items.ONE];
          * - `keys()`, `labels()` and `split()`: texts; `range()`: numbers; `nodes()` and `relationships()`: maps;
@@ -4914,9 +4914,12 @@ abstract class SqlCypherCompiler(
          * - `head()`, `last()` and an item `[i]`: of a list whose items are lists of one kind, that kind ([innerItems]);
          * - a `CASE`: the kind each of its values is of, its `ELSE` too; none with no `ELSE`, which may give null;
          * - a variable: the kind of the list it is bound to, by a `WITH`, by an `UNWIND` of a list of lists of one kind ([innerItems]),
-         *   or by a `UNION` each of whose queries makes it such a list ([unionItems]); a list of nodes or relationships, maps;
+         *   or by a `UNION` each of whose queries makes it such a list ([unionItems]); a list of nodes or relationships, maps, a null
+         *   among them or not;
          * - and, where [compiled], the value compiled of it, is given: that value's kind where it is a list of nodes or relationships
-         *   (maps), of temporal values of one kind ([Value.Items.TEMPORAL], from [Value.Json.items]), or one already typed.
+         *   (maps), of temporal values of one kind ([Value.Items.TEMPORAL], from [Value.Json.items]), or one already typed. That kind
+         *   is taken before [list] is read, so a null among the items doesn't clear it: `[n, null]` is maps and
+         *   `[date('2024-01-02'), null]` temporal values, though Neo4j, which takes `[1, null]`, probably takes both (not captured).
          *
          * Null where [list] is of any items, or no list.
          */
