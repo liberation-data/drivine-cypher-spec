@@ -330,7 +330,7 @@ cases:
         cypher: "MATCH (:CyWrite)-[r]->() DELETE r WITH r AS x RETURN type(x)"
         rows: ["T"]
       - cypher: "CREATE (:CyWrite {num: 2})-[:T {num: 1}]->(:CyWrite)"
-      - note: "A node the statement didn't delete still reads, and so does one OPTIONAL MATCH found none of."
+      - note: "A node the statement didn't delete still reads, and so does a relationship OPTIONAL MATCH found none of."
         only: [neo4j, sql]
         cypher: "MATCH (a:CyWrite {num: 2})-[r]->() OPTIONAL MATCH (a)-[s:NONE]->() DELETE r, s RETURN [a.num, s.num, type(s)]"
         rows: [[2, null, null]]

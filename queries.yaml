@@ -3113,7 +3113,7 @@ cases:
         rows: [["2.5", "3", "a", "4.0"]]
 
   - name: "toString() of a list or a map"
-    description: "toString() of a list of items of many kinds, or of a map, that the statement makes is its text, as Neo4j 2026.09 and later writes it, where the SQL stores refused it (liberation-data/drivine4j#420): each item as toString() writes it, a text without quotes, null as null, after ', ', and each entry as key: value, in the order of the keys' code points, as Neo4j orders them, not as written. A list of items of one kind is refused, as Neo4j refuses it (see \"toString of a list or a map\")."
+    description: "toString() of a list of items of many kinds, or of a map, that the statement makes is its text, as Neo4j's Cypher 25 writes it, where the SQL stores refused it (liberation-data/drivine4j#420): each item as toString() writes it, a text without quotes, null as null, after ', ', and each entry as key: value, in the order of the keys' code points, as Neo4j orders them, not as written. A list of items of one kind is refused, as Neo4j refuses it (see \"toString of a list or a map\")."
     steps:
       - note: "Neo4j 2026.10.1 gives these three."
         cypher: "RETURN [toString([1, 'a']), size(toString([1, 'a'])), toString({a: 1, b: 'x'}), toString([1.0, true, null])]"
@@ -4568,7 +4568,7 @@ cases:
         error: true
       - only: [sql]
         cypher: "RETURN toString([1, 2])"
-        error: "toString() takes a number, a text, a truth value or a temporal value, not a list of one kind, as in Neo4j."
+        error: "toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j."
       - note: "Neo4j 2026.10.1 refuses each of these when it plans them: Type mismatch: expected Boolean, Float, Integer, Point, String, …, List<Any>, Map, Node, Relationship or Path but was List<Integer>. A SQL store refused each of them, as it refused any list."
         only: [neo4j]
         cypher: "RETURN toString(['a', 'b'])"
@@ -4587,19 +4587,19 @@ cases:
         error: true
       - only: [sql]
         cypher: "RETURN toString(['a', 'b'])"
-        error: "toString() takes a number, a text, a truth value or a temporal value, not a list of one kind, as in Neo4j."
+        error: "toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j."
       - only: [sql]
         cypher: "RETURN toString([1.0E20, 0.001, -2.5, 1.0E-7])"
-        error: "toString() takes a number, a text, a truth value or a temporal value, not a list of one kind, as in Neo4j."
+        error: "toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j."
       - only: [sql]
         cypher: "RETURN toString([date('2024-01-02')])"
-        error: "toString() takes a number, a text, a truth value or a temporal value, not a list of one kind, as in Neo4j."
+        error: "toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j."
       - only: [sql]
         cypher: "WITH [1, 2] AS l RETURN toString(l)"
-        error: "toString() takes a number, a text, a truth value or a temporal value, not a list of one kind, as in Neo4j."
+        error: "toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j."
       - only: [sql]
         cypher: "UNWIND [1964, 1967] AS b WITH collect(b) AS c RETURN toString(c)"
-        error: "toString() takes a number, a text, a truth value or a temporal value, not a list of one kind, as in Neo4j."
+        error: "toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j."
       - only: [neo4j, sql]
         cypher: "RETURN toString({a: 1})"
         rows: ["{a: 1}"]

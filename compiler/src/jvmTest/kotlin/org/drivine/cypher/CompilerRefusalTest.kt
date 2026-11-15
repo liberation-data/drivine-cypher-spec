@@ -180,9 +180,9 @@ class CompilerRefusalTest {
     }
 
     @Test
-    fun `toString of a list or a map the statement makes is its text, as Neo4j 2026_09 and later writes it`() {
-        // #349: Postgres and SQLite gave the list's JSON text, each spaced its own way, and Oracle null, so it was refused, as Neo4j
-        // refused it then. Neo4j 2026.09 takes it (drivine4j#420): what each store gives is the spec's, in queries.yaml.
+    fun `toString of a list or a map the statement makes is its text, as Neo4j's Cypher 25 writes it`() {
+        // #349: Postgres and SQLite gave the list's JSON text, each spaced its own way, and Oracle null, so it was refused, as Neo4j's
+        // Cypher 5 refuses it. Its Cypher 25 takes it (drivine4j#420): what each store gives is the spec's, in queries.yaml.
         listOf(PostgresCypherCompiler("g"), OracleCypherCompiler("g"), SqliteCypherCompiler("g")).forEach { compiler ->
             // Written out of texts, integers, truth values and null alone, the text is worked out when compiling.
             listOf(
@@ -223,7 +223,7 @@ class CompilerRefusalTest {
                 "WITH [1, 2] AS l CREATE (n) RETURN toString(l)",
             ).forEach { cypher ->
                 val refused = assertThrows<CompilerException>("${compiler::class.simpleName}: $cypher") { compiler.compile(cypher) }.message!!
-                assertEquals("toString() takes a number, a text, a truth value or a temporal value, not a list of one kind, as in Neo4j.", refused)
+                assertEquals("toString() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j.", refused)
             }
             // A value whose kind the statement leaves open is compiled as before, as Neo4j plans it.
             compiler.compile("UNWIND [1, 'a'] AS x RETURN toString(x)")

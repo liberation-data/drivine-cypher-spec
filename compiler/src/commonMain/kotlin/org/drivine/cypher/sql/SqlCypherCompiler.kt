@@ -7036,7 +7036,7 @@ abstract class SqlCypherCompiler(
 
         /**
          * `toString` of [value], the argument of [function], where the statement makes it a list or writes it as a map: its text as
-         * Neo4j 2026.09 and later writes it, where Neo4j before refused it, and so did this (drivine4j#420); a list of items of one kind
+         * Neo4j's Cypher 25 writes it, where its Cypher 5 refuses it, and so did this (drivine4j#420); a list of items of one kind
          * it knows, written, `[1, 2]` or `[date(…)]`, bound by a `WITH` or gathered by `collect()` ([Value.Json.itemsKnown]), it refuses
          * still, and so does this. Each item is written as `toString` writes it, a text without quotes, null as `null`, a list or a
          * map within as one is, the items after `, ` and each entry `key: value`, in the order of the keys ([CODE_POINT_ORDER]), as
@@ -7057,7 +7057,7 @@ abstract class SqlCypherCompiler(
             }
             // Neo4j's Cypher 25 refuses a list whose items it knows to be of one kind, as [1, 2], and takes one of many, as [1, 'a'].
             if (itemsKind(written, scope) != null || (value as? Value.Json)?.items != null || (value as? Value.Json)?.itemsKnown != null) {
-                throw CompilerException("${function.name}() takes a number, a text, a truth value or a temporal value, not a list of one kind, as in Neo4j.")
+                throw CompilerException("${function.name}() takes a number, a text, a truth value, a temporal value, a map or a list of any items, not a list whose items are all of one kind, as in Neo4j.")
             }
             if (value is Value.Entities) unsupported("toString() of a list of nodes or relationships")
             if (hasTemporals(value)) unsupported("toString() of a list or a map that holds a temporal value")
