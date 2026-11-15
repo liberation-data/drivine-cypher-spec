@@ -36,6 +36,13 @@ class MadeNanosKeptTest {
     }
 
     @Test
+    fun `a moment made over one with an offset is refused where a nanosecond field moves it to another time zone`() {
+        // Moved through the store's timestamp in UTC; over a local value it takes the time zone as it is, and keeps its digits.
+        assertEquals("refused", sqlite("RETURN datetime({datetime: datetime('2024-01-01T00:00Z'), nanosecond: 645876123, timezone: '+05:00'}) AS r"))
+        assertTrue("00:00:00.645876123+05:00" in sqlite("RETURN datetime({datetime: localdatetime('2024-01-01T00:00'), nanosecond: 645876123, timezone: '+05:00'}) AS r"))
+    }
+
+    @Test
     fun `a nanosecond field out of its range fails and writes no text`() {
         // It wrote 01:00:00.000000-001, which is no temporal value's text.
         assertEquals("refused", sqlite("RETURN localtime({hour: 1, nanosecond: \$n}) AS r", mapOf("n" to -1)))

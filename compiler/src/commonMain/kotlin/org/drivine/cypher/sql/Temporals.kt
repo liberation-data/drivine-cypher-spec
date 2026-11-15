@@ -293,7 +293,7 @@ class Temporals(
         return shared(listOf(text)) { (o) ->
             shared(listOf(converted(o))) { (c) ->
                 val fraction = sql.group(o, literal(sql.regex("([.][0-9]+)")), 1)
-                val kept = sql.replace(c, literal(sql.regex("^([^:]*:[0-9]{2}:[0-9]{2})([.][0-9]+)?")), "('\\1' || $fraction)")
+                val kept = sql.replace(c, literal(sql.regex(SECONDS)), "('\\1' || $fraction)")
                 "CASE WHEN ${sql.matches(o, literal(sql.regex(SUB_MICRO_DIGITS)))} THEN $kept ELSE $c END"
             }
         }
@@ -335,7 +335,7 @@ class Temporals(
                 val micros = "${sql.trunc}(${fields["millisecond"] ?: "0"} * 1000 + ${fields["microsecond"] ?: "0"} + $n / 1000)"
                 val nine = "${sql.toChar}($micros, 'FM000000') || ${sql.toChar}(${sql.mod(n, "1000")}, 'FM000')"
                 // The fraction after the seconds, the text's first `:mm:ss`, written again of nine digits.
-                val kept = sql.replace(t, literal(sql.regex("^([^:]*:[0-9]{2}:[0-9]{2})([.][0-9]+)?")), "('\\1.' || $nine)")
+                val kept = sql.replace(t, literal(sql.regex(SECONDS)), "('\\1.' || $nine)")
                 // A nanosecond out of its range would write no fraction a temporal text has, so fails as it did (drivine4j#421).
                 val range = refuse?.let { refusing -> " WHEN $n < 0 OR $n > 999999999 THEN ${refusing(SUB_MICRO, "CAST($n AS ${sql.textType})")}" } ?: ""
                 "CASE WHEN ${sql.mod(n, "1000")} = 0 THEN $t$range ELSE $kept END"
@@ -1105,6 +1105,9 @@ class Temporals(
         const val SUB_MICRO_DIGITS = "[.][0-9]{6}[0-9]{0,2}[1-9]"
 
         private val SUB_MICRO_REGEX = Regex(SUB_MICRO_DIGITS)
+
+        /** A temporal text up to its first `:mm:ss` in the first group, and the fraction after it, if any, in the second. */
+        private const val SECONDS = "^([^:]*:[0-9]{2}:[0-9]{2})([.][0-9]+)?"
 
         /** A fraction of a second past six digits, its first six in the group: see `toMicros`. */
         private val PAST_MICROS = Regex("([.][0-9]{6})[0-9]+")
