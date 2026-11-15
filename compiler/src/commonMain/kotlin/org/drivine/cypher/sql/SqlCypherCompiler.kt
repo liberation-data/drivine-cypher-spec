@@ -920,6 +920,20 @@ abstract class SqlCypherCompiler(
     protected open fun indexedTagEquality(property: String, kind: Temporal, key: String, of: IndexedProperty? = null): String? = null
 
     /**
+     * The store whose index holds a property's class and key (see [org.drivine.cypher.store.IndexKey]), where a given
+     * value's class and key are worked out as the statement compiles, bound once and compared by [indexedKeyEquality]; null
+     * where the store writes [indexedEquality] over the value, as Postgres does, which compares the value's JSON.
+     */
+    protected open val indexKeyStore: org.drivine.cypher.api.Store? = null
+
+    /**
+     * As [indexedEquality], for a value given as the statement compiles, whose class is the word [kind] and whose key is bound
+     * at the marker [key] (`IndexKey.of`): the index's columns compared with them, not with the key written over the value,
+     * which Oracle writes as a `CASE` that reads the value in each of its branches (#286). Null where the store has none.
+     */
+    protected open fun indexedKeyEquality(property: String, kind: String, key: String, of: IndexedProperty? = null): String? = null
+
+    /**
      * Whether the store's index holds the value [given], a text or a truth value, as a text a test of [indexedEquality] finds:
      * where it doesn't, the comparison stands alone. Oracle's reads an empty text, and one past 4,000 bytes, as null (#617).
      */
@@ -6252,7 +6266,8 @@ abstract class SqlCypherCompiler(
             // and is compared with the index's text as each of its kinds can be: else the join reads every node for each row (#617).
             val indexed = when {
                 // A number and a temporal value too, where the index holds a value's class and key (see ValueLayout).
-                given != null && (given is String || given is Boolean || given is Number || Temporal.ofValue(given) != null) && indexHolds(given) -> indexedEquality(a, b, of)
+                given != null && (given is String || given is Boolean || given is Number || Temporal.ofValue(given) != null) && indexHolds(given) ->
+                    boundKey(written, given)?.let { (kind, key) -> indexedKeyEquality(a, kind, key, of) } ?: indexedEquality(a, b, of)
                 // A temporal value the statement works out, by its kind and its key.
                 given == null && (right as? Value.Json)?.temporal?.takeIf { it != Temporal.DURATION } != null ->
                     (right as Value.Json).let { tag -> indexedTagEquality(a, tag.temporal!!, tagKeyOf(tag), of) }
@@ -6391,6 +6406,23 @@ abstract class SqlCypherCompiler(
         }
 
         /** The parameter [name]'s value as the JSON it is bound as; null where it is null. */
+        /**
+         * The class of the value [given] and its key where the store's index holds a property's class and key and they are
+         * worked out here ([indexKeyStore], `IndexKey.of`): a parameter's key bound once beside it ([Parameters.derived]), a
+         * literal's written as a literal, as the literal is. Null where they are not worked out, where the parameters are bound
+         * as one map, which has no place for the key, and where [written] is neither, as an entry of a parameter that is a map.
+         */
+        private fun boundKey(written: Expression?, given: Any): Pair<String, String>? {
+            val store = indexKeyStore ?: return null
+            val key = org.drivine.cypher.store.IndexKey.of(store, CypherJson.valueToTree(given, encoder)) ?: return null
+            val marker = when (written) {
+                is Expression.Parameter -> parameters.derived(written.name, key.key) ?: return null
+                is Expression.Literal -> "'${key.key.replace("'", "''")}'"
+                else -> return null
+            }
+            return key.kind to marker
+        }
+
         private fun parameterTree(name: String): JsonNode? = parameterTrees.getOrPut(name) {
             CypherJson.valueToTree(parameters.value(name), encoder).takeUnless { it.isNull || it.isMissingNode }
         }

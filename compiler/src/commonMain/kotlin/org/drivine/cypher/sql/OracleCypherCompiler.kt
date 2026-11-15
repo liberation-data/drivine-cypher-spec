@@ -822,6 +822,16 @@ class OracleCypherCompiler(
         return shared(value) { (x) -> "(${labelledEquals(of, x)} OR ${OracleSql.valueKey(x)} IS NULL)" }
     }
 
+    override val indexKeyStore = org.drivine.cypher.api.Store.ORACLE
+
+    /**
+     * A value given as the statement compiles: the labelled indexes' class and key columns beside its class's word and its key,
+     * bound once (#286), where written over the bound value ([labelledEquals]) each of the index's columns read the value again
+     * in each branch of its `CASE`, 59 times for a lookup by id of a label with a range index and a uniqueness constraint.
+     */
+    override fun indexedKeyEquality(property: String, kind: String, key: String, of: IndexedProperty?): String? =
+        labelledHeld(of, listOf(OracleSql.literal(kind), key))
+
     /** A temporal value the statement works out: the labelled indexes' class and key columns beside its kind's word and its key. */
     override fun indexedTagEquality(property: String, kind: Temporal, key: String, of: IndexedProperty?): String? =
         labelledHeld(of, listOf("'${kind.function}'", if (binds(key)) "(SELECT $key FROM dual)" else key))
