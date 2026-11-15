@@ -20,8 +20,12 @@ import org.drivine.cypher.ast.SetItem
  * written, and a variable a `WITH` passes on as it is. Any other value (a property, a parameter, an unwound item, a
  * function's result) may be of any kind, and is never refused here as being of another: what it is used as is left to
  * the compiler, as before.
+ *
+ * [aggregates] is the compiler's test of whether an expression aggregates, outside a nested query of its own, passed in
+ * as [Aggregates] has it: after a `WITH` or a `RETURN` that groups, what its `ORDER BY` reads is not what it reads after one
+ * that does not.
  */
-internal object VariableKinds {
+internal class VariableKinds(private val aggregates: (Expression) -> Boolean) {
 
     /** A kind of variable: see [VariableKinds]. [noun] names a variable of it, as a message does; a value's kind is named as in [Value.Known]. */
     private enum class Kind(val noun: String) {
@@ -48,7 +52,8 @@ internal object VariableKinds {
 
     /**
      * Refuses [query] where a variable of it is used as two kinds, or made where it is bound already; where a pattern in a
-     * `WITH`'s `WHERE` names a variable the `WITH` drops (see [Scope]); and where a `WITH` or a `RETURN` names two items alike.
+     * `WITH`'s `WHERE` names a variable the `WITH` drops (see [Scope]), or in the `ORDER BY` of one that groups (see
+     * [projected]); and where a `WITH` or a `RETURN` names two items alike.
      */
     fun check(query: Query) {
         query(query, Scope())
@@ -80,7 +85,7 @@ internal object VariableKinds {
                 is Clause.With -> current = projected(clause.projection, current, clause.where, kept.keys).also { next ->
                     kept.forEach { (name, kind) -> if (next[name] == null) next[name] = kind }
                 }
-                is Clause.Return -> returned = projected(clause.projection, current, null).kinds
+                is Clause.Return -> returned = projected(clause.projection, current, null, kept.keys).kinds
                 is Clause.Create -> {
                     val made = mutableSetOf<String>()
                     clause.patterns.forEach { made(it, current, made, merging = false, foreach) }
@@ -128,40 +133,45 @@ internal object VariableKinds {
         return parts.first().mapValues { (name, kind) -> if (parts.all { it[name] == kind }) kind else Kind.ANY }
     }
 
-    /**
-     * The variables of the row, of [names], that the query [clauses] of [call] imports, as Neo4j has it: those its brackets
-     * name, `CALL (a, b) { … }`, or each with `CALL (*) { … }`; with no brackets, those its leading `WITH` names as they are,
-     * or each with `WITH *`; none where it has neither, `CALL () { … }` or `CALL { MATCH … }`. The compiler reads a call's
-     * scope from it too, so the two agree. Refuses a bracketed name not of the row, and, as Neo4j does (its 42I28), a leading
-     * `WITH` that names a variable of the row, or `*`, with anything more: such a `WITH` imports, and one that names none is
-     * any `WITH`, `CALL { WITH 1 AS one WHERE … }`.
-     */
-    fun imports(call: Clause.Call, clauses: List<Clause>, names: Collection<String>): Set<String> {
-        val all = names.toSet()
-        if (call.importsAll) return all
-        call.imports?.let { imports ->
-            imports.firstOrNull { it !in all }?.let { throw CompilerException("$it is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used.") }
-            return imports.toSet()
+    companion object {
+        /**
+         * The variables of the row, of [names], that the query [clauses] of [call] imports, as Neo4j has it: those its brackets
+         * name, `CALL (a, b) { … }`, or each with `CALL (*) { … }`; with no brackets, those its leading `WITH` names as they are,
+         * or each with `WITH *`; none where it has neither, `CALL () { … }` or `CALL { MATCH … }`. The compiler reads a call's
+         * scope from it too, so the two agree. Refuses a bracketed name not of the row, and, as Neo4j does (its 42I28), a leading
+         * `WITH` that names a variable of the row, or `*`, with anything more: such a `WITH` imports, and one that names none is
+         * any `WITH`, `CALL { WITH 1 AS one WHERE … }`.
+         */
+        fun imports(call: Clause.Call, clauses: List<Clause>, names: Collection<String>): Set<String> {
+            val all = names.toSet()
+            if (call.importsAll) return all
+            call.imports?.let { imports ->
+                imports.firstOrNull { it !in all }?.let { throw CompilerException("$it is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used.") }
+                return imports.toSet()
+            }
+            val with = clauses.firstOrNull() as? Clause.With ?: return emptySet()
+            val leading = with.projection
+            if (!leading.star && leading.items.none { (it.expression as? Expression.Variable)?.name in all }) return emptySet()
+            val plain = leading.items.all { (it.expression as? Expression.Variable)?.name == it.name }
+            if (!plain || with.where != null || leading.distinct || leading.orderBy.isNotEmpty() || leading.skip != null || leading.limit != null) {
+                throw CompilerException(
+                    "The importing WITH of a CALL { … } names variables of the row alone, as in Cypher: no alias, expression, DISTINCT, WHERE, ORDER BY, SKIP " +
+                        "or LIMIT. Import them with CALL (a, b) { … }, and work on them in a WITH after."
+                )
+            }
+            return if (leading.star) all else all intersect leading.items.map { it.name }.toSet()
         }
-        val with = clauses.firstOrNull() as? Clause.With ?: return emptySet()
-        val leading = with.projection
-        if (!leading.star && leading.items.none { (it.expression as? Expression.Variable)?.name in all }) return emptySet()
-        val plain = leading.items.all { (it.expression as? Expression.Variable)?.name == it.name }
-        if (!plain || with.where != null || leading.distinct || leading.orderBy.isNotEmpty() || leading.skip != null || leading.limit != null) {
-            throw CompilerException(
-                "The importing WITH of a CALL { … } names variables of the row alone, as in Cypher: no alias, expression, DISTINCT, WHERE, ORDER BY, SKIP " +
-                    "or LIMIT. Import them with CALL (a, b) { … }, and work on them in a WITH after."
-            )
-        }
-        return if (leading.star) all else all intersect leading.items.map { it.name }.toSet()
     }
 
     /**
      * The scope after a `WITH` or a `RETURN` of [projection] over [scope]: each item of the kind its expression is, and with
      * `*` each variable in scope. Its `WHERE`, [where], and its order read the items, and a variable before it as of any kind;
      * but a pattern in the `WHERE` names only what the `WITH` passes on, and what a `CALL`'s brackets import or a subquery
-     * reads from outside it, [kept], as Neo4j has it after a `WITH` that groups or is DISTINCT (drivine4j#504). Refuses two
-     * items of one name (Neo4j's 42N38).
+     * reads from outside it, [kept], as Neo4j has it after a `WITH` that groups or is DISTINCT (drivine4j#504). After one that groups or is DISTINCT, a term of its order
+     * that doesn't aggregate reads only the items, and [kept]: a pattern used as an expression there that names a variable
+     * from before is refused, as Neo4j refuses it (its 42N29), where the compiler would read it as a new node that matches every
+     * row; an `EXISTS { … }`, a `COUNT { … }` or a pattern comprehension binds such a variable as its own, as Neo4j does
+     * (drivine4j#680). Refuses two items of one name (Neo4j's 42N38).
      */
     private fun projected(projection: Projection, scope: Scope, where: Expression?, kept: Set<String> = emptySet()): Scope {
         projection.items.groupBy { it.name }.entries.firstOrNull { it.value.size > 1 }?.let { (name, _) ->
@@ -172,11 +182,13 @@ internal object VariableKinds {
         val next = if (projection.star) scope.copy() else Scope(dropped = LinkedHashSet(scope.dropped))
         projection.items.forEach { next[it.name] = kindOf(it.expression, scope) }
         val reading = Scope(scope.kinds.mapValuesTo(LinkedHashMap()) { Kind.ANY }.apply { putAll(next.kinds) })
+        val groups = projection.distinct || projection.items.any { aggregates(it.expression) }
         where?.let {
             val dropped = scope.kinds.keys.filterTo(LinkedHashSet(next.dropped)) { name -> next[name] == null && name !in kept }
             expression(it, Scope(LinkedHashMap(reading.kinds), dropped))
         }
-        projection.orderBy.forEach { expression(it.expression, reading) }
+        val items = Scope(scope.kinds.filterKeys { it in kept }.mapValuesTo(LinkedHashMap()) { Kind.ANY }.apply { putAll(next.kinds) })
+        projection.orderBy.forEach { expression(it.expression, if (groups && !aggregates(it.expression)) items.copy() else reading) }
         projection.skip?.let { expression(it, scope) }
         projection.limit?.let { expression(it, scope) }
         return next

@@ -420,7 +420,7 @@ abstract class SqlCypherCompiler(
 
     private fun compiled(query: Query, parameters: Map<String, Any?>): CompiledCypher {
         // A variable used as two kinds, or made where it is bound already, is refused for that, before what is not compiled yet.
-        VariableKinds.check(query)
+        VariableKinds { contains(it, ::isAggregate) }.check(query)
         // An aggregate in a WHERE, or in the ORDER BY of a projection that neither aggregates nor is DISTINCT, too.
         Aggregates(::isAggregate, ::children).check(query)
         val given = parameters.values.any { holdsNonFinite(it) }
