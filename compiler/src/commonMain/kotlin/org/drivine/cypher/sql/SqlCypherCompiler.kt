@@ -4577,7 +4577,8 @@ abstract class SqlCypherCompiler(
                             }
                             "CASE ${typeOf(key)} WHEN 'number' THEN $byNumber WHEN 'string' THEN $byText END"
                         }
-                        item(subject(), tested = true).let { taken ->
+                        // Of a node or a relationship the statement deleted, a failure, as a read of a property by name is (drivine4j#420).
+                        readOfDeleted(listed, item(subject(), tested = true)).let { taken ->
                             Value.Json(
                                 taken, temporal = itemsOf(listed), items = itemItemsOf(listed), entries = itemEntriesOf(listed),
                                 identity = identityOf(listed, taken, true) { item(it, tested = false) },

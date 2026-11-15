@@ -177,7 +177,8 @@ class SetBasedDeleteTest {
             listOf(
                 "MATCH (n) DELETE n RETURN n.num" to node, "MATCH (n) DELETE n RETURN labels(n)" to node,
                 "MATCH (n) DELETE n RETURN coalesce(n.num, 0)" to node, "MATCH (n) DELETE n WITH n AS m RETURN m.num" to node,
-                "MATCH (n) DELETE n CREATE (:Log {num: n.num})" to node,
+                "MATCH (n) DELETE n CREATE (:Log {num: n.num})" to node, "MATCH (n) DELETE n WITH n, 'num' AS k RETURN n[k]" to node,
+                "MATCH ()-[r]->() DELETE r WITH r, 'num' AS k RETURN r[k]" to relationship,
                 "MATCH ()-[r]->() DELETE r RETURN r.num" to relationship, "MATCH (a)-[r]->() DETACH DELETE a RETURN coalesce(r.num, 0)" to relationship,
             ).forEach { (cypher, failure) -> assertTrue(failure in compiler.compile(cypher).sql, "${compiler::class.simpleName}: $cypher") }
             listOf("MATCH (n) SET n.x = 1 RETURN n.num, labels(n)", "MATCH ()-[r]->() SET r.x = 1 RETURN r.num").forEach { cypher ->

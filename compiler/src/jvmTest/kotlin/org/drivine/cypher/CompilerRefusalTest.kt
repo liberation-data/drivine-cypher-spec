@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestFactory
 import org.junit.jupiter.api.assertThrows
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
@@ -388,6 +389,12 @@ class CompilerRefusalTest {
                 "WITH [1] AS l RETURN toInteger(l)" to emptyMap(),
                 "RETURN reduce(a = 0, x IN [1, 2] | a + x % 2), reduce(a = 0, x IN ['a', 1] | a + x % 2), reduce(a = 0, x IN ['a'] | a % 2)" to emptyMap(),
             ).forEach { (cypher, parameters) -> compiler().compile(cypher, parameters) }
+            // A list given to toInteger(), written, bound by a WITH or as a parameter, fails each row it reads, as in Neo4j.
+            listOf("RETURN toInteger([])" to emptyMap(), "WITH [1] AS l RETURN toInteger(l)" to emptyMap(), "RETURN toInteger(\$l)" to mapOf("l" to listOf(1))).forEach { (cypher, parameters) ->
+                val sql = compiler().compile(cypher, parameters).sql
+                assertTrue("toInteger() takes a truth value, an integer, a float or a text, not a list, as in Neo4j. Its JSON is an" in sql, cypher)
+            }
+            assertFalse("not a list, as in Neo4j. Its JSON" in compiler().compile("MATCH (n) RETURN toInteger(n.x)").sql)
         }
     }
 
