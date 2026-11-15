@@ -66,8 +66,11 @@ class PostgresTemporalSql(
      * Through the store's function, which refuses a nanosecond past the microsecond by name (`PostgresDdl.held`), or where the
      * SQL is written inline, Postgres's cast of a text that is no timestamp failing, quoting it ([microsWritten]).
      */
-    override fun heldMicros(text: String, kinds: List<Temporal>) =
-        graph?.let { "${org.drivine.cypher.store.ddl.PostgresDdl.heldName(it)}($text)" } ?: microsWritten(text)
+    override fun heldMicros(text: String, kinds: List<Temporal>): String {
+        val held = graph?.let(org.drivine.cypher.store.ddl.PostgresDdl::heldName) ?: return microsWritten(text)
+        // A moment's text is refused in [era], where the test of a year from 1000 on leaves it, as one past the microsecond is.
+        return if (kinds.none { it == Temporal.LOCAL_TIME || it == Temporal.TIME }) text else "$held($text)"
+    }
 
     /** A duration's text through the store's function too, where it keeps one: else [Temporals] tests it. */
     override fun heldDurationMicros(text: String) = graph?.let { "${org.drivine.cypher.store.ddl.PostgresDdl.heldName(it)}($text)" }
@@ -76,7 +79,7 @@ class PostgresTemporalSql(
      * Postgres reads no year before 1 in ISO text, but reads one BC after it: so 1 BC, the year `0000`, is `0001 … BC`,
      * and 45 BC, the year `-0044`, is `0045 … BC`. See [bcOnly].
      */
-    override fun era(text: String) = shared(listOf(text)) { (t) ->
+    override fun era(text: String) = shared(listOf(graph?.let { "${org.drivine.cypher.store.ddl.PostgresDdl.heldName(it)}($text)" } ?: text)) { (t) ->
         bcOnly(t, "ascii($t) < $BC_BELOW", "regexp_replace($t, '^(-[0-9]{4}|0000)(.*)$', to_char(1 - CAST(substring($t from '^-?[0-9]{4}') AS int), 'FM0000') || '\\2 BC')")
     }
 

@@ -1143,14 +1143,14 @@ cases:
         rows: ["12:00:00.000000001", "12:00:00.000000002", "12:00:00.000000003"]
       - note: "Kept: a value made of whole microseconds."
         only: [neo4j, sql]
-        cypher: "RETURN toString(localtime({hour: 12, minute: 0, nanosecond: 645876000}))"
+        cypher: "RETURN toString(localtime({hour: 12, minute: 0, second: 0, nanosecond: 645876000}))"
         rows: ["12:00:00.645876"]
       - note: "Refused: made of a nanosecond past the microsecond, written or bound."
         only: [sql]
-        cypher: "RETURN localtime({hour: 12, minute: 0, nanosecond: 645876123})"
+        cypher: "RETURN localtime({hour: 12, minute: 0, second: 0, nanosecond: 645876123})"
         error: true
       - only: [sql]
-        cypher: "RETURN localtime({hour: 12, minute: 0, nanosecond: $n})"
+        cypher: "RETURN localtime({hour: 12, minute: 0, second: 0, nanosecond: $n})"
         parameters: {n: 645876123}
         error: true
       - note: "Refused: a moment moved by a duration of a nanosecond past the microsecond, or a moment of one moved."

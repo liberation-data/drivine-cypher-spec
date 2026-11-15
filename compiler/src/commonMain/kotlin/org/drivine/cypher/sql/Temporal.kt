@@ -31,9 +31,19 @@ enum class Temporal(val pattern: String, val zoned: Boolean = false) {
      * Where this kind has a date, [pattern] for a text of it whose year is 1000 or later, which every store reads as ISO
      * 8601 writes it: no year BC, nor 0000, which Postgres and Oracle number otherwise. Null for a kind of no date.
      */
-    val adPattern: String? get() = pattern.takeIf { it.startsWith(SIGNED_YEAR) }?.let { "^[1-9][0-9]{3}" + it.removePrefix(SIGNED_YEAR) }
+    val adPattern: String? get() = pattern.takeIf { it.startsWith(SIGNED_YEAR) }?.let {
+        // Of a fraction to the microsecond too: one past it is read where the store's era function is, which refuses it
+        // (drivine4j#421).
+        "^[1-9][0-9]{3}" + it.removePrefix(SIGNED_YEAR).replace(FRACTION, MICROS_AT_MOST)
+    }
 
     companion object {
+        /** A fraction of a second as [pattern] writes one, of any digits. */
+        private const val FRACTION = "([.][0-9]+)?"
+
+        /** A fraction of a second of six digits at most, or nine whose last three are 0: none past the microsecond. */
+        private const val MICROS_AT_MOST = "([.]([0-9]{1,6}|[0-9]{6}0{1,3}))?"
+
         /** How [pattern] opens for a kind with a date: the year, its sign before 1 BC. */
         private const val SIGNED_YEAR = "^-?[0-9]{4}"
 

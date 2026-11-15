@@ -44,7 +44,8 @@ class OracleTemporalSql(
 
     /**
      * Where the store keeps the era functions, its era function refuses a nanosecond past the microsecond as it reads the
-     * text, once (drivine4j#421): a moment's text is read through it already, and a time of day's is given through it.
+     * text, once (drivine4j#421): a moment's text is read through it where the test of a year from 1000 on leaves it, which
+     * a text past the microsecond is ([Temporal.adPattern]), and a time of day's, which has no such test, is given through it.
      */
     /** Through the era function too, which refuses a duration's nanoseconds as a moment's and leaves its text as it is. */
     override fun heldDurationMicros(text: String): String? {

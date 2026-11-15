@@ -122,10 +122,10 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
      * expression, whose `REGEXP_REPLACE` cost Postgres some 60 µs a row, and a text with no point is given back at once. Its
      * message is [org.drivine.cypher.sql.Temporals.SUB_MICRO], as the test the SQL writes where the store keeps no such function.
      */
-    private fun heldFunction(): String = """
+    private fun heldFunction(): String = quotedBody("""
         CREATE OR REPLACE FUNCTION ${heldName(name)}(t text) RETURNS text LANGUAGE plpgsql IMMUTABLE PARALLEL SAFE AS '
         DECLARE
-            p int := strpos(t, ''.'');
+            p int := strpos(t, '.');
             c text;
         BEGIN
             IF p = 0 THEN
@@ -133,14 +133,15 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
             END IF;
             FOR i IN 1 .. 9 LOOP
                 c := substr(t, p + i, 1);
-                EXIT WHEN c = '''' OR c < ''0'' OR c > ''9'';
-                IF i > 6 AND c <> ''0'' THEN
-                    RAISE EXCEPTION ''% %'', ''$HELD_MESSAGE'', t;
+                EXIT WHEN c = '' OR c < '0' OR c > '9';
+                IF i > 6 AND c <> '0' THEN
+                    RAISE EXCEPTION '% %', '${org.drivine.cypher.sql.Temporals.SUB_MICRO.replace("'", "''")}', t;
                 END IF;
             END LOOP;
             RETURN t;
-        END';
-    """.trimIndent()
+        END
+        '
+    """.trimIndent())
 
     /** The function compiled Cypher works out a temporal value's sort key by: see [temporalKeyFunction]. */
     val temporalKey: String = temporalKeyName(name)
@@ -235,9 +236,12 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
                 lpad(CAST(o + $OFFSET_BIAS AS text), 6, '0');
         END
         '
-    """.trimIndent().let { function ->
+    """.trimIndent().let(::quotedBody)
+
+    /** [function] with each quote of its body, between `AS '` and the last line's `'`, written twice, as Postgres reads a body in quotes. */
+    private fun quotedBody(function: String): String {
         val (start, end) = function.indexOf("AS '\n") + 5 to function.lastIndexOf("\n'")
-        function.substring(0, start) + function.substring(start, end).replace("'", "''") + function.substring(end)
+        return function.substring(0, start) + function.substring(start, end).replace("'", "''") + function.substring(end)
     }
 
     /**
@@ -481,9 +485,6 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
 
         /** The function the store of the graph [graph] keeps that refuses a nanosecond past the microsecond: see [held]. */
         fun heldName(graph: String) = "${graph}_held"
-
-        /** [org.drivine.cypher.sql.Temporals.SUB_MICRO] as [heldFunction]'s body quotes it, a quote written four times (twice in the body's quotes, twice in its own). */
-        private val HELD_MESSAGE = org.drivine.cypher.sql.Temporals.SUB_MICRO.replace("'", "''''")
 
         /** Why [name] cannot name a graph here; null where it can (see [SqlStoreDdl.refusal]). */
         fun refusal(name: String): String? = SqlStoreDdl.refusal(name, ENGINE, MAX_OBJECT_NAME)
