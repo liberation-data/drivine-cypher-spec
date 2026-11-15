@@ -2281,6 +2281,13 @@ class OracleCypherCompiler(
         val given = LEADING_HINT.find(query)?.groupValues?.get(1).orEmpty()
         val hints = listOf(NO_JSON_TABLE_TRANSFORM, NO_FEEDBACK).filter { it in given }
         val head = if (hints.isEmpty()) "SELECT" else "SELECT /*+ ${hints.joinToString(" ")} */"
+        // A row each: every row's result is worked out once in the block, so one that fails fails the block, and the
+        // cursor then reads the rows as before, one value each, with no limit on their total size.
+        if (!rowsAsText) return listOf(
+            "$head COUNT(cy_q.result) INTO $COUNT FROM (\n${indent(query)}\n) cy_q;",
+            "OPEN $CURSOR FOR\n${indent(query)};",
+            "DBMS_SQL.RETURN_RESULT($CURSOR);",
+        )
         val numbered = "SELECT cy_q.result, ROWNUM AS cy_n FROM (\n${indent(query)}\n) cy_q"
         val (rows, cursor) = if (rowsAsText) {
             "COALESCE(JSON_ARRAYAGG(cy_r.result ORDER BY cy_r.cy_n NULL ON NULL RETURNING JSON), JSON('[]'))" to
