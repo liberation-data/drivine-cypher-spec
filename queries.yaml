@@ -1989,6 +1989,32 @@ cases:
         except: [memgraph, falkordb, neptune]
         rows: [["Keanu"], ["Keanu", "Carrie"]]
 
+  - name: "Quantified path pattern's group naming a variable a WITH dropped"
+    description: "After a WITH that groups or is DISTINCT, a quantified path pattern's group in its WHERE or its ORDER BY may name a variable from before the WITH that it drops, which Neo4j reads there no longer, and binds it as its own; so may one after the WITH. Neo4j refuses a variable bound outside the group (see refusals.yaml, \"Quantified path pattern's group naming a variable bound outside it\", drivine4j#681)."
+    steps:
+      - cypher: "MATCH (p:Person) WITH p AS q, count(*) AS c WHERE EXISTS { (q) ((p)-->(b))+ () } RETURN q.name ORDER BY q.name"
+        only: [neo4j, sql]
+        rows: ["Carrie", "Keanu", "Laurence"]
+      - cypher: "MATCH (p:Person) WITH DISTINCT p AS q WHERE EXISTS { (q) ((p)-->(b))+ () } RETURN q.name ORDER BY q.name"
+        only: [neo4j, sql]
+        rows: ["Carrie", "Keanu", "Laurence"]
+      - cypher: "MATCH (p:Person) WITH p AS q, count(*) AS c ORDER BY EXISTS { (q) ((p)-->(b))+ () }, q.name RETURN q.name"
+        only: [neo4j, sql]
+        rows: ["Hugo", "Carrie", "Keanu", "Laurence"]
+      - cypher: "MATCH (p:Person) WITH DISTINCT p AS q ORDER BY EXISTS { (q) ((p)-->(b))+ () }, q.name RETURN q.name"
+        only: [neo4j, sql]
+        rows: ["Hugo", "Carrie", "Keanu", "Laurence"]
+      - cypher: "MATCH (p:Person) RETURN p.name AS n, count(*) AS c ORDER BY COUNT { ((p)-->(b))+ () }, n"
+        only: [neo4j, sql]
+        rows: [["Carrie", 1], ["Hugo", 1], ["Keanu", 1], ["Laurence", 1]]
+      - cypher: "MATCH (p:Person) WITH p AS q MATCH (q) ((p)-->(b))+ () RETURN DISTINCT q.name ORDER BY q.name"
+        only: [neo4j, sql]
+        rows: ["Carrie", "Keanu", "Laurence"]
+      - note: "A variable bound outside the group may be a node beside it."
+        cypher: "MATCH (p:Person) MATCH (q:Person) WHERE EXISTS { (q) ((a)-->(b))+ (p) } RETURN q.name, p.name ORDER BY q.name, p.name"
+        only: [neo4j, sql]
+        rows: [["Keanu", "Carrie"], ["Laurence", "Carrie"], ["Laurence", "Keanu"]]
+
   - name: "Shortest paths"
     description: "shortestPath gives the shortest match, and allShortestPaths every match of that length."
     steps:
