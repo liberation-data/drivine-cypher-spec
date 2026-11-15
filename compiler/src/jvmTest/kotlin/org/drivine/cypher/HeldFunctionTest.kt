@@ -96,4 +96,19 @@ class HeldFunctionTest {
         assertTrue(Temporals.SUB_MICRO.replace("'", "''") in made, made)
     }
 
+    @Test
+    fun `a field read off the store's timestamp of a stored text is refused but one read off its text is not`() {
+        fun sqlite(cypher: String) = org.drivine.cypher.sql.SqliteCypherCompiler("g").compile(cypher).sql
+        // The day of the week and the epoch's seconds are read off the timestamp, which would cut or round the nanoseconds.
+        listOf("n.at.dayOfWeek", "n.at.epochSeconds", "n.at.week").forEach {
+            val sql = sqlite("MATCH (n) RETURN $it")
+            assertTrue("past the microsecond (drivine4j#421)" in sql, "$it: $sql")
+        }
+        // The nanosecond and the hour are read off the text, which keeps all nine digits.
+        listOf("n.at.nanosecond", "n.at.hour").forEach {
+            val sql = sqlite("MATCH (n) RETURN $it")
+            assertFalse("past the microsecond (drivine4j#421)" in sql, "$it: $sql")
+        }
+    }
+
 }
