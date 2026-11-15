@@ -485,6 +485,408 @@ cases:
       - cypher: "MATCH (n:CyWrite) MERGE (n)-[r:CyR {f: NOT (n)-->()}]->(m) RETURN count(r)"
         rows: [4]
 
+  - name: "Values a write makes: CREATE, a node made alone"
+    description: "Each cell of writevalues.yaml in this position that Neo4j 2026.10.1 stores, with its rows, each from the graph alone (liberation-data/drivine4j#814, #817): the cells it refuses are in refusals.yaml, \"Values a write makes, by position and form\"."
+    steps:
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "a pattern of new variables only."
+        cypher: "MATCH (n:CyWrite) CREATE (a:CyNew {name: 'x'}), (m:CyMade {f: NOT ()-[:NEXT]->()}) RETURN [n.id, m.f] ORDER BY n.id"
+        rows: [["a", false], ["b", false], ["c", false], ["d", false]]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "EXISTS naming a variable bound before."
+        cypher: "MATCH (n:CyWrite) CREATE (a:CyNew {name: 'x'}), (m:CyMade {f: EXISTS { (n)-[:NEXT]->() }}) RETURN [n.id, m.f] ORDER BY n.id"
+        rows: [["a", true], ["b", true], ["c", false], ["d", false]]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "COUNT naming a variable bound before."
+        cypher: "MATCH (n:CyWrite) CREATE (a:CyNew {name: 'x'}), (m:CyMade {f: COUNT { (n)-[:NEXT]->() }}) RETURN [n.id, m.f] ORDER BY n.id"
+        rows: [["a", 2], ["b", 1], ["c", 0], ["d", 0]]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "a pattern comprehension naming a variable the clause makes."
+        cypher: "MATCH (n:CyWrite) CREATE (a:CyNew {name: 'x'}), (m:CyMade {f: size([(a)-[:NEXT]->(x) | x])}) RETURN [n.id, m.f] ORDER BY n.id"
+        rows: [["a", 3], ["b", 3], ["c", 3], ["d", 3]]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "a variable bound before, plainly."
+        cypher: "MATCH (n:CyWrite) CREATE (a:CyNew {name: 'x'}), (m:CyMade {f: n.id}) RETURN [n.id, m.f] ORDER BY n.id"
+        rows: [["a", "a"], ["b", "b"], ["c", "c"], ["d", "d"]]
+
+  - name: "Values a write makes: CREATE, a relationship's endpoint"
+    description: "Each cell of writevalues.yaml in this position that Neo4j 2026.10.1 stores, with its rows, each from the graph alone (liberation-data/drivine4j#814, #817): the cells it refuses are in refusals.yaml, \"Values a write makes, by position and form\"."
+    steps:
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "a pattern naming a variable bound before."
+        cypher: "MATCH (n:CyWrite) CREATE (a:CyNew {name: 'x'})-[:CyR]->(m:CyMade {f: NOT (n)-[:NEXT]->()}) RETURN [n.id, m.f] ORDER BY n.id"
+        rows: [["a", false], ["b", false], ["c", true], ["d", true]]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "a pattern of new variables only."
+        cypher: "MATCH (n:CyWrite) CREATE (a:CyNew {name: 'x'})-[:CyR]->(m:CyMade {f: NOT ()-[:NEXT]->()}) RETURN [n.id, m.f] ORDER BY n.id"
+        rows: [["a", false], ["b", false], ["c", false], ["d", false]]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "a pattern comprehension naming a variable bound before."
+        cypher: "MATCH (n:CyWrite) CREATE (a:CyNew {name: 'x'})-[:CyR]->(m:CyMade {f: size([(n)-[:NEXT]->(x) | x])}) RETURN [n.id, m.f] ORDER BY n.id"
+        rows: [["a", 2], ["b", 1], ["c", 0], ["d", 0]]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "EXISTS naming a variable bound before."
+        cypher: "MATCH (n:CyWrite) CREATE (a:CyNew {name: 'x'})-[:CyR]->(m:CyMade {f: EXISTS { (n)-[:NEXT]->() }}) RETURN [n.id, m.f] ORDER BY n.id"
+        rows: [["a", true], ["b", true], ["c", false], ["d", false]]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "COUNT naming a variable bound before."
+        cypher: "MATCH (n:CyWrite) CREATE (a:CyNew {name: 'x'})-[:CyR]->(m:CyMade {f: COUNT { (n)-[:NEXT]->() }}) RETURN [n.id, m.f] ORDER BY n.id"
+        rows: [["a", 2], ["b", 1], ["c", 0], ["d", 0]]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "a pattern comprehension naming a variable the clause makes."
+        cypher: "MATCH (n:CyWrite) CREATE (a:CyNew {name: 'x'})-[:CyR]->(m:CyMade {f: size([(a)-[:NEXT]->(x) | x])}) RETURN [n.id, m.f] ORDER BY n.id"
+        rows: [["a", 3], ["b", 3], ["c", 3], ["d", 3]]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "a variable bound before, plainly."
+        cypher: "MATCH (n:CyWrite) CREATE (a:CyNew {name: 'x'})-[:CyR]->(m:CyMade {f: n.id}) RETURN [n.id, m.f] ORDER BY n.id"
+        rows: [["a", "a"], ["b", "b"], ["c", "c"], ["d", "d"]]
+
+  - name: "Values a write makes: CREATE, a relationship"
+    description: "Each cell of writevalues.yaml in this position that Neo4j 2026.10.1 stores, with its rows, each from the graph alone (liberation-data/drivine4j#814, #817): the cells it refuses are in refusals.yaml, \"Values a write makes, by position and form\"."
+    steps:
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "a pattern naming a variable bound before."
+        cypher: "MATCH (n:CyWrite) CREATE (a:CyNew {name: 'x'})-[r:CyR {f: NOT (n)-[:NEXT]->()}]->(m:CyMade) RETURN [n.id, r.f] ORDER BY n.id"
+        rows: [["a", false], ["b", false], ["c", true], ["d", true]]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "a pattern of new variables only."
+        cypher: "MATCH (n:CyWrite) CREATE (a:CyNew {name: 'x'})-[r:CyR {f: NOT ()-[:NEXT]->()}]->(m:CyMade) RETURN [n.id, r.f] ORDER BY n.id"
+        rows: [["a", false], ["b", false], ["c", false], ["d", false]]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "a pattern comprehension naming a variable bound before."
+        cypher: "MATCH (n:CyWrite) CREATE (a:CyNew {name: 'x'})-[r:CyR {f: size([(n)-[:NEXT]->(x) | x])}]->(m:CyMade) RETURN [n.id, r.f] ORDER BY n.id"
+        rows: [["a", 2], ["b", 1], ["c", 0], ["d", 0]]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "EXISTS naming a variable bound before."
+        cypher: "MATCH (n:CyWrite) CREATE (a:CyNew {name: 'x'})-[r:CyR {f: EXISTS { (n)-[:NEXT]->() }}]->(m:CyMade) RETURN [n.id, r.f] ORDER BY n.id"
+        rows: [["a", true], ["b", true], ["c", false], ["d", false]]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "COUNT naming a variable bound before."
+        cypher: "MATCH (n:CyWrite) CREATE (a:CyNew {name: 'x'})-[r:CyR {f: COUNT { (n)-[:NEXT]->() }}]->(m:CyMade) RETURN [n.id, r.f] ORDER BY n.id"
+        rows: [["a", 2], ["b", 1], ["c", 0], ["d", 0]]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "a pattern comprehension naming a variable the clause makes."
+        cypher: "MATCH (n:CyWrite) CREATE (a:CyNew {name: 'x'})-[r:CyR {f: size([(a)-[:NEXT]->(x) | x])}]->(m:CyMade) RETURN [n.id, r.f] ORDER BY n.id"
+        rows: [["a", 3], ["b", 3], ["c", 3], ["d", 3]]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "a variable bound before, plainly."
+        cypher: "MATCH (n:CyWrite) CREATE (a:CyNew {name: 'x'})-[r:CyR {f: n.id}]->(m:CyMade) RETURN [n.id, r.f] ORDER BY n.id"
+        rows: [["a", "a"], ["b", "b"], ["c", "c"], ["d", "d"]]
+
+  - name: "Values a write makes: FOREACH CREATE, a node made alone"
+    description: "Each cell of writevalues.yaml in this position that Neo4j 2026.10.1 stores, with its rows, each from the graph alone (liberation-data/drivine4j#814, #817): the cells it refuses are in refusals.yaml, \"Values a write makes, by position and form\"."
+    steps:
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "a pattern naming a variable bound before."
+        cypher: "MATCH (n:CyWrite) FOREACH (i IN [1] | CREATE (a:CyNew {name: 'x'}), (m:CyMade {f: NOT (n)-[:NEXT]->()})) WITH count(*) AS c MATCH (m:CyMade) RETURN m.f ORDER BY m.f"
+        rows: [false, false, true, true]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "a pattern of new variables only."
+        cypher: "MATCH (n:CyWrite) FOREACH (i IN [1] | CREATE (a:CyNew {name: 'x'}), (m:CyMade {f: NOT ()-[:NEXT]->()})) WITH count(*) AS c MATCH (m:CyMade) RETURN m.f ORDER BY m.f"
+        rows: [false, false, false, false]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "a pattern comprehension naming a variable bound before."
+        cypher: "MATCH (n:CyWrite) FOREACH (i IN [1] | CREATE (a:CyNew {name: 'x'}), (m:CyMade {f: size([(n)-[:NEXT]->(x) | x])})) WITH count(*) AS c MATCH (m:CyMade) RETURN m.f ORDER BY m.f"
+        rows: [0, 0, 1, 2]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "EXISTS naming a variable bound before."
+        cypher: "MATCH (n:CyWrite) FOREACH (i IN [1] | CREATE (a:CyNew {name: 'x'}), (m:CyMade {f: EXISTS { (n)-[:NEXT]->() }})) WITH count(*) AS c MATCH (m:CyMade) RETURN m.f ORDER BY m.f"
+        rows: [false, false, true, true]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "COUNT naming a variable bound before."
+        cypher: "MATCH (n:CyWrite) FOREACH (i IN [1] | CREATE (a:CyNew {name: 'x'}), (m:CyMade {f: COUNT { (n)-[:NEXT]->() }})) WITH count(*) AS c MATCH (m:CyMade) RETURN m.f ORDER BY m.f"
+        rows: [0, 0, 1, 2]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "a pattern comprehension naming a variable the clause makes."
+        cypher: "MATCH (n:CyWrite) FOREACH (i IN [1] | CREATE (a:CyNew {name: 'x'}), (m:CyMade {f: size([(a)-[:NEXT]->(x) | x])})) WITH count(*) AS c MATCH (m:CyMade) RETURN m.f ORDER BY m.f"
+        rows: [3, 3, 3, 3]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "a variable bound before, plainly."
+        cypher: "MATCH (n:CyWrite) FOREACH (i IN [1] | CREATE (a:CyNew {name: 'x'}), (m:CyMade {f: n.id})) WITH count(*) AS c MATCH (m:CyMade) RETURN m.f ORDER BY m.f"
+        rows: ["a", "b", "c", "d"]
+
+  - name: "Values a write makes: FOREACH CREATE, a relationship's endpoint"
+    description: "Each cell of writevalues.yaml in this position that Neo4j 2026.10.1 stores, with its rows, each from the graph alone (liberation-data/drivine4j#814, #817): the cells it refuses are in refusals.yaml, \"Values a write makes, by position and form\"."
+    steps:
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "a pattern naming a variable bound before."
+        cypher: "MATCH (n:CyWrite) FOREACH (i IN [1] | CREATE (a:CyNew {name: 'x'})-[:CyR]->(m:CyMade {f: NOT (n)-[:NEXT]->()})) WITH count(*) AS c MATCH (m:CyMade) RETURN m.f ORDER BY m.f"
+        rows: [false, false, true, true]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "a pattern of new variables only."
+        cypher: "MATCH (n:CyWrite) FOREACH (i IN [1] | CREATE (a:CyNew {name: 'x'})-[:CyR]->(m:CyMade {f: NOT ()-[:NEXT]->()})) WITH count(*) AS c MATCH (m:CyMade) RETURN m.f ORDER BY m.f"
+        rows: [false, false, false, false]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "a pattern comprehension naming a variable bound before."
+        cypher: "MATCH (n:CyWrite) FOREACH (i IN [1] | CREATE (a:CyNew {name: 'x'})-[:CyR]->(m:CyMade {f: size([(n)-[:NEXT]->(x) | x])})) WITH count(*) AS c MATCH (m:CyMade) RETURN m.f ORDER BY m.f"
+        rows: [0, 0, 1, 2]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "EXISTS naming a variable bound before."
+        cypher: "MATCH (n:CyWrite) FOREACH (i IN [1] | CREATE (a:CyNew {name: 'x'})-[:CyR]->(m:CyMade {f: EXISTS { (n)-[:NEXT]->() }})) WITH count(*) AS c MATCH (m:CyMade) RETURN m.f ORDER BY m.f"
+        rows: [false, false, true, true]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "COUNT naming a variable bound before."
+        cypher: "MATCH (n:CyWrite) FOREACH (i IN [1] | CREATE (a:CyNew {name: 'x'})-[:CyR]->(m:CyMade {f: COUNT { (n)-[:NEXT]->() }})) WITH count(*) AS c MATCH (m:CyMade) RETURN m.f ORDER BY m.f"
+        rows: [0, 0, 1, 2]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "a pattern comprehension naming a variable the clause makes."
+        cypher: "MATCH (n:CyWrite) FOREACH (i IN [1] | CREATE (a:CyNew {name: 'x'})-[:CyR]->(m:CyMade {f: size([(a)-[:NEXT]->(x) | x])})) WITH count(*) AS c MATCH (m:CyMade) RETURN m.f ORDER BY m.f"
+        rows: [3, 3, 3, 3]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "a variable bound before, plainly."
+        cypher: "MATCH (n:CyWrite) FOREACH (i IN [1] | CREATE (a:CyNew {name: 'x'})-[:CyR]->(m:CyMade {f: n.id})) WITH count(*) AS c MATCH (m:CyMade) RETURN m.f ORDER BY m.f"
+        rows: ["a", "b", "c", "d"]
+
+  - name: "Values a write makes: FOREACH CREATE, a relationship"
+    description: "Each cell of writevalues.yaml in this position that Neo4j 2026.10.1 stores, with its rows, each from the graph alone (liberation-data/drivine4j#814, #817): the cells it refuses are in refusals.yaml, \"Values a write makes, by position and form\"."
+    steps:
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "a pattern naming a variable bound before."
+        cypher: "MATCH (n:CyWrite) FOREACH (i IN [1] | CREATE (a:CyNew {name: 'x'})-[r:CyR {f: NOT (n)-[:NEXT]->()}]->(m:CyMade)) WITH count(*) AS c MATCH ()-[r:CyR]->() RETURN r.f ORDER BY r.f"
+        rows: [false, false, true, true]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "a pattern of new variables only."
+        cypher: "MATCH (n:CyWrite) FOREACH (i IN [1] | CREATE (a:CyNew {name: 'x'})-[r:CyR {f: NOT ()-[:NEXT]->()}]->(m:CyMade)) WITH count(*) AS c MATCH ()-[r:CyR]->() RETURN r.f ORDER BY r.f"
+        rows: [false, false, false, false]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "a pattern comprehension naming a variable bound before."
+        cypher: "MATCH (n:CyWrite) FOREACH (i IN [1] | CREATE (a:CyNew {name: 'x'})-[r:CyR {f: size([(n)-[:NEXT]->(x) | x])}]->(m:CyMade)) WITH count(*) AS c MATCH ()-[r:CyR]->() RETURN r.f ORDER BY r.f"
+        rows: [0, 0, 1, 2]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "EXISTS naming a variable bound before."
+        cypher: "MATCH (n:CyWrite) FOREACH (i IN [1] | CREATE (a:CyNew {name: 'x'})-[r:CyR {f: EXISTS { (n)-[:NEXT]->() }}]->(m:CyMade)) WITH count(*) AS c MATCH ()-[r:CyR]->() RETURN r.f ORDER BY r.f"
+        rows: [false, false, true, true]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "COUNT naming a variable bound before."
+        cypher: "MATCH (n:CyWrite) FOREACH (i IN [1] | CREATE (a:CyNew {name: 'x'})-[r:CyR {f: COUNT { (n)-[:NEXT]->() }}]->(m:CyMade)) WITH count(*) AS c MATCH ()-[r:CyR]->() RETURN r.f ORDER BY r.f"
+        rows: [0, 0, 1, 2]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "a pattern comprehension naming a variable the clause makes."
+        cypher: "MATCH (n:CyWrite) FOREACH (i IN [1] | CREATE (a:CyNew {name: 'x'})-[r:CyR {f: size([(a)-[:NEXT]->(x) | x])}]->(m:CyMade)) WITH count(*) AS c MATCH ()-[r:CyR]->() RETURN r.f ORDER BY r.f"
+        rows: [3, 3, 3, 3]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "a variable bound before, plainly."
+        cypher: "MATCH (n:CyWrite) FOREACH (i IN [1] | CREATE (a:CyNew {name: 'x'})-[r:CyR {f: n.id}]->(m:CyMade)) WITH count(*) AS c MATCH ()-[r:CyR]->() RETURN r.f ORDER BY r.f"
+        rows: ["a", "b", "c", "d"]
+
+  - name: "Values a write makes: MERGE, a node made alone"
+    description: "Each cell of writevalues.yaml in this position that Neo4j 2026.10.1 stores, with its rows, each from the graph alone (liberation-data/drivine4j#814, #817): the cells it refuses are in refusals.yaml, \"Values a write makes, by position and form\"."
+    steps:
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "a pattern of new variables only."
+        cypher: "MATCH (n:CyWrite) MERGE (m:CyMade {f: NOT ()-[:NEXT]->()}) RETURN [n.id, m.f] ORDER BY n.id"
+        rows: [["a", false], ["b", false], ["c", false], ["d", false]]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "a pattern comprehension naming a variable the clause makes."
+        cypher: "MATCH (n:CyWrite) MERGE (m:CyMade {f: size([(m)-[:NEXT]->(x) | x])}) RETURN [n.id, m.f] ORDER BY n.id"
+        rows: [["a", 3], ["b", 3], ["c", 3], ["d", 3]]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "a variable bound before, plainly."
+        cypher: "MATCH (n:CyWrite) MERGE (m:CyMade {f: n.id}) RETURN [n.id, m.f] ORDER BY n.id"
+        rows: [["a", "a"], ["b", "b"], ["c", "c"], ["d", "d"]]
+
+  - name: "Values a write makes: MERGE, a relationship's endpoint"
+    description: "Each cell of writevalues.yaml in this position that Neo4j 2026.10.1 stores, with its rows, each from the graph alone (liberation-data/drivine4j#814, #817): the cells it refuses are in refusals.yaml, \"Values a write makes, by position and form\"."
+    steps:
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "a pattern naming a variable bound before."
+        cypher: "MATCH (n:CyWrite) MERGE (a:CyNew {name: 'x'})-[:CyR]->(m:CyMade {f: NOT (n)-[:NEXT]->()}) RETURN [n.id, m.f] ORDER BY n.id"
+        rows: [["a", false], ["b", false], ["c", true], ["d", true]]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "a pattern of new variables only."
+        cypher: "MATCH (n:CyWrite) MERGE (a:CyNew {name: 'x'})-[:CyR]->(m:CyMade {f: NOT ()-[:NEXT]->()}) RETURN [n.id, m.f] ORDER BY n.id"
+        rows: [["a", false], ["b", false], ["c", false], ["d", false]]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "a pattern comprehension naming a variable bound before."
+        cypher: "MATCH (n:CyWrite) MERGE (a:CyNew {name: 'x'})-[:CyR]->(m:CyMade {f: size([(n)-[:NEXT]->(x) | x])}) RETURN [n.id, m.f] ORDER BY n.id"
+        rows: [["a", 2], ["b", 1], ["c", 0], ["d", 0]]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "a pattern comprehension naming a variable the clause makes."
+        cypher: "MATCH (n:CyWrite) MERGE (a:CyNew {name: 'x'})-[:CyR]->(m:CyMade {f: size([(a)-[:NEXT]->(x) | x])}) RETURN [n.id, m.f] ORDER BY n.id"
+        rows: [["a", 3], ["b", 3], ["c", 3], ["d", 3]]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "a variable bound before, plainly."
+        cypher: "MATCH (n:CyWrite) MERGE (a:CyNew {name: 'x'})-[:CyR]->(m:CyMade {f: n.id}) RETURN [n.id, m.f] ORDER BY n.id"
+        rows: [["a", "a"], ["b", "b"], ["c", "c"], ["d", "d"]]
+
+  - name: "Values a write makes: MERGE, a relationship"
+    description: "Each cell of writevalues.yaml in this position that Neo4j 2026.10.1 stores, with its rows, each from the graph alone (liberation-data/drivine4j#814, #817): the cells it refuses are in refusals.yaml, \"Values a write makes, by position and form\"."
+    steps:
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "a pattern naming a variable bound before."
+        cypher: "MATCH (n:CyWrite) MERGE (a:CyNew {name: 'x'})-[r:CyR {f: NOT (n)-[:NEXT]->()}]->(m:CyMade) RETURN [n.id, r.f] ORDER BY n.id"
+        rows: [["a", false], ["b", false], ["c", true], ["d", true]]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "a pattern of new variables only."
+        cypher: "MATCH (n:CyWrite) MERGE (a:CyNew {name: 'x'})-[r:CyR {f: NOT ()-[:NEXT]->()}]->(m:CyMade) RETURN [n.id, r.f] ORDER BY n.id"
+        rows: [["a", false], ["b", false], ["c", false], ["d", false]]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "a pattern comprehension naming a variable bound before."
+        cypher: "MATCH (n:CyWrite) MERGE (a:CyNew {name: 'x'})-[r:CyR {f: size([(n)-[:NEXT]->(x) | x])}]->(m:CyMade) RETURN [n.id, r.f] ORDER BY n.id"
+        rows: [["a", 2], ["b", 1], ["c", 0], ["d", 0]]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "a pattern comprehension naming a variable the clause makes."
+        cypher: "MATCH (n:CyWrite) MERGE (a:CyNew {name: 'x'})-[r:CyR {f: size([(a)-[:NEXT]->(x) | x])}]->(m:CyMade) RETURN [n.id, r.f] ORDER BY n.id"
+        rows: [["a", 3], ["b", 3], ["c", 3], ["d", 3]]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "a variable bound before, plainly."
+        cypher: "MATCH (n:CyWrite) MERGE (a:CyNew {name: 'x'})-[r:CyR {f: n.id}]->(m:CyMade) RETURN [n.id, r.f] ORDER BY n.id"
+        rows: [["a", "a"], ["b", "b"], ["c", "c"], ["d", "d"]]
+
+  - name: "Values a write makes: FOREACH MERGE, a node made alone"
+    description: "Each cell of writevalues.yaml in this position that Neo4j 2026.10.1 stores, with its rows, each from the graph alone (liberation-data/drivine4j#814, #817): the cells it refuses are in refusals.yaml, \"Values a write makes, by position and form\"."
+    steps:
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "a pattern naming a variable bound before."
+        cypher: "MATCH (n:CyWrite) FOREACH (i IN [1] | MERGE (m:CyMade {f: NOT (n)-[:NEXT]->()})) WITH count(*) AS c MATCH (m:CyMade) RETURN m.f ORDER BY m.f"
+        rows: [false, true]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "a pattern of new variables only."
+        cypher: "MATCH (n:CyWrite) FOREACH (i IN [1] | MERGE (m:CyMade {f: NOT ()-[:NEXT]->()})) WITH count(*) AS c MATCH (m:CyMade) RETURN m.f ORDER BY m.f"
+        rows: [false]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "a pattern comprehension naming a variable bound before."
+        cypher: "MATCH (n:CyWrite) FOREACH (i IN [1] | MERGE (m:CyMade {f: size([(n)-[:NEXT]->(x) | x])})) WITH count(*) AS c MATCH (m:CyMade) RETURN m.f ORDER BY m.f"
+        rows: [0, 1, 2]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "a pattern comprehension naming a variable the clause makes."
+        cypher: "MATCH (n:CyWrite) FOREACH (i IN [1] | MERGE (m:CyMade {f: size([(m)-[:NEXT]->(x) | x])})) WITH count(*) AS c MATCH (m:CyMade) RETURN m.f ORDER BY m.f"
+        rows: [3]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "a variable bound before, plainly."
+        cypher: "MATCH (n:CyWrite) FOREACH (i IN [1] | MERGE (m:CyMade {f: n.id})) WITH count(*) AS c MATCH (m:CyMade) RETURN m.f ORDER BY m.f"
+        rows: ["a", "b", "c", "d"]
+
+  - name: "Values a write makes: FOREACH MERGE, a relationship's endpoint"
+    description: "Each cell of writevalues.yaml in this position that Neo4j 2026.10.1 stores, with its rows, each from the graph alone (liberation-data/drivine4j#814, #817): the cells it refuses are in refusals.yaml, \"Values a write makes, by position and form\"."
+    steps:
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "a pattern naming a variable bound before."
+        cypher: "MATCH (n:CyWrite) FOREACH (i IN [1] | MERGE (a:CyNew {name: 'x'})-[:CyR]->(m:CyMade {f: NOT (n)-[:NEXT]->()})) WITH count(*) AS c MATCH (m:CyMade) RETURN m.f ORDER BY m.f"
+        rows: [false, true]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "a pattern of new variables only."
+        cypher: "MATCH (n:CyWrite) FOREACH (i IN [1] | MERGE (a:CyNew {name: 'x'})-[:CyR]->(m:CyMade {f: NOT ()-[:NEXT]->()})) WITH count(*) AS c MATCH (m:CyMade) RETURN m.f ORDER BY m.f"
+        rows: [false]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "a pattern comprehension naming a variable bound before."
+        cypher: "MATCH (n:CyWrite) FOREACH (i IN [1] | MERGE (a:CyNew {name: 'x'})-[:CyR]->(m:CyMade {f: size([(n)-[:NEXT]->(x) | x])})) WITH count(*) AS c MATCH (m:CyMade) RETURN m.f ORDER BY m.f"
+        rows: [0, 1, 2]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "a pattern comprehension naming a variable the clause makes."
+        cypher: "MATCH (n:CyWrite) FOREACH (i IN [1] | MERGE (a:CyNew {name: 'x'})-[:CyR]->(m:CyMade {f: size([(a)-[:NEXT]->(x) | x])})) WITH count(*) AS c MATCH (m:CyMade) RETURN m.f ORDER BY m.f"
+        rows: [3]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "a variable bound before, plainly."
+        cypher: "MATCH (n:CyWrite) FOREACH (i IN [1] | MERGE (a:CyNew {name: 'x'})-[:CyR]->(m:CyMade {f: n.id})) WITH count(*) AS c MATCH (m:CyMade) RETURN m.f ORDER BY m.f"
+        rows: ["a", "b", "c", "d"]
+
+  - name: "Values a write makes: FOREACH MERGE, a relationship"
+    description: "Each cell of writevalues.yaml in this position that Neo4j 2026.10.1 stores, with its rows, each from the graph alone (liberation-data/drivine4j#814, #817): the cells it refuses are in refusals.yaml, \"Values a write makes, by position and form\"."
+    steps:
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "a pattern naming a variable bound before."
+        cypher: "MATCH (n:CyWrite) FOREACH (i IN [1] | MERGE (a:CyNew {name: 'x'})-[r:CyR {f: NOT (n)-[:NEXT]->()}]->(m:CyMade)) WITH count(*) AS c MATCH ()-[r:CyR]->() RETURN r.f ORDER BY r.f"
+        rows: [false, true]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "a pattern of new variables only."
+        cypher: "MATCH (n:CyWrite) FOREACH (i IN [1] | MERGE (a:CyNew {name: 'x'})-[r:CyR {f: NOT ()-[:NEXT]->()}]->(m:CyMade)) WITH count(*) AS c MATCH ()-[r:CyR]->() RETURN r.f ORDER BY r.f"
+        rows: [false]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "a pattern comprehension naming a variable bound before."
+        cypher: "MATCH (n:CyWrite) FOREACH (i IN [1] | MERGE (a:CyNew {name: 'x'})-[r:CyR {f: size([(n)-[:NEXT]->(x) | x])}]->(m:CyMade)) WITH count(*) AS c MATCH ()-[r:CyR]->() RETURN r.f ORDER BY r.f"
+        rows: [0, 1, 2]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "a pattern comprehension naming a variable the clause makes."
+        cypher: "MATCH (n:CyWrite) FOREACH (i IN [1] | MERGE (a:CyNew {name: 'x'})-[r:CyR {f: size([(a)-[:NEXT]->(x) | x])}]->(m:CyMade)) WITH count(*) AS c MATCH ()-[r:CyR]->() RETURN r.f ORDER BY r.f"
+        rows: [3]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "a variable bound before, plainly."
+        cypher: "MATCH (n:CyWrite) FOREACH (i IN [1] | MERGE (a:CyNew {name: 'x'})-[r:CyR {f: n.id}]->(m:CyMade)) WITH count(*) AS c MATCH ()-[r:CyR]->() RETURN r.f ORDER BY r.f"
+        rows: ["a", "b", "c", "d"]
+
+  - name: "Values a write makes: MERGE, ON CREATE SET"
+    description: "Each cell of writevalues.yaml in this position that Neo4j 2026.10.1 stores, with its rows, each from the graph alone (liberation-data/drivine4j#814, #817): the cells it refuses are in refusals.yaml, \"Values a write makes, by position and form\"."
+    steps:
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "a property of a variable the clause makes."
+        cypher: "MATCH (n:CyWrite) MERGE (m:CyMade {id: n.id}) ON CREATE SET m.f = m.name RETURN [n.id, m.f] ORDER BY n.id"
+        rows: [["a", null], ["b", null], ["c", null], ["d", null]]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "a variable bound before, plainly."
+        cypher: "MATCH (n:CyWrite) MERGE (m:CyMade {id: n.id}) ON CREATE SET m.f = n.id RETURN [n.id, m.f] ORDER BY n.id"
+        rows: [["a", "a"], ["b", "b"], ["c", "c"], ["d", "d"]]
+
+  - name: "Values a write makes: MERGE, ON MATCH SET"
+    description: "Each cell of writevalues.yaml in this position that Neo4j 2026.10.1 stores, with its rows, each from the graph alone (liberation-data/drivine4j#814, #817): the cells it refuses are in refusals.yaml, \"Values a write makes, by position and form\"."
+    steps:
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "a property of a variable the clause makes."
+        cypher: "MATCH (n:CyWrite) MERGE (m:CyWrite {id: n.id}) ON MATCH SET m.f = m.name RETURN [n.id, m.f] ORDER BY n.id"
+        rows: [["a", null], ["b", null], ["c", null], ["d", null]]
+      - cypher: "MATCH (x) DETACH DELETE x"
+      - cypher: "CREATE (a:CyWrite {id: 'a'})-[:NEXT]->(b:CyWrite {id: 'b'})-[:NEXT]->(:CyWrite {id: 'c'}), (a)-[:NEXT]->(:CyWrite {id: 'd'})"
+      - note: "a variable bound before, plainly."
+        cypher: "MATCH (n:CyWrite) MERGE (m:CyWrite {id: n.id}) ON MATCH SET m.f = n.id RETURN [n.id, m.f] ORDER BY n.id"
+        rows: [["a", "a"], ["b", "b"], ["c", "c"], ["d", "d"]]
+
   - name: "SET and MERGE with EXISTS { } over UNWIND"
     description: "An EXISTS { } whose body unwinds a list, in a write's WHERE, SET or MERGE, reads the row being written (drivine4j#449)."
     steps:
