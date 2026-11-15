@@ -44,6 +44,17 @@ class HeldFunctionTest {
     }
 
     @Test
+    fun `Oracle reads a stored time of day and a stored duration through its era function`() {
+        // Its era function refuses either as it reads the text: a time of day has no year's test to leave it there, and a
+        // duration no store's read of its own.
+        val time = OracleCypherCompiler("g").compile("MATCH (n) RETURN localtime.truncate('second', n.t)").sql
+        assertTrue("'1970-01-01T' || g_era(JSON_VALUE(n1.props, '\$.t.v'))" in time, time)
+        val moved = OracleCypherCompiler("g").compile("MATCH (n) RETURN localdatetime('2024-01-01T00:00:00') + n.d").sql
+        assertTrue("g_era(JSON_VALUE(n1.props, '\$.d.v'))" in moved, moved)
+        assertFalse(Temporals.SUB_MICRO.replace("'", "''") in moved, moved)
+    }
+
+    @Test
     fun `the test of a year from 1000 on turns a nanosecond past the microsecond away, to where the store refuses it`() {
         val pattern = Regex(org.drivine.cypher.sql.Temporal.LOCAL_DATE_TIME.adPattern!!)
         listOf("2024-01-01T00:00:00", "2024-01-01T00:00:00.5", "2024-01-01T00:00:00.123456", "2024-01-01T00:00:00.123456000", "2024-01-01T00:00")
