@@ -21,7 +21,6 @@ class OracleKeyEqualityTest {
             "MATCH (i:Issue) WHERE i.state = \$s AND i.priority = \$p AND i.open = \$b RETURN count(*)",
             mapOf("s" to "open", "p" to 1L, "b" to true),
         )
-        println(compiled.sql)
         val sql = compiled.sql
         assertEquals(mapOf("_cyk_s" to "open", "_cyk_p" to "1", "_cyk_b" to "true"), compiled.parameters.filterKeys { it.startsWith("_cyk_") })
         assertTrue("JSON_VALUE(n1.props, '\$.state' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(STRICT)) = \$_cyk_s" in sql, sql)
@@ -56,7 +55,6 @@ class OracleKeyEqualityTest {
     @Test
     fun aLiteralIsComparedSoAndANegationKeepsCyphersNull() {
         val sql = compiler.compile("MATCH (i:Issue) WHERE NOT i.state = 'open' RETURN count(*)", emptyMap()).sql
-        println(sql)
         // Three-valued: the COALESCE gives null where the property isn't there, so NOT keeps no node without one.
         assertTrue("NOT (COALESCE(JSON_VALUE(n1.props, '\$.state' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(STRICT)) = 'open', CASE WHEN NVL(JSON_VALUE(n1.props, '\$.state.type()'), 'null') <> 'null' THEN FALSE END)" in sql, sql)
     }
