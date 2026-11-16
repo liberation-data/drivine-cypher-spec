@@ -612,10 +612,14 @@ class OracleCypherCompiler(
      * for layout 1's one read, which told no number from a text (#287). A list read by a path into it (`JSON_EXISTS` with
      * `PASSING`), in Oracle's lax mode, found `['open']` equal to `'open'` and the text `'1'` to the number 1.
      */
-    override fun keyEquals(x: String, kind: String, key: String): String? {
+    override fun keyEquals(x: String, kind: String, key: String, given: Any): String? {
         val read = when (kind) {
             "string" -> "JSON_VALUE($x, '\$' RETURNING VARCHAR2($SHORT_TEXT) NULL ON ERROR TYPE(STRICT)) = $key"
-            "number" -> "JSON_VALUE($x, '\$' RETURNING NUMBER NULL ON ERROR TYPE(STRICT)) = TO_NUMBER($key)"
+            // A double nearer 0 than a NUMBER holds (1e-130) is read as a NUMBER as 0, and was equal to 0: compared with 0 as a
+            // binary double, which holds it. A larger one isn't read as a NUMBER at all, and the kind's test finds it unequal. As
+            // a binary double the read took 11 ms longer over 250,000 rows, so only 0 is compared so (#287).
+            "number" -> if (given == 0L) "JSON_VALUE($x, '\$' RETURNING BINARY_DOUBLE NULL ON ERROR TYPE(STRICT)) = TO_BINARY_DOUBLE($key)"
+                else "JSON_VALUE($x, '\$' RETURNING NUMBER NULL ON ERROR TYPE(STRICT)) = TO_NUMBER($key)"
             "boolean" -> "JSON_VALUE($x, '\$' RETURNING BOOLEAN NULL ON ERROR TYPE(STRICT)) = ($key = 'true')"
             else -> return null
         }

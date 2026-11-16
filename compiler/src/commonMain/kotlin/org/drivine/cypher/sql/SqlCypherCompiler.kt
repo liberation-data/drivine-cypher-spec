@@ -1086,9 +1086,9 @@ abstract class SqlCypherCompiler(
     /**
      * Whether the JSON value [x] is equal to a value of the class [kind] whose key is bound at the marker [key], three-valued, as
      * [givenEquals] compares it: null where [x] is null or not there, else whether it is of that class and that key. Null where
-     * the store doesn't write it so; [givenEquals] is then written.
+     * the store doesn't write it so; [givenEquals] is then written. [given] is the value the key is of.
      */
-    protected open fun keyEquals(x: String, kind: String, key: String): String? = null
+    protected open fun keyEquals(x: String, kind: String, key: String, given: Any): String? = null
 
     /**
      * [x] [operator] [y], JSON values, where the statement writes or is given [left] or [right], one of them a whole number from
@@ -6297,7 +6297,7 @@ abstract class SqlCypherCompiler(
             }
             // Null is equal to nothing, itself included: the comparison is null, as in Cypher. A value the statement
             // is given that is not null needs no test of its own, and a property that is not there is SQL's null.
-            val keyed = if (given != null && comparesByKey(a, given)) boundKey(written, given)?.let { (kind, key) -> keyEquals(a, kind, key) } else null
+            val keyed = if (given != null && comparesByKey(a, given)) boundKey(written, given)?.let { (kind, key) -> keyEquals(a, kind, key, given) } else null
             // The parameter's own JSON, which the comparison by its key doesn't read, is bound only where the SQL reads it elsewhere.
             if (keyed != null && written is Expression.Parameter) parameters.mayLeaveUnread(written.name)
             val equal = if (given != null) (keyed ?: givenEquals(a, b, given)).let { if (stored || keyed != null) it else "CASE WHEN NOT ${isJsonNull(a)} THEN $it END" } else sharedCompared(a, b) { (x, y) -> "CASE WHEN NOT ${isJsonNull(x)} AND NOT ${isJsonNull(y)} THEN ${jsonEquals(x, y)} END" }

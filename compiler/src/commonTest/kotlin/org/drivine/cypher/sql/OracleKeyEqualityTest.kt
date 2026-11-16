@@ -60,6 +60,18 @@ class OracleKeyEqualityTest {
     }
 
     @Test
+    fun zeroIsComparedAsABinaryDoubleWhichHoldsADoubleTooSmallForANumber() {
+        // A double nearer 0 than a NUMBER holds, 1e-200, read as a NUMBER is 0: compared with 0 so, it was equal to it.
+        for ((cypher, parameters) in listOf("MATCH (i:Issue) WHERE i.k = \$z RETURN count(*)" to mapOf("z" to 0L), "MATCH (i:Issue) WHERE i.k = 0 RETURN count(*)" to emptyMap())) {
+            val sql = compiler.compile(cypher, parameters).sql
+            assertTrue("RETURNING BINARY_DOUBLE NULL ON ERROR TYPE(STRICT)) = TO_BINARY_DOUBLE(" in sql && "RETURNING NUMBER" !in sql, sql)
+        }
+        // Any other whole number is read as a NUMBER, the cheaper read.
+        val one = compiler.compile("MATCH (i:Issue) WHERE i.k = \$z RETURN count(*)", mapOf("z" to -3L)).sql
+        assertTrue("RETURNING NUMBER NULL ON ERROR TYPE(STRICT)) = TO_NUMBER(\$_cyk_z)" in one, one)
+    }
+
+    @Test
     fun aValueWithNoKeyOrAWriteComparesAsBefore() {
         for ((given, why) in listOf<Pair<Any, String>>(2.5 to "a float", "" to "an empty text", "x".repeat(4_001) to "a text past 4,000 bytes", 9_007_199_254_740_993L to "a whole number past 2^53")) {
             val compiled = compiler.compile("MATCH (i:Issue) WHERE i.k = \$v RETURN count(*)", mapOf("v" to given))
