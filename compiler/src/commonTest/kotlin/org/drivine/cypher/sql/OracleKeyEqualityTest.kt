@@ -26,6 +26,11 @@ class OracleKeyEqualityTest {
         assertTrue("JSON_VALUE(n1.props, '\$.state' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(STRICT)) = \$_cyk_s" in sql, sql)
         assertTrue("JSON_VALUE(n1.props, '\$.priority' RETURNING NUMBER NULL ON ERROR TYPE(STRICT)) = TO_NUMBER(\$_cyk_p)" in sql, sql)
         assertTrue("JSON_VALUE(n1.props, '\$.open' RETURNING BOOLEAN NULL ON ERROR TYPE(STRICT)) = (\$_cyk_b = 'true')" in sql, sql)
+        // A property read by its own path in a comparison: planned with the hint, as one compared otherwise is (#415).
+        for ((one, given) in listOf("MATCH (i:Issue) WHERE i.state = \$s RETURN i.id" to mapOf("s" to "open"), "MATCH (i:Issue) WHERE i.state = 'open' RETURN i.id" to emptyMap())) {
+            val hinted = compiler.compile(one, given).sql
+            assertTrue(hinted.startsWith("SELECT /*+ NO_JSON_TABLE_TRANSFORM */"), hinted)
+        }
         // The value once, and its kind where that read finds nothing: no JSON_QUERY of it, and no parse of the parameter.
         for (path in listOf("state", "priority", "open")) {
             assertEquals(1, reads(sql, path), "$path: $sql")
