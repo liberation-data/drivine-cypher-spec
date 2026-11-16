@@ -577,18 +577,25 @@ abstract class SqlCypherCompiler(
             if ((items.map { it.expression } + orderBy.map { it.expression }).any { contains(it, ::isAggregate) }) return false
         }
         val names = bound.toMutableSet()
-        return matches.filterIsInstance<Clause.Match>().any { match ->
-            readsTable(match.patterns, names).also {
-                match.patterns.forEach { p -> names += listOfNotNull(p.variable) + p.nodes.mapNotNull { it.variable } + p.relationships.mapNotNull { it.variable } }
-            }
+        return matches.filterIsInstance<Clause.Match>().any { match -> readsTable(match.patterns, names).also { names += match.patterns.flatMap(::named) } }
+    }
+
+    /**
+     * Whether [patterns] read a table for certain, a node not [bound] or named by an earlier pattern of them, or a relationship
+     * of at least one step: see [readsTable].
+     */
+    protected fun readsTable(patterns: List<Pattern>, bound: Set<String>): Boolean {
+        val names = bound.toMutableSet()
+        return patterns.any { p ->
+            (
+                p.shortest == null && p.relationships.none { it.group != null || (it.range?.min ?: 1) < 1 } &&
+                    (p.relationships.isNotEmpty() || p.nodes.any { it.variable == null || it.variable !in names })
+                ).also { names += named(p) }
         }
     }
 
-    /** Whether [patterns] read a table for certain, a node not [bound] or a relationship of at least one step: see [readsTable]. */
-    protected fun readsTable(patterns: List<Pattern>, bound: Set<String>): Boolean = patterns.any { p ->
-        p.shortest == null && p.relationships.none { it.group != null || (it.range?.min ?: 1) < 1 } &&
-            (p.relationships.isNotEmpty() || p.nodes.any { it.variable == null || it.variable !in bound })
-    }
+    /** The names [pattern] binds: its path's, its nodes' and its relationships'. */
+    private fun named(pattern: Pattern) = listOfNotNull(pattern.variable) + pattern.nodes.mapNotNull { it.variable } + pattern.relationships.mapNotNull { it.variable }
 
     /**
      * The query [query] of a subquery that a condition reads, as the store's planner is given it: the query of an `EXISTS (…)`

@@ -35,7 +35,7 @@ class OracleExistsQueryTest {
         "MERGE (n:CyWrite {id: 3}) SET n.e = EXISTS { UNWIND [1, 3] AS j WITH j WHERE j = n.id RETURN j ORDER BY j } RETURN n.e",
     )
 
-    /** Each `EXISTS (` of [sql] that opens a subquery, or Oracle's count of one that reads no table, and the text that follows it. */
+    /** Each `EXISTS (` of [sql] that opens a subquery, or Oracle's count of one not taken to read a table for certain, and the text that follows it. */
     private fun existsBodies(sql: String) = Regex("""(?:EXISTS \(|count\(\*\) FROM \()\n(\s*)(\S[^\n]*)""").findAll(sql).map { it.groupValues[2] }.toList()
 
     @Test
@@ -141,6 +141,9 @@ class OracleExistsQueryTest {
         "MATCH (n) RETURN EXISTS { MATCH (n) ((a)-[:R]->(b)){0,2} (m) }",
         "MATCH (n) RETURN EXISTS { MATCH p = shortestPath((n)-[*]->(m)) }",
         "MATCH (n) RETURN EXISTS { MATCH p = allShortestPaths((n)-[*]->(m)) }",
+        // A node bound by an earlier pattern of the same `MATCH`, one that may take no step, is not matched anew.
+        "MATCH (n) RETURN EXISTS { MATCH (n)-[*0..1]->(m), (m) }",
+        "MATCH (n) RETURN EXISTS { (n)-[*0..1]->(m), (m) }",
         "MATCH (n) RETURN EXISTS { CALL (n) { WITH n WHERE n:Movie RETURN n AS x } MATCH (y) RETURN y }",
         "MATCH (n) RETURN EXISTS { CALL db.labels() YIELD label MATCH (x) RETURN x }",
         "MATCH (n) RETURN EXISTS { MATCH (x:Movie) RETURN count(x) AS c }",
