@@ -561,22 +561,24 @@ abstract class SqlCypherCompiler(
 
     /**
      * Whether the Cypher of an `EXISTS { … }` reads a table for certain, whatever SQL it is written as: one of its own clauses
-     * (not an expression's subquery), a `CALL`'s or a `UNION`'s query's among them, matches a node not [bound] yet or a
-     * relationship of at least one step. A path that may take none, a quantified one, a shortest path, an `UNWIND`, a write or a
-     * clause after a `CALL` that reads none is taken to read none, which costs a store that counts such an `EXISTS` only speed.
+     * (not an expression's subquery), a `CALL`'s query's among them, matches a node not [bound] yet or a relationship of at
+     * least one step. A `UNION` reads one only where each of its queries does: Oracle has not been seen to answer an `EXISTS`
+     * of a union of a table's rows and the row alone. A path that may take none, a quantified one, a shortest path, an
+     * `UNWIND`, a write or a clause after a `CALL` that reads none is taken to read none, which costs a store that counts such
+     * an `EXISTS` only speed.
      */
     protected fun readsTable(query: Query, bound: Set<String>): Boolean =
-        (listOf(query.clauses) + query.unions.map { it.clauses }).any { clauses ->
+        (listOf(query.clauses) + query.unions.map { it.clauses }).all { clauses ->
             val names = bound.toMutableSet()
             for (clause in clauses) when (clause) {
-                is Clause.Match -> if (readsTable(clause.patterns, names)) return@any true else clause.patterns.forEach { p ->
+                is Clause.Match -> if (readsTable(clause.patterns, names)) return@all true else clause.patterns.forEach { p ->
                     names += listOfNotNull(p.variable) + p.nodes.mapNotNull { it.variable } + p.relationships.mapNotNull { it.variable }
                 }
                 is Clause.With -> names += clause.projection.items.map { it.name }
                 is Clause.Unwind -> names += clause.variable
                 is Clause.Return -> {}
-                is Clause.Call -> return@any !clause.procedure && readsTable(clause.query, names)
-                else -> return@any false
+                is Clause.Call -> return@all !clause.procedure && readsTable(clause.query, names)
+                else -> return@all false
             }
             false
         }

@@ -91,6 +91,8 @@ class OracleExistsQueryTest {
         "MATCH (n) RETURN EXISTS { CALL (n) { WITH n WHERE n:Movie RETURN n AS x } MATCH (x:Movie) RETURN x.title AS y }",
         // A path that may take no step is not taken to read a table for certain.
         "MATCH (n) RETURN EXISTS { MATCH (n:Movie)-[*0..1]->(n) }",
+        // A union reads a table for certain only where each of its queries does.
+        "MATCH (n) RETURN EXISTS { MATCH (n:Movie) RETURN n.title AS y UNION MATCH (x:Person) RETURN x.name AS y }",
     )
 
     /** Statements whose `EXISTS { … }` reads a table: the graph's, or a list's rows. */
@@ -100,7 +102,6 @@ class OracleExistsQueryTest {
         "MATCH (n) RETURN EXISTS { MATCH (x:Movie) RETURN x.title AS y }",
         "MATCH (n) RETURN EXISTS { MATCH (n:Movie) OPTIONAL MATCH (n)-->(x) RETURN x }",
         "MATCH (n) RETURN EXISTS { MATCH (n:Movie) CALL (n) { MATCH (n)-->(x) RETURN x } RETURN x }",
-        "MATCH (n) RETURN EXISTS { MATCH (n:Movie) RETURN n.title AS y UNION MATCH (x:Person) RETURN x.name AS y }",
         "MATCH (n), (m) RETURN EXISTS { MATCH (n)-[:R]->(m) }",
         "MATCH (n) RETURN EXISTS { WITH n.title AS t MATCH (x {title: t}) RETURN x }",
         "MATCH (n) RETURN EXISTS { WITH n AS x MATCH (x)-->() RETURN x }",
@@ -121,6 +122,29 @@ class OracleExistsQueryTest {
         for (cypher in ofATable) {
             val sql = OracleCypherCompiler("g").compile(cypher).sql
             assertTrue(!sql.contains(") ex) > 0)") && Regex("""(?<!JSON_)EXISTS \(""").containsMatchIn(sql), sql)
+        }
+    }
+
+    /**
+     * Statements whose `EXISTS { … }` reads a table in its SQL, but whose Cypher may read none: a path that may take no step,
+     * a quantified one, a shortest path, or a clause after a `CALL` that reads none. Each is counted, which costs only speed.
+     */
+    private val mayReadNone = listOf(
+        "MATCH (n) RETURN EXISTS { MATCH (n)-[*0..]->(m) }",
+        "MATCH (n) RETURN EXISTS { MATCH (n)-[:R]->*(m) }",
+        "MATCH (n) RETURN EXISTS { MATCH (n) ((a)-[:R]->(b)){0,2} (m) }",
+        "MATCH (n) RETURN EXISTS { MATCH p = shortestPath((n)-[*]->(m)) }",
+        "MATCH (n) RETURN EXISTS { MATCH p = allShortestPaths((n)-[*]->(m)) }",
+        "MATCH (n) RETURN EXISTS { CALL (n) { WITH n WHERE n:Movie RETURN n AS x } MATCH (y) RETURN y }",
+        "MATCH (n) RETURN EXISTS { CALL db.labels() YIELD label MATCH (x) RETURN x }",
+    )
+
+    @Test
+    fun `an EXISTS whose Cypher may read no table is counted on Oracle though its SQL reads one`() {
+        for (cypher in mayReadNone) {
+            val sql = OracleCypherCompiler("g").compile(cypher).sql
+            val counted = Regex("""count\(\*\) FROM \(\n([\s\S]*)\n\s*\) ex\) > 0\)""").find(sql)
+            assertTrue(counted != null && OracleSql.readsTable(counted.groupValues[1]), sql)
         }
     }
 
