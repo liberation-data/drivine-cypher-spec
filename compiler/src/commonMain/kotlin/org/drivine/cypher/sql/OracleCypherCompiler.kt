@@ -1531,8 +1531,10 @@ class OracleCypherCompiler(
         val direction = if (min) "ASC" else "DESC"
         // A temporal value's tag of a kind the statement does not know by its sort key, which its rank holds ([sortRank]), as MIN
         // reads no tag's order; any other value by its kind, and then as MIN orders it.
-        // A number by its keys after its kind (see numberKeys), read from the property by its path, as MIN orders it as JSON.
-        val order = if (key == null) (listOf(sortRank(value)) + numberOrder(groupedNumberKeys(value))).joinToString(", ") { "$it $direction NULLS LAST" }
+        // A number by its double after its kind (see numberKeys), read from the property by its path once; of those of one
+        // double, MIN or MAX of the JSON, as before. With its NUMBER too, the property was named five times, and min() and max()
+        // took 17% longer: an integer past 2^53 and a float of its double are not told apart (drivine-cypher-spec#315).
+        val order = if (key == null) (listOf(sortRank(value)) + groupedNumberKeys(value).take(1)).joinToString(", ") { "$it $direction NULLS LAST" }
             else "${kindOrder(value)} $direction NULLS LAST, $key $direction NULLS LAST"
         return "${if (min) "MIN" else "MAX"}(${nullIfJsonNull(value)}) KEEP (DENSE_RANK FIRST ORDER BY $order)"
     }

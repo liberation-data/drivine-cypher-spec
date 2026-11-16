@@ -47,14 +47,15 @@ class OracleNumberKeysTest {
     @Test
     fun minAndMaxOrderByTheKeysOfThePropertyAfterItsKind() {
         val sql = compiler.compile("MATCH (p:Person) RETURN [min(p.karma), max(p.karma)]", emptyMap()).sql
-        // The double, then the NUMBER where it is an integer past 2^53 alone: within ±2^53 an integer and an equal float tie.
-        val past = "CASE WHEN ABS(${big("n1.props", "$.karma")}) > 9007199254740992 THEN ${big("n1.props", "$.karma")} END"
-        assertTrue("ASC NULLS LAST, ${double("n1.props", "$.karma")} ASC NULLS LAST, $past ASC NULLS LAST)" in sql, sql)
-        assertTrue("DESC NULLS LAST, ${double("n1.props", "$.karma")} DESC NULLS LAST, $past DESC NULLS LAST)" in sql, sql)
-        // The number keys in each KEEP's order name the property's reads five times: its double, and its kind and NUMBER twice.
+        // The kind, then the double alone; of one double, MIN or MAX of the JSON, as before (an integer past 2^53 and a float of its
+        // double are not told apart: drivine-cypher-spec#315).
+        assertTrue("ASC NULLS LAST, ${double("n1.props", "$.karma")} ASC NULLS LAST)" in sql, sql)
+        assertTrue("DESC NULLS LAST, ${double("n1.props", "$.karma")} DESC NULLS LAST)" in sql, sql)
+        assertTrue(Regex("KEEP \\([^)]*RETURNING NUMBER").find(sql) == null && "THEN ${big("n1.props", "$.karma")} END" !in sql, sql)
+        // After its kind, each KEEP's order names the property's double once.
         Regex("KEEP \\(DENSE_RANK FIRST ORDER BY (DECODE\\(.*?'float', '5'\\)) (ASC|DESC) NULLS LAST, (.*?)\\)(, MAX| NULL ON NULL)").findAll(sql).toList().also { assertEquals(2, it.size, sql) }.forEach { keep ->
             val keys = keep.groupValues[3]
-            assertEquals(5, Regex("JSON_VALUE\\(n1\\.props, '\\$\\.karma(\\.type\\(\\))?'").findAll(keys).count(), keys)
+            assertEquals(1, Regex("JSON_VALUE\\(n1\\.props, '\\$\\.karma(\\.type\\(\\))?'").findAll(keys).count(), keys)
         }
         assertNoKeyOfARoutedValue(sql)
     }
@@ -211,7 +212,7 @@ class OracleNumberKeysTest {
         // No NaN given or worked out: a NaN an unwound item holds is counted once, as collect(DISTINCT …) keeps it.
         assertTrue("IS NAN THEN 1 END" !in unwound, unwound)
         val worked = compiler.compile("MATCH (n:K) RETURN max(n.k + 0)", emptyMap()).sql
-        assertTrue(Regex("KEEP \\(DENSE_RANK FIRST ORDER BY .* DESC NULLS LAST, JSON_VALUE\\(.* RETURNING BINARY_DOUBLE NULL ON ERROR TYPE\\(STRICT\\)\\) DESC NULLS LAST, CASE WHEN ABS\\(").containsMatchIn(worked), worked)
+        assertTrue(Regex("KEEP \\(DENSE_RANK FIRST ORDER BY .* DESC NULLS LAST, JSON_VALUE\\(.* RETURNING BINARY_DOUBLE NULL ON ERROR TYPE\\(STRICT\\)\\) DESC NULLS LAST\\)").containsMatchIn(worked), worked)
         // Under the aggregate, nothing is bound in a subquery.
         assertTrue(!Regex("KEEP \\(DENSE_RANK FIRST ORDER BY [^)]*\\(SELECT").containsMatchIn(worked), worked)
     }
