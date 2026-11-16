@@ -611,8 +611,9 @@ back.
 
 ```js
 const { hostCall, hostFunctions } = require('@liberation-data/drivine-cypher-compiler');
-for (const [name, { arity, deterministic }] of Object.entries(JSON.parse(hostFunctions()))) {
-    db.function(name, { deterministic, varargs: arity < 0, useBigIntArguments: true }, (...args) => {
+for (const [name, { deterministic }] of Object.entries(JSON.parse(hostFunctions()))) {
+    // varargs: node:sqlite counts a function's arguments by its own (`fn.length`), none for (...args); hostCall checks `arity`.
+    db.function(name, { deterministic, varargs: true, useBigIntArguments: true }, (...args) => {
         const answer = JSON.parse(hostCall(name, JSON.stringify(args.map(typed))));  // typed: a value as the table gives it
         if ('error' in answer) throw new Error(answer.error);
         return untyped(answer.v);
