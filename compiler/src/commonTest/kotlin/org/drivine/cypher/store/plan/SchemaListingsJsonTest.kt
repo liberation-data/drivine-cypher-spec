@@ -20,6 +20,7 @@ import org.drivine.schema.RangeIndexSpec
 import org.drivine.schema.SchemaItemInfo
 import org.drivine.schema.SchemaItemKind
 import org.drivine.schema.SimilarityFunction
+import org.drivine.schema.TextIndexSpec
 import org.drivine.schema.UniquenessConstraintSpec
 import org.drivine.schema.VectorIndexSpec
 import org.drivine.schema.made
@@ -98,6 +99,9 @@ class SchemaListingsJsonTest {
                     "on $target, $id, $of: $got",
                 )
                 assertTrue(got["items"]!!.size() > 0, "on $target, $id, $of: items listed")
+                // A spec given as null is no spec: every item is listed.
+                val unfiltered = ask(id, "\"items\": {\"of\": \"$of\", \"rows\": ${json(rows)}, \"spec\": null}")
+                assertEquals(CypherJson.writeValueAsString(got["items"]!!), CypherJson.writeValueAsString(unfiltered["items"]!!), "on $target, $id, $of: $unfiltered")
             }
         }
     }
@@ -123,6 +127,21 @@ class SchemaListingsJsonTest {
     }
 
     @Test
+    fun aSpecThatIgnoresCaseFindsTheIndexMadeOverTheLowercasedCopies() {
+        val spec = RangeIndexSpec("Person", listOf("name"), ignoreCase = true)
+        val made = spec.made()
+        val lowered = SchemaItemInfo(SchemaItemKind.RANGE_INDEX, "Person", made.properties, made.name)
+        for ((id, ddl) in ddls) {
+            val schema = StoreSchema.of(ddl)
+            val rows = ListingRows.rows(id, listOf(indexes[0], lowered), false)
+            val expected = schema.parseIndexRows(rows).distinct().filter { schema.matchesIdentity(it, made) }.map { json(PlanJson.item(it)) }
+            assertEquals(1, expected.size, "on $target, $id: the index over the copies, not the one over name")
+            val got = ask(id, "\"items\": {\"of\": \"indexes\", \"rows\": ${json(rows)}, \"spec\": ${json(PlanJson.spec(spec))}}")
+            assertEquals(expected, got["items"]!!.map { json(PlanJson.item(SchemaItemInfo(SchemaItemKind.valueOf(it["kind"]!!.textValue()!!), it["label"]!!.textValue()!!, it["properties"]!!.map { p -> p.textValue()!! }, it["name"]?.takeUnless { n -> n.isNull }?.textValue()))) }, "on $target, $id: $got")
+        }
+    }
+
+    @Test
     fun aCatalogRecordsAliasesAndAnItemsBuildStateAreGiven() {
         val record = linkedMapOf<String, Any?>(
             "kind" to "RANGE_INDEX", "label" to "Person", "properties" to listOf("name"), "name" to "Person_name_range",
@@ -135,6 +154,24 @@ class SchemaListingsJsonTest {
         val falkor = ask("falkordb", "\"items\": {\"of\": \"indexes\", \"rows\": ${json(building)}}")
         assertEquals(true, falkor["items"]!![0]!!["buildInProgress"]!!.booleanValue(), "on $target: $falkor")
         assertEquals(false, falkor["items"]!![0]!!["buildFailed"]!!.booleanValue(), "on $target: $falkor")
+        // And a constraint whose build failed, which it keeps listing though it enforces nothing, by its status too.
+        val failed = ListingRows.rows("falkordb", listOf(constraints[0].copy(status = "FAILED")), true)
+        val broken = ask("falkordb", "\"items\": {\"of\": \"constraints\", \"rows\": ${json(failed)}}")
+        assertEquals(true, broken["items"]!![0]!!["buildFailed"]!!.booleanValue(), "on $target: $broken")
+        assertEquals(false, broken["items"]!![0]!!["buildInProgress"]!!.booleanValue(), "on $target: $broken")
+    }
+
+    @Test
+    fun aTextIndexIsFoundOnlyOnAStoreThatHasThemAsDrivine4jsFindRefusesIt() {
+        val text = TextIndexSpec("Person", "bio")
+        for ((id, ddl) in ddls) {
+            val got = ask(id, "\"items\": {\"of\": \"indexes\", \"rows\": [], \"spec\": ${json(PlanJson.spec(text))}}")
+            if (StoreSchema.of(ddl).supportsTextIndex) {
+                assertEquals(0, got["items"]!!.size(), "on $target, $id: $got")
+            } else {
+                assertTrue(got["error"]?.textValue()?.contains("a TEXT index is Neo4j's") == true, "on $target, $id: $got")
+            }
+        }
     }
 
     @Test
@@ -147,6 +184,12 @@ class SchemaListingsJsonTest {
             assertEquals(expected, got["statement"]?.takeUnless { it.isNull }?.textValue(), "on $target, $id: $got")
             if (ddl is SqlStoreDdl) assertTrue(expected!!.contains("by_name"), "on $target, $id: $expected")
         }
+        // An item the store lists with no name, and no aliases left, which takes the record's away.
+        val unnamed = CatalogItem(SchemaItemKind.UNIQUENESS_CONSTRAINT, "Person", listOf("email"))
+        for ((id, ddl) in ddls) {
+            val got = ask(id, "\"aliased\": {\"item\": {\"kind\": \"UNIQUENESS_CONSTRAINT\", \"label\": \"Person\", \"properties\": [\"email\"], \"name\": null}, \"aliases\": []}")
+            assertEquals((ddl as? SqlStoreDdl)?.aliased(unnamed, emptyList()), got["statement"]?.takeUnless { it.isNull }?.textValue(), "on $target, $id: $got")
+        }
     }
 
     @Test
@@ -155,6 +198,14 @@ class SchemaListingsJsonTest {
             "\"items\": {\"rows\": []}" to "items gives of",
             "\"items\": {\"of\": \"indexes\"}" to "items gives its rows as a list",
             "\"aliased\": {\"item\": {\"kind\": \"NO_KIND\", \"label\": \"A\", \"properties\": []}, \"aliases\": []}" to "aliased gives its item's kind",
+            "\"items\": []" to "items gives {",
+            "\"aliased\": []" to "aliased gives {",
+            "\"aliased\": {\"aliases\": []}" to "aliased gives its item.",
+            "\"aliased\": {\"item\": {\"kind\": \"RANGE_INDEX\", \"properties\": []}, \"aliases\": []}" to "aliased gives its item's label",
+            "\"aliased\": {\"item\": {\"kind\": \"RANGE_INDEX\", \"label\": \"A\", \"properties\": \"a\"}, \"aliases\": []}" to "aliased gives its item's properties as a list",
+            "\"aliased\": {\"item\": {\"kind\": \"RANGE_INDEX\", \"label\": \"A\", \"properties\": [1]}, \"aliases\": []}" to "aliased gives its item's properties as names",
+            "\"aliased\": {\"item\": {\"kind\": \"RANGE_INDEX\", \"label\": \"A\", \"properties\": []}}" to "aliased gives its aliases as a list",
+            "\"aliased\": {\"item\": {\"kind\": \"RANGE_INDEX\", \"label\": \"A\", \"properties\": []}, \"aliases\": [1]}" to "aliased gives its aliases as names",
             "\"listings\": {}, \"validate\": {}" to "A schemaPlan request gives one of",
         )
         for ((rest, message) in wrong) {

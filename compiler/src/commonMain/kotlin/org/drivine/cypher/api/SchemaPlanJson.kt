@@ -12,7 +12,9 @@ import org.drivine.cypher.store.plan.SchemaPlanner
 import org.drivine.cypher.store.schema.StoreSchema
 import org.drivine.cypher.store.ddl.CatalogItem
 import org.drivine.cypher.store.ddl.SqlStoreDdl
+import org.drivine.cypher.store.ddl.unsupportedTextIndex
 import org.drivine.schema.SchemaItemKind
+import org.drivine.schema.TextIndexSpec
 import org.drivine.schema.made
 
 /**
@@ -45,7 +47,11 @@ import org.drivine.schema.made
  *   listings hold, as the store schema parses them ([StoreSchema.parseIndexRows], [StoreSchema.parseConstraintRows]):
  *   `{"items": [<item>, …]}`, each written as [PlanJson.item] writes it, with its `aliases`, the names a catalog record keeps
  *   beside its own (none on a graph engine), and whether its build is in progress or failed. With `spec`, only those of the
- *   spec's identity as it is made ([StoreSchema.matchesIdentity], `spec.made()`), as a find takes them.
+ *   spec's identity as it is made ([StoreSchema.matchesIdentity], `spec.made()`), as a find takes them from the listing of
+ *   its spec's kind (the constraint listing for a constraint); a `TEXT_INDEX` spec
+ *   on a store with no text indexes is refused, as drivine4j's find refuses it. As drivine4j's managers do, a host runs
+ *   each distinct listing statement once, takes a listing that fails as listing nothing (some engines refuse to list a
+ *   kind before there is one), and lists the indexes as the items of every listing, each once.
  * - `"aliased": {"item": {"kind", "label", "properties", "name"}, "aliases": [<name>, …]}`: the statement that records the
  *   aliases as all the item's aliases, in its catalog record, `{"statement": …}`, null on a store that keeps no record.
  *
@@ -134,11 +140,14 @@ internal object SchemaPlanJson {
             else -> throw IllegalArgumentException("items gives of, \"indexes\" or \"constraints\": the listing its rows are of.")
         }
         val rows = (given["rows"] as? ArrayNode ?: throw IllegalArgumentException("items gives its rows as a list.")).map(PlanJson::plain)
-        val made = given["spec"]?.takeUnless { it.isNull }?.let { PlanJson.spec(it).made() }
+        val spec = given["spec"]?.takeUnless { it.isNull }?.let(PlanJson::spec)
+        // As drivine4j's find refuses one: the store has no TEXT index, and no listing of them to find one in.
+        if (spec is TextIndexSpec && !store.supportsTextIndex) throw unsupportedTextIndex(spec, store.engine)
+        val made = spec?.made()
         // A row at a time, as drivine4j reads a catalog record's aliases beside the item parsed from it.
         val items = rows.flatMap { row ->
             val parsed = if (constraints) store.parseConstraintRows(listOf(row)) else store.parseIndexRows(listOf(row))
-            parsed.map { it to aliasesIn(row) }
+            parsed.map { it to store.aliasesOf(row) }
         }.distinct().filter { (info, _) -> made == null || store.matchesIdentity(info, made) }
         return mapOf(
             "items" to items.map { (info, aliases) ->
@@ -150,10 +159,6 @@ internal object SchemaPlanJson {
             },
         )
     }
-
-    /** The aliases a catalog row's `details` keep: none, where there are none, or the store keeps none. */
-    private fun aliasesIn(row: Any?): List<String> =
-        (((row as? Map<*, *>)?.get("details") as? Map<*, *>)?.get(SqlStoreDdl.ALIASES) as? List<*>).orEmpty().map { it.toString() }
 
     /** The statement that records the aliases of an item in its catalog record; null on a store that keeps none. */
     private fun aliased(store: StoreSchema, given: JsonNode?): Map<String, Any?> {

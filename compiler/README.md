@@ -532,7 +532,9 @@ JSON entry, so TypeScript and Python run what drivine4j runs from the Kotlin typ
     `listings` gives `{"indexes": {<kind>: <statement>, …}, "constraints": <statement>}`, an index listing for each kind the
     store has; `items` gives the items a listing's rows hold, `{"items": [<item>, …]}`, each with its catalog record's
     `aliases` and whether its build is in progress or failed, and with `spec` only those of the spec's identity, as a find
-    takes them; `aliased` gives the statement that records an item's aliases in its catalog record, `{"statement": …}`,
+    takes them from the listing of its spec's kind, or the constraint listing (a `TEXT_INDEX` spec on a store with no text indexes is refused, as drivine4j's find refuses it). A host runs
+    each distinct listing statement once, takes a listing that fails as listing nothing, and lists the indexes as the items
+    of every listing, each once, as drivine4j's managers do; `aliased` gives the statement that records an item's aliases in its catalog record, `{"statement": …}`,
     null on a graph engine.
 
   A request, an action, an outcome, the state and the report are written as `PlanJson` writes them, each key and value as
