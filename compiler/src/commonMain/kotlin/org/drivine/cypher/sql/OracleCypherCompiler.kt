@@ -498,7 +498,7 @@ class OracleCypherCompiler(
         // A property's keys after every other column, so those are named as they were before there were keys.
         val keys = if (!keyed) emptyList() else sides.withIndex().filter { properties[it.index] }.flatMap { (_, json) ->
             val (props, path) = propertyRead(json)!!
-            listOf(doubleKey(props, path), bigInteger(props, path))
+            listOf(doubleKey(props, path), numberRead(props, path))
         }
         return sharedBound(*(columns + keys).toTypedArray()) { names ->
             val next = names.iterator()
@@ -507,8 +507,9 @@ class OracleCypherCompiler(
             // A property's kind, CLOB and keys are read from their own columns: its JSON is null past BOUND_TEXT characters.
             bound.filter { it.size == 3 }.withIndex().fold(body(bound.map { it.first() })) { sql, (i, columns) ->
                 val (json, kindColumn, clob) = columns
-                val read = sql.replace(kind(json), kindColumn).replace("JSON_VALUE($json, '\$' RETURNING CLOB)", clob)
-                keyColumns?.get(i)?.let { (d, big) -> read.replace(doubleKey(json), d).replace(bigInteger(json, "'\$'"), big) } ?: read
+                // The keys' reads first: the number's read asks its kind as [kind] does.
+                val keyed = keyColumns?.get(i)?.let { (d, n) -> sql.replace(doubleKey(json), d).replace(numberRead(json, "'\$'"), n) } ?: sql
+                keyed.replace(kind(json), kindColumn).replace("JSON_VALUE($json, '\$' RETURNING CLOB)", clob)
             }
         }
     }
@@ -843,17 +844,25 @@ class OracleCypherCompiler(
      * it, worked out exactly ([OracleSql.wholeNumber]); 0 for any other number. Two numbers with one double differ only where
      * one is such an integer, as a double past 2^53 is a whole number and any integer to 2^53 is a double's. Not the double
      * read as a `NUMBER`, which Oracle makes no exactly: it reads the double 2^53 as 9007199254740993 (see [OracleSql.indexKey]).
-     * The integer is read once by a path only it passes, and its double made of it, so the value is written out once.
+     * The number is read as a `NUMBER` where it is one ([numberRead]); its double is [doubleKey]'s, which a `NUMBER` read so is.
      */
     private fun exactKey(json: String, path: String = "'\$'"): String {
         carried(json, path, 1)?.let { return it }
-        return shared(bigInteger(json, path)) { (n) -> "NVL($n - (${OracleSql.wholeNumber("TO_BINARY_DOUBLE($n)")}), 0)" }
+        // The value bound where it is long, not its number's read, which a property's path would bind for each row.
+        return shared(json) { (x) ->
+            val n = numberRead(x, path)
+            "CASE WHEN ABS($n) > $EXACT_DOUBLES THEN $n - (${OracleSql.wholeNumber(doubleKey(x, path))}) ELSE 0 END"
+        }
     }
 
-    /** The value at the path [path] of [json] where it is an integer past 2^53, as the `NUMBER` it is: see [exactKey]. */
-    private fun bigInteger(json: String, path: String) =
-        idColumn(json, path)?.let { "CASE WHEN ABS($it) > $EXACT_DOUBLES THEN $it END" }
-            ?: "JSON_VALUE($json, ${path.dropLast(1)}?(@.type() == \"number\" && @.abs() > $EXACT_DOUBLES)' RETURNING NUMBER NULL ON ERROR)"
+    /**
+     * The value at the path [path] of [json] as the `NUMBER` it is, where it is a `NUMBER` (an integer, not a double); else null:
+     * see [exactKey]. Its kind is asked first, apart, and the value read only where it is a number. A path that filters it, read
+     * of a list in Oracle's lax mode, tested each of its items, and `@.abs()` of a relationship's map among them, beside a null,
+     * crashed the session (ORA-00600 [koksccda1]): `a = a` of a list `[r1, r2] AS a` a WITH carries.
+     */
+    private fun numberRead(json: String, path: String) = idColumn(json, path)
+        ?: "CASE WHEN JSON_VALUE($json, ${path.dropLast(1)}.type()') = 'number' THEN JSON_VALUE($json, $path RETURNING NUMBER NULL ON ERROR TYPE(STRICT)) END"
 
     /**
      * The properties and the path of [json] where it is a property read through its text, as [itemProperty] reads one

@@ -17,8 +17,9 @@ class OracleNumberKeysTest {
 
     private fun double(props: String, path: String) = "JSON_VALUE($props, '$path' RETURNING BINARY_DOUBLE NULL ON ERROR TYPE(STRICT))"
 
+    /** The value at [path] read as a `NUMBER` where it is one, its kind asked apart: no path filters it (see OracleNumberKeyPathsTest). */
     private fun big(props: String, path: String) =
-        "JSON_VALUE($props, '$path?(@.type() == \"number\" && @.abs() > 9007199254740992)' RETURNING NUMBER NULL ON ERROR)"
+        "CASE WHEN JSON_VALUE($props, '$path.type()') = 'number' THEN JSON_VALUE($props, '$path' RETURNING NUMBER NULL ON ERROR TYPE(STRICT)) END"
 
     /** No key is read from a value read through its text, nor from a column that carries one. */
     private fun assertNoKeyOfARoutedValue(sql: String) {
@@ -30,7 +31,7 @@ class OracleNumberKeysTest {
     fun anOrderByAPropertyCarriesItsKeysReadOnceFromTheProperty() {
         val sql = compiler.compile("MATCH (p:Person) RETURN p.karma ORDER BY p.karma DESC LIMIT 100", emptyMap()).sql
         assertTrue("${double("n1.props", "$.karma")} AS s1k1" in sql, sql)
-        assertTrue(Regex("NVL\\(${Regex.escape(big("n1.props", "$.karma"))} - \\(.*\\), 0\\) AS s1k2").containsMatchIn(sql), sql)
+        assertTrue(Regex("CASE WHEN ABS\\(${Regex.escape(big("n1.props", "$.karma"))}\\) > 9007199254740992 THEN .* ELSE 0 END AS s1k2").containsMatchIn(sql), sql)
         // The order reads the keys' columns, after the kind and before the value.
         assertTrue(Regex("ORDER BY DECODE\\(.*\\) DESC, p2\\.s1k1 DESC, p2\\.s1k2 DESC, p2\\.s1 DESC").containsMatchIn(sql), sql)
         // Each key once in the select list.
@@ -41,8 +42,8 @@ class OracleNumberKeysTest {
     @Test
     fun minAndMaxOrderByTheKeysOfThePropertyAfterItsKind() {
         val sql = compiler.compile("MATCH (p:Person) RETURN [min(p.karma), max(p.karma)]", emptyMap()).sql
-        assertTrue("ASC NULLS LAST, ${double("n1.props", "$.karma")} ASC NULLS LAST, NVL(${big("n1.props", "$.karma")}" in sql, sql)
-        assertTrue("DESC NULLS LAST, ${double("n1.props", "$.karma")} DESC NULLS LAST, NVL(${big("n1.props", "$.karma")}" in sql, sql)
+        assertTrue("ASC NULLS LAST, ${double("n1.props", "$.karma")} ASC NULLS LAST, CASE WHEN ABS(${big("n1.props", "$.karma")}" in sql, sql)
+        assertTrue("DESC NULLS LAST, ${double("n1.props", "$.karma")} DESC NULLS LAST, CASE WHEN ABS(${big("n1.props", "$.karma")}" in sql, sql)
         assertNoKeyOfARoutedValue(sql)
     }
 
@@ -50,11 +51,11 @@ class OracleNumberKeysTest {
     fun twoPropertiesAreComparedAndOrderedByTheirKeys() {
         val equal = compiler.compile("MATCH (n:K), (m:K) RETURN n.k = m.k", emptyMap()).sql
         // Null where either is no number, and then compared as JSON.
-        assertTrue("COALESCE(${double("n1.props", "$.k")} = ${double("n2.props", "$.k")} AND NVL(${big("n1.props", "$.k")}" in equal, equal)
+        assertTrue("COALESCE(${double("n1.props", "$.k")} = ${double("n2.props", "$.k")} AND CASE WHEN ABS(${big("n1.props", "$.k")}" in equal, equal)
         assertNoKeyOfARoutedValue(equal)
         val less = compiler.compile("MATCH (n:K), (m:K) RETURN n.k < m.k", emptyMap()).sql
         // NaN is ordered against nothing; the doubles decide, and where they are equal, what an integer past 2^53 is beyond its double.
-        assertTrue("WHEN ${double("n1.props", "$.k")} <> ${double("n2.props", "$.k")} THEN (${double("n1.props", "$.k")} < ${double("n2.props", "$.k")} AND ${double("n1.props", "$.k")} IS NOT NAN AND ${double("n2.props", "$.k")} IS NOT NAN) ELSE (NVL(${big("n1.props", "$.k")}" in less, less)
+        assertTrue("WHEN ${double("n1.props", "$.k")} <> ${double("n2.props", "$.k")} THEN (${double("n1.props", "$.k")} < ${double("n2.props", "$.k")} AND ${double("n1.props", "$.k")} IS NOT NAN AND ${double("n2.props", "$.k")} IS NOT NAN) ELSE (CASE WHEN ABS(${big("n1.props", "$.k")}" in less, less)
         assertNoKeyOfARoutedValue(less)
     }
 
@@ -62,7 +63,7 @@ class OracleNumberKeysTest {
     fun aCaseSubjectAndARelationshipsPropertyAreComparedByTheirKeys() {
         // A simple CASE compares its subject with each alternative as = does: by the keys, read from the properties.
         val case = compiler.compile("MATCH (n:K), (m:K) RETURN CASE n.k WHEN m.k THEN 1 END", emptyMap()).sql
-        assertTrue("COALESCE(${double("n1.props", "$.k")} = ${double("n2.props", "$.k")} AND NVL(${big("n1.props", "$.k")}" in case, case)
+        assertTrue("COALESCE(${double("n1.props", "$.k")} = ${double("n2.props", "$.k")} AND CASE WHEN ABS(${big("n1.props", "$.k")}" in case, case)
         assertNoKeyOfARoutedValue(case)
         // A relationship's property is keyed as a node's is, from its own properties.
         val rel = compiler.compile("MATCH ()-[r:R]->() RETURN r.k ORDER BY r.k", emptyMap()).sql
@@ -79,7 +80,7 @@ class OracleNumberKeysTest {
         // Beside a number from -2^53 to 2^53 the doubles alone decide; beside 1e200, a whole number past 2^53, an integer past
         // 2^53 is told apart from the double nearest it too.
         assertTrue(big("n1.props", "$.k") !in equal, equal)
-        assertTrue("NVL(${big("n1.props", "$.k")}" in within, within)
+        assertTrue("CASE WHEN ABS(${big("n1.props", "$.k")}" in within, within)
         val ordered = compiler.compile("MATCH (n:K) RETURN n.k < \$g", mapOf("g" to 1.0e-140)).sql
         assertTrue("CASE WHEN ${double("n1.props", "$.k")} IS NOT NULL AND ${double("JSON(\$_cy_g EXTENDED)", "$")} IS NOT NULL THEN (${double("n1.props", "$.k")} < " in ordered, ordered)
         assertTrue(big("n1.props", "$.k") !in ordered, ordered)
@@ -91,7 +92,7 @@ class OracleNumberKeysTest {
     @Test
     fun aGroupIsKeyedByTheKeysAndAnOrderOfItReadsThemFromTheirColumns() {
         val sql = compiler.compile("MATCH (n:K) RETURN n.k AS k, count(*) AS c ORDER BY k", emptyMap()).sql
-        assertTrue(Regex("GROUP BY JSON\\(.*\\), ${Regex.escape(double("n1.props", "$.k"))}, NVL\\(").containsMatchIn(sql), sql)
+        assertTrue(Regex("GROUP BY JSON\\(.*\\), ${Regex.escape(double("n1.props", "$.k"))}, CASE WHEN ABS\\(").containsMatchIn(sql), sql)
         assertTrue("${double("n1.props", "$.k")} AS c1k1" in sql, sql)
         assertTrue(Regex("ORDER BY DECODE\\(.*\\), p\\d+\\.c1k1, p\\d+\\.c1k2, p\\d+\\.c1$").containsMatchIn(sql), sql)
         assertNoKeyOfARoutedValue(sql)
@@ -101,7 +102,7 @@ class OracleNumberKeysTest {
     fun countDistinctCountsANumberByItsKeysAndEachNaNApart() {
         val sql = compiler.compile("MATCH (n:K) RETURN count(DISTINCT n.k)", emptyMap()).sql
         assertTrue("count(DISTINCT CASE WHEN ${double("n1.props", "$.k")} IS NULL THEN CASE WHEN" in sql, sql)
-        assertTrue("count(DISTINCT CASE WHEN ${double("n1.props", "$.k")} IS NAN THEN NULL WHEN NVL(${big("n1.props", "$.k")}" in sql, sql)
+        assertTrue("count(DISTINCT CASE WHEN ${double("n1.props", "$.k")} IS NAN THEN NULL WHEN CASE WHEN ABS(${big("n1.props", "$.k")}" in sql, sql)
         assertTrue("count(CASE WHEN ${double("n1.props", "$.k")} IS NAN THEN 1 END)" in sql, sql)
         assertNoKeyOfARoutedValue(sql)
     }
@@ -163,7 +164,9 @@ class OracleNumberKeysTest {
         )) {
             val sql = compiler.compile(cypher, emptyMap()).sql
             assertTrue("${double("n1.props", "$.k")} AS c1k1" in sql && Regex("w\\d+\\.c1k1").containsMatchIn(sql), "$cypher: $sql")
-            assertEquals(1, Regex(Regex.escape(double("n1.props", "$.k"))).findAll(sql).count(), "$cypher: $sql")
+            // The property's keys read in the WITH's own query alone, the one that reads the node.
+            val within = sql.substring(sql.lastIndexOf("SELECT ", sql.indexOf("FROM g_node n1")), sql.indexOf("FROM g_node n1"))
+            assertEquals(Regex(Regex.escape(double("n1.props", "$.k"))).findAll(sql).count(), Regex(Regex.escape(double("n1.props", "$.k"))).findAll(within).count(), "$cypher: $sql")
             assertNoKeyOfARoutedValue(sql)
         }
         // Grouped after the WITH, by the carried keys.
@@ -174,11 +177,11 @@ class OracleNumberKeysTest {
     @Test
     fun countDistinctAndMinAndMaxOfAnyValueReadItsKeysWhereItIs() {
         val unwound = compiler.compile("UNWIND [1e-200, 0] AS x RETURN count(DISTINCT x)", emptyMap()).sql
-        assertTrue("count(DISTINCT CASE WHEN NVL(" in unwound && double("u1.item", "$") in unwound, unwound)
+        assertTrue("count(DISTINCT CASE WHEN CASE WHEN ABS(" in unwound && double("u1.item", "$") in unwound, unwound)
         // No NaN given or worked out: a NaN an unwound item holds is counted once, as collect(DISTINCT …) keeps it.
         assertTrue("IS NAN THEN 1 END" !in unwound, unwound)
         val worked = compiler.compile("MATCH (n:K) RETURN max(n.k + 0)", emptyMap()).sql
-        assertTrue(Regex("KEEP \\(DENSE_RANK FIRST ORDER BY .* DESC NULLS LAST, JSON_VALUE\\(.* RETURNING BINARY_DOUBLE NULL ON ERROR TYPE\\(STRICT\\)\\) DESC NULLS LAST, NVL\\(").containsMatchIn(worked), worked)
+        assertTrue(Regex("KEEP \\(DENSE_RANK FIRST ORDER BY .* DESC NULLS LAST, JSON_VALUE\\(.* RETURNING BINARY_DOUBLE NULL ON ERROR TYPE\\(STRICT\\)\\) DESC NULLS LAST, CASE WHEN ABS\\(").containsMatchIn(worked), worked)
         // Under the aggregate, nothing is bound in a subquery.
         assertTrue(!Regex("KEEP \\(DENSE_RANK FIRST ORDER BY [^)]*\\(SELECT").containsMatchIn(worked), worked)
     }

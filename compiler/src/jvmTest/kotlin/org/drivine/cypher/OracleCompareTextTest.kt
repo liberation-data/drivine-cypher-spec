@@ -29,11 +29,12 @@ class OracleCompareTextTest {
     private fun double(json: String, path: String = "\$") = "JSON_VALUE($json, '$path' RETURNING BINARY_DOUBLE NULL ON ERROR TYPE(STRICT))"
 
     /** What tells an integer past 2^53 at [path] of [json] apart from its double, as [double] reads it. */
-    private fun exact(json: String, path: String = "\$") = exactOf("JSON_VALUE($json, '$path?(@.type() == \"number\" && @.abs() > 9007199254740992)' RETURNING NUMBER NULL ON ERROR)")
+    private fun exact(json: String, path: String = "\$") =
+        exactOf("CASE WHEN JSON_VALUE($json, '$path.type()') = 'number' THEN JSON_VALUE($json, '$path' RETURNING NUMBER NULL ON ERROR TYPE(STRICT)) END", double(json, path))
 
-    /** [exact], of the integer [n] read already. */
-    private fun exactOf(n: String) =
-        "NVL($n - (CAST(FLOOR(TO_BINARY_DOUBLE($n) / 4294967296) AS NUMBER) * 4294967296 + CAST(TO_BINARY_DOUBLE($n) - FLOOR(TO_BINARY_DOUBLE($n) / 4294967296) * 4294967296 AS NUMBER)), 0)"
+    /** [exact], of the number [n] and the double [d] read already. */
+    private fun exactOf(n: String, d: String) =
+        "CASE WHEN ABS($n) > 9007199254740992 THEN $n - (CAST(FLOOR($d / 4294967296) AS NUMBER) * 4294967296 + CAST($d - FLOOR($d / 4294967296) * 4294967296 AS NUMBER)) ELSE 0 END"
 
     /**
      * Two numbers [x] and [y] by their doubles [dx] and [dy], then [ex] and [ey], what tells an integer past 2^53 apart; NaN
@@ -112,13 +113,13 @@ class OracleCompareTextTest {
         val (alias) = Regex("(sh\\d+)\\.v3").find(beside)!!.destructured
         // Its number keys too, bound by its own path after the other columns (drivine-cypher-spec#309); beside a text the
         // statement makes, the two are compared as JSON, with no key read.
-        assertTrue(beside.contains("AS v4, ${double("n1.props", "\$.t")} AS v5, JSON_VALUE(n1.props, '\$.t?(@.type() == \"number\""), beside)
+        assertTrue(beside.contains("AS v4, ${double("n1.props", "\$.t")} AS v5, CASE WHEN JSON_VALUE(n1.props, '\$.t.type()') = 'number'"), beside)
         assertTrue(beside.contains("THEN CASE WHEN $alias.v2 = 'string' THEN ${texts("JSON_VALUE($alias.v1, '\$')", "JSON_VALUE($alias.v4, '\$')", "$alias.v3", "JSON_VALUE($alias.v4, '\$' RETURNING CLOB)", ">")} ELSE $alias.v1 > $alias.v4 END"), beside)
         // Beside a number, by its keys, read from those columns.
         val numeric = sql("MATCH (n:Doc), (m:Doc) WHERE n.t > coalesce(\$p.q, m.n, toInteger(trim(toString(m.name)))) RETURN count(*)", mapOf("p" to mapOf("q" to null)))
         val (bound) = Regex("(sh\\d+)\\.v5 <> ").find(numeric)?.destructured ?: error(numeric)
         assertTrue(numeric.contains("WHEN $bound.v5 <> ${double("$bound.v4")} THEN ($bound.v5 > ${double("$bound.v4")} AND $bound.v5 IS NOT NAN"), numeric)
-        assertTrue(numeric.contains("ELSE (${exactOf("$bound.v6")} > ${exact("$bound.v4")} AND $bound.v5 IS NOT NAN)"), numeric)
+        assertTrue(numeric.contains("ELSE (${exactOf("$bound.v6", "$bound.v5")} > ${exact("$bound.v4")} AND $bound.v5 IS NOT NAN)"), numeric)
         val inBeside = sql("MATCH (n:Doc), (m:Doc) RETURN n.t IN [toLower(trim(coalesce(\$p.q, m.name)))]", mapOf("p" to mapOf("q" to null)))
         assertTrue(inBeside.contains("JSON_VALUE(n1.props, '\$.t' RETURNING CLOB) AS v3") && inBeside.contains("DBMS_LOB.COMPARE("), inBeside)
     }

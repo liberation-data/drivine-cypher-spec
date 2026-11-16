@@ -6530,8 +6530,10 @@ abstract class SqlCypherCompiler(
             val entities = left is Value.Entities && right is Value.Entities && left.relationships == right.relationships
             val a = if (entities) (left as Value.Entities).ids else comparable(json(left))
             val b = if (entities) (right as Value.Entities).ids else comparable(json(right))
+            // A list or a map, or a text or a truth value, made or given beside any value: no number keys are read (see numberlessEquals).
+            val numberless = numberless(left, leftWritten) || numberless(right, rightWritten)
             // Either may hold a null, which makes the comparison null where no item or entry differs.
-            if (!plain) return nullableEquals(a, b, ::jsonEquals)
+            if (!plain) return nullableEquals(a, b, if (numberless) ::numberlessEquals else ::jsonEquals)
             val given = written?.let(::given)
             // A value the statement is given is known as it compiles; one it isn't, as an unwound row's, may be of any kind,
             // and is compared with the index's text as each of its kinds can be: else the join reads every node for each row (#617).
@@ -6553,8 +6555,6 @@ abstract class SqlCypherCompiler(
             if (keyed != null && written is Expression.Parameter) parameters.mayLeaveUnread(written.name)
             // Two integers the statement makes are compared as the store compares them, which is exact for them (see integerEquals).
             val integers = leftWritten != null && rightWritten != null && integral(left, leftWritten) && integral(right, rightWritten)
-            // A text or a truth value made or given beside any value: no number keys are read (see numberlessEquals).
-            val numberless = numberless(left, leftWritten) || numberless(right, rightWritten)
             fun equals(x: String, y: String) = when {
                 integers -> integerEquals(x, y) { jsonEquals(x, y) }
                 numberless -> numberlessEquals(x, y)
@@ -7094,10 +7094,14 @@ abstract class SqlCypherCompiler(
                 (expression is Expression.Function && expression.name.lowercase() in COUNTS) || expression is Expression.CountStar ||
                 (expression is Expression.Subquery && expression.kind == Expression.Subquery.Kind.COUNT)
 
-        /** Whether the statement makes [value], compiled from [expression], a text or a truth value, or is given one: no number. */
-        private fun numberless(value: Value, expression: Expression?): Boolean =
-            (value as? Value.Json)?.known.let { it == Value.Known.TEXT || it == Value.Known.BOOLEAN } || isText(value) ||
-                expression?.let(::given).let { it is String || it is Boolean }
+        /**
+         * Whether the statement makes [value], compiled from [expression], no number: a text, a truth value, a list or a map, one that
+         * holds a node or a relationship, a list of them, or one given so.
+         */
+        private fun numberless(value: Value, expression: Expression?): Boolean = value !is Value.Json ||
+            value.known.let { it == Value.Known.TEXT || it == Value.Known.BOOLEAN || it == Value.Known.LIST || it == Value.Known.MAP } ||
+            value.text || value.list || value.identity != null || value.temporal != null ||
+            expression?.let(::given).let { it is String || it is Boolean || it is List<*> || it is Map<*, *> }
 
         /** The value [expression] is where the statement gives it: written, or bound to a parameter or a parameter's key; null where it is not given, or is null. */
         private fun given(expression: Expression): Any? = when (expression) {
