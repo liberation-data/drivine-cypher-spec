@@ -294,8 +294,10 @@ val npmPackage = tasks.register<Sync>("npmPackage") {
     doLast {
         // Kotlin's loader copies each character of a string JavaScript hands the wasm through an array of its own
         // (`mem16.set([c], i)`): a host function's arguments cross on every row it is called for, and those copies were a
-        // third of a call's time (liberation-data/drivine#757). Written to the view directly, the same copy. The edit is
-        // checked, so a Kotlin release that writes the loader otherwise fails the package, rather than shipping it slow.
+        // third of a call's time (liberation-data/drivine#757). Written to the view directly, the same copy. The pattern is
+        // Kotlin 2.2.20's loader, as the kotlin("multiplatform") plugin above pins it. The edit is checked: where a Kotlin
+        // release writes the loader otherwise, `check` fails npmPackage, and so the build, naming the edit, rather than
+        // shipping it slow. Look at that release's loader, and edit its copy, or drop this where it no longer needs one.
         val loader = destinationDir.resolve("drivine-cypher-compiler.uninstantiated.mjs")
         val slowCopy = "mem16.set([src.charCodeAt(srcIndex)], arrayIndex);"
         val loaderText = loader.readText()
