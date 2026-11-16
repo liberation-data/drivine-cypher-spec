@@ -22,7 +22,7 @@ class OracleItemPropertyTest {
 
     @Test
     fun `a property an item returns or passes on is read through its text, one sorted by takes the guarded route, and a short one tested is read as it was`() {
-        val returned = OracleCypherCompiler("g").compile("MATCH (n:Doc) WHERE n.b = 1 RETURN n.a ORDER BY n.id").sql
+        val returned = OracleCypherCompiler("g").compile("MATCH (n:Doc) WHERE n.b = 1.5 RETURN n.a ORDER BY n.id").sql
         assertTrue(returned.contains("$long AS c1"), returned)
         // A sort key, read so too where it may be a long text; a test of a short text as it was.
         assertTrue(returned.contains("${OracleReads.routedRead("n1.props", "'\$.id'")} AS s1") && returned.contains("JSON_QUERY(n1.props, '\$.b' RETURNING JSON)"), returned)
@@ -414,7 +414,7 @@ class OracleItemPropertyTest {
         val map = OracleCypherCompiler("g").compile("MATCH (n:Doc) WITH n {.a} AS m RETURN m.a").sql
         assertTrue(Regex("\\b(\\w+\\.c1)\\b").findAll(map).map { it.groupValues[1] }.any { map.contains(read(it)) }, map)
         // A property of a node or a relationship a pattern binds, and of an unwound item, is read as it was.
-        val bound = OracleCypherCompiler("g").compile("MATCH (n:Doc)-[r:R]->() WHERE n.a = 1 AND r.a = 1 RETURN n.b").sql
+        val bound = OracleCypherCompiler("g").compile("MATCH (n:Doc)-[r:R]->() WHERE n.a = 1.5 AND r.a = 1.5 RETURN n.b").sql
         assertTrue(bound.contains("JSON_QUERY(n1.props, '\$.a' RETURNING JSON)") && !bound.contains(shortText), bound)
         val unwound = OracleCypherCompiler("g").compile("UNWIND [{a: 1}] AS x WITH x WHERE x.a = 1 RETURN 1").sql
         assertTrue(!unwound.contains(shortText) && !unwound.contains("KEEP"), unwound)

@@ -597,6 +597,50 @@ class OracleCypherCompiler(
     }
 
     /**
+     * A property compared with a text of 1 to [SHORT_TEXT] bytes, a truth value or a whole number below 2^53 the statement gives,
+     * outside a write: by [keyEquals], one read of the property that only a value of the given kind passes (#287). Where the
+     * property is SQL's null or not there, it is null; and elsewhere false where that read finds nothing.
+     */
+    override fun comparesByKey(x: String, given: Any): Boolean =
+        !asJson && propertyRead(x) != null && (given is String || given is Boolean || wholeNumber(given)?.let { it > -EXACT_DOUBLES && it < EXACT_DOUBLES } == true)
+
+    /**
+     * [given] as a long where it is a whole number held as one, a Long, an Int, a Short or a Byte, as a caller gives one (an
+     * object manager's `priority = 1` is an Int), which `IndexKey.of` keys alike; else null. A float is not, even where whole.
+     */
+    private fun wholeNumber(given: Any): Long? = when (given) {
+        is Long -> given
+        is Int -> given.toLong()
+        is Short -> given.toLong()
+        is Byte -> given.toLong()
+        else -> null
+    }
+
+    /**
+     * Whether the property [x] is equal to the value of the class [kind] bound at [key], as Cypher compares them, three-valued:
+     * the property read as that kind alone, `TYPE(STRICT)`, which reads a value of another kind, a list or a map
+     * among them, as null; compared with the key; and where that read gives nothing, false unless the property is null or not there. Measured
+     * over 250,000 rows, `state = 'open' AND priority = 1` took 50 ms so, against 137 ms as [oneSided] compares them and 45 ms
+     * for layout 1's one read, which told no number from a text (#287). A list read by a path into it (`JSON_EXISTS` with
+     * `PASSING`), in Oracle's lax mode, found `['open']` equal to `'open'` and the text `'1'` to the number 1.
+     */
+    override fun keyEquals(x: String, kind: String, key: String, given: Any): String? {
+        val read = when (kind) {
+            "string" -> "JSON_VALUE($x, '\$' RETURNING VARCHAR2($SHORT_TEXT) NULL ON ERROR TYPE(STRICT)) = $key"
+            // A double nearer 0 than a NUMBER holds (1e-130) is read as a NUMBER as 0, and was equal to 0: compared with 0 as a
+            // binary double, which holds it. A larger one isn't read as a NUMBER at all, and the kind's test finds it unequal. As
+            // a binary double the read took 11 ms longer over 250,000 rows, so only 0 is compared so (#287).
+            "number" -> if (wholeNumber(given) == 0L) "JSON_VALUE($x, '\$' RETURNING BINARY_DOUBLE NULL ON ERROR TYPE(STRICT)) = TO_BINARY_DOUBLE($key)"
+                else "JSON_VALUE($x, '\$' RETURNING NUMBER NULL ON ERROR TYPE(STRICT)) = TO_NUMBER($key)"
+            "boolean" -> "JSON_VALUE($x, '\$' RETURNING BOOLEAN NULL ON ERROR TYPE(STRICT)) = ($key = 'true')"
+            else -> return null
+        }
+        // A property read by its own path, as [sharedCompared] reads one: the statement keeps its hint (#415).
+        readsCompared = true
+        return "COALESCE($read, CASE WHEN NVL(${kind(x)}, 'null') <> 'null' THEN FALSE END)"
+    }
+
+    /**
      * Whether the JSON value [a] is equal to [b], a value that is no text, or a text read as a `VARCHAR2`: as JSON, where [a] is
      * read as a `VARCHAR2` too or is no text; else [a] is a text that is longer, or empty, and not equal.
      */

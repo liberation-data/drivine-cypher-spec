@@ -106,9 +106,10 @@ class CypherEncoderTest {
 
     @Test
     fun oraclesLiteralJsonIsWrittenAsTheEncodersText() {
-        // A literal the statement writes, a text here, compared as JSON.
+        // A literal the statement writes, a text here, compared as JSON, as an order compares it: an equality compares a text by
+        // its key, worked out of it (#287).
         val encoder = marking("x")
-        val sql = OracleCypherCompiler("g", true, true, emptySet(), encoder).compile("MATCH (n:N) WHERE n.a = 'x' RETURN n").sql
+        val sql = OracleCypherCompiler("g", true, true, emptySet(), encoder).compile("MATCH (n:N) WHERE n.a > 'x' RETURN n").sql
         assertTrue("x" in encoder.textsAsked, "Not asked of 'x': ${encoder.textsAsked}")
         assertTrue("JSON('\"MARK\"')" in sql, sql)
     }

@@ -389,7 +389,7 @@ abstract class SqlCypherCompiler(
             if (functions.isNotEmpty() || terms.any { calledFunctions(it).isNotEmpty() }) {
                 throw CompilerException("A fragment calls a function the store declares for a statement, which SQL a library writes doesn't declare: $cypher")
             }
-            return SqlFragment(terms, writer.parameters.values, nonFinite, fragmentHints(terms))
+            return SqlFragment(terms, writer.parameters.valuesOf(terms.joinToString("\n")), nonFinite, fragmentHints(terms))
         } finally {
             functions.clear()
             functions += declared
@@ -443,7 +443,7 @@ abstract class SqlCypherCompiler(
         if (query.unions.isNotEmpty()) return withFunctions(union(query, parameters))
         if (!writes) {
             val writer = Writer(Parameters(parameters, ::parameterJson, ::parameterCount, text = ::parameterText, asPath = parameterPath))
-            return withFunctions(CompiledCypher(planned(writer.query(query)), writer.parameters.values, nonFinite))
+            return withFunctions(writer.query(query).let { sql -> CompiledCypher(planned(sql), writer.parameters.valuesOf(sql), nonFinite) })
         }
         if (given) refuseNonFiniteWrite(parameters)
         procedural = true
@@ -615,7 +615,7 @@ abstract class SqlCypherCompiler(
             val keys = "u.result${if (identities) ", u.identity" else ""}$apart"
             "SELECT d.result FROM (\n${indent("SELECT u.result, MIN(u.part * 1000000000.0 + u.n) AS k FROM (\n${indent(rows)}\n) u\nGROUP BY $keys")}\n) d\nORDER BY d.k"
         }
-        return CompiledCypher(planned(sql), writer.parameters.values, nonFinite)
+        return CompiledCypher(planned(sql), writer.parameters.valuesOf(sql), nonFinite)
     }
 
     // ----- A store's SQL -----
@@ -1075,6 +1075,20 @@ abstract class SqlCypherCompiler(
 
     /** Whether the JSON value [x] is equal to [y], the JSON of [given], a value the statement gives that is not null. */
     protected open fun givenEquals(x: String, y: String, given: Any) = "$x = $y"
+
+    /**
+     * Whether the store compares the JSON value [x] with [given], a value the statement gives that is not null, by [keyEquals]:
+     * by its class and key worked out as the statement compiles (`IndexKey.of`), bound once (liberation-data/drivine-cypher-spec#287).
+     * Where it does, the key is bound only where it's compared, so no statement binds a name its SQL doesn't hold.
+     */
+    protected open fun comparesByKey(x: String, given: Any): Boolean = false
+
+    /**
+     * Whether the JSON value [x] is equal to a value of the class [kind] whose key is bound at the marker [key], three-valued, as
+     * [givenEquals] compares it: null where [x] is null or not there, else whether it is of that class and that key. Null where
+     * the store doesn't write it so; [givenEquals] is then written. [given] is the value the key is of.
+     */
+    protected open fun keyEquals(x: String, kind: String, key: String, given: Any): String? = null
 
     /**
      * [x] [operator] [y], JSON values, where the statement writes or is given [left] or [right], one of them a whole number from
@@ -6283,7 +6297,10 @@ abstract class SqlCypherCompiler(
             }
             // Null is equal to nothing, itself included: the comparison is null, as in Cypher. A value the statement
             // is given that is not null needs no test of its own, and a property that is not there is SQL's null.
-            val equal = if (given != null) givenEquals(a, b, given).let { if (stored) it else "CASE WHEN NOT ${isJsonNull(a)} THEN $it END" } else sharedCompared(a, b) { (x, y) -> "CASE WHEN NOT ${isJsonNull(x)} AND NOT ${isJsonNull(y)} THEN ${jsonEquals(x, y)} END" }
+            val keyed = if (given != null && comparesByKey(a, given)) boundKey(written, given)?.let { (kind, key) -> keyEquals(a, kind, key, given) } else null
+            // The parameter's own JSON, which the comparison by its key doesn't read, is bound only where the SQL reads it elsewhere.
+            if (keyed != null && written is Expression.Parameter) parameters.mayLeaveUnread(written.name)
+            val equal = if (given != null) (keyed ?: givenEquals(a, b, given)).let { if (stored || keyed != null) it else "CASE WHEN NOT ${isJsonNull(a)} THEN $it END" } else sharedCompared(a, b) { (x, y) -> "CASE WHEN NOT ${isJsonNull(x)} AND NOT ${isJsonNull(y)} THEN ${jsonEquals(x, y)} END" }
             if (indexed != null) indexedEmitted = true
             return if (indexed != null) "($indexed AND $equal)" else equal
         }

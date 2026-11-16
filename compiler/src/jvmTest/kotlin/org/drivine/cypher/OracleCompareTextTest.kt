@@ -63,13 +63,14 @@ class OracleCompareTextTest {
 
     @Test
     fun `a stored text is compared with a given one, a list's items and a long value as texts, the property bound by its own path`() {
-        // A given text of at most 4,000 bytes is read as a VARCHAR2, and so is longer than a stored text that isn't.
+        // A given text of at most 4,000 bytes is compared with the property read as a text of at most 4,000 bytes alone, which a
+        // longer stored text isn't, and found not equal where that read finds nothing (#287).
         val given = sql("MATCH (n:Doc) WHERE n.t = \$x RETURN n")
-        assertTrue(given.contains("CASE WHEN ${property("n1")} IS NOT NULL OR NVL(JSON_VALUE(n1.props, '\$.t.type()'), 'null') <> 'string' THEN JSON_QUERY(n1.props, '\$.t' RETURNING JSON) = JSON(\$_cy_x) ELSE FALSE END"), given)
+        assertTrue(given.contains("COALESCE(JSON_VALUE(n1.props, '\$.t' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(STRICT)) = \$_cyk_x, CASE WHEN NVL(JSON_VALUE(n1.props, '\$.t.type()'), 'null') <> 'null' THEN FALSE END)"), given)
         val longer = sql("MATCH (n:Doc) WHERE n.t = \$x RETURN n", mapOf("x" to "€".repeat(1_334)))
         assertTrue(longer.contains("THEN ${clobs(property("n1", clob = true), "JSON_VALUE(JSON(\$_cy_x), '\$' RETURNING CLOB)", "=")}"), longer)
         val number = sql("MATCH (n:Doc) WHERE n.t = 5 RETURN n")
-        assertTrue(number.contains("<> 'string' THEN JSON_QUERY(n1.props, '\$.t' RETURNING JSON) = JSON('5') ELSE FALSE END"), number)
+        assertTrue(number.contains("COALESCE(JSON_VALUE(n1.props, '\$.t' RETURNING NUMBER NULL ON ERROR TYPE(STRICT)) = TO_NUMBER('5'), "), number)
         val empty = sql("MATCH (n:Doc) WHERE n.t = '' RETURN n")
         assertTrue(empty.contains("THEN ${clobs(property("n1", clob = true), "JSON_VALUE(JSON('\"\"'), '\$' RETURNING CLOB)", "=")}") && !empty.contains("ELSE FALSE END"), empty)
         // Items each read as a VARCHAR2, written or given, are compared as JSON with the property, a plain equality, where it is
