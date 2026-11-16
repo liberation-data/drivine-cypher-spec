@@ -562,11 +562,12 @@ abstract class SqlCypherCompiler(
     /**
      * Whether the Cypher of an `EXISTS { … }` reads a table for certain, whatever SQL it is written as: only where it is one
      * query, no `UNION`, of one or more `MATCH`es, none optional, each with or without a `WHERE`, at least one of which matches
-     * a node not [bound] there, by the query or an earlier `MATCH` of it, or a relationship of at least one step ([readsTable]
-     * of patterns), and then nothing or a `RETURN` that has no aggregate in its items or its order (an expression's subquery,
-     * `COUNT { … }`, is not one), no `DISTINCT`, no `*`, no `SKIP` and no `LIMIT`. Any other query, one with an `OPTIONAL MATCH`,
-     * a `CALL`, a `WITH`, an `UNWIND` or a write among them, is taken to read none, which costs a store that counts such an
-     * `EXISTS` only speed.
+     * a node not [bound] there, by the query, an earlier `MATCH` of it or an earlier pattern of its own, or a relationship of
+     * at least one step, in a pattern with no shortest path, no quantified path and no relationship that may take no step
+     * ([readsTable] of patterns), and then nothing or a `RETURN` that has no aggregate in its items or its order (an
+     * expression's subquery, `COUNT { … }`, is not one), no `DISTINCT`, no `*`, no `SKIP` and no `LIMIT`. Any other query, one
+     * with an `OPTIONAL MATCH`, a `CALL`, a `WITH`, an `UNWIND` or a write among them, is taken to read none, which costs a
+     * store that counts such an `EXISTS` only speed.
      */
     protected fun readsTable(query: Query, bound: Set<String>): Boolean {
         val returns = query.clauses.lastOrNull() as? Clause.Return
@@ -581,8 +582,9 @@ abstract class SqlCypherCompiler(
     }
 
     /**
-     * Whether [patterns] read a table for certain, a node not [bound] or named by an earlier pattern of them, or a relationship
-     * of at least one step: see [readsTable].
+     * Whether [patterns] read a table for certain: one of them, with no shortest path, no quantified path and no relationship
+     * that may take no step, matches a node not [bound] or named by an earlier pattern of them, or a relationship of at least
+     * one step: see [readsTable].
      */
     protected fun readsTable(patterns: List<Pattern>, bound: Set<String>): Boolean {
         val names = bound.toMutableSet()
