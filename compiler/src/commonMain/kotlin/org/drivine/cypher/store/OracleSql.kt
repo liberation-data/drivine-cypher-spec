@@ -257,9 +257,10 @@ object OracleSql {
     /**
      * Whether the rows of [query] are read from a table: a source named after a `FROM` or a `JOIN` of it, a table of the
      * graph's or `JSON_TABLE(…)`, and not `DUAL`, in it or in a derived table or a lateral query (`LATERAL`, `CROSS APPLY`,
-     * `OUTER APPLY`) it reads from, outside its quoted texts. A subquery within an expression of it, an `EXISTS (SELECT …)`,
-     * an `IN (SELECT …)` or a scalar `(SELECT …)`, makes none of its rows, and what it reads is not counted. A
-     * query that reads no table reads only the row it is in.
+     * `OUTER APPLY`) it reads from, outside its quoted texts and the `FROM` of an `EXTRACT(MONTH FROM …)`, which a temporal's
+     * field is read by. A subquery within an expression of it, an `EXISTS (SELECT …)`, an `IN (SELECT …)` or a scalar
+     * `(SELECT …)`, makes none of its rows, and what it reads is not counted. A query that reads no table reads only the row
+     * it is in.
      */
     internal fun readsTable(query: String): Boolean {
         val text = query.split('\'').filterIndexed { i, _ -> i % 2 == 0 }.joinToString("''")
@@ -290,11 +291,14 @@ object OracleSql {
             }
             i++
         }
-        return TABLE_READ.containsMatchIn(sources)
+        return TABLE_READ.containsMatchIn(EXTRACTED.replace(sources, "EXTRACT("))
     }
 
     /** A source named after a `FROM` or a `JOIN`: see [readsTable]. */
     private val TABLE_READ = Regex("""\b(?:FROM|JOIN)\s+(?!\(|DUAL\b|LATERAL\s*\()\w""")
+
+    /** The field and `FROM` of an `EXTRACT(… FROM …)`, which name no source: see [readsTable]. */
+    private val EXTRACTED = Regex("""\bEXTRACT\s*\(\s*\w+\s+FROM\b""")
 
     /** The words before a derived table's or a lateral query's opening bracket: see [readsTable]. */
     private val SOURCE_WORDS = setOf("FROM", "JOIN", "LATERAL", "APPLY")

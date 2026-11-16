@@ -81,6 +81,8 @@ class OracleExistsQueryTest {
         "MATCH (n) RETURN EXISTS { MATCH (n:Movie) RETURN n.title AS y UNION MATCH (n:Person) RETURN n.name AS y }",
         "MATCH (n) RETURN EXISTS { MATCH (n:Movie) RETURN n.title AS y ORDER BY y LIMIT 1 }",
         "MATCH (n) RETURN CASE WHEN EXISTS { MATCH (n:Movie) RETURN n.title AS y } THEN 'y' ELSE 'n' END",
+        "MATCH (n) RETURN EXISTS { MATCH (n:Movie) WHERE n.released.year = 1999 }",
+        "MATCH (n) RETURN EXISTS { MATCH (n:Movie) WHERE datetime(n.released).quarter = 1 }",
     )
 
     /** Statements whose `EXISTS { … }` reads a table: the graph's, or a list's rows. */
@@ -154,6 +156,8 @@ class OracleExistsQueryTest {
             "SELECT 1 WHERE EXISTS (SELECT 1 FROM g_node n) AND x IN (SELECT 1 FROM g_edge e)",
             "SELECT (SELECT count(*) FROM g_node n) AS c FROM DUAL",
             "SELECT 1 FROM (SELECT 1 FROM DUAL) d CROSS JOIN LATERAL (SELECT 1 FROM DUAL) l",
+            "SELECT 1 FROM (SELECT 1) one WHERE EXTRACT(MONTH FROM JSON_VALUE(n1.props, '\$.a' RETURNING TIMESTAMP)) = 1",
+            "SELECT 1 WHERE EXTRACT( TIMEZONE_HOUR  FROM x) = 1",
         )) assertFalse(OracleSql.readsTable(query), query)
     }
 }
