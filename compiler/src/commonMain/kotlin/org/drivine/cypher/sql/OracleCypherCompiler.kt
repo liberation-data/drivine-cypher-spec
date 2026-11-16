@@ -273,7 +273,7 @@ class OracleCypherCompiler(
     override fun openSortKey(json: String) = shared(json) { (x) -> sortRank(x) }.let { rank -> listOf(rank, json) }
 
     /** [openSortKey], a number ordered by its [numberKeys], [keys], after its kind and before its JSON, which orders it no further. */
-    override fun openSortKey(json: String, keys: List<String>) = openSortKey(json).let { (rank, value) -> listOf(rank) + keys + value }
+    override fun openSortKey(json: String, keys: List<String>) = openSortKey(json).let { (rank, value) -> listOf(rank) + numberOrder(keys) + value }
 
     /**
      * [openSortKey]'s rank of the JSON [x], a text: `1` for a map, `2` for a list, `2` and the place of a temporal value's kind in
@@ -303,7 +303,19 @@ class OracleCypherCompiler(
     override fun jsonNullSortKey(json: String) = openSortKey(json).let { (rank) -> listOf(rank, groupedNull(json)) }
 
     /** [jsonNullSortKey], a number ordered by its [numberKeys], [keys], as [openSortKey] orders it. */
-    override fun jsonNullSortKey(json: String, keys: List<String>) = jsonNullSortKey(json).let { (rank, value) -> listOf(rank) + keys + value }
+    override fun jsonNullSortKey(json: String, keys: List<String>) = jsonNullSortKey(json).let { (rank, value) -> listOf(rank) + numberOrder(keys) + value }
+
+    /**
+     * The terms a number is ordered by, of its [numberKeys], [keys], the double and the `NUMBER`: where they are columns a query
+     * carries, the double, then the exact key worked out of the two ([exactOf]), with no read of the value; where they are reads
+     * of it, the double, then the `NUMBER`, each read once. Read so, an integer past 2^53 is ordered among those of its double,
+     * but a float of that double comes after them, or before them descending, where it may be between two.
+     */
+    private fun numberOrder(keys: List<String>): List<String> {
+        if (keys.isEmpty()) return keys
+        val (d, n) = keys
+        return if (COLUMN_KEY.matches(d) && COLUMN_KEY.matches(n)) listOf(d, exactOf(n, d)) else listOf(d, n)
+    }
 
     /** Oracle groups by no subquery, so the value is not bound in one, as [nullIfJsonNull] binds a long one: it is read twice. */
     override fun comparedNull(json: String) = "CASE WHEN ${kind(json)} <> 'null' THEN $json END"
@@ -806,18 +818,19 @@ class OracleCypherCompiler(
     override fun carriesKeysAfter(json: String) = (propertyRead(json) ?: keptRead(json)) != null
 
     /**
-     * The keys a number is compared, ordered, grouped and counted by (drivine-cypher-spec#309), where Oracle's JSON compares and
-     * sorts one through a decimal `NUMBER`, which holds magnitudes from 1e-130 to about 1e126: so 1e-200 was equal to 0, 1e200
-     * to -1e200, and an integer beside a float near 2^53 was rounded. The double, [doubleKey], then [exactKey], what an integer
-     * past 2^53 is beyond its double. A property is read by its own path, once for each key, from the stored properties: never
-     * from its value read through its text ([itemProperty]), which each read would work out again (an order by such keys read
-     * so took twice as long and more, where read from the property it took 11 to 18% longer than JSON's order). Where [json] is
-     * no number, the double is null and the exact key 0.
+     * The keys a number is compared, ordered and counted by (drivine-cypher-spec#309), where Oracle's JSON compares and sorts one
+     * through a decimal `NUMBER`, which holds magnitudes from 1e-130 to about 1e126: so 1e-200 was equal to 0, 1e200 to -1e200,
+     * and an integer beside a float near 2^53 was rounded. The double, [doubleKey], then the `NUMBER` where it is one, an
+     * integer ([numberRead]), of which, with the double, [exactKey] is worked out. A property is read by its own path, once for
+     * each key, from the stored properties: never from its value read through its text ([itemProperty]), which each read would
+     * work out again (an order by such keys read so took twice as long and more, where read from the property it took 11 to 18%
+     * longer than JSON's order). Where [json] is no number, both are null. Not grouped by, nor kept `DISTINCT` by: a group or
+     * `DISTINCT` compares a number as JSON, as before (drivine-cypher-spec#315).
      */
     override fun numberKeys(json: String): List<String> {
         carriedKeys[json]?.let { return it }
         val (x, path) = propertyRead(json) ?: keptRead(json) ?: (json to "'\$'")
-        return listOf(doubleKey(x, path), exactKey(x, path))
+        return listOf(doubleKey(x, path), numberRead(x, path))
     }
 
     /**
@@ -847,13 +860,13 @@ class OracleCypherCompiler(
      * The number is read as a `NUMBER` where it is one ([numberRead]); its double is [doubleKey]'s, which a `NUMBER` read so is.
      */
     private fun exactKey(json: String, path: String = "'\$'"): String {
-        carried(json, path, 1)?.let { return it }
+        carried(json, path, 1)?.let { n -> return exactOf(n, carried(json, path, 0)!!) }
         // The value bound where it is long, not its number's read, which a property's path would bind for each row.
-        return shared(json) { (x) ->
-            val n = numberRead(x, path)
-            "CASE WHEN ABS($n) > $EXACT_DOUBLES THEN $n - (${OracleSql.wholeNumber(doubleKey(x, path))}) ELSE 0 END"
-        }
+        return shared(json) { (x) -> exactOf(numberRead(x, path), doubleKey(x, path)) }
     }
+
+    /** [exactKey] of the `NUMBER` [n] ([numberRead]) and the double [d] ([doubleKey]) of one value, read already. */
+    private fun exactOf(n: String, d: String) = "CASE WHEN ABS($n) > $EXACT_DOUBLES THEN $n - (${OracleSql.wholeNumber(d)}) ELSE 0 END"
 
     /**
      * The value at the path [path] of [json] as the `NUMBER` it is, where it is a `NUMBER` (an integer, not a double); else null:
@@ -986,20 +999,21 @@ class OracleCypherCompiler(
         if (items.any { it is Number }) numbersEqual(item, value, small = items.all { it !is Number || small(it) }) else "$item = $value"
 
     /**
-     * Each value once, a number by its keys ([numberKeys]) as [numbersEqual] compares it, read where the value is, written out
-     * as nothing is bound under an aggregate: any other value as JSON, a number whose [exactKey] is 0 by its double, and an
-     * integer past 2^53 by the `NUMBER` it is, its double's exactly ([OracleSql.wholeNumber]) and that key. NaN, equal to
-     * nothing, is counted each time (drivine4j#558), where a double, which Oracle finds equal to itself, would count it once:
-     * a property's, and any where the statement is given or works out NaN ([bareNaN]). Else, as of an item of a stored list, a
-     * NaN is counted once, as `collect(DISTINCT …)` keeps it, as before (writes.yaml, "MERGE of a null or NaN property").
+     * Each value once, a number by its keys ([numberKeys]), read where the value is, written out as nothing is bound under an
+     * aggregate: any other value as JSON, a number by its double, and an integer past 2^53 by the `NUMBER` it is, each read once
+     * for each row: such an integer that a double is equal to is counted twice. NaN, equal to nothing, is counted each time
+     * (drivine4j#558), where a double, which Oracle finds equal to itself, would count it once: a property's, and any where the
+     * statement is given or works out NaN ([bareNaN]). Else, as of an item of a stored list, a NaN is counted once, as
+     * `collect(DISTINCT …)` keeps it, as before (writes.yaml, "MERGE of a null or NaN property").
      */
     override fun distinctCount(json: String, counted: String): String {
-        val (d, exact) = groupedNumberKeys(json)
+        val (d, n) = groupedNumberKeys(json)
         // A NaN apart where it is a property's, or the statement is given or works out NaN ([bareNaN]); else once.
         val apart = (propertyRead(json) ?: keptRead(json)) != null || bareNaN(counted) != null
-        val doubles = if (apart) "CASE WHEN $d IS NAN THEN NULL WHEN $exact = 0 THEN $d END" else "CASE WHEN $exact = 0 THEN $d END"
-        return "(count(DISTINCT CASE WHEN $d IS NULL THEN $counted END) + count(DISTINCT $doubles) + " +
-            "count(DISTINCT CASE WHEN $exact <> 0 THEN ${OracleSql.wholeNumber(d)} + $exact END)${if (apart) " + count(CASE WHEN $d IS NAN THEN 1 END)" else ""})"
+        val big = "ABS($n) > $EXACT_DOUBLES"
+        val doubles = if (apart) "CASE WHEN $d IS NAN OR $big THEN NULL ELSE $d END" else "CASE WHEN $big THEN NULL ELSE $d END"
+        return "(count(DISTINCT CASE WHEN $d IS NULL THEN $counted END) + count(DISTINCT $doubles) + count(DISTINCT CASE WHEN $big THEN $n END)" +
+            "${if (apart) " + count(CASE WHEN $d IS NAN THEN 1 END)" else ""})"
     }
 
     /**
@@ -1513,7 +1527,7 @@ class OracleCypherCompiler(
         // A temporal value's tag of a kind the statement does not know by its sort key, which its rank holds ([sortRank]), as MIN
         // reads no tag's order; any other value by its kind, and then as MIN orders it.
         // A number by its keys after its kind (see numberKeys), read from the property by its path, as MIN orders it as JSON.
-        val order = if (key == null) (listOf(sortRank(value)) + groupedNumberKeys(value)).joinToString(", ") { "$it $direction NULLS LAST" }
+        val order = if (key == null) (listOf(sortRank(value)) + numberOrder(groupedNumberKeys(value))).joinToString(", ") { "$it $direction NULLS LAST" }
             else "${kindOrder(value)} $direction NULLS LAST, $key $direction NULLS LAST"
         return "${if (min) "MIN" else "MAX"}(${nullIfJsonNull(value)}) KEEP (DENSE_RANK FIRST ORDER BY $order)"
     }
@@ -2717,6 +2731,9 @@ class OracleCypherCompiler(
 
         /** What a property as [propertyOf] reads it starts with, its path's start, and what it ends with, its path's closing quote: see [propertyRead]. */
         private const val READ_HEAD = "JSON_QUERY("
+
+        /** A column a query carries, `p2.s1k1`: see [numberOrder]. */
+        private val COLUMN_KEY = Regex("""[A-Za-z_]\w*\.\w+""")
 
         /** An id as `id()` and `elementId()` give it, `JSON_SCALAR` of a node's or a relationship's key column: see [idColumn]. */
         private val ID_COLUMN = Regex("""JSON_SCALAR\(([A-Za-z_]\w*\.(?:\w+_)?(?:nid|eid))\)""")

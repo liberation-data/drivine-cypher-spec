@@ -2609,7 +2609,8 @@ cases:
         note: "count of distinct doubles"
         rows: [6]
       - cypher: "MATCH (n:CyWrite) WHERE n.i IN [1, 2, 6, 7] RETURN n.k AS k, count(*) AS c ORDER BY k"
-        note: "grouped by a double"
+        note: "grouped by a double. Oracle groups a number as JSON, through a decimal NUMBER, so 1e200 with -1e200 and 1e-200 with 1e-140 (drivine-cypher-spec#315)."
+        except: [oracle]
         rows: [[-1.0e+200, 1], [1.0e-200, 1], [1.0e-140, 1], [1.0e+200, 1]]
 
   - name: "An integer and a float near 2^53, compared exactly"

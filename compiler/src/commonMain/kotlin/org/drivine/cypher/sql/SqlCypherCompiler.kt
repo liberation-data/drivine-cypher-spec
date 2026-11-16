@@ -3747,15 +3747,14 @@ abstract class SqlCypherCompiler(
         }
 
         /**
-         * [value], where it may be a number, with the store's number keys of it ([Value.Json.keys]) to carry beside it, read where
-         * the value is: where rows are [compared] by them, and where a query [after] may read them, and they are read cheaply here
-         * and dearly there, as a property's by its path ([carriesKeysAfter]). As it is where the store keeps none, or reads them
-         * of the column after.
+         * [value], where it may be a number, with the store's number keys of it ([Value.Json.keys]) to carry beside it for a query
+         * after to read, where they are read cheaply here and dearly there, as a property's by its path ([carriesKeysAfter]). As
+         * it is where the store keeps none, or reads them of the column after.
          */
-        private fun keyed(value: Value, compared: Boolean, after: Boolean): Value {
+        private fun keyed(value: Value): Value {
             if (value !is Value.Json || !keepsNumberKeys || !value.mayBeNumber() || value.keys != null) return value
             val sql = value.inflight ?: value.sql
-            if (!carriesNumberKeys(sql) || !compared && !(after && carriesKeysAfter(sql))) return value
+            if (!carriesNumberKeys(sql) || !carriesKeysAfter(sql)) return value
             return value.copy(keys = groupedNumberKeys(sql).ifEmpty { return value })
         }
 
@@ -3803,15 +3802,17 @@ abstract class SqlCypherCompiler(
             val aggregating = groupsRows(projection, items)
             // Where rows are compared (DISTINCT, GROUP BY), each item is compared as [compared] has it.
             val compared = projection.distinct || aggregating
-            // An item that may be a number carries the store's number keys beside it, where rows are compared by them or a query
-            // after reads them (see numberKeys): read once here, where the value is, as a property by its own path.
+            // An item that may be a number carries the store's number keys beside it where a query after reads them (see
+            // numberKeys): read once here, where the value is, as a property by its own path. Not where rows are compared (DISTINCT,
+            // GROUP BY), which compare an item as JSON, by itself alone, keys and all: grouped by them too, an aggregate over a few
+            // walks took a third as long again and more (drivine-cypher-spec#315 keeps the numbers JSON groups as one).
             val columns = compiled.mapIndexed { i, (_, value) ->
                 val column = if (compared) compared(value) else value
                 // Where no query after reads it, or in a query of a UNION in CALL { … }, whose columns are matched, a value carried
                 // with keys is carried without them.
                 "c${i + 1}" to when {
                     contains(items[i].expression, ::isAggregate) -> column
-                    !keysLeft && (compared || keysAfter) -> keyed(column, compared, keysAfter)
+                    !keysLeft && !compared && keysAfter -> keyed(column)
                     else -> (column as? Value.Json)?.takeIf { it.keys != null }?.copy(keys = null) ?: column
                 }
             }
@@ -9031,13 +9032,11 @@ abstract class SqlCypherCompiler(
 
     /**
      * What a projection that aggregates is grouped by, to keep this value: a node by its columns; a value in flight as it is
-     * carried ([columns]), which keeps the groups of a whole one; and a value that may be a number by the store's number keys
-     * too, where it keeps any.
+     * carried ([columns]), which keeps the groups of a whole one; and a value that may be a number as the store groups one by
+     * its value ([groupedValue]), where it groups its JSON otherwise.
      */
     private fun Value.groupKeys(): List<String> = when (this) {
-        // A value that may be a number by the keys the store keeps numbers apart by, where it keeps any (see numberKeys).
-        is Value.Json -> (inflight ?: sql).let { value -> (if (mayBeNumber()) groupedValue(value) else null) ?: listOf(value) } + listOfNotNull(identity) +
-            (keys ?: if (mayBeNumber() && carriesNumberKeys(inflight ?: sql)) groupedNumberKeys(inflight ?: sql) else emptyList())
+        is Value.Json -> (inflight ?: sql).let { value -> (if (mayBeNumber()) groupedValue(value) else null) ?: listOf(value) } + listOfNotNull(identity)
         is Value.Entities -> listOf(ids)
         is Value.Bool -> listOf(sql)
         is Value.Node -> listOf(nid, labels, props, stamp)
