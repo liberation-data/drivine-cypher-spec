@@ -2455,6 +2455,8 @@ abstract class SqlCypherCompiler(
             // It is a list ([Value.Json.list]) only where each query makes it one, so that an order sorts the others' numbers and
             // maps by their kinds, not as lists; and it holds no null ([Value.Json.flat]) only where each query's holds none. It keeps
             // its keys' order ([Value.Json.ordered]) where any query's does, as each is then written as one that does ([orderedJson]).
+            // It is an integer the compiler makes ([Value.Json.integer]) only where each query's is: else a store that compares other
+            // numbers by keys of their own would compare another query's float as JSON (drivine-cypher-spec#309).
             val first = unidentified(projected.first())
             val scope = projected.first().scope.mapValues { (variable, value) ->
                 val all = projected.map { it.scope.getValue(variable) as? Value.Json }
@@ -2468,6 +2470,7 @@ abstract class SqlCypherCompiler(
                     text = all.all { it?.text == true }, texts = all.all { it?.texts == true },
                     known = all.map { it?.known }.distinct().singleOrNull(), itemsKnown = unionItems(all.map { it?.itemsKnown }), jsonNull = all.any { it?.jsonNull == true },
                     list = all.all { it?.list == true }, itemLists = all.all { it?.itemLists == true }, flat = all.all { it?.flat == true },
+                    integer = all.all { it?.integer == true },
                     // Its identity is the column beside it where any query gives one, the first query's own or its value's.
                     identity = if (variable in byProperties) null else value.identity ?: first[variable]?.let { (column, _) -> "$PENDING.${column}_identity" },
                     tagText = null, tagKey = null,

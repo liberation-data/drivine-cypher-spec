@@ -140,6 +140,15 @@ class OracleNumberKeysTest {
             emptyMap(),
         ).sql
         assertTrue(Regex("\\w+\\.c1 = JSON_SCALAR\\(n\\d+\\.nid\\)").containsMatchIn(carried) && "TO_BINARY_DOUBLE(n" !in carried, carried)
+        // An id one query of a UNION in a CALL returns, beside a property another returns, is no integer the statement makes:
+        // compared as JSON, the property 1e-200 would be equal to 0.
+        for (cypher in listOf(
+            "MATCH (m:K) CALL { MATCH (n:K) RETURN id(n) AS a UNION ALL MATCH (n:K) RETURN n.k AS a } RETURN a = 0",
+            "MATCH (m:K) CALL { MATCH (n:K) RETURN n.k AS a UNION ALL MATCH (n:K) RETURN id(n) AS a } RETURN a = 0",
+        )) {
+            val sql = compiler.compile(cypher, emptyMap()).sql
+            assertTrue(Regex("JSON_VALUE\\(c\\d+\\.c1, '\\$' RETURNING BINARY_DOUBLE NULL ON ERROR TYPE\\(STRICT\\)\\) = ").containsMatchIn(sql), "$cypher: $sql")
+        }
     }
 
     @Test
