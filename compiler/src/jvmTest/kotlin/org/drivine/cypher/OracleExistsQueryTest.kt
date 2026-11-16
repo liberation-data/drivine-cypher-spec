@@ -93,6 +93,9 @@ class OracleExistsQueryTest {
         "MATCH (n) RETURN EXISTS { MATCH (n:Movie)-[*0..1]->(n) }",
         // A union reads a table for certain only where each of its queries does.
         "MATCH (n) RETURN EXISTS { MATCH (n:Movie) RETURN n.title AS y UNION MATCH (x:Person) RETURN x.name AS y }",
+        // An optional read keeps the row whatever the table holds.
+        "MATCH (n) RETURN EXISTS { MATCH (n:Movie) OPTIONAL MATCH (n)-->(x) RETURN x }",
+        "MATCH (n) RETURN EXISTS { OPTIONAL CALL (n) { MATCH (n)-->(k) RETURN k } RETURN k }",
     )
 
     /** Statements whose `EXISTS { … }` reads a table: the graph's, or a list's rows. */
@@ -100,7 +103,6 @@ class OracleExistsQueryTest {
         "MATCH (n) RETURN EXISTS { MATCH (n:Movie)<-[:ACTED_IN]-(a) RETURN a.name AS y }",
         "MATCH (n) RETURN EXISTS { (n)-->() }",
         "MATCH (n) RETURN EXISTS { MATCH (x:Movie) RETURN x.title AS y }",
-        "MATCH (n) RETURN EXISTS { MATCH (n:Movie) OPTIONAL MATCH (n)-->(x) RETURN x }",
         "MATCH (n) RETURN EXISTS { MATCH (n:Movie) CALL (n) { MATCH (n)-->(x) RETURN x } RETURN x }",
         "MATCH (n), (m) RETURN EXISTS { MATCH (n)-[:R]->(m) }",
         "MATCH (n) RETURN EXISTS { WITH n.title AS t MATCH (x {title: t}) RETURN x }",
