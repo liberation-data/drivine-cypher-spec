@@ -18,8 +18,8 @@ fun hostVersion(): Int = SqliteFunctions.HOST_VERSION
 
 /**
  * A call of one of the module's SQLite host functions by its [name] (`drivine_temporal`, `drivine_sort_key` …), [args] its
- * arguments as a JSON array of SQLite values, typed: the answer as JSON text, `{"v": …}` or `{"error": …}`
- * ([org.drivine.cypher.host.HostCall]). A host whose own SQLite functions are in JavaScript registers each of
+ * arguments, SQLite's values each written as its kind, length and text: the answer, a value so written or `e<message>`
+ * ([org.drivine.cypher.host.HostCall] says how). A host whose own SQLite functions are in JavaScript registers each of
  * `HostFunctions.all` as a call of this, so the module's one copy is the one every library runs (liberation-data/drivine#757).
  */
 @JsExport

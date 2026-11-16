@@ -99,7 +99,7 @@ compiled SQL needs, `hostVersion()` and `drivine_host_version()`: see [The host 
 The wasm build exports SQLite's host function of temporal arithmetic too, `temporalArithmetic(operator, x, y)`, for a host
 that registers it as a call of the module's code (see [The SQLite extension](#the-sqlite-extension)), and each of the host
 functions by name, `hostCall(name, args)`, with `hostFunctions()` listing them: a host whose SQLite takes functions in
-JavaScript registers each as a call of the module's own, rather than keeping a copy (see [Host functions over JSON](#host-functions-over-json)).
+JavaScript registers each as a call of the module's own, rather than keeping a copy (see [Host functions from JavaScript](#host-functions-from-javascript)).
 
 ```json
 {"store": "oracle",
@@ -588,40 +588,57 @@ const { temporalArithmetic } = require('@liberation-data/drivine-cypher-compiler
 const { hostCall, hostFunctions } = require('@liberation-data/drivine-cypher-compiler');  // every host function, by name
 ```
 
-#### Host functions over JSON
+#### Host functions from JavaScript
 
 `hostFunctions()` lists the module's SQLite host functions as JSON, by name: each one's `arity` (-1 for any number) and
-whether it is `deterministic`, as the host registers it. `hostCall(name, args)` calls one (`HostCall`). `args` is a JSON
-array of SQLite's values, each typed as SQLite hands it over, as the functions tell an integer, a float and a text of the same
-digits apart:
+whether it is `deterministic`, as the host registers it. `hostCall(name, args)` calls one (`HostCall`). `args` is SQLite's
+values, each typed as SQLite hands it over, as the functions tell an integer, a float and a text of the same digits apart,
+written one after another:
 
 | Value | As |
 |---|---|
-| SQL's null | `null` |
-| an integer | `{"i": "<digits>"}`, its decimal text, so no JavaScript number rounds one past 2^53 |
-| a float | `{"r": <number>}`, or `{"r": "NaN"}`, `{"r": "Infinity"}`, `{"r": "-Infinity"}` |
-| a text | `{"t": "<text>"}` |
-| a blob | `{"b": "<base64>"}` |
+| SQL's null | `n` |
+| an integer | `i<length>:<digits>`, its decimal text, so no JavaScript number rounds one past 2^53 |
+| a float | `r<length>:<number>`, as JavaScript's `String(number)` writes it (`2.5`, `1e+21`, `NaN`, `-Infinity`), `-0` for minus zero |
+| a text | `t<length>:<text>`, as it stands |
+| a blob | `b<length>:<base64>` |
 
-The answer is `{"v": <value>}`, typed the same way, or `{"error": "<message>"}`, where the function fails its statement: the
-host throws the message, so SQLite fails the statement with it. A call that can't be made (no such function, the wrong
-number of arguments, an argument of no kind above) is answered `{"error": …}` too, naming why. A function that reads a float
-as text reads it as SQLite writes it (`SqliteRealText`): the same value, in SQLite's own spelling wherever 15 digits read it
-back.
+`<length>` is the JavaScript `length` of what follows the colon, so no text is escaped: a host function's argument is most
+often JSON text, which escaped inside JSON was read twice. The answer is the value written the same way without its length
+(`n`, `i<digits>`, `r<number>`, `t<text>`, `b<base64>`), a float as Java writes it, which `Number` reads back as the same; or
+`e<message>`, where the function fails its statement: the host throws the message, so SQLite fails the statement with it.
+A call that can't be made (no such function, the wrong number of arguments, an argument of no kind above) is answered
+`e…` too, naming why. A function that reads a float as text reads it as SQLite writes it (`SqliteRealText`): the same value,
+in SQLite's own spelling wherever 15 digits read it back.
 
 ```js
 const { hostCall, hostFunctions } = require('@liberation-data/drivine-cypher-compiler');
+const item = (kind, text) => kind + text.length + ':' + text;
+const written = (v) =>
+    v === null ? 'n'
+    : typeof v === 'bigint' ? item('i', String(v))
+    : typeof v === 'number' ? item('r', Object.is(v, -0) ? '-0' : String(v))
+    : typeof v === 'string' ? item('t', v)
+    : item('b', Buffer.from(v).toString('base64'));
 for (const [name, { deterministic }] of Object.entries(JSON.parse(hostFunctions()))) {
     // varargs: node:sqlite counts a function's arguments by its own (`fn.length`), none for (...args); hostCall checks `arity`.
     db.function(name, { deterministic, varargs: true, useBigIntArguments: true }, (...args) => {
-        const answer = JSON.parse(hostCall(name, JSON.stringify(args.map(typed))));  // typed: a value as the table gives it
-        if ('error' in answer) throw new Error(answer.error);
-        return untyped(answer.v);
+        const answer = hostCall(name, args.map(written).join(''));
+        const rest = answer.substring(1);
+        switch (answer[0]) {
+            case 'n': return null;
+            case 'i': return BigInt(rest);
+            case 'r': return Number(rest);
+            case 't': return rest;
+            case 'b': return Buffer.from(rest, 'base64');
+            default: throw new Error(rest);
+        }
     });
 }
 ```
 
-Each call is one crossing into the wasm, with its arguments and answer as JSON text.
+Each call is one crossing into the wasm. A call of a function of short JSON texts, such as `drivine_sort_key` of a list,
+takes 1 to 2 µs on Node 26.
 
 The CommonJS entry (`npm/index.cjs`) loads the wasm synchronously. Kotlin/Wasm writes only an ES module loader, with a
 top-level await, so the entry runs that loader's text as a function with its Node branch made synchronous. Each edit

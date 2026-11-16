@@ -2,7 +2,7 @@ package org.drivine.cypher.host
 
 import org.drivine.cypher.json.CypherJson
 import org.drivine.cypher.json.JsonNode
-import org.drivine.cypher.json.ObjectNode
+import org.drivine.cypher.json.jvmDoubleText
 import org.drivine.cypher.number.oracleFile
 import org.drivine.cypher.number.target
 import kotlin.test.Test
@@ -11,41 +11,41 @@ import kotlin.test.assertTrue
 
 /**
  * Each of `host.yaml`'s calls through [HostCall], as Drivine for TypeScript makes them through the wasm build's `hostCall`
- * (liberation-data/drivine#757): its arguments as typed JSON, and the answer the function's own, a value or its failure's
- * message, as the call made directly gives it, on every target.
+ * (liberation-data/drivine#757): its arguments written as [HostCall] reads them, and the answer the function's own, a value
+ * or its failure's message, as the call made directly gives it, on every target.
  */
 class HostCallTest {
 
     private val host: JsonNode = CypherJson.readTree(oracleFile("host.json"))
 
-    private fun quoted(text: String) = CypherJson.writeValueAsString(CypherJson.valueToTree(text))
+    /** [text] after its kind and length, as [HostCall] reads an argument. */
+    private fun item(kind: Char, text: String) = "$kind${text.length}:$text"
 
-    /** [values], SQLite's values a step gives, as [HostCall] takes them. */
-    private fun typed(values: List<Any?>): String = values.joinToString(",", "[", "]") { value ->
+    /** [values], SQLite's values a step gives, as [HostCall] takes them, a float written as JavaScript writes it. */
+    private fun typed(values: List<Any?>): String = values.joinToString("") { value ->
         when (value) {
-            null -> "null"
-            is Long -> "{\"i\":\"$value\"}"
-            is Double -> when {
-                value.isNaN() -> "{\"r\":\"NaN\"}"
-                value.isInfinite() -> "{\"r\":\"${if (value > 0) "Infinity" else "-Infinity"}\"}"
-                else -> "{\"r\":${CypherJson.writeValueAsString(CypherJson.valueToTree(value))}}"
-            }
-            is String -> "{\"t\":${quoted(value)}}"
+            null -> "n"
+            is Long -> item('i', value.toString())
+            is Double -> item('r', if (value.isNaN() || value.isInfinite()) value.toString() else jsText(value))
+            is String -> item('t', value)
             else -> error("no step gives ${value::class.simpleName}")
         }
     }
 
+    /** [value] about as JavaScript's `String(value)` writes it (`2.5`, `1e+21`, `0` for -0): the same value, in its forms. */
+    private fun jsText(value: Double): String = when {
+        value == 0.0 -> "0"
+        value == kotlin.math.floor(value) && kotlin.math.abs(value) < 9e18 -> value.toLong().toString()
+        else -> jvmDoubleText(value).lowercase().replace("e", "e+").replace("e+-", "e-").removeSuffix(".0")
+    }
+
     /** The value [HostCall] answers, as the direct call gives it. */
-    private fun read(answer: JsonNode): Any? {
-        val v = answer["v"] ?: error("no value: ${CypherJson.writeValueAsString(answer)}")
-        if (v.isNull) return null
-        val (kind, inner) = (v as ObjectNode).properties().single()
-        return when (kind) {
-            "i" -> inner.textValue()!!.toLong()
-            "r" -> if (inner.isNumber) inner.doubleValue() else when (inner.textValue()) { "NaN" -> Double.NaN; "Infinity" -> Double.POSITIVE_INFINITY; else -> Double.NEGATIVE_INFINITY }
-            "t" -> inner.textValue()
-            else -> error("no step answers $kind")
-        }
+    private fun read(answer: String): Any? = when (answer[0]) {
+        'n' -> null
+        'i' -> answer.substring(1).toLong()
+        'r' -> answer.substring(1).toDouble()
+        't' -> answer.substring(1)
+        else -> error("no value: $answer")
     }
 
     @Test
@@ -61,7 +61,7 @@ class HostCallTest {
             val direct = runCatching { callHost(functions, values, where) }
             // A step the direct call can't make, as a SQLite read the harness doesn't convert, isn't one to compare.
             if (direct.exceptionOrNull() is Unreadable) continue
-            val answer = CypherJson.readTree(HostCall.call(name, typed(values)))
+            val answer = HostCall.call(name, typed(values))
             direct.fold(
                 { value ->
                     val got = read(answer)
@@ -69,8 +69,7 @@ class HostCallTest {
                     else assertEquals(if (value is Int) value.toLong() else value, got, where)
                 },
                 { failure ->
-                    val error = answer["error"]?.textValue()
-                    assertTrue(error != null && failure.message!!.endsWith(error), "$where: ${failure.message} where the JSON call gave ${CypherJson.writeValueAsString(answer)}")
+                    assertTrue(answer.startsWith('e') && failure.message!!.endsWith(answer.substring(1)), "$where: ${failure.message} where hostCall gave $answer")
                 },
             )
             checked++
@@ -81,25 +80,34 @@ class HostCallTest {
     @Test
     fun aCallThatCantBeMadeIsAnErrorNamingWhy() {
         for ((name, args, message) in listOf(
-            Triple("drivine_nothing", "[]", "No host function is drivine_nothing"),
-            Triple("drivine_trunc", "{}", "A host call gives its arguments as a JSON array"),
-            Triple("drivine_trunc", "[{\"x\": 1}]", "No argument is {\"x\"}"),
-            Triple("drivine_trunc", "[{\"i\": 1}]", "{\"i\": …} holds an integer's text"),
-            Triple("drivine_trunc", "[{\"r\": \"many\"}]", "{\"r\": …} holds a number"),
-            Triple("drivine_trunc", "[1]", "A host call's argument is null or one of"),
-            Triple("drivine_trunc", "[null, null]", "drivine_trunc takes 1 argument(s), not 2"),
+            Triple("drivine_nothing", "", "No host function is drivine_nothing"),
+            Triple("drivine_trunc", "x1:1", "No argument is of the kind x"),
+            Triple("drivine_trunc", "i3:1.5", "i holds an integer's digits, not 1.5"),
+            Triple("drivine_trunc", "r4:many", "r holds a number, not many"),
+            Triple("drivine_trunc", "t", "A host call's argument 1 is no kind, length and colon"),
+            Triple("drivine_trunc", "t9:abc", "A host call's argument 1 is no kind, length and colon"),
+            Triple("drivine_trunc", "t-1:", "A host call's argument 1 is no kind, length and colon"),
+            Triple("drivine_trunc", "nn", "drivine_trunc takes 1 argument(s), not 2"),
         )) {
-            val error = CypherJson.readTree(HostCall.call(name, args))["error"]?.textValue()
-            assertTrue(error != null && error.startsWith(message), "on $target, $name $args: $error")
+            val answer = HostCall.call(name, args)
+            assertTrue(answer.startsWith("e$message"), "on $target, $name $args: $answer")
         }
     }
 
     @Test
     fun aValueIsAnsweredTypedAsTheFunctionGivesIt() {
         // A whole number past 2^53 stays whole and exact, a float keeps its kind, and a text is a text.
-        assertEquals("{\"v\":{\"i\":\"9007199254740993\"}}", HostCall.call("drivine_trunc", "[{\"i\":\"9007199254740993\"}]"), "on $target")
-        val float = CypherJson.readTree(HostCall.call("drivine_trunc", "[{\"r\":2.5}]"))
-        assertTrue(float["v"]!!["r"] != null || float["v"]!!["i"] != null, "on $target: $float")
-        assertEquals("{\"v\":null}", HostCall.call("drivine_trunc", "[null]"), "on $target")
+        assertEquals("i9007199254740993", HostCall.call("drivine_trunc", "i16:9007199254740993"), "on $target")
+        assertEquals("i2", HostCall.call("drivine_trunc", "r3:2.5"), "on $target")
+        assertEquals("n", HostCall.call("drivine_trunc", "n"), "on $target")
+        // A text holding the colons, digits and kind letters the arguments are written with is read by its length alone.
+        assertEquals("t\"t3:a:b\"", HostCall.call("drivine_canonical", "t8:\"t3:a:b\""), "on $target")
+        // A float is read in each of the forms JavaScript's String(number) writes.
+        for ((js, value) in listOf("1e+21" to 1e21, "-0" to -0.0, "1.5e-7" to 1.5e-7, "-Infinity" to Double.NEGATIVE_INFINITY, "123.456" to 123.456)) {
+            assertEquals("r${jvmDoubleText(value)}", HostCall.call("drivine_float_text", item('r', js)).let { "r" + it.substring(1).toDouble().let(::jvmDoubleText) }, "on $target, $js")
+        }
+        // A float a function answers reads back as the same, Java's text read as JavaScript's Number reads it.
+        assertEquals("r0.1", HostCall.call("drivine_float_text", "r3:0.1").let { "r" + it.substring(1).toDouble() }, "on $target")
+        assertEquals("NaN", HostCall.call("drivine_float_text", "r3:NaN").substring(1), "on $target")
     }
 }

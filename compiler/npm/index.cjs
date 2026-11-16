@@ -76,10 +76,10 @@ function temporalArithmetic(operator, x, y) {
 }
 
 /**
- * A call of one of the module's SQLite host functions by its name, `args` its arguments as a JSON array of SQLite values,
- * typed (`null`, `{"i": "<digits>"}`, `{"r": <number>}`, `{"t": "<text>"}`, `{"b": "<base64>"}`): the answer as JSON text,
- * `{"v": <value typed so>}` or `{"error": "<message>"}`. A host registers each of `hostFunctions()` on its SQLite as a call
- * of this, so every library runs the module's one copy (liberation-data/drivine#757).
+ * A call of one of the module's SQLite host functions by its name, `args` its arguments, SQLite's values each written as its
+ * kind, its JavaScript length, a colon and its text (`n` for null, `i<len>:<digits>`, `r<len>:<number>`, `t<len>:<text>`,
+ * `b<len>:<base64>`), one after another: the answer, the value written the same way without its length (`n`, `i…`, `r…`,
+ * `t…`, `b…`), or `e<message>` where the function fails. See the compiler's README, "Host functions from JavaScript".
  */
 function hostCall(name, args) {
     return load().hostCall(name, args);
