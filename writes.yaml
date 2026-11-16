@@ -2799,7 +2799,7 @@ cases:
         rows: [[-0.0, "-0.0"]]
 
   - name: "#309's remaining paths: a UNION's rows"
-    description: "A UNION keeps a double nearer 0 than a decimal holds apart from 0, and 1 one with 1.0, as Neo4j does. Oracle merges the double with 0, and SQLite keeps 1 and 1.0 apart, until #315."
+    description: "A UNION keeps a double nearer 0 than a decimal holds apart from 0, and 1 and 1.0 as one, as Neo4j does. Oracle merges the double with 0, and SQLite keeps 1 and 1.0 apart, until #315."
     steps:
       - cypher: "RETURN 1.0e-200 AS k UNION RETURN 0 AS k UNION RETURN 1 AS k UNION RETURN 1.0 AS k"
         except: [oracle, sqlite]
@@ -2833,9 +2833,11 @@ cases:
         rows: [2]
 
   - name: "DISTINCT keeps the order its rows come in"
-    description: "WITH DISTINCT keeps each value where its first row came, in the order the rows come in, and a LIMIT after it keeps the first of them."
+    description: "WITH DISTINCT keeps each value where its first row came, in the order the rows come in, and a LIMIT after it keeps the first of them. Oracle keeps no order through a DISTINCT until #316."
     steps:
-      - cypher: "UNWIND [{k: 3}, {k: 1}, {k: 2}, {k: 1}] AS m WITH m ORDER BY m.k DESC WITH DISTINCT m.k AS k RETURN collect(k)"
+      - except: [oracle]
+        cypher: "UNWIND [{k: 3}, {k: 1}, {k: 2}, {k: 1}] AS m WITH m ORDER BY m.k DESC WITH DISTINCT m.k AS k RETURN collect(k)"
         rows: [[3, 2, 1]]
-      - cypher: "UNWIND [{k: 3}, {k: 1}, {k: 2}, {k: 1}] AS m WITH m ORDER BY m.k DESC WITH DISTINCT m.k AS k LIMIT 2 RETURN collect(k)"
+      - except: [oracle]
+        cypher: "UNWIND [{k: 3}, {k: 1}, {k: 2}, {k: 1}] AS m WITH m ORDER BY m.k DESC WITH DISTINCT m.k AS k LIMIT 2 RETURN collect(k)"
         rows: [[3, 2]]

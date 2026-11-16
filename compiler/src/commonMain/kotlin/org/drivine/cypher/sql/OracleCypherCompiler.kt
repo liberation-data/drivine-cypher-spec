@@ -843,7 +843,7 @@ class OracleCypherCompiler(
      * What tells numbers apart that [doubleKey] finds equal: an integer past 2^53, held as a `NUMBER`, less the double nearest
      * it, worked out exactly ([OracleSql.wholeNumber]); 0 for any other number, and for a value that is no number. Two numbers with one double differ only where
      * one is such an integer, as a double past 2^53 is a whole number and any integer to 2^53 is a double's. Not the double
-     * read as a `NUMBER`, which Oracle makes no exactly: it reads the double 2^53 as 9007199254740993 (see [OracleSql.indexKey]).
+     * read as a `NUMBER`, which Oracle does not make exactly: it reads the double 2^53 as 9007199254740993 (see [OracleSql.indexKey]).
      * The number is read as a `NUMBER` where it is one ([numberRead]); its double is [doubleKey]'s, which a `NUMBER` read so is.
      */
     private fun exactKey(json: String, path: String = "'\$'"): String {
