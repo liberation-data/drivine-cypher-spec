@@ -873,6 +873,8 @@ class CompilerRefusalTest {
             taken("UNWIND [[1], ['a']] AS x RETURN toString(x)"), taken("RETURN toString([x IN \$l | x])", parameters = mapOf("l" to listOf(1, 2))),
             taken("RETURN toString(tail([1, 'a', 2]))"), taken("RETURN toString([1, 'a', 2][0..2])"), taken("RETURN toString(reverse([1, 'a']))"),
             taken("RETURN toString([1] + ['a'])"), taken("RETURN toString(coalesce([1, 'a'], [2]))"),
+            // Two lists of one kind compared are a truth value, no list: only + of them is a list (listItems).
+            taken("RETURN toString([1, 2] = [1, 2])"),
             taken("RETURN toString([true, 1])", "[true, 1]"), taken("RETURN toString([[1], 1])", "[[1], 1]"), taken("RETURN toString([{a: 1}, 1])", "[{a: 1}, 1]"),
             // A UNION each of whose queries makes it a list of one kind, of one kind or of two, as Neo4j 2026.10.1 refuses it.
             refused("CALL { RETURN [1, 2] AS l UNION RETURN [1.5] AS l } RETURN toString(l)"),
