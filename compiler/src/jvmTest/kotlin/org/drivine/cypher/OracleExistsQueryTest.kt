@@ -77,6 +77,10 @@ class OracleExistsQueryTest {
         "MATCH (n) RETURN EXISTS { WITH n WHERE n:Movie RETURN n.title AS y }",
         "MATCH (n) RETURN EXISTS { MATCH (n:Movie) WHERE COUNT { (n)<--() } > 1 RETURN n.title AS y }",
         "MATCH (n) WHERE NOT EXISTS { MATCH (n:Movie) RETURN n.title AS y } RETURN n.name",
+        "MATCH (n) RETURN EXISTS { OPTIONAL MATCH (n:Movie) RETURN n.title AS y }",
+        "MATCH (n) RETURN EXISTS { MATCH (n:Movie) RETURN n.title AS y UNION MATCH (n:Person) RETURN n.name AS y }",
+        "MATCH (n) RETURN EXISTS { MATCH (n:Movie) RETURN n.title AS y ORDER BY y LIMIT 1 }",
+        "MATCH (n) RETURN CASE WHEN EXISTS { MATCH (n:Movie) RETURN n.title AS y } THEN 'y' ELSE 'n' END",
     )
 
     /** Statements whose `EXISTS { … }` reads a table: the graph's, or a list's rows. */
@@ -106,6 +110,16 @@ class OracleExistsQueryTest {
             val sql = OracleCypherCompiler("g").compile(cypher).sql
             assertTrue(!sql.contains(") ex) > 0)") && Regex("""(?<!JSON_)EXISTS \(""").containsMatchIn(sql), sql)
         }
+    }
+
+    @Test
+    fun `an EXISTS of the row alone is counted while an EXISTS within its WHERE that reads a table is written as it was`() {
+        val sql = OracleCypherCompiler("g").compile(
+            "MATCH (n) RETURN EXISTS { WITH n WHERE n:Movie AND EXISTS { (n)<-[:ACTED_IN]-(:Person {name: 'Carrie'}) } RETURN 1 AS y }"
+        ).sql
+        val counted = sql.indexOf(") ex) > 0)")
+        val inner = Regex("""(?<!JSON_)EXISTS \(SELECT /\*\+ NO_COALESCE_SQ \*/ 1 FROM g_node""").findAll(sql).toList()
+        assertTrue(Regex("""\) ex\) > 0\)""").findAll(sql).count() == 1 && inner.size == 1 && inner[0].range.first < counted, sql)
     }
 
     @Test
