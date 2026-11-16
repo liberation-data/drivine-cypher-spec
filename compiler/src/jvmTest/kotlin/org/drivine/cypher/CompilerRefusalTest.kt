@@ -899,6 +899,8 @@ class CompilerRefusalTest {
             refused("MATCH (p:Person) RETURN toString([keys(p), keys(p)])"), refused("MATCH (p:Person) WITH keys(p) AS k RETURN toString(k)"),
             refused("MATCH (p:Person) RETURN toString([CASE WHEN p.born > 1960 THEN 'a' ELSE 'b' END, 'c'])"),
             refused("RETURN toString([1.5, 2.5])"), refused("RETURN toString([x IN [1, 2] | x + 1])"),
+            // Truth values alone are of one kind too (itemOf).
+            refused("RETURN toString([true, false])"),
             // A comprehension with a WHERE and no projection keeps its list's kind, as one with its variable as the projection does.
             refused("RETURN toString([x IN [1, 2] WHERE x > 1])"),
             // tail(), a slice and reverse() keep their list's kind, and two lists of one kind joined by + or given to coalesce() are of it.
