@@ -884,6 +884,8 @@ class CompilerRefusalTest {
             refused("MATCH path = (:Person)-[:KNOWS]->() RETURN toString(nodes(path))"),
             refused("MATCH path = (:Person)-[:KNOWS]->() RETURN toString(relationships(path))"),
             refused("MATCH (:Person)-[r:KNOWS*]->() RETURN toString(r)"),
+            // Not captured: tail() of such a variable keeps its kind, read off the variable bound to them (listItems).
+            refused("MATCH (:Person)-[r:KNOWS*]->() RETURN toString(tail(r))"),
             // As captured, past a WITH that limits the rows.
             refused("MATCH (p:Person {name: 'Keanu'})-[r]->(m) WITH p, r LIMIT 1 RETURN toString([p, r])"),
             refused("MATCH path = (p:Person)-[:ACTED_IN]->() WITH path LIMIT 1 RETURN toString(nodes(path))"),
