@@ -32,7 +32,8 @@ class OracleOptionalJoinTest {
     @Test
     fun `a CALL that is not optional is still a cross join, and Postgres still joins on TRUE`() {
         val called = OracleCypherCompiler("g").compile("MATCH (n:CyOpt) RETURN COUNT { CALL { MATCH (z:Nope) RETURN z.k AS u } RETURN u }").sql
-        assertTrue(Regex("CROSS JOIN LATERAL \\(\\n(.*\\n)*?\\s*\\) c\\d+\\n").containsMatchIn(called) && " ON " !in called, called)
+        // No join's ON: a number key's read says NULL ON ERROR (drivine-cypher-spec#309).
+        assertTrue(Regex("CROSS JOIN LATERAL \\(\\n(.*\\n)*?\\s*\\) c\\d+\\n").containsMatchIn(called) && " ON " !in called.replace("NULL ON ERROR", ""), called)
         val postgres = PostgresCypherCompiler("g").compile(statements[1]).sql
         assertTrue(Regex("\\) c\\d+ ON TRUE").containsMatchIn(postgres), postgres)
     }

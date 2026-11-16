@@ -23,7 +23,7 @@ class OracleNumberKeysTest {
     /** No key is read from a value read through its text, nor from a column that carries one. */
     private fun assertNoKeyOfARoutedValue(sql: String) {
         assertTrue(!Regex("JSON_VALUE\\(JSON\\(JSON_QUERY\\(JSON_SERIALIZE[^)]*\\)[^']*'[^']*' RETURNING (BINARY_DOUBLE|NUMBER)").containsMatchIn(sql), sql)
-        assertTrue(!Regex("JSON_VALUE\\(p\\d+\\.[sc]\\d+, '\\$[^']*' RETURNING (BINARY_DOUBLE|NUMBER)").containsMatchIn(sql), sql)
+        assertTrue(!Regex("JSON_VALUE\\([pw]\\d+\\.[sc]\\d+, '\\$[^']*' RETURNING (BINARY_DOUBLE|NUMBER)").containsMatchIn(sql), sql)
     }
 
     @Test
@@ -142,10 +142,44 @@ class OracleNumberKeysTest {
     }
 
     @Test
-    fun countDistinctOfAValueNoPropertyIsCountedAsBefore() {
-        // Of an item of a stored list, as collect(DISTINCT …) keeps it: a NaN stored once where the statement works out none
-        // (writes.yaml, "MERGE of a null or NaN property").
+    fun countDistinctOfAListItemCountsAStoredNaNOnce() {
+        // Keyed as any value, but a NaN an item of a stored list holds is counted once where the statement works out none, as
+        // collect(DISTINCT …) keeps it (writes.yaml, "MERGE of a null or NaN property").
         val sql = compiler.compile("MATCH (n:CyWrite) WHERE n.l IS NOT NULL RETURN count(DISTINCT n.l[0]), size(collect(DISTINCT n.l[0]))", emptyMap()).sql
-        assertTrue("IS NAN THEN 1 END" !in sql && "BINARY_DOUBLE NULL ON ERROR TYPE(STRICT)" !in sql, sql)
+        assertTrue("IS NAN THEN 1 END" !in sql && "BINARY_DOUBLE NULL ON ERROR TYPE(STRICT)" in sql, sql)
+        // Given NaN, each is counted apart, as before.
+        val given = compiler.compile("MATCH (n:CyWrite) WHERE n.l IS NOT NULL AND n.x <> \$nan RETURN count(DISTINCT n.l[0])", mapOf("nan" to Double.NaN)).sql
+        assertTrue("IS NAN THEN 1 END" in given, given)
+    }
+
+    @Test
+    fun aValueAWithCarriesCarriesItsKeysAsColumnsOfTheirOwn() {
+        // Read once by the property's path in the WITH's query, and read of those columns after it: never of the WITH's column,
+        // a property read through its text, which each read would work out again.
+        for (cypher in listOf(
+            "MATCH (n:K) WITH n.k AS k RETURN k ORDER BY k", "MATCH (n:K) WITH n.k AS k RETURN DISTINCT k",
+            "MATCH (n:K) WITH n.k AS k RETURN k, count(*)", "MATCH (n:K) WITH n.k AS k RETURN min(k)",
+            "MATCH (n:K) WITH n.k AS k RETURN k = 0", "MATCH (n:K) WITH n.k AS k, n.j AS j RETURN k < j",
+        )) {
+            val sql = compiler.compile(cypher, emptyMap()).sql
+            assertTrue("${double("n1.props", "$.k")} AS c1k1" in sql && Regex("w\\d+\\.c1k1").containsMatchIn(sql), "$cypher: $sql")
+            assertEquals(1, Regex(Regex.escape(double("n1.props", "$.k"))).findAll(sql).count(), "$cypher: $sql")
+            assertNoKeyOfARoutedValue(sql)
+        }
+        // Grouped after the WITH, by the carried keys.
+        val grouped = compiler.compile("MATCH (n:K) WITH n.k AS k RETURN k, count(*)", emptyMap()).sql
+        assertTrue(Regex("GROUP BY w\\d+\\.c1, w\\d+\\.c1k1, w\\d+\\.c1k2").containsMatchIn(grouped), grouped)
+    }
+
+    @Test
+    fun countDistinctAndMinAndMaxOfAnyValueReadItsKeysWhereItIs() {
+        val unwound = compiler.compile("UNWIND [1e-200, 0] AS x RETURN count(DISTINCT x)", emptyMap()).sql
+        assertTrue("count(DISTINCT CASE WHEN NVL(" in unwound && double("u1.item", "$") in unwound, unwound)
+        // No NaN given or worked out: a NaN an unwound item holds is counted once, as collect(DISTINCT …) keeps it.
+        assertTrue("IS NAN THEN 1 END" !in unwound, unwound)
+        val worked = compiler.compile("MATCH (n:K) RETURN max(n.k + 0)", emptyMap()).sql
+        assertTrue(Regex("KEEP \\(DENSE_RANK FIRST ORDER BY .* DESC NULLS LAST, JSON_VALUE\\(.* RETURNING BINARY_DOUBLE NULL ON ERROR TYPE\\(STRICT\\)\\) DESC NULLS LAST, NVL\\(").containsMatchIn(worked), worked)
+        // Under the aggregate, nothing is bound in a subquery.
+        assertTrue(!Regex("KEEP \\(DENSE_RANK FIRST ORDER BY [^)]*\\(SELECT").containsMatchIn(worked), worked)
     }
 }

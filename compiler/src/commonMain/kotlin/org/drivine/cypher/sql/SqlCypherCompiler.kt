@@ -369,6 +369,7 @@ abstract class SqlCypherCompiler(
         nonFinite = given || (nonFiniteWorkedOut(false) && (worksOutNonFinite(query, parameters) || (infinitiesStored && worksOutNaN(query, parameters))))
         nanWorkedOut = given || worksOutNonFinite(query, parameters) || worksOutNaN(query, parameters)
         idsAtMost(mostIds(query))
+        carriedKeys.clear()
         procedural = false
         // The functions the statements compiled before declared are set aside, and put back after: one the fragment calls is
         // seen though such a statement declared it already, and none it declares is left for the next statement.
@@ -440,6 +441,7 @@ abstract class SqlCypherCompiler(
         nonFinite = given || (nonFiniteWorkedOut(writes) && (worksOutNonFinite(query, parameters) || (infinitiesStored && worksOutNaN(query, parameters))))
         nanWorkedOut = given || worksOutNonFinite(query, parameters) || worksOutNaN(query, parameters)
         idsAtMost(mostIds(query))
+        carriedKeys.clear()
         if (query.unions.isNotEmpty()) return withFunctions(union(query, parameters))
         if (!writes) {
             val writer = Writer(Parameters(parameters, ::parameterJson, ::parameterCount, text = ::parameterText, asPath = parameterPath))
@@ -1172,12 +1174,25 @@ abstract class SqlCypherCompiler(
     protected open fun carriesNumberKeys(json: String) = true
 
     /**
+     * The number keys of the values a query carries with them, by the SQL a value is read by after it, `w3.c1`: the columns
+     * that carry its keys (see [Value.Json.keys]), noted where the value is read, for the store to read in place of the value's
+     * own keys. Set aside as each statement is compiled.
+     */
+    protected val carriedKeys = mutableMapOf<String, List<String>>()
+
+    /**
      * The terms a group, or `DISTINCT`, keys the JSON value [json], which may be a number, by in its place, where the store's
      * comparison of it as a value keeps two equal numbers apart: SQLite's, of their text, kept `1` from `1.0` and `0.0` from `0`.
      * Null where the value keys it, as on a store that compares numbers by their values (Postgres's `jsonb`) or by keys beside
      * them ([numberKeys]).
      */
     protected open fun groupedValue(json: String): List<String>? = null
+
+    /**
+     * Whether a query carries the [numberKeys] of the JSON value [json] beside it to the query after, where that reads it: where
+     * they are read cheaply here, as a property's by its path, and only dearly of the column after, as through its text.
+     */
+    protected open fun carriesKeysAfter(json: String) = false
 
     /** Whether the store compares, sorts and groups a number by [numberKeys]: by default it keeps none. */
     protected open val keepsNumberKeys = false
@@ -2387,7 +2402,8 @@ abstract class SqlCypherCompiler(
             val names = returns.first().projection.items.map { it.name }
             if (returns.any { r -> r.projection.items.map { it.name }.toSet() != names.toSet() }) throw CompilerException("Each query of a UNION returns the same names, as in Cypher.")
             val distinct = !query.unions.first().all
-            val projected = comparingParts(distinct) { parts.map { calledPart(select, call, it, names, distinct) } }
+            // Each query's columns alike: none carries number keys, which one query's value may have and another's not.
+            val projected = comparingParts(distinct) { keyless { parts.map { calledPart(select, call, it, names, distinct) } } }
             if (projected.map { p -> p.scope.values.map { it::class } }.distinct().size > 1) unsupported("A UNION in CALL { … } whose queries return values of different kinds")
             // A map or a list that holds a node carries a column more, of its identity. Where one query's value has it and another's
             // has none, as `{x: c}` beside `{x: 1}`, the other gives its value as its identity, which it is, so their columns match
@@ -3717,6 +3733,32 @@ abstract class SqlCypherCompiler(
          * statement is compiled [typed], gives its nodes and relationships tagged ([output]), and its `result` as the host's
          * driver reads it back (`returned(json)`, which Oracle encodes again with `oracleReencodeJson`).
          */
+        /** Whether no value is [keyed]: in the queries of a `UNION` in `CALL { … }`, whose columns are matched. */
+        private var keysLeft = false
+
+        /** [work], no value [keyed] in it. */
+        private fun <T> keyless(work: () -> T): T {
+            val was = keysLeft
+            keysLeft = true
+            try {
+                return work()
+            } finally {
+                keysLeft = was
+            }
+        }
+
+        /**
+         * [value], where it may be a number, with the store's number keys of it ([Value.Json.keys]) to carry beside it, read where
+         * the value is: where rows are [compared] by them, and where they are read cheaply there and dearly after, as a property's
+         * by its path ([carriesKeysAfter]). As it is where the store keeps none, or reads them of the column after.
+         */
+        private fun keyed(value: Value, compared: Boolean): Value {
+            if (value !is Value.Json || !keepsNumberKeys || keysLeft || !value.mayBeNumber() || value.keys != null) return value
+            val sql = value.inflight ?: value.sql
+            if (!carriesNumberKeys(sql) || !compared && !carriesKeysAfter(sql)) return value
+            return value.copy(keys = groupedNumberKeys(sql).ifEmpty { return value })
+        }
+
         fun project(select: Select, written: Projection, final: Boolean, statement: Boolean = false): Projected {
             // As in Neo4j, a star gives the variables in the order of their names, before the items named after it.
             // Not a randomUUID() made first for a CALL or a condition (see `anewCall`), which the statement never named.
@@ -3750,7 +3792,12 @@ abstract class SqlCypherCompiler(
             val aggregating = groupsRows(projection, items)
             // Where rows are compared (DISTINCT, GROUP BY), each item is compared as [compared] has it.
             val compared = projection.distinct || aggregating
-            val columns = compiled.mapIndexed { i, (_, value) -> "c${i + 1}" to (if (compared) compared(value) else value) }
+            // An item that may be a number carries the store's number keys beside it, where rows are compared by them or a query
+            // after reads them (see numberKeys): read once here, where the value is, as a property by its own path.
+            val columns = compiled.mapIndexed { i, (_, value) ->
+                val column = if (compared) compared(value) else value
+                "c${i + 1}" to (if ((compared || !final) && !contains(items[i].expression, ::isAggregate)) keyed(column, compared) else column)
+            }
             val selectList = columns.flatMap { (column, value) -> value.columns(column) }.toMutableList()
             // A row of DISTINCT whose item is NaN, equal to nothing, is kept apart, as Neo4j keeps it (drivine4j#685): its own
             // number beside it, which no other row has. Only where an item may be NaN ([bareNaN]), so a statement given and working
@@ -3769,11 +3816,8 @@ abstract class SqlCypherCompiler(
             // (see numberKeys): carried beside it, so DISTINCT keeps such rows apart, and an order of the item reads them from their
             // columns, where read of the item's column again they would be read through a property's text. A group is keyed by
             // them already (see groupKeys).
-            if (compared) items.zip(columns).forEach { (item, column) ->
-                val value = column.second as? Value.Json ?: return@forEach
-                if (contains(item.expression, ::isAggregate) || !value.mayBeNumber() || !carriesNumberKeys(value.inflight ?: value.sql)) return@forEach
-                val keys = groupedNumberKeys(value.inflight ?: value.sql).mapIndexed { k, key -> "${column.first}k${k + 1}".also { selectList += "$key AS $it" } }
-                if (keys.isNotEmpty()) keyedColumns["$name.${column.first}"] = keys.map { "$name.$it" }
+            columns.forEach { (column, value) ->
+                (value as? Value.Json)?.keys?.let { keys -> keyedColumns["$name.$column"] = keys.indices.map { "$name.${column}k${it + 1}" } }
             }
             // Where rows are compared, an order term of the items that is no item is read over their columns, once compared:
             // a group is keyed by an item, and by no part of one.
@@ -7700,7 +7744,8 @@ abstract class SqlCypherCompiler(
 
         /** A value as JSON, for a projection or a comparison. A node is its properties, its stamp among them, as drivine gives a node. */
         fun json(value: Value): Value.Json = when (value) {
-            is Value.Json -> value
+            // A value carried with its number keys: the store reads them, not its column (see carriedKeys).
+            is Value.Json -> value.also { v -> v.keys?.let { carriedKeys[v.sql] = it } }
             is Value.Bool -> Value.Json(boolJson(value.sql))
             // One the statement deleted has no properties, as in Neo4j (drivine4j#420).
             is Value.Node -> Value.Json(nodeJson(value).let { if (value.deletable) "CASE WHEN ${isDeleted(value)} THEN ${literalJson(emptyMap<String, Any>())} ELSE $it END" else it })
@@ -8882,7 +8927,8 @@ abstract class SqlCypherCompiler(
     /** The select-list entries that carry this value out of a query, under [name]. */
     private fun Value.columns(name: String): List<String> = when (this) {
         // A value in flight is carried so, and made whole where it is read whole (see [columnsOf]).
-        is Value.Json -> listOf("${inflight ?: sql} AS $name") + listOfNotNull(identity?.let { "$it AS ${name}_identity" })
+        is Value.Json -> listOf("${inflight ?: sql} AS $name") + listOfNotNull(identity?.let { "$it AS ${name}_identity" }) +
+            keys.orEmpty().mapIndexed { k, key -> "$key AS ${name}k${k + 1}" }
         is Value.Entities -> listOf("$ids AS $name")
         is Value.Bool -> listOf("$sql AS $name")
         is Value.Node -> listOf("$nid AS ${name}_nid", "$labels AS ${name}_labels", "$props AS ${name}_props", "$stamp AS ${name}_stamp")
@@ -8904,7 +8950,7 @@ abstract class SqlCypherCompiler(
             // never given its key (see [Value.Json.inflight]).
             is Value.Json -> "$prefix$base".let { column ->
                 copy(sql = if (inflight != null) completed(column) else column, identity = identity?.let { "$prefix${base}_identity" }, tagText = null, tagKey = null,
-                    inflight = inflight?.let { column }, inflightItems = null)
+                    inflight = inflight?.let { column }, inflightItems = null, keys = keys?.indices?.map { "$prefix${base}k${it + 1}" })
             }
             is Value.Entities -> Value.Entities("$prefix$base", relationships, flat = flat)
             is Value.Bool -> Value.Bool("$prefix$base")
@@ -8928,7 +8974,7 @@ abstract class SqlCypherCompiler(
 
     /** This value with each piece of its SQL [transform]ed. */
     private fun Value.mapSql(transform: (String) -> String): Value = when (this) {
-        is Value.Json -> copy(sql = transform(sql), identity = identity?.let(transform), tagText = tagText?.let(transform), tagKey = tagKey?.let(transform), inflight = inflight?.let(transform), inflightItems = inflightItems?.let(transform))
+        is Value.Json -> copy(sql = transform(sql), identity = identity?.let(transform), tagText = tagText?.let(transform), tagKey = tagKey?.let(transform), inflight = inflight?.let(transform), inflightItems = inflightItems?.let(transform), keys = keys?.map(transform))
         is Value.Entities -> copy(ids = transform(ids), gathered = gathered?.let(transform))
         is Value.Bool -> copy(sql = transform(sql))
         is Value.Node -> copy(nid = transform(nid), labels = transform(labels), props = transform(props), stamp = transform(stamp))
@@ -8938,7 +8984,7 @@ abstract class SqlCypherCompiler(
 
     /** The columns [columns] gives this value under [name], each named and whether it holds JSON, in the same order. */
     private fun Value.columnKinds(name: String): List<Pair<String, Boolean>> = when (this) {
-        is Value.Json -> listOf(name to true) + listOfNotNull(identity?.let { "${name}_identity" to true })
+        is Value.Json -> listOf(name to true) + listOfNotNull(identity?.let { "${name}_identity" to true }) + keys.orEmpty().indices.map { "${name}k${it + 1}" to false }
         is Value.Entities -> listOf(name to true)
         is Value.Bool -> listOf(name to false)
         is Value.Node -> listOf("${name}_nid" to false, "${name}_labels" to true, "${name}_props" to true, "${name}_stamp" to false)
@@ -8952,8 +8998,11 @@ abstract class SqlCypherCompiler(
      */
     private fun Value.Json.mayBeNumber() = (known == null || known == Value.Known.FLOAT) && !integer && !text && !list && temporal == null && identity == null
 
-    /** [numberKeys] of [json] as a group is keyed by them: written out, not bound in a subquery, as Oracle groups by none (ORA-22818). */
-    private fun groupedNumberKeys(json: String): List<String> {
+    /**
+     * [numberKeys] of [json] written out, not bound in a subquery: as a group is keyed by them, as Oracle groups by none
+     * (ORA-22818), and under an aggregate, which binds none.
+     */
+    protected fun groupedNumberKeys(json: String): List<String> {
         val was = sharing
         sharing = false
         try {
@@ -8971,7 +9020,7 @@ abstract class SqlCypherCompiler(
     private fun Value.groupKeys(): List<String> = when (this) {
         // A value that may be a number by the keys the store keeps numbers apart by, where it keeps any (see numberKeys).
         is Value.Json -> (inflight ?: sql).let { value -> (if (mayBeNumber()) groupedValue(value) else null) ?: listOf(value) } + listOfNotNull(identity) +
-            (if (mayBeNumber() && carriesNumberKeys(inflight ?: sql)) groupedNumberKeys(inflight ?: sql) else emptyList())
+            (keys ?: if (mayBeNumber() && carriesNumberKeys(inflight ?: sql)) groupedNumberKeys(inflight ?: sql) else emptyList())
         is Value.Entities -> listOf(ids)
         is Value.Bool -> listOf(sql)
         is Value.Node -> listOf(nid, labels, props, stamp)

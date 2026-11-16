@@ -801,13 +801,8 @@ class OracleCypherCompiler(
 
     override val keepsNumberKeys = true
 
-    /**
-     * Whether [json]'s [numberKeys] are read where it is with no value bound in a subquery ([shared]): a property's, by its path,
-     * or a short value's that no subquery works out. Under an aggregate, as in `min`'s order and `count(DISTINCT …)`, nothing is
-     * bound; a long value worked out there, or one a subquery works out, is compared as JSON, as before.
-     */
-    private fun keyedInPlace(json: String) =
-        (propertyRead(json) ?: keptRead(json)) != null || !binds(bigInteger(json, "'\$'")) && !json.contains("SELECT", ignoreCase = true)
+    /** A property's, read by its path: read of the column after, they would read it through its text ([itemProperty]). */
+    override fun carriesKeysAfter(json: String) = (propertyRead(json) ?: keptRead(json)) != null
 
     /**
      * The keys a number is compared, ordered, grouped and counted by (drivine-cypher-spec#309), where Oracle's JSON compares and
@@ -819,6 +814,7 @@ class OracleCypherCompiler(
      * where [json] is no number.
      */
     override fun numberKeys(json: String): List<String> {
+        carriedKeys[json]?.let { return it }
         val (x, path) = propertyRead(json) ?: keptRead(json) ?: (json to "'\$'")
         return listOf(doubleKey(x, path), exactKey(x, path))
     }
@@ -828,8 +824,11 @@ class OracleCypherCompiler(
      * among them, and an integer as the double nearest it; null where it is no number, as `TYPE(STRICT)` reads a text or a
      * truth value, which Oracle's lax read would make a number of.
      */
-    private fun doubleKey(json: String, path: String = "'\$'") =
-        idColumn(json, path)?.let { "TO_BINARY_DOUBLE($it)" } ?: "JSON_VALUE($json, $path RETURNING BINARY_DOUBLE NULL ON ERROR TYPE(STRICT))"
+    private fun doubleKey(json: String, path: String = "'\$'") = carried(json, path, 0)
+        ?: idColumn(json, path)?.let { "TO_BINARY_DOUBLE($it)" } ?: "JSON_VALUE($json, $path RETURNING BINARY_DOUBLE NULL ON ERROR TYPE(STRICT))"
+
+    /** The column a query carries the key at [index] of [json] in ([carriedKeys]), where [path] reads it whole. */
+    private fun carried(json: String, path: String, index: Int) = if (path != "'\$'") null else carriedKeys[json]?.get(index)
 
     /**
      * The key column [json] is the id of, `JSON_SCALAR(n3.nid)`, as `id()` and `elementId()` give it, where [path] reads it
@@ -847,6 +846,7 @@ class OracleCypherCompiler(
      * The integer is read once by a path only it passes, and its double made of it, so the value is written out once.
      */
     private fun exactKey(json: String, path: String = "'\$'"): String {
+        carried(json, path, 1)?.let { return it }
         return shared(bigInteger(json, path)) { (n) -> "NVL($n - (${OracleSql.wholeNumber("TO_BINARY_DOUBLE($n)")}), 0)" }
     }
 
@@ -977,19 +977,20 @@ class OracleCypherCompiler(
         if (items.any { it is Number }) numbersEqual(item, value, small = items.all { it !is Number || small(it) }) else "$item = $value"
 
     /**
-     * Each value once, a number by its keys ([numberKeys]) as [numbersEqual] compares it: any other value as JSON, a number
-     * whose [exactKey] is 0 by its double, and an integer past 2^53 by the `NUMBER` it is. NaN, equal to nothing, is counted
-     * each time (drivine4j#558), as a double, which Oracle finds equal to itself, would count it once. A property's value alone:
-     * any other, as an item of a stored list, is counted as before, a NaN once where the statement works out none, as
-     * `collect(DISTINCT …)` keeps it (writes.yaml, "MERGE of a null or NaN property").
+     * Each value once, a number by its keys ([numberKeys]) as [numbersEqual] compares it, read where the value is, written out
+     * as nothing is bound under an aggregate: any other value as JSON, a number whose [exactKey] is 0 by its double, and an
+     * integer past 2^53 by the `NUMBER` it is, its double's exactly ([OracleSql.wholeNumber]) and that key. NaN, equal to
+     * nothing, is counted each time (drivine4j#558), where a double, which Oracle finds equal to itself, would count it once:
+     * a property's, and any where the statement is given or works out NaN ([bareNaN]). Else, as of an item of a stored list, a
+     * NaN is counted once, as `collect(DISTINCT …)` keeps it, as before (writes.yaml, "MERGE of a null or NaN property").
      */
-    override fun distinctCount(json: String, counted: String): String? {
-        if ((propertyRead(json) ?: keptRead(json)) == null) return null
-        val (d, exact) = numberKeys(json)
-        val (x, path) = propertyRead(json) ?: keptRead(json) ?: (json to "'\$'")
-        val big = bigInteger(x, path)
-        return "(count(DISTINCT CASE WHEN $d IS NULL THEN $counted END) + count(DISTINCT CASE WHEN $d IS NAN THEN NULL WHEN $exact = 0 THEN $d END) + " +
-            "count(DISTINCT CASE WHEN $exact <> 0 THEN $big END) + count(CASE WHEN $d IS NAN THEN 1 END))"
+    override fun distinctCount(json: String, counted: String): String {
+        val (d, exact) = groupedNumberKeys(json)
+        // A NaN apart where it is a property's, or the statement is given or works out NaN ([bareNaN]); else once.
+        val apart = (propertyRead(json) ?: keptRead(json)) != null || bareNaN(counted) != null
+        val doubles = if (apart) "CASE WHEN $d IS NAN THEN NULL WHEN $exact = 0 THEN $d END" else "CASE WHEN $exact = 0 THEN $d END"
+        return "(count(DISTINCT CASE WHEN $d IS NULL THEN $counted END) + count(DISTINCT $doubles) + " +
+            "count(DISTINCT CASE WHEN $exact <> 0 THEN ${OracleSql.wholeNumber(d)} + $exact END)${if (apart) " + count(CASE WHEN $d IS NAN THEN 1 END)" else ""})"
     }
 
     /**
@@ -1503,7 +1504,7 @@ class OracleCypherCompiler(
         // A temporal value's tag of a kind the statement does not know by its sort key, which its rank holds ([sortRank]), as MIN
         // reads no tag's order; any other value by its kind, and then as MIN orders it.
         // A number by its keys after its kind (see numberKeys), read from the property by its path, as MIN orders it as JSON.
-        val order = if (key == null) (listOf(sortRank(value)) + (if (keyedInPlace(value)) numberKeys(value) else emptyList())).joinToString(", ") { "$it $direction NULLS LAST" }
+        val order = if (key == null) (listOf(sortRank(value)) + groupedNumberKeys(value)).joinToString(", ") { "$it $direction NULLS LAST" }
             else "${kindOrder(value)} $direction NULLS LAST, $key $direction NULLS LAST"
         return "${if (min) "MIN" else "MAX"}(${nullIfJsonNull(value)}) KEEP (DENSE_RANK FIRST ORDER BY $order)"
     }
