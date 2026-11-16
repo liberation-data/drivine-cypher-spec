@@ -108,6 +108,9 @@ class OracleExistsQueryTest {
         "MATCH (n) RETURN EXISTS { WITH n.title AS t MATCH (x {title: t}) RETURN x }",
         "MATCH (n) RETURN EXISTS { WITH n AS x MATCH (x)-->() RETURN x }",
         "MATCH (n) RETURN EXISTS { MATCH (n)-[*1..2]->(:Person) }",
+        // A read after an aggregate decides the truth again: a node returned by a `CALL` is bound.
+        "MATCH (n) RETURN EXISTS { MATCH (x:Movie) WITH count(x) AS c MATCH (y:Person) RETURN y }",
+        "MATCH (n) RETURN EXISTS { CALL (n) { MATCH (n)-->(x) RETURN x } WITH x, count(*) AS c MATCH (x)-->(y) RETURN y }",
         "MATCH (n) WHERE (n)-->() RETURN n",
     )
 
@@ -130,6 +133,7 @@ class OracleExistsQueryTest {
     /**
      * Statements whose `EXISTS { … }` reads a table in its SQL, but whose Cypher may read none: a path that may take no step,
      * a quantified one, a shortest path, or a clause after a `CALL` that reads none. Each is counted, which costs only speed.
+     * One that aggregates after its read keeps a row whatever the table holds, as an optional read does, so it is counted too.
      */
     private val mayReadNone = listOf(
         "MATCH (n) RETURN EXISTS { MATCH (n)-[*0..]->(m) }",
@@ -139,6 +143,12 @@ class OracleExistsQueryTest {
         "MATCH (n) RETURN EXISTS { MATCH p = allShortestPaths((n)-[*]->(m)) }",
         "MATCH (n) RETURN EXISTS { CALL (n) { WITH n WHERE n:Movie RETURN n AS x } MATCH (y) RETURN y }",
         "MATCH (n) RETURN EXISTS { CALL db.labels() YIELD label MATCH (x) RETURN x }",
+        "MATCH (n) RETURN EXISTS { MATCH (x:Movie) RETURN count(x) AS c }",
+        "MATCH (n) RETURN EXISTS { MATCH (x:Movie) WITH collect(x) AS xs RETURN xs }",
+        "MATCH (n) RETURN EXISTS { MATCH (n)-->(x) WITH count(x) AS c WHERE c >= 0 RETURN c }",
+        "MATCH (n) RETURN EXISTS { CALL { MATCH (x:Movie) RETURN count(x) AS c } RETURN c }",
+        "MATCH (n) RETURN EXISTS { CALL { MATCH (x:Movie) RETURN x } RETURN count(x) AS c }",
+        "MATCH (n) RETURN EXISTS { CALL (n) { MATCH (n)-->(x) RETURN x } WITH x, count(*) AS c MATCH (x:Movie) RETURN x }",
     )
 
     @Test

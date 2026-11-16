@@ -564,24 +564,34 @@ abstract class SqlCypherCompiler(
      * (not an expression's subquery), a `CALL`'s query's among them, matches a node not [bound] yet or a relationship of at
      * least one step. A `UNION` reads one only where each of its queries does: Oracle has not been seen to answer an `EXISTS`
      * of a union of a table's rows and the row alone. An `OPTIONAL MATCH` or an `OPTIONAL CALL` keeps the row whatever the
-     * table holds, so it reads none for certain either. A path that may take none, a quantified one, a shortest path, an
-     * `UNWIND`, a write or a clause after a `CALL` that reads none is taken to read none, which costs a store that counts such
-     * an `EXISTS` only speed.
+     * table holds, so it reads none for certain either, and nor does a `WITH` or a `RETURN` that aggregates after a read:
+     * `count(x)` or `collect(x)` with no key gives a row however many it reads, so only a read after it decides the truth again.
+     * A path that may take none, a quantified one, a shortest path, an `UNWIND`, a write, a `CALL` that returns `*`, or a clause
+     * after a `CALL` that reads none is taken to read none, which costs a store that counts such an `EXISTS` only speed.
      */
     protected fun readsTable(query: Query, bound: Set<String>): Boolean =
         (listOf(query.clauses) + query.unions.map { it.clauses }).all { clauses ->
             val names = bound.toMutableSet()
+            var reads = false
             for (clause in clauses) when (clause) {
-                is Clause.Match -> if (!clause.optional && readsTable(clause.patterns, names)) return@all true else clause.patterns.forEach { p ->
+                is Clause.Match -> if (!clause.optional && readsTable(clause.patterns, names)) reads = true else clause.patterns.forEach { p ->
                     names += listOfNotNull(p.variable) + p.nodes.mapNotNull { it.variable } + p.relationships.mapNotNull { it.variable }
                 }
-                is Clause.With -> names += clause.projection.items.map { it.name }
+                is Clause.With -> {
+                    names += clause.projection.items.map { it.name }
+                    if (clause.projection.items.any { contains(it.expression, ::isAggregate) }) reads = false
+                }
                 is Clause.Unwind -> names += clause.variable
-                is Clause.Return -> {}
-                is Clause.Call -> return@all !clause.optional && !clause.procedure && readsTable(clause.query, names)
+                is Clause.Return -> if (clause.projection.items.any { contains(it.expression, ::isAggregate) }) reads = false
+                is Clause.Call -> {
+                    val returns = (listOf(clause.query.clauses) + clause.query.unions.map { it.clauses }).map { it.lastOrNull() as? Clause.Return }
+                    if (clause.optional || clause.procedure || returns.any { it == null || it.projection.star } || !readsTable(clause.query, names)) return@all false
+                    names += returns.flatMap { r -> r!!.projection.items.map { it.name } }
+                    reads = true
+                }
                 else -> return@all false
             }
-            false
+            reads
         }
 
     /** Whether [patterns] read a table for certain, a node not [bound] or a relationship of at least one step: see [readsTable]. */
