@@ -1162,7 +1162,7 @@ abstract class SqlCypherCompiler(
     /**
      * The keys a store sorts, groups and counts the JSON value [json] by beside the value itself, where it may be a number and
      * the store's JSON loses a number's value in comparing it: none by default, where the JSON's own order and equality are
-     * Cypher's for numbers. Each is a SQL value, null where [json] is no number.
+     * Cypher's for numbers. Each is a SQL value: the first null where [json] is no number, which so tells it from any number.
      */
     protected open fun numberKeys(json: String): List<String> = emptyList()
 
@@ -2162,7 +2162,7 @@ abstract class SqlCypherCompiler(
             try {
                 var select = Select(scope)
                 for (clause in query.clauses) {
-                    if (clause is Clause.Return) return project(select, clause.projection, final = false).sql
+                    if (clause is Clause.Return) return project(select, clause.projection, final = false, keysAfter = false).sql
                     select = read(select, clause, scope)
                 }
                 return (listOf(select.head("1")) + from(select) + listOfNotNull(select.whereClause())).joinToString("\n")
@@ -3726,14 +3726,9 @@ abstract class SqlCypherCompiler(
         private val keyedColumns = mutableMapOf<String, List<String>>()
 
         /**
-         * The query a `WITH` or a `RETURN` makes of [select]: its items as columns, grouped where it
-         * aggregates, or is `DISTINCT` and orders by an aggregate ([groupsRows]), then ordered, skipped and limited. Rows it does not order, group or keep distinct
-         * stay in the order [select] reads them, as a graph engine keeps them. With [statement], it is the statement's own last
-         * `RETURN`, or one of its `UNION`'s, not a subquery's: it names the statement's columns ([returned]), and where the
-         * statement is compiled [typed], gives its nodes and relationships tagged ([output]), and its `result` as the host's
-         * driver reads it back (`returned(json)`, which Oracle encodes again with `oracleReencodeJson`).
+         * Whether no value is [keyed], and none carries keys it was given: in the queries of a `UNION` in `CALL { … }`, whose
+         * columns are matched, where one query's value may have them and another's not.
          */
-        /** Whether no value is [keyed]: in the queries of a `UNION` in `CALL { … }`, whose columns are matched. */
         private var keysLeft = false
 
         /** [work], no value [keyed] in it. */
@@ -3749,17 +3744,29 @@ abstract class SqlCypherCompiler(
 
         /**
          * [value], where it may be a number, with the store's number keys of it ([Value.Json.keys]) to carry beside it, read where
-         * the value is: where rows are [compared] by them, and where they are read cheaply there and dearly after, as a property's
-         * by its path ([carriesKeysAfter]). As it is where the store keeps none, or reads them of the column after.
+         * the value is: where rows are [compared] by them, and where a query [after] may read them, and they are read cheaply here
+         * and dearly there, as a property's by its path ([carriesKeysAfter]). As it is where the store keeps none, or reads them
+         * of the column after.
          */
-        private fun keyed(value: Value, compared: Boolean): Value {
-            if (value !is Value.Json || !keepsNumberKeys || keysLeft || !value.mayBeNumber() || value.keys != null) return value
+        private fun keyed(value: Value, compared: Boolean, after: Boolean): Value {
+            if (value !is Value.Json || !keepsNumberKeys || !value.mayBeNumber() || value.keys != null) return value
             val sql = value.inflight ?: value.sql
-            if (!carriesNumberKeys(sql) || !compared && !carriesKeysAfter(sql)) return value
+            if (!carriesNumberKeys(sql) || !compared && !(after && carriesKeysAfter(sql))) return value
             return value.copy(keys = groupedNumberKeys(sql).ifEmpty { return value })
         }
 
-        fun project(select: Select, written: Projection, final: Boolean, statement: Boolean = false): Projected {
+        /**
+         * The query a `WITH` or a `RETURN` makes of [select]: its items as columns, grouped where it
+         * aggregates, or is `DISTINCT` and orders by an aggregate ([groupsRows]), then ordered, skipped and limited. Rows it does not order, group or keep distinct
+         * stay in the order [select] reads them, as a graph engine keeps them. With [statement], it is the statement's own last
+         * `RETURN`, or one of its `UNION`'s, not a subquery's: it names the statement's columns ([returned]), and where the
+         * statement is compiled [typed], gives its nodes and relationships tagged ([output]), and its `result` as the host's
+         * driver reads it back (`returned(json)`, which Oracle encodes again with `oracleReencodeJson`).
+         * Where [keysAfter], a query after may read its items' number keys, which are carried beside them ([keyed]): a final
+         * `RETURN`, or a `COUNT { … }`'s or an `EXISTS { … }`'s, whose columns nothing reads, carries none but those it
+         * compares its rows by.
+         */
+        fun project(select: Select, written: Projection, final: Boolean, statement: Boolean = false, keysAfter: Boolean = !final): Projected {
             // As in Neo4j, a star gives the variables in the order of their names, before the items named after it.
             // Not a randomUUID() made first for a CALL or a condition (see `anewCall`), which the statement never named.
             val starred = select.bound.keys.filterNot { it in madeAnew }.sorted()
@@ -3774,13 +3781,13 @@ abstract class SqlCypherCompiler(
             )
             // Before aggregatesFirst, which names each variable it groups by as an item of its own.
             requireExplicitGrouping(items, projection.orderBy, select.scope.keys, projection.distinct)
-            anewFirst(select, projection, items)?.let { (made, kept) -> return project(made, kept, final, statement) }
-            casesFirst(select, projection, items)?.let { (cased, kept) -> return project(cased, kept, final, statement) }
+            anewFirst(select, projection, items)?.let { (made, kept) -> return project(made, kept, final, statement, keysAfter) }
+            casesFirst(select, projection, items)?.let { (cased, kept) -> return project(cased, kept, final, statement, keysAfter) }
             // After casesFirst, which refuses what it must of an aggregate's CASE before working it out first.
-            sharedFirst(select, projection, items)?.let { (shared, kept) -> return project(shared, kept, final, statement) }
-            sortsFirst(select, projection, items)?.let { (sorted, kept) -> return project(sorted, kept, final, statement) }
-            aggregatesFirst(select, projection, items)?.let { (grouped, kept) -> return project(grouped, kept, final, statement) }
-            heldFirst(select, projection, items)?.let { (held, keyed) -> return project(held, keyed, final, statement) }
+            sharedFirst(select, projection, items)?.let { (shared, kept) -> return project(shared, kept, final, statement, keysAfter) }
+            sortsFirst(select, projection, items)?.let { (sorted, kept) -> return project(sorted, kept, final, statement, keysAfter) }
+            aggregatesFirst(select, projection, items)?.let { (grouped, kept) -> return project(grouped, kept, final, statement, keysAfter) }
+            heldFirst(select, projection, items)?.let { (held, keyed) -> return project(held, keyed, final, statement, keysAfter) }
             if (final && items.size > 1) {
                 warn(
                     "The statement returns ${items.size} items (${items.joinToString { it.name }}). Prefer returning a single map or value, such as RETURN { key1: val1, key2: val2 }: " +
@@ -3796,7 +3803,13 @@ abstract class SqlCypherCompiler(
             // after reads them (see numberKeys): read once here, where the value is, as a property by its own path.
             val columns = compiled.mapIndexed { i, (_, value) ->
                 val column = if (compared) compared(value) else value
-                "c${i + 1}" to (if ((compared || !final) && !contains(items[i].expression, ::isAggregate)) keyed(column, compared) else column)
+                // Where no query after reads it, or in a query of a UNION in CALL { … }, whose columns are matched, a value carried
+                // with keys is carried without them.
+                "c${i + 1}" to when {
+                    contains(items[i].expression, ::isAggregate) -> column
+                    !keysLeft && (compared || keysAfter) -> keyed(column, compared, keysAfter)
+                    else -> (column as? Value.Json)?.takeIf { it.keys != null }?.copy(keys = null) ?: column
+                }
             }
             val selectList = columns.flatMap { (column, value) -> value.columns(column) }.toMutableList()
             // A row of DISTINCT whose item is NaN, equal to nothing, is kept apart, as Neo4j keeps it (drivine4j#685): its own
@@ -7095,8 +7108,8 @@ abstract class SqlCypherCompiler(
                 (expression is Expression.Subquery && expression.kind == Expression.Subquery.Kind.COUNT)
 
         /**
-         * Whether the statement makes [value], compiled from [expression], no number: a text, a truth value, a list or a map, one that
-         * holds a node or a relationship, a list of them, or one given so.
+         * Whether the statement makes [value], compiled from [expression], no number: a text, a truth value, a list or a map, a
+         * temporal value, a node or a relationship, one that holds one, a list of them, or one given so.
          */
         private fun numberless(value: Value, expression: Expression?): Boolean = value !is Value.Json ||
             value.known.let { it == Value.Known.TEXT || it == Value.Known.BOOLEAN || it == Value.Known.LIST || it == Value.Known.MAP } ||

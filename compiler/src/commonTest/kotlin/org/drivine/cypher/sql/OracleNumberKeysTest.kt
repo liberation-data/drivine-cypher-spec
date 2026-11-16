@@ -185,4 +185,28 @@ class OracleNumberKeysTest {
         // Under the aggregate, nothing is bound in a subquery.
         assertTrue(!Regex("KEEP \\(DENSE_RANK FIRST ORDER BY [^)]*\\(SELECT").containsMatchIn(worked), worked)
     }
+
+    @Test
+    fun aQueryWhoseColumnsNothingReadsCarriesNoKeys() {
+        // A final RETURN of a value a WITH carries with its keys gives the value alone.
+        val returned = compiler.compile("MATCH (n:K) WITH n.k AS k RETURN k", emptyMap()).sql
+        assertTrue(!Regex("w\\d+\\.c1k1").containsMatchIn(returned), returned)
+        // A COUNT { … }'s RETURN is counted, its columns read by nothing.
+        val counted = compiler.compile("MATCH (n:K) RETURN COUNT { MATCH (m:K) RETURN m.k }", emptyMap()).sql
+        assertTrue("BINARY_DOUBLE NULL ON ERROR TYPE(STRICT)" !in counted, counted)
+    }
+
+    @Test
+    fun eachQueryOfAUnionInACallGivesTheSameColumns() {
+        // A value a WITH carries with its keys, returned by one query of the UNION beside a value with none in the other: each
+        // query gives its value alone, where Oracle refuses queries of a UNION with different numbers of columns (ORA-01789).
+        for (cypher in listOf(
+            "MATCH (n:K) WITH n.k AS k CALL { WITH k RETURN k AS a UNION WITH k RETURN 1.5 AS a } RETURN a",
+            "MATCH (n:K) WITH n.k AS k CALL (k) { RETURN k AS a UNION ALL RETURN 1.5 AS a } RETURN a ORDER BY a",
+        )) {
+            val sql = compiler.compile(cypher, emptyMap()).sql
+            val parts = Regex("SELECT (q\\d+\\.c1.*) FROM \\(").findAll(sql).map { it.groupValues[1].replace(Regex("q\\d+\\."), "") }.toList()
+            assertEquals(listOf("c1", "c1"), parts, "$cypher: $sql")
+        }
+    }
 }
