@@ -597,6 +597,34 @@ class OracleCypherCompiler(
     }
 
     /**
+     * A property compared with a text of 1 to [SHORT_TEXT] bytes, a truth value or a whole number below 2^53 the statement gives,
+     * outside a write: by [keyEquals], one read of the property that only a value of the given kind passes (#287). Where the
+     * property is SQL's null or not there, it is null; and elsewhere false where that read finds nothing.
+     */
+    override fun comparesByKey(x: String, given: Any): Boolean =
+        !asJson && propertyRead(x) != null && (given is String || given is Boolean || given is Long && given > -EXACT_DOUBLES && given < EXACT_DOUBLES)
+
+    /**
+     * Whether the property [x] is equal to the value of the class [kind] bound at [key], as Cypher compares them, three-valued:
+     * the property read as that kind alone, `TYPE(STRICT)`, which reads a value of another kind, a list or a map
+     * among them, as null; compared with the key; and where that read gives nothing, false unless the property is null or not there. Measured
+     * over 250,000 rows, `state = 'open' AND priority = 1` took 50 ms so, against 137 ms as [oneSided] compares them and 45 ms
+     * for layout 1's one read, which told no number from a text (#287). A list read by a path into it (`JSON_EXISTS` with
+     * `PASSING`), in Oracle's lax mode, found `['open']` equal to `'open'` and the text `'1'` to the number 1.
+     */
+    override fun keyEquals(x: String, kind: String, key: String): String? {
+        val read = when (kind) {
+            "string" -> "JSON_VALUE($x, '\$' RETURNING VARCHAR2($SHORT_TEXT) NULL ON ERROR TYPE(STRICT)) = $key"
+            "number" -> "JSON_VALUE($x, '\$' RETURNING NUMBER NULL ON ERROR TYPE(STRICT)) = TO_NUMBER($key)"
+            "boolean" -> "JSON_VALUE($x, '\$' RETURNING BOOLEAN NULL ON ERROR TYPE(STRICT)) = ($key = 'true')"
+            else -> return null
+        }
+        // A property read by its own path, as [sharedCompared] reads one: the statement keeps its hint (#415).
+        readsCompared = true
+        return "COALESCE($read, CASE WHEN NVL(${kind(x)}, 'null') <> 'null' THEN FALSE END)"
+    }
+
+    /**
      * Whether the JSON value [a] is equal to [b], a value that is no text, or a text read as a `VARCHAR2`: as JSON, where [a] is
      * read as a `VARCHAR2` too or is no text; else [a] is a text that is longer, or empty, and not equal.
      */

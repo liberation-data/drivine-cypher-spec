@@ -77,6 +77,21 @@ class Parameters(
         return asCount("\$$key")
     }
 
+    /**
+     * Marks the parameter [name]'s own marker, `_cy_<name>`, as one the SQL may not read: a comparison by the value's key
+     * ([derived]) reads the key in its place (liberation-data/drivine-cypher-spec#287). [valuesOf] binds it only where the SQL
+     * holds it, so no statement binds a name its SQL doesn't hold.
+     */
+    fun mayLeaveUnread(name: String) {
+        if (!inObject) unread += "_cy_$name"
+    }
+
+    private val unread = mutableSetOf<String>()
+
+    /** What the SQL [sql] binds: [values], but a marker [mayLeaveUnread] names only where [sql] holds it. */
+    fun valuesOf(sql: String): Map<String, Any?> =
+        if (inObject || unread.isEmpty()) values else bound.filterKeys { it !in unread || Regex("\\$" + Regex.escape(it) + "(?![A-Za-z0-9_])").containsMatchIn(sql) }
+
     /** The value bound to the parameter [name], as the caller gave it. */
     fun value(name: String): Any? = given(name)
 

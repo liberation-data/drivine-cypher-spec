@@ -53,17 +53,21 @@ class IndexKeyTest {
         for ((given, key) in listOf<Pair<Any, String>>("p-123" to "p-123", 5L to "5", true to "true")) {
             val compiled = compiler.compile(statement, mapOf("id" to given))
             assertEquals(key, compiled.parameters["_cyk_id"], "the key of $given")
-            assertEquals(1, Regex("JSON\\(\\\$_cy_id\\)").findAll(compiled.sql).count(), compiled.sql)
-            // The labelled range index's and the uniqueness constraint's key columns, each compared with the one bound key.
-            assertEquals(2, Regex("= \\\$_cyk_id\\b").findAll(compiled.sql).count(), compiled.sql)
+            // The value's JSON is read nowhere, and so not bound: the equality, too, compares the property by the key (#287).
+            assertEquals(0, Regex("JSON\\(\\\$_cy_id\\)").findAll(compiled.sql).count(), compiled.sql)
+            assertTrue("_cy_id" !in compiled.parameters, compiled.parameters.keys.toString())
+            // The labelled range index's and the uniqueness constraint's key columns, and the equality, each compare the one key.
+            assertEquals(3, Regex("\\\$_cyk_id\\b").findAll(compiled.sql).count(), compiled.sql)
         }
         // Named after its parameter, as `_cy_id` is: the fragments of one statement, given parameters of their own, bind apart.
         val two = compiler.compile("MATCH (p:Person {id: \$a}), (q:Person {id: \$b}) RETURN p.name, q.name", mapOf("a" to "x", "b" to "y"))
         assertEquals("x", two.parameters["_cyk_a"])
         assertEquals("y", two.parameters["_cyk_b"])
-        // Bound only where an index answers it: a property no index holds binds no key, as its SQL names none.
+        // Bound only where it is compared: a property no index holds compares no index column with it.
         val unindexed = compiler.compile("MATCH (p:Person {name: \$n}) RETURN p.id", mapOf("n" to "Ada"))
-        assertTrue(unindexed.parameters.keys.none { it.startsWith("_cyk_") }, unindexed.parameters.keys.toString())
+        // Since #287 the equality itself compares the property by the key, so it is bound, and read there alone.
+        assertEquals(setOf("_cyk_n"), unindexed.parameters.keys, unindexed.sql)
+        assertEquals(1, Regex("\\\$_cyk_n\\b").findAll(unindexed.sql).count(), unindexed.sql)
         // A literal's key is written as the literal is, binding nothing of the compiler's.
         val literal = compiler.compile("MATCH (p:Person {id: 'p-1'}) RETURN p.name", emptyMap())
         assertTrue(literal.parameters.keys.none { it.startsWith("_cyk_") } && "= 'p-1'" in literal.sql, literal.sql)
@@ -101,7 +105,7 @@ class IndexKeyTest {
         val compiler = OracleCypherCompiler("g", true, true, setOf("Person" to "id", "Person" to "code"))
         val compiled = compiler.compile("MATCH (p:Person {id: \$x}), (q:Person {code: \$x}) RETURN p.name, q.name", mapOf("x" to "k"))
         assertEquals(listOf("_cyk_x"), compiled.parameters.keys.filter { it.startsWith("_cyk_") })
-        assertEquals(4, Regex("= \\\$_cyk_x\\b").findAll(compiled.sql).count(), compiled.sql)
+        assertEquals(6, Regex("= \\\$_cyk_x\\b").findAll(compiled.sql).count(), compiled.sql)
     }
 
     @Test
