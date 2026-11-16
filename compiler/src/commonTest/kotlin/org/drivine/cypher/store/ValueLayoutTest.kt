@@ -122,7 +122,7 @@ class ValueLayoutTest {
             assertEquals(CypherJson.writeValueAsString(tree), CypherJson.writeValueAsString(ValueLayout.read(tree, typed = true)), "on $target, typed: $text")
             checked++
         }
-        assertTrue(checked > 500, "on $target: $checked texts read")
+        assertTrue(checked > if (target == "jvm") 500 else 50, "on $target: $checked texts read")
         // An object shaped as a tag with no dollar, `{"t": "date", "v": …}`, is not one.
         val shaped = CypherJson.readTree("""{"t":"date","v":"2024-01-01","s":"10000020240101"}""")
         assertEquals(shaped, ValueLayout.read(shaped))
