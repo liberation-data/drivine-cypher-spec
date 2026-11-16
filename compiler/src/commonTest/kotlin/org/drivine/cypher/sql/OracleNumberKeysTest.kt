@@ -59,6 +59,18 @@ class OracleNumberKeysTest {
     }
 
     @Test
+    fun aCaseSubjectAndARelationshipsPropertyAreComparedByTheirKeys() {
+        // A simple CASE compares its subject with each alternative as = does: by the keys, read from the properties.
+        val case = compiler.compile("MATCH (n:K), (m:K) RETURN CASE n.k WHEN m.k THEN 1 END", emptyMap()).sql
+        assertTrue("COALESCE(${double("n1.props", "$.k")} = ${double("n2.props", "$.k")} AND NVL(${big("n1.props", "$.k")}" in case, case)
+        assertNoKeyOfARoutedValue(case)
+        // A relationship's property is keyed as a node's is, from its own properties.
+        val rel = compiler.compile("MATCH ()-[r:R]->() RETURN r.k ORDER BY r.k", emptyMap()).sql
+        assertTrue(Regex("JSON_VALUE\\(e\\d+\\.props, '\\$\\.k' RETURNING BINARY_DOUBLE NULL ON ERROR TYPE\\(STRICT\\)\\) AS s1k1").containsMatchIn(rel), rel)
+        assertNoKeyOfARoutedValue(rel)
+    }
+
+    @Test
     fun aGivenFloatAndAListOfThemAreComparedByTheirKeys() {
         val equal = compiler.compile("MATCH (n:K) WHERE n.k = \$g RETURN n.i", mapOf("g" to 1.0e-140)).sql
         assertTrue("${double("n1.props", "$.k")} = ${double("JSON(\$_cy_g EXTENDED)", "$")}" in equal, equal)
