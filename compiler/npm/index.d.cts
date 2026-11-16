@@ -9,3 +9,14 @@ export declare function hostVersion(): number;
  * null, a number as its text; the tag it makes as JSON text, or null. Throws for a pair Cypher has no arithmetic of.
  */
 export declare function temporalArithmetic(operator: string, x: string | null, y: string | null): string | null;
+
+/**
+ * A call of one of the module's SQLite host functions by its name, `args` its arguments, SQLite's values each written as its
+ * kind, its JavaScript length, a colon and its text (`n` for null, `i<len>:<digits>`, `r<len>:<number>`, `t<len>:<text>`,
+ * `b<len>:<base64>`), one after another: the answer, the value written the same way without its length (`n`, `i…`, `r…`,
+ * `t…`, `b…`), or `e<message>` where the function fails. See the compiler's README, "Host functions from JavaScript".
+ */
+export declare function hostCall(name: string, args: string): string;
+
+/** The module's SQLite host functions, as a JSON object by name: each one's `arity` (-1 for any) and `deterministic`. */
+export declare function hostFunctions(): string;

@@ -17,6 +17,24 @@ fun compile(request: String): String = CompileJson.compile(request)
 fun hostVersion(): Int = SqliteFunctions.HOST_VERSION
 
 /**
+ * A call of one of the module's SQLite host functions by its [name] (`drivine_temporal`, `drivine_sort_key` …), [args] its
+ * arguments, SQLite's values each written as its kind, length and text: the answer, a value so written or `e<message>`
+ * ([org.drivine.cypher.host.HostCall] says how). A host whose own SQLite functions are in JavaScript registers each of
+ * `HostFunctions.all` as a call of this, so the module's one copy is the one every library runs (liberation-data/drivine#757).
+ */
+@JsExport
+fun hostCall(name: String, args: String): String = org.drivine.cypher.host.HostCall.call(name, args)
+
+/**
+ * The module's SQLite host functions, as a JSON object by name: each one's number of arguments (-1 for any) and whether it is
+ * deterministic, so a host registers each as SQLite is to call it.
+ */
+@JsExport
+fun hostFunctions(): String = org.drivine.cypher.host.HostFunctions.all.joinToString(",", "{", "}") {
+    "\"${it.name}\":{\"arity\":${it.arity},\"deterministic\":${it.deterministic}}"
+}
+
+/**
  * SQLite's host function of temporal arithmetic, `drivine_temporal_arithmetic(operator, x, y)`, as the module works it out
  * (`HostTemporalArithmetic`, drivine4j#418): a host whose own SQLite functions are in JavaScript registers it as a call of this,
  * so the module's one copy is the one every library runs. [x] and [y] are each a JSON text, or null for SQL's null; a number
