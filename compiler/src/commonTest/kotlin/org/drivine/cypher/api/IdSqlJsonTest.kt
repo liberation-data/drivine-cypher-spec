@@ -1,0 +1,70 @@
+package org.drivine.cypher.api
+
+import org.drivine.cypher.json.CypherJson
+import org.drivine.cypher.json.JsonNode
+import org.drivine.cypher.number.target
+import org.drivine.cypher.store.IdSql
+import org.drivine.cypher.store.IndexKey
+import org.drivine.cypher.store.Stamps
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertTrue
+
+/**
+ * The id lookups through the JSON entry ([IdSqlJson]), as TypeScript and Python ask for them: each [IdSql]'s own, on every
+ * target, and each written over the expressions the store's index is made over ([IndexKey.column]), so the index answers it
+ * (liberation-data/drivine-cypher-spec#107).
+ */
+class IdSqlJsonTest {
+
+    private fun answer(request: String): JsonNode = CypherJson.readTree(CompileJson.compile(request))
+
+    private fun sql(store: String, rest: String): String? = answer("{\"idSql\": {\"store\": \"$store\", $rest}}")["sql"]?.textValue()
+
+    private val stores = mapOf("postgres" to Store.POSTGRES, "oracle" to Store.ORACLE, "sqlite" to Store.SQLITE)
+
+    @Test
+    fun eachHelperIsIdSqlsOwn() {
+        for ((name, store) in stores) for (key in listOf("id", "\$\$id", Stamps.PROPERTY)) {
+            val k = CypherJson.writeValueAsString(CypherJson.valueToTree(key))
+            assertEquals(IdSql.hasId(store, "n", key, "JSON(:id)"), sql(name, "\"helper\": \"hasId\", \"alias\": \"n\", \"key\": $k, \"json\": \"JSON(:id)\""), "on $target, $name, $key")
+            assertEquals(IdSql.keyText(store, "n", key), sql(name, "\"helper\": \"keyText\", \"alias\": \"n\", \"key\": $k"), "on $target, $name, $key")
+            assertEquals(IdSql.property(store, "n", key), sql(name, "\"helper\": \"property\", \"alias\": \"n\", \"key\": $k"), "on $target, $name, $key")
+            assertEquals(IdSql.hasProperty(store, "n", key), sql(name, "\"helper\": \"hasProperty\", \"alias\": \"n\", \"key\": $k"), "on $target, $name, $key")
+            val nodes = if (store == Store.SQLITE) ", \"nodes\": \"g_node\", \"labels\": [\"Person\"]" else ""
+            assertEquals(
+                IdSql.hasIdIn(store, "n", key, ":ids", "g_node".takeIf { store == Store.SQLITE }, if (store == Store.SQLITE) listOf("Person") else emptyList()),
+                sql(name, "\"helper\": \"hasIdIn\", \"alias\": \"n\", \"key\": $k, \"parameter\": \":ids\"$nodes"),
+                "on $target, $name, $key",
+            )
+        }
+    }
+
+    @Test
+    fun anIdIsComparedOverTheExpressionsItsIndexIsMadeOver() {
+        for ((_, store) in stores) {
+            val made = IdSql.hasId(store, "n", "id", "JSON(:id)")
+            for (expression in IndexKey.column(store, "n", "id")) assertTrue("$expression = " in made, "on $target, $store: $made")
+            val inList = IdSql.hasIdIn(store, "n", "id", ":ids", "g_node", listOf("Person"))
+            // On SQLite each id finds its node through the index on the node table's own alias.
+            val alias = if (store == Store.SQLITE) "f" else "n"
+            for (expression in IndexKey.column(store, alias, "id")) assertTrue(expression in inList, "on $target, $store: $inList")
+        }
+    }
+
+    @Test
+    fun aRequestIdSqlCantAnswerIsAnError() {
+        for ((request, message) in listOf(
+            "{\"idSql\": 1}" to "An idSql request gives",
+            "{\"idSql\": {\"store\": \"neo4j\", \"helper\": \"hasId\"}}" to "An idSql request names its store",
+            "{\"idSql\": {\"store\": \"oracle\", \"helper\": \"find\"}}" to "An idSql request names its helper",
+            "{\"idSql\": {\"store\": \"oracle\", \"helper\": \"hasId\", \"alias\": \"n\", \"key\": \"id\"}}" to "idSql's hasId gives json as text",
+            "{\"idSql\": {\"store\": \"sqlite\", \"helper\": \"hasIdIn\", \"alias\": \"n\", \"key\": \"id\", \"parameter\": \":ids\"}}" to "An id in a list on SQLite",
+            "{\"idSql\": {\"store\": \"sqlite\", \"helper\": \"hasIdIn\", \"alias\": \"n\", \"key\": \"id\", \"parameter\": \":ids\", \"nodes\": \"t\", \"labels\": \"P\"}}" to "idSql's hasIdIn gives labels",
+            "{\"idSql\": {\"store\": \"oracle\", \"helper\": \"hasId\", \"alias\": \"n\", \"key\": \"id\", \"json\": \"x\"}, \"cypher\": \"RETURN 1\"}" to "A request gives one of",
+        )) {
+            val error = answer(request)["error"]?.textValue()
+            assertTrue(error != null && error.startsWith(message), "on $target, $request: $error")
+        }
+    }
+}

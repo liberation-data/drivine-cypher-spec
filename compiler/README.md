@@ -193,7 +193,7 @@ FullTextSearch.plan(store, graph, SearchRequest(labels, properties, query, index
 
 Over JSON it is the same entry, `CompileJson.compile` (`compile`, `drivine_compile`): a request with `search` in place of
 `cypher` is a search, and one that gives more than one of `cypher`, `search`, `searchIndex`, `vector`, `settings`,
-`fragment`, `read`, `temporalKey`, `layout`, `expand`, `write`, `storeStatements` and `schemaPlan` is an error.
+`fragment`, `read`, `temporalKey`, `layout`, `expand`, `write`, `storeStatements`, `schemaPlan` and `idSql` is an error.
 
 ```json
 {"store": "postgres", "graph": {"name": "g"},
@@ -530,6 +530,22 @@ JSON entry, so TypeScript and Python run what drivine4j runs from the Kotlin typ
   it is, not as `write` gives a value: a row's or a sample's `{"$t": …}` stays `$t`, and a host binds an action's
   parameters and reads a report as they are given. Every `plans.yaml`
   case runs through the request, beside the Kotlin planner, round by round.
+
+- **`idSql`** names a store (`postgres`, `oracle` or `sqlite`) and a `helper`, and gives `{"sql": "…"}`, the SQL a library's
+  object manager writes to find a node by its id, and to read it, as the store's range index and uniqueness constraint are
+  made over the property (`store/IndexKey`), so the index answers it, and a temporal id's tag is equal only to the same
+  value's (`IdSql`):
+  - `hasId` (`alias`, `key`, `json`, the SQL of the id's JSON as the host binds it);
+  - `hasIdIn` (`alias`, `key`, `parameter`, the SQL of a JSON array of the ids, and on SQLite `nodes`, the node table, and
+    `labels`);
+  - `keyText`, a temporal id's tag read as its text, as a write plan keys a node; `property`; and `hasProperty`, each with
+    `alias` and `key`.
+
+  Each key is given as the node holds it, escaped where it begins with `$`.
+
+  ```json
+  {"idSql": {"store": "oracle", "helper": "hasId", "alias": "n", "key": "id", "json": "JSON(:id)"}}
+  ```
 
 ### Fragments
 
