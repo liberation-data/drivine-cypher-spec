@@ -120,17 +120,29 @@ class StorePlanTest {
         val planner = planner(id)
         val rounds = expected["rounds"]!!.toList()
         val done = expected["done"]!!.longValue()
-        var step = planner.start(request, rounds.firstOrNull()?.get("now")?.longValue() ?: done)
+        val first = rounds.firstOrNull()?.get("now")?.longValue() ?: done
+        var step = planner.start(request, first)
+        // The same plan through the JSON entry, as TypeScript and Python run it (drivine-cypher-spec#107): each round's actions
+        // and the report must be the Kotlin planner's, written as PlanJson writes them.
+        val store = "\"store\": \"$id\", \"graph\": ${CypherJson.writeValueAsString(CypherJson.valueToTree(graph))}"
+        fun ask(rest: String): JsonNode = CypherJson.readTree(org.drivine.cypher.api.CompileJson.compile("{\"schemaPlan\": {$store, $rest}}"))
+        // As a host writes them, plain: a row's `$t` stays as it is, not as the layout writes a value.
+        fun json(value: Any?): String = PlanJson.writePlain(value)
+        var answer = ask("\"start\": ${json(PlanJson.requestTree(request))}, \"now\": $first")
         for ((r, round) in rounds.withIndex()) {
             val run = assertIs<PlanStep.Run>(step, "$name: round $r is planned")
             val (actions, outcomes) = expand(id, round)
             assertEquals(actions, run.actions, "$name: round $r")
+            assertEquals(json(run.actions.map(PlanJson::action)), answer["run"]?.let(CypherJson::writeValueAsString), "$name: round $r through the JSON entry: $answer")
             // The state crosses as JSON, and reads back the same.
             val crossed = PlannerState.fromJson(run.state.toJson())
             assertEquals(run.state.toJson(), crossed.toJson(), "$name: round $r's state as JSON")
-            step = planner.resume(crossed, outcomes, rounds.getOrNull(r + 1)?.get("now")?.longValue() ?: done)
+            val now = rounds.getOrNull(r + 1)?.get("now")?.longValue() ?: done
+            step = planner.resume(crossed, outcomes, now)
+            answer = ask("\"resume\": ${CypherJson.writeValueAsString(answer["state"]!!)}, \"outcomes\": ${json(outcomes.map(PlanJson::outcomeTree))}, \"now\": $now")
         }
         val report = assertIs<PlanStep.Done>(step, "$name: done after ${rounds.size} round(s)").report
+        assertEquals(json(PlanJson.report(report)), answer["done"]?.let(CypherJson::writeValueAsString), "$name: the report through the JSON entry: $answer")
         val engine = ddls.getValue(id).engine
         assertEquals(engined(plain(expected["report"]!!), engine), written(report), "$name: report")
     }

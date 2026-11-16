@@ -97,7 +97,9 @@ A host with no Kotlin types calls `CompileJson.compile(request)`, JSON text in a
 `compile`, and the shared library as `drivine_compile`. Each also exports the SQLite host functions' version the
 compiled SQL needs, `hostVersion()` and `drivine_host_version()`: see [The host functions' version](#the-host-functions-version).
 The wasm build exports SQLite's host function of temporal arithmetic too, `temporalArithmetic(operator, x, y)`, for a host
-that registers it as a call of the module's code (see [The SQLite extension](#the-sqlite-extension)).
+that registers it as a call of the module's code (see [The SQLite extension](#the-sqlite-extension)), and each of the host
+functions by name, `hostCall(name, args)`, with `hostFunctions()` listing them: a host whose SQLite takes functions in
+JavaScript registers each as a call of the module's own, rather than keeping a copy (see [Host functions from JavaScript](#host-functions-from-javascript)).
 
 ```json
 {"store": "oracle",
@@ -193,7 +195,7 @@ FullTextSearch.plan(store, graph, SearchRequest(labels, properties, query, index
 
 Over JSON it is the same entry, `CompileJson.compile` (`compile`, `drivine_compile`): a request with `search` in place of
 `cypher` is a search, and one that gives more than one of `cypher`, `search`, `searchIndex`, `vector`, `settings`,
-`fragment`, `read`, `temporalKey`, `layout` and `expand` is an error.
+`fragment`, `read`, `temporalKey`, `layout`, `expand`, `write`, `storeStatements`, `schemaPlan` and `idSql` is an error.
 
 ```json
 {"store": "postgres", "graph": {"name": "g"},
@@ -483,6 +485,80 @@ of its own, so the three libraries read rows, key a temporal value and judge a g
 - **`expand`** takes a statement of `store.yaml` and gives it, `{"text": "…"}`, with each marker of a generated function in it
   (`<TemporalArithmeticFunction.postgres(drivine)>`) written out as the module makes it: `store.yaml` holds the function of
   temporal arithmetic by its marker (drivine4j#418), so a runner expands each statement before it compares.
+- **`write`** takes a value as a request's parameters give one, each temporal value marked
+  `{"$temporal": "DATE", "text": "2024-01-01"}`, and gives it as the store layout holds it, `{"value": …}`: each temporal
+  value its tag `{"$t", "v", "s"}`, and each map key that begins with `$` with one more `$` before it, at any depth (#107).
+  It is what drivine4j writes a parameter, its save plan and a node's properties through, so a host writes them as the
+  other libraries do, with no writer of its own.
+
+### The store's own statements and the schema plan
+
+A library makes and stamps a store, and plans its indexes, with the module's own statements (#107, #135), each through the
+JSON entry, so TypeScript and Python run what drivine4j runs from the Kotlin types, with no copy of their own.
+
+```json
+{"storeStatements": {"store": "oracle", "graph": "g"}}
+{"storeStatements": {"store": "postgres", "graph": "g", "stampParameters": {"storeId": "…", "assignedAt": "2026-01-01T00:00:00Z"}}}
+{"schemaPlan": {"store": "postgres", "graph": "g", "start": {"database": "neo4j", "operation": {"type": "enforce", "owners": {"all": true}}, "catalogs": [], "runtime": [], "policy": {"mode": "FAIL_FAST", "recreateOnDrift": false, "recreateOnStartup": false, "violationSampleSize": 10, "replaceBlockingIndex": false}, "buildTimeoutMillis": 60000}, "now": 1700000000000}}
+```
+
+- **`storeStatements`** names a store (`postgres`, `oracle`, `sqlite`, `neo4j`, `memgraph` or `falkordb`) and, on a SQL
+  store, its graph. Its answer:
+  - `engine`, the store as a stamp names it, and `layout`, the layout a stamp of it records;
+  - on a SQL store, `ddl`, the statements that make the graph's tables, indexes and functions, and `ensuring`, the block
+    that makes them where the store's version is not the module's (null on SQLite);
+  - on Oracle, `functions` and `versions` (each function's `-- drivine:<hash>`), and `storedFunctions`, `{"probes": {…}, "noFunction": […]}`:
+    in `probes`, by each compiler flag's name (`nullsEqualStored`, `eraStored`, `temporalArithmeticStored`), the statement
+    that finds whether the session may call the functions the flag names, and in `noFunction`, the Oracle error numbers that
+    mean it may not (904, 942, 1031, 6575).
+    A library compiles with every flag it may call (drivine4j#808, #811);
+  - `stamp` and `marker`, the statements of each node's stamp and of the schema marker, as `marker.yaml` pins them, each with
+    the `constraint` that keeps one, after `prepare`.
+
+  With `stampParameters`, `restamp: true` or `markerParameters`, the answer is `{"parameters": {…}}`, what the stamp's
+  `assignIfAbsent`, its `restampLayout` or the marker's `merge` binds; a request gives one of the three at most.
+  `store.yaml` and `marker.yaml` pin every statement.
+- **`schemaPlan`** names a store, as `storeStatements` does, and one of:
+  - `validate`, a request: `{"refusal": …}`, null where nothing conflicts;
+  - `start`, a request, and `now`, the host's clock in milliseconds, or `resume`, the state the last answer gave, with
+    `outcomes`, what each of its actions did, and `now`: `{"run": [<action>, …], "state": <state>}`, the actions to run in
+    order and the state to resume from, or `{"done": <report>}`. An outcome is `{"type": "rows", "rows": […]}`,
+    `{"type": "ran"}` or `{"type": "failed", "causes": [{"sqlState", "vendorCode", "code", "gqlStatus", "message"}, …]}`, for
+    the actions that ran, up to and with the first that failed;
+  - `runtimeAfter` (`operation`, `runtime`, `databases`) and `runtimeOn` (`database`, `runtime`): the runtime catalogs a
+    library keeps of the items it ensures as it runs, as drivine4j's `SchemaManager` keeps them.
+  - `listings` (`{}`), `items` (`of`, `rows`, `spec`) and `aliased` (`item`, `aliases`): what a library's index and
+    constraint managers list, find and alias by with no plan, as drivine4j's do through the store schema's own calls.
+    `listings` gives `{"indexes": {<kind>: <statement>, …}, "constraints": <statement>}`, an index listing for each kind the
+    store has; `items` gives the items a listing's rows hold, `{"items": [<item>, …]}`, each with its catalog record's
+    `aliases` and whether its build is in progress or failed, and with `spec` only those of the spec's identity, as a find
+    takes them from the listing of its spec's kind, or the constraint listing (a `TEXT_INDEX` spec on a store with no text indexes is refused, as drivine4j's find refuses it). A host runs
+    each distinct listing statement once, takes a listing that fails as listing nothing, and lists the indexes as the items
+    of every listing, each once, as drivine4j's managers do; `aliased` gives the statement that records an item's aliases in its catalog record, `{"statement": …}`,
+    null on a graph engine.
+
+  A request, an action, an outcome, the state and the report are written as `PlanJson` writes them, each key and value as
+  it is, not as `write` gives a value: a row's or a sample's `{"$t": …}` stays `$t`, and a host binds an action's
+  parameters and reads a report as they are given. Every `plans.yaml`
+  case runs through the request, beside the Kotlin planner, round by round.
+
+- **`idSql`** names a store (`postgres`, `oracle` or `sqlite`) and a `helper`, and gives `{"sql": "…"}`, the SQL a library's
+  object manager writes to find a node by its id, and to read it, as the store's range index and uniqueness constraint are
+  made over the property (`store/IndexKey`), so the index answers it, and a temporal id's tag is equal only to the same
+  value's (`IdSql`):
+  - `hasId` (`alias`, `key`, `json`, the SQL of the id's JSON as the host binds it);
+  - `hasIdIn` (`alias`, `key`, `parameter`, the SQL of a JSON array of each id's JSON text, `["\"a\"", "1"]`, and on
+    SQLite `nodes`, the node table, and `labels`);
+  - `keyText`, a temporal id's tag read as its text, as a write plan keys a node; `property`; and `hasProperty`, each with
+    `alias` and `key`.
+
+  Each key is given as the node holds it, escaped where it begins with `$`; the stamp's key is its column, and is refused as an
+  id. `json` and `parameter` are written into the SQL as given, in the host's own placeholder; on Oracle and SQLite `json` is
+  written more than once, so a host binds it by name (`:id`, not `?`).
+
+  ```json
+  {"idSql": {"store": "oracle", "helper": "hasId", "alias": "n", "key": "id", "json": "JSON(:id)"}}
+  ```
 
 ### Fragments
 
@@ -496,7 +572,7 @@ A library's object manager writes its own SQL, and asks for the parts of it that
 
 - `fragment` gives one of `condition`, `value` or `order`, an order with `descending` (false where left out), and `variables`: each a row of the library's SQL, `{"node": "<alias>", "labels": [...]}` or `{"relationship": "<alias>"}`. An alias ends with `_`, as none the compiler gives its own rows does, so a subquery the fragment writes doesn't take the library's row for one of its own (`n1`, `x`): another is refused. A node's columns are the table of nodes' (`nid`, `labels`, `props`, `stamp`); a relationship's, the table of relationships'.
 - A node's `labels` are those the library matched it by. An equality of its property with a value is then written with the index of that label and property, where the store's indexes are a label's: Oracle's, for the properties the graph's `indexedProperties` names. Postgres's and SQLite's indexes answer it without them.
-- The answer is `{"terms": [...], "parameters": {...}, "nonFinite": false, "hints": [...]}`, on Oracle with `storedFunctions` as a statement's answer has it. `hints` are the optimizer hints the library's query that holds the terms puts in its outermost `SELECT` (`SELECT /*+ … */`), on Oracle, `NO_JSON_TABLE_TRANSFORM` always, as a statement that compares a property, reads a list item by its place or reads the graph's tables twice is planned with it, and the library's query reads them beside the fragment's own reads, in a FROM the module doesn't see (without it Oracle 23 may give a comparison the wrong truth, or lose a row's label tests, #415); and `OPT_PARAM('_optimizer_use_feedback' 'false')` where a term tests a node's labels as one read by its key. None on Postgres and SQLite. A library puts in each it is given, as given. On Oracle each subquery a term or a statement reads in a condition, an `EXISTS`, an `IN (SELECT …)` or the count of a `COUNT { … }` or a quantifier, carries `NO_COALESCE_SQ` in its own `SELECT`, where alone it helps: Oracle 23.26 merged an `OR` of two of them wrongly and kept only the first one's rows (drivine-cypher-spec#252). A library writes no such hint itself, and keeps the terms' as they are. A `condition`'s term is for a `WHERE` to keep rows by: it may be false where Cypher's truth is null, as neither keeps the row, so a library never negates it in SQL, and writes `NOT` in the Cypher instead. A `value` is for the library's SQL to group or bind within it, not a column to read back (a statement's columns are, and Oracle re-encodes them as it returns them), nor to compare with SQL's operators, which compare as SQL does and not as Cypher does (temporal values, kinds): a `condition` compares. `typed` beside `fragment` is an error. `nonFinite` is a statement's: where it is true, a value the fragment gives may hold NaN or an infinity as a statement's rows do (`{"$numberDouble": "NaN"}`), and the library reads it back as it reads those. Each parameter `$p` is bound as `_cy_p`, to its JSON text: a library binds them beside its own, under those names, so it names the parameters of two fragments of one statement apart. `{"refusal": …}` is the compiler's refusal of the expression; a fragment that would call a function a statement declares before it is refused, as SQL a library writes declares none, and so is one that aggregates, as that SQL groups no rows for it, and one that calls `randomUUID()` within it (`toUpper(randomUUID())`), which a statement calls first, as a column of each row, so no subquery worked out once gives every row the same UUID: `randomUUID()` alone is called for each row.
+- The answer is `{"terms": [...], "parameters": {...}, "nonFinite": false, "hints": [...]}`, on Oracle with `storedFunctions` as a statement's answer has it. `hints` are the optimizer hints the library's query that holds the terms puts in its outermost `SELECT` (`SELECT /*+ … */`), on Oracle, `NO_JSON_TABLE_TRANSFORM` always, as a statement that compares a property, reads a list item by its place or reads the graph's tables twice is planned with it, and the library's query reads them beside the fragment's own reads, in a FROM the module doesn't see (without it Oracle 23 may give a comparison the wrong truth, or lose a row's label tests, #415); and `OPT_PARAM('_optimizer_use_feedback' 'false')` where a term tests a node's labels as one read by its key. None on Postgres and SQLite. A library puts in each it is given, as given. On Oracle each subquery a term or a statement reads in a condition, an `EXISTS`, an `IN (SELECT …)` or the count of a `COUNT { … }` or a quantifier, carries `NO_COALESCE_SQ` in its own `SELECT`, where alone it helps: Oracle 23.26 merged an `OR` of two of them wrongly and kept only the first one's rows (drivine-cypher-spec#252). A library writes no such hint itself, and keeps the terms' as they are. A `condition`'s term is for a `WHERE` to keep rows by: it may be false where Cypher's truth is null, as neither keeps the row, so a library never negates it in SQL, and writes `NOT` in the Cypher instead. A `value` is for the library's SQL to group or bind within it, not a column to read back (a statement's columns are, and Oracle re-encodes them as it returns them), nor to compare with SQL's operators, which compare as SQL does and not as Cypher does (temporal values, kinds): a `condition` compares. `typed` beside `fragment` is an error. `nonFinite` is a statement's: where it is true, a value the fragment gives may hold NaN or an infinity as a statement's rows do (`{"$numberDouble": "NaN"}`), and the library reads it back as it reads those. Each parameter `$p` is bound as `_cy_p`, to its JSON text, and on Oracle, where a property is compared with it by its class and key (`IndexKey.of`), as `_cyk_p`, to that key, and then as `_cy_p` only where the SQL reads it elsewhere (#287). A library binds what `parameters` holds beside its own, under those names, and no other, so it names the parameters of two fragments of one statement apart. `{"refusal": …}` is the compiler's refusal of the expression; a fragment that would call a function a statement declares before it is refused, as SQL a library writes declares none, and so is one that aggregates, as that SQL groups no rows for it, and one that calls `randomUUID()` within it (`toUpper(randomUUID())`), which a statement calls first, as a column of each row, so no subquery worked out once gives every row the same UUID: `randomUUID()` alone is called for each row.
 
 **The forms a fragment takes** are those the three libraries' object managers write their filters, orders and seeks in, and no other (`FragmentForms`):
 
@@ -518,7 +594,61 @@ const { compile } = require('@liberation-data/drivine-cypher-compiler');      //
 const answer = JSON.parse(compile(JSON.stringify({ store: 'sqlite', graph: { name: 'g' }, cypher: 'RETURN 1' })));
 const { hostVersion } = require('@liberation-data/drivine-cypher-compiler');  // what SELECT drivine_host_version() must give
 const { temporalArithmetic } = require('@liberation-data/drivine-cypher-compiler');  // registered as drivine_temporal_arithmetic(operator, x, y)
+const { hostCall, hostFunctions } = require('@liberation-data/drivine-cypher-compiler');  // every host function, by name
 ```
+
+#### Host functions from JavaScript
+
+`hostFunctions()` lists the module's SQLite host functions as JSON, by name: each one's `arity` (-1 for any number) and
+whether it is `deterministic`, as the host registers it. `hostCall(name, args)` calls one (`HostCall`). `args` is SQLite's
+values, each typed as SQLite hands it over, as the functions tell an integer, a float and a text of the same digits apart,
+written one after another:
+
+| Value | As |
+|---|---|
+| SQL's null | `n` |
+| an integer | `i<length>:<digits>`, its decimal text, so no JavaScript number rounds one past 2^53 |
+| a float | `r<length>:<number>`, as JavaScript's `String(number)` writes it (`2.5`, `1e+21`, `NaN`, `-Infinity`), `-0` for minus zero |
+| a text | `t<length>:<text>`, as it stands |
+| a blob | `b<length>:<base64>` |
+
+`<length>` is the JavaScript `length` of what follows the colon, so no text is escaped: a host function's argument is most
+often JSON text, which escaped inside JSON was read twice. The answer is the value written the same way without its length
+(`n`, `i<digits>`, `r<number>`, `t<text>`, `b<base64>`), a float as Java writes it, which `Number` reads back as the same; or
+`e<message>`, where the function fails its statement: the host throws the message, so SQLite fails the statement with it.
+A call that can't be made (no such function, the wrong number of arguments, an argument of no kind above) is answered
+`e…` too, naming why. A function that reads a float as text reads it as SQLite writes it (`SqliteRealText`): the same value,
+in SQLite's own spelling wherever 15 digits read it back. One that reads a text as a number reads its leading number, as
+SQLite does (`12abc` is 12, `abc` and `Infinity` are 0).
+
+```js
+const { hostCall, hostFunctions } = require('@liberation-data/drivine-cypher-compiler');
+const item = (kind, text) => kind + text.length + ':' + text;
+const written = (v) =>
+    v === null ? 'n'
+    : typeof v === 'bigint' ? item('i', String(v))
+    : typeof v === 'number' ? item('r', Object.is(v, -0) ? '-0' : String(v))
+    : typeof v === 'string' ? item('t', v)
+    : item('b', Buffer.from(v).toString('base64'));
+for (const [name, { deterministic }] of Object.entries(JSON.parse(hostFunctions()))) {
+    // varargs: node:sqlite counts a function's arguments by its own (`fn.length`), none for (...args); hostCall checks `arity`.
+    db.function(name, { deterministic, varargs: true, useBigIntArguments: true }, (...args) => {
+        const answer = hostCall(name, args.map(written).join(''));
+        const rest = answer.substring(1);
+        switch (answer[0]) {
+            case 'n': return null;
+            case 'i': return BigInt(rest);
+            case 'r': return Number(rest);
+            case 't': return rest;
+            case 'b': return Buffer.from(rest, 'base64');
+            default: throw new Error(rest);
+        }
+    });
+}
+```
+
+Each call is one crossing into the wasm. A call of a function of short JSON texts, such as `drivine_sort_key` of a list,
+takes 1 to 2 µs on Node 26.
 
 The CommonJS entry (`npm/index.cjs`) loads the wasm synchronously. Kotlin/Wasm writes only an ES module loader, with a
 top-level await, so the entry runs that loader's text as a function with its Node branch made synchronous. Each edit
@@ -937,6 +1067,8 @@ The JVM is the oracle. `./gradlew jvmOracle` writes, into `build/oracle`:
 - `marker.json`: the spec's `marker.yaml` as JSON, which `StoreMarkerTest` reads on every target: each store's
   statements for the schema marker and the store's stamp that `org.drivine.cypher.store.marker` must give, the
   inventories it must write and read back, the version tokens, and the node stamps `Stamps` must read and write.
+- `writevalues.json`: the spec's `writevalues.yaml` as JSON, which `WriteValuesTableTest` reads on every target: the
+  verdict each SQL store's compiler gives each value a write makes, by position and form.
 - `nesting.json`: the spec's `nesting.yaml` as JSON, which `NestingTableTest` reads on every target: the verdict
   each SQL store's compiler gives each nesting of a dropped variable, and the lists the cells are built from.
 - `rebinding.json`: the spec's `rebinding.yaml` as JSON, which `RebindingTableTest` reads on every target: the verdict

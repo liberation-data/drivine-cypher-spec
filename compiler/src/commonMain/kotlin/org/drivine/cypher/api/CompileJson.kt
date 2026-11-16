@@ -39,9 +39,12 @@ import kotlin.io.encoding.ExperimentalEncodingApi
  *
  * A request with `search` or `searchIndex` in place of `cypher` is a full-text search, answered by [FullTextSearch]: see
  * [SearchJson]. One with `vector` is a vector search, answered by [VectorSearch]: see [VectorJson]. One with `read`,
- * `temporalKey`, `layout` or `expand` asks the store layout's questions: a column's value read, a temporal value's sort key, a
- * graph's layout judged, a statement of `store.yaml` with its generated functions written out; see [LayoutJson]. One with `fragment` asks for a part of a statement a library writes itself, a
- * condition, a value or an order's terms: see [FragmentJson]. A request that gives more than one kind is an error.
+ * `temporalKey`, `layout`, `expand` or `write` asks the store layout's questions: a column's value read, a temporal value's sort key, a
+ * graph's layout judged, a statement of `store.yaml` with its generated functions written out, a value as the layout holds it; see [LayoutJson]. One with `fragment` asks for a part of a statement a library writes itself, a
+ * condition, a value or an order's terms: see [FragmentJson]. One with `storeStatements` asks for a store's DDL and the statements of
+ * its stamps and schema marker: see [StoreJson]. One with `schemaPlan` asks the schema planner for a round of statements to
+ * run, or a host's runtime catalogs: see [SchemaPlanJson]. One with `idSql` asks for the SQL that finds a node by its id as the
+ * store's index is made over it: see [IdSqlJson]. A request that gives more than one kind is an error.
  *
  * Values, in the parameters given and those bound, are plain JSON, tagged only where JSON, or a host's reading of it, loses
  * what the SQL depends on:
@@ -94,7 +97,7 @@ object CompileJson {
         // A full-text search, asked of the same entry: a request with "search" or "searchIndex" in place of "cypher", and a
         // vector search, with "vector". A request asks one thing: one that gives two would have the other read past as though
         // it were not there.
-        val kinds = listOf("cypher", "search", "searchIndex", "vector", "settings", "fragment") + LayoutJson.KINDS
+        val kinds = listOf("cypher", "search", "searchIndex", "vector", "settings", "fragment") + LayoutJson.KINDS + StoreJson.KIND + SchemaPlanJson.KIND + IdSqlJson.KIND
         if (kinds.count { tree.has(it) } > 1) {
             return error("A request gives one of ${kinds.dropLast(1).joinToString()} and ${kinds.last()}.")
         }
@@ -102,6 +105,12 @@ object CompileJson {
         if (tree.has("vector")) return VectorJson.answer(tree)
         // The store layout's questions, asked of the same entry: see LayoutJson.
         if (LayoutJson.KINDS.any { tree.has(it) }) return LayoutJson.answer(tree)
+        // A store's own statements, its DDL, stamp and marker: see StoreJson.
+        if (tree.has(StoreJson.KIND)) return StoreJson.answer(tree)
+        // The schema planner, a round at a time: see SchemaPlanJson.
+        if (tree.has(SchemaPlanJson.KIND)) return SchemaPlanJson.answer(tree)
+        // A lookup of a node by its id, as the store's index is made over it: see IdSqlJson.
+        if (tree.has(IdSqlJson.KIND)) return IdSqlJson.answer(tree)
         if (tree.has("settings")) return settings(tree["settings"])
         if (tree.has("fragment")) return FragmentJson.answer(tree)
         val call = try {

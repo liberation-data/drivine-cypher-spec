@@ -322,9 +322,15 @@ object CypherJson {
 
     /**
      * [text] as a tree, refused where its arrays and objects nest past [MAX_DEPTH]: before it is parsed, as
-     * kotlinx.serialization's parse recurses as deep as the text nests, and overflows the stack.
+     * kotlinx.serialization's parse recurses as deep as the text nests, and overflows the stack. Plain JSON is read in one
+     * pass ([FastJson]); any other text as kotlinx.serialization reads it, which decides what it is or how it fails.
      */
     fun readTree(text: String): JsonNode {
+        return FastJson.read(text) ?: readTreeFull(text)
+    }
+
+    /** [text] read as kotlinx.serialization reads it, as [readTree] reads what [FastJson] doesn't. */
+    internal fun readTreeFull(text: String): JsonNode {
         nesting(text)
         return fromElement(Json.parseToJsonElement(text))
     }

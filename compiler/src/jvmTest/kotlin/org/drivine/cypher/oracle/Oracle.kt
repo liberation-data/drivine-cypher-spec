@@ -28,6 +28,8 @@ import java.time.format.DateTimeFormatter
  * - `marker.json`: the spec's `marker.yaml`, the schema marker and the stamps, as JSON likewise. See `StoreMarkerTest`.
  * - `plans.json`: the spec's `plans.yaml`, the schema plan's cases, as JSON likewise. See `StorePlanTest`.
  * - `fragments.json`: the spec's `fragments.yaml`, the fragments a library writes itself, as JSON likewise. See `FragmentsTest`.
+ * - `writevalues.json`: the spec's `writevalues.yaml`, the values a write makes by position and form, as JSON likewise. See
+ *   `WriteValuesTableTest`.
  * - `nesting.json`: the spec's `nesting.yaml`, a dropped variable's nestings and Neo4j's verdict on each, as JSON likewise. See
  *   `NestingTableTest`.
  * - `rebinding.json`: the spec's `rebinding.yaml`, a variable from outside a subquery bound again within it, and Neo4j's
@@ -73,6 +75,8 @@ object Oracle {
         File(out, "marker.json").writeText(json.writeValueAsString(yaml.readTree(File(spec, "marker.yaml"))))
         // The fragments a library writes itself, for each target's FragmentsTest.
         File(out, "fragments.json").writeText(json.writeValueAsString(yaml.readTree(File(spec, "fragments.yaml"))))
+        // The values a write makes, by position and form, for each target's WriteValuesTableTest.
+        File(out, "writevalues.json").writeText(json.writeValueAsString(yaml.readTree(File(spec, "writevalues.yaml"))))
         // A dropped variable's nestings, for each target's NestingTableTest.
         File(out, "nesting.json").writeText(json.writeValueAsString(yaml.readTree(File(spec, "nesting.yaml"))))
         // A variable from outside a subquery bound again within it, for each target's RebindingTableTest.
