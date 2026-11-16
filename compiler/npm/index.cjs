@@ -75,4 +75,19 @@ function temporalArithmetic(operator, x, y) {
     return load().temporalArithmetic(operator, x, y);
 }
 
-module.exports = { compile, hostVersion, temporalArithmetic };
+/**
+ * A call of one of the module's SQLite host functions by its name, `args` its arguments, SQLite's values each written as its
+ * kind, its JavaScript length, a colon and its text (`n` for null, `i<len>:<digits>`, `r<len>:<number>`, `t<len>:<text>`,
+ * `b<len>:<base64>`), one after another: the answer, the value written the same way without its length (`n`, `i…`, `r…`,
+ * `t…`, `b…`), or `e<message>` where the function fails. See the compiler's README, "Host functions from JavaScript".
+ */
+function hostCall(name, args) {
+    return load().hostCall(name, args);
+}
+
+/** The module's SQLite host functions, as a JSON object by name: each one's `arity` (-1 for any) and `deterministic`. */
+function hostFunctions() {
+    return load().hostFunctions();
+}
+
+module.exports = { compile, hostVersion, temporalArithmetic, hostCall, hostFunctions };

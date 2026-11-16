@@ -77,8 +77,38 @@ class Parameters(
         return asCount("\$$key")
     }
 
+    /**
+     * Marks the parameter [name]'s own marker, `_cy_<name>`, as one the SQL may not read: a comparison by the value's key
+     * ([derived]) reads the key in its place (liberation-data/drivine-cypher-spec#287). [valuesOf] binds it only where the SQL
+     * holds it, so no statement binds a name its SQL doesn't hold.
+     */
+    fun mayLeaveUnread(name: String) {
+        if (!inObject) unread += "_cy_$name"
+    }
+
+    private val unread = mutableSetOf<String>()
+
+    /** What the SQL [sql] binds: [values], but a marker [mayLeaveUnread] names only where [sql] holds it. */
+    fun valuesOf(sql: String): Map<String, Any?> =
+        if (inObject || unread.isEmpty()) values else bound.filterKeys { it !in unread || Regex("\\$" + Regex.escape(it) + "(?![A-Za-z0-9_])").containsMatchIn(sql) }
+
     /** The value bound to the parameter [name], as the caller gave it. */
     fun value(name: String): Any? = given(name)
+
+    /**
+     * The text [text], which the compiler works out of the value of the parameter [name], bound once as itself beside the
+     * parameters, and its marker, `_cyk_<name>`: named after the parameter, as `_cy_<name>` is, so the fragments of one
+     * statement, which a library gives parameters of names no other uses, bind theirs apart. Null where every parameter is
+     * bound as one map ([inObject]), which holds only the caller's, so the SQL works it out of the parameter instead. A key a
+     * lookup compares with an index's is bound so (`IndexKey`, liberation-data/drivine-cypher-spec#286).
+     */
+    fun derived(name: String, text: String): String? {
+        given(name)
+        if (inObject) return null
+        val key = "_cyk_$name"
+        bound[key] = text
+        return "\$$key"
+    }
 
     private fun given(name: String): Any? {
         if (!given.containsKey(name)) throw CompilerException("The statement has a parameter \$$name, and no value is bound to it.")

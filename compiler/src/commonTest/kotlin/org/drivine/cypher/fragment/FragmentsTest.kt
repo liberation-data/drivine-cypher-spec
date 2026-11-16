@@ -66,6 +66,24 @@ class FragmentsTest {
     }
 
     @Test
+    fun eachNameAFragmentBindsIsOneItsTermsHold() {
+        // On Oracle a property compared by its key binds the key alone, where no term reads the value's own JSON (#287).
+        for (case in spec["cases"]!!) {
+            if (case["parameters"] == null) continue
+            for (store in STORES) {
+                val got = CypherJson.readTree(CompileJson.compile(request(case, store))) as ObjectNode
+                val terms = (got["terms"] as ArrayNode).joinToString("\n") { it.textValue()!! }
+                for ((name, _) in (got["parameters"] as ObjectNode).properties()) {
+                    assertTrue(Regex("\\$" + Regex.escape(name) + "(?![A-Za-z0-9_])").containsMatchIn(terms), "on $target, ${case["name"]!!.textValue()} on $store binds $name: $got")
+                }
+            }
+        }
+        val name = spec["cases"]!!.first { it["name"]!!.textValue() == "A property unequal to a text: a value of another kind is unequal, a missing one null" }
+        val oracle = CypherJson.readTree(CompileJson.compile(request(name, "oracle"))) as ObjectNode
+        assertEquals(setOf("_cyk_p"), (oracle["parameters"] as ObjectNode).properties().map { it.key }.toSet(), "on $target: $oracle")
+    }
+
+    @Test
     fun aRequestThatIsNoFragmentIsAnErrorAndOneTheCompilerRefusesARefusal() {
         val graph = "\"graph\": {\"name\": \"g\"}"
         val node = "\"variables\": {\"n\": {\"node\": \"r_\"}}"
@@ -82,7 +100,7 @@ class FragmentsTest {
             "{\"store\": \"postgres\", $graph, \"fragment\": {\"condition\": \"true\", \"variables\": {\"n\": {\"relationship\": \"r\", \"labels\": []}}}}" to "A fragment's variable n is a relationship, which has no labels.",
             "{\"store\": \"postgres\", $graph, \"fragment\": {\"condition\": \"true\", \"variables\": {\"n\": {\"node\": \"r\", \"labels\": \"L\"}}}}" to "A fragment's variable n gives its labels as a list.",
             "{\"store\": \"postgres\", $graph, \"fragment\": {\"condition\": \"true\", \"variables\": {\"n\": {\"node\": \"r\", \"labels\": [1]}}}}" to "A fragment's variable n gives its labels as texts.",
-            "{\"store\": \"postgres\", $graph, \"cypher\": \"RETURN 1\", \"fragment\": {\"condition\": \"true\"}}" to "A request gives one of cypher, search, searchIndex, vector, settings, fragment, read, temporalKey, layout, expand, write, storeStatements and schemaPlan.",
+            "{\"store\": \"postgres\", $graph, \"cypher\": \"RETURN 1\", \"fragment\": {\"condition\": \"true\"}}" to "A request gives one of cypher, search, searchIndex, vector, settings, fragment, read, temporalKey, layout, expand, write, storeStatements, schemaPlan and idSql.",
         )) {
             assertEquals(message, CypherJson.readTree(CompileJson.compile(request))["error"]?.textValue(), request)
         }
