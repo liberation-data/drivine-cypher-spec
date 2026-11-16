@@ -25,9 +25,12 @@ object SqliteRealText {
     private const val DIGITS = 17
 
     fun of(value: Double): String {
+        // SQLite's Inf, and NaN, read back as no double: written as they are.
+        if (!value.isFinite()) return written(value, DIGITS)
         for (significant in SHORT until DIGITS) {
             val text = written(value, significant)
-            if (text.toDouble() == value) return text
+            // parseDouble, not toDouble: Kotlin/Wasm's is an ulp off for some, and would keep digits that don't read back.
+            if (org.drivine.cypher.json.parseDouble(text) == value) return text
         }
         return written(value, DIGITS)
     }
@@ -35,7 +38,8 @@ object SqliteRealText {
     private fun written(value: Double, significant: Int): String {
         if (value.isNaN()) return "NaN"
         if (value.isInfinite()) return if (value > 0) "Inf" else "-Inf"
-        if (value == 0.0) return if (1.0 / value < 0) "-0.0" else "0.0"
+        // Minus zero too: SQLite writes no sign of a zero.
+        if (value == 0.0) return "0.0"
         val negative = value < 0
         val (digits, point) = rounded(kotlin.math.abs(value), significant)
         // digits: [significant] decimal digits, d1 d2 …; the value is 0.d1d2… × 10^point.

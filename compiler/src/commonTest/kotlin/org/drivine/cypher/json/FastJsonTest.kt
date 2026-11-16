@@ -29,7 +29,7 @@ class FastJsonTest {
         "NaN" to false, "Infinity" to false, "abc" to false, "True" to false, "nul" to false, "truex" to false, "1abc" to false,
         "[1,]" to false, "[,1]" to false, "{\"a\":1,}" to false, "{a:1}" to false, "{\"a\" 1}" to false, "{\"a\":1,\"a\":2}" to false,
         "[1 2]" to false, "1 2" to false, "\"abc" to false, "\"a\u0001b\"" to false, "\"\\x\"" to false, "\"\\u12\"" to false,
-        "\"\\u12G4\"" to false, "[" to false, "{" to false, "]" to false, "'a'" to false, "[1]x" to false,
+        "\"\\u12G4\"" to false, "\"\\u\u0661\u0662\u0663\u0664\"" to false, "\"\\u\uFF21BCD\"" to false, "[" to false, "{" to false, "]" to false, "'a'" to false, "[1]x" to false,
         "[".repeat(65) + "]".repeat(65) to false,
     )
 

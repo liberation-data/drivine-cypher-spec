@@ -2,6 +2,8 @@ package org.drivine.cypher.host
 
 import org.drivine.DrivineInternalApi
 import org.drivine.cypher.json.jvmDoubleText
+import org.drivine.cypher.json.parseDoubleOrNull
+import org.drivine.cypher.number.SqliteRealText
 import kotlin.io.encoding.Base64
 import kotlin.io.encoding.ExperimentalEncodingApi
 
@@ -65,7 +67,7 @@ object HostCall {
             if (kind == 'n') { values.add(null); continue }
             val colon = args.indexOf(':', at)
             val length = if (colon < 0) null else args.substring(at, colon).toIntOrNull()
-            require(length != null && length >= 0 && colon + 1 + length <= args.length) {
+            require(length != null && length >= 0 && length <= args.length - colon - 1) {
                 "A host call's argument ${values.size + 1} is no kind, length and colon (${args.substring(at - 1).take(20)})."
             }
             val text = args.substring(colon + 1, colon + 1 + length)
@@ -73,12 +75,7 @@ object HostCall {
             values.add(
                 when (kind) {
                     'i' -> text.toLongOrNull() ?: throw IllegalArgumentException("i holds an integer's digits, not $text.")
-                    'r' -> when (text) {
-                        "NaN" -> Double.NaN
-                        "Infinity" -> Double.POSITIVE_INFINITY
-                        "-Infinity" -> Double.NEGATIVE_INFINITY
-                        else -> text.toDoubleOrNull() ?: throw IllegalArgumentException("r holds a number, not $text.")
-                    }
+                    'r' -> parseDoubleOrNull(text) ?: throw IllegalArgumentException("r holds a number, not $text.")
                     't' -> text
                     'b' -> Base64.decode(text)
                     else -> throw IllegalArgumentException("No argument is of the kind $kind: one of n, i, r, t and b.")
@@ -99,7 +96,11 @@ object HostCall {
         else -> throw IllegalStateException("A host function gave ${value::class.simpleName}")
     }
 
-    /** The arguments [values] as a host function reads them. */
+    /**
+     * The arguments [values] as a host function reads them: one read as another type converted as SQLite converts it, a
+     * text's (or a blob's) leading number read as a number ([sqliteLong], [sqliteDouble]), a float's text as SQLite writes
+     * it ([SqliteRealText]).
+     */
     private class Args(private val values: List<Any?>) : HostArgs {
         override fun type(i: Int) = when (values[i]) {
             null -> SqlType.NULL
@@ -108,11 +109,67 @@ object HostCall {
             is String -> SqlType.TEXT
             else -> SqlType.BLOB
         }
-        override fun long(i: Int) = when (val v = values[i]) { is Long -> v; is Double -> v.toLong(); is String -> v.toLongOrNull() ?: 0L; else -> 0L }
+        override fun long(i: Int) = when (val v = values[i]) { is Long -> v; is Double -> v.toLong(); null -> 0L; else -> sqliteLong(text(i)!!) }
         override fun int(i: Int) = long(i).toInt()
-        override fun double(i: Int) = when (val v = values[i]) { is Double -> v; is Long -> v.toDouble(); is String -> v.toDoubleOrNull() ?: 0.0; else -> 0.0 }
-        override fun text(i: Int) = when (val v = values[i]) { null -> null; is String -> v; is Long -> v.toString(); is Double -> org.drivine.cypher.number.SqliteRealText.of(v); is ByteArray -> v.decodeToString(); else -> null }
+        override fun double(i: Int) = when (val v = values[i]) { is Double -> v; is Long -> v.toDouble(); null -> 0.0; else -> sqliteDouble(text(i)!!) }
+        override fun text(i: Int) = when (val v = values[i]) { null -> null; is String -> v; is Long -> v.toString(); is Double -> SqliteRealText.of(v); is ByteArray -> v.decodeToString(); else -> null }
         override fun text16(i: Int) = text(i)
         override fun blob(i: Int) = when (val v = values[i]) { null -> null; is ByteArray -> v; else -> text(i)?.encodeToByteArray() }
+    }
+
+    /** Whether [c] is a space as SQLite's `sqlite3Isspace` takes one, which it skips before a number. */
+    private fun space(c: Char) = c == ' ' || c in '\t'..'\r'
+
+    /**
+     * [text] as SQLite's `sqlite3_value_int64` reads a text: after any spaces and a sign, its leading digits (`12abc` is 12,
+     * `1.9` and `1e3` are 1, `abc` is 0), a whole number past a long's range the nearest end of it.
+     */
+    internal fun sqliteLong(text: String): Long {
+        var at = 0
+        while (at < text.length && space(text[at])) at++
+        val negative = at < text.length && text[at] == '-'
+        if (at < text.length && (text[at] == '-' || text[at] == '+')) at++
+        while (at < text.length && text[at] == '0') at++
+        val start = at
+        while (at < text.length && text[at] in '0'..'9') at++
+        val digits = text.substring(start, at)
+        val magnitude = if (digits.length > 19) null else digits.ifEmpty { "0" }.toULong()
+        return when {
+            magnitude == null || magnitude > Long.MAX_VALUE.toULong() -> if (negative) Long.MIN_VALUE else Long.MAX_VALUE
+            negative -> -magnitude.toLong()
+            else -> magnitude.toLong()
+        }
+    }
+
+    /**
+     * [text] as SQLite's `sqlite3_value_double` reads a text: after any spaces, its leading decimal number, a sign, digits, a
+     * point and digits, and an exponent where digits follow its `e` (`12abc` is 12.0, `1e` is 1.0, `.5` is 0.5); 0.0 where
+     * it opens with none (`abc`, `Infinity`), and `0x10` is 0.0, its `0`. SQLite reads one of more than 19 significant
+     * digits in its own arithmetic, which can be an ulp from the nearest double this gives.
+     */
+    internal fun sqliteDouble(text: String): Double {
+        var at = 0
+        while (at < text.length && space(text[at])) at++
+        val start = at
+        if (at < text.length && (text[at] == '-' || text[at] == '+')) at++
+        val whole = at
+        while (at < text.length && text[at] in '0'..'9') at++
+        var digits = at > whole
+        if (at < text.length && text[at] == '.') {
+            val point = ++at
+            while (at < text.length && text[at] in '0'..'9') at++
+            digits = digits || at > point
+        }
+        if (!digits) return 0.0
+        var end = at
+        if (at < text.length && (text[at] == 'e' || text[at] == 'E')) {
+            at++
+            if (at < text.length && (text[at] == '-' || text[at] == '+')) at++
+            val exponent = at
+            while (at < text.length && text[at] in '0'..'9') at++
+            if (at > exponent) end = at
+        }
+        // Java reads a number with a point at either end (`1.`, `.5`), and in big exponents an infinity or zero, as SQLite.
+        return parseDoubleOrNull(text.substring(start, end)) ?: 0.0
     }
 }

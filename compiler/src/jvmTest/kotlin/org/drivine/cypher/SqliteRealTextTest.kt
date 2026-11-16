@@ -23,6 +23,7 @@ class SqliteRealTextTest {
             1.5e-5, 1e20, -1e20, 1e300, 1e-300, Double.MAX_VALUE, Double.MIN_VALUE, 4.9e-324, 0.1 + 0.2, 1.0 / 3, 2.0 / 3,
             999999999999999.5, 0.30000000000000004, 1.0000000000000002, 9.999999999999999e22, 5e-324, -0.5, 1e-7, 3.14159,
             123456.7890123456789, 0.000999999999999999, 2.2250738585072014E-308, 2.225073858507201E-308, 1e-310, -3e-320,
+            Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY, -0.0, 0.0,
         )
         val subnormals = List(500) { Double.fromBits(random.nextLong(1L, 1L shl 52)) }
         val values = edges + subnormals + List(20_000) {
@@ -40,6 +41,8 @@ class SqliteRealTextTest {
                     val sqlite = s.executeQuery().use { r -> r.next(); r.getString(1) }
                     val ours = SqliteRealText.of(value)
                     val where = "$value (${value.toRawBits()}): SQLite wrote $sqlite, this $ours"
+                    // An infinity and minus zero, letter for letter: SQLite's Inf reads as no Double.
+                    if (!value.isFinite() || value == 0.0) { assertEquals(sqlite, ours, where); continue }
                     assertEquals(sqlite.toDouble(), ours.toDouble(), where)
                     if (significant(sqlite) <= 15 && kotlin.math.abs(value) >= java.lang.Double.MIN_NORMAL) assertEquals(sqlite, ours, where)
                 }

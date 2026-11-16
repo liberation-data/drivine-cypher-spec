@@ -30,7 +30,7 @@ if (absent.length > 0) {
     process.exit(1);
 }
 const started = performance.now();
-const { compile, hostVersion, temporalArithmetic } = require(require('path').resolve(packageDir));
+const { compile, hostVersion, temporalArithmetic, hostCall, hostFunctions } = require(require('path').resolve(packageDir));
 compile(JSON.stringify({ store: 'postgres', graph: { name: 'g' }, cypher: 'RETURN 1' }));
 const loadMs = performance.now() - started;
 // The host functions' version the package gives is the one host.yaml pins (the JVM's host.json, beside the corpus).
@@ -52,6 +52,30 @@ for (const step of arithmetic.steps) {
     const wrong = step.error !== undefined ? !(got.error || '').includes(step.error) : got.result !== step.result;
     if (wrong) {
         console.error(`The npm package's temporalArithmetic(${JSON.stringify(step.args)}) gives ${JSON.stringify(got)}, not as host.yaml pins it: ${JSON.stringify(step)}.`);
+        process.exit(1);
+    }
+}
+// Every host function, as a library registers each by hostFunctions() and calls it by hostCall (liberation-data/drivine#757):
+// host.yaml's steps of texts and nulls give what it pins, through `require` and the package's loader.
+const functions = JSON.parse(hostFunctions());
+for (const step of host.cases.flatMap((c) => c.steps)) {
+    if (!step.function || !step.args || !step.args.every((a) => a === null || typeof a === 'string')) continue;
+    if (!functions[step.function]) {
+        console.error(`The npm package's hostFunctions() has no ${step.function}: ${Object.keys(functions).join(', ')}.`);
+        process.exit(1);
+    }
+    const answer = hostCall(step.function, step.args.map((a) => (a === null ? 'n' : 't' + a.length + ':' + a)).join(''));
+    const got = answer[0] === 'e' ? { error: answer.substring(1) }
+        : { result: answer === 'n' ? null : answer[0] === 't' ? answer.substring(1) : Number(answer.substring(1)) };
+    const wrong = step.error !== undefined ? !(got.error || '').includes(step.error) : got.result !== step.result;
+    // A step held for layout 2 must fail, as check/extension-native.py runs it, so its hold comes off when it passes.
+    if ((step.note || '').includes('drivine4j#421 (layout 2)')) {
+        if (!wrong) {
+            console.error(`The npm package's hostCall('${step.function}', …) of ${JSON.stringify(step.args)} passes, held for layout 2: take the hold off.`);
+            process.exit(1);
+        }
+    } else if (wrong) {
+        console.error(`The npm package's hostCall('${step.function}', …) of ${JSON.stringify(step.args)} gives ${JSON.stringify(got)}, not as host.yaml pins it: ${JSON.stringify(step)}.`);
         process.exit(1);
     }
 }

@@ -3,8 +3,12 @@ package org.drivine.cypher.host
 import org.drivine.cypher.json.CypherJson
 import org.drivine.cypher.json.JsonNode
 import org.drivine.cypher.json.jvmDoubleText
+import org.drivine.cypher.json.parseDouble
+import org.drivine.cypher.number.DoubleText
+import org.drivine.cypher.number.SqliteRealText
 import org.drivine.cypher.number.oracleFile
 import org.drivine.cypher.number.target
+import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -87,6 +91,7 @@ class HostCallTest {
             Triple("drivine_trunc", "t", "A host call's argument 1 is no kind, length and colon"),
             Triple("drivine_trunc", "t9:abc", "A host call's argument 1 is no kind, length and colon"),
             Triple("drivine_trunc", "t-1:", "A host call's argument 1 is no kind, length and colon"),
+            Triple("drivine_trunc", "t2147483647:a", "A host call's argument 1 is no kind, length and colon"),
             Triple("drivine_trunc", "nn", "drivine_trunc takes 1 argument(s), not 2"),
         )) {
             val answer = HostCall.call(name, args)
@@ -109,5 +114,20 @@ class HostCallTest {
         // A float a function answers reads back as the same, Java's text read as JavaScript's Number reads it.
         assertEquals("r0.1", HostCall.call("drivine_float_text", "r3:0.1").let { "r" + it.substring(1).toDouble() }, "on $target")
         assertEquals("NaN", HostCall.call("drivine_float_text", "r3:NaN").substring(1), "on $target")
+    }
+
+    @Test
+    fun aFloatIsReadExactlyAndWrittenAsTextThatReadsBackOnEveryTarget() {
+        // Kotlin/Wasm's own String.toDouble is an ulp off for about one double in 400 (see parseDoubleOrNull).
+        val random = Random(757)
+        repeat(if (target == "jvm") 20_000 else 5_000) {
+            val value = when (it % 3) {
+                0 -> Double.fromBits(random.nextLong()).takeIf { d -> d.isFinite() } ?: 1.5
+                1 -> random.nextDouble(-1e6, 1e6)
+                else -> random.nextLong(-1_000_000_000_000L, 1_000_000_000_000L) / 1000.0
+            }
+            assertEquals("t${DoubleText.of(value)}", HostCall.call("drivine_float_text", item('r', jvmDoubleText(value))), "on $target, $value")
+            assertEquals(value, parseDouble(SqliteRealText.of(value)), "on $target, $value (${value.toRawBits()}) as ${SqliteRealText.of(value)}")
+        }
     }
 }

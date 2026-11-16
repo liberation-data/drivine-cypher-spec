@@ -118,7 +118,14 @@ internal class FastJson private constructor(private val text: String) {
                         if (at + 4 > text.length) return null
                         var code = 0
                         repeat(4) {
-                            val digit = text[at++].digitToIntOrNull(16) ?: return null
+                            // ASCII hex digits alone, as kotlinx.serialization reads them: digitToIntOrNull takes any
+                            // Unicode digit ('١') and full-width letter too.
+                            val digit = when (val h = text[at++]) {
+                                in '0'..'9' -> h - '0'
+                                in 'a'..'f' -> h - 'a' + 10
+                                in 'A'..'F' -> h - 'A' + 10
+                                else -> return null
+                            }
                             code = code * 16 + digit
                         }
                         out.append(code.toChar())

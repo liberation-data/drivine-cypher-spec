@@ -609,7 +609,8 @@ often JSON text, which escaped inside JSON was read twice. The answer is the val
 `e<message>`, where the function fails its statement: the host throws the message, so SQLite fails the statement with it.
 A call that can't be made (no such function, the wrong number of arguments, an argument of no kind above) is answered
 `e…` too, naming why. A function that reads a float as text reads it as SQLite writes it (`SqliteRealText`): the same value,
-in SQLite's own spelling wherever 15 digits read it back.
+in SQLite's own spelling wherever 15 digits read it back. One that reads a text as a number reads its leading number, as
+SQLite does (`12abc` is 12, `abc` and `Infinity` are 0).
 
 ```js
 const { hostCall, hostFunctions } = require('@liberation-data/drivine-cypher-compiler');
