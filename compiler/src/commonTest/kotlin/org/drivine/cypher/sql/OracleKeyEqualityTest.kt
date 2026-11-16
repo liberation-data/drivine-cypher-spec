@@ -39,6 +39,21 @@ class OracleKeyEqualityTest {
     }
 
     @Test
+    fun aParameterComparedByKeyAndReadElsewhereIsBoundAsBoth() {
+        for (cypher in listOf(
+            "MATCH (i:Issue) WHERE i.state = \$s RETURN \$s",
+            "MATCH (i:Issue) WHERE i.state = \$s RETURN i.id AS x UNION MATCH (i:Issue) RETURN \$s AS x",
+        )) {
+            val compiled = compiler.compile(cypher, mapOf("s" to "open"))
+            assertEquals(setOf("_cy_s", "_cyk_s"), compiled.parameters.keys, compiled.sql)
+            compiled.parameters.keys.forEach { assertTrue(Regex("\\\$$it\\b").containsMatchIn(compiled.sql), "$it: ${compiled.sql}") }
+        }
+        // A union whose every comparison reads the key binds the key alone.
+        val union = compiler.compile("MATCH (i:Issue) WHERE i.state = \$s RETURN i.id AS x UNION MATCH (i:Issue) WHERE i.k = \$s RETURN i.id AS x", mapOf("s" to "open"))
+        assertEquals(setOf("_cyk_s"), union.parameters.keys, union.sql)
+    }
+
+    @Test
     fun aLiteralIsComparedSoAndANegationKeepsCyphersNull() {
         val sql = compiler.compile("MATCH (i:Issue) WHERE NOT i.state = 'open' RETURN count(*)", emptyMap()).sql
         println(sql)

@@ -2353,43 +2353,70 @@ cases:
         rows: ["b", "c"]
 
   - name: "A property equal to a given text, number or truth value, beside each kind a property holds"
-    description: "A property is equal to a value of its own kind and that value alone: a text is no number or truth value, a list holding the value is not the value, NaN is equal to nothing, and a missing property is null, which NOT keeps null (drivine-cypher-spec#287)."
+    description: "A property is equal to a value of its own kind and that value alone: a text is no number or truth value, a list holding the value is not the value, and a missing property is null, which NOT keeps null (drivine-cypher-spec#287). NaN is the next case's."
     steps:
-      - cypher: "CREATE (:CyWrite {i: 0}), (:CyWrite {i: 1, k: 'open'}), (:CyWrite {i: 2, k: 'Open'}), (:CyWrite {i: 3, k: ''}), (:CyWrite {i: 4, k: '1'}), (:CyWrite {i: 5, k: 'true'}), (:CyWrite {i: 6, k: 1}), (:CyWrite {i: 7, k: 2}), (:CyWrite {i: 8, k: 1.0}), (:CyWrite {i: 9, k: 1.5}), (:CyWrite {i: 10, k: true}), (:CyWrite {i: 11, k: false}), (:CyWrite {i: 12, k: [1]}), (:CyWrite {i: 13, k: ['open']}), (:CyWrite {i: 14, k: []}), (:CyWrite {i: 15, k: [true]}), (:CyWrite {i: 16, k: date('2026-01-02')}), (:CyWrite {i: 17, k: $nan}), (:CyWrite {i: 18, k: $long}), (:CyWrite {i: 19, k: $text}), (:CyWrite {i: 20, k: 9007199254740993})"
-        parameters: {nan: {$float: "NaN"}, long: {$repeat: "x", times: 4500}, text: {$repeat: "x", times: 4000}}
+      - cypher: "CREATE (:CyWrite {i: 0}), (:CyWrite {i: 1, k: 'open'}), (:CyWrite {i: 2, k: 'Open'}), (:CyWrite {i: 3, k: ''}), (:CyWrite {i: 4, k: '1'}), (:CyWrite {i: 5, k: 'true'}), (:CyWrite {i: 6, k: 1}), (:CyWrite {i: 7, k: 2}), (:CyWrite {i: 8, k: 1.0}), (:CyWrite {i: 9, k: 1.5}), (:CyWrite {i: 10, k: true}), (:CyWrite {i: 11, k: false}), (:CyWrite {i: 12, k: [1]}), (:CyWrite {i: 13, k: ['open']}), (:CyWrite {i: 14, k: []}), (:CyWrite {i: 15, k: [true]}), (:CyWrite {i: 16, k: date('2026-01-02')}), (:CyWrite {i: 18, k: $long}), (:CyWrite {i: 19, k: $text}), (:CyWrite {i: 20, k: 9007199254740993})"
+        parameters: {long: {$repeat: "x", times: 4500}, text: {$repeat: "x", times: 4000}}
         rows: []
       - note: "Given 'open'."
         cypher: "MATCH (n:CyWrite) RETURN n.i, n.k = $g ORDER BY n.i"
         parameters: {g: "open"}
-        rows: [[0, null], [1, true], [2, false], [3, false], [4, false], [5, false], [6, false], [7, false], [8, false], [9, false], [10, false], [11, false], [12, false], [13, false], [14, false], [15, false], [16, false], [17, false], [18, false], [19, false], [20, false]]
+        rows: [[0, null], [1, true], [2, false], [3, false], [4, false], [5, false], [6, false], [7, false], [8, false], [9, false], [10, false], [11, false], [12, false], [13, false], [14, false], [15, false], [16, false], [18, false], [19, false], [20, false]]
       - note: "Given '1'."
         cypher: "MATCH (n:CyWrite) RETURN n.i, n.k = $g ORDER BY n.i"
         parameters: {g: "1"}
-        rows: [[0, null], [1, false], [2, false], [3, false], [4, true], [5, false], [6, false], [7, false], [8, false], [9, false], [10, false], [11, false], [12, false], [13, false], [14, false], [15, false], [16, false], [17, false], [18, false], [19, false], [20, false]]
+        rows: [[0, null], [1, false], [2, false], [3, false], [4, true], [5, false], [6, false], [7, false], [8, false], [9, false], [10, false], [11, false], [12, false], [13, false], [14, false], [15, false], [16, false], [18, false], [19, false], [20, false]]
       - note: "Given x * 4000."
         cypher: "MATCH (n:CyWrite) RETURN n.i, n.k = $g ORDER BY n.i"
         parameters: {g: {"$repeat": "x", "times": 4000}}
-        rows: [[0, null], [1, false], [2, false], [3, false], [4, false], [5, false], [6, false], [7, false], [8, false], [9, false], [10, false], [11, false], [12, false], [13, false], [14, false], [15, false], [16, false], [17, false], [18, false], [19, true], [20, false]]
+        rows: [[0, null], [1, false], [2, false], [3, false], [4, false], [5, false], [6, false], [7, false], [8, false], [9, false], [10, false], [11, false], [12, false], [13, false], [14, false], [15, false], [16, false], [18, false], [19, true], [20, false]]
       - note: "Given 1."
         cypher: "MATCH (n:CyWrite) RETURN n.i, n.k = $g ORDER BY n.i"
         parameters: {g: 1}
-        rows: [[0, null], [1, false], [2, false], [3, false], [4, false], [5, false], [6, true], [7, false], [8, true], [9, false], [10, false], [11, false], [12, false], [13, false], [14, false], [15, false], [16, false], [17, false], [18, false], [19, false], [20, false]]
+        rows: [[0, null], [1, false], [2, false], [3, false], [4, false], [5, false], [6, true], [7, false], [8, true], [9, false], [10, false], [11, false], [12, false], [13, false], [14, false], [15, false], [16, false], [18, false], [19, false], [20, false]]
       - note: "Given 2."
         cypher: "MATCH (n:CyWrite) RETURN n.i, n.k = $g ORDER BY n.i"
         parameters: {g: 2}
-        rows: [[0, null], [1, false], [2, false], [3, false], [4, false], [5, false], [6, false], [7, true], [8, false], [9, false], [10, false], [11, false], [12, false], [13, false], [14, false], [15, false], [16, false], [17, false], [18, false], [19, false], [20, false]]
+        rows: [[0, null], [1, false], [2, false], [3, false], [4, false], [5, false], [6, false], [7, true], [8, false], [9, false], [10, false], [11, false], [12, false], [13, false], [14, false], [15, false], [16, false], [18, false], [19, false], [20, false]]
       - note: "Given true."
         cypher: "MATCH (n:CyWrite) RETURN n.i, n.k = $g ORDER BY n.i"
         parameters: {g: true}
-        rows: [[0, null], [1, false], [2, false], [3, false], [4, false], [5, false], [6, false], [7, false], [8, false], [9, false], [10, true], [11, false], [12, false], [13, false], [14, false], [15, false], [16, false], [17, false], [18, false], [19, false], [20, false]]
+        rows: [[0, null], [1, false], [2, false], [3, false], [4, false], [5, false], [6, false], [7, false], [8, false], [9, false], [10, true], [11, false], [12, false], [13, false], [14, false], [15, false], [16, false], [18, false], [19, false], [20, false]]
       - note: "Given false."
         cypher: "MATCH (n:CyWrite) RETURN n.i, n.k = $g ORDER BY n.i"
         parameters: {g: false}
-        rows: [[0, null], [1, false], [2, false], [3, false], [4, false], [5, false], [6, false], [7, false], [8, false], [9, false], [10, false], [11, true], [12, false], [13, false], [14, false], [15, false], [16, false], [17, false], [18, false], [19, false], [20, false]]
+        rows: [[0, null], [1, false], [2, false], [3, false], [4, false], [5, false], [6, false], [7, false], [8, false], [9, false], [10, false], [11, true], [12, false], [13, false], [14, false], [15, false], [16, false], [18, false], [19, false], [20, false]]
       - note: "NOT keeps a missing property null, and so leaves it out, and keeps each value of another kind."
         cypher: "MATCH (n:CyWrite) WHERE NOT n.k = $g RETURN n.i ORDER BY n.i"
         parameters: {g: "open"}
-        rows: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+        rows: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 19, 20]
       - note: "A literal compares so too."
         cypher: "MATCH (n:CyWrite) WHERE n.k = 1 RETURN n.i ORDER BY n.i"
         rows: [6, 8]
+
+  - name: "NaN equal to a given number, text or truth value"
+    description: "NaN is equal to no value a statement gives, and NOT keeps it (drivine-cypher-spec#287). Only where a write may store NaN: Postgres and SQLite refuse one."
+    steps:
+      - only: [neo4j, oracle]
+        cypher: "CREATE (:CyWrite {i: 0, k: $nan}), (:CyWrite {i: 1, k: 1.0})"
+        parameters: {nan: {$float: "NaN"}}
+        rows: []
+      - only: [neo4j, oracle]
+        note: "Given 1."
+        cypher: "MATCH (n:CyWrite) RETURN n.i, n.k = $g ORDER BY n.i"
+        parameters: {g: 1}
+        rows: [[0, false], [1, true]]
+      - only: [neo4j, oracle]
+        note: "Given 'open'."
+        cypher: "MATCH (n:CyWrite) RETURN n.i, n.k = $g ORDER BY n.i"
+        parameters: {g: "open"}
+        rows: [[0, false], [1, false]]
+      - only: [neo4j, oracle]
+        note: "Given true."
+        cypher: "MATCH (n:CyWrite) RETURN n.i, n.k = $g ORDER BY n.i"
+        parameters: {g: true}
+        rows: [[0, false], [1, false]]
+      - only: [neo4j, oracle]
+        cypher: "MATCH (n:CyWrite) WHERE NOT n.k = $g RETURN n.i ORDER BY n.i"
+        parameters: {g: 1}
+        rows: [0]
