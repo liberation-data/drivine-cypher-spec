@@ -46,12 +46,14 @@ class OracleNumberKeysTest {
     @Test
     fun minAndMaxOrderByTheKeysOfThePropertyAfterItsKind() {
         val sql = compiler.compile("MATCH (p:Person) RETURN [min(p.karma), max(p.karma)]", emptyMap()).sql
-        assertTrue("ASC NULLS LAST, ${double("n1.props", "$.karma")} ASC NULLS LAST, ${big("n1.props", "$.karma")} ASC NULLS LAST)" in sql, sql)
-        assertTrue("DESC NULLS LAST, ${double("n1.props", "$.karma")} DESC NULLS LAST, ${big("n1.props", "$.karma")} DESC NULLS LAST)" in sql, sql)
-        // The number keys in each KEEP's order read the property at most three times: its kind, its double and its NUMBER.
+        // The double, then the NUMBER where it is an integer past 2^53 alone: within ±2^53 an integer and an equal float tie.
+        val past = "CASE WHEN ABS(${big("n1.props", "$.karma")}) > 9007199254740992 THEN ${big("n1.props", "$.karma")} END"
+        assertTrue("ASC NULLS LAST, ${double("n1.props", "$.karma")} ASC NULLS LAST, $past ASC NULLS LAST)" in sql, sql)
+        assertTrue("DESC NULLS LAST, ${double("n1.props", "$.karma")} DESC NULLS LAST, $past DESC NULLS LAST)" in sql, sql)
+        // The number keys in each KEEP's order name the property's reads five times: its double, and its kind and NUMBER twice.
         Regex("KEEP \\(DENSE_RANK FIRST ORDER BY (DECODE\\(.*?'float', '5'\\)) (ASC|DESC) NULLS LAST, (.*?)\\)(, MAX| NULL ON NULL)").findAll(sql).toList().also { assertEquals(2, it.size, sql) }.forEach { keep ->
             val keys = keep.groupValues[3]
-            assertEquals(3, Regex("JSON_VALUE\\(n1\\.props, '\\$\\.karma(\\.type\\(\\))?'").findAll(keys).count(), keys)
+            assertEquals(5, Regex("JSON_VALUE\\(n1\\.props, '\\$\\.karma(\\.type\\(\\))?'").findAll(keys).count(), keys)
         }
         assertNoKeyOfARoutedValue(sql)
     }
@@ -208,7 +210,7 @@ class OracleNumberKeysTest {
         // No NaN given or worked out: a NaN an unwound item holds is counted once, as collect(DISTINCT …) keeps it.
         assertTrue("IS NAN THEN 1 END" !in unwound, unwound)
         val worked = compiler.compile("MATCH (n:K) RETURN max(n.k + 0)", emptyMap()).sql
-        assertTrue(Regex("KEEP \\(DENSE_RANK FIRST ORDER BY .* DESC NULLS LAST, JSON_VALUE\\(.* RETURNING BINARY_DOUBLE NULL ON ERROR TYPE\\(STRICT\\)\\) DESC NULLS LAST, CASE WHEN JSON_VALUE\\(").containsMatchIn(worked), worked)
+        assertTrue(Regex("KEEP \\(DENSE_RANK FIRST ORDER BY .* DESC NULLS LAST, JSON_VALUE\\(.* RETURNING BINARY_DOUBLE NULL ON ERROR TYPE\\(STRICT\\)\\) DESC NULLS LAST, CASE WHEN ABS\\(").containsMatchIn(worked), worked)
         // Under the aggregate, nothing is bound in a subquery.
         assertTrue(!Regex("KEEP \\(DENSE_RANK FIRST ORDER BY [^)]*\\(SELECT").containsMatchIn(worked), worked)
     }
@@ -235,5 +237,32 @@ class OracleNumberKeysTest {
             val parts = Regex("SELECT (q\\d+\\.c1.*) FROM \\(").findAll(sql).map { it.groupValues[1].replace(Regex("q\\d+\\."), "") }.toList()
             assertEquals(listOf("c1", "c1"), parts, "$cypher: $sql")
         }
+    }
+
+    @Test
+    fun aGroupingKeyOrderedByIsReadOfItsGroupedValueNotItsPath() {
+        // Read by the property's path beside a GROUP BY of its JSON, a key was no group's (ORA-00979): the order's keys are read of
+        // the column the grouped value is carried in, after the GROUP BY, or of the grouped value itself.
+        for (cypher in listOf(
+            "MATCH (p:Person)-[:ACTED_IN]->(m) RETURN p.name, count(*) ORDER BY p.name",
+            "MATCH (me:CyKey)--(you:CyKey) RETURN me.age AS age, count(you.age) AS cnt ORDER BY me.age + count(you.age)",
+            "MATCH (me:CyKey)--(you:CyKey) RETURN me.age AS age, count(you.age) AS cnt ORDER BY CASE WHEN me.age > 1 THEN count(*) END",
+        )) {
+            val sql = compiler.compile(cypher, emptyMap()).sql
+            val grouped = sql.substring(sql.lastIndexOf("SELECT ", sql.indexOf("GROUP BY")), sql.indexOf("GROUP BY"))
+            assertTrue(!Regex("JSON_VALUE\\(n\\d+\\.props, '[^']*' RETURNING (BINARY_DOUBLE|NUMBER) NULL ON ERROR").containsMatchIn(grouped) ||
+                Regex("GROUP BY .*JSON_VALUE\\(n\\d+\\.props").containsMatchIn(sql), "$cypher: $sql")
+        }
+        val ordered = compiler.compile("MATCH (p:Person)-[:ACTED_IN]->(m) RETURN p.name, count(*) ORDER BY p.name", emptyMap()).sql
+        assertTrue(Regex("ORDER BY .*JSON_VALUE\\(p\\d+\\.s1, '\\$' RETURNING BINARY_DOUBLE").containsMatchIn(ordered) && " AS s1k1" !in ordered, ordered)
+    }
+
+    @Test
+    fun anIntegerAndAnEqualFloatTieInAnOrderReadInPlace() {
+        // As a fragment orders by a property: 36 and 36.0 tie, and only an integer past 2^53 is told apart by its NUMBER.
+        val order = compiler.order("n.age", false, mapOf("n" to FragmentVariable.Node("people_"))).terms
+        val n = big("people_.props", "$.age")
+        assertTrue(order.any { it == "CASE WHEN ABS($n) > 9007199254740992 THEN $n END" }, "$order")
+        assertTrue(order.none { it == n }, "$order")
     }
 }

@@ -1195,6 +1195,25 @@ abstract class SqlCypherCompiler(
      */
     protected open fun carriesKeysAfter(json: String) = false
 
+    /**
+     * Whether the terms compiled read the values of a query that groups its rows, where a value the groups are keyed by is grouped
+     * as it is, and its number keys must be read of it, not of the property it is read from by the property's own path, which is
+     * no group's key (ORA-00979): see [groupedReads].
+     */
+    protected var groupedTerms = false
+        private set
+
+    /** [work], its terms [groupedTerms] where [grouped]. */
+    protected fun <T> groupedReads(grouped: Boolean, work: () -> T): T {
+        val was = groupedTerms
+        groupedTerms = grouped || was
+        try {
+            return work()
+        } finally {
+            groupedTerms = was
+        }
+    }
+
     /** Whether the store compares, sorts and groups a number by [numberKeys]: by default it keeps none. */
     protected open val keepsNumberKeys = false
 
@@ -3854,14 +3873,18 @@ abstract class SqlCypherCompiler(
                 // The value's number keys (see numberKeys) carried beside it, each read once, where the value is read, where
                 // the store reads them so ([carriesNumberKeys]): read again of the column in the query after, a property read
                 // through its text would be read through it for each. Any other value's are read of its column there.
-                if (!numbered || !carriesNumberKeys(carried)) {
+                // Not where rows are compared: read of the value by its path beside a GROUP BY of its JSON, a key was no group's
+                // (ORA-00979); they are read of the column it is carried in, after.
+                if (!numbered || compared || !carriesNumberKeys(carried)) {
                     sorted[column] = { at -> sorts(at, if (numbered) numberKeys(at) else emptyList()) }
                     return
                 }
                 val keyColumns = numberKeys(carried).mapIndexed { k, key -> "${column}k${k + 1}".also { selectList += "$key AS $it" } }
                 sorted[column] = { at -> sorts(at, keyColumns.map { "$name.$it" }) }
             }
-            val sorts = projection.orderBy.mapIndexed { i, sort ->
+            // Where rows are grouped, a term's number keys are read of the values the groups are keyed by, not by their paths
+            // (see groupedReads).
+            val sorts = groupedReads(aggregating) { projection.orderBy.mapIndexed { i, sort ->
                 val column = "s${i + 1}"
                 // An order term that is an item, as written, is that item: so it may be ordered by where rows are compared.
                 val item = items.indexOfFirst { it.expression == sort.expression }
@@ -3899,7 +3922,7 @@ abstract class SqlCypherCompiler(
                     }
                 }
                 column to sort.descending
-            }.ifEmpty {
+            } }.ifEmpty {
                 if (compared) emptyList() else select.order.mapIndexed { i, (term, descending) ->
                     val name = "o${i + 1}"
                     selectList += "$term AS $name"

@@ -308,13 +308,16 @@ class OracleCypherCompiler(
     /**
      * The terms a number is ordered by, of its [numberKeys], [keys], the double and the `NUMBER`: where they are columns a query
      * carries, the double, then the exact key worked out of the two ([exactOf]), with no read of the value; where they are reads
-     * of it, the double, then the `NUMBER`, each read once. Read so, an integer past 2^53 is ordered among those of its double,
-     * but a float of that double comes after them, or before them descending, where it may be between two.
+     * of it, the double, then the `NUMBER` where it is an integer past 2^53 alone, each read once: within ±2^53 an integer and a
+     * float of one value tie, as in Neo4j (36 and 36.0 were ordered apart by the `NUMBER` of the one, the other's null). Read
+     * so, an integer past 2^53 is ordered among those of its double, but a float of that double comes after them, or before
+     * them descending, where it may be between two.
      */
     private fun numberOrder(keys: List<String>): List<String> {
         if (keys.isEmpty()) return keys
         val (d, n) = keys
-        return if (COLUMN_KEY.matches(d) && COLUMN_KEY.matches(n)) listOf(d, exactOf(n, d)) else listOf(d, n)
+        return if (COLUMN_KEY.matches(d) && COLUMN_KEY.matches(n)) listOf(d, exactOf(n, d))
+            else listOf(d, "CASE WHEN ABS($n) > $EXACT_DOUBLES THEN $n END")
     }
 
     /** Oracle groups by no subquery, so the value is not bound in one, as [nullIfJsonNull] binds a long one: it is read twice. */
@@ -882,6 +885,8 @@ class OracleCypherCompiler(
      * ([keptText]): so its [numberKeys] are read from the properties by the path, not from that text.
      */
     private fun keptRead(json: String): Pair<String, String>? {
+        // Where rows are grouped, such a value is a group's key as it is: its keys are read of it (see groupedTerms).
+        if (groupedTerms) return null
         if (!json.startsWith(KEPT_HEAD)) return null
         var keep = json.indexOf(KEPT_KEEP)
         while (keep > 0) {
