@@ -1160,7 +1160,7 @@ abstract class SqlCypherCompiler(
     protected open fun writtenItemEquals(item: String, value: String, items: List<Any?>) = jsonEquals(item, value)
 
     /**
-     * The keys a store sorts, groups and counts the JSON value [json] by beside the value itself, where it may be a number and
+     * The keys a store compares, sorts and counts the JSON value [json] by beside the value itself, where it may be a number and
      * the store's JSON loses a number's value in comparing it: none by default, where the JSON's own order and equality are
      * Cypher's for numbers. Each is a SQL value: the first null where [json] is no number, which so tells it from any number.
      */
@@ -1168,8 +1168,8 @@ abstract class SqlCypherCompiler(
 
     /**
      * Whether a query that carries the JSON value [json] out as a column carries its [numberKeys] beside it, read where the value
-     * is, and groups by them: else they are read of the column in the query after, and a group is keyed by the value alone, as
-     * a long value worked out in the query, written out again for each key, would grow the statement.
+     * is: else they are read of the column in the query after, as a long value worked out in the query, written out again for
+     * each key, would grow the statement.
      */
     protected open fun carriesNumberKeys(json: String) = true
 
@@ -1184,8 +1184,8 @@ abstract class SqlCypherCompiler(
      * The terms a group keys the JSON value [json], which may be a number, by in its place, where the store's comparison of it
      * as a value keeps two equal numbers apart: SQLite's, of their text, kept `1` from `1.0` and `0.0` from `0`. Not `DISTINCT`,
      * which keeps its rows in the order they come in, as a `GROUP BY` would not (drivine-cypher-spec#315).
-     * Null where the value keys it, as on a store that compares numbers by their values (Postgres's `jsonb`) or by keys beside
-     * them ([numberKeys]).
+     * Null where the value keys it, as on a store that compares numbers by their values (Postgres's `jsonb`), or where the store
+     * groups a number as its JSON compares it, as Oracle does (drivine-cypher-spec#315).
      */
     protected open fun groupedValue(json: String): List<String>? = null
 
@@ -1214,7 +1214,7 @@ abstract class SqlCypherCompiler(
         }
     }
 
-    /** Whether the store compares, sorts and groups a number by [numberKeys]: by default it keeps none. */
+    /** Whether the store compares, sorts and counts a number by [numberKeys]: by default it keeps none. */
     protected open val keepsNumberKeys = false
 
     /** [openSortKey] of the JSON value [json], where [keys] are its [numberKeys], read where they are read. */
@@ -3785,8 +3785,8 @@ abstract class SqlCypherCompiler(
          * statement is compiled [typed], gives its nodes and relationships tagged ([output]), and its `result` as the host's
          * driver reads it back (`returned(json)`, which Oracle encodes again with `oracleReencodeJson`).
          * Where [keysAfter], a query after may read its items' number keys, which are carried beside them ([keyed]): a final
-         * `RETURN`, or a `COUNT { … }`'s or an `EXISTS { … }`'s, whose columns nothing reads, carries none but those it
-         * compares its rows by.
+         * `RETURN`, or a `COUNT { … }`'s or an `EXISTS { … }`'s, whose columns nothing reads, carries none; nor does a query
+         * that compares its rows (`DISTINCT`, `GROUP BY`), which compares an item as its JSON (drivine-cypher-spec#315).
          */
         fun project(select: Select, written: Projection, final: Boolean, statement: Boolean = false, keysAfter: Boolean = !final): Projected {
             // As in Neo4j, a star gives the variables in the order of their names, before the items named after it.
@@ -3849,10 +3849,9 @@ abstract class SqlCypherCompiler(
             }
             // An order is written over the items' names, and where nothing is grouped or kept distinct, the variables too.
             val name = alias("p")
-            // Where rows are compared, an item that may be a number is compared by the store's number keys too, where it keeps any
-            // (see numberKeys): carried beside it, so DISTINCT keeps such rows apart, and an order of the item reads them from their
-            // columns, where read of the item's column again they would be read through a property's text. A group is keyed by
-            // them already (see groupKeys).
+            // An item carried with the store's number keys ([keyed]), where no rows are compared: an order of the item in the query
+            // after reads them from their columns, where read of the item's column again they would be read through a property's
+            // text.
             columns.forEach { (column, value) ->
                 (value as? Value.Json)?.keys?.let { keys -> keyedColumns["$name.$column"] = keys.indices.map { "$name.${column}k${it + 1}" } }
             }
@@ -9040,8 +9039,8 @@ abstract class SqlCypherCompiler(
     private fun Value.Json.mayBeNumber() = (known == null || known == Value.Known.FLOAT) && !integer && !text && !list && temporal == null && identity == null
 
     /**
-     * [numberKeys] of [json] written out, not bound in a subquery: as a group is keyed by them, as Oracle groups by none
-     * (ORA-22818), and under an aggregate, which binds none.
+     * [numberKeys] of [json] written out, not bound in a subquery: as a query carries them beside the value ([keyed]), and
+     * under an aggregate, which binds none.
      */
     protected fun groupedNumberKeys(json: String): List<String> {
         val was = sharing

@@ -5,11 +5,12 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * A number compared, ordered, grouped and counted on Oracle by its keys, its double and what tells an integer past 2^53 apart
- * beyond it, where Oracle's JSON compares and sorts one through a decimal `NUMBER`, which holds no double nearer 0 than
- * 1e-130 or past 1e126 and rounds an integer beside a float near 2^53 (liberation-data/drivine-cypher-spec#309). Each key is
- * read from the stored properties by the property's path, never from the property read through its text, which each read
- * would work out again.
+ * A number compared, ordered and counted on Oracle by its keys, its double and what tells an integer past 2^53 apart beyond
+ * it, where Oracle's JSON compares and sorts one through a decimal `NUMBER`, which holds no double nearer 0 than 1e-130 or
+ * past 1e126 and rounds an integer beside a float near 2^53 (liberation-data/drivine-cypher-spec#309). A group and a
+ * `DISTINCT` compare a number as JSON, as before (drivine-cypher-spec#315). Each key is read from the stored properties by
+ * the property's path, never from the property read through its text, which each read would work out again; but a value a
+ * group is keyed by has its keys read of it, after the `GROUP BY`, as no other read of it is a group's key (ORA-00979).
  */
 class OracleNumberKeysTest {
 

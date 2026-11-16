@@ -809,8 +809,8 @@ class OracleCypherCompiler(
 
     /**
      * A property's keys, read from the properties by its path, and a short value's, are read where it is; a long value's, and
-     * one a subquery works out, are read of the column that carries it, and a group is not keyed by them, as each key would
-     * write the value out again, and work the subquery out again for each.
+     * one a subquery works out, are read of the column that carries it, as each key would write the value out again, and work
+     * the subquery out again for each.
      */
     override fun carriesNumberKeys(json: String) =
         (propertyRead(json) ?: keptRead(json)) != null || json.length <= SHARED_ABOVE && !json.contains("SELECT", ignoreCase = true)
