@@ -3,7 +3,9 @@ package org.drivine.cypher
 import org.drivine.cypher.sql.OracleCypherCompiler
 import org.drivine.cypher.sql.PostgresCypherCompiler
 import org.drivine.cypher.sql.SqliteCypherCompiler
+import org.drivine.cypher.store.OracleSql
 import org.junit.jupiter.api.Test
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
@@ -83,6 +85,11 @@ class OracleExistsQueryTest {
         "MATCH (n) RETURN EXISTS { (n)-->() }",
         "MATCH (n) RETURN EXISTS { MATCH (x:Movie) RETURN x.title AS y }",
         "MATCH (n) RETURN EXISTS { UNWIND [n] AS z WITH z WHERE z:Movie RETURN z }",
+        "MATCH (n) RETURN EXISTS { MATCH (n:Movie) OPTIONAL MATCH (n)-->(x) RETURN x }",
+        "MATCH (n) RETURN EXISTS { MATCH (n:Movie) CALL (n) { MATCH (n)-->(x) RETURN x } RETURN x }",
+        "MATCH (n) RETURN EXISTS { MATCH (n:Movie) RETURN n.title AS y UNION MATCH (x:Person) RETURN x.name AS y }",
+        "MATCH (n), (m) RETURN EXISTS { MATCH (n)-[:R]->(m) }",
+        "MATCH (n) WHERE (n)-->() RETURN n",
     )
 
     @Test
@@ -108,5 +115,31 @@ class OracleExistsQueryTest {
                 assertTrue(!sql.contains(") ex) > 0") && sql.contains("EXISTS ("), sql)
             }
         }
+    }
+
+    @Test
+    fun `a query reads a table where a source of it or of a derived table or a lateral one is a table`() {
+        for (query in listOf(
+            "SELECT 1 FROM g_node n",
+            "SELECT 1 FROM (SELECT 1) one CROSS JOIN g_edge e",
+            "SELECT 1 FROM (SELECT x FROM (SELECT 1 FROM g_node n) d) d2",
+            "SELECT 1 FROM (SELECT 1) one LEFT JOIN LATERAL (SELECT 1 FROM g_node n) o ON 1 = 1",
+            "SELECT 1 FROM (SELECT 1) one CROSS APPLY (SELECT 1 FROM g_node n) a",
+            "SELECT 1 FROM (SELECT 1) one OUTER APPLY (SELECT 1 FROM g_node n) a",
+            "SELECT 1 FROM JSON_TABLE(x, '\$[*]' COLUMNS (v PATH '\$')) j",
+            "SELECT 1 FROM DUAL UNION ALL SELECT 1 FROM g_node n",
+            "SELECT 1 FROM g_node DUAL",
+        )) assertTrue(OracleSql.readsTable(query), query)
+    }
+
+    @Test
+    fun `a query reads no table where only DUAL or a subquery within an expression or a quoted text names one`() {
+        for (query in listOf(
+            "SELECT 1 FROM DUAL WHERE JSON_EXISTS(n1.labels, '\$[*]?(@ == \"Movie\")')",
+            "SELECT 1 FROM (SELECT 1) one WHERE x = 'a FROM b' AND y = 'it''s JOIN c'",
+            "SELECT 1 WHERE EXISTS (SELECT 1 FROM g_node n) AND x IN (SELECT 1 FROM g_edge e)",
+            "SELECT (SELECT count(*) FROM g_node n) AS c FROM DUAL",
+            "SELECT 1 FROM (SELECT 1 FROM DUAL) d CROSS JOIN LATERAL (SELECT 1 FROM DUAL) l",
+        )) assertFalse(OracleSql.readsTable(query), query)
     }
 }
