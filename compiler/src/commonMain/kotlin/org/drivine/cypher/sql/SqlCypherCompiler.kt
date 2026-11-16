@@ -552,6 +552,13 @@ abstract class SqlCypherCompiler(
     protected open fun existsQuery(query: String) = query
 
     /**
+     * The truth of an `EXISTS { … }`, of a pattern as a predicate or of a subquery's query, [query], as [predicateQuery] gives
+     * it: `EXISTS (…)`, on lines of its own where [laidOut]. A store whose planner gets some such `EXISTS` wrong writes it
+     * otherwise: see Oracle's.
+     */
+    protected open fun existsOf(query: String, laidOut: Boolean) = if (laidOut) "EXISTS (\n${indent(query)}\n)" else "EXISTS ($query)"
+
+    /**
      * The query [query] of a subquery that a condition reads, as the store's planner is given it: the query of an `EXISTS (…)`
      * or a `NOT EXISTS (…)`, of an `x IN (…)`, and the count a `COUNT { … }` or a quantifier compares. Each such subquery the
      * compiler writes is given here. A store whose planner merges two of them wrongly keeps it from doing so: see Oracle's.
@@ -4710,7 +4717,7 @@ abstract class SqlCypherCompiler(
             is Expression.PatternPredicate -> exists(listOf(expression.pattern), null, scope)
             is Expression.Exists -> exists(expression.patterns, expression.where, scope)
             is Expression.Subquery -> when (expression.kind) {
-                Expression.Subquery.Kind.EXISTS -> Value.Bool("EXISTS (\n${indent(predicateQuery(existsQuery(correlated(expression.query, scope, "EXISTS { … }", identified = false))))}\n)")
+                Expression.Subquery.Kind.EXISTS -> Value.Bool(existsOf(predicateQuery(existsQuery(correlated(expression.query, scope, "EXISTS { … }", identified = false))), laidOut = true))
                 Expression.Subquery.Kind.COUNT ->
                     Value.Json(scalar("(${predicateQuery("SELECT count(*) FROM (\n${indent(correlated(expression.query, scope, "COUNT { … }"))}\n) ${alias("q")}")})"))
             }
@@ -4800,7 +4807,7 @@ abstract class SqlCypherCompiler(
             val inner = Select(scope)
             patterns(inner, patterns)
             where?.let { filter(inner, it) }
-            return Value.Bool("EXISTS (${predicateQuery((listOf(inner.head("1")) + inner.from() + listOfNotNull(inner.whereClause())).joinToString(" "))})")
+            return Value.Bool(existsOf(predicateQuery((listOf(inner.head("1")) + inner.from() + listOfNotNull(inner.whereClause())).joinToString(" ")), laidOut = false))
         }
 
         /**

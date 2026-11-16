@@ -64,4 +64,49 @@ class OracleExistsQueryTest {
             }
         }
     }
+
+    /** Statements whose `EXISTS { … }` reads only the row it is in, as the spec's "EXISTS { } and COUNT { } of the row alone" has them. */
+    private val ofTheRow = listOf(
+        "MATCH (:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, EXISTS { MATCH (m1:Movie) RETURN m1.title AS y } AS y ORDER BY title",
+        "MATCH (n) RETURN EXISTS { MATCH (n:Movie) WITH n.title AS t RETURN t AS y }",
+        "MATCH (n) RETURN n.name ORDER BY EXISTS { MATCH (n:Movie) RETURN n.title AS y }",
+        "MATCH (n) RETURN EXISTS { (n:Movie) }",
+        "MATCH (n) RETURN EXISTS { MATCH (n:Movie) }",
+        "MATCH (n) RETURN EXISTS { WITH n WHERE n:Movie RETURN n.title AS y }",
+        "MATCH (n) RETURN EXISTS { MATCH (n:Movie) WHERE COUNT { (n)<--() } > 1 RETURN n.title AS y }",
+        "MATCH (n) WHERE NOT EXISTS { MATCH (n:Movie) RETURN n.title AS y } RETURN n.name",
+    )
+
+    /** Statements whose `EXISTS { … }` reads a table: the graph's, or a list's rows. */
+    private val ofATable = listOf(
+        "MATCH (n) RETURN EXISTS { MATCH (n:Movie)<-[:ACTED_IN]-(a) RETURN a.name AS y }",
+        "MATCH (n) RETURN EXISTS { (n)-->() }",
+        "MATCH (n) RETURN EXISTS { MATCH (x:Movie) RETURN x.title AS y }",
+        "MATCH (n) RETURN EXISTS { UNWIND [n] AS z WITH z WHERE z:Movie RETURN z }",
+    )
+
+    @Test
+    fun `an EXISTS whose query reads only the row is its rows counted on Oracle`() {
+        for (cypher in ofTheRow) {
+            val sql = OracleCypherCompiler("g").compile(cypher).sql
+            assertTrue(sql.contains(") ex) > 0)") && Regex("""(?<!JSON_)EXISTS \(\n""").findAll(sql).count() == 0, sql)
+        }
+    }
+
+    @Test
+    fun `an EXISTS whose query reads a table is written as it was on Oracle`() {
+        for (cypher in ofATable) {
+            val sql = OracleCypherCompiler("g").compile(cypher).sql
+            assertTrue(!sql.contains(") ex) > 0)") && Regex("""(?<!JSON_)EXISTS \(""").containsMatchIn(sql), sql)
+        }
+    }
+
+    @Test
+    fun `Postgres and SQLite write the EXISTS of a query that reads only the row as an EXISTS`() {
+        for (cypher in ofTheRow) {
+            for (sql in listOf(PostgresCypherCompiler("g"), SqliteCypherCompiler("g")).map { it.compile(cypher).sql }) {
+                assertTrue(!sql.contains(") ex) > 0") && sql.contains("EXISTS ("), sql)
+            }
+        }
+    }
 }
