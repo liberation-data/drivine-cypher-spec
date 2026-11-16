@@ -119,6 +119,7 @@ class ValueLayoutTest {
             if (text.contains("\"\$") || text.contains("\\u0024")) return@repeat
             val tree = runCatching { CypherJson.readTree(text) }.getOrNull() ?: return@repeat
             assertEquals(CypherJson.writeValueAsString(tree), CypherJson.writeValueAsString(ValueLayout.read(tree)), "on $target: $text")
+            assertEquals(CypherJson.writeValueAsString(tree), CypherJson.writeValueAsString(ValueLayout.read(tree, typed = true)), "on $target, typed: $text")
             checked++
         }
         assertTrue(checked > 500, "on $target: $checked texts read")

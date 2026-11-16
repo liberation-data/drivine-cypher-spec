@@ -4,11 +4,10 @@ import org.drivine.cypher.store.ddl.GeneratedFunctions
 import org.drivine.DrivineInternalApi
 import org.drivine.cypher.json.ArrayNode
 import org.drivine.cypher.json.CypherJson
-import org.drivine.cypher.json.RawNode
-import org.drivine.cypher.json.DoubleNode
 import org.drivine.cypher.json.JsonNode
 import org.drivine.cypher.json.ObjectNode
 import org.drivine.cypher.sql.Temporals
+import org.drivine.cypher.store.SqliteCypherValues
 import org.drivine.cypher.store.ValueLayout
 import org.drivine.cypher.store.ddl.OracleDdl
 import org.drivine.cypher.store.ddl.PostgresDdl
@@ -77,19 +76,10 @@ internal object LayoutJson {
         } catch (e: Exception) {
             throw IllegalArgumentException("A read request's column is no JSON: ${e.message}")
         }
-        return "{\"value\":${CypherJson.writeValueAsString(infinitiesAsNumbers(ValueLayout.read(value, typed?.booleanValue() ?: false)))}}"
-    }
-
-    /**
-     * [node] with each infinity a number again, `9e999` or `-9e999`, as SQLite writes one in a column and as a host's JSON
-     * reader reads it back: the writer gives a double it can't write as a number as the text `"Infinity"`, which a host
-     * would take for the text a node held.
-     */
-    private fun infinitiesAsNumbers(node: JsonNode): JsonNode = when {
-        node is DoubleNode && node.value.isInfinite() -> RawNode(if (node.value > 0) "9e999" else "-9e999")
-        node is ObjectNode -> ObjectNode().apply { node.properties().forEach { (key, value) -> set<JsonNode>(key, infinitiesAsNumbers(value)) } }
-        node is ArrayNode -> ArrayNode().apply { node.forEach { add(infinitiesAsNumbers(it)) } }
-        else -> node
+        // An infinity is written as the number SQLite writes for one, 9e999, which a host's JSON reader reads back as one:
+        // the writer gives a double it can't write as a number as the text "Infinity", which a host would take for a text.
+        // A column's JSON holds no NaN, so none is read.
+        return "{\"value\":${SqliteCypherValues.write(ValueLayout.read(value, typed?.booleanValue() ?: false))}}"
     }
 
     private fun write(given: JsonNode?): String {
