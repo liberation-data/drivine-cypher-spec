@@ -14,11 +14,13 @@ import org.drivine.cypher.store.IdSql
  * `{"idSql": {"store": "oracle", "helper": "hasId", "alias": "n", "key": "id", "json": "JSON(:id)"}}`, the store one of
  * `postgres`, `oracle` and `sqlite`, and the helper one of:
  * - `hasId`, with `alias`, `key` and `json`, the SQL of the id's JSON as the host binds it ([IdSql.hasId]);
- * - `hasIdIn`, with `alias`, `key` and `parameter`, the SQL of a JSON array of ids, and on SQLite `nodes`, the node table, and
- *   `labels`, a list of the node's labels ([IdSql.hasIdIn]);
+ * - `hasIdIn`, with `alias`, `key` and `parameter`, the SQL of a JSON array of each id's JSON text (`["\"a\"", "1"]`), and on
+ *   SQLite `nodes`, the node table, and `labels`, a list of the node's labels ([IdSql.hasIdIn]);
  * - `keyText`, `property` and `hasProperty`, with `alias` and `key` ([IdSql.keyText], [IdSql.property], [IdSql.hasProperty]).
  *
- * Each key is given as the node holds it, escaped where it begins with `$`. Answered `{"sql": "…"}`.
+ * Each key is given as the node holds it, escaped where it begins with `$`. `json` and `parameter` are written into the SQL as
+ * given, in the host's own placeholder; on Oracle and SQLite `json` is written more than once, so it is bound by name.
+ * Answered `{"sql": "…"}`.
  */
 @DrivineInternalApi
 internal object IdSqlJson {

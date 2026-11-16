@@ -536,12 +536,14 @@ JSON entry, so TypeScript and Python run what drivine4j runs from the Kotlin typ
   made over the property (`store/IndexKey`), so the index answers it, and a temporal id's tag is equal only to the same
   value's (`IdSql`):
   - `hasId` (`alias`, `key`, `json`, the SQL of the id's JSON as the host binds it);
-  - `hasIdIn` (`alias`, `key`, `parameter`, the SQL of a JSON array of the ids, and on SQLite `nodes`, the node table, and
-    `labels`);
+  - `hasIdIn` (`alias`, `key`, `parameter`, the SQL of a JSON array of each id's JSON text, `["\"a\"", "1"]`, and on
+    SQLite `nodes`, the node table, and `labels`);
   - `keyText`, a temporal id's tag read as its text, as a write plan keys a node; `property`; and `hasProperty`, each with
     `alias` and `key`.
 
-  Each key is given as the node holds it, escaped where it begins with `$`.
+  Each key is given as the node holds it, escaped where it begins with `$`; the stamp's key is its column, and is refused as an
+  id. `json` and `parameter` are written into the SQL as given, in the host's own placeholder; on Oracle and SQLite `json` is
+  written more than once, so a host binds it by name (`:id`, not `?`).
 
   ```json
   {"idSql": {"store": "oracle", "helper": "hasId", "alias": "n", "key": "id", "json": "JSON(:id)"}}

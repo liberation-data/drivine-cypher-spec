@@ -27,10 +27,11 @@ class IdSqlJsonTest {
     fun eachHelperIsIdSqlsOwn() {
         for ((name, store) in stores) for (key in listOf("id", "\$\$id", Stamps.PROPERTY)) {
             val k = CypherJson.writeValueAsString(CypherJson.valueToTree(key))
-            assertEquals(IdSql.hasId(store, "n", key, "JSON(:id)"), sql(name, "\"helper\": \"hasId\", \"alias\": \"n\", \"key\": $k, \"json\": \"JSON(:id)\""), "on $target, $name, $key")
             assertEquals(IdSql.keyText(store, "n", key), sql(name, "\"helper\": \"keyText\", \"alias\": \"n\", \"key\": $k"), "on $target, $name, $key")
             assertEquals(IdSql.property(store, "n", key), sql(name, "\"helper\": \"property\", \"alias\": \"n\", \"key\": $k"), "on $target, $name, $key")
             assertEquals(IdSql.hasProperty(store, "n", key), sql(name, "\"helper\": \"hasProperty\", \"alias\": \"n\", \"key\": $k"), "on $target, $name, $key")
+            if (key == Stamps.PROPERTY) continue
+            assertEquals(IdSql.hasId(store, "n", key, "JSON(:id)"), sql(name, "\"helper\": \"hasId\", \"alias\": \"n\", \"key\": $k, \"json\": \"JSON(:id)\""), "on $target, $name, $key")
             val nodes = if (store == Store.SQLITE) ", \"nodes\": \"g_node\", \"labels\": [\"Person\"]" else ""
             assertEquals(
                 IdSql.hasIdIn(store, "n", key, ":ids", "g_node".takeIf { store == Store.SQLITE }, if (store == Store.SQLITE) listOf("Person") else emptyList()),
@@ -50,6 +51,28 @@ class IdSqlJsonTest {
             val alias = if (store == Store.SQLITE) "f" else "n"
             for (expression in IndexKey.column(store, alias, "id")) assertTrue(expression in inList, "on $target, $store: $inList")
         }
+    }
+
+    @Test
+    fun theStampIsReadAsItsColumnAndRefusedAsAnId() {
+        for ((name, store) in stores) {
+            val k = CypherJson.writeValueAsString(CypherJson.valueToTree(Stamps.PROPERTY))
+            assertEquals("n.stamp", IdSql.keyText(store, "n", Stamps.PROPERTY), "on $target, $store")
+            assertEquals("n.stamp", IdSql.property(store, "n", Stamps.PROPERTY), "on $target, $store")
+            for (helper in listOf("hasId", "hasIdIn")) {
+                val error = answer("{\"idSql\": {\"store\": \"$name\", \"helper\": \"$helper\", \"alias\": \"n\", \"key\": $k, \"json\": \":id\", \"parameter\": \":ids\", \"nodes\": \"g_node\"}}")["error"]?.textValue()
+                assertTrue(error != null && error.startsWith("An id is a property of the node"), "on $target, $store, $helper: $error")
+            }
+        }
+    }
+
+    @Test
+    fun anIdInAListOnSqliteNeedsNoLabels() {
+        assertEquals(
+            IdSql.hasIdIn(Store.SQLITE, "n", "id", ":ids", "g_node"),
+            sql("sqlite", "\"helper\": \"hasIdIn\", \"alias\": \"n\", \"key\": \"id\", \"parameter\": \":ids\", \"nodes\": \"g_node\""),
+            "on $target",
+        )
     }
 
     @Test

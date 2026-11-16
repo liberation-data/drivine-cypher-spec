@@ -11,7 +11,11 @@ import org.drivine.cypher.api.Store
  * date id twice as two nodes; TypeScript and Python ask for them through the JSON entry (`idSql`).
  *
  * Each takes [key] as the node holds it, [ValueLayout.escape]d where it begins with `$`. A [Stamps.PROPERTY] key is the stamp's
- * column, not a property.
+ * column, not a property, which [keyText], [property] and [hasProperty] read; [hasId] and [hasIdIn] refuse it, as no index
+ * of an id is made over the stamp.
+ *
+ * The SQL of a bound value ([hasId]'s `json`, [hasIdIn]'s `parameter`) is written in as given, in the host's own placeholder.
+ * On Oracle and SQLite [hasId] writes `json` more than once, so a host binds it by name (`:id`, not `?`).
  */
 @DrivineInternalApi
 object IdSql {
@@ -22,6 +26,7 @@ object IdSql {
      * A null [json] is equal to no id.
      */
     fun hasId(store: Store, alias: String, key: String, json: String): String {
+        requireId(key)
         val column = IndexKey.column(store, alias, key)
         return when (store) {
             Store.POSTGRES -> "${column.single()} = CAST($json AS jsonb)"
@@ -36,6 +41,7 @@ object IdSql {
      * a list, each id finds its node of the table [nodes] of [labels] through the index before the node is joined.
      */
     fun hasIdIn(store: Store, alias: String, key: String, parameter: String, nodes: String? = null, labels: Collection<String> = emptyList()): String {
+        requireId(key)
         val column = IndexKey.column(store, alias, key)
         return when (store) {
             Store.POSTGRES ->
@@ -51,6 +57,10 @@ object IdSql {
         }
     }
 
+    /** Refuses the stamp as an id: [IndexKey.column] is made over a property, and Postgres's stamp column is no `jsonb`. */
+    private fun requireId(key: String) =
+        require(key != Stamps.PROPERTY) { "An id is a property of the node, not its stamp (${Stamps.PROPERTY})." }
+
     /**
      * The id held under [key] of the node [alias] as the text a write plan keys it by: a temporal value's tag read as its text
      * `v`, anything else as the store reads the property as text, as the module's Postgres write function reads a target's id.
@@ -58,7 +68,7 @@ object IdSql {
     fun keyText(store: Store, alias: String, key: String): String = when (store) {
         Store.POSTGRES -> PostgresSql.searchedProperty(alias, key)
         Store.SQLITE -> SqliteSql.searchedProperty(alias, key)
-        Store.ORACLE -> "COALESCE(JSON_VALUE($alias.props, ${OracleSql.path(key, ".${ValueLayout.TEXT}")}), JSON_VALUE($alias.props, ${OracleSql.path(key)}))"
+        Store.ORACLE -> if (key == Stamps.PROPERTY) OracleSql.property(alias, key) else "COALESCE(JSON_VALUE($alias.props, ${OracleSql.path(key, ".${ValueLayout.TEXT}")}), JSON_VALUE($alias.props, ${OracleSql.path(key)}))"
     }
 
     /** The property [key] of the node or relationship [alias], read as text: the expression a range index is made over. */
@@ -73,6 +83,6 @@ object IdSql {
         key == Stamps.PROPERTY -> "$alias.stamp IS NOT NULL"
         store == Store.POSTGRES -> "${PostgresSql.value(alias, key)} IS NOT NULL"
         store == Store.ORACLE -> OracleSql.hasProperty(alias, key)
-        else -> "json_type(${SqliteSql.column(alias, "props")}, ${SqliteSql.path(key)}) IS NOT NULL"
+        else -> "${SqliteSql.type(alias, key)} IS NOT NULL"
     }
 }
