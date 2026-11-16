@@ -2038,11 +2038,12 @@ class OracleCypherCompiler(
      * m.title }` of a node `m` bound already, `EXISTS { (m:Movie) }` and `EXISTS { WITH m WHERE m:Movie RETURN m }` compile to
      * such a query: a test of the row's labels in a `SELECT` with no `FROM`, or a derived table of one. `FROM DUAL`, `NO_UNNEST`
      * and `ROWNUM` don't help. So its truth is its rows counted, as a `COUNT { … }`'s query is, which Oracle gets right; a query
-     * of the row alone has few. An `EXISTS` whose query reads a table, a list's rows (`JSON_TABLE`) among them, is written as
-     * it was. The spec's case "EXISTS { } and COUNT { } of the row alone" holds each form to Neo4j's answers.
+     * of the row alone has few. An `EXISTS` is written as it was only where both its Cypher ([readsTable]) and its SQL
+     * ([OracleSql.readsTable]) read a table for certain: either may miss one, which costs a count, and a word of the SQL taken
+     * for a source wrongly, as the `FROM` of an `EXTRACT` once was, is not enough alone. The spec's case "EXISTS { } and COUNT { } of the row alone" holds each form to Neo4j's answers.
      */
-    override fun existsOf(query: String, laidOut: Boolean): String =
-        if (OracleSql.readsTable(query)) super.existsOf(query, laidOut)
+    override fun existsOf(query: String, laidOut: Boolean, readsTable: Boolean): String =
+        if (readsTable && OracleSql.readsTable(query)) super.existsOf(query, laidOut, true)
         else "((${OracleSql.uncoalesced("SELECT count(*) FROM (\n${indent(query)}\n) ex")}) > 0)"
 
     /**

@@ -554,9 +554,38 @@ abstract class SqlCypherCompiler(
     /**
      * The truth of an `EXISTS { … }`, of a pattern as a predicate or of a subquery's query, [query], as [predicateQuery] gives
      * it: `EXISTS (…)`, on lines of its own where [laidOut]. A store whose planner gets some such `EXISTS` wrong writes it
-     * otherwise: see Oracle's.
+     * otherwise: see Oracle's. Its Cypher reads a table for certain where [readsTable] ([readsTable] of a query or patterns).
      */
-    protected open fun existsOf(query: String, laidOut: Boolean) = if (laidOut) "EXISTS (\n${indent(query)}\n)" else "EXISTS ($query)"
+    protected open fun existsOf(query: String, laidOut: Boolean, readsTable: Boolean) =
+        if (laidOut) "EXISTS (\n${indent(query)}\n)" else "EXISTS ($query)"
+
+    /**
+     * Whether the Cypher of an `EXISTS { … }` reads a table for certain, whatever SQL it is written as: one of its own clauses
+     * (not an expression's subquery), a `CALL`'s or a `UNION`'s query's among them, matches a node not [bound] yet or a
+     * relationship of at least one step. A path that may take none, a quantified one, a shortest path, an `UNWIND`, a write or a
+     * clause after a `CALL` that reads none is taken to read none, which costs a store that counts such an `EXISTS` only speed.
+     */
+    protected fun readsTable(query: Query, bound: Set<String>): Boolean =
+        (listOf(query.clauses) + query.unions.map { it.clauses }).any { clauses ->
+            val names = bound.toMutableSet()
+            for (clause in clauses) when (clause) {
+                is Clause.Match -> if (readsTable(clause.patterns, names)) return@any true else clause.patterns.forEach { p ->
+                    names += listOfNotNull(p.variable) + p.nodes.mapNotNull { it.variable } + p.relationships.mapNotNull { it.variable }
+                }
+                is Clause.With -> names += clause.projection.items.map { it.name }
+                is Clause.Unwind -> names += clause.variable
+                is Clause.Return -> {}
+                is Clause.Call -> return@any !clause.procedure && readsTable(clause.query, names)
+                else -> return@any false
+            }
+            false
+        }
+
+    /** Whether [patterns] read a table for certain, a node not [bound] or a relationship of at least one step: see [readsTable]. */
+    protected fun readsTable(patterns: List<Pattern>, bound: Set<String>): Boolean = patterns.any { p ->
+        p.shortest == null && p.relationships.none { it.group != null || (it.range?.min ?: 1) < 1 } &&
+            (p.relationships.isNotEmpty() || p.nodes.any { it.variable == null || it.variable !in bound })
+    }
 
     /**
      * The query [query] of a subquery that a condition reads, as the store's planner is given it: the query of an `EXISTS (…)`
@@ -4717,7 +4746,9 @@ abstract class SqlCypherCompiler(
             is Expression.PatternPredicate -> exists(listOf(expression.pattern), null, scope)
             is Expression.Exists -> exists(expression.patterns, expression.where, scope)
             is Expression.Subquery -> when (expression.kind) {
-                Expression.Subquery.Kind.EXISTS -> Value.Bool(existsOf(predicateQuery(existsQuery(correlated(expression.query, scope, "EXISTS { … }", identified = false))), laidOut = true))
+                Expression.Subquery.Kind.EXISTS -> Value.Bool(
+                    existsOf(predicateQuery(existsQuery(correlated(expression.query, scope, "EXISTS { … }", identified = false))), laidOut = true, readsTable(expression.query, scope.keys)),
+                )
                 Expression.Subquery.Kind.COUNT ->
                     Value.Json(scalar("(${predicateQuery("SELECT count(*) FROM (\n${indent(correlated(expression.query, scope, "COUNT { … }"))}\n) ${alias("q")}")})"))
             }
@@ -4807,7 +4838,7 @@ abstract class SqlCypherCompiler(
             val inner = Select(scope)
             patterns(inner, patterns)
             where?.let { filter(inner, it) }
-            return Value.Bool(existsOf(predicateQuery((listOf(inner.head("1")) + inner.from() + listOfNotNull(inner.whereClause())).joinToString(" ")), laidOut = false))
+            return Value.Bool(existsOf(predicateQuery((listOf(inner.head("1")) + inner.from() + listOfNotNull(inner.whereClause())).joinToString(" ")), laidOut = false, readsTable(patterns, scope.keys)))
         }
 
         /**

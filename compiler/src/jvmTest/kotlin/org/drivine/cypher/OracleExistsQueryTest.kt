@@ -35,8 +35,8 @@ class OracleExistsQueryTest {
         "MERGE (n:CyWrite {id: 3}) SET n.e = EXISTS { UNWIND [1, 3] AS j WITH j WHERE j = n.id RETURN j ORDER BY j } RETURN n.e",
     )
 
-    /** Each `EXISTS (` of [sql] that opens a subquery, and the text that follows it. */
-    private fun existsBodies(sql: String) = Regex("""EXISTS \(\n(\s*)(\S[^\n]*)""").findAll(sql).map { it.groupValues[2] }.toList()
+    /** Each `EXISTS (` of [sql] that opens a subquery, or Oracle's count of one that reads no table, and the text that follows it. */
+    private fun existsBodies(sql: String) = Regex("""(?:EXISTS \(|count\(\*\) FROM \()\n(\s*)(\S[^\n]*)""").findAll(sql).map { it.groupValues[2] }.toList()
 
     @Test
     fun `each EXISTS query is read from a derived table on Oracle`() {
@@ -83,6 +83,14 @@ class OracleExistsQueryTest {
         "MATCH (n) RETURN CASE WHEN EXISTS { MATCH (n:Movie) RETURN n.title AS y } THEN 'y' ELSE 'n' END",
         "MATCH (n) RETURN EXISTS { MATCH (n:Movie) WHERE n.released.year = 1999 }",
         "MATCH (n) RETURN EXISTS { MATCH (n:Movie) WHERE datetime(n.released).quarter = 1 }",
+        // Its SQL reads a list's rows (`JSON_TABLE`), but its Cypher, an `UNWIND`, no table for certain.
+        "MATCH (n) RETURN EXISTS { UNWIND [n] AS z WITH z WHERE z:Movie RETURN z }",
+        // A node bound within the query, by a `WITH`, an `UNWIND` or a `CALL` that reads no table, is not matched anew.
+        "MATCH (n) RETURN EXISTS { WITH n AS x MATCH (x:Movie) RETURN x.title AS y }",
+        "MATCH (n) RETURN EXISTS { UNWIND [n] AS x MATCH (x:Movie) RETURN x.title AS y }",
+        "MATCH (n) RETURN EXISTS { CALL (n) { WITH n WHERE n:Movie RETURN n AS x } MATCH (x:Movie) RETURN x.title AS y }",
+        // A path that may take no step is not taken to read a table for certain.
+        "MATCH (n) RETURN EXISTS { MATCH (n:Movie)-[*0..1]->(n) }",
     )
 
     /** Statements whose `EXISTS { … }` reads a table: the graph's, or a list's rows. */
@@ -90,11 +98,13 @@ class OracleExistsQueryTest {
         "MATCH (n) RETURN EXISTS { MATCH (n:Movie)<-[:ACTED_IN]-(a) RETURN a.name AS y }",
         "MATCH (n) RETURN EXISTS { (n)-->() }",
         "MATCH (n) RETURN EXISTS { MATCH (x:Movie) RETURN x.title AS y }",
-        "MATCH (n) RETURN EXISTS { UNWIND [n] AS z WITH z WHERE z:Movie RETURN z }",
         "MATCH (n) RETURN EXISTS { MATCH (n:Movie) OPTIONAL MATCH (n)-->(x) RETURN x }",
         "MATCH (n) RETURN EXISTS { MATCH (n:Movie) CALL (n) { MATCH (n)-->(x) RETURN x } RETURN x }",
         "MATCH (n) RETURN EXISTS { MATCH (n:Movie) RETURN n.title AS y UNION MATCH (x:Person) RETURN x.name AS y }",
         "MATCH (n), (m) RETURN EXISTS { MATCH (n)-[:R]->(m) }",
+        "MATCH (n) RETURN EXISTS { WITH n.title AS t MATCH (x {title: t}) RETURN x }",
+        "MATCH (n) RETURN EXISTS { WITH n AS x MATCH (x)-->() RETURN x }",
+        "MATCH (n) RETURN EXISTS { MATCH (n)-[*1..2]->(:Person) }",
         "MATCH (n) WHERE (n)-->() RETURN n",
     )
 
