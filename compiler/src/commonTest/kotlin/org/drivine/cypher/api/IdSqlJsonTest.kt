@@ -84,6 +84,8 @@ class IdSqlJsonTest {
             "{\"idSql\": {\"store\": \"oracle\", \"helper\": \"hasId\", \"alias\": \"n\", \"key\": \"id\"}}" to "idSql's hasId gives json as text",
             "{\"idSql\": {\"store\": \"sqlite\", \"helper\": \"hasIdIn\", \"alias\": \"n\", \"key\": \"id\", \"parameter\": \":ids\"}}" to "An id in a list on SQLite",
             "{\"idSql\": {\"store\": \"sqlite\", \"helper\": \"hasIdIn\", \"alias\": \"n\", \"key\": \"id\", \"parameter\": \":ids\", \"nodes\": \"t\", \"labels\": \"P\"}}" to "idSql's hasIdIn gives labels",
+            "{\"idSql\": {\"store\": \"sqlite\", \"helper\": \"hasIdIn\", \"alias\": \"n\", \"key\": \"id\", \"parameter\": \":ids\", \"nodes\": \"t\", \"labels\": [1]}}" to "idSql's hasIdIn gives labels",
+            "{\"idSql\": {\"store\": \"sqlite\", \"helper\": \"hasIdIn\", \"alias\": \"n\", \"key\": \"id\", \"parameter\": \":ids\", \"nodes\": 1}}" to "idSql's hasIdIn gives nodes as text",
             "{\"idSql\": {\"store\": \"oracle\", \"helper\": \"hasId\", \"alias\": \"n\", \"key\": \"id\", \"json\": \"x\"}, \"cypher\": \"RETURN 1\"}" to "A request gives one of",
         )) {
             val error = answer(request)["error"]?.textValue()
