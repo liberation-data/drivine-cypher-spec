@@ -4,6 +4,8 @@ import org.drivine.cypher.store.ddl.GeneratedFunctions
 import org.drivine.DrivineInternalApi
 import org.drivine.cypher.json.ArrayNode
 import org.drivine.cypher.json.CypherJson
+import org.drivine.cypher.json.RawNode
+import org.drivine.cypher.json.DoubleNode
 import org.drivine.cypher.json.JsonNode
 import org.drivine.cypher.json.ObjectNode
 import org.drivine.cypher.sql.Temporals
@@ -21,7 +23,7 @@ import org.drivine.cypher.store.marker.StoreLayout
  * - `{"read": "<a column's JSON text>", "typed": false}`: [ValueLayout.read] of the column, a tag read as its text and each
  *   map's keys unescaped, at any depth (a column that nests past [org.drivine.cypher.json.MAX_DEPTH] is an error, as a
  *   request is, as its read would overflow a native host's stack); with `typed`, a tag as `{"$t", "v"}` and a map that has a `$t` key of its own as
- *   `{"$t": "map", "v": …}`. Answered `{"value": <the value as JSON>}`. The column is given as its text, as the store gave it,
+ *   `{"$t": "map", "v": …}`. Answered `{"value": <the value as JSON>}`, an infinity as `9e999` or `-9e999`, as SQLite writes one. The column is given as its text, as the store gave it,
  *   so a host's JSON reader never rounds a whole number past 2^53 first (a fraction is read as a double, as the host's own reader would).
  * - `{"temporalKey": {"kind": "date", "v": "2024-01-01"}}`: [Temporals.key], the sort key `s` a tag of that kind and
  *   canonical text holds, as a host writes a temporal value of its own into a stored map. Answered `{"key": "…"}`, null
@@ -75,7 +77,19 @@ internal object LayoutJson {
         } catch (e: Exception) {
             throw IllegalArgumentException("A read request's column is no JSON: ${e.message}")
         }
-        return "{\"value\":${CypherJson.writeValueAsString(ValueLayout.read(value, typed?.booleanValue() ?: false))}}"
+        return "{\"value\":${CypherJson.writeValueAsString(infinitiesAsNumbers(ValueLayout.read(value, typed?.booleanValue() ?: false)))}}"
+    }
+
+    /**
+     * [node] with each infinity a number again, `9e999` or `-9e999`, as SQLite writes one in a column and as a host's JSON
+     * reader reads it back: the writer gives a double it can't write as a number as the text `"Infinity"`, which a host
+     * would take for the text a node held.
+     */
+    private fun infinitiesAsNumbers(node: JsonNode): JsonNode = when {
+        node is DoubleNode && node.value.isInfinite() -> RawNode(if (node.value > 0) "9e999" else "-9e999")
+        node is ObjectNode -> ObjectNode().apply { node.properties().forEach { (key, value) -> set<JsonNode>(key, infinitiesAsNumbers(value)) } }
+        node is ArrayNode -> ArrayNode().apply { node.forEach { add(infinitiesAsNumbers(it)) } }
+        else -> node
     }
 
     private fun write(given: JsonNode?): String {

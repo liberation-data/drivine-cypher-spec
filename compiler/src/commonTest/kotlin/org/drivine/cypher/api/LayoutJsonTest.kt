@@ -92,6 +92,13 @@ class LayoutJsonTest {
     }
 
     @Test
+    fun anInfinityIsReadBackAsANumberAsSqliteWritesOne() {
+        // SQLite writes an infinity as 9e999: read beside a tag or an escaped key, it stays a number, not the text "Infinity".
+        val got = CompileJson.compile("{\"read\": ${json("{\"\$\$k\":[9e999,-9e999,\"Infinity\"],\"d\":{\"\$t\":\"date\",\"v\":\"2024-01-01\"}}")}}")
+        assertEquals("{\"value\":{\"\$k\":[9e999,-9e999,\"Infinity\"],\"d\":\"2024-01-01\"}}", got, "on $target")
+    }
+
+    @Test
     fun aRequestTheLayoutCantAnswerIsAnError() {
         for ((request, message) in listOf(
             "{\"temporalKey\": {\"kind\": \"week\", \"v\": \"2024-W01\"}}" to "No temporal kind week: datetime, localdatetime, date, time, localtime, duration.",
