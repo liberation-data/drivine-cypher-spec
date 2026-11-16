@@ -1171,6 +1171,14 @@ abstract class SqlCypherCompiler(
      */
     protected open fun carriesNumberKeys(json: String) = true
 
+    /**
+     * The terms a group, or `DISTINCT`, keys the JSON value [json], which may be a number, by in its place, where the store's
+     * comparison of it as a value keeps two equal numbers apart: SQLite's, of their text, kept `1` from `1.0` and `0.0` from `0`.
+     * Null where the value keys it, as on a store that compares numbers by their values (Postgres's `jsonb`) or by keys beside
+     * them ([numberKeys]).
+     */
+    protected open fun groupedValue(json: String): List<String>? = null
+
     /** Whether the store compares, sorts and groups a number by [numberKeys]: by default it keeps none. */
     protected open val keepsNumberKeys = false
 
@@ -3159,7 +3167,7 @@ abstract class SqlCypherCompiler(
                             list = values[variable]?.list == true, itemLists = values[variable]?.itemLists == true,
                             text = values[variable]?.text == true, texts = values[variable]?.texts == true,
                             rowKeys = if (written) listOf(key) else null, fromList = !written, known = values[variable]?.known,
-                            itemsKnown = values[variable]?.itemsKnown,
+                            itemsKnown = values[variable]?.itemsKnown, integer = values[variable]?.integer == true,
                         ),
                     )
                     // A list or a path that is null is held as JSON's null, and read as SQL's.
@@ -3836,7 +3844,11 @@ abstract class SqlCypherCompiler(
                     name to descending
                 }
             }
-            val groupBy = if (!aggregating) emptyList() else {
+            // DISTINCT, where the store keys an item that may be a number otherwise than by its value (see groupedValue), is a
+            // GROUP BY of the items' keys, each item read of a row of its group: but not where a row is kept apart for NaN.
+            val distinctlyGrouped = projection.distinct && !aggregating && selectList.none { it.endsWith(" AS d1") } &&
+                columns.any { (_, value) -> value is Value.Json && value.mayBeNumber() && groupedValue(value.inflight ?: value.sql) != null }
+            val groupBy = if (distinctlyGrouped) columns.flatMap { (_, value) -> value.groupKeys() }.distinct() else if (!aggregating) emptyList() else {
                 val keys = mutableListOf<String>()
                 items.zip(columns).forEach { (item, pair) ->
                     if (!contains(item.expression, ::isAggregate)) keys += pair.second.groupKeys()
@@ -3861,7 +3873,7 @@ abstract class SqlCypherCompiler(
                 keys.distinct()
             }
             val inner = buildList {
-                add(select.head("${if (projection.distinct) "DISTINCT " else ""}${selectList.joinToString(",\n       ")}"))
+                add(select.head("${if (projection.distinct && !distinctlyGrouped) "DISTINCT " else ""}${selectList.joinToString(",\n       ")}"))
                 addAll(select.from())
                 select.whereClause()?.let(::add)
                 if (groupBy.isNotEmpty()) add("GROUP BY ${groupBy.joinToString(", ")}")
@@ -7033,7 +7045,7 @@ abstract class SqlCypherCompiler(
          * exact for integers, where a store compares other numbers by keys of their own (see Oracle's [numberKeys]).
          */
         private fun integral(value: Value, expression: Expression): Boolean =
-            (value as? Value.Json)?.known == Value.Known.INTEGER ||
+            (value as? Value.Json)?.let { it.known == Value.Known.INTEGER || it.integer } == true ||
                 given(expression).let { it is Long || it is Int || it is Short || it is Byte } ||
                 (expression is Expression.Function && expression.name.lowercase() in COUNTS) || expression is Expression.CountStar ||
                 (expression is Expression.Subquery && expression.kind == Expression.Subquery.Kind.COUNT)
@@ -7137,8 +7149,8 @@ abstract class SqlCypherCompiler(
                 "labels" -> (one() as? Value.Node)?.let { Value.Json(readOfDeleted(it, it.labels)) } ?: throw CompilerException("labels() takes a node.")
                 "type" -> (one() as? Value.Relationship)?.let { Value.Json(scalar(it.type), text = true) } ?: throw CompilerException("type() takes a relationship.")
                 "id", "elementid" -> when (val subject = one()) {
-                    is Value.Node -> Value.Json(scalar(subject.nid))
-                    is Value.Relationship -> Value.Json(scalar(subject.eid))
+                    is Value.Node -> Value.Json(scalar(subject.nid), integer = true)
+                    is Value.Relationship -> Value.Json(scalar(subject.eid), integer = true)
                     else -> throw CompilerException("${function.name}() takes a node or a relationship.")
                 }
                 "length" -> (one() as? Value.Path)?.let { Value.Json(idCount(it.eids)) } ?: throw CompilerException("length() takes a path.")
@@ -8938,7 +8950,7 @@ abstract class SqlCypherCompiler(
      * Whether this value may be a number that is no integer the statement makes: not where it makes it of another kind, a
      * text, a list, a temporal value, a truth value, a map, or an integer, which the store's JSON compares exactly.
      */
-    private fun Value.Json.mayBeNumber() = (known == null || known == Value.Known.FLOAT) && !text && !list && temporal == null && identity == null
+    private fun Value.Json.mayBeNumber() = (known == null || known == Value.Known.FLOAT) && !integer && !text && !list && temporal == null && identity == null
 
     /** [numberKeys] of [json] as a group is keyed by them: written out, not bound in a subquery, as Oracle groups by none (ORA-22818). */
     private fun groupedNumberKeys(json: String): List<String> {
@@ -8958,7 +8970,8 @@ abstract class SqlCypherCompiler(
      */
     private fun Value.groupKeys(): List<String> = when (this) {
         // A value that may be a number by the keys the store keeps numbers apart by, where it keeps any (see numberKeys).
-        is Value.Json -> listOf(inflight ?: sql) + listOfNotNull(identity) + (if (mayBeNumber() && carriesNumberKeys(inflight ?: sql)) groupedNumberKeys(inflight ?: sql) else emptyList())
+        is Value.Json -> (inflight ?: sql).let { value -> (if (mayBeNumber()) groupedValue(value) else null) ?: listOf(value) } + listOfNotNull(identity) +
+            (if (mayBeNumber() && carriesNumberKeys(inflight ?: sql)) groupedNumberKeys(inflight ?: sql) else emptyList())
         is Value.Entities -> listOf(ids)
         is Value.Bool -> listOf(sql)
         is Value.Node -> listOf(nid, labels, props, stamp)

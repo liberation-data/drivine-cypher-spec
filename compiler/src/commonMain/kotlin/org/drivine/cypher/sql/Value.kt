@@ -109,6 +109,12 @@ sealed interface Value {
          * one compared, sorted or stored is made whole there (see [inflight]). Nothing else reads it, and it is not carried on.
          */
         val inflightItems: String? = null,
+        /**
+         * Whether the compiler makes it an integer, though the statement leaves its kind open to Neo4j: an id, `id(n)` or
+         * `elementId(n)`, the row's key. A store that compares other numbers by keys of their own compares it as it is, and a
+         * variable a `WITH` binds to it is one too (drivine-cypher-spec#309).
+         */
+        val integer: Boolean = false,
     ) : Value
 
     /** A kind of value the statement writes: see [Json.known]. [noun] names a value of it, as a message does. */

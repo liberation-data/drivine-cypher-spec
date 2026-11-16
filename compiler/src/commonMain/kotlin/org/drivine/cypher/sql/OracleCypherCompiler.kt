@@ -828,7 +828,16 @@ class OracleCypherCompiler(
      * among them, and an integer as the double nearest it; null where it is no number, as `TYPE(STRICT)` reads a text or a
      * truth value, which Oracle's lax read would make a number of.
      */
-    private fun doubleKey(json: String, path: String = "'\$'") = "JSON_VALUE($json, $path RETURNING BINARY_DOUBLE NULL ON ERROR TYPE(STRICT))"
+    private fun doubleKey(json: String, path: String = "'\$'") =
+        idColumn(json, path)?.let { "TO_BINARY_DOUBLE($it)" } ?: "JSON_VALUE($json, $path RETURNING BINARY_DOUBLE NULL ON ERROR TYPE(STRICT))"
+
+    /**
+     * The key column [json] is the id of, `JSON_SCALAR(n3.nid)`, as `id()` and `elementId()` give it, where [path] reads it
+     * whole: its keys are read of the column, a `NUMBER`. Read with `JSON_VALUE` of `JSON_SCALAR` of a column of the graph's
+     * tables, the statement gave no rows on Oracle (23.26), `RETURN k.node = elementId(c)` among them, where the same read
+     * of a value an unwound row holds gave the right ones (drivine-cypher-spec#309).
+     */
+    private fun idColumn(json: String, path: String) = if (path != "'\$'") null else ID_COLUMN.matchEntire(json)?.groupValues?.get(1)
 
     /**
      * What tells numbers apart that [doubleKey] finds equal: an integer past 2^53, held as a `NUMBER`, less the double nearest
@@ -843,7 +852,8 @@ class OracleCypherCompiler(
 
     /** The value at the path [path] of [json] where it is an integer past 2^53, as the `NUMBER` it is: see [exactKey]. */
     private fun bigInteger(json: String, path: String) =
-        "JSON_VALUE($json, ${path.dropLast(1)}?(@.type() == \"number\" && @.abs() > $EXACT_DOUBLES)' RETURNING NUMBER NULL ON ERROR)"
+        idColumn(json, path)?.let { "CASE WHEN ABS($it) > $EXACT_DOUBLES THEN $it END" }
+            ?: "JSON_VALUE($json, ${path.dropLast(1)}?(@.type() == \"number\" && @.abs() > $EXACT_DOUBLES)' RETURNING NUMBER NULL ON ERROR)"
 
     /**
      * The properties and the path of [json] where it is a property read through its text, as [itemProperty] reads one
@@ -969,10 +979,12 @@ class OracleCypherCompiler(
     /**
      * Each value once, a number by its keys ([numberKeys]) as [numbersEqual] compares it: any other value as JSON, a number
      * whose [exactKey] is 0 by its double, and an integer past 2^53 by the `NUMBER` it is. NaN, equal to nothing, is counted
-     * each time (drivine4j#558), as a double, which Oracle finds equal to itself, would count it once.
+     * each time (drivine4j#558), as a double, which Oracle finds equal to itself, would count it once. A property's value alone:
+     * any other, as an item of a stored list, is counted as before, a NaN once where the statement works out none, as
+     * `collect(DISTINCT …)` keeps it (writes.yaml, "MERGE of a null or NaN property").
      */
     override fun distinctCount(json: String, counted: String): String? {
-        if (!keyedInPlace(json)) return null
+        if ((propertyRead(json) ?: keptRead(json)) == null) return null
         val (d, exact) = numberKeys(json)
         val (x, path) = propertyRead(json) ?: keptRead(json) ?: (json to "'\$'")
         val big = bigInteger(x, path)
@@ -2695,6 +2707,9 @@ class OracleCypherCompiler(
 
         /** What a property as [propertyOf] reads it starts with, its path's start, and what it ends with, its path's closing quote: see [propertyRead]. */
         private const val READ_HEAD = "JSON_QUERY("
+
+        /** An id as `id()` and `elementId()` give it, `JSON_SCALAR` of a node's or a relationship's key column: see [idColumn]. */
+        private val ID_COLUMN = Regex("""JSON_SCALAR\(([A-Za-z_]\w*\.(?:\w+_)?(?:nid|eid))\)""")
 
         /** How a property read through its text starts, and what comes before its path: see [keptText] and [keptRead]. */
         private const val KEPT_HEAD = "JSON(JSON_QUERY(JSON_SERIALIZE(JSON_TRANSFORM("

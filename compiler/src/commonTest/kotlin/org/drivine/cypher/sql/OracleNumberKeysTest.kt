@@ -108,4 +108,32 @@ class OracleNumberKeysTest {
         val property = compiler.compile("MATCH (n:K) RETURN n.k < 3", emptyMap()).sql
         assertTrue("BINARY_DOUBLE NULL ON ERROR TYPE(STRICT)" in property, property)
     }
+
+    @Test
+    fun anIdIsKeyedByItsColumnAndTwoIdsAreComparedAsJson() {
+        // Read with JSON_VALUE of JSON_SCALAR of a key column, the statement gave no rows on Oracle (writes.yaml, "An id is not
+        // used again by a later statement"): an id's keys are its column's.
+        for (cypher in listOf(
+            "MATCH (k:CyKeep), (:CyWrite {k: 'a'})-[t:T]->(c:CyWrite {k: 'c'}) RETURN k.node = elementId(c), k.rel = elementId(t)",
+            "MATCH (n:CyWrite {id: 'a'}), (b:CyWrite {id: 'b'}) SET n.p = elementId(b) RETURN n.p = elementId(b)",
+        )) {
+            val sql = compiler.compile(cypher, emptyMap()).sql
+            assertTrue(!Regex("JSON_VALUE\\(JSON_SCALAR\\(\\w+\\.(nid|eid)\\), '\\$(\\?[^']*)?' RETURNING (BINARY_DOUBLE|NUMBER)").containsMatchIn(sql), sql)
+            assertTrue(Regex("= TO_BINARY_DOUBLE\\(\\w+\\.(nid|eid)\\)").containsMatchIn(sql), sql)
+        }
+        // An id carried by a WITH is an integer still: two ids are compared as JSON, with no key read.
+        val carried = compiler.compile(
+            "MATCH (a:CyWrite) WITH a, elementId(a) AS old DELETE a FOREACH (x IN [1] | MERGE (:CyWrite {num: 5})) WITH old MATCH (b:CyWrite) RETURN b.num, old = elementId(b)",
+            emptyMap(),
+        ).sql
+        assertTrue(Regex("\\w+\\.c1 = JSON_SCALAR\\(n\\d+\\.nid\\)").containsMatchIn(carried) && "TO_BINARY_DOUBLE(n" !in carried, carried)
+    }
+
+    @Test
+    fun countDistinctOfAValueNoPropertyIsCountedAsBefore() {
+        // Of an item of a stored list, as collect(DISTINCT …) keeps it: a NaN stored once where the statement works out none
+        // (writes.yaml, "MERGE of a null or NaN property").
+        val sql = compiler.compile("MATCH (n:CyWrite) WHERE n.l IS NOT NULL RETURN count(DISTINCT n.l[0]), size(collect(DISTINCT n.l[0]))", emptyMap()).sql
+        assertTrue("IS NAN THEN 1 END" !in sql && "BINARY_DOUBLE NULL ON ERROR TYPE(STRICT)" !in sql, sql)
+    }
 }
