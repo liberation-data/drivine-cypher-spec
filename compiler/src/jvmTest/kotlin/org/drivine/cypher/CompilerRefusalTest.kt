@@ -903,6 +903,8 @@ class CompilerRefusalTest {
             refused("RETURN toString([true, false])"),
             // A comprehension with a WHERE and no projection keeps its list's kind, as one with its variable as the projection does.
             refused("RETURN toString([x IN [1, 2] WHERE x > 1])"),
+            // One with its variable as the projection keeps the kind of a list a function gives, which its items' own kind can't name.
+            refused("RETURN toString([x IN range(1, 3) | x])"),
             // tail(), a slice and reverse() keep their list's kind, and two lists of one kind joined by + or given to coalesce() are of it.
             refused("RETURN toString(tail([1, 2]))"), refused("RETURN toString([1, 2][0..1])"), refused("RETURN toString(reverse([1, 2]))"),
             refused("RETURN toString([1] + [2])"), refused("RETURN toString(coalesce([1, 2], [3]))"),
