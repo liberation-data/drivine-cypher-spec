@@ -2770,7 +2770,8 @@ cases:
       - note: "grouped by the value"
         cypher: "MATCH (n:CyWrite) WITH n.k AS k, count(*) AS c RETURN c ORDER BY c"
         rows: [2, 3]
-      - note: "WITH DISTINCT"
+      - note: "WITH DISTINCT. SQLite keeps a number distinct by its text, so 1 from 1.0 and 0 from 0.0 (drivine-cypher-spec#315)."
+        except: [sqlite]
         cypher: "MATCH (n:CyWrite) WITH DISTINCT n.k AS k RETURN count(*)"
         rows: [2]
       - note: "= a given -0.0"
@@ -2830,3 +2831,11 @@ cases:
       - cypher: "MATCH (n:CyWrite) RETURN DISTINCT n.k + n.k AS s"
         except: [sqlite]
         rows: [2]
+
+  - name: "DISTINCT keeps the order its rows come in"
+    description: "WITH DISTINCT keeps each value where its first row came, in the order the rows come in, and a LIMIT after it keeps the first of them."
+    steps:
+      - cypher: "UNWIND [{k: 3}, {k: 1}, {k: 2}, {k: 1}] AS m WITH m ORDER BY m.k DESC WITH DISTINCT m.k AS k RETURN collect(k)"
+        rows: [[3, 2, 1]]
+      - cypher: "UNWIND [{k: 3}, {k: 1}, {k: 2}, {k: 1}] AS m WITH m ORDER BY m.k DESC WITH DISTINCT m.k AS k LIMIT 2 RETURN collect(k)"
+        rows: [[3, 2]]

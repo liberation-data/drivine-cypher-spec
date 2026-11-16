@@ -70,9 +70,9 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
 
     /**
      * A number by its value as SQLite reads it out of the JSON, `->>`, an `INTEGER` or a `REAL`, and any other value by its JSON
-     * text: SQLite groups and keeps distinct a value by its text, where `1` and `1.0`, and `0`, `0.0` and `-0.0`, are equal
-     * numbers, as in Neo4j, and other stores, keep them (drivine-cypher-spec#309). SQLite compares an integer with a float
-     * exactly, so an integer past 2^53 stays apart from the double nearest it.
+     * text: SQLite groups a value by its text, where `1` and `1.0`, and `0`, `0.0` and `-0.0`, are equal numbers, as in Neo4j,
+     * and other stores, keep them (drivine-cypher-spec#309). SQLite compares an integer with a float exactly, so an integer
+     * past 2^53 stays apart from the double nearest it. `DISTINCT` still keeps them apart (drivine-cypher-spec#315).
      */
     override fun groupedValue(json: String) =
         listOf("CASE WHEN ${isNumber(json)} THEN NULL ELSE $json END", "CASE WHEN ${isNumber(json)} THEN $json ->> '\$' END")

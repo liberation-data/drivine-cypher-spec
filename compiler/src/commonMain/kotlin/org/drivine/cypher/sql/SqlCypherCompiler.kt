@@ -1181,8 +1181,9 @@ abstract class SqlCypherCompiler(
     protected val carriedKeys = mutableMapOf<String, List<String>>()
 
     /**
-     * The terms a group, or `DISTINCT`, keys the JSON value [json], which may be a number, by in its place, where the store's
-     * comparison of it as a value keeps two equal numbers apart: SQLite's, of their text, kept `1` from `1.0` and `0.0` from `0`.
+     * The terms a group keys the JSON value [json], which may be a number, by in its place, where the store's comparison of it
+     * as a value keeps two equal numbers apart: SQLite's, of their text, kept `1` from `1.0` and `0.0` from `0`. Not `DISTINCT`,
+     * which keeps its rows in the order they come in, as a `GROUP BY` would not (drivine-cypher-spec#315).
      * Null where the value keys it, as on a store that compares numbers by their values (Postgres's `jsonb`) or by keys beside
      * them ([numberKeys]).
      */
@@ -3904,11 +3905,7 @@ abstract class SqlCypherCompiler(
                     name to descending
                 }
             }
-            // DISTINCT, where the store keys an item that may be a number otherwise than by its value (see groupedValue), is a
-            // GROUP BY of the items' keys, each item read of a row of its group: but not where a row is kept apart for NaN.
-            val distinctlyGrouped = projection.distinct && !aggregating && selectList.none { it.endsWith(" AS d1") } &&
-                columns.any { (_, value) -> value is Value.Json && value.mayBeNumber() && groupedValue(value.inflight ?: value.sql) != null }
-            val groupBy = if (distinctlyGrouped) columns.flatMap { (_, value) -> value.groupKeys() }.distinct() else if (!aggregating) emptyList() else {
+            val groupBy = if (!aggregating) emptyList() else {
                 val keys = mutableListOf<String>()
                 items.zip(columns).forEach { (item, pair) ->
                     if (!contains(item.expression, ::isAggregate)) keys += pair.second.groupKeys()
@@ -3933,7 +3930,7 @@ abstract class SqlCypherCompiler(
                 keys.distinct()
             }
             val inner = buildList {
-                add(select.head("${if (projection.distinct && !distinctlyGrouped) "DISTINCT " else ""}${selectList.joinToString(",\n       ")}"))
+                add(select.head("${if (projection.distinct) "DISTINCT " else ""}${selectList.joinToString(",\n       ")}"))
                 addAll(select.from())
                 select.whereClause()?.let(::add)
                 if (groupBy.isNotEmpty()) add("GROUP BY ${groupBy.joinToString(", ")}")
