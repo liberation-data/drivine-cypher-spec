@@ -527,6 +527,13 @@ JSON entry, so TypeScript and Python run what drivine4j runs from the Kotlin typ
     the actions that ran, up to and with the first that failed;
   - `runtimeAfter` (`operation`, `runtime`, `databases`) and `runtimeOn` (`database`, `runtime`): the runtime catalogs a
     library keeps of the items it ensures as it runs, as drivine4j's `SchemaManager` keeps them.
+  - `listings` (`{}`), `items` (`of`, `rows`, `spec`) and `aliased` (`item`, `aliases`): what a library's index and
+    constraint managers list, find and alias by with no plan, as drivine4j's do through the store schema's own calls.
+    `listings` gives `{"indexes": {<kind>: <statement>, …}, "constraints": <statement>}`, an index listing for each kind the
+    store has; `items` gives the items a listing's rows hold, `{"items": [<item>, …]}`, each with its catalog record's
+    `aliases` and whether its build is in progress or failed, and with `spec` only those of the spec's identity, as a find
+    takes them; `aliased` gives the statement that records an item's aliases in its catalog record, `{"statement": …}`,
+    null on a graph engine.
 
   A request, an action, an outcome, the state and the report are written as `PlanJson` writes them, each key and value as
   it is, not as `write` gives a value: a row's or a sample's `{"$t": …}` stays `$t`, and a host binds an action's

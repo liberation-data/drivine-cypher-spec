@@ -10,6 +10,10 @@ import org.drivine.cypher.store.plan.PlanStep
 import org.drivine.cypher.store.plan.PlannerState
 import org.drivine.cypher.store.plan.SchemaPlanner
 import org.drivine.cypher.store.schema.StoreSchema
+import org.drivine.cypher.store.ddl.CatalogItem
+import org.drivine.cypher.store.ddl.SqlStoreDdl
+import org.drivine.schema.SchemaItemKind
+import org.drivine.schema.made
 
 /**
  * The schema planner for a host with no Kotlin types, asked of the JSON entry ([CompileJson]) in place of a statement
@@ -33,6 +37,17 @@ import org.drivine.cypher.store.schema.StoreSchema
  *   Answered `{"runtime": [<runtime catalog>, …]}`.
  * - `"runtimeOn": {"database": <name>, "runtime": [<runtime catalog>, …]}`: the runtime catalogs that hold on the database,
  *   as a request's `runtime` takes them ([SchemaPlanner.runtimeOn]). Answered `{"catalogs": [<catalog>, …]}`.
+ * - `"listings": {}`: the statements that list what the store holds, read with no plan, as drivine4j's `IndexManager` and
+ *   `ConstraintManager` list, find and look for a constraint in force: `{"indexes": {<kind>: <statement>, …}, "constraints":
+ *   <statement>}`, an index listing for each kind the store has (`TEXT_INDEX` only where it has text indexes), each kind's
+ *   [org.drivine.cypher.store.ddl.StoreDdl.listIndexesQuery], one statement listing more than one kind on some stores.
+ * - `"items": {"of": "indexes" | "constraints", "rows": [<row>, …], "spec": <spec>}`: the items the rows of one of those
+ *   listings hold, as the store schema parses them ([StoreSchema.parseIndexRows], [StoreSchema.parseConstraintRows]):
+ *   `{"items": [<item>, …]}`, each written as [PlanJson.item] writes it, with its `aliases`, the names a catalog record keeps
+ *   beside its own (none on a graph engine), and whether its build is in progress or failed. With `spec`, only those of the
+ *   spec's identity as it is made ([StoreSchema.matchesIdentity], `spec.made()`), as a find takes them.
+ * - `"aliased": {"item": {"kind", "label", "properties", "name"}, "aliases": [<name>, …]}`: the statement that records the
+ *   aliases as all the item's aliases, in its catalog record, `{"statement": …}`, null on a store that keeps no record.
  *
  * A request that gives more than one of them is an error.
  */
@@ -41,7 +56,7 @@ internal object SchemaPlanJson {
 
     const val KIND = "schemaPlan"
 
-    private val QUESTIONS = listOf("validate", "start", "resume", "runtimeAfter", "runtimeOn")
+    private val QUESTIONS = listOf("validate", "start", "resume", "runtimeAfter", "runtimeOn", "listings", "items", "aliased")
 
     /** The answer to [tree], a request that gives [KIND]. */
     fun answer(tree: ObjectNode): String = try {
@@ -52,8 +67,12 @@ internal object SchemaPlanJson {
             given.has("runtimeAfter") -> runtimeAfter(given["runtimeAfter"])
             given.has("runtimeOn") -> runtimeOn(given["runtimeOn"])
             else -> {
-                val planner = SchemaPlanner(StoreSchema.of(StoreJson.ddl(given, KIND)))
+                val store = StoreSchema.of(StoreJson.ddl(given, KIND))
+                val planner = SchemaPlanner(store)
                 when {
+                    given.has("listings") -> listings(store)
+                    given.has("items") -> items(store, given["items"])
+                    given.has("aliased") -> aliased(store, given["aliased"])
                     given.has("validate") -> mapOf("refusal" to planner.validate(PlanJson.requestOf(given["validate"]!!)))
                     given.has("start") -> step(planner.start(PlanJson.requestOf(given["start"]!!), now(given)))
                     given.has("resume") -> {
@@ -93,5 +112,63 @@ internal object SchemaPlanJson {
         val database = given["database"]?.takeIf { it.isTextual }?.textValue() ?: throw IllegalArgumentException("runtimeOn gives its database as text.")
         val runtime = (given["runtime"] as? ArrayNode ?: throw IllegalArgumentException("runtimeOn gives runtime as a list.")).map(PlanJson::runtimeOf)
         return mapOf("catalogs" to SchemaPlanner.runtimeOn(database, runtime).map(PlanJson::catalogTree))
+    }
+
+    /** The index listing of each kind the store has, and its constraint listing. */
+    private fun listings(store: StoreSchema): Map<String, Any?> = linkedMapOf(
+        "indexes" to listOfNotNull(
+            SchemaItemKind.VECTOR_INDEX,
+            SchemaItemKind.RANGE_INDEX,
+            SchemaItemKind.FULLTEXT_INDEX,
+            SchemaItemKind.TEXT_INDEX.takeIf { store.supportsTextIndex },
+        ).associate { it.name to store.ddl.listIndexesQuery(it) },
+        "constraints" to store.ddl.listConstraintsQuery(),
+    )
+
+    /** The items the rows of a listing hold, each with its aliases and build state; with a spec, those of its identity. */
+    private fun items(store: StoreSchema, given: JsonNode?): Map<String, Any?> {
+        require(given is ObjectNode) { "items gives {\"of\": \"indexes\" | \"constraints\", \"rows\": […]}." }
+        val constraints = when (given["of"]?.takeIf { it.isTextual }?.textValue()) {
+            "indexes" -> false
+            "constraints" -> true
+            else -> throw IllegalArgumentException("items gives of, \"indexes\" or \"constraints\": the listing its rows are of.")
+        }
+        val rows = (given["rows"] as? ArrayNode ?: throw IllegalArgumentException("items gives its rows as a list.")).map(PlanJson::plain)
+        val made = given["spec"]?.takeUnless { it.isNull }?.let { PlanJson.spec(it).made() }
+        // A row at a time, as drivine4j reads a catalog record's aliases beside the item parsed from it.
+        val items = rows.flatMap { row ->
+            val parsed = if (constraints) store.parseConstraintRows(listOf(row)) else store.parseIndexRows(listOf(row))
+            parsed.map { it to aliasesIn(row) }
+        }.distinct().filter { (info, _) -> made == null || store.matchesIdentity(info, made) }
+        return mapOf(
+            "items" to items.map { (info, aliases) ->
+                PlanJson.item(info)!! + linkedMapOf(
+                    "aliases" to aliases,
+                    "buildInProgress" to info.buildInProgress,
+                    "buildFailed" to info.buildFailed,
+                )
+            },
+        )
+    }
+
+    /** The aliases a catalog row's `details` keep: none, where there are none, or the store keeps none. */
+    private fun aliasesIn(row: Any?): List<String> =
+        (((row as? Map<*, *>)?.get("details") as? Map<*, *>)?.get(SqlStoreDdl.ALIASES) as? List<*>).orEmpty().map { it.toString() }
+
+    /** The statement that records the aliases of an item in its catalog record; null on a store that keeps none. */
+    private fun aliased(store: StoreSchema, given: JsonNode?): Map<String, Any?> {
+        require(given is ObjectNode) { "aliased gives {\"item\": {…}, \"aliases\": […]}." }
+        val item = given["item"] as? ObjectNode ?: throw IllegalArgumentException("aliased gives its item.")
+        val kind = item["kind"]?.textValue()?.let { name -> SchemaItemKind.entries.firstOrNull { it.name == name } }
+            ?: throw IllegalArgumentException("aliased gives its item's kind, one of ${SchemaItemKind.entries.joinToString()}.")
+        val label = item["label"]?.takeIf { it.isTextual }?.textValue() ?: throw IllegalArgumentException("aliased gives its item's label.")
+        val properties = (item["properties"] as? ArrayNode ?: throw IllegalArgumentException("aliased gives its item's properties as a list.")).map {
+            it.textValue() ?: throw IllegalArgumentException("aliased gives its item's properties as names.")
+        }
+        val name = item["name"]?.takeUnless { it.isNull }?.textValue()
+        val aliases = (given["aliases"] as? ArrayNode ?: throw IllegalArgumentException("aliased gives its aliases as a list.")).map {
+            it.textValue() ?: throw IllegalArgumentException("aliased gives its aliases as names.")
+        }
+        return mapOf("statement" to (store.ddl as? SqlStoreDdl)?.aliased(CatalogItem(kind, label, properties, name), aliases))
     }
 }
