@@ -99,10 +99,14 @@ class OracleKeyEqualityTest {
 
     @Test
     fun aValueWithNoKeyOrAWriteComparesAsBefore() {
-        for ((given, why) in listOf<Pair<Any, String>>(2.5 to "a float", "" to "an empty text", "x".repeat(4_001) to "a text past 4,000 bytes", 9_007_199_254_740_993L to "a whole number past 2^53")) {
+        for ((given, why) in listOf<Pair<Any, String>>("" to "an empty text", "x".repeat(4_001) to "a text past 4,000 bytes", 9_007_199_254_740_993L to "a whole number past 2^53")) {
             val compiled = compiler.compile("MATCH (i:Issue) WHERE i.k = \$v RETURN count(*)", mapOf("v" to given))
             assertTrue("TYPE(STRICT)" !in compiled.sql && compiled.parameters.keys.none { it.startsWith("_cyk_") }, "$why: ${compiled.sql}")
         }
+        // A float is compared by its double, read of the parameter's JSON, as any number not keyed is (drivine-cypher-spec#309).
+        val float = compiler.compile("MATCH (i:Issue) WHERE i.k = \$v RETURN count(*)", mapOf("v" to 2.5))
+        assertTrue(float.parameters.keys.none { it.startsWith("_cyk_") }, float.sql)
+        assertTrue("JSON_VALUE(JSON(\$_cy_v EXTENDED), '\$' RETURNING BINARY_DOUBLE NULL ON ERROR TYPE(STRICT))" in float.sql, float.sql)
         val write = compiler.compile("MATCH (i:Issue) WHERE i.state = \$s SET i.seen = true", mapOf("s" to "open"))
         assertTrue("TYPE(STRICT)" !in write.sql, write.sql)
     }

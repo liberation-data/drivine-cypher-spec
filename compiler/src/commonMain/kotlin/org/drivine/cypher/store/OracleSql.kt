@@ -125,13 +125,19 @@ object OracleSql {
     /** [indexKey] of the value at the JSON path [at], written bare, of [json]. */
     private fun keyAt(json: String, at: String): String {
         val d = "JSON_VALUE($json, ${literal(at)} RETURNING BINARY_DOUBLE)"
-        val whole = "TO_CHAR(CAST(FLOOR($d / 4294967296) AS NUMBER) * 4294967296 + CAST($d - FLOOR($d / 4294967296) * 4294967296 AS NUMBER), 'TM9')"
+        val whole = "TO_CHAR(${wholeNumber(d)}, 'TM9')"
         // A tag's key and text are read of an object alone: Oracle's path is lax, and `$.k.s` of a list of one tag is its item's.
         return "CASE ${type(json, at)} WHEN 'object' THEN COALESCE(JSON_VALUE($json, ${literal("$at.${ValueLayout.KEY}")}), JSON_VALUE($json, ${literal("$at.${ValueLayout.TEXT}")})) " +
             "WHEN 'number' THEN TO_CHAR(JSON_VALUE($json, ${literal(at)} RETURNING NUMBER), 'TM9') " +
             "WHEN 'double' THEN CASE WHEN $d = FLOOR($d) AND $d >= -9223372036854775808 AND $d < 9223372036854775808 THEN $whole ELSE 'd' || TO_CHAR($d) END " +
             "ELSE JSON_VALUE($json, ${literal(at)}) END"
     }
+
+    /**
+     * The binary double [d], a whole number within a long's range, as the `NUMBER` it is, exactly: by halves at 2^32, as
+     * [indexKey] reads one, for Oracle makes no `NUMBER` of a double exactly (see [indexKey]).
+     */
+    fun wholeNumber(d: String): String = "CAST(FLOOR($d / 4294967296) AS NUMBER) * 4294967296 + CAST($d - FLOOR($d / 4294967296) * 4294967296 AS NUMBER)"
 
     /** The JSON kind of the value at [at] of [json], by the `type()` item method: `string`, `number`, `double`, `boolean` … */
     private fun type(json: String, at: String) = "JSON_VALUE($json, ${literal("$at.type()")} RETURNING VARCHAR2(16))"
