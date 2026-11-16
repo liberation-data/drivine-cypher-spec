@@ -75,4 +75,19 @@ function temporalArithmetic(operator, x, y) {
     return load().temporalArithmetic(operator, x, y);
 }
 
-module.exports = { compile, hostVersion, temporalArithmetic };
+/**
+ * A call of one of the module's SQLite host functions by its name, `args` its arguments as a JSON array of SQLite values,
+ * typed (`null`, `{"i": "<digits>"}`, `{"r": <number>}`, `{"t": "<text>"}`, `{"b": "<base64>"}`): the answer as JSON text,
+ * `{"v": <value typed so>}` or `{"error": "<message>"}`. A host registers each of `hostFunctions()` on its SQLite as a call
+ * of this, so every library runs the module's one copy (liberation-data/drivine#757).
+ */
+function hostCall(name, args) {
+    return load().hostCall(name, args);
+}
+
+/** The module's SQLite host functions, as a JSON object by name: each one's `arity` (-1 for any) and `deterministic`. */
+function hostFunctions() {
+    return load().hostFunctions();
+}
+
+module.exports = { compile, hostVersion, temporalArithmetic, hostCall, hostFunctions };
