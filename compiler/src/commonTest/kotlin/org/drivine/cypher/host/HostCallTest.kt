@@ -120,6 +120,22 @@ class HostCallTest {
     }
 
     @Test
+    fun aTextReadAsANumberIsReadAsSqliteReadsItOnEveryTarget() {
+        // HostCallSqliteTest pins these texts against the JVM's SQLite; here the same reads hold on every target.
+        for ((text, value) in listOf(
+            "12abc" to 12L, " 3.5" to 3L, "\t-7e-2xyz" to -7L, "+2" to 2L, ".5" to 0L, "1e5" to 1L, "abc" to 0L, "" to 0L,
+            "007" to 7L, "\u000B4" to 4L, "9223372036854775807" to Long.MAX_VALUE, "9223372036854775808" to Long.MAX_VALUE,
+            "-9223372036854775808" to Long.MIN_VALUE, "-9223372036854775809" to Long.MIN_VALUE,
+            "123456789012345678901234567890" to Long.MAX_VALUE,
+        )) assertEquals(value, HostCall.sqliteLong(text), "on $target, the whole number of '$text'")
+        for ((text, value) in listOf(
+            "12abc" to 12.0, " 3.5" to 3.5, "\t-7e-2xyz" to -0.07, "+2" to 2.0, ".5" to 0.5, "1." to 1.0, "1e" to 1.0,
+            "1e+2x" to 100.0, "-" to 0.0, "abc" to 0.0, "" to 0.0, "0x10" to 0.0, "Infinity" to 0.0, "NaN" to 0.0,
+            "1e400" to Double.POSITIVE_INFINITY, "-1e400" to Double.NEGATIVE_INFINITY, "2.5 " to 2.5, "1 2" to 1.0,
+        )) assertEquals(value, HostCall.sqliteDouble(text), "on $target, the float of '$text'")
+    }
+
+    @Test
     fun aFloatIsReadExactlyAndWrittenAsTextThatReadsBackOnEveryTarget() {
         // Kotlin/Wasm's own String.toDouble is an ulp off for about one double in 400 (see parseDoubleOrNull).
         val random = Random(757)
