@@ -2401,6 +2401,14 @@ cases:
       - note: "A literal compares so too."
         cypher: "MATCH (n:CyWrite) WHERE n.k = 1 RETURN n.i ORDER BY n.i"
         rows: [6, 8]
+      - note: "Given 0, a whole 0 and a float 0 are equal to it, as a parameter and as a literal."
+        cypher: "CREATE (:CyWrite {i: 22, k: 0}), (:CyWrite {i: 23, k: 0.0})"
+        rows: []
+      - cypher: "MATCH (n:CyWrite) WHERE n.k = $g RETURN n.i ORDER BY n.i"
+        parameters: {g: 0}
+        rows: [22, 23]
+      - cypher: "MATCH (n:CyWrite) WHERE n.k = 0 RETURN n.i ORDER BY n.i"
+        rows: [22, 23]
 
   - name: "NaN equal to a given number, text or truth value"
     description: "NaN is equal to no value a statement gives, and NOT keeps it (drivine-cypher-spec#287). Only where a write may store NaN: Postgres and SQLite refuse one."
