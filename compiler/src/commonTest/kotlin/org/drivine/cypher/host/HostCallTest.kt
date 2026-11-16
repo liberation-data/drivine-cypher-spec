@@ -88,6 +88,7 @@ class HostCallTest {
             Triple("drivine_trunc", "x1:1", "No argument is of the kind x"),
             Triple("drivine_trunc", "i3:1.5", "i holds an integer's digits, not 1.5"),
             Triple("drivine_trunc", "r4:many", "r holds a number, not many"),
+            Triple("drivine_trunc", "b3:a!b", "b holds base64, not a!b"),
             Triple("drivine_trunc", "t", "A host call's argument 1 is no kind, length and colon"),
             Triple("drivine_trunc", "t9:abc", "A host call's argument 1 is no kind, length and colon"),
             Triple("drivine_trunc", "t-1:", "A host call's argument 1 is no kind, length and colon"),
@@ -105,6 +106,8 @@ class HostCallTest {
         assertEquals("i9007199254740993", HostCall.call("drivine_trunc", "i16:9007199254740993"), "on $target")
         assertEquals("i2", HostCall.call("drivine_trunc", "r3:2.5"), "on $target")
         assertEquals("n", HostCall.call("drivine_trunc", "n"), "on $target")
+        // A blob is its base64, read as a number as SQLite reads its bytes as text.
+        assertEquals("t2.5", HostCall.call("drivine_float_text", "b4:Mi41"), "on $target")
         // A text holding the colons, digits and kind letters the arguments are written with is read by its length alone.
         assertEquals("t\"t3:a:b\"", HostCall.call("drivine_canonical", "t8:\"t3:a:b\""), "on $target")
         // A float is read in each of the forms JavaScript's String(number) writes.

@@ -77,7 +77,7 @@ object HostCall {
                     'i' -> text.toLongOrNull() ?: throw IllegalArgumentException("i holds an integer's digits, not $text.")
                     'r' -> parseDoubleOrNull(text) ?: throw IllegalArgumentException("r holds a number, not $text.")
                     't' -> text
-                    'b' -> Base64.decode(text)
+                    'b' -> try { Base64.decode(text) } catch (e: IllegalArgumentException) { throw IllegalArgumentException("b holds base64, not $text.") }
                     else -> throw IllegalArgumentException("No argument is of the kind $kind: one of n, i, r, t and b.")
                 },
             )
