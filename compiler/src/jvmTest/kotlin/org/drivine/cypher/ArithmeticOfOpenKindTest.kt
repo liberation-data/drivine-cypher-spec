@@ -105,6 +105,21 @@ class ArithmeticOfOpenKindTest {
     }
 
     @Test
+    fun `a key of a map read is tested beside its temporal tag test`() {
+        // A side that may be a tag is tested for one first, then for a truth value, in the one CASE: see temporalRefused.
+        val truth = mapOf("l" to listOf(mapOf("flag" to true)))
+        for ((cypher, operator) in listOf(
+            "UNWIND \$l AS m RETURN m.flag + 1" to "+", "UNWIND \$l AS m RETURN m.flag - 1" to "-",
+            "UNWIND \$l AS m RETURN 2 * m.flag" to "*", "UNWIND \$l AS m RETURN m.flag / 2" to "/",
+        )) {
+            assertContains(SqliteCypherCompiler("g").compile(cypher, truth).sql, "\$t", message = cypher)
+            assertContains(sqlite(cypher, truth), "$failure $operator", message = cypher)
+        }
+        assertEquals("2", sqlite("UNWIND \$l AS m RETURN m.flag + 1", mapOf("l" to listOf(mapOf("flag" to 1)))))
+        assertEquals("{\"\$t\":\"duration\",\"v\":\"PT48H\"}", sqlite("UNWIND \$l AS m RETURN m.d * 2", mapOf("l" to listOf(mapOf("d" to java.time.Duration.ofDays(1))))))
+    }
+
+    @Test
     fun `each store tests a side read once beside a number and nothing else`() {
         compilers.forEach { compiler ->
             fun tests(compiler: org.drivine.cypher.sql.SqlCypherCompiler, cypher: String) = compiler.compile(cypher).sql.split(failure).size - 1

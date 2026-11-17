@@ -5742,7 +5742,8 @@ abstract class SqlCypherCompiler(
          * arithmetic is written inline only where a side is known to be temporal. A `+` tests only a tag beside a tag or a
          * number: beside a text a temporal value is its text, and beside a list an item, as before, so beside a side known to be
          * a text or a list it is not tested. A side that can't be a tag ([tagFree]) is not tested. The kind a failure names is the
-         * tag's on either side: the other may be a number (`n.n * n.d`).
+         * tag's on either side: the other may be a number (`n.n * n.d`). A side [truths] marks ([truthRead]) fails by name where
+         * it is a truth value, tested after the tag, in the same `CASE`.
          */
         private fun temporalRefused(
             binary: Expression.Binary, left: Value, right: Value, x: String, y: String, truths: List<Boolean> = listOf(false, false), arithmetic: () -> String,

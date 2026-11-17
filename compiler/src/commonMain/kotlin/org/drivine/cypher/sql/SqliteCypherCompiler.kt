@@ -94,10 +94,10 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
             noLength + "ELSE $json END"
     }
 
-    /** SQLite has no failing expression of its own: Drivine's function fails with the text. */
     /** SQLite's `CASE` takes a value of any type in each branch. */
     override fun failed(failure: String) = failure
 
+    /** SQLite has no failing expression of its own: Drivine's function fails with the text. */
     override fun failure(message: String, value: String) = "${SqliteFunctions.FAIL}(${literal("$message ")} || $value)"
 
     /** NaN, where the statement is given one, is a number: see the class. */
