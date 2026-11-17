@@ -45,8 +45,8 @@ data class MigrationReport(
     /** A property to declare: [kind] would change its [values]. */
     data class Candidate(val label: String, val property: String, val kind: String, val values: Long)
 
-    /** How many values are not of their declared kind. */
-    val invalidCount: Int get() = properties.values.sumOf { it.invalid.size }
+    /** How many values are not of their declared kind: one of a node of two labels that declare its property, listed under both, counted once. */
+    val invalidCount: Int get() = properties.flatMap { (key, p) -> p.invalid.map { Triple(it.table, it.id, split(key).second) } }.distinct().size
 
     /** This report, ended with [status] and [message]. */
     fun ended(status: Status, message: String) = copy(status = status, message = message)

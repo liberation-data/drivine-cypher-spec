@@ -71,6 +71,15 @@ class MigrationReportTest {
     }
 
     @Test
+    fun aValueNotOfItsKindOfANodeWhoseTwoLabelsDeclareItIsListedUnderBothAndCountedOnce() {
+        val declarations = listOf(Declaration("Person", "born", Kind.DATE), Declaration("Employee", "born", Kind.DATE))
+        val report = scan(listOf(listOf("Person", "Employee") to """{"born": "soon"}"""), declarations, Store.POSTGRES)
+        assertEquals(1, report.properties["Person\u0000born"]!!.invalid.size)
+        assertEquals(1, report.properties["Employee\u0000born"]!!.invalid.size)
+        assertEquals(1, report.invalidCount)
+    }
+
+    @Test
     fun aReportReadsBackAsItWasWrittenThroughJson() {
         val declarations = listOf(Declaration("Person", "born", Kind.DATE))
         val report = scan(listOf(
