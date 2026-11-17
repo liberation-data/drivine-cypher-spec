@@ -7510,15 +7510,35 @@ abstract class SqlCypherCompiler(
          * among it (`count(*) AS c`, read by name in an ORDER BY), keeps no kind to tell a list by. A property of a node or a
          * relationship is none either: it keeps the store's JSON text, as Neo4j's text of a list read from the store
          * would cost every `toString()` of a property thousands of characters of SQL (liberation-data/drivine-cypher-spec#297,
-         * #346 for a property's list).
+         * #346 for a property's list). None is where it is known to be no list ([noList]), nor an item, `head()` or `last()` of a
+         * list whose items are ([noListItems]), so `coalesce($m.n, 1)` of `{n: 1}` and `$l[0]` of `[1, 2]` keep their SQL.
          */
-        private fun mayHoldList(written: Expression, scope: Map<String, Value>): Boolean = when (written) {
+        private fun mayHoldList(written: Expression, scope: Map<String, Value>): Boolean = !noList(written, scope) && when (written) {
             is Expression.Property -> holdsMap(written.subject, scope)
-            is Expression.Index -> holdsMap(written.subject, scope) || written.subject is Expression.ListLiteral
-            is Expression.Function -> written.name.lowercase() in LIST_PASSING &&
-                written.arguments.any { knownKind(it, scope) == Value.Known.LIST || mayHoldList(it, scope) }
+            is Expression.Index -> (holdsMap(written.subject, scope) || written.subject is Expression.ListLiteral) && !noListItems(written.subject, scope)
+            is Expression.Function -> written.name.lowercase().let { name ->
+                name in LIST_PASSING && written.arguments.any {
+                    (name == "coalesce" || !noListItems(it, scope)) && (knownKind(it, scope) == Value.Known.LIST || mayHoldList(it, scope))
+                }
+            }
             is Expression.Case -> (written.alternatives.map { it.second } + listOfNotNull(written.otherwise))
                 .any { knownKind(it, scope) == Value.Known.LIST || mayHoldList(it, scope) }
+            else -> false
+        }
+
+        /** Whether [written] is known to be no list or map: of a known kind ([knownKind]), or given ([given]) as a number, a text or a truth value. */
+        private fun noList(written: Expression, scope: Map<String, Value>): Boolean =
+            knownKind(written, scope).let { it != null && it != Value.Known.LIST && it != Value.Known.MAP } ||
+                given(written).let { it is String || it is Number || it is Boolean }
+
+        /**
+         * Whether each item of the list [list] is known to be no list or map, or null: a list written of such items ([noList]), one
+         * given as a parameter of numbers, texts and truth values, or a variable bound to a list of one such kind ([Value.Json.itemsKnown]).
+         */
+        private fun noListItems(list: Expression, scope: Map<String, Value>): Boolean = when (list) {
+            is Expression.ListLiteral -> list.items.all { noList(it, scope) || (it is Expression.Literal && it.value == null) }
+            is Expression.Parameter -> (given(list) as? List<*>)?.all { it == null || it is String || it is Number || it is Boolean } == true
+            is Expression.Variable -> (scope[list.name] as? Value.Json)?.itemsKnown in setOf(Value.Items.NUMBER, Value.Items.TEXT, Value.Items.BOOLEAN)
             else -> false
         }
 
@@ -8031,15 +8051,19 @@ abstract class SqlCypherCompiler(
         /** What a read of a property of a relationship the statement deleted fails with, before its id, as Neo4j fails it (drivine4j#420). */
         const val DELETED_RELATIONSHIP = "A relationship the statement deleted has no properties to read, as in Neo4j: its id is"
 
+        /** The functions that give one of their arguments, so may give a list where one is ([mayHoldList]). */
+        val LIST_PASSING = setOf("coalesce", "head", "last")
+
+        /**
+         * What `toString()` of a map read as the statement runs fails with, where the statement leaves its kind open and its keys
+         * aren't known here: see `textOfOpen`. What it is follows.
+         */
+        const val TEXT_OF_MAP_HELD = "toString() of a map read as the statement runs is not compiled to SQL yet (liberation-data/drivine-cypher-spec#301): it is"
+
         /**
          * What `toString()` of a list or a map fails with, as it runs, where it holds what its text is not known of here: see
          * `itemText`. What it holds follows.
          */
-        /** The functions that give one of their arguments, so may give a list where one is ([mayHoldList]). */
-        val LIST_PASSING = setOf("coalesce", "head", "last")
-
-        const val TEXT_OF_MAP_HELD = "toString() of a map read as the statement runs is not compiled to SQL yet (liberation-data/drivine-cypher-spec#301): it is"
-
         const val TEXT_OF_HELD = "toString() of a list or a map that holds a map read as the statement runs, a temporal value or a list nested deeper is not compiled to SQL yet: it holds"
 
         /**
