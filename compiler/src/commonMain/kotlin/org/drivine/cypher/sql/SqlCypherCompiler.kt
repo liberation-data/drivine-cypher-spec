@@ -6,6 +6,7 @@ import org.drivine.cypher.json.NullNode
 import org.drivine.DrivineInternalApi
 import org.drivine.cypher.CompilerException
 import org.drivine.cypher.CypherReader
+import org.drivine.cypher.Procedure
 import org.drivine.cypher.time.CommonTime
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.number
@@ -537,7 +538,7 @@ abstract class SqlCypherCompiler(
      * The query of a `CALL { … }`, [query], as the row that reads what it returns joins it: kept apart from that
      * row's query, where a store would merge the two and read a value bound in the row wrongly.
      */
-    protected open fun called(query: String) = query
+    protected open fun called(query: String, keepsDistinct: Boolean = false) = query
 
     /**
      * The query [query] that makes a value anew for each row, `randomUUID()`, kept apart from the query that reads it, where a
@@ -1738,6 +1739,12 @@ abstract class SqlCypherCompiler(
     private inner class Writer(val parameters: Parameters) {
         private var counter = 0
 
+        /**
+         * How many numbered `DISTINCT`s are compiled so far ([project]): a query compiled while it grew holds one, which [called]
+         * is told of, as it is of a `SELECT DISTINCT`.
+         */
+        private var numberedDistincts = 0
+
         private fun alias(prefix: String) = "$prefix${++counter}"
 
         /** The variables made here for a randomUUID() made first, for each row: no variable of the statement's, though one may be quoted as named alike. */
@@ -1825,9 +1832,9 @@ abstract class SqlCypherCompiler(
         fun projected(query: Query): Projected {
             give(query)
             var select = Select(emptyMap())
-            for (clause in query.clauses) {
+            for ((i, clause) in query.clauses.withIndex()) {
                 if (clause is Clause.Return) return project(select, clause.projection, final = true, statement = true)
-                select = read(select, clause)
+                select = read(select, clause, orderSeen = orderSeenAfter(query.clauses, i, seenAtEnd = true))
             }
             throw CompilerException("A Cypher statement ends with RETURN.")
         }
@@ -1840,17 +1847,43 @@ abstract class SqlCypherCompiler(
          * on nothing, as Neo4j has it, and is left out: SQL has no query of no column (#472). Its `WHERE` is met on the rows it
          * reads, which hold what that reads; with `DISTINCT`, an order, `SKIP` or `LIMIT` it is refused, as it was.
          */
-        private fun read(select: Select, clause: Clause, outer: Map<String, Value> = emptyMap()): Select = when (clause) {
+        private fun read(select: Select, clause: Clause, outer: Map<String, Value> = emptyMap(), orderSeen: Boolean = true): Select = when (clause) {
             is Clause.Match -> match(select, clause)
             is Clause.Unwind -> anewBefore(select, listOf(clause.list), whole = true)
                 ?.let { (made, read) -> made.also { unwind(it, clause.copy(list = read.single())) } } ?: select.also { unwind(it, clause) }
             is Clause.With ->
                 if (clause.projection == Projection(false, true, emptyList(), emptyList(), null, null) && select.bound.keys.all { it in madeAnew }) {
                     clause.where?.let { filtered(select, it) } ?: select
-                } else with(select, clause, outer)
+                } else with(select, clause, outer, orderSeen = orderSeen)
             is Clause.Call -> anewCall(select, clause)
             is Clause.VectorSearch -> vectorSearch(select, clause)
             else -> error("${clause::class.simpleName} reads nothing")
+        }
+
+        /**
+         * Whether the order of the rows the clause at [at] of [clauses] gives can be seen after it, so a `DISTINCT` there keeps
+         * it ([project]): false only where the clauses after it are sure not to see it. A `MATCH` or an `UNWIND` passes the rows
+         * on, as does a `WITH` that neither aggregates, orders nor pages. The first `WITH` or `RETURN` that aggregates sees the
+         * order where it collects, and not where it only counts, sums, averages or takes the least or greatest; one that orders
+         * or pages sees it. A plain `RETURN` at the end, or the end of [clauses], sees it as [seenAtEnd] has it: a statement's
+         * rows are seen in order, an `EXISTS { … }`'s or a `COUNT { … }`'s are not. Any other clause, a `CALL` or a write among
+         * them, sees it.
+         */
+        private fun orderSeenAfter(clauses: List<Clause>, at: Int, seenAtEnd: Boolean): Boolean {
+            for (clause in clauses.drop(at + 1)) {
+                val projection = when (clause) {
+                    is Clause.Match, is Clause.Unwind -> continue
+                    is Clause.With -> clause.projection
+                    is Clause.Return -> clause.projection
+                    else -> return true
+                }
+                if (projection.orderBy.isNotEmpty() || projection.skip != null || projection.limit != null) return true
+                if (projection.items.any { contains(it.expression, ::isAggregate) }) {
+                    return projection.items.any { item -> contains(item.expression) { isAggregate(it) && !isOrderBlind(it) } }
+                }
+                if (clause is Clause.Return) return seenAtEnd
+            }
+            return seenAtEnd
         }
 
         /**
@@ -1988,9 +2021,9 @@ abstract class SqlCypherCompiler(
         }
 
         /** A `WITH`: a query of its own, which the rest of the statement reads from, as it reads [outer]. */
-        private fun with(select: Select, clause: Clause.With, outer: Map<String, Value> = emptyMap(), apart: Boolean = false): Select {
+        private fun with(select: Select, clause: Clause.With, outer: Map<String, Value> = emptyMap(), apart: Boolean = false, orderSeen: Boolean = true): Select {
             val (with, hidden) = having(clause)
-            return withHaving(select, with, outer, apart).also { next -> hidden.forEach { next.bound.remove(it) } }
+            return withHaving(select, with, outer, apart, orderSeen).also { next -> hidden.forEach { next.bound.remove(it) } }
         }
 
         /**
@@ -2028,8 +2061,10 @@ abstract class SqlCypherCompiler(
         }
 
         /** A `WITH` [having] has read: see [with]. */
-        private fun withHaving(select: Select, with: Clause.With, outer: Map<String, Value>, apart: Boolean): Select {
-            val projected = project(select, with.projection, final = false)
+        private fun withHaving(select: Select, with: Clause.With, outer: Map<String, Value>, apart: Boolean, orderSeen: Boolean = true): Select {
+            val numberedBefore = numberedDistincts
+            val projected = project(select, with.projection, final = false, orderSeen = orderSeen)
+            val numbered = numberedDistincts > numberedBefore
             val name = alias("w")
             val next = Select(outer)
             next.walks = select.walks
@@ -2037,11 +2072,16 @@ abstract class SqlCypherCompiler(
             // A value made anew for each row is one value however often the clauses after read it: see [once]. Kept apart
             // from the query that reads it, where that query must not have it merged in: see `casesFirst`.
             val anew = with.projection.items.any { item -> holdsAnew(item.expression) }
-            val sql = if (anew) once(projected.sql) else projected.sql
             // A path it passes on is kept apart too: Oracle merged the WITH's query into the one that reads it, and the
             // subqueries that read a path's nodes and relationships by the ids in its columns read the first row's on every row (#537).
             val passesPath = projected.scope.values.any { it is Value.Path }
-            next.source("(\n${indent(if (apart || passesPath) called(sql) else sql)}\n) $name")
+            fun source(query: String): String {
+                val sql = if (anew) once(query) else query
+                return "(\n${indent(if (apart || passesPath) called(sql, keepsDistinct = numbered) else sql)}\n) $name"
+            }
+            val source = source(projected.sql)
+            next.source(source)
+            projected.unsorted?.let { next.unsorted[source] = source(it) }
             // Rows an `UNWIND` read last are still read before what comes after a `WITH` of them: SQLite merges its query in.
             next.afterRows = select.afterRows?.let { name }
             projected.scope.forEach { (variable, value) -> next.bind(variable, value.columnsOf(name)) }
@@ -2102,8 +2142,8 @@ abstract class SqlCypherCompiler(
                         val returns = (listOf(query.clauses) + query.unions.map { it.clauses }).map { (it.last() as Clause.Return).projection }
                         val projected = (listOf(query.clauses) + query.unions.map { it.clauses }).map { clauses ->
                             var select = Select(scope)
-                            clauses.dropLast(1).forEach { select = read(select, it, scope) }
-                            project(select, (clauses.last() as Clause.Return).projection, final = true)
+                            clauses.dropLast(1).forEachIndexed { i, clause -> select = read(select, clause, scope, orderSeenAfter(clauses, i, seenAtEnd = false)) }
+                            project(select, (clauses.last() as Clause.Return).projection, final = true, orderSeen = false)
                         }
                         // Of one type in each query, compared or not (drivine4j#679).
                         val result = if (distinct) comparable(Value.Json("q.result", ordered = true)) else orderedJson("q.result")
@@ -2121,9 +2161,9 @@ abstract class SqlCypherCompiler(
             val order = rowOrder
             try {
                 var select = Select(scope)
-                for (clause in query.clauses) {
-                    if (clause is Clause.Return) return project(select, clause.projection, final = false).sql
-                    select = read(select, clause, scope)
+                for ((i, clause) in query.clauses.withIndex()) {
+                    if (clause is Clause.Return) return project(select, clause.projection, final = false, orderSeen = false).sql
+                    select = read(select, clause, scope, orderSeenAfter(query.clauses, i, seenAtEnd = false))
                 }
                 return (listOf(select.head("1")) + from(select) + listOfNotNull(select.whereClause())).joinToString("\n")
             } finally {
@@ -2136,11 +2176,12 @@ abstract class SqlCypherCompiler(
             if (call.query.clauses.last() !is Clause.Return) unsupported("A CALL { … } that returns nothing")
             if (call.query.clauses.any(::writes)) unsupported("A write in CALL { … }")
             val order = rowOrder
+            val numberedBefore = numberedDistincts
             val projected = if (call.query.unions.isEmpty()) calledPart(select, call, call.query.clauses, null, distinct = false) else calledUnion(select, call)
             rowOrder = order
             redeclared(projected.scope.keys, select.bound.keys)
             val name = alias("c")
-            select.join(lateral(called(projected.sql), name, call.optional, projected.columns))
+            select.join(lateral(called(projected.sql, keepsDistinct = numberedDistincts > numberedBefore), name, call.optional, projected.columns))
             projected.scope.forEach { (variable, value) ->
                 val returned = value.laterally(name, projected.columns)
                 // A value taken from a write's row is null where an OPTIONAL CALL finds nothing: it is read as the call returns it (#336).
@@ -2272,7 +2313,7 @@ abstract class SqlCypherCompiler(
             val bracketed = call.imports != null || call.importsAll
             val outer = if (bracketed) imported else emptyMap()
             val reading = if (bracketed) clauses.dropLast(1) else starredImports(clauses.dropLast(1), imported.keys)
-            reading.forEach { inner = read(inner, it, outer) }
+            reading.forEachIndexed { i, clause -> inner = read(inner, clause, outer, orderSeenAfter(reading + clauses.last(), i, seenAtEnd = true)) }
             val projection = (clauses.last() as Clause.Return).projection
             val items = names?.map { name -> projection.items.single { it.name == name } } ?: projection.items
             return project(inner, projection.copy(items = items, distinct = distinct || projection.distinct), final = false)
@@ -2986,15 +3027,15 @@ abstract class SqlCypherCompiler(
                 when {
                     clause is Clause.Return -> step(ProcedureStep.Return(project(select, clause.projection, final = true, statement = true).sql))
                     clause is Clause.Delete && i == clauses.lastIndex && deleteMatched(select, clause) -> Unit
-                    else -> select = next(select, clause)
+                    else -> select = next(select, clause, orderSeenAfter(clauses, i, seenAtEnd = true))
                 }
             }
             return blocks.single()
         }
 
         /** [clause] over the rows [select] reads, written for them where it writes: the rows the clauses after it read. */
-        private fun next(select: Select, clause: Clause): Select {
-            if (!writes(clause)) return read(select, clause)
+        private fun next(select: Select, clause: Clause, orderSeen: Boolean = true): Select {
+            if (!writes(clause)) return read(select, clause, orderSeen = orderSeen)
             carry(select)
             when (clause) {
                 is Clause.Foreach -> foreach(clause)
@@ -3676,6 +3717,7 @@ abstract class SqlCypherCompiler(
             val order: List<Pair<String, Boolean>>,
             val columns: List<Pair<String, Boolean>>,
             val identity: Boolean = false,
+            val unsorted: String? = null,
         )
 
         /**
@@ -3685,8 +3727,12 @@ abstract class SqlCypherCompiler(
          * `RETURN`, or one of its `UNION`'s, not a subquery's: it names the statement's columns ([returned]), and where the
          * statement is compiled [typed], gives its nodes and relationships tagged ([output]), and its `result` as the host's
          * driver reads it back (`returned(json)`, which Oracle encodes again with `oracleReencodeJson`).
+         *
+         * A `DISTINCT` of rows that come in an order keeps each row where the first of its kind came, as Neo4j does (#316), where
+         * that order can be seen: by its own `SKIP` or `LIMIT`, or, with [orderSeen], by what reads its rows ([orderSeenAfter]).
+         * [Projected.unsorted] is its query without its `ORDER BY`, where that picks no rows: see [numberedFrom].
          */
-        fun project(select: Select, written: Projection, final: Boolean, statement: Boolean = false): Projected {
+        fun project(select: Select, written: Projection, final: Boolean, statement: Boolean = false, orderSeen: Boolean = true): Projected {
             // As in Neo4j, a star gives the variables in the order of their names, before the items named after it.
             // Not a randomUUID() made first for a CALL or a condition (see `anewCall`), which the statement never named.
             val starred = select.bound.keys.filterNot { it in madeAnew }.sorted()
@@ -3701,13 +3747,13 @@ abstract class SqlCypherCompiler(
             )
             // Before aggregatesFirst, which names each variable it groups by as an item of its own.
             requireExplicitGrouping(items, projection.orderBy, select.scope.keys, projection.distinct)
-            anewFirst(select, projection, items)?.let { (made, kept) -> return project(made, kept, final, statement) }
-            casesFirst(select, projection, items)?.let { (cased, kept) -> return project(cased, kept, final, statement) }
+            anewFirst(select, projection, items)?.let { (made, kept) -> return project(made, kept, final, statement, orderSeen) }
+            casesFirst(select, projection, items)?.let { (cased, kept) -> return project(cased, kept, final, statement, orderSeen) }
             // After casesFirst, which refuses what it must of an aggregate's CASE before working it out first.
-            sharedFirst(select, projection, items)?.let { (shared, kept) -> return project(shared, kept, final, statement) }
-            sortsFirst(select, projection, items)?.let { (sorted, kept) -> return project(sorted, kept, final, statement) }
-            aggregatesFirst(select, projection, items)?.let { (grouped, kept) -> return project(grouped, kept, final, statement) }
-            heldFirst(select, projection, items)?.let { (held, keyed) -> return project(held, keyed, final, statement) }
+            sharedFirst(select, projection, items)?.let { (shared, kept) -> return project(shared, kept, final, statement, orderSeen) }
+            sortsFirst(select, projection, items)?.let { (sorted, kept) -> return project(sorted, kept, final, statement, orderSeen) }
+            aggregatesFirst(select, projection, items)?.let { (grouped, kept) -> return project(grouped, kept, final, statement, orderSeen) }
+            heldFirst(select, projection, items)?.let { (held, keyed) -> return project(held, keyed, final, statement, orderSeen) }
             if (final && items.size > 1) {
                 warn(
                     "The statement returns ${items.size} items (${items.joinToString { it.name }}). Prefer returning a single map or value, such as RETURN { key1: val1, key2: val2 }: " +
@@ -3750,6 +3796,19 @@ abstract class SqlCypherCompiler(
                 selectList += "$carried AS $column"
                 sorted[column] = sorts
             }
+            // A DISTINCT of rows that come in an order, and that orders them no way of its own, keeps each row where the first of
+            // its kind came, as Neo4j keeps it (#316): each row is numbered in that order, and the distinct rows are ordered by the
+            // least number of each. A SELECT DISTINCT keeps no order: Oracle hashes or sorts its rows, and Postgres may, by its plan.
+            // Only where the order is seen: by its own SKIP or LIMIT, or by what reads its rows ([orderSeen]). Elsewhere, as where
+            // only count() reads them, the SQL is as it was. Not a procedure's, `db.labels()`'s: its rows, each label of each node,
+            // come in no order Neo4j gives, but each node's labels in theirs.
+            val numbered = projection.distinct && !aggregating && projection.orderBy.isEmpty() && select.order.isNotEmpty() &&
+                (orderSeen || projection.skip != null || projection.limit != null) &&
+                items.none { item -> variablesIn(item.expression).any(Procedure::reads) }
+            if (numbered) {
+                selectList += "ROW_NUMBER() OVER (ORDER BY ${orderOf(select)}) AS rn"
+                numberedDistincts++
+            }
             val sorts = projection.orderBy.mapIndexed { i, sort ->
                 val column = "s${i + 1}"
                 // An order term that is an item, as written, is that item: so it may be ordered by where rows are compared.
@@ -3789,7 +3848,8 @@ abstract class SqlCypherCompiler(
                 }
                 column to sort.descending
             }.ifEmpty {
-                if (compared) emptyList() else select.order.mapIndexed { i, (term, descending) ->
+                if (numbered) listOf("o1" to false)
+                else if (compared) emptyList() else select.order.mapIndexed { i, (term, descending) ->
                     val name = "o${i + 1}"
                     selectList += "$term AS $name"
                     name to descending
@@ -3819,12 +3879,21 @@ abstract class SqlCypherCompiler(
                 }
                 keys.distinct()
             }
-            val inner = buildList {
-                add(select.head("${if (projection.distinct) "DISTINCT " else ""}${selectList.joinToString(",\n       ")}"))
-                addAll(select.from())
+            fun rowsFrom(from: List<String>) = buildList {
+                add(select.head("${if (projection.distinct && !numbered) "DISTINCT " else ""}${selectList.joinToString(",\n       ")}"))
+                addAll(from)
                 select.whereClause()?.let(::add)
                 if (groupBy.isNotEmpty()) add("GROUP BY ${groupBy.joinToString(", ")}")
             }.joinToString("\n")
+            val rows = rowsFrom(if (numbered) numberedFrom(select) else select.from())
+            // The distinct rows, each with the least number of its kind ([numbered]): grouped by every column the DISTINCT compares,
+            // a NaN's d1 among them, which keeps that row apart.
+            val inner = if (!numbered) rows else {
+                val q = alias("q")
+                val kept = selectList.map { it.substringAfterLast(" AS ") }.filter { it != "rn" }
+                "SELECT ${kept.joinToString(", ") { "$q.$it AS $it" }}, MIN($q.rn) AS o1\n" +
+                    "FROM (\n${indent(rows)}\n) $q\nGROUP BY ${kept.joinToString(", ") { "$q.$it" }}"
+            }
             // What sorts a term in the query that reads this one: worked out there, of the column carried out, or that column.
             // Each is named for the query after it, which sorts by them in turn: the last by the term's column, any before it,
             // where its kind comes ([openSortKey]) or a list's key ([listSortKeys]), by that column with a number after it.
@@ -3849,19 +3918,33 @@ abstract class SqlCypherCompiler(
                 (columns.flatMap { (column, value) -> value.columns(column).map { "$name.${it.substringAfterLast(" AS ")}" } } +
                     sorts.flatMap { (column, _) -> sortedBy(column).map { (named, term) -> "$term AS $named" } }).joinToString(", ")
             }
-            val outer = buildList {
+            val paged = page(projection.skip?.let(::count), projection.limit?.let(::count))
+            fun outer(sorted: Boolean, inner: String) = buildList {
                 add("SELECT $outerColumns")
                 add("FROM (\n${indent(if (sortsAnew) once(inner) else inner)}\n) $name")
-                if (sorts.isNotEmpty()) {
+                if (sorted && sorts.isNotEmpty()) {
                     add("ORDER BY ${sorts.flatMap { (column, descending) -> sortedBy(column).map { (_, term) -> orderTerm(term, descending) } }.joinToString(", ")}")
                 }
-                addAll(page(projection.skip?.let(::count), projection.limit?.let(::count)))
+                addAll(paged)
             }.joinToString("\n")
             // What each item is bound to in the query that reads this one: its columns, which that query names.
             val scope = items.zip(columns).associate { (item, pair) -> item.name to pair.second.columnsOf(PENDING, pair.first) }
             val kinds = columns.flatMap { (column, value) -> value.columnKinds(column) } + order.map { (column, _) -> column to false }
-            return Projected(outer, scope, order, kinds, identity = identity != null)
+            // Without its ORDER BY, where that only orders the rows a WITH passes on, and picks none of them: see [numberedFrom].
+            // One that only carries on the order its rows came in reads them unsorted too.
+            val unsorted = if (final || sorts.isEmpty() || paged.isNotEmpty()) null
+            else outer(sorted = false, if (projection.orderBy.isEmpty() && !compared) rowsFrom(numberedFrom(select)) else inner)
+            return Projected(outer(sorted = true, inner), scope, order, kinds, identity = identity != null, unsorted = unsorted)
         }
+
+        /**
+         * The sources of [select] as a numbered `DISTINCT` reads them ([project]): a `WITH`'s query that only orders its rows
+         * read without its `ORDER BY` ([Select.unsorted]), as the `ROW_NUMBER()` that numbers them sorts them by the same terms.
+         * One whose `SKIP` or `LIMIT` picks rows by that order keeps it. A `WITH` between that only carries the order on is
+         * read so too, unsorted itself ([Projected.unsorted]).
+         */
+        private fun numberedFrom(select: Select): List<String> =
+            select.from().map { source -> select.unsorted.entries.fold(source) { text, (sorted, unsorted) -> text.replace(sorted, unsorted) } }
 
         /**
          * The identity of a row of the items [items], as a part of a `UNION` that compares rows gives it beside its `result`: the
@@ -7756,6 +7839,12 @@ abstract class SqlCypherCompiler(
         /** The order its rows are read in, where it has one: each term, and whether it descends. */
         val order = mutableListOf<Pair<String, Boolean>>()
 
+        /**
+         * The text of each source that is a `WITH`'s query whose `ORDER BY` only orders its rows, by that text without it
+         * ([Projected.unsorted]): a numbered `DISTINCT` reads it so ([numberedFrom]).
+         */
+        val unsorted = mutableMapOf<String, String>()
+
         /** What an expression of this part sees: the variables bound around it, then its own. */
         val scope: Map<String, Value> get() = outer + bound
 
@@ -8114,6 +8203,9 @@ abstract class SqlCypherCompiler(
 
         val AGGREGATES = setOf("count", "collect", "sum", "avg", "min", "max")
 
+        /** The [AGGREGATES] whose value is the same in any order of their rows: see `orderSeenAfter`. */
+        val ORDER_BLIND_AGGREGATES = setOf("count", "sum", "avg", "min", "max")
+
         /** Why a `sum` or an `avg` of durations fails: see `ofNumbers`. */
         const val DURATION_SUM = "A sum or an average of durations isn't worked out yet (drivine-cypher-spec#281, #282):"
 
@@ -8277,6 +8369,10 @@ abstract class SqlCypherCompiler(
 
         fun isAggregate(expression: Expression): Boolean =
             expression == Expression.CountStar || (expression is Expression.Function && expression.name.lowercase() in AGGREGATES)
+
+        /** Whether [aggregate] gives the same value whatever the order of its rows: all but `collect`. */
+        fun isOrderBlind(aggregate: Expression): Boolean =
+            aggregate == Expression.CountStar || (aggregate is Expression.Function && aggregate.name.lowercase() in ORDER_BLIND_AGGREGATES)
 
         /**
          * Whether [expression], an item that does not aggregate, is a key that an item that aggregates may read, as Neo4j

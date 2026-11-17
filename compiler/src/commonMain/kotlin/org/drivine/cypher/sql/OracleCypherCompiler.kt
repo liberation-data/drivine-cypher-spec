@@ -1900,9 +1900,11 @@ class OracleCypherCompiler(
      * `SELECT DISTINCT` at any depth ([DISTINCT_SELECT]), so the parts of a `UNION` in a `CALL` and `db.labels()`'s query are
      * hinted too, though each read right without, and so are a query [once] keeps apart, a `WITH`'s query kept apart, as
      * one that passes a path on is, and one whose string holds those words: the hint changes a plan, not its rows. `count(DISTINCT …)` read right, and is not hinted.
+     * A `DISTINCT` that keeps the order of its rows is written as no `SELECT DISTINCT`, but numbers its rows and groups them
+     * (#316): the compiler tells of one, at any depth, by [keepsDistinct].
      */
-    override fun called(query: String) =
-        "SELECT /*+ NO_MERGE${if (DISTINCT_SELECT.containsMatchIn(query)) " NO_DECORRELATE" else ""} */ * FROM (\n${indent(query)}\n)"
+    override fun called(query: String, keepsDistinct: Boolean) =
+        "SELECT /*+ NO_MERGE${if (keepsDistinct || DISTINCT_SELECT.containsMatchIn(query)) " NO_DECORRELATE" else ""} */ * FROM (\n${indent(query)}\n)"
 
     /** A fragment's term [sql] with its reads routed as a statement's are: see [finished]. */
     override fun finishedTerm(sql: String) = OracleLongReads.routed(sql)
