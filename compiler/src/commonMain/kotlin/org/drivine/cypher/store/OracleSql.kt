@@ -254,6 +254,55 @@ object OracleSql {
     /** The first hint comment of a query that opens with one, and the hints it holds. */
     private val HINTS = Regex("""^SELECT /\*\+ (.*?) \*/""")
 
+    /**
+     * Whether the rows of [query] are read from a table: a source named after a `FROM` or a `JOIN` of it, a table of the
+     * graph's or `JSON_TABLE(…)`, and not `DUAL`, in it or in a derived table or a lateral query (`LATERAL`, `CROSS APPLY`,
+     * `OUTER APPLY`) it reads from, outside its quoted texts and the `FROM` of an `EXTRACT(MONTH FROM …)`, which a temporal's
+     * field is read by. A subquery within an expression of it, an `EXISTS (SELECT …)`, an `IN (SELECT …)` or a scalar
+     * `(SELECT …)`, makes none of its rows, and what it reads is not counted. A query that reads no table reads only the row
+     * it is in.
+     */
+    internal fun readsTable(query: String): Boolean {
+        val text = query.split('\'').filterIndexed { i, _ -> i % 2 == 0 }.joinToString("''")
+        fun wordBefore(at: Int): String {
+            var end = at
+            while (end > 0 && text[end - 1].isWhitespace()) end--
+            var start = end
+            while (start > 0 && (text[start - 1].isLetterOrDigit() || text[start - 1] == '_')) start--
+            return text.substring(start, end)
+        }
+        fun subqueryAt(at: Int): Boolean {
+            var start = at
+            while (start < text.length && text[start].isWhitespace()) start++
+            return text.startsWith("SELECT", start) || text.startsWith("WITH", start)
+        }
+        val sources = StringBuilder()
+        var i = 0
+        while (i < text.length) {
+            if (text[i] == '(' && wordBefore(i) !in SOURCE_WORDS && subqueryAt(i + 1)) {
+                var depth = 0
+                while (i < text.length) {
+                    if (text[i] == '(') depth++ else if (text[i] == ')' && --depth == 0) break
+                    i++
+                }
+                sources.append(' ')
+            } else {
+                sources.append(text[i])
+            }
+            i++
+        }
+        return TABLE_READ.containsMatchIn(EXTRACTED.replace(sources, "EXTRACT("))
+    }
+
+    /** A source named after a `FROM` or a `JOIN`: see [readsTable]. */
+    private val TABLE_READ = Regex("""\b(?:FROM|JOIN)\s+(?!\(|DUAL\b|LATERAL\s*\()\w""")
+
+    /** The field and `FROM` of an `EXTRACT(… FROM …)`, which name no source: see [readsTable]. */
+    private val EXTRACTED = Regex("""\bEXTRACT\s*\(\s*\w+\s+FROM\b""")
+
+    /** The words before a derived table's or a lateral query's opening bracket: see [readsTable]. */
+    private val SOURCE_WORDS = setOf("FROM", "JOIN", "LATERAL", "APPLY")
+
     /** The texts of the JSON array bound as [parameter], as rows of one column, `v`. */
     fun textValues(parameter: String): String = "SELECT v FROM JSON_TABLE($parameter, '$[*]' COLUMNS (v VARCHAR2(4000) PATH '$'))"
 

@@ -2089,6 +2089,20 @@ class OracleCypherCompiler(
     override fun existsQuery(query: String) = "SELECT 1 FROM (\n${indent(query)}\n)"
 
     /**
+     * Oracle 23.26 gets the `EXISTS` of a query that reads no table, only the row it is in, wrong where its truth is a value (an
+     * item, a `CASE`, an order) rather than a `WHERE`'s: false or null, whatever the query finds. `EXISTS { MATCH (m:Movie) RETURN
+     * m.title }` of a node `m` bound already, `EXISTS { (m:Movie) }` and `EXISTS { WITH m WHERE m:Movie RETURN m }` compile to
+     * such a query: a test of the row's labels in a `SELECT` with no `FROM`, or a derived table of one. `FROM DUAL`, `NO_UNNEST`
+     * and `ROWNUM` don't help. So its truth is its rows counted, as a `COUNT { … }`'s query is, which Oracle gets right; a query
+     * of the row alone has few. An `EXISTS` is written as it was only where both its Cypher ([readsTable]) and its SQL
+     * ([OracleSql.readsTable]) read a table for certain: either may miss one, which costs a count, and a word of the SQL taken
+     * for a source wrongly, as the `FROM` of an `EXTRACT` once was, is not enough alone. The spec's case "EXISTS { } and COUNT { } of the row alone" holds each form to Neo4j's answers.
+     */
+    override fun existsOf(query: String, laidOut: Boolean, readsTable: Boolean): String =
+        if (readsTable && OracleSql.readsTable(query)) super.existsOf(query, laidOut, true)
+        else "((${OracleSql.uncoalesced("SELECT count(*) FROM (\n${indent(query)}\n) ex")}) > 0)"
+
+    /**
      * Each subquery a condition reads is hinted against Oracle's subquery coalescing, `SELECT /*+ NO_COALESCE_SQ */`, in its
      * own `SELECT` ([OracleSql.uncoalesced]). Oracle 23.26 merged an `OR` of two correlated subqueries wrongly and kept only
      * the rows the first one matched: `MATCH (g:GuideUser) WHERE EXISTS { (g)-[:IS_WEB_USER]->(:Anonymous) } OR EXISTS {

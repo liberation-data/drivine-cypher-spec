@@ -3,7 +3,9 @@ package org.drivine.cypher
 import org.drivine.cypher.sql.OracleCypherCompiler
 import org.drivine.cypher.sql.PostgresCypherCompiler
 import org.drivine.cypher.sql.SqliteCypherCompiler
+import org.drivine.cypher.store.OracleSql
 import org.junit.jupiter.api.Test
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
@@ -33,8 +35,8 @@ class OracleExistsQueryTest {
         "MERGE (n:CyWrite {id: 3}) SET n.e = EXISTS { UNWIND [1, 3] AS j WITH j WHERE j = n.id RETURN j ORDER BY j } RETURN n.e",
     )
 
-    /** Each `EXISTS (` of [sql] that opens a subquery, and the text that follows it. */
-    private fun existsBodies(sql: String) = Regex("""EXISTS \(\n(\s*)(\S[^\n]*)""").findAll(sql).map { it.groupValues[2] }.toList()
+    /** Each `EXISTS (` of [sql] that opens a subquery, or Oracle's count of one not taken to read a table for certain, and the text that follows it. */
+    private fun existsBodies(sql: String) = Regex("""(?:EXISTS \(|count\(\*\) FROM \()\n(\s*)(\S[^\n]*)""").findAll(sql).map { it.groupValues[2] }.toList()
 
     @Test
     fun `each EXISTS query is read from a derived table on Oracle`() {
@@ -63,5 +65,161 @@ class OracleExistsQueryTest {
                 assertTrue(bodies.isNotEmpty() && bodies.none { it.startsWith("SELECT 1 FROM (") }, sql)
             }
         }
+    }
+
+    /** Statements whose `EXISTS { … }` reads only the row it is in, as the spec's "EXISTS { } and COUNT { } of the row alone" has them. */
+    private val ofTheRow = listOf(
+        "MATCH (:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, EXISTS { MATCH (m1:Movie) RETURN m1.title AS y } AS y ORDER BY title",
+        "MATCH (n) RETURN EXISTS { MATCH (n:Movie) WITH n.title AS t RETURN t AS y }",
+        "MATCH (n) RETURN n.name ORDER BY EXISTS { MATCH (n:Movie) RETURN n.title AS y }",
+        "MATCH (n) RETURN EXISTS { (n:Movie) }",
+        "MATCH (n) RETURN EXISTS { MATCH (n:Movie) }",
+        "MATCH (n) RETURN EXISTS { WITH n WHERE n:Movie RETURN n.title AS y }",
+        "MATCH (n) RETURN EXISTS { MATCH (n:Movie) WHERE COUNT { (n)<--() } > 1 RETURN n.title AS y }",
+        "MATCH (n) WHERE NOT EXISTS { MATCH (n:Movie) RETURN n.title AS y } RETURN n.name",
+        "MATCH (n) RETURN EXISTS { OPTIONAL MATCH (n:Movie) RETURN n.title AS y }",
+        "MATCH (n) RETURN EXISTS { MATCH (n:Movie) RETURN n.title AS y UNION MATCH (n:Person) RETURN n.name AS y }",
+        "MATCH (n) RETURN EXISTS { MATCH (n:Movie) RETURN n.title AS y ORDER BY y LIMIT 1 }",
+        "MATCH (n) RETURN CASE WHEN EXISTS { MATCH (n:Movie) RETURN n.title AS y } THEN 'y' ELSE 'n' END",
+        "MATCH (n) RETURN EXISTS { MATCH (n:Movie) WHERE n.released.year = 1999 }",
+        "MATCH (n) RETURN EXISTS { MATCH (n:Movie) WHERE datetime(n.released).quarter = 1 }",
+        // Its SQL reads a list's rows (`JSON_TABLE`), but its Cypher, an `UNWIND`, no table for certain.
+        "MATCH (n) RETURN EXISTS { UNWIND [n] AS z WITH z WHERE z:Movie RETURN z }",
+        // A node bound within the query, by a `WITH`, an `UNWIND` or a `CALL` that reads no table, is not matched anew.
+        "MATCH (n) RETURN EXISTS { WITH n AS x MATCH (x:Movie) RETURN x.title AS y }",
+        "MATCH (n) RETURN EXISTS { UNWIND [n] AS x MATCH (x:Movie) RETURN x.title AS y }",
+        "MATCH (n) RETURN EXISTS { CALL (n) { WITH n WHERE n:Movie RETURN n AS x } MATCH (x:Movie) RETURN x.title AS y }",
+        // A path that may take no step is not taken to read a table for certain.
+        "MATCH (n) RETURN EXISTS { MATCH (n:Movie)-[*0..1]->(n) }",
+        // A union is not taken to read a table for certain.
+        "MATCH (n) RETURN EXISTS { MATCH (n:Movie) RETURN n.title AS y UNION MATCH (x:Person) RETURN x.name AS y }",
+        // An optional read keeps the row whatever the table holds.
+        "MATCH (n) RETURN EXISTS { MATCH (n:Movie) OPTIONAL MATCH (n)-->(x) RETURN x }",
+        "MATCH (n) RETURN EXISTS { OPTIONAL CALL (n) { MATCH (n)-->(k) RETURN k } RETURN k }",
+    )
+
+    /** Statements whose `EXISTS { … }` reads a table: the graph's, or a list's rows. */
+    private val ofATable = listOf(
+        "MATCH (n) RETURN EXISTS { MATCH (n:Movie)<-[:ACTED_IN]-(a) RETURN a.name AS y }",
+        "MATCH (n) RETURN EXISTS { (n)-->() }",
+        "MATCH (n) RETURN EXISTS { MATCH (x:Movie) RETURN x.title AS y }",
+        "MATCH (n), (m) RETURN EXISTS { MATCH (n)-[:R]->(m) }",
+        "MATCH (n) RETURN EXISTS { MATCH (n)-[*1..2]->(:Person) }",
+        "MATCH (n) WHERE (n)-->() RETURN n",
+        "MATCH (n) RETURN EXISTS { MATCH (n)-->(m) WHERE m.title IS NOT NULL }",
+        "MATCH (n) RETURN EXISTS { (n)-->(m) WHERE m.title IS NOT NULL }",
+        "MATCH (n) RETURN EXISTS { MATCH (x:Movie) MATCH (n)-[:R]->(y) WHERE y <> x RETURN x.title AS t, y.title AS u }",
+        // A `COUNT { … }` in an item is a subquery of the row, not an aggregate of the query's rows.
+        "MATCH (n) RETURN EXISTS { MATCH (n)-->(x) RETURN COUNT { (x)-->() } AS c }",
+    )
+
+    @Test
+    fun `an EXISTS whose query reads only the row is its rows counted on Oracle`() {
+        for (cypher in ofTheRow) {
+            val sql = OracleCypherCompiler("g").compile(cypher).sql
+            assertTrue(sql.contains(") ex) > 0)") && Regex("""(?<!JSON_)EXISTS \(\n""").findAll(sql).count() == 0, sql)
+        }
+    }
+
+    @Test
+    fun `an EXISTS whose query reads a table is written as it was on Oracle`() {
+        for (cypher in ofATable) {
+            val sql = OracleCypherCompiler("g").compile(cypher).sql
+            assertTrue(!sql.contains(") ex) > 0)") && Regex("""(?<!JSON_)EXISTS \(""").containsMatchIn(sql), sql)
+        }
+    }
+
+    /**
+     * Statements whose `EXISTS { … }` reads a table in its SQL, but whose Cypher is not taken to read one for certain: any query
+     * but `MATCH`es then a plain `RETURN` or none, or one whose only reads may read none, a path that may take no step, a
+     * quantified one or a shortest path. Each is counted, which costs only speed. One that aggregates after its read keeps a row
+     * whatever the table holds, as an optional read does, so it must be counted.
+     */
+    private val mayReadNone = listOf(
+        "MATCH (n) RETURN EXISTS { MATCH (n)-[*0..]->(m) }",
+        "MATCH (n) RETURN EXISTS { MATCH (n)-[:R]->*(m) }",
+        "MATCH (n) RETURN EXISTS { MATCH (n) ((a)-[:R]->(b)){0,2} (m) }",
+        "MATCH (n) RETURN EXISTS { MATCH p = shortestPath((n)-[*]->(m)) }",
+        "MATCH (n) RETURN EXISTS { MATCH p = allShortestPaths((n)-[*]->(m)) }",
+        // A node bound by an earlier pattern of the same `MATCH`, one that may take no step, is not matched anew.
+        "MATCH (n) RETURN EXISTS { MATCH (n)-[*0..1]->(m), (m) }",
+        "MATCH (n) RETURN EXISTS { (n)-[*0..1]->(m), (m) }",
+        "MATCH (n) RETURN EXISTS { CALL (n) { WITH n WHERE n:Movie RETURN n AS x } MATCH (y) RETURN y }",
+        "MATCH (n) RETURN EXISTS { CALL db.labels() YIELD label MATCH (x) RETURN x }",
+        "MATCH (n) RETURN EXISTS { MATCH (x:Movie) RETURN count(x) AS c }",
+        "MATCH (n) RETURN EXISTS { MATCH (x:Movie) WITH collect(x) AS xs RETURN xs }",
+        "MATCH (n) RETURN EXISTS { MATCH (n)-->(x) WITH count(x) AS c WHERE c >= 0 RETURN c }",
+        "MATCH (n) RETURN EXISTS { CALL { MATCH (x:Movie) RETURN count(x) AS c } RETURN c }",
+        "MATCH (n) RETURN EXISTS { CALL { MATCH (x:Movie) RETURN x } RETURN count(x) AS c }",
+        "MATCH (n) RETURN EXISTS { CALL (n) { MATCH (n)-->(x) RETURN x } WITH x, count(*) AS c MATCH (x:Movie) RETURN x }",
+        "MATCH (n) RETURN EXISTS { MATCH (n:Movie) CALL (n) { MATCH (n)-->(x) RETURN x } RETURN x }",
+        "MATCH (n) RETURN EXISTS { WITH n.title AS t MATCH (x {title: t}) RETURN x }",
+        "MATCH (n) RETURN EXISTS { WITH n AS x MATCH (x)-->() RETURN x }",
+        "MATCH (n) RETURN EXISTS { MATCH (x:Movie) WITH count(x) AS c MATCH (y:Person) RETURN y }",
+        "MATCH (n) RETURN EXISTS { CALL (n) { MATCH (n)-->(x) RETURN x } WITH x, count(*) AS c MATCH (x)-->(y) RETURN y }",
+        "MATCH (n) RETURN EXISTS { MATCH (x:Movie) RETURN size(collect(x)) AS c }",
+        "MATCH (n) RETURN EXISTS { MATCH (x:Movie) RETURN CASE WHEN count(x) > 0 THEN 1 ELSE 0 END AS c }",
+        "MATCH (n) RETURN EXISTS { MATCH (n)-->(x) RETURN DISTINCT x }",
+        "MATCH (n) RETURN EXISTS { MATCH (n)-->(x) RETURN * }",
+        "MATCH (n) RETURN EXISTS { MATCH (n)-->(x) RETURN x SKIP 1 }",
+        "MATCH (n) RETURN EXISTS { MATCH (n)-->(x) RETURN x LIMIT 1 }",
+        "MATCH (n) RETURN EXISTS { MATCH (n)-->(x) UNWIND [1] AS i RETURN i }",
+        "MATCH (n) RETURN EXISTS { MATCH (n)-->(x) RETURN x UNION MATCH (n)<--(x) RETURN x }",
+    )
+
+    @Test
+    fun `an EXISTS whose Cypher may read no table is counted on Oracle though its SQL reads one`() {
+        for (cypher in mayReadNone) {
+            val sql = OracleCypherCompiler("g").compile(cypher).sql
+            val counted = Regex("""count\(\*\) FROM \(\n([\s\S]*)\n\s*\) ex\) > 0\)""").find(sql)
+            assertTrue(counted != null && OracleSql.readsTable(counted.groupValues[1]), sql)
+        }
+    }
+
+    @Test
+    fun `an EXISTS of the row alone is counted while an EXISTS within its WHERE that reads a table is written as it was`() {
+        val sql = OracleCypherCompiler("g").compile(
+            "MATCH (n) RETURN EXISTS { WITH n WHERE n:Movie AND EXISTS { (n)<-[:ACTED_IN]-(:Person {name: 'Carrie'}) } RETURN 1 AS y }"
+        ).sql
+        val counted = sql.indexOf(") ex) > 0)")
+        val inner = Regex("""(?<!JSON_)EXISTS \(SELECT /\*\+ NO_COALESCE_SQ \*/ 1 FROM g_node""").findAll(sql).toList()
+        assertTrue(Regex("""\) ex\) > 0\)""").findAll(sql).count() == 1 && inner.size == 1 && inner[0].range.first < counted, sql)
+    }
+
+    @Test
+    fun `Postgres and SQLite write the EXISTS of a query that reads only the row as an EXISTS`() {
+        for (cypher in ofTheRow) {
+            for (sql in listOf(PostgresCypherCompiler("g"), SqliteCypherCompiler("g")).map { it.compile(cypher).sql }) {
+                assertTrue(!sql.contains(") ex) > 0") && sql.contains("EXISTS ("), sql)
+            }
+        }
+    }
+
+    @Test
+    fun `a query reads a table where a source of it or of a derived table or a lateral one is a table`() {
+        for (query in listOf(
+            "SELECT 1 FROM g_node n",
+            "SELECT 1 FROM (SELECT 1) one CROSS JOIN g_edge e",
+            "SELECT 1 FROM (SELECT x FROM (SELECT 1 FROM g_node n) d) d2",
+            "SELECT 1 FROM (SELECT 1) one LEFT JOIN LATERAL (SELECT 1 FROM g_node n) o ON 1 = 1",
+            "SELECT 1 FROM (SELECT 1) one CROSS APPLY (SELECT 1 FROM g_node n) a",
+            "SELECT 1 FROM (SELECT 1) one OUTER APPLY (SELECT 1 FROM g_node n) a",
+            "SELECT 1 FROM JSON_TABLE(x, '\$[*]' COLUMNS (v PATH '\$')) j",
+            "SELECT 1 FROM DUAL UNION ALL SELECT 1 FROM g_node n",
+            "SELECT 1 FROM g_node DUAL",
+        )) assertTrue(OracleSql.readsTable(query), query)
+    }
+
+    @Test
+    fun `a query reads no table where only DUAL or a subquery within an expression or a quoted text names one`() {
+        for (query in listOf(
+            "SELECT 1 FROM DUAL WHERE JSON_EXISTS(n1.labels, '\$[*]?(@ == \"Movie\")')",
+            "SELECT 1 FROM (SELECT 1) one WHERE x = 'a FROM b' AND y = 'it''s JOIN c'",
+            "SELECT 1 WHERE EXISTS (SELECT 1 FROM g_node n) AND x IN (SELECT 1 FROM g_edge e)",
+            "SELECT (SELECT count(*) FROM g_node n) AS c FROM DUAL",
+            "SELECT 1 FROM (SELECT 1 FROM DUAL) d CROSS JOIN LATERAL (SELECT 1 FROM DUAL) l",
+            "SELECT 1 FROM (SELECT 1) one WHERE EXTRACT(MONTH FROM JSON_VALUE(n1.props, '\$.a' RETURNING TIMESTAMP)) = 1",
+            "SELECT 1 WHERE EXTRACT( TIMEZONE_HOUR  FROM x) = 1",
+        )) assertFalse(OracleSql.readsTable(query), query)
     }
 }
