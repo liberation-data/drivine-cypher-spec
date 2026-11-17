@@ -88,6 +88,46 @@ class ValueLayoutTest {
         )
     }
 
+    /**
+     * What a library may read without asking [ValueLayout.read]: Drivine for TypeScript reads a column whose JSON text holds
+     * neither `"$` nor `\u0024` as it is, and asks the module only of the others, as a call of it costs some twenty times a
+     * parse. So every tag and every escaped key the module writes holds `"$` in its text, and [ValueLayout.read] gives back
+     * unchanged every value whose text holds neither. A change that tags a value otherwise fails here.
+     */
+    @Test
+    fun everyTagAndEscapedKeyHoldsADollarAfterAQuoteAndReadChangesNoTextWithout() {
+        val texts = mapOf(
+            Temporal.DATE to "2024-01-01", Temporal.LOCAL_TIME to "10:00:00", Temporal.TIME to "10:00:00+02:00",
+            Temporal.LOCAL_DATE_TIME to "2024-01-01T10:00:00", Temporal.DATE_TIME to "2024-03-15T10:30:00.500+02:00",
+            Temporal.DURATION to "PT36H",
+        )
+        assertEquals(Temporal.entries.toSet(), texts.keys, "a text of each temporal kind")
+        for ((kind, v) in texts) {
+            val written = CypherJson.writeValueAsString(CypherJson.valueToTree(mapOf("x" to TemporalValue(kind, v))))
+            assertTrue(written.contains("\"\$"), "on $target: the tag of $kind, $written")
+        }
+        for (key in listOf("\$", "\$t", "\$\$x", "\$1")) {
+            val written = CypherJson.writeValueAsString(CypherJson.valueToTree(mapOf(key to 1)))
+            assertTrue(written.contains("\"\$"), "on $target: the key $key, $written")
+        }
+        // A text with neither reads back as it is, whatever else it holds: no tag and no escaped key can be in it.
+        val random = kotlin.random.Random(161)
+        val pieces = listOf("{", "}", "[", "]", ",", ":", "\"t\"", "\"v\"", "\"s\"", "\"date\"", "\"a\$\"", "\"\\u0041\"", "1", "-2.5", "true", "null", "\"2024-01-01\"")
+        var checked = 0
+        repeat(if (target == "jvm") 50_000 else 5_000) {
+            val text = (0 until random.nextInt(1, 14)).joinToString("") { pieces.random(random) }
+            if (text.contains("\"\$") || text.contains("\\u0024")) return@repeat
+            val tree = runCatching { CypherJson.readTree(text) }.getOrNull() ?: return@repeat
+            assertEquals(CypherJson.writeValueAsString(tree), CypherJson.writeValueAsString(ValueLayout.read(tree)), "on $target: $text")
+            assertEquals(CypherJson.writeValueAsString(tree), CypherJson.writeValueAsString(ValueLayout.read(tree, typed = true)), "on $target, typed: $text")
+            checked++
+        }
+        assertTrue(checked > if (target == "jvm") 500 else 50, "on $target: $checked texts read")
+        // An object shaped as a tag with no dollar, `{"t": "date", "v": …}`, is not one.
+        val shaped = CypherJson.readTree("""{"t":"date","v":"2024-01-01","s":"10000020240101"}""")
+        assertEquals(shaped, ValueLayout.read(shaped))
+    }
+
     /** [node] with each whole number a long, each other number a double, for the YAML's and the JSON's to compare. */
     private fun plain(node: JsonNode): Any? = when {
         node is ObjectNode -> node.properties().associate { (k, v) -> k to plain(v) }
