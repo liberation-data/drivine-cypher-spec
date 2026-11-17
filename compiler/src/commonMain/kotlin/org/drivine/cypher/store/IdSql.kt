@@ -57,7 +57,22 @@ object IdSql {
         }
     }
 
-    /** Refuses the stamp as an id: [IndexKey.column] is made over a property, and Postgres's stamp column is no `jsonb`. */
+    /**
+     * Whether the node [alias] carries every one of [labels], as a lookup by its id tests them beside [hasId]: on Postgres and
+     * SQLite each label's test as its partial index is made with ([PostgresSql.hasLabels], [SqliteSql.hasLabels]), so the
+     * labelled index answers the lookup; on Oracle each by its text ([OracleSql.carriesLabel]), as the index over the id is
+     * the store's own and not a label's, and Oracle, given a label test its index over labels answers, reads every node of the
+     * label. Each label is given as the node holds it and written into the SQL escaped, a quote in it as the store's JSON and
+     * literal write one. No labels at all is a true condition, `1 = 1`, which each store accepts.
+     */
+    fun hasLabels(store: Store, alias: String, labels: List<String>): String = when {
+        labels.isEmpty() -> "1 = 1"
+        store == Store.POSTGRES -> PostgresSql.hasLabels(alias, labels)
+        store == Store.ORACLE -> OracleSql.hasLabels(alias, labels)
+        else -> SqliteSql.hasLabels(alias, labels)
+    }
+
+    /** Refuses the stamp as an id:[IndexKey.column] is made over a property, and Postgres's stamp column is no `jsonb`. */
     private fun requireId(key: String) =
         require(key != Stamps.PROPERTY) { "An id is a property of the node, not its stamp (${Stamps.PROPERTY})." }
 

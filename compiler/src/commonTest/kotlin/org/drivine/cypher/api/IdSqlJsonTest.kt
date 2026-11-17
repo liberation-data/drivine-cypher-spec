@@ -5,6 +5,9 @@ import org.drivine.cypher.json.JsonNode
 import org.drivine.cypher.number.target
 import org.drivine.cypher.store.IdSql
 import org.drivine.cypher.store.IndexKey
+import org.drivine.cypher.store.OracleSql
+import org.drivine.cypher.store.PostgresSql
+import org.drivine.cypher.store.SqliteSql
 import org.drivine.cypher.store.Stamps
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -75,6 +78,41 @@ class IdSqlJsonTest {
         )
     }
 
+    private fun labels(store: String, labels: String): String? =
+        sql(store, "\"helper\": \"hasLabels\", \"alias\": \"n\", \"labels\": $labels")
+
+    @Test
+    fun eachLabelIsTestedAsTheLabelsIndexIsMadeOnPostgresAndSqliteAndByItsTextOnOracle() {
+        assertEquals("""n.labels @> '["A"]'""", labels("postgres", "[\"A\"]"), "on $target")
+        assertEquals("""n.labels @> '["A"]' AND n.labels @> '["B"]'""", labels("postgres", "[\"A\", \"B\"]"), "on $target")
+        assertEquals("""instr(n.labels, '"A"') > 0""", labels("sqlite", "[\"A\"]"), "on $target")
+        assertEquals("""instr(n.labels, '"A"') > 0 AND instr(n.labels, '"B"') > 0""", labels("sqlite", "[\"A\", \"B\"]"), "on $target")
+        val oracle = { label: String -> """INSTR(',' || LTRIM(RTRIM(JSON_SERIALIZE(n.labels), ']'), '[') || ',"', ',"$label","') > 0""" }
+        assertEquals(oracle("A"), labels("oracle", "[\"A\"]"), "on $target")
+        assertEquals("${oracle("A")} AND ${oracle("B")}", labels("oracle", "[\"A\", \"B\"]"), "on $target")
+        for ((name, store) in stores) {
+            assertEquals(IdSql.hasLabels(store, "n", listOf("A", "B")), labels(name, "[\"A\", \"B\"]"), "on $target, $name")
+        }
+        // The partial index's own predicate, as the DDL writes it over the bare column.
+        assertEquals(PostgresSql.hasLabel("", "A"), IdSql.hasLabels(Store.POSTGRES, "", listOf("A")), "on $target")
+        assertEquals(SqliteSql.hasLabel("", "A"), IdSql.hasLabels(Store.SQLITE, "", listOf("A")), "on $target")
+        assertEquals(OracleSql.carriesLabel("n", "A"), IdSql.hasLabels(Store.ORACLE, "n", listOf("A")), "on $target")
+    }
+
+    @Test
+    fun noLabelsIsATrueCondition() {
+        for ((name, _) in stores) assertEquals("1 = 1", labels(name, "[]"), "on $target, $name")
+    }
+
+    @Test
+    fun aLabelIsGivenAsTheNodeHoldsItAndWrittenEscaped() {
+        // O'Br"en: the single quote doubled for the literal, the double quote escaped for the label's JSON.
+        val label = "[\"O'Br\\\"en\"]"
+        assertEquals("""n.labels @> '["O''Br\"en"]'""", labels("postgres", label), "on $target")
+        assertEquals("""instr(n.labels, '"O''Br\"en"') > 0""", labels("sqlite", label), "on $target")
+        assertEquals("""INSTR(',' || LTRIM(RTRIM(JSON_SERIALIZE(n.labels), ']'), '[') || ',"', ',"O''Br\"en","') > 0""", labels("oracle", label), "on $target")
+    }
+
     @Test
     fun aRequestIdSqlCantAnswerIsAnError() {
         for ((request, message) in listOf(
@@ -86,6 +124,11 @@ class IdSqlJsonTest {
             "{\"idSql\": {\"store\": \"sqlite\", \"helper\": \"hasIdIn\", \"alias\": \"n\", \"key\": \"id\", \"parameter\": \":ids\", \"nodes\": \"t\", \"labels\": \"P\"}}" to "idSql's hasIdIn gives labels",
             "{\"idSql\": {\"store\": \"sqlite\", \"helper\": \"hasIdIn\", \"alias\": \"n\", \"key\": \"id\", \"parameter\": \":ids\", \"nodes\": \"t\", \"labels\": [1]}}" to "idSql's hasIdIn gives labels",
             "{\"idSql\": {\"store\": \"sqlite\", \"helper\": \"hasIdIn\", \"alias\": \"n\", \"key\": \"id\", \"parameter\": \":ids\", \"nodes\": 1}}" to "idSql's hasIdIn gives nodes as text",
+            "{\"idSql\": {\"store\": \"postgres\", \"helper\": \"hasLabels\", \"alias\": \"n\"}}" to "idSql's hasLabels gives labels as a list of texts",
+            "{\"idSql\": {\"store\": \"sqlite\", \"helper\": \"hasLabels\", \"alias\": \"n\", \"labels\": \"A\"}}" to "idSql's hasLabels gives labels as a list of texts",
+            "{\"idSql\": {\"store\": \"oracle\", \"helper\": \"hasLabels\", \"alias\": \"n\", \"labels\": [\"A\", 1]}}" to "idSql's hasLabels gives labels as a list of texts",
+            "{\"idSql\": {\"store\": \"oracle\", \"helper\": \"hasLabels\", \"alias\": \"n\", \"labels\": [null]}}" to "idSql's hasLabels gives labels as a list of texts",
+            "{\"idSql\": {\"store\": \"oracle\", \"helper\": \"hasLabels\", \"labels\": [\"A\"]}}" to "idSql's hasLabels gives alias as text",
             "{\"idSql\": {\"store\": \"oracle\", \"helper\": \"hasId\", \"alias\": \"n\", \"key\": \"id\", \"json\": \"x\"}, \"cypher\": \"RETURN 1\"}" to "A request gives one of",
         )) {
             val error = answer(request)["error"]?.textValue()
