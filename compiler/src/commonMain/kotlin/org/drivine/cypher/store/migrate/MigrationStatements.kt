@@ -6,7 +6,12 @@ import org.drivine.cypher.store.ddl.OracleDdl
 import org.drivine.cypher.store.ddl.PostgresDdl
 import org.drivine.cypher.store.ddl.SqlStoreDdl
 import org.drivine.cypher.store.ddl.SqliteDdl
+import org.drivine.cypher.store.OracleSql
+import org.drivine.cypher.store.PostgresSql
+import org.drivine.cypher.store.SqliteSql
+import org.drivine.cypher.store.ValueLayout
 import org.drivine.cypher.store.marker.StoreLayout
+import org.drivine.cypher.store.marker.StoreStamp
 
 /**
  * The statements a migration of a graph's layout runs on its SQL store ([LayoutMigrator]), each the module's own, as
@@ -53,8 +58,18 @@ sealed class MigrationStatements(val ddl: SqlStoreDdl) {
      */
     abstract val writeCheckpoint: String
 
-    /** Drops the checkpoint table, safe to run again. */
-    val dropCheckpoint: String get() = "DROP TABLE IF EXISTS ${ddl.migrate}"
+    /** Drops the checkpoint table, safe to run again: the migration's last statement. */
+    open val dropCheckpoint: String get() = "DROP TABLE IF EXISTS ${ddl.migrate}"
+
+    /**
+     * Reads each uniqueness constraint the catalog records, `{"label", "properties"}`, the properties their JSON text, as
+     * an earlier layout's records hold them: read before the earlier layout's objects and their records are dropped, and kept
+     * in the checkpoint, for a migration to check for keys that collide in this layout once its rows are written.
+     */
+    abstract val uniques: String
+
+    /** Gives every stamp of the graph this layout, whatever it holds besides: the migration's finish, once every value is rewritten. */
+    abstract val stampLayout: String
 
     /**
      * Takes the row lock a schema change takes on the lock table ([SqlStoreDdl.lock]), from a connection of the library's
@@ -114,6 +129,12 @@ sealed class MigrationStatements(val ddl: SqlStoreDdl) {
                 "ON CONFLICT (name) DO UPDATE SET state = EXCLUDED.state"
 
         override val lock = "SELECT name FROM ${ddl.lock} WHERE name = ${literal(ddl.lockRow)} FOR UPDATE"
+
+        override val uniques =
+            "SELECT jsonb_build_object('label', label, 'properties', properties) FROM ${ddl.catalog} WHERE kind = 'UNIQUENESS_CONSTRAINT' ORDER BY label, properties"
+
+        override val stampLayout =
+            "UPDATE ${ddl.nodes} n SET props = n.props || jsonb_build_object('layout', ${ValueLayout.LAYOUT}) WHERE ${PostgresSql.hasLabel("n", StoreStamp.LABEL)}"
     }
 
     /** Oracle's: a row's props read as extended JSON, so a binary double is told from a `NUMBER`, and written back so. */
@@ -146,6 +167,15 @@ sealed class MigrationStatements(val ddl: SqlStoreDdl) {
                 "WHEN MATCHED THEN UPDATE SET c.state = s.state WHEN NOT MATCHED THEN INSERT (name, state) VALUES (s.name, s.state)"
 
         override val lock = "SELECT name FROM ${ddl.lock} WHERE name = ${literal(ddl.lockRow)} FOR UPDATE WAIT 10"
+
+        // PURGE, as the layout's own drops drop a table: dropped to the recycle bin, it would keep its name in use.
+        override val dropCheckpoint = "DROP TABLE IF EXISTS ${ddl.migrate} PURGE"
+
+        override val uniques =
+            "SELECT JSON_OBJECT('label' VALUE label, 'properties' VALUE properties RETURNING JSON) FROM ${ddl.catalog} WHERE kind = 'UNIQUENESS_CONSTRAINT' ORDER BY label, properties"
+
+        override val stampLayout =
+            "UPDATE ${ddl.nodes} n SET n.props = JSON_TRANSFORM(n.props, SET '\$.layout' = ${ValueLayout.LAYOUT}) WHERE ${OracleSql.hasLabel("n", StoreStamp.LABEL)}"
     }
 
     /** SQLite's: each row given as JSON text, read as JSON ([SqliteDdl.JSON_ROWS]). */
@@ -175,5 +205,11 @@ sealed class MigrationStatements(val ddl: SqlStoreDdl) {
             "INSERT INTO ${ddl.migrate} (name, state) VALUES (\$name, \$state)\nON CONFLICT (name) DO UPDATE SET state = excluded.state"
 
         override val lock: String? = null
+
+        override val uniques =
+            "${SqliteDdl.JSON_ROWS}\nSELECT json_object('label', label, 'properties', properties) FROM ${ddl.catalog} WHERE kind = 'UNIQUENESS_CONSTRAINT' ORDER BY label, properties"
+
+        override val stampLayout =
+            "UPDATE ${ddl.nodes} SET props = json_set(props, '\$.layout', ${ValueLayout.LAYOUT}) WHERE nid IN (SELECT n.nid FROM ${ddl.nodes} n WHERE ${SqliteSql.hasLabel("n", StoreStamp.LABEL)})"
     }
 }

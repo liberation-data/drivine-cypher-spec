@@ -27,6 +27,8 @@ statements:
       ON CONFLICT (name) DO UPDATE SET state = EXCLUDED.state
     dropCheckpoint: "DROP TABLE IF EXISTS drivine_migrate2"
     lock: "SELECT name FROM drivine_lock2 WHERE name = 'schema' FOR UPDATE"
+    uniques: "SELECT jsonb_build_object('label', label, 'properties', properties) FROM drivine_schema WHERE kind = 'UNIQUENESS_CONSTRAINT' ORDER BY label, properties"
+    stampLayout: "UPDATE drivine_node n SET props = n.props || jsonb_build_object('layout', 2) WHERE n.labels @> '[\"DrivineStore\"]'"
   oracle:
     readBatch:
       nodes: |-
@@ -45,8 +47,10 @@ statements:
     writeCheckpoint: |-
       MERGE INTO drivine_migrate2 c USING (SELECT $name AS name, TO_CLOB($state) AS state FROM dual) s ON (c.name = s.name)
       WHEN MATCHED THEN UPDATE SET c.state = s.state WHEN NOT MATCHED THEN INSERT (name, state) VALUES (s.name, s.state)
-    dropCheckpoint: "DROP TABLE IF EXISTS drivine_migrate2"
+    dropCheckpoint: "DROP TABLE IF EXISTS drivine_migrate2 PURGE"
     lock: "SELECT name FROM drivine_lock2 WHERE name = 'schema' FOR UPDATE WAIT 10"
+    uniques: "SELECT JSON_OBJECT('label' VALUE label, 'properties' VALUE properties RETURNING JSON) FROM drivine_schema WHERE kind = 'UNIQUENESS_CONSTRAINT' ORDER BY label, properties"
+    stampLayout: "UPDATE drivine_node n SET n.props = JSON_TRANSFORM(n.props, SET '$.layout' = 2) WHERE JSON_EXISTS(n.labels, '$[*]?(@ == \"DrivineStore\")')"
   sqlite:
     readBatch:
       nodes: |-
@@ -75,6 +79,17 @@ statements:
       ON CONFLICT (name) DO UPDATE SET state = excluded.state
     dropCheckpoint: "DROP TABLE IF EXISTS drivine_migrate2"
     lock: null
+    uniques: |-
+      /* drivine:json */
+      SELECT json_object('label', label, 'properties', properties) FROM drivine_schema WHERE kind = 'UNIQUENESS_CONSTRAINT' ORDER BY label, properties
+    stampLayout: "UPDATE drivine_node SET props = json_set(props, '$.layout', 2) WHERE nid IN (SELECT n.nid FROM drivine_node n WHERE instr(n.labels, '\"DrivineStore\"') > 0)"
+finished:
+  # A graph once its migration is finished: stamped layout 2, layout 1's indexes dropped with their records, the checkpoint
+  # table dropped last. The verdict judges it an ordinary graph of layout 2, current, whose indexes an application's schema
+  # plan makes at its next start. An unstamped graph is stamped by assignIfAbsent, of layout 2, and judged so too.
+  - {store: "postgres", stamps: [{layout: 2}], foreignNodes: true, objects: [{name: "drivine_lock2", type: "TABLE"}], verdict: "current"}
+  - {store: "oracle", stamps: [{layout: 2}], foreignNodes: true, objects: [{name: "drivine_lock2", type: "TABLE"}, {name: "drivine_count2", type: "TABLE"}], verdict: "current"}
+  - {store: "sqlite", stamps: [{layout: 2}], foreignNodes: true, objects: [{name: "drivine_lock2", type: "TABLE"}], verdict: "current"}
 declarationRefusals:
   - name: "One label's property declared two kinds"
     declarations: [{label: "Person", property: "born", kind: "date"}, {label: "Person", property: "born", kind: "datetime"}]
