@@ -1968,3 +1968,70 @@ cases:
         cypher: "UNWIND $l AS m RETURN duration(m)"
         parameters: {l: [{days: 1}]}
         error: true
+
+  - name: "A temporal value of a list, a number or a truth value"
+    description: "Neo4j fails a temporal function of a list, a number or a truth value as the statement runs, as no text and no map of its fields. The SQL stores gave null (drivine-cypher-spec#331); they refuse one the compiler knows by name (refusals.yaml, \"A temporal value of a list, a number or a truth value\"), and any other fails it by name as it runs, or gives null where it is null. Captured from Neo4j 2026.10.2."
+    steps:
+      - only: [neo4j]
+        cypher: "WITH collect([1]) AS l RETURN toString(localtime(l[0]))"
+        error: true
+      - only: [neo4j]
+        cypher: "RETURN toString(localtime([1]))"
+        error: true
+      - only: [neo4j]
+        cypher: "RETURN toString(date([2024, 3, 15]))"
+        error: true
+      - only: [neo4j]
+        cypher: "RETURN toString(date($l))"
+        parameters: {l: [2024]}
+        error: true
+      - only: [neo4j]
+        cypher: "UNWIND [[1], [2]] AS l RETURN toString(localtime(l))"
+        error: true
+      - only: [neo4j]
+        cypher: "WITH [[1]] AS ls RETURN toString(duration(ls[0]))"
+        error: true
+      - only: [neo4j]
+        cypher: "RETURN toString(datetime([]))"
+        error: true
+      - only: [neo4j]
+        cypher: "WITH collect(true) AS l RETURN toString(date(l[0]))"
+        error: true
+      - only: [neo4j]
+        cypher: "WITH collect(5) AS l RETURN toString(date(l[0]))"
+        error: true
+      - only: [neo4j]
+        cypher: "RETURN toString(date(5))"
+        error: true
+      - only: [neo4j]
+        cypher: "RETURN toString(date(true))"
+        error: true
+      - note: "One only read as the statement runs, an item of a list, fails the statement on the SQL stores, where it gave null."
+        only: [sql]
+        cypher: "WITH collect([1]) AS l RETURN localtime(l[0])"
+        error: true
+      - only: [sql]
+        cypher: "WITH [[1]] AS ls RETURN duration(ls[0])"
+        error: true
+      - only: [sql]
+        cypher: "UNWIND [[1], [2]] AS l RETURN localtime(l)"
+        error: true
+      - only: [sql]
+        cypher: "WITH collect(true) AS l RETURN date(l[0])"
+        error: true
+      - only: [sql]
+        cypher: "WITH collect(5) AS l RETURN date(l[0])"
+        error: true
+      - only: [sql]
+        cypher: "UNWIND $l AS m RETURN datetime(m)"
+        parameters: {l: [2.5]}
+        error: true
+      - note: "A function's null is null, as of a function that gives a number where it gives one."
+        only: [sql]
+        cypher: "RETURN date(toFloat($x))"
+        parameters: {x: null}
+        rows: [null]
+      - note: "So is a variable's of a kind the statement knows, which may be null, as Neo4j's date(null) is."
+        only: [sql]
+        cypher: "WITH CASE WHEN false THEN 1 END AS n RETURN date(n)"
+        rows: [null]

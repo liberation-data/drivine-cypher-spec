@@ -7730,6 +7730,44 @@ cases:
         except: [memgraph, falkordb]
         rows: [["NaN", "Infinity", "-Infinity"]]
 
+  - name: "A truth value put together with a text or a list"
+    description: "+ puts a truth value together with a text, as its text, and with a list, as an item, as Neo4j 2026.10.2 gives each; with null it is null. The SQL stores gave null for a truth value beside a text (liberation-data/drivine-cypher-spec#341). Beside a number, a truth value or a map Neo4j refuses it as it plans the statement where it knows both kinds, as the SQL stores now do (refusals.yaml's \"Arithmetic of a value that isn't a number\"), and fails as it runs otherwise, where the SQL stores still give null. The graph engines other than Neo4j are not pinned here."
+    steps:
+      - only: [neo4j, sql]
+        cypher: "RETURN 'a' + true"
+        rows: ["atrue"]
+      - only: [neo4j, sql]
+        cypher: "RETURN true + 'a'"
+        rows: ["truea"]
+      - only: [neo4j, sql]
+        cypher: "RETURN [1] + true"
+        rows: [[1, true]]
+      - only: [neo4j, sql]
+        cypher: "RETURN true + [1]"
+        rows: [[true, 1]]
+      - only: [neo4j, sql]
+        cypher: "RETURN true + null"
+        rows: [null]
+      - note: "A truth value given as a parameter, put together with a text either side."
+        only: [neo4j, sql]
+        cypher: "RETURN ['a' + $b, $b + 'a', $b + [1]]"
+        parameters: {b: false}
+        rows: [["afalse", "falsea", [false, 1]]]
+      - note: "Read as the statement runs, an item of a list given, put together with a text."
+        only: [neo4j, sql]
+        cypher: "UNWIND $l AS b RETURN 'a' + b"
+        parameters: {l: [true]}
+        rows: ["atrue"]
+      - note: "Beside a number, Neo4j fails as the statement runs; the SQL stores give null (liberation-data/drivine-cypher-spec#341: a test of each side's kind in every + made a sum of sums too long)."
+        only: [neo4j]
+        cypher: "UNWIND $l AS b RETURN b + 1"
+        parameters: {l: [true]}
+        error: true
+      - only: [sql]
+        cypher: "UNWIND $l AS b RETURN b + 1"
+        parameters: {l: [true]}
+        rows: [null]
+
   - name: "Sorted by a list"
     description: "A sort by a list compares two lists item by item, the shorter first where one begins the other, items of different kinds as Cypher orders kinds and null last, as by what collect gathered."
     steps:

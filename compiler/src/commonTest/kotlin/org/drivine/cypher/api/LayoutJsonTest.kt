@@ -55,6 +55,8 @@ class LayoutJsonTest {
                 else -> {
                     assertEquals("refuse", got["verdict"]?.textValue(), "on $target, $name: $got")
                     assertEquals(expected["refuse"]!!.textValue(), got["message"]?.textValue(), "on $target, $name")
+                    assertEquals(expected["from"]?.longValue(), got["from"]?.longValue(), "on $target, $name: the layout a migration moves it from")
+                    assertEquals(expected["inProgress"]?.booleanValue() ?: false, got["inProgress"]?.booleanValue() ?: false, "on $target, $name: part way through a migration")
                 }
             }
             checked++
@@ -122,7 +124,17 @@ class LayoutJsonTest {
             "{\"layout\": {\"engine\": \"POSTGRES\", \"graph\": \"g\", \"stamps\": [{\"layout\": 4294967298}], \"foreignNodes\": false}}" to "A layout request's stamp gives its layout as a whole number: 4294967298.",
             "{\"layout\": {\"engine\": \"POSTGRES\", \"graph\": \"g\", \"stamps\": [], \"foreignNodes\": false, \"objects\": {}}}" to "A layout request gives the objects as a list.",
             "{\"layout\": {\"engine\": \"POSTGRES\", \"graph\": \"g\", \"stamps\": [], \"foreignNodes\": false, \"objects\": [\"x\"]}}" to "A layout request's object is a map.",
-            "{\"read\": \"1\", \"cypher\": \"RETURN 1\"}" to "A request gives one of cypher, search, searchIndex, vector, settings, fragment, read, temporalKey, layout, expand, write, storeStatements, schemaPlan and idSql.",
+            "{\"rewrite\": {}, \"store\": \"sqlite\", \"labels\": []}" to "A rewrite request gives the row as its JSON text.",
+            "{\"rewrite\": \"{}\", \"labels\": []}" to "A rewrite request gives the store: postgres, oracle or sqlite.",
+            "{\"rewrite\": \"{}\", \"store\": \"neo4j\", \"labels\": []}" to "A rewrite request gives the store as postgres, oracle or sqlite, not neo4j.",
+            "{\"rewrite\": \"{}\", \"store\": \"sqlite\"}" to "A rewrite request gives the labels as a list.",
+            "{\"rewrite\": \"{}\", \"store\": \"sqlite\", \"labels\": [1]}" to "A rewrite request's label is a text.",
+            "{\"rewrite\": \"{}\", \"store\": \"sqlite\", \"labels\": [], \"declarations\": {}}" to "A rewrite request gives the declarations as a list.",
+            "{\"rewrite\": \"{}\", \"store\": \"sqlite\", \"labels\": [], \"declarations\": [{\"label\": \"A\", \"kind\": \"date\"}]}" to "A rewrite request's declaration gives its property as a text.",
+            "{\"rewrite\": \"{}\", \"store\": \"sqlite\", \"labels\": [], \"declarations\": [{\"label\": \"A\", \"property\": \"p\", \"kind\": \"week\"}]}" to "No kind week to declare: date, localtime, time, localdatetime, datetime, duration, float, bytes.",
+            "{\"rewrite\": \"{}\", \"store\": \"sqlite\", \"labels\": [], \"declarations\": [{\"label\": \"A\", \"property\": \"p\", \"kind\": \"date\"}, {\"label\": \"A\", \"property\": \"p\", \"kind\": \"float\"}]}" to "The property p of A is declared date and float: declare one kind.",
+            "{\"rewrite\": \"[1]\", \"store\": \"sqlite\", \"labels\": []}" to "A row's properties are a JSON object, not [1].",
+            "{\"read\": \"1\", \"cypher\": \"RETURN 1\"}" to "A request gives one of cypher, search, searchIndex, vector, settings, fragment, read, temporalKey, layout, expand, write, rewrite, storeStatements, schemaPlan, idSql and migrate.",
         )) {
             assertEquals(message, answer(request)["error"]?.textValue(), request)
         }
@@ -250,6 +262,18 @@ class LayoutJsonTest {
             }
             val error = answer["error"]?.textValue()
             assertTrue(error != null && error.startsWith(message), "on $target, $request: $error")
+        }
+    }
+
+    @Test
+    fun aRewriteRequestOfNoDeclarationsDeclaresNothing() {
+        // Declarations left out, or null, are none: a property is rewritten only as needs no declaration.
+        for (declarations in listOf("", ", \"declarations\": null")) {
+            val request = "{\"rewrite\": ${json("{\"born\":\"2024-03-15\",\"\$t\":1}")}, \"store\": \"sqlite\", \"labels\": [\"Person\"]$declarations}"
+            assertEquals(
+                "{\"value\":{\"born\":\"2024-03-15\",\"\$\$t\":1},\"changed\":true,\"changes\":[{\"property\":\"\$t\",\"change\":\"escapedKey\"}],\"invalid\":[]}",
+                CompileJson.compile(request), "on $target, $request",
+            )
         }
     }
 

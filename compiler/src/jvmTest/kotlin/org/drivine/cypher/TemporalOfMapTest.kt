@@ -8,12 +8,14 @@ import org.drivine.cypher.sql.Temporal
 import org.junit.jupiter.api.Test
 import kotlin.test.assertContains
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 
 /**
  * drivine-cypher-spec#328: a temporal value made from a map the compiler doesn't see written, which Neo4j makes as the
  * statement runs, gave null. A map a parameter gives or an expression is known to make is refused (refusals.yaml); one only
  * read as the statement runs, as an item of a list, fails it by name. This runs the latter on SQLite, and checks the SQL each
- * SQL store is given.
+ * SQL store is given. drivine-cypher-spec#331: so is a list, a number or a truth value, which Neo4j fails, refused or
+ * failed by name as the statement compiles or runs, where it gave null too.
  */
 class TemporalOfMapTest {
 
@@ -42,7 +44,23 @@ class TemporalOfMapTest {
         assertContains(sqlite("WITH collect(localtime('12:30')) AS l RETURN localtime(l[0]) AS r"), "12:30")
         assertContains(sqlite("WITH collect(duration('P1D')) AS l RETURN duration(l[0]) AS r"), "P1D")
         assertEquals("null", sqlite("WITH collect(null) + [null] AS l RETURN localtime(l[0]) AS r"))
-        assertEquals("null", sqlite("WITH collect(1) AS l RETURN localtime(l[0]) AS r"))
+        assertEquals("null", sqlite("UNWIND \$l AS m RETURN date(m) AS r", mapOf("l" to listOf(null))))
+        assertEquals("null", sqlite("RETURN date(toFloat(\$x)) AS r", mapOf("x" to null)))
+        assertEquals("null", sqlite("RETURN date(CASE WHEN 1 = 0 THEN 5 END) AS r"))
+    }
+
+    @Test
+    fun `a value of a known kind that is null as the statement runs gives null as Neo4j gives it`() {
+        assertEquals("null", sqlite("WITH toFloat(\$x) AS f RETURN date(f) AS r", mapOf("x" to null)))
+        assertEquals("null", sqlite("WITH CASE WHEN false THEN 1 END AS n RETURN date(n) AS r"))
+        assertEquals("null", sqlite("WITH CASE WHEN false THEN [1] END AS l RETURN localtime(l) AS r"))
+        assertEquals("null", sqlite("RETURN date(toFloat(\$x) + 1) AS r", mapOf("x" to null)))
+        assertEquals("null", sqlite("RETURN date(-toFloat(\$x)) AS r", mapOf("x" to null)))
+        assertEquals("null", sqlite("RETURN date(reduce(a = null, x IN [] | 1)) AS r"))
+        assertEquals("null", sqlite("RETURN date(\$x) AS r", mapOf("x" to null)))
+        assertContains(sqlite("RETURN date('2024-03-15') AS r"), "2024-03-15")
+        assertEquals("fails: '5' is no date.", sqlite("RETURN date('5') AS r"))
+        assertContains(sqlite("WITH date('2024-03-15') AS d RETURN localdatetime(d) AS r"), "2024-03-15T00:00")
     }
 
     @Test
@@ -65,6 +83,50 @@ class TemporalOfMapTest {
     fun `Postgres and Oracle fail by name where the item is a map`() {
         listOf(PostgresCypherCompiler("g"), OracleCypherCompiler("g")).forEach { compiler ->
             assertContains(compiler.compile("WITH collect({hour: 1}) AS l RETURN localtime(l[0]) AS r").sql, "A temporal value of a map read as the statement runs")
+        }
+    }
+
+    @Test
+    fun `a list a number or a truth value read as the statement runs fails it by name and gives no null`() {
+        val prefix = "A temporal value is made of a text or a map of its fields, as in Neo4j:"
+        assertContains(sqlite("WITH collect([1]) AS l RETURN localtime(l[0]) AS r"), "$prefix localtime() of a list")
+        assertContains(sqlite("WITH [[1]] AS ls RETURN duration(ls[0]) AS r"), "$prefix duration() of a list")
+        assertContains(sqlite("UNWIND [[1], 2, true] AS l RETURN localtime(l) AS r"), "$prefix localtime() of a list")
+        assertContains(sqlite("UNWIND [[1], [2]] AS l RETURN localtime(l) AS r"), "$prefix localtime() of a list")
+        assertContains(sqlite("WITH 5 AS n RETURN date(n) AS r"), "$prefix date() of a number")
+        assertContains(sqlite("RETURN date(toFloat(2.5)) AS r"), "$prefix date() of a number")
+        assertContains(sqlite("RETURN date(CASE WHEN 1 = 1 THEN true END) AS r"), "$prefix date() of a truth value")
+        assertContains(sqlite("WITH collect(5) AS l RETURN date(l[0]) AS r"), "$prefix date() of a number")
+        assertContains(sqlite("WITH collect(2.5) AS l RETURN datetime(l[0]) AS r"), "$prefix datetime() of a number")
+        assertContains(sqlite("WITH collect(true) AS l RETURN date(l[0]) AS r"), "$prefix date() of a truth value")
+        assertContains(sqlite("WITH collect(false) AS l RETURN localdatetime(l[0]) AS r"), "$prefix localdatetime() of a truth value")
+        assertContains(sqlite("WITH collect(1) AS l RETURN time(l[0]) AS r"), "$prefix time() of a number")
+        assertContains(sqlite("UNWIND \$l AS m RETURN date(m) AS r", mapOf("l" to listOf(listOf(2024L)))), "$prefix date() of a list")
+        assertContains(sqlite("UNWIND \$l AS m RETURN date(m) AS r", mapOf("l" to listOf(5L))), "$prefix date() of a number")
+    }
+
+    @Test
+    fun `a list a number or a truth value the compiler knows is refused by name as Neo4j refuses it`() {
+        listOf(PostgresCypherCompiler("g"), OracleCypherCompiler("g"), SqliteCypherCompiler("g")).forEach { compiler ->
+            fun refused(cypher: String, parameters: Map<String, Any?> = emptyMap()) =
+                assertFailsWith<CompilerException>(cypher) { compiler.compile(cypher, parameters) }.message
+            assertEquals("localtime() takes a text or a map of its fields, not a list, as in Neo4j.", refused("RETURN localtime([1])"))
+            assertEquals("datetime() takes a text or a map of its fields, not a list, as in Neo4j.", refused("RETURN datetime([])"))
+            assertEquals("date() takes a text or a map of its fields, not an integer, as in Neo4j.", refused("RETURN date(5)"))
+            assertEquals("date() takes a text or a map of its fields, not a float, as in Neo4j.", refused("RETURN date(-2.5)"))
+            assertEquals("date() takes a text or a map of its fields, not a truth value, as in Neo4j.", refused("RETURN date(true)"))
+            assertEquals("date() takes a text or a map of its fields, not a list, as in Neo4j.", refused("RETURN date(\$l)", mapOf("l" to listOf(2024L))))
+            assertEquals("duration() takes a text or a map of its fields, not an integer, as in Neo4j.", refused("RETURN duration(\$p.d)", mapOf("p" to mapOf("d" to 1L))))
+            assertEquals("time() takes a text or a map of its fields, not a truth value, as in Neo4j.", refused("RETURN time(\$b)", mapOf("b" to false)))
+            assertEquals("date() takes a text or a map of its fields, not a truth value, as in Neo4j.", refused("MATCH (n) RETURN date(n.x > 1)"))
+        }
+    }
+
+    @Test
+    fun `Postgres and Oracle fail by name where the item is a list a number or a truth value`() {
+        listOf(PostgresCypherCompiler("g"), OracleCypherCompiler("g")).forEach { compiler ->
+            val sql = compiler.compile("WITH collect([1]) AS l RETURN localtime(l[0]) AS r").sql
+            listOf("localtime() of a list", "localtime() of a number", "localtime() of a truth value").forEach { assertContains(sql, it) }
         }
     }
 }
