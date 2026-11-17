@@ -5710,6 +5710,11 @@ abstract class SqlCypherCompiler(
                 return of(guard(temporals.of(numbers, timezone, kind)))
             }
             val given = arguments.single() as? Value.Json ?: throw CompilerException("${function.name}() takes a text or a map of its fields.")
+            // A map of its fields that a parameter gives or an expression makes, which Neo4j reads as the statement runs, is
+            // refused, not read as a text or a tag, which gave null (drivine-cypher-spec#328).
+            if (given.known == Value.Known.MAP || givenAsWritten(written) && given(written) is Map<*, *>) {
+                unsupported("${function.name}() of a map a parameter or an expression gives")
+            }
             return when {
                 given.temporal == Temporal.DURATION && kind == Temporal.DURATION -> given
                 given.temporal != null && (kind == Temporal.DURATION || given.temporal == Temporal.DURATION) -> Value.Json(literalJson(null))
@@ -5719,7 +5724,9 @@ abstract class SqlCypherCompiler(
                     val fromText = if (kind == Temporal.DURATION) temporals.duration(text(x)) else temporals.convert(text(x), kind)
                     val fromTag = if (kind == Temporal.DURATION) "CASE WHEN ${tagKind(x)} = '${kind.function}' THEN ${tagText(x)} END"
                         else temporals.byTag(tagKind(x), tagText(x)) { from, t -> temporals.convert(t, from, kind) }
-                    "CASE WHEN ${tagKind(x)} IS NOT NULL THEN $fromTag ELSE $fromText END"
+                    // A map read as the statement runs (`UNWIND $l AS m`, `l[0]`) fails it by name, as one the compiler sees is
+                    // refused above: it is no text and no tag, and gave null (drivine-cypher-spec#328).
+                    "CASE WHEN ${tagKind(x)} IS NOT NULL THEN $fromTag WHEN ${typeOf(x)} = 'object' THEN ${textFailing(TEMPORAL_OF_MAP, "${function.name}()")} ELSE $fromText END"
                 })
             }
         }
@@ -7905,6 +7912,7 @@ abstract class SqlCypherCompiler(
          * What `toString()` of a list or a map fails with, as it runs, where it holds what its text is not known of here: see
          * `itemText`. What it holds follows.
          */
+        const val TEMPORAL_OF_MAP = "A temporal value of a map read as the statement runs is Cypher, and is not compiled to SQL yet:"
         const val TEXT_OF_HELD = "toString() of a list or a map that holds a map read as the statement runs, a temporal value or a list nested deeper is not compiled to SQL yet: it holds"
 
         /**
