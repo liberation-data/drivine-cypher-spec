@@ -78,6 +78,9 @@ internal enum class Procedure(val qualifiedName: String, val field: String) {
         private const val ROW = "#procedure"
         private const val VALUE = "#procedureValue"
 
+        /** Whether [variable] is one a procedure's query reads its rows by ([ROW], [VALUE]): no statement names one. */
+        fun reads(variable: String): Boolean = variable == ROW || variable == VALUE
+
         /** The procedure named [name], as Neo4j names it, case and all; null for one the compiler does not take. */
         fun named(name: String): Procedure? = entries.firstOrNull { it.qualifiedName == name }
     }
