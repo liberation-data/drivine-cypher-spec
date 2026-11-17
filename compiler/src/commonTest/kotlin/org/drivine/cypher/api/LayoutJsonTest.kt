@@ -155,8 +155,27 @@ class LayoutJsonTest {
     }
 
     @Test
-    fun aValueWrittenIsAsDrivine4jWritesItThroughValueToTree() {
-        // Each request's value beside the Kotlin value drivine4j gives valueToTree: the same JSON, on every target.
+    fun eachValueASaveWritesIsAsHostYamlSays() {
+        var checked = 0
+        for (case in host["cases"]!!) for ((index, step) in case["steps"]!!.withIndex()) {
+            val write = step["write"] ?: continue
+            val where = "on $target, ${case["name"]!!.textValue()}, step ${index + 1}"
+            val request = "{\"write\": ${CypherJson.writeValueAsString(write["value"]!!)}" +
+                write["store"]?.let { ", \"store\": ${CypherJson.writeValueAsString(it)}" }.orEmpty() + "}"
+            val got = CompileJson.compile(request)
+            // The text compared as it is: an infinity's 9e999 and a whole float's fraction would not survive a read of it.
+            when (val error = step["error"]) {
+                null -> assertEquals("{\"value\":${step["result"]!!.textValue()}}", got, "$where: $request")
+                else -> assertEquals(error.textValue(), answer(request)["error"]?.textValue(), "$where: $request gave $got")
+            }
+            checked++
+        }
+        assertTrue(checked >= 30, "host.yaml has $checked write steps")
+    }
+
+    @Test
+    fun aValueWrittenIsAsTheStoreHoldsItThroughStoreValues() {
+        // Each request's value beside the Kotlin value a library gives StoreValues.text: the same text, on every target.
         val date = org.drivine.cypher.json.TemporalValue(org.drivine.cypher.sql.Temporal.DATE, "2024-01-01")
         val at = org.drivine.cypher.json.TemporalValue(org.drivine.cypher.sql.Temporal.DATE_TIME, "2024-01-01T10:00:00+02:00")
         val cases = listOf(
@@ -167,18 +186,23 @@ class LayoutJsonTest {
                 listOf(org.drivine.cypher.json.TemporalValue(org.drivine.cypher.sql.Temporal.DURATION, "PT1S"), "x", null),
             "9007199254740993" to 9007199254740993L,
             "1.5" to 1.5,
+            "[2.0, {\"\$float\": \"1e24\"}]" to listOf(2.0, 1e24),
             "\"\$t\"" to "\$t",
             "null" to null,
         )
-        for ((given, value) in cases) {
-            val got = answer("{\"write\": $given}")
-            assertEquals(json(value), got["value"]?.let(CypherJson::writeValueAsString), "on $target, $given: $got")
+        for (store in Store.entries) for ((given, value) in cases) {
+            val got = CompileJson.compile("{\"write\": $given, \"store\": \"${store.id}\"}")
+            assertEquals("{\"value\":${org.drivine.cypher.store.StoreValues.text(value, store)}}", got, "on $target, ${store.id}, $given")
         }
         // A temporal value's tag holds its sort key, and a key that begins with `$` is escaped, however deep.
-        val written = answer("{\"write\": {\"m\": {\"\$x\": {\"\$temporal\": \"DATE\", \"text\": \"2024-01-01\"}}}}")["value"]!!
+        val written = answer("{\"write\": {\"m\": {\"\$x\": {\"\$temporal\": \"DATE\", \"text\": \"2024-01-01\"}}}, \"store\": \"postgres\"}")["value"]!!
         assertEquals("date", written["m"]!!["\$\$x"]!!["\$t"]!!.textValue(), "on $target: $written")
-        assertTrue(written["m"]!!["\$\$x"]!!["s"]!!.isTextual, "on $target: $written")
-        assertTrue(answer("{\"write\": ${"[".repeat(65) + "]".repeat(65)}}")["error"] != null, "a value nested past MAX_DEPTH is refused")
+        assertTrue(written["m"]!!["s"] == null && written["m"]!!["\$\$x"]!!["s"]!!.isTextual, "on $target: $written")
+        // Postgres writes a whole float with its fraction, which jsonb keeps; Oracle every float as extended JSON's double.
+        assertEquals("{\"value\":[10000000.0,1.5]}", CompileJson.compile("{\"write\": [1e7, 1.5], \"store\": \"postgres\"}"))
+        assertEquals("{\"value\":[{\"\$numberDouble\":\"1.0E7\"},2]}", CompileJson.compile("{\"write\": [1e7, 2], \"store\": \"oracle\"}"))
+        assertEquals("{\"value\":[1.0E7,9e999]}", CompileJson.compile("{\"write\": [1e7, {\"\$float\": \"Infinity\"}], \"store\": \"sqlite\"}"))
+        assertTrue(answer("{\"write\": ${"[".repeat(65) + "]".repeat(65)}, \"store\": \"sqlite\"}")["error"] != null, "a value nested past MAX_DEPTH is refused")
     }
 
     @Test
@@ -193,23 +217,38 @@ class LayoutJsonTest {
             // Valid text of another form is written as its kind's canonical text, as drivine4j writes a java.time value.
             "{\"\$temporal\": \"DATE_TIME\", \"text\": \"2024-01-01T10:00+0200\"}" to
                 org.drivine.cypher.json.TemporalValue(org.drivine.cypher.sql.Temporal.DATE_TIME, "2024-01-01T10:00:00+02:00"),
-        )) {
-            val got = answer("{\"write\": $given}")
-            assertEquals(json(value), got["value"]?.let(CypherJson::writeValueAsString), "on $target, $given: $got")
+        )) for (store in Store.entries) {
+            val got = CompileJson.compile("{\"write\": $given, \"store\": \"${store.id}\"}")
+            assertEquals("{\"value\":${org.drivine.cypher.store.StoreValues.text(value, store)}}", got, "on $target, ${store.id}, $given")
+        }
+        // Bytes are the list of their signed values on every store, not base64 text, which a store reads back as a text.
+        for (store in Store.entries) {
+            assertEquals("{\"value\":[1,2,-1]}", CompileJson.compile("{\"write\": {\"\$bytes\": \"AQL/\"}, \"store\": \"${store.id}\"}"), "on $target, ${store.id}")
         }
     }
 
     @Test
-    fun aWriteOfNoValueOfItsKindIsAnError() {
+    fun aWriteOfNoValueOfItsKindOrForNoSqlStoreIsAnError() {
         // A temporal value whose text is no value of its kind is refused, not written as a text the layout reads as one.
         for ((request, message) in listOf(
-            "{\"write\": {\"\$temporal\": \"DATE\", \"text\": \"2024-1-1\"}}" to "No DATE is 2024-1-1",
-            "{\"write\": [{\"a\": {\"\$temporal\": \"DURATION\", \"text\": \"1 day\"}}]}" to "No DURATION is 1 day",
-            "{\"write\": {\"\$temporal\": \"DAY\", \"text\": \"2024-01-01\"}}" to "No temporal kind DAY",
-            "{\"write\": {\"\$bytes\": 1}}" to "{\"\$bytes\": …} holds base64 text.",
-            "{\"write\": {\"\$map\": 1}}" to "{\"\$map\": …} holds a map.",
+            "{\"write\": {\"\$temporal\": \"DATE\", \"text\": \"2024-1-1\"}, \"store\": \"postgres\"}" to "No DATE is 2024-1-1",
+            "{\"write\": [{\"a\": {\"\$temporal\": \"DURATION\", \"text\": \"1 day\"}}], \"store\": \"oracle\"}" to "No DURATION is 1 day",
+            "{\"write\": {\"\$temporal\": \"DAY\", \"text\": \"2024-01-01\"}, \"store\": \"sqlite\"}" to "No temporal kind DAY",
+            "{\"write\": {\"\$bytes\": 1}, \"store\": \"sqlite\"}" to "{\"\$bytes\": …} holds base64 text.",
+            "{\"write\": {\"\$map\": 1}, \"store\": \"sqlite\"}" to "{\"\$map\": …} holds a map.",
+            "{\"write\": 1}" to "A write request gives the store: postgres, oracle or sqlite.",
+            "{\"write\": 1, \"store\": null}" to "A write request gives the store: postgres, oracle or sqlite.",
+            "{\"write\": 1, \"store\": 1}" to "A write request gives the store: postgres, oracle or sqlite.",
+            "{\"write\": 1, \"store\": \"POSTGRES\"}" to "A write request gives the store as postgres, oracle or sqlite, not POSTGRES.",
+            "{\"write\": 1, \"store\": \"memgraph\"}" to "A write request gives the store as postgres, oracle or sqlite, not memgraph.",
+            "{\"write\": null, \"store\": \"sqlite\"}" to "",
         )) {
-            val error = answer(request)["error"]?.textValue()
+            val answer = answer(request)
+            if (message.isEmpty()) {
+                assertEquals("null", CypherJson.writeValueAsString(answer["value"]!!), "on $target, $request: $answer")
+                continue
+            }
+            val error = answer["error"]?.textValue()
             assertTrue(error != null && error.startsWith(message), "on $target, $request: $error")
         }
     }

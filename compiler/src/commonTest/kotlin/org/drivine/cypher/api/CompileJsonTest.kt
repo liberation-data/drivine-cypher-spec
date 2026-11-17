@@ -92,6 +92,17 @@ class CompileJsonTest {
         CompileJson.compile("{\"store\": \"$store\", \"graph\": $graph, \"cypher\": \"RETURN \$x\", \"parameters\": {\"x\": $parameters}}")
 
     @Test
+    fun aBytesParameterIsBoundAsTheListOfItsSignedValuesOnEachStore() {
+        // As a graph engine holds bytes, and as a save writes them (liberation-data/drivine-cypher-spec#329): not base64 text.
+        for (store in listOf("postgres", "oracle", "sqlite")) {
+            val answer = CypherJson.readTree(request("{\"\$bytes\": \"AQL/\"}", store = store))
+            assertEquals("[1,2,-1]", answer["parameters"]!!["_cy_x"]?.textValue(), "$store: $answer")
+            val nested = CypherJson.readTree(request("{\"b\": [{\"\$bytes\": \"AQL/\"}]}", store = store))
+            assertEquals("{\"b\":[[1,2,-1]]}", nested["parameters"]!!["_cy_x"]?.textValue(), "$store: $nested")
+        }
+    }
+
+    @Test
     fun aRequestsNumberIsJsonsAlone() {
         // kotlinx.serialization takes these unquoted; a JSON number is none of them.
         for (number in listOf("1.5f", "0x1.8p1", ".5", "5.", "01", "-", "NaN", "Infinity", "1d", "tru")) {

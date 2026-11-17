@@ -8,6 +8,7 @@ import org.drivine.cypher.json.JsonNode
 import org.drivine.cypher.json.ObjectNode
 import org.drivine.cypher.sql.Temporals
 import org.drivine.cypher.store.SqliteCypherValues
+import org.drivine.cypher.store.StoreValues
 import org.drivine.cypher.store.ValueLayout
 import org.drivine.cypher.store.ddl.OracleDdl
 import org.drivine.cypher.store.ddl.PostgresDdl
@@ -36,12 +37,18 @@ import org.drivine.cypher.store.marker.StoreLayout
  *   run the drops, then the restamp with the parameters, or where `assign`, the stamp's `assignIfAbsent` with its own
  *   parameters, as the graph has no stamp to give the layout, then read the stamps, list the objects again, and ask again; or
  *   `{"verdict": "refuse", "message": "…"}`.
- * - `{"write": <a value>}`: the value as the store layout holds it (liberation-data/drivine-cypher-spec#107), as drivine4j
- *   writes a parameter or a node's properties through [CypherJson.valueToTree]: each temporal value, given as a request's
- *   parameter gives one (`{"$temporal": "DATE", "text": "2024-01-01"}`, its kind as [org.drivine.cypher.sql.Temporal] names it), its tag `{"$t", "v", "s"}`, and each map key that
- *   begins with `$` escaped, at any depth; one whose text is no value of its kind is an error. Every other value is written as the request gives it, a whole number past 2^53
- *   exactly. Answered `{"value": <the value as JSON>}`, so a host that writes its parameters, its save plan or a node's
- *   properties in layout 2 writes them as the other libraries do, with no writer of its own.
+ * - `{"write": <a value>, "store": "postgres" | "oracle" | "sqlite"}`: the value as that store's layout holds it, [StoreValues.text]
+ *   (liberation-data/drivine-cypher-spec#107, #329), the text a compiled statement that writes binds it as: each temporal value,
+ *   given as a request's parameter gives one (`{"$temporal": "DATE", "text": "2024-01-01"}`, its kind as
+ *   [org.drivine.cypher.sql.Temporal] names it), its tag `{"$t", "v", "s"}`, each map key that begins with `$` escaped, at any
+ *   depth, and bytes the list of their signed values, `[1, 2, -1]`; one whose text is no value of its kind is an error. Each
+ *   float as the store holds it: on Postgres a whole one with its fraction (`10000000.0`), on Oracle every one as extended
+ *   JSON's double (`{"$numberDouble": "1.5"}`, NaN and the infinities `"NaN"`, `"Infinity"`, `"-Infinity"`), on SQLite an
+ *   infinity as `9e999` or `-9e999`. A float the store holds as no number, Postgres's NaN and infinities and SQLite's NaN, is an
+ *   error, with the message a statement that writes is refused with. Every other value is written as the request gives it, a
+ *   whole number past 2^53 exactly. The store is required: a graph engine's (`neo4j`) is an error. Answered
+ *   `{"value": <the text, as it is>}`, so a host that writes its parameters, its save plan or a node's properties in layout 2
+ *   writes them as the other libraries do, with no writer of its own.
  * - `{"expand": "<a statement of store.yaml's>"}`: [GeneratedFunctions.expand], each marker of a generated function in it
  *   (`<TemporalArithmeticFunction.postgres(drivine)>`) written out as the module makes it, as a runner of `store.yaml` reads
  *   the statements it compares. Answered `{"text": "…"}`.
@@ -58,7 +65,7 @@ internal object LayoutJson {
             tree.has("read") -> read(tree)
             tree.has("temporalKey") -> temporalKey(tree["temporalKey"])
             tree.has("expand") -> expand(tree["expand"])
-            tree.has("write") -> write(tree["write"])
+            tree.has("write") -> write(tree["write"], tree["store"])
             else -> layout(tree["layout"])
         }
     } catch (e: Exception) {
@@ -82,12 +89,19 @@ internal object LayoutJson {
         return "{\"value\":${SqliteCypherValues.write(ValueLayout.read(value, typed?.booleanValue() ?: false))}}"
     }
 
-    private fun write(given: JsonNode?): String {
+    private fun write(given: JsonNode?, store: JsonNode?): String {
+        // The store first: each holds a value otherwise, and a graph engine's are no layout this writes.
+        val named = store?.textValue() ?: throw IllegalArgumentException("A write request gives the store: $STORES.")
+        val of = Store.of(named) ?: throw IllegalArgumentException("A write request gives the store as $STORES, not $named.")
         // As a parameter is read: the value is at 2, inside the request's object.
         val value = TypedJson.value(given ?: throw IllegalArgumentException("A write request gives the value."), depth = 2)
         temporalsOfTheirKind(value)
-        return "{\"value\":${CypherJson.writeValueAsString(CypherJson.valueToTree(value))}}"
+        // The text the store holds, spliced in as it is: a float's fraction, an infinity's 9e999 and Oracle's extended doubles kept.
+        return "{\"value\":${StoreValues.text(value, of)}}"
     }
+
+    /** The stores a write request names, as a statement's request names them. */
+    private const val STORES = "postgres, oracle or sqlite"
 
     /**
      * Refuses a temporal value in [value], at any depth, whose text is no value of its kind: [CypherJson.valueToTree] would

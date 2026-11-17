@@ -50,6 +50,20 @@ class CypherEncoderTest {
     }
 
     @Test
+    fun bytesAreTheListOfTheirSignedValuesWhateverTheEncoderWrites() {
+        // A host's encoder that writes bytes as base64 text, as Jackson does: the store layout holds them as a graph engine does.
+        val base64 = object : CypherEncoder {
+            override fun tree(value: Any?): JsonNode? = if (value is ByteArray) TextNode("base64") else null
+            override fun text(value: Any?): String? = if (value is ByteArray) "\"base64\"" else null
+        }
+        val bytes = byteArrayOf(1, 2, -1)
+        assertEquals("[1,2,-1]", CypherJson.writeValueAsString(bytes, encoder = base64))
+        assertEquals("{\"b\":[1,2,-1],\"n\":1}", CypherJson.writeValueAsString(mapOf("b" to bytes, "n" to 1L), encoder = base64))
+        assertEquals("[[1,2,-1]]", CypherJson.writeValueAsString(CypherJson.valueToTree(listOf(bytes), base64)))
+        assertEquals("[]", CypherJson.writeValueAsString(byteArrayOf()))
+    }
+
+    @Test
     fun withNoEncoderAnApplicationsTypeIsRefused() {
         assertFailsWith<IllegalArgumentException> { CypherJson.valueToTree(Point(1, 2)) }
     }

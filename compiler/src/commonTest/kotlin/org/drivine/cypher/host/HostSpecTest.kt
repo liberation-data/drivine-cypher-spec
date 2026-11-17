@@ -15,7 +15,8 @@ import kotlin.test.assertTrue
  * as SQLite calls them, on every target: each `function` step of a function the module implements gives its `result`, fails
  * with its `error`, or its values ascend. A function host.yaml calls that the module doesn't implement yet is in [PENDING], and [PENDING] holds
  * nothing else; each function the module implements has a step. A `read` step pins each library's row reader, not the
- * module's, and a `key` step a temporal value's sort key, which `ValueLayoutTest` checks: each is passed over. The cases' `pairs` are checked by each library's runner (drivine4j's HostSpecTest), which
+ * module's, a `key` step a temporal value's sort key, which `ValueLayoutTest` checks, and a `write` step a value as a store's
+ * layout holds it, which `LayoutJsonTest` checks: each is passed over. The cases' `pairs` are checked by each library's runner (drivine4j's HostSpecTest), which
  * compiles them. The SQLite extension's check (check/extension-native.py) runs the same steps through SQL, on the
  * native library loaded in SQLite.
  */
@@ -23,11 +24,13 @@ class HostSpecTest {
 
     private companion object {
         /**
-         * The keys of each kind of step, beside its optional `note`: a function's result, its failure, its order, a read, and
-         * a temporal value's sort key (`ValueLayoutTest` checks it, over `Temporals.key`).
+         * The keys of each kind of step, beside its optional `note`: a function's result, its failure, its order, a read,
+         * a temporal value's sort key (`ValueLayoutTest` checks it, over `Temporals.key`), and a value written for a store or
+         * refused (`LayoutJsonTest` checks it, over the JSON request `write`).
          */
         val SHAPES = setOf(
             setOf("function", "args", "result"), setOf("function", "args", "error"), setOf("function", "ascending"), setOf("read", "value"), setOf("key", "result"),
+            setOf("write", "result"), setOf("write", "error"),
         )
 
         /** Drivine's functions, and `regexp`, which SQLite calls, as `regexp(pattern, text)`, for `text REGEXP pattern`. */
@@ -117,6 +120,12 @@ class HostSpecTest {
         assertEquals(Outcome.PENDING, check(pending, "pending", setOf("drivine_pending")))
         val read = CypherJson.readTree("""{"read": {"store": "sqlite", "nonFinite": false, "column": "1"}, "value": 1, "note": "n"}""")
         assertEquals(Outcome.READ, check(read, "read"))
+        val write = CypherJson.readTree("""{"write": {"store": "sqlite", "value": 1}, "result": "1"}""")
+        assertEquals(Outcome.READ, check(write, "write"))
+        val writeRefused = CypherJson.readTree("""{"write": {"store": "sqlite", "value": 1}, "error": "x"}""")
+        assertEquals(Outcome.READ, check(writeRefused, "writeRefused"))
+        val writeOfValue = CypherJson.readTree("""{"write": {"store": "sqlite", "value": 1}, "value": "1"}""")
+        assertContains(assertFails { check(writeOfValue, "writeOfValue") }.message!!, "a step has the keys")
         val failing = HostFunction("drivine_failing", 1, deterministic = true) { _, _, result -> result.error("no") }
         assertContains(assertFails { call(listOf(failing), listOf(1L), "failing") }.message!!, "failing: drivine_failing failed: no")
         val nanResult = HostFunction("drivine_nan", 0, deterministic = true) { _, _, result -> result.double(Double.NaN) }
@@ -206,7 +215,7 @@ class HostSpecTest {
     private fun check(step: JsonNode, where: String, pending: Set<String> = PENDING): Outcome {
         val keys = step.keys() - "note"
         require(keys in SHAPES) { "$where: a step has the keys of one of $SHAPES, and an optional note, not $keys" }
-        if ("read" in keys || "key" in keys) return Outcome.READ
+        if ("read" in keys || "key" in keys || "write" in keys) return Outcome.READ
         val name = step["function"]!!.textValue()!!
         require(name.matches(FUNCTION)) { "$where: $name is no function of Drivine's" }
         val functions = HostFunctions.all.filter { it.name == name }

@@ -1,19 +1,15 @@
 package org.drivine.cypher.sql
 
 import org.drivine.DrivineInternalApi
-import org.drivine.cypher.json.JsonNode
-import org.drivine.cypher.json.ArrayNode
-import org.drivine.cypher.json.DecimalNode
-import org.drivine.cypher.json.ObjectNode
 import org.drivine.cypher.CompilerException
 import org.drivine.cypher.ast.RelationshipPattern
 import org.drivine.cypher.json.CypherEncoder
-import org.drivine.cypher.json.CypherJson
 import org.drivine.cypher.store.PostgresSql
+import org.drivine.cypher.store.StoreValues
+import org.drivine.cypher.api.Store
 import org.drivine.cypher.store.ddl.PostgresDdl
 import org.drivine.cypher.store.Stamps
 import com.ionspin.kotlin.bignum.decimal.BigDecimal
-import org.drivine.cypher.json.jvmDoubleText
 import org.drivine.cypher.json.sha256
 import org.drivine.cypher.store.schema.SqlText
 
@@ -39,34 +35,16 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
     // The constructor drivine4j's compiler had, kept so that what was compiled against it still links.
     constructor(graph: String) : this(graph, null)
 
-    override fun literalJson(value: Any?) = "CAST(${literal(written(value))} AS jsonb)"
+    override fun literalJson(value: Any?) = "CAST(${literal(parameterText(value))} AS jsonb)"
 
     override fun parameterJson(marker: String, text: String?) = "CAST($marker AS jsonb)"
 
-    override fun parameterText(value: Any?): String = written(value)
-
     /**
-     * [value] as JSON text, each float in it that is a whole number written out in full with a fraction, `10000000.0`: as
-     * Java writes it, `1.0E7`, `jsonb` reads it as the whole number 10000000, which is then read back as an integer.
+     * [value] as JSON text, as the store layout holds it ([StoreValues.text], which a library's save writes too): each float
+     * in it that is a whole number written out in full with a fraction, `10000000.0`, which `jsonb` keeps a float. NaN and
+     * the infinities are the numbers that stand for them (see the class), which a statement that writes refuses first.
      */
-    private fun written(value: Any?): String {
-        val tree = CypherJson.valueToTree(value, encoder)
-        return CypherJson.writeValueAsString(wholeFloats(tree), plainDecimals = true, encoder = encoder)
-    }
-
-    /**
-     * [node] with each float in it that is a whole number a decimal of one place, `10000000.0`, from its shortest decimal: the
-     * double's exact value, `999999999999999983222784.0` for `1e24`, is no number Postgres works out or reads as that float. NaN
-     * and the infinities are the numbers that stand for them: see the class.
-     */
-    private fun wholeFloats(node: JsonNode): JsonNode = when {
-        (node.isDouble || node.isFloat) && !node.doubleValue().isFinite() -> DecimalNode(standIn(node.doubleValue()), standInText(node.doubleValue()))
-        (node.isDouble || node.isFloat) && node.doubleValue().let { it.isFinite() && it == kotlin.math.round(it) } ->
-            wholePlain(jvmDoubleText(node.doubleValue())).let { DecimalNode(BigDecimal.parseString(it), it) }
-        node is ObjectNode -> node.apply { properties().toList().forEach { (key, value) -> set<JsonNode>(key, wholeFloats(value)) } }
-        node is ArrayNode -> node.apply { (0 until size()).forEach { set(it, wholeFloats(get(it))) } }
-        else -> node
-    }
+    override fun parameterText(value: Any?): String = StoreValues.postgres(value, encoder)
 
     override fun parameterCount(marker: String) = "CAST($marker AS bigint)"
 
@@ -593,8 +571,9 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
     /** A statement that reads only: one that writes would store the number that stands for one, and fails as `numeric` does. */
     override fun nonFiniteWorkedOut(writes: Boolean) = !writes
 
-    override fun refuseNonFiniteWrite(parameters: Map<String, Any?>) =
-        throw CompilerException(NON_FINITE_WRITE.formatted("NaN or an infinity", "Postgres's `jsonb`"))
+    override fun refuseNonFiniteWrite(parameters: Map<String, Any?>) {
+        StoreValues.nonFiniteRefusal(Store.POSTGRES, parameters.values)?.let { throw CompilerException(it) }
+    }
 
     override fun page(skip: String?, limit: String?) = listOfNotNull(skip?.let { "OFFSET $it" }, limit?.let { "LIMIT $it" })
 
@@ -979,7 +958,7 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
         private val NEGATIVE_INFINITY_TEXT: String by lazy { NEGATIVE_INFINITY.toPlainString() }
 
         /** The text of the number [standIn] gives [value]. */
-        private fun standInText(value: Double): String = when {
+        internal fun standInText(value: Double): String = when {
             value.isNaN() -> NOT_A_NUMBER_TEXT
             value > 0 -> INFINITY_TEXT
             else -> NEGATIVE_INFINITY_TEXT
@@ -1000,7 +979,7 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
         }
 
         /** The number a statement given [value], NaN or an infinity, writes for it: see the class. */
-        private fun standIn(value: Double): BigDecimal = when {
+        internal fun standIn(value: Double): BigDecimal = when {
             value.isNaN() -> NOT_A_NUMBER
             value > 0 -> INFINITY
             else -> NEGATIVE_INFINITY

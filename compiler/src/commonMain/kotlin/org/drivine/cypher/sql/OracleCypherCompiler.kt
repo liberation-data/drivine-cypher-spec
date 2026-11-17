@@ -2,14 +2,13 @@ package org.drivine.cypher.sql
 
 import org.drivine.DrivineInternalApi
 import org.drivine.cypher.json.JsonNode
-import org.drivine.cypher.json.ArrayNode
-import org.drivine.cypher.json.JsonNodeFactory
 import org.drivine.cypher.json.ObjectNode
 import org.drivine.cypher.CompilerException
 import org.drivine.cypher.store.OracleSql
 import org.drivine.cypher.ast.RelationshipPattern
 import org.drivine.cypher.json.CypherEncoder
 import org.drivine.cypher.json.CypherJson
+import org.drivine.cypher.store.StoreValues
 import org.drivine.cypher.store.Stamps
 import org.drivine.cypher.store.ValueLayout
 import org.drivine.cypher.store.ddl.SqlStoreDdl
@@ -186,13 +185,15 @@ class OracleCypherCompiler(
      * value that holds a map with a key as extended JSON's are, `{"${'$'}numberLong": "5"}`, which `JSON(… EXTENDED)` would read as
      * the value it writes: such a value is written as JSON is, its floats that are whole numbers read as whole numbers. A
      * statement that writes binds all its parameters as one text, and reads as extended JSON only those of them with such
-     * a double in them: see [propertyOf], and [parametersText] for one where a parameter holds such a key.
+     * a double in them: see [propertyOf], and [parametersText] for one where a parameter holds such a key. The floats are
+     * written as the store layout holds them ([StoreValues.text], which a library's save writes too, and which refuses a
+     * value keyed as extended JSON's where this writes it as JSON).
      */
     override fun parameterText(value: Any?): String {
         val tree = CypherJson.valueToTree(value, encoder)
         if (keyedAsExtended(tree)) return CypherJson.writeValueAsString(tree, encoder = encoder)
         var doubled = false
-        val written = doubles(tree) { doubled = true }
+        val written = StoreValues.oracleDoubles(tree) { doubled = true }
         // A procedure's parameters are one map: those of its entries with a double in them are read as extended JSON.
         if (doubled && written is ObjectNode) extendedParameters += written.properties().filter { keyedAsExtended(it.value) }.map { it.key }
         return CypherJson.writeValueAsString(written, encoder = encoder).also { if (doubled) extended += it }
@@ -212,39 +213,14 @@ class OracleCypherCompiler(
         for ((key, value) in tree.properties().toList()) {
             if (keyedAsExtended(value)) continue
             var doubled = false
-            tree.set<JsonNode>(key, doubles(value) { doubled = true })
+            tree.set<JsonNode>(key, StoreValues.oracleDoubles(value) { doubled = true })
             if (doubled) extendedParameters += key
         }
         return CypherJson.writeValueAsString(tree, encoder = encoder)
     }
 
-    /**
-     * Whether [node] holds a map with a key that starts with one `$`, as extended JSON's keys do. A user's key that starts
-     * with `$` is held with one more ([ValueLayout.escape]), which Oracle's extended JSON reads as the key it is, and a
-     * temporal value's tag's `$t` is no key extended JSON reads either, as Oracle reads tags back through it ([LIST_KEY]),
-     * so in layout 2 no parameter holds one (drivine-cypher-spec#202): this is for a host's encoder that gives a tree with
-     * one of its own. Were a tag such a key, a float beside a temporal value in one parameter, as a row of `UNWIND $rows`
-     * holds, would be read as JSON and stored as a whole number.
-     */
-    private fun keyedAsExtended(node: JsonNode): Boolean =
-        (node is ObjectNode && !ValueLayout.isTag(node) && node.fieldNames().asSequence().any { it.startsWith("$") && !it.startsWith("$$") }) ||
-            node.any(::keyedAsExtended)
-
-    /**
-     * [node] with each float in it written as extended JSON's double, calling [doubled] for each. A
-     * `BigDecimal` is no float: it stays the number it is, every digit kept.
-     */
-    private fun doubles(node: JsonNode, doubled: () -> Unit): JsonNode = when {
-        // Every float, as the store layout holds one (#146): a binary double, which `JSON(… EXTENDED)` reads of extended JSON's
-        // double, and not of JSON's `1.5`, which it reads as a `NUMBER`.
-        node.isDouble || node.isFloat -> {
-            doubled()
-            JsonNodeFactory.instance.objectNode().put(DOUBLE, org.drivine.cypher.json.jvmDoubleText(node.doubleValue()))
-        }
-        node is ObjectNode -> node.apply { properties().toList().forEach { (key, value) -> set<JsonNode>(key, doubles(value, doubled)) } }
-        node is ArrayNode -> node.apply { (0 until size()).forEach { set(it, doubles(get(it), doubled)) } }
-        else -> node
-    }
+    /** Whether [node] holds a map with a key that starts with one `$`, as extended JSON's keys do: see [StoreValues.keyedAsExtended]. */
+    private fun keyedAsExtended(node: JsonNode): Boolean = StoreValues.keyedAsExtended(node)
 
     override fun parameterCount(marker: String) = "CAST($marker AS NUMBER)"
 
@@ -1090,10 +1066,10 @@ class OracleCypherCompiler(
         if (readsExtended && doubled(value)) "JSON(JSON_QUERY($marker, $path RETURNING CLOB) EXTENDED)" else "JSON_QUERY($marker, $path RETURNING JSON)"
     }
 
-    /** Whether [value] holds a float that is a whole number, as extended JSON's double: see [doubles]. */
+    /** Whether [value] holds a float, as extended JSON's double: see [StoreValues.oracleDoubles]. */
     private fun doubled(value: Any?): Boolean {
         var doubled = false
-        doubles(CypherJson.valueToTree(value, encoder)) { doubled = true }
+        StoreValues.oracleDoubles(CypherJson.valueToTree(value, encoder)) { doubled = true }
         return doubled
     }
 
@@ -2661,7 +2637,6 @@ class OracleCypherCompiler(
         const val NUMBER_TEXT = 32
 
         /** The key of a double in Oracle's extended JSON. */
-        private const val DOUBLE = "\$numberDouble"
 
         /** NaN, as `JSON_SERIALIZE(… EXTENDED)` writes it: see [holdsNaN]. */
         private const val EXTENDED_NAN = "{\"\$numberDouble\":\"Nan\"}"
