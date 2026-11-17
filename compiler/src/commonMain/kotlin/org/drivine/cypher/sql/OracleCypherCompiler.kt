@@ -498,13 +498,15 @@ class OracleCypherCompiler(
 
     /**
      * [sharedSum], and where [keyed], a property's [numberKeys] bound by its own path too, each a column the body's reads of
-     * them are rewritten to: read from its JSON so bound, they would read it through its text ([itemProperty]).
+     * them are rewritten to: read from its JSON so bound, they would read it through its text ([itemProperty]). Where neither
+     * side is long and both are properties, neither a parameter's, only their keys are bound ([keysBound]).
      */
     private fun sharedSum(a: String, b: String, keyed: Boolean, body: (List<String>) -> String): String {
         val sides = listOf(a, b)
         val properties = sides.map(::besideLong)
         // Two properties' keys bound once: beside a value given or written, one read of a few, the form is as it was (#309's cost).
-        if (keyed && !binds(a, b) && properties.all { it }) return keysBound(sides, body(sides))
+        // A parameter's value, `$p.k`, is read by its path as a property is, from its marker: it is a value given.
+        if (keyed && !binds(a, b) && properties.all { it } && sides.none { propertyRead(it)!!.first.startsWith("$") }) return keysBound(sides, body(sides))
         if (!binds(a, b) || properties.none { it }) return shared(a, b, body = body)
         val columns = sides.withIndex().flatMap { (i, json) ->
             if (!properties[i]) return@flatMap listOf(json)
@@ -534,8 +536,8 @@ class OracleCypherCompiler(
     /**
      * [sql], a comparison of two short properties, with each of the [properties]' [numberKeys] read once, by its own path, a column of a
      * subquery the comparison reads them by name from: written where each is used, a property was read up to a dozen times in
-     * one comparison of two (drivine-cypher-spec#309), and such a statement, after others in the session, crashed the Oracle
-     * server process (ORA-07445). Only the keys are bound, numbers both: a property's JSON bound so and read as a CLOB, a text
+     * one comparison of two (drivine-cypher-spec#309); read once, they avoid an Oracle server crash (ORA-07445) seen in the
+     * TCK. Only the keys are bound, numbers both: a property's JSON bound so and read as a CLOB, a text
      * past 32 KB closed the session (#370), so it is still read where it is, as [direct] reads it. Where [sql] reads no key, as
      * where neither side may be a number, it is as it was.
      */
@@ -550,7 +552,8 @@ class OracleCypherCompiler(
     /**
      * The sides of a comparison, an `IN` among them, bound as a sum's are (see [sharedSum]), and each property read by its own
      * path where it is not bound (see [direct]): [jsonEquals] and [ordered] read a text as a `VARCHAR2` or a CLOB, and not as
-     * JSON, which Oracle refuses to compare past about 32 KB (ORA-40180, #389). Taken out as JSON and compared, a stored text
+     * JSON, which Oracle refuses to compare past about 32 KB (ORA-40180, #389). Two short properties have their number keys
+     * bound once, the properties still read where they are ([keysBound]). Taken out as JSON and compared, a stored text
      * past 32 KB, on two rows or more, closed the session on the first run or a later one (ORA-03113), as #255's did.
      *
      * Not in a statement that writes, nor in the step of a `reduce()`, where two values are compared as JSON, as before (see

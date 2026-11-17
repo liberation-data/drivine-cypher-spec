@@ -27,13 +27,15 @@ class OracleNumberKeysTest {
 
     /**
      * The subquery a comparison of short properties reads their [keys] from, each once, as `sh1.v1`, `sh1.v2`…: its name, by
-     * which the comparison names them (see `OracleCypherCompiler.keysBound`).
+     * which the comparison names them (see `OracleCypherCompiler.keysBound`). Bound once: a comparison around one that bound
+     * them, as `=` is around the one it compares numbers by, binds none of those columns again.
      */
     private fun keysBound(sql: String, vararg keys: String): String {
         val columns = keys.withIndex().joinToString(", ") { (i, key) -> "$key AS v${i + 1}" }
         val bound = Regex("FROM \\(SELECT /\\*\\+ NO_MERGE \\*/ ${Regex.escape(columns)}\\) (sh\\d+)\\)").find(sql)
         assertTrue(bound != null, sql)
         keys.forEach { assertEquals(1, Regex(Regex.escape(it)).findAll(sql).count(), sql) }
+        assertTrue(!Regex("sh\\d+\\.v\\d+ AS v").containsMatchIn(sql), sql)
         return bound!!.groupValues[1]
     }
 
@@ -53,6 +55,44 @@ class OracleNumberKeysTest {
         }
         assertTrue(Regex("\\(SELECT /\\*\\+ NO_MERGE \\*/ ${Regex.escape(double("n1.props", "$.val"))} AS v1").containsMatchIn(sql), sql)
         assertNoKeyOfARoutedValue(sql)
+    }
+
+    @Test
+    fun aPropertyComparedWithAParametersValueHasItsKeysReadWhereTheyAre() {
+        // `$p.k` is read by its path as a property is, but is a value given: the comparison is as it was, with nothing bound.
+        val sql = compiler.compile("MATCH (n:K) WHERE n.k < \$p.k RETURN n", mapOf("p" to mapOf("k" to 1))).sql
+        assertTrue("NO_MERGE" !in sql && double("n1.props", "$.k") in sql, sql)
+    }
+
+    @Test
+    fun aPropertyInAnotherHasOnlyItsOwnKeysBound() {
+        // The list's keys are no comparison's: each of its items is compared by its own, read where it is.
+        val sql = compiler.compile("MATCH (n:K), (m:K) RETURN n.k IN m.k", emptyMap()).sql
+        keysBound(sql, double("n1.props", "$.k"), big("n1.props", "$.k"))
+        assertTrue(double("n2.props", "$.k") !in sql && big("n2.props", "$.k") !in sql, sql)
+    }
+
+    @Test
+    fun aPropertyComparedWithItselfHasItsKeysBoundOnce() {
+        val sql = compiler.compile("MATCH (n:K) RETURN n.k < n.k", emptyMap()).sql
+        val k = keysBound(sql, double("n1.props", "$.k"), big("n1.props", "$.k"))
+        assertTrue("WHEN $k.v1 <> $k.v1 THEN" in sql, sql)
+    }
+
+    @Test
+    fun anAggregatesComparisonOfTwoPropertiesIsWorkedOutFirstWithItsKeysBound() {
+        // Bound in a subquery, the keys are read for each row before the aggregate, not from the group it reads.
+        val sql = compiler.compile("MATCH (n:K), (m:K) RETURN count(CASE WHEN n.k < m.k THEN 1 END)", emptyMap()).sql
+        keysBound(sql, double("n1.props", "$.k"), big("n1.props", "$.k"), double("n2.props", "$.k"), big("n2.props", "$.k"))
+        assertTrue(Regex("count\\(CASE WHEN JSON_VALUE\\(w\\d+\\.c\\d+, '\\$\\.type\\(\\)'\\) <> 'null'").containsMatchIn(sql), sql)
+    }
+
+    @Test
+    fun aComparisonOfTwoPropertiesWhereNoValueIsBoundReadsItsKeysWhereTheyAre() {
+        // Beside a variable-length walk, an order term that holds a subquery is not worked out first, and binds no value.
+        val sql = compiler.compile("MATCH (a:K)-[*]->(b:K) RETURN a ORDER BY CASE WHEN a.k < b.k THEN COUNT { (a)-->() } END", emptyMap()).sql
+        assertTrue("NO_MERGE" !in sql && !Regex("sh\\d+\\.v\\d+").containsMatchIn(sql), sql)
+        assertTrue(Regex(Regex.escape(double("n1.props", "$.k"))).findAll(sql).count() > 1, sql)
     }
 
     @Test
