@@ -415,7 +415,7 @@ internal class VariableKinds(private val aggregates: (Expression) -> Boolean) {
      * already in each of these places, and only one of another kind is refused. [before] is the scope before the clause,
      * and [own] the variables the clause makes (see [madeBy]): a property it makes reads none of them (see [madeHere]), and
      * a pattern in the properties of a node made with no relationship names none of those bound before it either (see
-     * [declared]); and none is a node, a relationship or a path (see [stored]).
+     * [declared]); and none is a node, a relationship, a path or a map, nor a list of maps or lists (see [stored]).
      */
     private fun made(pattern: Pattern, scope: Scope, before: Scope, own: Set<String>, made: MutableSet<String>, merging: Boolean, foreach: Boolean) {
         val clause = if (merging) "MERGE" else "CREATE"
@@ -752,7 +752,7 @@ internal class VariableKinds(private val aggregates: (Expression) -> Boolean) {
      * A `SET` item's value, over [scope]: a pattern is no value to set, as Neo4j refuses it (see [valued]); nor is a node, a
      * relationship or a path, `SET m.f = m`, a list written of one, `SET m.f = [m]`, or an entry of a map set, `SET n += {f: m}`,
      * which Neo4j refuses when it runs (its 22N01, "Property values can only be of primitive types or arrays thereof"), and
-     * the store would hold as a document (see [stored]). Read after the rest of it, as Neo4j refuses what it refuses before
+     * the store would hold as a document, nor a map or a list of maps or lists (see [stored]). Read after the rest of it, as Neo4j refuses what it refuses before
      * it runs first: `SET n.p = [b, zz]` is refused for `zz`, which is not defined.
      */
     private fun set(item: SetItem, scope: Scope) {
