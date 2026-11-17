@@ -7,6 +7,7 @@ import org.drivine.cypher.json.JsonNode
 import org.drivine.cypher.json.ObjectNode
 import org.drivine.cypher.number.oracleFile
 import org.drivine.cypher.number.target
+import org.drivine.cypher.store.ValueLayout
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -66,6 +67,13 @@ class LayoutMigrationTest {
                 assertEquals(rows(pinned["invalid"], "property", "kind", "value", "message"), rows(answer["invalid"], "property", "kind", "value", "message"), "$at: the invalid values")
             }
         }
+    }
+
+    @Test
+    fun migrateYamlPinsTheLayoutsTheRewriteIsBetween() {
+        assertEquals(LayoutMigration.FROM.toLong(), spec["from"]!!.longValue(), "on $target: from")
+        assertEquals(LayoutMigration.TO.toLong(), spec["to"]!!.longValue(), "on $target: to")
+        assertEquals(ValueLayout.LAYOUT, LayoutMigration.TO, "on $target: the rewrite is to the layout values are written in")
     }
 
     @Test

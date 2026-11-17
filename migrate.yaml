@@ -18,12 +18,12 @@ rewrites:
       oracle: {props: '{"name":"Ada","age":36,"ok":true,"tags":["a","b"]}', result: '{"name":"Ada","age":36,"ok":true,"tags":["a","b"]}'}
       sqlite: {props: '{"name":"Ada","age":36,"ok":true,"tags":["a","b"]}', result: '{"name":"Ada","age":36,"ok":true,"tags":["a","b"]}'}
   - name: "Floats on Postgres and SQLite"
-    description: "A float with a point is a float in both layouts, on Postgres and SQLite; a whole number is an integer, unless declared a float."
+    description: "A float with a point is a float in both layouts, on Postgres and SQLite, as is an infinity as SQLite's JSON writes it, 9e999; a whole number is an integer, unless declared a float."
     labels: ["Reading"]
     declarations: []
     stores:
       postgres: {props: '{"a": 2.0, "b": 1.5, "c": 10000000000000000}', result: '{"a":2.0,"b":1.5,"c":10000000000000000}'}
-      sqlite: {props: '{"a":2.0,"b":1.5,"c":10000000000000000}', result: '{"a":2.0,"b":1.5,"c":10000000000000000}'}
+      sqlite: {props: '{"a":2.0,"b":1.5,"c":10000000000000000,"i":9e999,"j":-9e999}', result: '{"a":2.0,"b":1.5,"c":10000000000000000,"i":9e999,"j":-9e999}'}
   - name: "A property whose name begins with $"
     description: "Held with one more $ in layout 2, at any depth of $, whatever its value; one with a $ after its first character is held as it is."
     labels: ["Person"]

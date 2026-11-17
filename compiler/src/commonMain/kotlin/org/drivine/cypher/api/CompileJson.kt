@@ -39,8 +39,9 @@ import kotlin.io.encoding.ExperimentalEncodingApi
  *
  * A request with `search` or `searchIndex` in place of `cypher` is a full-text search, answered by [FullTextSearch]: see
  * [SearchJson]. One with `vector` is a vector search, answered by [VectorSearch]: see [VectorJson]. One with `read`,
- * `temporalKey`, `layout`, `expand` or `write` asks the store layout's questions: a column's value read, a temporal value's sort key, a
- * graph's layout judged, a statement of `store.yaml` with its generated functions written out, a value as the layout holds it; see [LayoutJson]. One with `fragment` asks for a part of a statement a library writes itself, a
+ * `temporalKey`, `layout`, `expand`, `write` or `rewrite` asks the store layout's questions: a column's value read, a temporal value's sort key, a
+ * graph's layout judged, a statement of `store.yaml` with its generated functions written out, a value as the layout holds it, a
+ * layout-1 row as layout 2 holds it; see [LayoutJson]. One with `fragment` asks for a part of a statement a library writes itself, a
  * condition, a value or an order's terms: see [FragmentJson]. One with `storeStatements` asks for a store's DDL and the statements of
  * its stamps and schema marker: see [StoreJson]. One with `schemaPlan` asks the schema planner for a round of statements to
  * run, or a host's runtime catalogs: see [SchemaPlanJson]. One with `idSql` asks for the SQL that finds a node by its id as the
