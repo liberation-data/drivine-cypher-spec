@@ -512,7 +512,8 @@ of its own, so the three libraries read rows, key a temporal value and judge a g
 
 - **`migrate`** runs a store's migration from layout 1 to layout 2 (#256) a round at a time, as `schemaPlan` runs a plan:
   `{"migrate": {"store": "postgres", "graph": "g", "start": {"declarations": [...], "batchSize": 1000, "dryRun": false,
-  "keepInvalid": false}}}`, then `{"migrate": {"store": …, "graph": …, "resume": <state>, "outcomes": [<outcome>, …]}}`, each
+  "keepInvalid": false}}}` (any of them left out: no declarations, and these defaults; a key a start doesn't know is
+  refused), then `{"migrate": {"store": …, "graph": …, "resume": <state>, "outcomes": [<outcome>, …]}}`, each
   answered `{"run": [<action>, …], "state": <state>}` or `{"done": <report>}`. An action is `{"type": "query" | "execute",
   "statement", "parameters", "purpose"}`, `{"type": "transaction", "statements": [<execute>, …]}`, `{"type": "prepare"}` or
   `{"type": "lock", "statement"}`; an outcome `{"type": "rows", "rows": [...]}`, `{"type": "ran"}` or `{"type": "failed",

@@ -95,7 +95,7 @@ class LayoutMigratorTest {
                     val id = (action.parameters["id"] as Number).toLong()
                     val row = rows[table]!![id] ?: fail("No row $id")
                     rows[table]!![id] = row.first to action.parameters["props"] as String
-                    rewrites.merge(table to id, 1, Int::plus)
+                    rewrites[table to id] = (rewrites[table to id] ?: 0) + 1
                 }
             }
         }

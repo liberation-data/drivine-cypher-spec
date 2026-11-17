@@ -15,9 +15,12 @@ import org.drivine.cypher.store.migrate.MigrationStatements.Table
  * - [properties]: for each label (a relationship's type, for one) and property that a rewrite changes or finds a value of
  *   not of its declared kind, the count of each change ([LayoutMigration.Change]'s words) and each such value. A property
  *   of a node of two labels is counted under both.
- * - [candidates]: each label's property no declaration names whose values all read as one kind a declaration would
- *   change them by (a temporal kind, where each is a text of it; a float, where they are whole numbers and floats both),
- *   with the count of its values: what to declare, never applied unless declared.
+ * - [observed]: for each label and property, the count of its values of each class ([LayoutMigration.observe]), of the
+ *   rows other than Drivine's own whose labels declare the property nothing.
+ * - [candidates]: each label's property no declaration names whose values [observed] all read as one kind a declaration
+ *   would change them by (a temporal kind, where each is a text of it; a float, where they are whole numbers and floats
+ *   both), with the count of its values: what to declare, never applied unless declared. A value of a node of two labels,
+ *   one of which declares its property, is that declaration's, and no candidate of the other.
  * - [kept]: once written, each value kept as it was, not of its declared kind, where the migration was told to keep them.
  */
 @DrivineInternalApi
@@ -61,7 +64,7 @@ data class MigrationReport(
             for ((property, changes) in rewrite.changes.groupBy { it.property }) {
                 val key = key(label, property)
                 val was = props[key] ?: PropertyReport()
-                props[key] = was.copy(changes = was.changes.toMutableMap().apply { changes.forEach { merge(it.change.word, 1L, Long::plus) } })
+                props[key] = was.copy(changes = was.changes.toMutableMap().apply { changes.forEach { count(it.change.word) } })
             }
         }
         // A value not of its kind is listed under each of the row's labels that declares its property.
@@ -73,10 +76,13 @@ data class MigrationReport(
             }
         }
         val seen = observed.toMutableMap()
+        // Drivine's own nodes are no candidates, nor a property a declaration of one of the row's labels rewrites already.
         if (row.labels.none { it in StoreLayout.OWN_LABELS }) {
+            val declared = declarations.filter { it.label in row.labels }.map { it.property }.toSet()
             for (label in row.labels) for ((property, kind) in observe) {
+                if (property in declared) continue
                 val key = key(label, property)
-                seen[key] = (seen[key] ?: emptyMap()).toMutableMap().apply { merge(kind, 1L, Long::plus) }
+                seen[key] = (seen[key] ?: emptyMap()).toMutableMap().apply { count(kind) }
             }
         }
         return copy(tables = counted(table, rewrite.changed), properties = props, observed = seen)
@@ -113,13 +119,13 @@ data class MigrationReport(
             val (label, property) = split(key)
             linkedMapOf(
                 "label" to label, "property" to property,
-                "changes" to p.changes.toSortedMap(),
+                "changes" to p.changes.sorted(),
                 "invalid" to p.invalid.map { linkedMapOf("table" to it.table, "id" to it.id, "kind" to it.kind, "value" to it.value, "message" to it.message) },
             )
         },
         "observed" to observed.entries.sortedBy { it.key }.map { (key, classes) ->
             val (label, property) = split(key)
-            linkedMapOf("label" to label, "property" to property, "classes" to classes.toSortedMap())
+            linkedMapOf("label" to label, "property" to property, "classes" to classes.sorted())
         },
         "candidates" to candidates.map { linkedMapOf("label" to it.label, "property" to it.property, "kind" to it.kind, "values" to it.values) },
         "kept" to kept.map { it.toMap() },
@@ -151,5 +157,12 @@ data class MigrationReport(
         )
     }
 }
+
+/** One more of [word]: `merge` and `toSortedMap` are the JVM's alone, and this module is built for every target. */
+private fun MutableMap<String, Long>.count(word: String) {
+    this[word] = (this[word] ?: 0L) + 1L
+}
+
+private fun Map<String, Long>.sorted(): Map<String, Long> = entries.sortedBy { it.key }.associate { it.key to it.value }
 
 private fun <T> JsonNode.associate(transform: (JsonNode) -> Pair<String, T>): Map<String, T> = map(transform).toMap()

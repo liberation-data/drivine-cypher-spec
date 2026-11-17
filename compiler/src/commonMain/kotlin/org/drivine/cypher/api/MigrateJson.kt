@@ -22,7 +22,7 @@ import org.drivine.cypher.store.plan.PlanJson
  *
  * A request names its SQL store, `{"store": "postgres", "graph": "g"}`, and one of:
  * - `"start": {"declarations": [{"label", "property", "kind"}, …], "batchSize": 1000, "dryRun": false, "keepInvalid": false}`:
- *   the first round (each but `declarations` may be left out, as these defaults);
+ *   the first round (each may be left out: no declarations, and these defaults; a key it doesn't know is refused);
  * - `"resume": <state>, "outcomes": [<outcome>, …]`: the next round, after the last round of the state gave `outcomes`, one
  *   for each of its actions that ran, in order: all of them, or those up to and with the first that failed.
  *
@@ -41,6 +41,8 @@ internal object MigrateJson {
 
     private val QUESTIONS = listOf("start", "resume")
 
+    private val START_KEYS = listOf("declarations", "batchSize", "dryRun", "keepInvalid")
+
     fun answer(tree: ObjectNode): String = try {
         val given = tree[KIND] as? ObjectNode ?: throw IllegalArgumentException("A $KIND request gives {\"store\": …, \"graph\": …, …}.")
         if (QUESTIONS.count { given.has(it) } != 1) throw IllegalArgumentException("A $KIND request gives one of start and resume.")
@@ -51,7 +53,11 @@ internal object MigrateJson {
             migrator.validate(request)?.let { throw IllegalArgumentException(it) }
             migrator.start(request)
         } else {
-            val state = MigrationState.fromJson(CypherJson.writeValueAsString(given["resume"]!!))
+            val state = try {
+                MigrationState.fromJson(CypherJson.writeValueAsString(given["resume"]!!))
+            } catch (e: Exception) {
+                throw IllegalArgumentException("A resume gives back the state its last round was answered with, as it was: ${e.message ?: e.toString()}")
+            }
             val outcomes = (given["outcomes"] as? ArrayNode ?: throw IllegalArgumentException("A resume gives its outcomes as a list.")).map(::outcomeOf)
             migrator.resume(state, outcomes)
         }
@@ -62,6 +68,10 @@ internal object MigrateJson {
 
     private fun requestOf(node: JsonNode): MigrationRequest {
         require(node is ObjectNode) { "A start gives {\"declarations\": […], …}." }
+        // A key it doesn't know, dryRun mistyped say, is refused, as read past it would have the migration write.
+        val unknown = node.properties().map { it.key }.filter { it !in START_KEYS }
+        require(unknown.isEmpty()) { "A start gives no ${unknown.joinToString()}: it gives ${START_KEYS.joinToString()}." }
+        require(node["declarations"].let { it == null || it.isNull || it is ArrayNode }) { "A start gives its declarations as a list." }
         fun flag(key: String) = node[key]?.takeUnless { it.isNull }?.let { require(it.isBoolean) { "A start gives $key as true or false." }; it.booleanValue() } ?: false
         val batch = node["batchSize"]?.takeUnless { it.isNull }?.let { require(it.isIntegralNumber) { "A start gives batchSize as a whole number." }; it.longValue() } ?: 1000L
         require(batch in 1..Int.MAX_VALUE) { "A migration reads its rows in batches of 1 or more, not $batch." }
