@@ -9,6 +9,10 @@ import org.drivine.cypher.store.OracleSql
 import org.drivine.cypher.store.PostgresSql
 import org.drivine.cypher.store.SqliteSql
 import org.drivine.cypher.store.Stamps
+import org.drivine.cypher.store.ddl.DdlStatement
+import org.drivine.cypher.store.ddl.PostgresDdl
+import org.drivine.cypher.store.ddl.SqliteDdl
+import org.drivine.schema.RangeIndexSpec
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -111,6 +115,27 @@ class IdSqlJsonTest {
         assertEquals("""n.labels @> '["O''Br\"en"]'""", labels("postgres", label), "on $target")
         assertEquals("""instr(n.labels, '"O''Br\"en"') > 0""", labels("sqlite", label), "on $target")
         assertEquals("""INSTR(',' || LTRIM(RTRIM(JSON_SERIALIZE(n.labels), ']'), '[') || ',"', ',"O''Br\"en","') > 0""", labels("oracle", label), "on $target")
+    }
+
+    /**
+     * The test of each label, through the JSON entry over the bare column, is the WHERE of the index the store's DDL makes over the
+     * label's nodes, byte for byte, so a lookup by its id reads that index: for a backslash, a character past ASCII and both
+     * quotes too. A label given twice is tested twice, which is still the index's own test.
+     */
+    @Test
+    fun eachLabelsTestIsTheWhereOfTheLabelsIndexOnPostgresAndSqlite() {
+        for (label in listOf("A", "a\\b", "Caf\u00e9 \u65e5", "O'Br\"en")) {
+            val spec = RangeIndexSpec(label, listOf("id"))
+            for ((name, made) in listOf("postgres" to (PostgresDdl("g") to PostgresDdl.RANGE), "sqlite" to (SqliteDdl("g") to SqliteDdl.RANGE))) {
+                val (ddl, range) = made
+                val head = "CREATE INDEX IF NOT EXISTS ${ddl.objectName(range, listOf(label, "id"))} ON "
+                val index = ddl.createIndex(spec, null).filterIsInstance<DdlStatement.Text>().map { it.statement }.single { it.startsWith(head) }
+                val given = CypherJson.writeValueAsString(listOf(label, label))
+                val test = sql(name, "\"helper\": \"hasLabels\", \"alias\": \"\", \"labels\": $given")!!
+                val where = index.substringAfter(" WHERE ")
+                assertEquals("$where AND $where", test, "on $target, $name, $label")
+            }
+        }
     }
 
     @Test

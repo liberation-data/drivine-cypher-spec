@@ -72,7 +72,7 @@ object IdSql {
         else -> SqliteSql.hasLabels(alias, labels)
     }
 
-    /** Refuses the stamp as an id:[IndexKey.column] is made over a property, and Postgres's stamp column is no `jsonb`. */
+    /** Refuses the stamp as an id: [IndexKey.column] is made over a property, and Postgres's stamp column is no `jsonb`. */
     private fun requireId(key: String) =
         require(key != Stamps.PROPERTY) { "An id is a property of the node, not its stamp (${Stamps.PROPERTY})." }
 
