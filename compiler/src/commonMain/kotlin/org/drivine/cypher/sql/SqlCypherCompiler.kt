@@ -7912,8 +7912,13 @@ abstract class SqlCypherCompiler(
          * What `toString()` of a list or a map fails with, as it runs, where it holds what its text is not known of here: see
          * `itemText`. What it holds follows.
          */
-        const val TEMPORAL_OF_MAP = "A temporal value of a map read as the statement runs is Cypher, and is not compiled to SQL yet:"
         const val TEXT_OF_HELD = "toString() of a list or a map that holds a map read as the statement runs, a temporal value or a list nested deeper is not compiled to SQL yet: it holds"
+
+        /**
+         * What a temporal function fails with, as it runs, of a map read as the statement runs, which it is not compiled to
+         * make (drivine-cypher-spec#328): see `temporal`. The function's name follows.
+         */
+        const val TEMPORAL_OF_MAP = "A temporal value of a map read as the statement runs is Cypher, and is not compiled to SQL yet:"
 
         /**
          * Texts in the order of their Unicode code points, as Neo4j orders a map's keys where `toString()` writes it: UTF-16's
