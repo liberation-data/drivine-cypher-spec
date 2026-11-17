@@ -40,6 +40,11 @@ class LayoutMigratorTest {
         /** Layout 1's index, until a finish drops it, and the uniqueness constraints the catalog records, each a label and its properties. */
         var oldIndex = true
         val uniques = mutableListOf("Person" to listOf("name"))
+        /** The uniqueness constraints as declared, which the samples are of, whether or not their records are dropped yet. */
+        val declaredUniques: List<Pair<String, List<String>>> get() = declared
+        private val declared = mutableListOf<Pair<String, List<String>>>()
+        /** Layout 1's unique index, over its label's property's JSON text, refusing a write that repeats a key while it stands. */
+        var oldUnique: Pair<String, String>? = null
         private val schema = org.drivine.cypher.store.schema.StoreSchema.of(ddl)
 
         fun own() = rows[Table.NODES]!!.filter { (_, row) -> row.first.any { it == "DrivineStore" || it == "_DrivineSchema" } }
@@ -53,10 +58,14 @@ class LayoutMigratorTest {
                 // All or none: applied to copies, which replace the store's once every statement has run.
                 val copy = checkpoint?.toMutableMap()
                 val copies = rows.mapValues { it.value.toMutableMap() }
-                action.statements.forEach { execute(it, copy, copies) }
-                checkpoint = copy
-                rows.forEach { (table, live) -> live.clear(); live.putAll(copies[table]!!) }
-                MigrationOutcome.Ran
+                try {
+                    action.statements.forEach { execute(it, copy, copies) }
+                    checkpoint = copy
+                    rows.forEach { (table, live) -> live.clear(); live.putAll(copies[table]!!) }
+                    MigrationOutcome.Ran
+                } catch (refused: IllegalStateException) {
+                    MigrationOutcome.Failed(refused.message!!)
+                }
             }
             MigrationAction.Prepare -> { prepared = true; MigrationOutcome.Ran }
             MigrationAction.AssignStamp -> { assertNull(stampLayout, "a stamp assigned where there is one"); stampLayout = 2; MigrationOutcome.Ran }
@@ -100,7 +109,7 @@ class LayoutMigratorTest {
 
         /** The rows the sample of [statement], a uniqueness constraint's, gives: each key of its properties that repeats among its label's nodes. */
         private fun collisions(statement: String): List<Any?> {
-            val (label, properties) = uniques.first { (label, properties) ->
+            val (label, properties) = (declared + uniques).first { (label, properties) ->
                 schema.sampleConflictsQuery(org.drivine.schema.UniquenessConstraintSpec(label, properties), 5) == statement
             }
             return rows[Table.NODES]!!.entries.filter { label in it.value.first }.mapNotNull { (id, row) ->
@@ -118,12 +127,18 @@ class LayoutMigratorTest {
                 statements.stampLayout -> stampLayout = 2
                 statements.dropCheckpoint -> this.checkpoint = null
                 else -> if (action.statement.startsWith("DROP INDEX IF EXISTS drivine_ix_personname")) oldIndex = false
-                else if (action.statement.startsWith("DELETE FROM ${ddl.catalog}")) uniques.clear()
+                else if (action.statement.startsWith("DELETE FROM ${ddl.catalog}")) { declared += uniques; uniques.clear() }
                 else {
                     val table = Table.entries.first { statements.update(it) == action.statement }
                     val id = (action.parameters["id"] as Number).toLong()
                     val row = rows[table]!![id] ?: fail("No row $id")
-                    rows[table]!![id] = row.first to action.parameters["props"] as String
+                    val props = action.parameters["props"] as String
+                    oldUnique?.takeIf { oldIndex && table == Table.NODES && it.first in row.first }?.let { (label, property) ->
+                        fun key(text: String) = (PlanJson.plain(CypherJson.readTree(text)) as Map<*, *>)[property]?.let { PlanJson.writePlain(it) }
+                        val repeats = rows[table]!!.any { (other, o) -> other != id && label in o.first && key(o.second) != null && key(o.second) == key(props) }
+                        check(!repeats) { "duplicate key value violates unique constraint \"drivine_ix_personname_1a2b3c4d\"" }
+                    }
+                    rows[table]!![id] = row.first to props
                     rewrites[table to id] = (rewrites[table to id] ?: 0) + 1
                 }
             }
@@ -252,6 +267,8 @@ class LayoutMigratorTest {
             edges = emptyMap(),
         )
         store.uniques.clear(); store.uniques += "Event" to listOf("at")
+        // Layout 1's unique index over the texts: dropped before the writes, it can't refuse the rewrite that makes them one.
+        store.oldUnique = "Event" to "at"
         val request = MigrationRequest(listOf(Declaration("Event", "at", Kind.DATE_TIME)))
         // The dry run, over layout 1's texts, can't see it: its check is of possible collisions.
         assertTrue(migrate(store, request.copy(dryRun = true))!!.collisions.isEmpty())
@@ -259,7 +276,8 @@ class LayoutMigratorTest {
         assertEquals(Status.COLLISIONS, stopped.status, stopped.message)
         assertEquals(listOf("Event" to listOf("at")), stopped.collisions.map { it.label to it.properties })
         assertTrue(stopped.message!!.contains("Correct the rows"), stopped.message)
-        assertTrue(store.checkpoint != null && store.oldIndex && store.stampLayout == 1, "kept refused, part way through, nothing dropped or stamped")
+        assertTrue(store.checkpoint != null && store.stampLayout == 1, "kept refused, part way through, not stamped")
+        assertTrue(!store.oldIndex, "layout 1's unique index dropped before the writes, so the rewrite that made the keys one wasn't refused")
         // Resumed as it is, it is stopped again; the user corrects a row with the store's own tools, in layout 2, and resumes.
         assertEquals(Status.COLLISIONS, migrate(store, request)!!.status)
         store.rows[Table.NODES]!![3L] = listOf("Event") to """{"at": {"${'$'}t": "datetime", "v": "2024-03-15T10:31:00Z", "s": "10000020240315103100000000000064800"}}"""
@@ -310,9 +328,9 @@ class LayoutMigratorTest {
 
     @Test
     fun aResumeOfAGraphChangedUnderTheMigrationOrByOtherDeclarationsIsRefused() {
-        // Judged (5 actions), scanned (6 batches), begun (6), the first checkpoint and the first batch written (2, and 1 read):
-        // stopped before the second batch is written.
-        val stopAt = 21
+        // Judged (5 actions), scanned (6 batches), begun (7), the first checkpoint, the earlier layout's drops (2) and the first
+        // batch's read, then its write and the second's read: stopped before the second batch is written.
+        val stopAt = 24
         val changed = store()
         assertNull(migrate(changed, MigrationRequest(declarations, batchSize = 2), stopAt = stopAt))
         assertTrue(changed.checkpoint?.containsKey("checkpoint") == true, "stopped part way through its writes")
@@ -332,7 +350,7 @@ class LayoutMigratorTest {
         // Begun keeping a value not of its kind, stopped once its first batches are written, before the one that keeps it.
         val store = store()
         store.rows[Table.EDGES]!![6L] = listOf("KNOWS") to """{"since": "soon"}"""
-        assertNull(migrate(store, MigrationRequest(declarations, batchSize = 2, keepInvalid = true), stopAt = 21))
+        assertNull(migrate(store, MigrationRequest(declarations, batchSize = 2, keepInvalid = true), stopAt = 24))
         assertTrue(store.checkpoint?.containsKey("checkpoint") == true, "stopped part way through its writes")
         val refused = migrate(store, MigrationRequest(declarations, batchSize = 2))!!
         assertEquals(Status.REFUSED, refused.status, refused.message)
@@ -347,7 +365,7 @@ class LayoutMigratorTest {
     fun aGraphPartWayThroughAMigrationThatALaterDrivineWroteToIsRefusedNotResumed() {
         val store = store()
         // Stopped after its first batch is written, then written to by a later Drivine, which made its own lock table.
-        assertNull(migrate(store, MigrationRequest(declarations, batchSize = 2), stopAt = 21))
+        assertNull(migrate(store, MigrationRequest(declarations, batchSize = 2), stopAt = 24))
         store.extraObjects += mapOf("name" to "drivine_lock3", "type" to "TABLE")
         val report = migrate(store, MigrationRequest(declarations, batchSize = 2))!!
         assertEquals(Status.REFUSED, report.status)
@@ -382,7 +400,13 @@ class LayoutMigratorTest {
     }
 
     @Test
-    fun twoMigrationsBegunAtOnceRunOneAndRefuseTheOther() {
+    /**
+     * The race the stamps read under the lock guards: two migrations judge the graph, the first finishes and drops its
+     * checkpoint, and the second, taking the lock after it, would find no checkpoint and rewrite layout 2's values again,
+     * which a rewrite is not to be run on twice. It reads the stamp of layout 2 under the lock and aborts, writing nothing.
+     * Keep it named so: the read of the stamps in [LayoutMigrator]'s begin round is what this test holds in place.
+     */
+    fun aMigrationThatReadsALayoutTwoStampUnderTheLockAbortsWithoutWriting() {
         val store = store()
         val request = MigrationRequest(declarations, batchSize = 2)
         // The second judges and scans the graph before the first begins, and waits on the lock while the first runs.
@@ -452,7 +476,7 @@ class LayoutMigratorTest {
     fun aValueNotOfItsKindWrittenAfterTheScanRefusesItsBatchUnwritten() {
         // Stopped before the second batch is written, as in the test of a changed graph; then a row of a later batch changed.
         val store = store()
-        assertNull(migrate(store, MigrationRequest(declarations, batchSize = 2), stopAt = 21))
+        assertNull(migrate(store, MigrationRequest(declarations, batchSize = 2), stopAt = 24))
         store.rows[Table.EDGES]!![5L] = listOf("KNOWS") to """{"since": "soon"}"""
         val before = store.rows.mapValues { it.value.toMap() }
         val checkpoint = store.checkpoint!!.toMap()
@@ -480,7 +504,7 @@ class LayoutMigratorTest {
     fun aValueNotOfItsKindWrittenAfterTheScanIsReportedWithOnlyTheRowsWritten() {
         // Stopped before the second batch, nodes 3 and 4, is written; then node 4 changed, after node 3, which its batch would rewrite.
         val store = store()
-        assertNull(migrate(store, MigrationRequest(declarations, batchSize = 2), stopAt = 21))
+        assertNull(migrate(store, MigrationRequest(declarations, batchSize = 2), stopAt = 24))
         store.rows[Table.NODES]!![4L] = listOf("Person") to """{"born": "soon"}"""
         val report = migrate(store, MigrationRequest(declarations, batchSize = 2))!!
         assertEquals(Status.INVALID, report.status, report.message)
