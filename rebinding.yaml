@@ -1,0 +1,920 @@
+# drivine4j#819's rebinding table: a name a subquery has from outside it, m1, bound again within it, by each binder, in
+# each context, with two controls, and what Neo4j 2026.10.1 does with each, each statement run over queries.yaml's graph
+# alone, as EXPLAIN and as a run. Then a canary: a sample of contexts two deep, alike. See README.md, "Rebinding a
+# variable from outside a subquery".
+name: "m1"
+contexts:
+  - {name: "CALL (x) importing it", outer: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->({o}) CALL ({o}) { {body} } RETURN {o}.title AS title, y ORDER BY title, y", inner: "CALL ({o}) { {body} } RETURN y"}
+  - {name: "CALL (*)", outer: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->({o}) CALL (*) { {body} } RETURN {o}.title AS title, y ORDER BY title, y", inner: "CALL (*) { {body} } RETURN y"}
+  - {name: "CALL () at the top level", outer: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->({o}) CALL () { {body} } RETURN {o}.title AS title, y ORDER BY title, y", inner: "CALL () { {body} } RETURN y"}
+  - {name: "CALL () inside EXISTS", outer: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->({o}) RETURN {o}.title AS title, EXISTS { CALL () { {body} } RETURN y } AS y ORDER BY title", inner: "RETURN EXISTS { CALL () { {body} } RETURN y } AS y"}
+  - {name: "CALL () inside COUNT", outer: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->({o}) RETURN {o}.title AS title, COUNT { CALL () { {body} } RETURN y } AS y ORDER BY title", inner: "RETURN COUNT { CALL () { {body} } RETURN y } AS y"}
+  - {name: "EXISTS", outer: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->({o}) RETURN {o}.title AS title, EXISTS { {body} } AS y ORDER BY title", inner: "RETURN EXISTS { {body} } AS y"}
+  - {name: "COUNT", outer: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->({o}) RETURN {o}.title AS title, COUNT { {body} } AS y ORDER BY title", inner: "RETURN COUNT { {body} } AS y"}
+binders:
+  - {name: "a WITH alias", bind: "WITH 'w' AS {v} RETURN {v} AS y", read: "WITH {v} AS z RETURN z.title AS y"}
+  - {name: "an UNWIND alias", bind: "UNWIND ['u'] AS {v} RETURN {v} AS y", read: "UNWIND [{v}] AS z RETURN z.title AS y"}
+  - {name: "a CALL subquery's RETURN item", bind: "CALL () { RETURN 'c' AS {v} } RETURN {v} AS y", read: "CALL ({v}) { RETURN {v}.title AS z } RETURN z AS y"}
+  - {name: "a FOREACH variable", bind: "FOREACH ({v} IN [] | CREATE (:Tmp)) RETURN 'f' AS y", read: "FOREACH (z IN [{v}][0..0] | CREATE (:Tmp)) RETURN 'f' AS y"}
+  - {name: "a MATCH pattern variable", bind: "MATCH ({v}:Movie) RETURN {v}.title AS y", read: "MATCH (z:Movie) WHERE z = {v} RETURN z.title AS y"}
+  - {name: "an OPTIONAL MATCH pattern variable", bind: "OPTIONAL MATCH ({v}:Movie) RETURN {v}.title AS y", read: "OPTIONAL MATCH (z:Movie) WHERE z = {v} RETURN z.title AS y"}
+variants:
+  - {name: "bound outside", outer: "m1", body: "bind"}
+  - {name: "not bound outside", outer: "m0", body: "bind"}
+  - {name: "only read", outer: "m1", body: "read"}
+cells:
+  - contexts: ["CALL (x) importing it"]
+    binder: "a WITH alias"
+    variant: "bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL (m1) { WITH 'w' AS m1 RETURN m1 AS y } RETURN m1.title AS title, y ORDER BY title, y"
+    neo4j: "42N07"
+    error: "The variable m1 is shadowing a variable with the same name from the outer scope, as in Neo4j: rename it."
+  - contexts: ["CALL (x) importing it"]
+    binder: "a WITH alias"
+    variant: "not bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) CALL (m0) { WITH 'w' AS m1 RETURN m1 AS y } RETURN m0.title AS title, y ORDER BY title, y"
+    neo4j: "rows"
+    rows: [["The Matrix", "w"], ["The Matrix Reloaded", "w"]]
+  - contexts: ["CALL (x) importing it"]
+    binder: "a WITH alias"
+    variant: "only read"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL (m1) { WITH m1 AS z RETURN z.title AS y } RETURN m1.title AS title, y ORDER BY title, y"
+    neo4j: "rows"
+    rows: [["The Matrix", "The Matrix"], ["The Matrix Reloaded", "The Matrix Reloaded"]]
+  - contexts: ["CALL (x) importing it"]
+    binder: "an UNWIND alias"
+    variant: "bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL (m1) { UNWIND ['u'] AS m1 RETURN m1 AS y } RETURN m1.title AS title, y ORDER BY title, y"
+    neo4j: "42N07"
+    error: "The variable m1 is shadowing a variable with the same name from the outer scope, as in Neo4j: rename it."
+  - contexts: ["CALL (x) importing it"]
+    binder: "an UNWIND alias"
+    variant: "not bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) CALL (m0) { UNWIND ['u'] AS m1 RETURN m1 AS y } RETURN m0.title AS title, y ORDER BY title, y"
+    neo4j: "rows"
+    rows: [["The Matrix", "u"], ["The Matrix Reloaded", "u"]]
+  - contexts: ["CALL (x) importing it"]
+    binder: "an UNWIND alias"
+    variant: "only read"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL (m1) { UNWIND [m1] AS z RETURN z.title AS y } RETURN m1.title AS title, y ORDER BY title, y"
+    neo4j: "rows"
+    rows: [["The Matrix", "The Matrix"], ["The Matrix Reloaded", "The Matrix Reloaded"]]
+  - contexts: ["CALL (x) importing it"]
+    binder: "a CALL subquery's RETURN item"
+    variant: "bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL (m1) { CALL () { RETURN 'c' AS m1 } RETURN m1 AS y } RETURN m1.title AS title, y ORDER BY title, y"
+    neo4j: "42N07"
+    error: "The variable m1 is shadowing a variable with the same name from the outer scope, as in Neo4j: rename it."
+  - contexts: ["CALL (x) importing it"]
+    binder: "a CALL subquery's RETURN item"
+    variant: "not bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) CALL (m0) { CALL () { RETURN 'c' AS m1 } RETURN m1 AS y } RETURN m0.title AS title, y ORDER BY title, y"
+    neo4j: "rows"
+    rows: [["The Matrix", "c"], ["The Matrix Reloaded", "c"]]
+  - contexts: ["CALL (x) importing it"]
+    binder: "a CALL subquery's RETURN item"
+    variant: "only read"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL (m1) { CALL (m1) { RETURN m1.title AS z } RETURN z AS y } RETURN m1.title AS title, y ORDER BY title, y"
+    neo4j: "rows"
+    rows: [["The Matrix", "The Matrix"], ["The Matrix Reloaded", "The Matrix Reloaded"]]
+  - contexts: ["CALL (x) importing it"]
+    binder: "a FOREACH variable"
+    variant: "bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL (m1) { FOREACH (m1 IN [] | CREATE (:Tmp)) RETURN 'f' AS y } RETURN m1.title AS title, y ORDER BY title, y"
+    neo4j: "rows"
+    rows: [["The Matrix", "f"], ["The Matrix Reloaded", "f"]]
+  - contexts: ["CALL (x) importing it"]
+    binder: "a FOREACH variable"
+    variant: "not bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) CALL (m0) { FOREACH (m1 IN [] | CREATE (:Tmp)) RETURN 'f' AS y } RETURN m0.title AS title, y ORDER BY title, y"
+    neo4j: "rows"
+    rows: [["The Matrix", "f"], ["The Matrix Reloaded", "f"]]
+  - contexts: ["CALL (x) importing it"]
+    binder: "a FOREACH variable"
+    variant: "only read"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL (m1) { FOREACH (z IN [m1][0..0] | CREATE (:Tmp)) RETURN 'f' AS y } RETURN m1.title AS title, y ORDER BY title, y"
+    neo4j: "rows"
+    rows: [["The Matrix", "f"], ["The Matrix Reloaded", "f"]]
+  - contexts: ["CALL (x) importing it"]
+    binder: "a MATCH pattern variable"
+    variant: "bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL (m1) { MATCH (m1:Movie) RETURN m1.title AS y } RETURN m1.title AS title, y ORDER BY title, y"
+    neo4j: "rows"
+    rows: [["The Matrix", "The Matrix"], ["The Matrix Reloaded", "The Matrix Reloaded"]]
+  - contexts: ["CALL (x) importing it"]
+    binder: "a MATCH pattern variable"
+    variant: "not bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) CALL (m0) { MATCH (m1:Movie) RETURN m1.title AS y } RETURN m0.title AS title, y ORDER BY title, y"
+    neo4j: "rows"
+    rows: [["The Matrix", "Johnny Mnemonic"], ["The Matrix", "The Matrix"], ["The Matrix", "The Matrix Reloaded"], ["The Matrix Reloaded", "Johnny Mnemonic"], ["The Matrix Reloaded", "The Matrix"], ["The Matrix Reloaded", "The Matrix Reloaded"]]
+  - contexts: ["CALL (x) importing it"]
+    binder: "a MATCH pattern variable"
+    variant: "only read"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL (m1) { MATCH (z:Movie) WHERE z = m1 RETURN z.title AS y } RETURN m1.title AS title, y ORDER BY title, y"
+    neo4j: "rows"
+    rows: [["The Matrix", "The Matrix"], ["The Matrix Reloaded", "The Matrix Reloaded"]]
+  - contexts: ["CALL (x) importing it"]
+    binder: "an OPTIONAL MATCH pattern variable"
+    variant: "bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL (m1) { OPTIONAL MATCH (m1:Movie) RETURN m1.title AS y } RETURN m1.title AS title, y ORDER BY title, y"
+    neo4j: "rows"
+    rows: [["The Matrix", "The Matrix"], ["The Matrix Reloaded", "The Matrix Reloaded"]]
+  - contexts: ["CALL (x) importing it"]
+    binder: "an OPTIONAL MATCH pattern variable"
+    variant: "not bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) CALL (m0) { OPTIONAL MATCH (m1:Movie) RETURN m1.title AS y } RETURN m0.title AS title, y ORDER BY title, y"
+    neo4j: "rows"
+    rows: [["The Matrix", "Johnny Mnemonic"], ["The Matrix", "The Matrix"], ["The Matrix", "The Matrix Reloaded"], ["The Matrix Reloaded", "Johnny Mnemonic"], ["The Matrix Reloaded", "The Matrix"], ["The Matrix Reloaded", "The Matrix Reloaded"]]
+  - contexts: ["CALL (x) importing it"]
+    binder: "an OPTIONAL MATCH pattern variable"
+    variant: "only read"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL (m1) { OPTIONAL MATCH (z:Movie) WHERE z = m1 RETURN z.title AS y } RETURN m1.title AS title, y ORDER BY title, y"
+    neo4j: "rows"
+    rows: [["The Matrix", "The Matrix"], ["The Matrix Reloaded", "The Matrix Reloaded"]]
+  - contexts: ["CALL (*)"]
+    binder: "a WITH alias"
+    variant: "bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL (*) { WITH 'w' AS m1 RETURN m1 AS y } RETURN m1.title AS title, y ORDER BY title, y"
+    neo4j: "42N07"
+    error: "The variable m1 is shadowing a variable with the same name from the outer scope, as in Neo4j: rename it."
+  - contexts: ["CALL (*)"]
+    binder: "a WITH alias"
+    variant: "not bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) CALL (*) { WITH 'w' AS m1 RETURN m1 AS y } RETURN m0.title AS title, y ORDER BY title, y"
+    neo4j: "rows"
+    rows: [["The Matrix", "w"], ["The Matrix Reloaded", "w"]]
+  - contexts: ["CALL (*)"]
+    binder: "a WITH alias"
+    variant: "only read"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL (*) { WITH m1 AS z RETURN z.title AS y } RETURN m1.title AS title, y ORDER BY title, y"
+    neo4j: "rows"
+    rows: [["The Matrix", "The Matrix"], ["The Matrix Reloaded", "The Matrix Reloaded"]]
+  - contexts: ["CALL (*)"]
+    binder: "an UNWIND alias"
+    variant: "bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL (*) { UNWIND ['u'] AS m1 RETURN m1 AS y } RETURN m1.title AS title, y ORDER BY title, y"
+    neo4j: "42N07"
+    error: "The variable m1 is shadowing a variable with the same name from the outer scope, as in Neo4j: rename it."
+  - contexts: ["CALL (*)"]
+    binder: "an UNWIND alias"
+    variant: "not bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) CALL (*) { UNWIND ['u'] AS m1 RETURN m1 AS y } RETURN m0.title AS title, y ORDER BY title, y"
+    neo4j: "rows"
+    rows: [["The Matrix", "u"], ["The Matrix Reloaded", "u"]]
+  - contexts: ["CALL (*)"]
+    binder: "an UNWIND alias"
+    variant: "only read"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL (*) { UNWIND [m1] AS z RETURN z.title AS y } RETURN m1.title AS title, y ORDER BY title, y"
+    neo4j: "rows"
+    rows: [["The Matrix", "The Matrix"], ["The Matrix Reloaded", "The Matrix Reloaded"]]
+  - contexts: ["CALL (*)"]
+    binder: "a CALL subquery's RETURN item"
+    variant: "bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL (*) { CALL () { RETURN 'c' AS m1 } RETURN m1 AS y } RETURN m1.title AS title, y ORDER BY title, y"
+    neo4j: "42N07"
+    error: "The variable m1 is shadowing a variable with the same name from the outer scope, as in Neo4j: rename it."
+  - contexts: ["CALL (*)"]
+    binder: "a CALL subquery's RETURN item"
+    variant: "not bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) CALL (*) { CALL () { RETURN 'c' AS m1 } RETURN m1 AS y } RETURN m0.title AS title, y ORDER BY title, y"
+    neo4j: "rows"
+    rows: [["The Matrix", "c"], ["The Matrix Reloaded", "c"]]
+  - contexts: ["CALL (*)"]
+    binder: "a CALL subquery's RETURN item"
+    variant: "only read"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL (*) { CALL (m1) { RETURN m1.title AS z } RETURN z AS y } RETURN m1.title AS title, y ORDER BY title, y"
+    neo4j: "rows"
+    rows: [["The Matrix", "The Matrix"], ["The Matrix Reloaded", "The Matrix Reloaded"]]
+  - contexts: ["CALL (*)"]
+    binder: "a FOREACH variable"
+    variant: "bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL (*) { FOREACH (m1 IN [] | CREATE (:Tmp)) RETURN 'f' AS y } RETURN m1.title AS title, y ORDER BY title, y"
+    neo4j: "rows"
+    rows: [["The Matrix", "f"], ["The Matrix Reloaded", "f"]]
+  - contexts: ["CALL (*)"]
+    binder: "a FOREACH variable"
+    variant: "not bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) CALL (*) { FOREACH (m1 IN [] | CREATE (:Tmp)) RETURN 'f' AS y } RETURN m0.title AS title, y ORDER BY title, y"
+    neo4j: "rows"
+    rows: [["The Matrix", "f"], ["The Matrix Reloaded", "f"]]
+  - contexts: ["CALL (*)"]
+    binder: "a FOREACH variable"
+    variant: "only read"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL (*) { FOREACH (z IN [m1][0..0] | CREATE (:Tmp)) RETURN 'f' AS y } RETURN m1.title AS title, y ORDER BY title, y"
+    neo4j: "rows"
+    rows: [["The Matrix", "f"], ["The Matrix Reloaded", "f"]]
+  - contexts: ["CALL (*)"]
+    binder: "a MATCH pattern variable"
+    variant: "bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL (*) { MATCH (m1:Movie) RETURN m1.title AS y } RETURN m1.title AS title, y ORDER BY title, y"
+    neo4j: "rows"
+    rows: [["The Matrix", "The Matrix"], ["The Matrix Reloaded", "The Matrix Reloaded"]]
+  - contexts: ["CALL (*)"]
+    binder: "a MATCH pattern variable"
+    variant: "not bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) CALL (*) { MATCH (m1:Movie) RETURN m1.title AS y } RETURN m0.title AS title, y ORDER BY title, y"
+    neo4j: "rows"
+    rows: [["The Matrix", "Johnny Mnemonic"], ["The Matrix", "The Matrix"], ["The Matrix", "The Matrix Reloaded"], ["The Matrix Reloaded", "Johnny Mnemonic"], ["The Matrix Reloaded", "The Matrix"], ["The Matrix Reloaded", "The Matrix Reloaded"]]
+  - contexts: ["CALL (*)"]
+    binder: "a MATCH pattern variable"
+    variant: "only read"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL (*) { MATCH (z:Movie) WHERE z = m1 RETURN z.title AS y } RETURN m1.title AS title, y ORDER BY title, y"
+    neo4j: "rows"
+    rows: [["The Matrix", "The Matrix"], ["The Matrix Reloaded", "The Matrix Reloaded"]]
+  - contexts: ["CALL (*)"]
+    binder: "an OPTIONAL MATCH pattern variable"
+    variant: "bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL (*) { OPTIONAL MATCH (m1:Movie) RETURN m1.title AS y } RETURN m1.title AS title, y ORDER BY title, y"
+    neo4j: "rows"
+    rows: [["The Matrix", "The Matrix"], ["The Matrix Reloaded", "The Matrix Reloaded"]]
+  - contexts: ["CALL (*)"]
+    binder: "an OPTIONAL MATCH pattern variable"
+    variant: "not bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) CALL (*) { OPTIONAL MATCH (m1:Movie) RETURN m1.title AS y } RETURN m0.title AS title, y ORDER BY title, y"
+    neo4j: "rows"
+    rows: [["The Matrix", "Johnny Mnemonic"], ["The Matrix", "The Matrix"], ["The Matrix", "The Matrix Reloaded"], ["The Matrix Reloaded", "Johnny Mnemonic"], ["The Matrix Reloaded", "The Matrix"], ["The Matrix Reloaded", "The Matrix Reloaded"]]
+  - contexts: ["CALL (*)"]
+    binder: "an OPTIONAL MATCH pattern variable"
+    variant: "only read"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL (*) { OPTIONAL MATCH (z:Movie) WHERE z = m1 RETURN z.title AS y } RETURN m1.title AS title, y ORDER BY title, y"
+    neo4j: "rows"
+    rows: [["The Matrix", "The Matrix"], ["The Matrix Reloaded", "The Matrix Reloaded"]]
+  - contexts: ["CALL () at the top level"]
+    binder: "a WITH alias"
+    variant: "bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL () { WITH 'w' AS m1 RETURN m1 AS y } RETURN m1.title AS title, y ORDER BY title, y"
+    neo4j: "rows"
+    rows: [["The Matrix", "w"], ["The Matrix Reloaded", "w"]]
+  - contexts: ["CALL () at the top level"]
+    binder: "a WITH alias"
+    variant: "not bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) CALL () { WITH 'w' AS m1 RETURN m1 AS y } RETURN m0.title AS title, y ORDER BY title, y"
+    neo4j: "rows"
+    rows: [["The Matrix", "w"], ["The Matrix Reloaded", "w"]]
+  - contexts: ["CALL () at the top level"]
+    binder: "a WITH alias"
+    variant: "only read"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL () { WITH m1 AS z RETURN z.title AS y } RETURN m1.title AS title, y ORDER BY title, y"
+    neo4j: "42N62"
+    error: "m1 is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used."
+  - contexts: ["CALL () at the top level"]
+    binder: "an UNWIND alias"
+    variant: "bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL () { UNWIND ['u'] AS m1 RETURN m1 AS y } RETURN m1.title AS title, y ORDER BY title, y"
+    neo4j: "rows"
+    rows: [["The Matrix", "u"], ["The Matrix Reloaded", "u"]]
+  - contexts: ["CALL () at the top level"]
+    binder: "an UNWIND alias"
+    variant: "not bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) CALL () { UNWIND ['u'] AS m1 RETURN m1 AS y } RETURN m0.title AS title, y ORDER BY title, y"
+    neo4j: "rows"
+    rows: [["The Matrix", "u"], ["The Matrix Reloaded", "u"]]
+  - contexts: ["CALL () at the top level"]
+    binder: "an UNWIND alias"
+    variant: "only read"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL () { UNWIND [m1] AS z RETURN z.title AS y } RETURN m1.title AS title, y ORDER BY title, y"
+    neo4j: "42N62"
+    error: "m1 is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used."
+  - contexts: ["CALL () at the top level"]
+    binder: "a CALL subquery's RETURN item"
+    variant: "bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL () { CALL () { RETURN 'c' AS m1 } RETURN m1 AS y } RETURN m1.title AS title, y ORDER BY title, y"
+    neo4j: "rows"
+    rows: [["The Matrix", "c"], ["The Matrix Reloaded", "c"]]
+  - contexts: ["CALL () at the top level"]
+    binder: "a CALL subquery's RETURN item"
+    variant: "not bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) CALL () { CALL () { RETURN 'c' AS m1 } RETURN m1 AS y } RETURN m0.title AS title, y ORDER BY title, y"
+    neo4j: "rows"
+    rows: [["The Matrix", "c"], ["The Matrix Reloaded", "c"]]
+  - contexts: ["CALL () at the top level"]
+    binder: "a CALL subquery's RETURN item"
+    variant: "only read"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL () { CALL (m1) { RETURN m1.title AS z } RETURN z AS y } RETURN m1.title AS title, y ORDER BY title, y"
+    neo4j: "42N62"
+    error: "m1 is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used."
+  - contexts: ["CALL () at the top level"]
+    binder: "a FOREACH variable"
+    variant: "bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL () { FOREACH (m1 IN [] | CREATE (:Tmp)) RETURN 'f' AS y } RETURN m1.title AS title, y ORDER BY title, y"
+    neo4j: "rows"
+    rows: [["The Matrix", "f"], ["The Matrix Reloaded", "f"]]
+  - contexts: ["CALL () at the top level"]
+    binder: "a FOREACH variable"
+    variant: "not bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) CALL () { FOREACH (m1 IN [] | CREATE (:Tmp)) RETURN 'f' AS y } RETURN m0.title AS title, y ORDER BY title, y"
+    neo4j: "rows"
+    rows: [["The Matrix", "f"], ["The Matrix Reloaded", "f"]]
+  - contexts: ["CALL () at the top level"]
+    binder: "a FOREACH variable"
+    variant: "only read"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL () { FOREACH (z IN [m1][0..0] | CREATE (:Tmp)) RETURN 'f' AS y } RETURN m1.title AS title, y ORDER BY title, y"
+    neo4j: "42N62"
+    error: "m1 is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used."
+  - contexts: ["CALL () at the top level"]
+    binder: "a MATCH pattern variable"
+    variant: "bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL () { MATCH (m1:Movie) RETURN m1.title AS y } RETURN m1.title AS title, y ORDER BY title, y"
+    neo4j: "rows"
+    rows: [["The Matrix", "Johnny Mnemonic"], ["The Matrix", "The Matrix"], ["The Matrix", "The Matrix Reloaded"], ["The Matrix Reloaded", "Johnny Mnemonic"], ["The Matrix Reloaded", "The Matrix"], ["The Matrix Reloaded", "The Matrix Reloaded"]]
+  - contexts: ["CALL () at the top level"]
+    binder: "a MATCH pattern variable"
+    variant: "not bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) CALL () { MATCH (m1:Movie) RETURN m1.title AS y } RETURN m0.title AS title, y ORDER BY title, y"
+    neo4j: "rows"
+    rows: [["The Matrix", "Johnny Mnemonic"], ["The Matrix", "The Matrix"], ["The Matrix", "The Matrix Reloaded"], ["The Matrix Reloaded", "Johnny Mnemonic"], ["The Matrix Reloaded", "The Matrix"], ["The Matrix Reloaded", "The Matrix Reloaded"]]
+  - contexts: ["CALL () at the top level"]
+    binder: "a MATCH pattern variable"
+    variant: "only read"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL () { MATCH (z:Movie) WHERE z = m1 RETURN z.title AS y } RETURN m1.title AS title, y ORDER BY title, y"
+    neo4j: "42N62"
+    error: "m1 is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used."
+  - contexts: ["CALL () at the top level"]
+    binder: "an OPTIONAL MATCH pattern variable"
+    variant: "bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL () { OPTIONAL MATCH (m1:Movie) RETURN m1.title AS y } RETURN m1.title AS title, y ORDER BY title, y"
+    neo4j: "rows"
+    rows: [["The Matrix", "Johnny Mnemonic"], ["The Matrix", "The Matrix"], ["The Matrix", "The Matrix Reloaded"], ["The Matrix Reloaded", "Johnny Mnemonic"], ["The Matrix Reloaded", "The Matrix"], ["The Matrix Reloaded", "The Matrix Reloaded"]]
+  - contexts: ["CALL () at the top level"]
+    binder: "an OPTIONAL MATCH pattern variable"
+    variant: "not bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) CALL () { OPTIONAL MATCH (m1:Movie) RETURN m1.title AS y } RETURN m0.title AS title, y ORDER BY title, y"
+    neo4j: "rows"
+    rows: [["The Matrix", "Johnny Mnemonic"], ["The Matrix", "The Matrix"], ["The Matrix", "The Matrix Reloaded"], ["The Matrix Reloaded", "Johnny Mnemonic"], ["The Matrix Reloaded", "The Matrix"], ["The Matrix Reloaded", "The Matrix Reloaded"]]
+  - contexts: ["CALL () at the top level"]
+    binder: "an OPTIONAL MATCH pattern variable"
+    variant: "only read"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL () { OPTIONAL MATCH (z:Movie) WHERE z = m1 RETURN z.title AS y } RETURN m1.title AS title, y ORDER BY title, y"
+    neo4j: "42N62"
+    error: "m1 is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used."
+  - contexts: ["CALL () inside EXISTS"]
+    binder: "a WITH alias"
+    variant: "bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, EXISTS { CALL () { WITH 'w' AS m1 RETURN m1 AS y } RETURN y } AS y ORDER BY title"
+    neo4j: "rows"
+    rows: [["The Matrix", true], ["The Matrix Reloaded", true]]
+  - contexts: ["CALL () inside EXISTS"]
+    binder: "a WITH alias"
+    variant: "not bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) RETURN m0.title AS title, EXISTS { CALL () { WITH 'w' AS m1 RETURN m1 AS y } RETURN y } AS y ORDER BY title"
+    neo4j: "rows"
+    rows: [["The Matrix", true], ["The Matrix Reloaded", true]]
+  - contexts: ["CALL () inside EXISTS"]
+    binder: "a WITH alias"
+    variant: "only read"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, EXISTS { CALL () { WITH m1 AS z RETURN z.title AS y } RETURN y } AS y ORDER BY title"
+    neo4j: "42N62"
+    error: "m1 is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used."
+  - contexts: ["CALL () inside EXISTS"]
+    binder: "an UNWIND alias"
+    variant: "bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, EXISTS { CALL () { UNWIND ['u'] AS m1 RETURN m1 AS y } RETURN y } AS y ORDER BY title"
+    neo4j: "rows"
+    rows: [["The Matrix", true], ["The Matrix Reloaded", true]]
+  - contexts: ["CALL () inside EXISTS"]
+    binder: "an UNWIND alias"
+    variant: "not bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) RETURN m0.title AS title, EXISTS { CALL () { UNWIND ['u'] AS m1 RETURN m1 AS y } RETURN y } AS y ORDER BY title"
+    neo4j: "rows"
+    rows: [["The Matrix", true], ["The Matrix Reloaded", true]]
+  - contexts: ["CALL () inside EXISTS"]
+    binder: "an UNWIND alias"
+    variant: "only read"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, EXISTS { CALL () { UNWIND [m1] AS z RETURN z.title AS y } RETURN y } AS y ORDER BY title"
+    neo4j: "42N62"
+    error: "m1 is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used."
+  - contexts: ["CALL () inside EXISTS"]
+    binder: "a CALL subquery's RETURN item"
+    variant: "bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, EXISTS { CALL () { CALL () { RETURN 'c' AS m1 } RETURN m1 AS y } RETURN y } AS y ORDER BY title"
+    neo4j: "42N07"
+    error: "The variable m1 is shadowing a variable with the same name from the outer scope, as in Neo4j: rename it."
+  - contexts: ["CALL () inside EXISTS"]
+    binder: "a CALL subquery's RETURN item"
+    variant: "not bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) RETURN m0.title AS title, EXISTS { CALL () { CALL () { RETURN 'c' AS m1 } RETURN m1 AS y } RETURN y } AS y ORDER BY title"
+    neo4j: "rows"
+    rows: [["The Matrix", true], ["The Matrix Reloaded", true]]
+  - contexts: ["CALL () inside EXISTS"]
+    binder: "a CALL subquery's RETURN item"
+    variant: "only read"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, EXISTS { CALL () { CALL (m1) { RETURN m1.title AS z } RETURN z AS y } RETURN y } AS y ORDER BY title"
+    neo4j: "42N62"
+    error: "m1 is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used."
+  - contexts: ["CALL () inside EXISTS"]
+    binder: "a FOREACH variable"
+    variant: "bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, EXISTS { CALL () { FOREACH (m1 IN [] | CREATE (:Tmp)) RETURN 'f' AS y } RETURN y } AS y ORDER BY title"
+    neo4j: "42N57"
+    error: "A write in EXISTS { … } is Cypher, and is not compiled to SQL yet."
+    note: "Neo4j refuses a write within an EXISTS { … } or a COUNT { … } (its 42N57), which the SQL stores refuse as not compiled yet."
+  - contexts: ["CALL () inside EXISTS"]
+    binder: "a FOREACH variable"
+    variant: "not bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) RETURN m0.title AS title, EXISTS { CALL () { FOREACH (m1 IN [] | CREATE (:Tmp)) RETURN 'f' AS y } RETURN y } AS y ORDER BY title"
+    neo4j: "42N57"
+    error: "A write in EXISTS { … } is Cypher, and is not compiled to SQL yet."
+    note: "Neo4j refuses a write within an EXISTS { … } or a COUNT { … } (its 42N57), which the SQL stores refuse as not compiled yet."
+  - contexts: ["CALL () inside EXISTS"]
+    binder: "a FOREACH variable"
+    variant: "only read"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, EXISTS { CALL () { FOREACH (z IN [m1][0..0] | CREATE (:Tmp)) RETURN 'f' AS y } RETURN y } AS y ORDER BY title"
+    neo4j: "42N57"
+    error: "A write in EXISTS { … } is Cypher, and is not compiled to SQL yet."
+    note: "Neo4j refuses a write within an EXISTS { … } or a COUNT { … } (its 42N57), which the SQL stores refuse as not compiled yet."
+  - contexts: ["CALL () inside EXISTS"]
+    binder: "a MATCH pattern variable"
+    variant: "bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, EXISTS { CALL () { MATCH (m1:Movie) RETURN m1.title AS y } RETURN y } AS y ORDER BY title"
+    neo4j: "rows"
+    rows: [["The Matrix", true], ["The Matrix Reloaded", true]]
+  - contexts: ["CALL () inside EXISTS"]
+    binder: "a MATCH pattern variable"
+    variant: "not bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) RETURN m0.title AS title, EXISTS { CALL () { MATCH (m1:Movie) RETURN m1.title AS y } RETURN y } AS y ORDER BY title"
+    neo4j: "rows"
+    rows: [["The Matrix", true], ["The Matrix Reloaded", true]]
+  - contexts: ["CALL () inside EXISTS"]
+    binder: "a MATCH pattern variable"
+    variant: "only read"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, EXISTS { CALL () { MATCH (z:Movie) WHERE z = m1 RETURN z.title AS y } RETURN y } AS y ORDER BY title"
+    neo4j: "42N62"
+    error: "m1 is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used."
+  - contexts: ["CALL () inside EXISTS"]
+    binder: "an OPTIONAL MATCH pattern variable"
+    variant: "bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, EXISTS { CALL () { OPTIONAL MATCH (m1:Movie) RETURN m1.title AS y } RETURN y } AS y ORDER BY title"
+    neo4j: "rows"
+    rows: [["The Matrix", true], ["The Matrix Reloaded", true]]
+  - contexts: ["CALL () inside EXISTS"]
+    binder: "an OPTIONAL MATCH pattern variable"
+    variant: "not bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) RETURN m0.title AS title, EXISTS { CALL () { OPTIONAL MATCH (m1:Movie) RETURN m1.title AS y } RETURN y } AS y ORDER BY title"
+    neo4j: "rows"
+    rows: [["The Matrix", true], ["The Matrix Reloaded", true]]
+  - contexts: ["CALL () inside EXISTS"]
+    binder: "an OPTIONAL MATCH pattern variable"
+    variant: "only read"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, EXISTS { CALL () { OPTIONAL MATCH (z:Movie) WHERE z = m1 RETURN z.title AS y } RETURN y } AS y ORDER BY title"
+    neo4j: "42N62"
+    error: "m1 is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used."
+  - contexts: ["CALL () inside COUNT"]
+    binder: "a WITH alias"
+    variant: "bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, COUNT { CALL () { WITH 'w' AS m1 RETURN m1 AS y } RETURN y } AS y ORDER BY title"
+    neo4j: "rows"
+    rows: [["The Matrix", 1], ["The Matrix Reloaded", 1]]
+  - contexts: ["CALL () inside COUNT"]
+    binder: "a WITH alias"
+    variant: "not bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) RETURN m0.title AS title, COUNT { CALL () { WITH 'w' AS m1 RETURN m1 AS y } RETURN y } AS y ORDER BY title"
+    neo4j: "rows"
+    rows: [["The Matrix", 1], ["The Matrix Reloaded", 1]]
+  - contexts: ["CALL () inside COUNT"]
+    binder: "a WITH alias"
+    variant: "only read"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, COUNT { CALL () { WITH m1 AS z RETURN z.title AS y } RETURN y } AS y ORDER BY title"
+    neo4j: "42N62"
+    error: "m1 is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used."
+  - contexts: ["CALL () inside COUNT"]
+    binder: "an UNWIND alias"
+    variant: "bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, COUNT { CALL () { UNWIND ['u'] AS m1 RETURN m1 AS y } RETURN y } AS y ORDER BY title"
+    neo4j: "rows"
+    rows: [["The Matrix", 1], ["The Matrix Reloaded", 1]]
+  - contexts: ["CALL () inside COUNT"]
+    binder: "an UNWIND alias"
+    variant: "not bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) RETURN m0.title AS title, COUNT { CALL () { UNWIND ['u'] AS m1 RETURN m1 AS y } RETURN y } AS y ORDER BY title"
+    neo4j: "rows"
+    rows: [["The Matrix", 1], ["The Matrix Reloaded", 1]]
+  - contexts: ["CALL () inside COUNT"]
+    binder: "an UNWIND alias"
+    variant: "only read"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, COUNT { CALL () { UNWIND [m1] AS z RETURN z.title AS y } RETURN y } AS y ORDER BY title"
+    neo4j: "42N62"
+    error: "m1 is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used."
+  - contexts: ["CALL () inside COUNT"]
+    binder: "a CALL subquery's RETURN item"
+    variant: "bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, COUNT { CALL () { CALL () { RETURN 'c' AS m1 } RETURN m1 AS y } RETURN y } AS y ORDER BY title"
+    neo4j: "42N07"
+    error: "The variable m1 is shadowing a variable with the same name from the outer scope, as in Neo4j: rename it."
+  - contexts: ["CALL () inside COUNT"]
+    binder: "a CALL subquery's RETURN item"
+    variant: "not bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) RETURN m0.title AS title, COUNT { CALL () { CALL () { RETURN 'c' AS m1 } RETURN m1 AS y } RETURN y } AS y ORDER BY title"
+    neo4j: "rows"
+    rows: [["The Matrix", 1], ["The Matrix Reloaded", 1]]
+  - contexts: ["CALL () inside COUNT"]
+    binder: "a CALL subquery's RETURN item"
+    variant: "only read"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, COUNT { CALL () { CALL (m1) { RETURN m1.title AS z } RETURN z AS y } RETURN y } AS y ORDER BY title"
+    neo4j: "42N62"
+    error: "m1 is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used."
+  - contexts: ["CALL () inside COUNT"]
+    binder: "a FOREACH variable"
+    variant: "bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, COUNT { CALL () { FOREACH (m1 IN [] | CREATE (:Tmp)) RETURN 'f' AS y } RETURN y } AS y ORDER BY title"
+    neo4j: "42N57"
+    error: "A write in COUNT { … } is Cypher, and is not compiled to SQL yet."
+    note: "Neo4j refuses a write within an EXISTS { … } or a COUNT { … } (its 42N57), which the SQL stores refuse as not compiled yet."
+  - contexts: ["CALL () inside COUNT"]
+    binder: "a FOREACH variable"
+    variant: "not bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) RETURN m0.title AS title, COUNT { CALL () { FOREACH (m1 IN [] | CREATE (:Tmp)) RETURN 'f' AS y } RETURN y } AS y ORDER BY title"
+    neo4j: "42N57"
+    error: "A write in COUNT { … } is Cypher, and is not compiled to SQL yet."
+    note: "Neo4j refuses a write within an EXISTS { … } or a COUNT { … } (its 42N57), which the SQL stores refuse as not compiled yet."
+  - contexts: ["CALL () inside COUNT"]
+    binder: "a FOREACH variable"
+    variant: "only read"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, COUNT { CALL () { FOREACH (z IN [m1][0..0] | CREATE (:Tmp)) RETURN 'f' AS y } RETURN y } AS y ORDER BY title"
+    neo4j: "42N57"
+    error: "A write in COUNT { … } is Cypher, and is not compiled to SQL yet."
+    note: "Neo4j refuses a write within an EXISTS { … } or a COUNT { … } (its 42N57), which the SQL stores refuse as not compiled yet."
+  - contexts: ["CALL () inside COUNT"]
+    binder: "a MATCH pattern variable"
+    variant: "bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, COUNT { CALL () { MATCH (m1:Movie) RETURN m1.title AS y } RETURN y } AS y ORDER BY title"
+    neo4j: "rows"
+    rows: [["The Matrix", 3], ["The Matrix Reloaded", 3]]
+  - contexts: ["CALL () inside COUNT"]
+    binder: "a MATCH pattern variable"
+    variant: "not bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) RETURN m0.title AS title, COUNT { CALL () { MATCH (m1:Movie) RETURN m1.title AS y } RETURN y } AS y ORDER BY title"
+    neo4j: "rows"
+    rows: [["The Matrix", 3], ["The Matrix Reloaded", 3]]
+  - contexts: ["CALL () inside COUNT"]
+    binder: "a MATCH pattern variable"
+    variant: "only read"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, COUNT { CALL () { MATCH (z:Movie) WHERE z = m1 RETURN z.title AS y } RETURN y } AS y ORDER BY title"
+    neo4j: "42N62"
+    error: "m1 is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used."
+  - contexts: ["CALL () inside COUNT"]
+    binder: "an OPTIONAL MATCH pattern variable"
+    variant: "bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, COUNT { CALL () { OPTIONAL MATCH (m1:Movie) RETURN m1.title AS y } RETURN y } AS y ORDER BY title"
+    neo4j: "rows"
+    rows: [["The Matrix", 3], ["The Matrix Reloaded", 3]]
+  - contexts: ["CALL () inside COUNT"]
+    binder: "an OPTIONAL MATCH pattern variable"
+    variant: "not bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) RETURN m0.title AS title, COUNT { CALL () { OPTIONAL MATCH (m1:Movie) RETURN m1.title AS y } RETURN y } AS y ORDER BY title"
+    neo4j: "rows"
+    rows: [["The Matrix", 3], ["The Matrix Reloaded", 3]]
+  - contexts: ["CALL () inside COUNT"]
+    binder: "an OPTIONAL MATCH pattern variable"
+    variant: "only read"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, COUNT { CALL () { OPTIONAL MATCH (z:Movie) WHERE z = m1 RETURN z.title AS y } RETURN y } AS y ORDER BY title"
+    neo4j: "42N62"
+    error: "m1 is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used."
+  - contexts: ["EXISTS"]
+    binder: "a WITH alias"
+    variant: "bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, EXISTS { WITH 'w' AS m1 RETURN m1 AS y } AS y ORDER BY title"
+    neo4j: "42N07"
+    error: "The variable m1 is shadowing a variable with the same name from the outer scope, as in Neo4j: rename it."
+  - contexts: ["EXISTS"]
+    binder: "a WITH alias"
+    variant: "not bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) RETURN m0.title AS title, EXISTS { WITH 'w' AS m1 RETURN m1 AS y } AS y ORDER BY title"
+    neo4j: "rows"
+    rows: [["The Matrix", true], ["The Matrix Reloaded", true]]
+  - contexts: ["EXISTS"]
+    binder: "a WITH alias"
+    variant: "only read"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, EXISTS { WITH m1 AS z RETURN z.title AS y } AS y ORDER BY title"
+    neo4j: "rows"
+    rows: [["The Matrix", true], ["The Matrix Reloaded", true]]
+  - contexts: ["EXISTS"]
+    binder: "an UNWIND alias"
+    variant: "bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, EXISTS { UNWIND ['u'] AS m1 RETURN m1 AS y } AS y ORDER BY title"
+    neo4j: "42N07"
+    error: "The variable m1 is shadowing a variable with the same name from the outer scope, as in Neo4j: rename it."
+  - contexts: ["EXISTS"]
+    binder: "an UNWIND alias"
+    variant: "not bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) RETURN m0.title AS title, EXISTS { UNWIND ['u'] AS m1 RETURN m1 AS y } AS y ORDER BY title"
+    neo4j: "rows"
+    rows: [["The Matrix", true], ["The Matrix Reloaded", true]]
+  - contexts: ["EXISTS"]
+    binder: "an UNWIND alias"
+    variant: "only read"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, EXISTS { UNWIND [m1] AS z RETURN z.title AS y } AS y ORDER BY title"
+    neo4j: "rows"
+    rows: [["The Matrix", true], ["The Matrix Reloaded", true]]
+  - contexts: ["EXISTS"]
+    binder: "a CALL subquery's RETURN item"
+    variant: "bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, EXISTS { CALL () { RETURN 'c' AS m1 } RETURN m1 AS y } AS y ORDER BY title"
+    neo4j: "42N07"
+    error: "The variable m1 is shadowing a variable with the same name from the outer scope, as in Neo4j: rename it."
+  - contexts: ["EXISTS"]
+    binder: "a CALL subquery's RETURN item"
+    variant: "not bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) RETURN m0.title AS title, EXISTS { CALL () { RETURN 'c' AS m1 } RETURN m1 AS y } AS y ORDER BY title"
+    neo4j: "rows"
+    rows: [["The Matrix", true], ["The Matrix Reloaded", true]]
+  - contexts: ["EXISTS"]
+    binder: "a CALL subquery's RETURN item"
+    variant: "only read"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, EXISTS { CALL (m1) { RETURN m1.title AS z } RETURN z AS y } AS y ORDER BY title"
+    neo4j: "rows"
+    rows: [["The Matrix", true], ["The Matrix Reloaded", true]]
+  - contexts: ["EXISTS"]
+    binder: "a FOREACH variable"
+    variant: "bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, EXISTS { FOREACH (m1 IN [] | CREATE (:Tmp)) RETURN 'f' AS y } AS y ORDER BY title"
+    neo4j: "42N57"
+    error: "A write in EXISTS { … } is Cypher, and is not compiled to SQL yet."
+    note: "Neo4j refuses a write within an EXISTS { … } or a COUNT { … } (its 42N57), which the SQL stores refuse as not compiled yet."
+  - contexts: ["EXISTS"]
+    binder: "a FOREACH variable"
+    variant: "not bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) RETURN m0.title AS title, EXISTS { FOREACH (m1 IN [] | CREATE (:Tmp)) RETURN 'f' AS y } AS y ORDER BY title"
+    neo4j: "42N57"
+    error: "A write in EXISTS { … } is Cypher, and is not compiled to SQL yet."
+    note: "Neo4j refuses a write within an EXISTS { … } or a COUNT { … } (its 42N57), which the SQL stores refuse as not compiled yet."
+  - contexts: ["EXISTS"]
+    binder: "a FOREACH variable"
+    variant: "only read"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, EXISTS { FOREACH (z IN [m1][0..0] | CREATE (:Tmp)) RETURN 'f' AS y } AS y ORDER BY title"
+    neo4j: "42N57"
+    error: "A write in EXISTS { … } is Cypher, and is not compiled to SQL yet."
+    note: "Neo4j refuses a write within an EXISTS { … } or a COUNT { … } (its 42N57), which the SQL stores refuse as not compiled yet."
+  - contexts: ["EXISTS"]
+    binder: "a MATCH pattern variable"
+    variant: "bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, EXISTS { MATCH (m1:Movie) RETURN m1.title AS y } AS y ORDER BY title"
+    neo4j: "rows"
+    rows: [["The Matrix", true], ["The Matrix Reloaded", true]]
+  - contexts: ["EXISTS"]
+    binder: "a MATCH pattern variable"
+    variant: "not bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) RETURN m0.title AS title, EXISTS { MATCH (m1:Movie) RETURN m1.title AS y } AS y ORDER BY title"
+    neo4j: "rows"
+    rows: [["The Matrix", true], ["The Matrix Reloaded", true]]
+  - contexts: ["EXISTS"]
+    binder: "a MATCH pattern variable"
+    variant: "only read"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, EXISTS { MATCH (z:Movie) WHERE z = m1 RETURN z.title AS y } AS y ORDER BY title"
+    neo4j: "rows"
+    rows: [["The Matrix", true], ["The Matrix Reloaded", true]]
+  - contexts: ["EXISTS"]
+    binder: "an OPTIONAL MATCH pattern variable"
+    variant: "bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, EXISTS { OPTIONAL MATCH (m1:Movie) RETURN m1.title AS y } AS y ORDER BY title"
+    neo4j: "rows"
+    rows: [["The Matrix", true], ["The Matrix Reloaded", true]]
+  - contexts: ["EXISTS"]
+    binder: "an OPTIONAL MATCH pattern variable"
+    variant: "not bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) RETURN m0.title AS title, EXISTS { OPTIONAL MATCH (m1:Movie) RETURN m1.title AS y } AS y ORDER BY title"
+    neo4j: "rows"
+    rows: [["The Matrix", true], ["The Matrix Reloaded", true]]
+  - contexts: ["EXISTS"]
+    binder: "an OPTIONAL MATCH pattern variable"
+    variant: "only read"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, EXISTS { OPTIONAL MATCH (z:Movie) WHERE z = m1 RETURN z.title AS y } AS y ORDER BY title"
+    neo4j: "rows"
+    rows: [["The Matrix", true], ["The Matrix Reloaded", true]]
+  - contexts: ["COUNT"]
+    binder: "a WITH alias"
+    variant: "bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, COUNT { WITH 'w' AS m1 RETURN m1 AS y } AS y ORDER BY title"
+    neo4j: "42N07"
+    error: "The variable m1 is shadowing a variable with the same name from the outer scope, as in Neo4j: rename it."
+  - contexts: ["COUNT"]
+    binder: "a WITH alias"
+    variant: "not bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) RETURN m0.title AS title, COUNT { WITH 'w' AS m1 RETURN m1 AS y } AS y ORDER BY title"
+    neo4j: "rows"
+    rows: [["The Matrix", 1], ["The Matrix Reloaded", 1]]
+  - contexts: ["COUNT"]
+    binder: "a WITH alias"
+    variant: "only read"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, COUNT { WITH m1 AS z RETURN z.title AS y } AS y ORDER BY title"
+    neo4j: "rows"
+    rows: [["The Matrix", 1], ["The Matrix Reloaded", 1]]
+  - contexts: ["COUNT"]
+    binder: "an UNWIND alias"
+    variant: "bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, COUNT { UNWIND ['u'] AS m1 RETURN m1 AS y } AS y ORDER BY title"
+    neo4j: "42N07"
+    error: "The variable m1 is shadowing a variable with the same name from the outer scope, as in Neo4j: rename it."
+  - contexts: ["COUNT"]
+    binder: "an UNWIND alias"
+    variant: "not bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) RETURN m0.title AS title, COUNT { UNWIND ['u'] AS m1 RETURN m1 AS y } AS y ORDER BY title"
+    neo4j: "rows"
+    rows: [["The Matrix", 1], ["The Matrix Reloaded", 1]]
+  - contexts: ["COUNT"]
+    binder: "an UNWIND alias"
+    variant: "only read"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, COUNT { UNWIND [m1] AS z RETURN z.title AS y } AS y ORDER BY title"
+    neo4j: "rows"
+    rows: [["The Matrix", 1], ["The Matrix Reloaded", 1]]
+  - contexts: ["COUNT"]
+    binder: "a CALL subquery's RETURN item"
+    variant: "bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, COUNT { CALL () { RETURN 'c' AS m1 } RETURN m1 AS y } AS y ORDER BY title"
+    neo4j: "42N07"
+    error: "The variable m1 is shadowing a variable with the same name from the outer scope, as in Neo4j: rename it."
+  - contexts: ["COUNT"]
+    binder: "a CALL subquery's RETURN item"
+    variant: "not bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) RETURN m0.title AS title, COUNT { CALL () { RETURN 'c' AS m1 } RETURN m1 AS y } AS y ORDER BY title"
+    neo4j: "rows"
+    rows: [["The Matrix", 1], ["The Matrix Reloaded", 1]]
+  - contexts: ["COUNT"]
+    binder: "a CALL subquery's RETURN item"
+    variant: "only read"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, COUNT { CALL (m1) { RETURN m1.title AS z } RETURN z AS y } AS y ORDER BY title"
+    neo4j: "rows"
+    rows: [["The Matrix", 1], ["The Matrix Reloaded", 1]]
+  - contexts: ["COUNT"]
+    binder: "a FOREACH variable"
+    variant: "bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, COUNT { FOREACH (m1 IN [] | CREATE (:Tmp)) RETURN 'f' AS y } AS y ORDER BY title"
+    neo4j: "42N57"
+    error: "A write in COUNT { … } is Cypher, and is not compiled to SQL yet."
+    note: "Neo4j refuses a write within an EXISTS { … } or a COUNT { … } (its 42N57), which the SQL stores refuse as not compiled yet."
+  - contexts: ["COUNT"]
+    binder: "a FOREACH variable"
+    variant: "not bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) RETURN m0.title AS title, COUNT { FOREACH (m1 IN [] | CREATE (:Tmp)) RETURN 'f' AS y } AS y ORDER BY title"
+    neo4j: "42N57"
+    error: "A write in COUNT { … } is Cypher, and is not compiled to SQL yet."
+    note: "Neo4j refuses a write within an EXISTS { … } or a COUNT { … } (its 42N57), which the SQL stores refuse as not compiled yet."
+  - contexts: ["COUNT"]
+    binder: "a FOREACH variable"
+    variant: "only read"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, COUNT { FOREACH (z IN [m1][0..0] | CREATE (:Tmp)) RETURN 'f' AS y } AS y ORDER BY title"
+    neo4j: "42N57"
+    error: "A write in COUNT { … } is Cypher, and is not compiled to SQL yet."
+    note: "Neo4j refuses a write within an EXISTS { … } or a COUNT { … } (its 42N57), which the SQL stores refuse as not compiled yet."
+  - contexts: ["COUNT"]
+    binder: "a MATCH pattern variable"
+    variant: "bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, COUNT { MATCH (m1:Movie) RETURN m1.title AS y } AS y ORDER BY title"
+    neo4j: "rows"
+    rows: [["The Matrix", 1], ["The Matrix Reloaded", 1]]
+  - contexts: ["COUNT"]
+    binder: "a MATCH pattern variable"
+    variant: "not bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) RETURN m0.title AS title, COUNT { MATCH (m1:Movie) RETURN m1.title AS y } AS y ORDER BY title"
+    neo4j: "rows"
+    rows: [["The Matrix", 3], ["The Matrix Reloaded", 3]]
+  - contexts: ["COUNT"]
+    binder: "a MATCH pattern variable"
+    variant: "only read"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, COUNT { MATCH (z:Movie) WHERE z = m1 RETURN z.title AS y } AS y ORDER BY title"
+    neo4j: "rows"
+    rows: [["The Matrix", 1], ["The Matrix Reloaded", 1]]
+  - contexts: ["COUNT"]
+    binder: "an OPTIONAL MATCH pattern variable"
+    variant: "bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, COUNT { OPTIONAL MATCH (m1:Movie) RETURN m1.title AS y } AS y ORDER BY title"
+    neo4j: "rows"
+    rows: [["The Matrix", 1], ["The Matrix Reloaded", 1]]
+  - contexts: ["COUNT"]
+    binder: "an OPTIONAL MATCH pattern variable"
+    variant: "not bound outside"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) RETURN m0.title AS title, COUNT { OPTIONAL MATCH (m1:Movie) RETURN m1.title AS y } AS y ORDER BY title"
+    neo4j: "rows"
+    rows: [["The Matrix", 3], ["The Matrix Reloaded", 3]]
+  - contexts: ["COUNT"]
+    binder: "an OPTIONAL MATCH pattern variable"
+    variant: "only read"
+    cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, COUNT { OPTIONAL MATCH (z:Movie) WHERE z = m1 RETURN z.title AS y } AS y ORDER BY title"
+    neo4j: "rows"
+    rows: [["The Matrix", 1], ["The Matrix Reloaded", 1]]
+canary:
+  seed: 819
+  count: 20
+  cells:
+    - contexts: ["CALL () at the top level", "COUNT"]
+      binder: "an UNWIND alias"
+      variant: "bound outside"
+      cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL () { RETURN COUNT { UNWIND ['u'] AS m1 RETURN m1 AS y } AS y } RETURN m1.title AS title, y ORDER BY title, y"
+      neo4j: "rows"
+      rows: [["The Matrix", 1], ["The Matrix Reloaded", 1]]
+    - contexts: ["CALL () at the top level", "CALL () at the top level"]
+      binder: "an UNWIND alias"
+      variant: "only read"
+      cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL () { CALL () { UNWIND [m1] AS z RETURN z.title AS y } RETURN y } RETURN m1.title AS title, y ORDER BY title, y"
+      neo4j: "42N62"
+      error: "m1 is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used."
+    - contexts: ["EXISTS", "COUNT"]
+      binder: "a CALL subquery's RETURN item"
+      variant: "not bound outside"
+      cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) RETURN m0.title AS title, EXISTS { RETURN COUNT { CALL () { RETURN 'c' AS m1 } RETURN m1 AS y } AS y } AS y ORDER BY title"
+      neo4j: "rows"
+      rows: [["The Matrix", true], ["The Matrix Reloaded", true]]
+    - contexts: ["CALL () inside COUNT", "CALL (*)"]
+      binder: "a MATCH pattern variable"
+      variant: "only read"
+      cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, COUNT { CALL () { CALL (*) { MATCH (z:Movie) WHERE z = m1 RETURN z.title AS y } RETURN y } RETURN y } AS y ORDER BY title"
+      neo4j: "42N62"
+      error: "m1 is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used."
+    - contexts: ["CALL () at the top level", "CALL () inside EXISTS"]
+      binder: "a FOREACH variable"
+      variant: "not bound outside"
+      cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) CALL () { RETURN EXISTS { CALL () { FOREACH (m1 IN [] | CREATE (:Tmp)) RETURN 'f' AS y } RETURN y } AS y } RETURN m0.title AS title, y ORDER BY title, y"
+      neo4j: "42N57"
+      error: "A write in EXISTS { … } is Cypher, and is not compiled to SQL yet."
+      note: "Neo4j refuses a write within an EXISTS { … } or a COUNT { … } (its 42N57), which the SQL stores refuse as not compiled yet."
+    - contexts: ["CALL () inside EXISTS", "CALL (*)"]
+      binder: "an OPTIONAL MATCH pattern variable"
+      variant: "not bound outside"
+      cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) RETURN m0.title AS title, EXISTS { CALL () { CALL (*) { OPTIONAL MATCH (m1:Movie) RETURN m1.title AS y } RETURN y } RETURN y } AS y ORDER BY title"
+      neo4j: "rows"
+      rows: [["The Matrix", true], ["The Matrix Reloaded", true]]
+    - contexts: ["EXISTS", "CALL () inside EXISTS"]
+      binder: "a FOREACH variable"
+      variant: "not bound outside"
+      cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) RETURN m0.title AS title, EXISTS { RETURN EXISTS { CALL () { FOREACH (m1 IN [] | CREATE (:Tmp)) RETURN 'f' AS y } RETURN y } AS y } AS y ORDER BY title"
+      neo4j: "42N57"
+      error: "A write in EXISTS { … } is Cypher, and is not compiled to SQL yet."
+      note: "Neo4j refuses a write within an EXISTS { … } or a COUNT { … } (its 42N57), which the SQL stores refuse as not compiled yet."
+    - contexts: ["CALL () at the top level", "EXISTS"]
+      binder: "a MATCH pattern variable"
+      variant: "only read"
+      cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL () { RETURN EXISTS { MATCH (z:Movie) WHERE z = m1 RETURN z.title AS y } AS y } RETURN m1.title AS title, y ORDER BY title, y"
+      neo4j: "42N62"
+      error: "m1 is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used."
+    - contexts: ["CALL (*)", "EXISTS"]
+      binder: "an UNWIND alias"
+      variant: "not bound outside"
+      cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) CALL (*) { RETURN EXISTS { UNWIND ['u'] AS m1 RETURN m1 AS y } AS y } RETURN m0.title AS title, y ORDER BY title, y"
+      neo4j: "rows"
+      rows: [["The Matrix", true], ["The Matrix Reloaded", true]]
+    - contexts: ["CALL () inside COUNT", "CALL () inside COUNT"]
+      binder: "a FOREACH variable"
+      variant: "not bound outside"
+      cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) RETURN m0.title AS title, COUNT { CALL () { RETURN COUNT { CALL () { FOREACH (m1 IN [] | CREATE (:Tmp)) RETURN 'f' AS y } RETURN y } AS y } RETURN y } AS y ORDER BY title"
+      neo4j: "42N57"
+      error: "A write in COUNT { … } is Cypher, and is not compiled to SQL yet."
+      note: "Neo4j refuses a write within an EXISTS { … } or a COUNT { … } (its 42N57), which the SQL stores refuse as not compiled yet."
+    - contexts: ["CALL () inside EXISTS", "CALL () inside COUNT"]
+      binder: "an UNWIND alias"
+      variant: "only read"
+      cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, EXISTS { CALL () { RETURN COUNT { CALL () { UNWIND [m1] AS z RETURN z.title AS y } RETURN y } AS y } RETURN y } AS y ORDER BY title"
+      neo4j: "42N62"
+      error: "m1 is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used."
+    - contexts: ["CALL (*)", "CALL () at the top level"]
+      binder: "an UNWIND alias"
+      variant: "not bound outside"
+      cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) CALL (*) { CALL () { UNWIND ['u'] AS m1 RETURN m1 AS y } RETURN y } RETURN m0.title AS title, y ORDER BY title, y"
+      neo4j: "rows"
+      rows: [["The Matrix", "u"], ["The Matrix Reloaded", "u"]]
+    - contexts: ["CALL () at the top level", "CALL (x) importing it"]
+      binder: "an OPTIONAL MATCH pattern variable"
+      variant: "not bound outside"
+      cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) CALL () { CALL (m0) { OPTIONAL MATCH (m1:Movie) RETURN m1.title AS y } RETURN y } RETURN m0.title AS title, y ORDER BY title, y"
+      neo4j: "42N62"
+      error: "m0 is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used."
+    - contexts: ["CALL () inside EXISTS", "COUNT"]
+      binder: "a MATCH pattern variable"
+      variant: "bound outside"
+      cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, EXISTS { CALL () { RETURN COUNT { MATCH (m1:Movie) RETURN m1.title AS y } AS y } RETURN y } AS y ORDER BY title"
+      neo4j: "rows"
+      rows: [["The Matrix", true], ["The Matrix Reloaded", true]]
+    - contexts: ["CALL () inside EXISTS", "CALL () inside COUNT"]
+      binder: "an UNWIND alias"
+      variant: "bound outside"
+      cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, EXISTS { CALL () { RETURN COUNT { CALL () { UNWIND ['u'] AS m1 RETURN m1 AS y } RETURN y } AS y } RETURN y } AS y ORDER BY title"
+      neo4j: "rows"
+      rows: [["The Matrix", true], ["The Matrix Reloaded", true]]
+    - contexts: ["COUNT", "EXISTS"]
+      binder: "a WITH alias"
+      variant: "not bound outside"
+      cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) RETURN m0.title AS title, COUNT { RETURN EXISTS { WITH 'w' AS m1 RETURN m1 AS y } AS y } AS y ORDER BY title"
+      neo4j: "rows"
+      rows: [["The Matrix", 1], ["The Matrix Reloaded", 1]]
+    - contexts: ["CALL () at the top level", "CALL (*)"]
+      binder: "a FOREACH variable"
+      variant: "bound outside"
+      cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL () { CALL (*) { FOREACH (m1 IN [] | CREATE (:Tmp)) RETURN 'f' AS y } RETURN y } RETURN m1.title AS title, y ORDER BY title, y"
+      neo4j: "rows"
+      rows: [["The Matrix", "f"], ["The Matrix Reloaded", "f"]]
+    - contexts: ["CALL () at the top level", "CALL (*)"]
+      binder: "an UNWIND alias"
+      variant: "only read"
+      cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL () { CALL (*) { UNWIND [m1] AS z RETURN z.title AS y } RETURN y } RETURN m1.title AS title, y ORDER BY title, y"
+      neo4j: "42N62"
+      error: "m1 is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used."
+    - contexts: ["CALL (*)", "EXISTS"]
+      binder: "a CALL subquery's RETURN item"
+      variant: "only read"
+      cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) CALL (*) { RETURN EXISTS { CALL (m1) { RETURN m1.title AS z } RETURN z AS y } AS y } RETURN m1.title AS title, y ORDER BY title, y"
+      neo4j: "rows"
+      rows: [["The Matrix", true], ["The Matrix Reloaded", true]]
+    - contexts: ["CALL (x) importing it", "COUNT"]
+      binder: "a MATCH pattern variable"
+      variant: "not bound outside"
+      cypher: "MATCH (q:Person {name: 'Carrie'})-[:ACTED_IN]->(m0) CALL (m0) { RETURN COUNT { MATCH (m1:Movie) RETURN m1.title AS y } AS y } RETURN m0.title AS title, y ORDER BY title, y"
+      neo4j: "rows"
+      rows: [["The Matrix", 3], ["The Matrix Reloaded", 3]]

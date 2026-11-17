@@ -1159,7 +1159,7 @@ cases:
         parameters: {n: 645876123}
         rows: ["12:00:00.645876123"]
       - only: [neo4j, sql]
-        cypher: "UNWIND [3, 1, 2] AS n WITH datetime({year: 1984, month: 10, day: 11, hour: 12, nanosecond: n, timezone: '+01:00'}) AS t RETURN toString(t) ORDER BY t"
+        cypher: "UNWIND [3, 1, 2] AS n WITH datetime({year: 1984, month: 10, day: 11, hour: 12, minute: 0, second: 0, nanosecond: n, timezone: '+01:00'}) AS t RETURN toString(t) ORDER BY t"
         rows: ["1984-10-11T12:00:00.000000001+01:00", "1984-10-11T12:00:00.000000002+01:00", "1984-10-11T12:00:00.000000003+01:00"]
       - note: "Kept: truncated, to any unit, each a microsecond or coarser; and converted to a date, or to a kind with a time, its fraction kept (#302)."
         only: [neo4j, sql]
@@ -1168,7 +1168,7 @@ cases:
       - note: "Kept: a date of a map whose date is of one (#302)."
         only: [neo4j, sql]
         cypher: "WITH localdatetime({year: 1984, month: 11, day: 11, hour: 12, minute: 31, second: 14, nanosecond: 645876123}) AS o RETURN [toString(date({date: o})), toString(date({date: o, day: 28})), toString(localdatetime({date: o, hour: 1}))]"
-        rows: [["1984-11-11", "1984-11-28", "1984-11-11T01:00"]]
+        rows: [["1984-11-11", "1984-11-28", "1984-11-11T01:00:00"]]
       - note: "Refused: worked out through the store's timestamp, a moment made of one moved."
         only: [sql]
         cypher: "RETURN localtime({hour: 12, minute: 0, second: 0, nanosecond: 645876123}) + duration('PT1S')"
@@ -1189,7 +1189,7 @@ cases:
       - note: "Stored: truncated and converted from its text cut to the microsecond, a time's fraction kept (#302)."
         only: [neo4j, sql]
         cypher: "MATCH (n:CyTemporal {id: 'ns'}) RETURN [toString(localtime.truncate('second', n.t)), toString(date(n.at)), toString(localtime(n.at))]"
-        rows: [["12:00", "2024-01-01", "00:00:00.000000001"]]
+        rows: [["12:00:00", "2024-01-01", "00:00:00.000000001"]]
       - note: "Stored: refused as the statement runs through each path that reads a store's timestamp of it."
         only: [sql]
         cypher: "MATCH (n:CyTemporal {id: 'ns'}) RETURN n.at + duration('PT1S')"

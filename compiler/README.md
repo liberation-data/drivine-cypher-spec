@@ -1072,6 +1072,9 @@ The JVM is the oracle. `./gradlew jvmOracle` writes, into `build/oracle`:
   verdict each SQL store's compiler gives each value a write makes, by position and form.
 - `nesting.json`: the spec's `nesting.yaml` as JSON, which `NestingTableTest` reads on every target: the verdict
   each SQL store's compiler gives each nesting of a dropped variable, and the lists the cells are built from.
+- `rebinding.json`: the spec's `rebinding.yaml` as JSON, which `RebindingTableTest` reads on every target: the verdict
+  each SQL store's compiler gives each binding again of a variable from outside a subquery, and the lists the cells are
+  built from.
 - `plans.json`: the spec's `plans.yaml` as JSON, which `StorePlanTest` reads on every target: each case's rounds that
   `org.drivine.cypher.store.plan`'s planner must give on each store, the answers it is given back, and its report.
 - `host.json`: the spec's `host.yaml` as JSON, which `HostSpecTest` reads on every target: the `function` steps the

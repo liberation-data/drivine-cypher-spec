@@ -559,6 +559,27 @@ class CompilerRefusalTest {
     }
 
     @Test
+    fun `a procedure's YIELD of a variable bound already is refused as bound already with a WHERE as without one`() {
+        // Not in the spec yet (drivine4j#819): a procedure's WHERE is read as a WITH within its query, whose item is not a
+        // subquery binding a name from outside it, so it is refused as a CALL's item is, not as shadowing.
+        listOf(PostgresCypherCompiler("g"), OracleCypherCompiler("g"), SqliteCypherCompiler("g")).forEach { compiler ->
+            val store = compiler::class.simpleName
+            listOf(
+                "MATCH (label) CALL db.labels() YIELD label RETURN label",
+                "MATCH (label) CALL db.labels() YIELD label WHERE label <> 'x' RETURN label",
+                "MATCH (n) WITH n.name AS l CALL db.labels() YIELD label AS l WHERE l <> 'x' RETURN l",
+            ).forEach { cypher ->
+                val refused = assertThrows<CompilerException>("$store: $cypher") { compiler.compile(cypher) }.message!!
+                assertTrue(refused.endsWith("is bound already, so a CALL does not return or yield it, as in Cypher: name it with AS."), "$store: $cypher: $refused")
+            }
+            // Within a subquery that imports it, as shadowing, with a WHERE too, as Neo4j refuses it without one (its 42N07).
+            val cypher = "MATCH (m1:Movie) CALL (m1) { CALL db.labels() YIELD label AS m1 WHERE m1 <> 'x' RETURN m1 AS y } RETURN y"
+            val refused = assertThrows<CompilerException>("$store: $cypher") { compiler.compile(cypher) }.message!!
+            assertEquals("The variable m1 is shadowing a variable with the same name from the outer scope, as in Neo4j: rename it.", refused, "$store: $cypher")
+        }
+    }
+
+    @Test
     fun `two lists compared in a statement that writes are refused on Oracle, whose block calls no function the query declares`() {
         // #349: Oracle compares two lists by a function the query declares, which a procedure's queries do not call.
         val cypher = "CREATE (n:N {a: [1] < [2]})"
