@@ -79,7 +79,7 @@ cases:
         result: 0
 
   - name: "drivine_add"
-    description: "drivine_add(a, b) is Cypher's a + b of two JSON values, as JSON text: NaN, as SQLite's JSON writes it, adds as a number, a sum of floats past a double's range is an infinity, written 9e999, and infinities of both signs sum to NaN; a text put together with NaN or an infinity writes it as Java does. Null where Cypher adds no such two, a map that is not exactly the tag of NaN among them."
+    description: "drivine_add(a, b) is Cypher's a + b of two JSON values, as JSON text: NaN, as SQLite's JSON writes it, adds as a number, a sum of floats past a double's range is an infinity, written 9e999, and infinities of both signs sum to NaN; a text put together with NaN or an infinity writes it as Java does, and with a truth value as true or false (liberation-data/drivine-cypher-spec#341). Null where Cypher adds no such two, a map that is not exactly the tag of NaN among them, and a truth value beside a number, which Neo4j fails on as it runs."
     pairs:
       writes.yaml: ["NaN worked out from stored infinities", "NaN and the infinities written"]
     steps:
@@ -129,6 +129,22 @@ cases:
         result: null
       - function: "drivine_add"
         args: [null, '1']
+        result: null
+      - function: "drivine_add"
+        args: ['"a"', 'true']
+        result: '"atrue"'
+      - function: "drivine_add"
+        args: ['false', '"a"']
+        result: '"falsea"'
+      - function: "drivine_add"
+        args: ['[1]', 'true']
+        result: '[1,true]'
+      - function: "drivine_add"
+        args: ['true', 'null']
+        result: null
+      - note: "A truth value beside a number, which Neo4j fails on as it runs: null, as before (liberation-data/drivine-cypher-spec#341)."
+        function: "drivine_add"
+        args: ['true', '1']
         result: null
 
   - name: "drivine_list_order"
