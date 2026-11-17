@@ -2436,3 +2436,19 @@ cases:
         cypher: "MATCH (n:CyWrite) WHERE NOT n.k = $g RETURN n.i ORDER BY n.i"
         parameters: {g: 1}
         rows: [0]
+
+  - name: "A stored truth value beside a number"
+    description: "Arithmetic of a truth value a node holds and a number fails the statement as it runs, on Neo4j 2026.10.2 (Cannot add `Boolean` and `Long`) and on the SQL stores, where it gave null (liberation-data/drivine-cypher-spec#345). A number stored beside it is added as before. The graph engines other than Neo4j are not pinned here."
+    steps:
+      - only: [neo4j, sql]
+        cypher: "CREATE (n:CyWrite {flag: true}) WITH n RETURN n.flag + 1"
+        error: true
+      - only: [sql]
+        cypher: "CREATE (:CyWrite {i: 1, flag: false})"
+        rows: []
+      - only: [sql]
+        cypher: "MATCH (n:CyWrite {i: 1}) RETURN n.flag - 1"
+        error: true
+      - only: [sql]
+        cypher: "MATCH (n:CyWrite {i: 1}) RETURN n.i + 1, 2 * n.i"
+        rows: [[2, 2]]

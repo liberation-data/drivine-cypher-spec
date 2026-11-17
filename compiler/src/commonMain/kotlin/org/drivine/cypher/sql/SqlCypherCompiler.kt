@@ -1223,6 +1223,15 @@ abstract class SqlCypherCompiler(
      */
     protected abstract fun failure(message: String, value: String): String
 
+    /** Whether the JSON value [json] is a truth value, as the store tests it most cheaply. */
+    protected open fun isTruth(json: String): String = "${typeOf(json)} = 'boolean'"
+
+    /**
+     * [failure], a whole number that fails the statement, where a JSON value is read: of the JSON type the store's `CASE` takes
+     * beside one, and no more, as it is never worked out to a value. [scalar] would write it out again, where it tests for NaN.
+     */
+    protected open fun failed(failure: String): String = scalar(failure)
+
     /** [failure] of a [text] that is a SQL text already, which a store need not write as text again: see Oracle's. */
     protected open fun textFailure(message: String, text: String): String = failure(message, text)
 
@@ -4994,7 +5003,8 @@ abstract class SqlCypherCompiler(
         /**
          * The kind of value [expression] is in [scope], where the statement writes it as one ([Value.Json.known]): a literal, a
          * negated number, a list or a map written, or a variable bound to one. A function that gives a float ([FLOAT_FUNCTIONS])
-         * is a float, arithmetic of two numbers of known kinds is a float where either is one or for `^` and else an integer, and a
+         * is a float, arithmetic of two numbers of known kinds is a float where either is one or for `^` and else an integer, a `+`
+         * of a text and a text, a number or a truth value is a text (`true + 'a'`, liberation-data/drivine-cypher-spec#345), and a
          * `CASE` each of whose values is of one kind is of that kind. Read from the statement alone, compiling nothing, so a check
          * may run before its operand is compiled. Null where the kind is left open, as it is for a property, a parameter, another
          * function's value, or arithmetic with one: Neo4j checks those when the row is read.
@@ -5009,6 +5019,8 @@ abstract class SqlCypherCompiler(
             is Expression.Function -> Value.Known.FLOAT.takeIf { expression.name.lowercase() in FLOAT_FUNCTIONS }
             is Expression.Binary -> if (expression.operator !in ARITHMETIC) null else listOf(knownKind(expression.left, scope), knownKind(expression.right, scope)).let { sides ->
                 when {
+                    // A text put together with a text, a number or a truth value is a text.
+                    expression.operator == Operator.ADD && Value.Known.TEXT in sides && sides.all { it in TEXT_SUMMED } -> Value.Known.TEXT
                     !sides.all { it == Value.Known.INTEGER || it == Value.Known.FLOAT } -> null
                     expression.operator == Operator.POWER || Value.Known.FLOAT in sides -> Value.Known.FLOAT
                     else -> Value.Known.INTEGER
@@ -5208,31 +5220,50 @@ abstract class SqlCypherCompiler(
         /**
          * Refuses [binary], a `+` of [left] and [right], where the statement makes, writes or binds one a truth value (a
          * condition among them, or a parameter given one: [givenKind]) and the other a number, a truth value, a map or a temporal
-         * value, or one a map and the other a number: Neo4j refuses it when it plans the statement, where the SQL gave null
-         * (liberation-data/drivine-cypher-spec#341). A truth value is put together with a text or a list, as Neo4j gives
+         * value, or one a map and the other anything known but a map or a list (a number, a text or a temporal value): Neo4j
+         * refuses it when it plans the statement, where the SQL gave null (liberation-data/drivine-cypher-spec#341,
+         * liberation-data/drivine-cypher-spec#345). A truth value is put together with a text or a list, as Neo4j gives
          * `'a' + true` and `[1] + true`. A side whose kind is left open is compiled as before: a truth value read as the
-         * statement runs beside such a value still gives null, where Neo4j fails as it runs.
+         * statement runs beside a number fails it ([truthRead]).
          */
         private fun sumOfKind(binary: Expression.Binary, left: Value, right: Value, scope: Map<String, Value>) {
             fun kind(value: Value, written: Expression): Value.Known? = if (value is Value.Bool) Value.Known.BOOLEAN else givenKind(written, scope)
-            fun noun(value: Value, written: Expression): String? =
-                if ((value as? Value.Json)?.temporal != null) "a temporal value"
-                else kind(value, written)?.takeIf { it != Value.Known.TEXT && it != Value.Known.LIST }?.noun
+            fun temporal(value: Value) = (value as? Value.Json)?.temporal != null
+            fun noun(value: Value, written: Expression): String? = if (temporal(value)) "a temporal value" else kind(value, written)?.noun
             val sides = listOf(left to binary.left, right to binary.right)
-            val numbers = setOf(Value.Known.INTEGER, Value.Known.FLOAT)
-            for ((side, other) in listOf(sides[0] to sides[1], sides[1] to sides[0])) {
-                val against = noun(other.first, other.second) ?: continue
-                when (kind(side.first, side.second)) {
-                    Value.Known.BOOLEAN -> throw CompilerException("+ of a truth value takes a text or a list, not $against, as in Neo4j.")
-                    Value.Known.MAP -> if (kind(other.first, other.second) in numbers) throw CompilerException("+ of a map takes a map or a list, not $against, as in Neo4j.")
-                    else -> {}
-                }
+            val pairs = listOf(sides[0] to sides[1], sides[1] to sides[0])
+            for ((side, other) in pairs) {
+                if (kind(side.first, side.second) != Value.Known.BOOLEAN) continue
+                val against = other.takeIf { temporal(it.first) || kind(it.first, it.second) !in setOf(Value.Known.TEXT, Value.Known.LIST) }
+                    ?.let { noun(it.first, it.second) } ?: continue
+                throw CompilerException("+ of a truth value takes a text or a list, not $against, as in Neo4j.")
+            }
+            for ((side, other) in pairs) {
+                if (temporal(side.first) || kind(side.first, side.second) != Value.Known.MAP) continue
+                val against = other.takeIf { temporal(it.first) || kind(it.first, it.second) !in setOf(Value.Known.MAP, Value.Known.LIST) }
+                    ?.let { noun(it.first, it.second) } ?: continue
+                throw CompilerException("+ of a map takes a map or a list, not $against, as in Neo4j.")
             }
         }
 
-        /** Refuses [expression], an operand of [operator], where its kind is known ([knownKind]) to be other than a truth value, as Neo4j refuses it. */
+        /**
+         * Refuses [binary], `*` or `/` of [left] and [right], where the statement makes a side a temporal value other than a
+         * duration, as Neo4j refuses `date('2024-01-01') * 2` when it plans the statement (liberation-data/drivine-cypher-spec#345):
+         * it gave null. A duration is scaled by a number ([temporalBinary]).
+         */
+        private fun scaledOfKind(binary: Expression.Binary, left: Value, right: Value) {
+            if (binary.operator != Operator.MULTIPLY && binary.operator != Operator.DIVIDE) return
+            val kind = listOf(left, right).firstNotNullOfOrNull { side -> (side as? Value.Json)?.temporal?.takeIf { it != Temporal.DURATION } } ?: return
+            throw CompilerException("${NUMERIC_SYMBOLS[binary.operator]} takes numbers or a duration, not a ${kind.function}, as in Neo4j.")
+        }
+
+        /**
+         * Refuses [expression], an operand of [operator], where its kind is known ([knownKind]) to be other than a truth value, as
+         * Neo4j refuses it. Of `NOT`, a parameter is of its value's kind too ([givenKind]), as Neo4j 2026.10.2 refuses `NOT ${'$'}s` of
+         * a text (liberation-data/drivine-cypher-spec#345).
+         */
         private fun requireCondition(expression: Expression, scope: Map<String, Value>, operator: String) {
-            val kind = knownKind(expression, scope) ?: return
+            val kind = (if (operator == "NOT") givenKind(expression, scope) else knownKind(expression, scope)) ?: return
             if (kind != Value.Known.BOOLEAN) throw CompilerException("$operator takes a truth value, not ${kind.noun}, as in Neo4j.")
         }
 
@@ -5713,7 +5744,9 @@ abstract class SqlCypherCompiler(
          * a text or a list it is not tested. A side that can't be a tag ([tagFree]) is not tested. The kind a failure names is the
          * tag's on either side: the other may be a number (`n.n * n.d`).
          */
-        private fun temporalRefused(binary: Expression.Binary, left: Value, right: Value, x: String, y: String, arithmetic: () -> String): String {
+        private fun temporalRefused(
+            binary: Expression.Binary, left: Value, right: Value, x: String, y: String, truths: List<Boolean> = listOf(false, false), arithmetic: () -> String,
+        ): String {
             val sides = listOf(left, right).map { (it as? Value.Json)?.temporal != null }
             if (sides.any { it }) return arithmetic()
             val open = listOf(!tagFree(left, binary.left), !tagFree(right, binary.right))
@@ -5722,7 +5755,11 @@ abstract class SqlCypherCompiler(
                 binary.operator == Operator.ADD && (isText(value) || isList(value) || given(written).let { it is String || it is List<*> })
             }
             val tested = open.zip(besideTextOrList).map { (maybe, beside) -> maybe && !beside }
-            if (tested.none { it }) return arithmetic()
+            // A truth value read beside a number fails the statement by name, tested at that side alone: see [truthRead].
+            val truth = listOf(x, y).zip(truths).filter { it.second }.joinToString("") { (json, _) ->
+                "WHEN ${isTruth(json)} THEN ${failed(textFailure(TRUTH_ARITHMETIC, literal(OPERATOR_WORDS.getValue(binary.operator))))} "
+            }
+            if (tested.none { it }) return if (truth.isEmpty()) arithmetic() else "CASE ${truth}ELSE ${arithmetic()} END"
             val tag = listOf(x, y).zip(open).map { (json, maybe) -> if (maybe) "${tagKind(json)} IS NOT NULL" else "FALSE" }
             val test = if (binary.operator == Operator.ADD) {
                 listOf(0 to 1, 1 to 0).filter { (i, _) -> tested[i] }.joinToString(" OR ") { (i, j) ->
@@ -5736,7 +5773,29 @@ abstract class SqlCypherCompiler(
                 val kind = if (open[0] && open[1]) "COALESCE(${tagKind(x)}, ${tagKind(y)})" else if (open[0]) tagKind(x) else tagKind(y)
                 scalar(textFailure(TEMPORAL_ARITHMETIC, kind))
             }
-            return "CASE WHEN $test THEN $worked ELSE ${arithmetic()} END"
+            return "CASE WHEN $test THEN $worked ${truth}ELSE ${arithmetic()} END"
+        }
+
+        /**
+         * Of [binary], `+`, `-`, `*` or `/` of [left] and [right], whether each side is to be tested for a truth value as the
+         * statement runs: where it is read there, a property, a variable or an item, of a kind left open, and the other side is a
+         * number the statement makes or gives. Neo4j fails `n.flag + 1` of a stored truth value as it runs, and refuses
+         * `UNWIND ${'$'}l AS b RETURN b + 1` of `[true]` as it plans; the SQL stores gave null (liberation-data/drivine-cypher-spec#345).
+         * One test at the side read, never around arithmetic of arithmetic, so a sum of sums is tested once at each value it reads,
+         * as #341's test of every `+` was not: the statement grew at every level.
+         */
+        private fun truthRead(binary: Expression.Binary, left: Value, right: Value, scope: Map<String, Value>): List<Boolean> {
+            if (binary.operator !in TRUTH_TESTED) return listOf(false, false)
+            fun number(value: Value, written: Expression) = given(written) is Number ||
+                givenKind(written, scope).let { it == Value.Known.INTEGER || it == Value.Known.FLOAT } ||
+                (value as? Value.Json)?.known.let { it == Value.Known.INTEGER || it == Value.Known.FLOAT }
+            fun open(value: Value, written: Expression): Boolean {
+                if (written !is Expression.Property && written !is Expression.Variable && written !is Expression.Index) return false
+                val json = value as? Value.Json ?: return false
+                if (json.temporal != null || json.text || json.list || json.known != null || json.identity != null) return false
+                return given(written).let { it == null || it is Boolean } && givenKind(written, scope) == null
+            }
+            return listOf(open(left, binary.left) && number(right, binary.right), open(right, binary.right) && number(left, binary.left))
         }
 
         /**
@@ -6270,6 +6329,8 @@ abstract class SqlCypherCompiler(
             }
             val (left, right) = compared(expression(binary.left, scope), expression(binary.right, scope), binary)
             if (binary.operator == Operator.ADD) sumOfKind(binary, left, right, scope)
+            scaledOfKind(binary, left, right)
+            val truthsRead = truthRead(binary, left, right, scope)
             temporalBinary(binary.operator, left, right, binary.left, binary.right)?.let { return it }
             val a = comparable(json(left))
             val b = comparable(json(right))
@@ -6321,7 +6382,7 @@ abstract class SqlCypherCompiler(
                     Value.Json(
                         sharedSum(a, b) { (x, y) ->
                             val given = (givenLeft ?: MadeText.takeIf { textLeft }) to (givenRight ?: MadeText.takeIf { textRight })
-                            temporalRefused(binary, left, right, x, y) { addTagged(x, left, y, right, textLeft, textRight) { p, q -> add(p, q, given, truths) } }
+                            temporalRefused(binary, left, right, x, y, truthsRead) { addTagged(x, left, y, right, textLeft, textRight) { p, q -> add(p, q, given, truths) } }
                         },
                         items = itemsOf(left)?.takeIf { it == itemsOf(right) }, itemItems = itemItemsOf(left)?.takeIf { it == itemItemsOf(right) },
                         temporals = hasTemporals(left) || hasTemporals(right),
@@ -6330,12 +6391,12 @@ abstract class SqlCypherCompiler(
                         texts = (holdsTexts(left) && (holdsTexts(right) || textRight)) || (textLeft && holdsTexts(right)),
                     )
                 }
-                Operator.SUBTRACT -> Value.Json(shared(a, b) { (x, y) -> temporalRefused(binary, left, right, x, y) { arithmetic(x, y, "-") } })
-                Operator.MULTIPLY -> Value.Json(shared(a, b) { (x, y) -> temporalRefused(binary, left, right, x, y) { arithmetic(x, y, "*") } })
+                Operator.SUBTRACT -> Value.Json(shared(a, b) { (x, y) -> temporalRefused(binary, left, right, x, y, truthsRead) { arithmetic(x, y, "-") } })
+                Operator.MULTIPLY -> Value.Json(shared(a, b) { (x, y) -> temporalRefused(binary, left, right, x, y, truthsRead) { arithmetic(x, y, "*") } })
                 // A whole number divided by one is a whole number, as in Cypher.
                 Operator.DIVIDE -> Value.Json(
                     shared(a, divisor(binary, b)) { (x, y) ->
-                        temporalRefused(binary, left, right, x, y) {
+                        temporalRefused(binary, left, right, x, y, truthsRead) {
                             "CASE WHEN ${integral(x)} AND ${integral(y)} THEN ${scalar(wholeQuotient(number(x), number(y)))} ELSE ${arithmetic(x, y, "/")} END"
                         }
                     }
@@ -8042,6 +8103,12 @@ abstract class SqlCypherCompiler(
         const val TEMPORAL_OF_MAP = "A temporal value of a map read as the statement runs is Cypher, and is not compiled to SQL yet:"
 
         /**
+         * What `+`, `-`, `*` or `/` fails with, as it runs, of a truth value read beside a number, as Neo4j fails it
+         * (drivine-cypher-spec#345): see `truthRead`. The operator follows.
+         */
+        const val TRUTH_ARITHMETIC = "Arithmetic of a truth value and a number fails, as in Neo4j:"
+
+        /**
          * What a temporal function fails with, as it runs, of a list, a number or a truth value read as the statement runs, as
          * Neo4j fails it (drivine-cypher-spec#331): see `temporal`. The function's name and the value's kind follow.
          */
@@ -8273,11 +8340,17 @@ abstract class SqlCypherCompiler(
         /** The operators of arithmetic, whose value is a number where both operands are: see [Value.Json.known]. */
         val ARITHMETIC = setOf(Operator.ADD, Operator.SUBTRACT, Operator.MULTIPLY, Operator.DIVIDE, Operator.MODULO, Operator.POWER)
 
+        /** The arithmetic a side read as the statement runs is tested for a truth value in, beside a number: see [truthRead]. */
+        val TRUTH_TESTED = setOf(Operator.ADD, Operator.SUBTRACT, Operator.MULTIPLY, Operator.DIVIDE)
+
         /** The operators a store's function of temporal arithmetic is called with, by the text it is told each by: see [storedArithmetic]. */
         val OPERATOR_WORDS = mapOf(Operator.ADD to "+", Operator.SUBTRACT to "-", Operator.MULTIPLY to "*", Operator.DIVIDE to "/")
 
         /** The arithmetic that takes numbers alone, and temporal values where the store does: `+` puts texts and lists together too. */
         val NUMERIC_ONLY = ARITHMETIC - Operator.ADD
+
+        /** The kinds a `+` puts together with a text as a text ([knownKind]). */
+        val TEXT_SUMMED = setOf(Value.Known.TEXT, Value.Known.INTEGER, Value.Known.FLOAT, Value.Known.BOOLEAN)
 
         /**
          * The kinds `toInteger()`, `toFloat()` and `toBoolean()` take, as Neo4j documents them, and how a refusal names them: see
