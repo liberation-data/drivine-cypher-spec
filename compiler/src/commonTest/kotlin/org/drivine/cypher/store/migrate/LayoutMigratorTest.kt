@@ -27,7 +27,7 @@ class LayoutMigratorTest {
     private val statements = MigrationStatements.of(ddl)
     private val stamps = StoreStampStatements.of(ddl)
 
-    /** A store's rows, its checkpoint table, and what it was asked, as the statements the migrator gives would leave it. */
+    /** A store's rows, its checkpoint table, and what it was asked, as the statements the migrator gives would leave it: stamped [stampLayout], or with no stamp where null. */
     private inner class Store(nodes: Map<Long, Pair<List<String>, String>>, edges: Map<Long, Pair<List<String>, String>>, val stampLayout: Int? = 1) {
         val rows = mapOf(Table.NODES to nodes.toMutableMap(), Table.EDGES to edges.toMutableMap())
         var checkpoint: MutableMap<String, String>? = null
@@ -55,6 +55,7 @@ class LayoutMigratorTest {
             MigrationAction.Prepare -> { prepared = true; MigrationOutcome.Ran }
             is MigrationAction.Lock -> {
                 assertEquals(statements.lock, action.statement)
+                assertTrue(prepared, "the lock taken before its table is made")
                 // A second lock from another connection of the same process would wait on its first forever.
                 assertTrue(!locked, "the lock taken twice by one migration")
                 locked = true
@@ -63,7 +64,7 @@ class LayoutMigratorTest {
         }
 
         private fun query(action: MigrationAction.Query): List<Any?> = when (action.statement) {
-            stamps.readStamps -> listOf(mapOf("id" to "s", "assignedAt" to "2026-11-17T00:00:00Z", "layout" to stampLayout?.toLong()))
+            stamps.readStamps -> listOfNotNull(stampLayout?.let { mapOf("id" to "s", "assignedAt" to "2026-11-17T00:00:00Z", "layout" to it.toLong()) })
             stamps.foreignNodes -> if (rows[Table.NODES]!!.size > own().size) listOf(1L) else emptyList()
             stamps.layoutObjects -> listOfNotNull(
                 mapOf("name" to "drivine_ix_personname_1a2b3c4d", "type" to "INDEX"),
@@ -177,18 +178,27 @@ class LayoutMigratorTest {
     }
 
     @Test
-    fun aMigrationStoppedAfterAnyActionAndBegunAgainRewritesEveryRowExactlyOnce() {
+    fun aMigrationStoppedAfterAnyActionAndBegunAgainRewritesEveryRowExactlyOnce() = stoppedAfterEachAction(::store)
+
+    @Test
+    fun aMigrationOfAGraphWithNoStampStoppedAfterAnyActionAndBegunAgainRewritesEveryRowExactlyOnce() =
+        // Layout 1's graph with no stamp: its lock table, which only layout 2 makes, made before its checkpoint table would read
+        // as layout 2's with its stamp gone (the verdict's rows 11 and 12), were the migration stopped between them.
+        stoppedAfterEachAction { Store(store().rows[Table.NODES]!!.filterKeys { it != 1L }, store().rows[Table.EDGES]!!, stampLayout = null) }
+
+    /** A migration of the store [make] makes, stopped after each action in turn and begun again from the start. */
+    private fun stoppedAfterEachAction(make: () -> Store) {
         var stops = 0
         var stopAt = 0
         while (true) {
-            val store = store()
+            val store = make()
             val stopped = migrate(store, MigrationRequest(declarations, batchSize = 2), stopAt = stopAt)
             if (stopped != null) break
             stops++
             // Begun again from the start, as a library begins it, by the same declarations: it resumes where the store says.
             val report = migrate(store, MigrationRequest(declarations, batchSize = 2))!!
             assertEquals(Status.REWRITTEN, report.status, "stopped at action $stopAt: ${report.message}")
-            assertEquals(expected(), store.rows.mapValues { (_, rows) -> rows.mapValues { it.value.second } }, "stopped at action $stopAt")
+            assertEquals(expected().mapValues { (table, rows) -> rows.filterKeys { it in make().rows[table]!! } }, store.rows.mapValues { (_, rows) -> rows.mapValues { it.value.second } }, "stopped at action $stopAt")
             assertTrue(store.rewrites.values.all { it == 1 }, "stopped at action $stopAt, a row rewritten twice: ${store.rewrites}")
             stopAt++
         }

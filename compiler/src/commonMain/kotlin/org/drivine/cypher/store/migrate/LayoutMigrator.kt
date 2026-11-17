@@ -27,9 +27,10 @@ import org.drivine.cypher.store.plan.PlanJson
  *    ([LayoutMigration.rewrite]) with nothing written: the report counts what would change, lists every value not of its
  *    declared kind, and names the properties whose values all read as one kind, the candidates to declare. A dry run ends
  *    here, read-only. A graph with a value not of its kind is refused here, unless the request keeps such values.
- * 3. **Begin.** The store's tables are made as layout 2 makes them (the library's `prepare`, run as at a first connection,
- *    without the verdict), the lock a schema change takes is taken and held to the end, and the checkpoint table made. It is
- *    then read again under the lock: a checkpoint already there is another migration's, which is resumed, not begun again.
+ * 3. **Begin.** The checkpoint table is made, first, so a graph stopped at any later moment is refused as part way through
+ *    a migration; then the store's tables as layout 2 makes them (the library's `prepare`, run as at a first connection,
+ *    without the verdict), and the lock a schema change takes is taken and held to the end. The checkpoint table is then
+ *    read under the lock: a checkpoint already there is another migration's, which is resumed, not begun again.
  * 4. **Write.** Every node, then every relationship, is read again in batches after the checkpoint's id, and each batch's
  *    rewritten rows, the values it keeps, and the checkpoint after its last id are written in one transaction: so a row is
  *    rewritten exactly once, as a rewrite is not to be run again on a row it wrote (it would escape a tag's `$t`), and a
@@ -102,7 +103,8 @@ class LayoutMigrator(private val ddl: SqlStoreDdl) {
         // A checkpoint is resumed, but a graph a later Drivine wrote, or two stamped at once, is refused first, as the verdict's rows order them.
         if (verdict is StoreLayout.Verdict.Refuse && verdict.inProgress) {
             if (state.request.dryRun) return MigrationStep.Done(state.report.ended(Status.IN_PROGRESS, IN_PROGRESS))
-            return run(judged.copy(phase = Phase.RESUME, locked = true), *lockAnd(MigrationAction.Query(statements.readCheckpoint, purpose = "checkpoint")))
+            // Prepared again, as a migration stopped once its checkpoint table was made may not have made the lock table yet.
+            return run(judged.copy(phase = Phase.RESUME, locked = true), MigrationAction.Prepare, *lockAnd(MigrationAction.Query(statements.readCheckpoint, purpose = "checkpoint")))
         }
         return when (verdict) {
             StoreLayout.Verdict.Current -> MigrationStep.Done(state.report.ended(Status.CURRENT, "The graph is in store layout ${LayoutMigration.TO}: there is nothing to migrate."))
@@ -156,13 +158,12 @@ class LayoutMigrator(private val ddl: SqlStoreDdl) {
             state.request.dryRun -> MigrationStep.Done(scannedAll.ended(Status.DRY_RUN, "A dry run: nothing was written."))
             else -> run(
                 next.copy(phase = Phase.BEGIN, table = Table.NODES, after = 0, report = scannedAll.copy(tables = emptyMap()), locked = true),
+                // The checkpoint table first, so a graph stopped at any later action is refused as part way through a migration
+                // (the verdict's row 4), never read by this layout's lock table, which Prepare makes, as one of this layout whose stamp is gone.
+                MigrationAction.Execute(statements.createCheckpoint, purpose = "checkpoint"),
                 MigrationAction.Prepare,
                 // A migration begun again from its scan, its checkpoint table made and nothing written, holds the lock already.
-                *lockAnd(
-                    MigrationAction.Execute(statements.createCheckpoint, purpose = "checkpoint"),
-                    MigrationAction.Query(statements.readCheckpoint, purpose = "checkpoint"),
-                    held = state.locked,
-                ),
+                *lockAnd(MigrationAction.Query(statements.readCheckpoint, purpose = "checkpoint"), held = state.locked),
             )
         }
     }
