@@ -556,7 +556,8 @@ internal class SchemaProgram(
         requireSupported(spec)
         // An index that ignores case is over copies every node of its label has. One made anew fills them in again,
         // recorded or not: they may have gone out of step while it was gone.
-        fillIn(spec) { findIndex(spec) == null }
+        // One a uniqueness constraint serves is never listed, and is not made anew (#325).
+        fillIn(spec) { findIndex(spec) == null && servingConstraint(spec.made()) == null }
         return ensureMadeIndex(spec.made(), build)
     }
 
@@ -610,13 +611,18 @@ internal class SchemaProgram(
      * beside it and a drop leaves it (liberation-data/drivine-cypher-spec#325). Null where there is none, or its build failed.
      */
     private fun servedByConstraint(spec: IndexSpec): SchemaItemInfo? {
-        if (spec.kind != SchemaItemKind.RANGE_INDEX || spec.properties.size != 1 || !store.uniquenessConstraintsServeRangeIndexes) return null
-        val constraint = constraints().firstOrNull {
-            it.kind == SchemaItemKind.UNIQUENESS_CONSTRAINT && it.label == spec.label && it.properties == spec.properties && !it.buildFailed
-        } ?: return null
+        val constraint = servingConstraint(spec) ?: return null
         val owner = constraint.name ?: "the uniqueness constraint on ${spec.label}${spec.properties}"
         log(LogLevel.INFO, INDEX_MANAGER, "Range index on ${spec.label}${spec.properties} is served by $owner's index: nothing made beside it")
         return SchemaItemInfo(kind = spec.kind, label = spec.label, properties = spec.properties, name = constraint.name, owningConstraint = owner)
+    }
+
+    /** The uniqueness constraint whose index serves [spec], as it is made, as [servedByConstraint] takes it: null where none does. */
+    private fun servingConstraint(spec: IndexSpec): SchemaItemInfo? {
+        if (spec.kind != SchemaItemKind.RANGE_INDEX || spec.properties.size != 1 || !store.uniquenessConstraintsServeRangeIndexes) return null
+        return constraints().firstOrNull {
+            it.kind == SchemaItemKind.UNIQUENESS_CONSTRAINT && it.label == spec.label && it.properties == spec.properties && !it.buildFailed
+        }
     }
 
     /**

@@ -4324,8 +4324,12 @@ cases:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
               - now: 1000000
                 actions:
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
                   - {fillLowerCopies: {label: "Person", properties: ["email"]}, failed: [{sqlState: "57014", vendorCode: 0, message: "canceling statement due to statement timeout"}]}
-                  - {query: {listing: "constraints"}}
+                  - {execute: {create: "Range index that ignores case"}}
+                  - {query: {listing: "indexes.RANGE_INDEX"}}
               - now: 1000000
                 actions:
                   - {query: {listing: "indexes.FULLTEXT_INDEX"}, items: []}
@@ -4624,14 +4628,38 @@ cases:
                 - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 2 already matching, 0 recreated, 0 needing attention"]
   - case: "29b"
     name: "Ignore-case lower copies, after a listing that fails once"
-    description: "The first read of the listing fails, so the copies are filled in again; the index is read again, there, and matches."
+    description: "The first read of the listing fails, so the copies are filled in again (on Postgres and SQLite once the constraints show none serves the index); the index is read again, there, and matches."
     stores: ["postgres", "oracle", "sqlite"]
     catalogs:
       - {owner: null, version: null, items: ["Range index that ignores case"]}
     steps:
       - operation: {enforce: "all"}
         runs:
-          - stores: ["postgres", "oracle", "sqlite"]
+          - stores: ["postgres", "sqlite"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {execute: {marker: "prepare"}}
+                  - {query: {marker: "read.items", scope: "schema"}, rows: []}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, failed: [{message: "connection reset"}]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
+                  - {fillLowerCopies: {label: "Person", properties: ["email"]}}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["__drivine.lower.email"], name: "Person_email_ci_range"}]}
+              - now: 1000000
+                actions:
+                  - {writeMarker: {scope: "schema", version: null, items: "RANGE_INDEX:Person:__drivine.lower.email:Person_email_ci_range"}}
+            done: 1000000
+            report:
+              owners:
+                - {owner: null, results: [{spec: "Range index that ignores case", alreadyMatching: {kind: "RANGE_INDEX", label: "Person", properties: ["__drivine.lower.email"], name: "Person_email_ci_range"}}], marker: {version: null, items: "RANGE_INDEX:Person:__drivine.lower.email:Person_email_ci_range"}}
+              log:
+                - ["INFO", "SchemaManager", "Applying schema for owner 'schema' on 'default': 1 items (forceRecreate=false, versionChanged=false, version=null)"]
+                - ["INFO", "SchemaManager", "Schema for owner 'schema' on 'default': 0 created, 1 already matching, 0 recreated, 0 needing attention"]
+          - stores: ["oracle"]
             rounds:
               - now: 1000000
                 actions:
