@@ -97,8 +97,29 @@ class LayoutMigrationTest {
             assertEquals(pinned["writeCheckpoint"]!!.textValue(), statements.writeCheckpoint, "on $target, $name: writeCheckpoint")
             assertEquals(pinned["dropCheckpoint"]!!.textValue(), statements.dropCheckpoint, "on $target, $name: dropCheckpoint")
             assertEquals(pinned["lock"]?.textValue(), statements.lock, "on $target, $name: lock")
+            assertEquals(pinned["uniques"]!!.textValue(), statements.uniques, "on $target, $name: uniques")
+            assertEquals(pinned["stampLayout"]!!.textValue(), statements.stampLayout, "on $target, $name: stampLayout")
         }
         assertEquals(setOf("postgres", "oracle", "sqlite"), stores.fieldNames().asSequence().toSet())
+    }
+
+    @Test
+    fun aFinishedGraphIsJudgedCurrentAsMigrateYamlPins() {
+        for (case in spec["finished"]!!) {
+            val store = case["store"]!!.textValue()!!
+            val ddl = when (store) {
+                "postgres" -> org.drivine.cypher.store.ddl.PostgresDdl("drivine")
+                "oracle" -> org.drivine.cypher.store.ddl.OracleDdl("drivine")
+                else -> org.drivine.cypher.store.ddl.SqliteDdl("drivine")
+            }
+            @Suppress("UNCHECKED_CAST")
+            fun maps(key: String) = org.drivine.cypher.store.plan.PlanJson.plain(case[key]!!) as List<Map<String, Any?>>
+            val verdict = org.drivine.cypher.store.marker.StoreLayout.verdict(
+                org.drivine.cypher.store.marker.StoreStamp.engine(ddl), "drivine", maps("stamps"), case["foreignNodes"]!!.booleanValue(), maps("objects"), ddl,
+            )
+            assertEquals(org.drivine.cypher.store.marker.StoreLayout.Verdict.Current, verdict, "on $target, $store: a finished graph")
+        }
+        assertEquals(3, spec["finished"]!!.size())
     }
 
     @Test

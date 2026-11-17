@@ -22,6 +22,12 @@ import org.drivine.cypher.store.migrate.MigrationStatements.Table
  *   both), with the count of its values: what to declare, never applied unless declared. A value of a node of two labels,
  *   one of which declares its property, is that declaration's, and no candidate of the other.
  * - [kept]: once written, each value kept as it was, not of its declared kind, where the migration was told to keep them.
+ * - [collisions]: keys a uniqueness constraint the catalog records would refuse, with samples: after the writes, exactly, in
+ *   layout 2; in a dry run, over layout 1's values, possible ones, which miss values that become equal only once rewritten
+ *   and count a date and the text that spells it as one.
+ * - [notes]: what a migration leaves to others, said in every report from the check on (a dry run's, `collisions` and `migrated`): the indexes, which an application's
+ *   schema plan makes at its next start (until then statements give the same answers, unindexed), and the count store,
+ *   unseeded as a fresh store's.
  */
 @DrivineInternalApi
 data class MigrationReport(
@@ -32,6 +38,8 @@ data class MigrationReport(
     val observed: Map<String, Map<String, Long>> = emptyMap(),
     val candidates: List<Candidate> = emptyList(),
     val kept: List<Kept> = emptyList(),
+    val collisions: List<Collision> = emptyList(),
+    val notes: List<String> = emptyList(),
 ) {
     /** The rows of a table read and changed. */
     data class Counted(val rows: Long = 0, val changed: Long = 0)
@@ -41,6 +49,13 @@ data class MigrationReport(
 
     /** A value of the row [id] of [table] not of its declared [kind]: [value], its JSON text, and why ([message]). */
     data class InvalidValue(val table: String, val id: Long, val kind: String, val value: String, val message: String)
+
+    /**
+     * Keys of the uniqueness constraint over [properties] of [label] that repeat: [sample], a row of the schema plan's sample
+     * of what the constraint would refuse (`{properties, count, nodes}`), as its JSON text. After the writes they collide in
+     * layout 2; in a dry run, read over layout 1's values, they may.
+     */
+    data class Collision(val label: String, val properties: List<String>, val sample: String)
 
     /** A property to declare: [kind] would change its [values]. */
     data class Candidate(val label: String, val property: String, val kind: String, val values: Long)
@@ -129,6 +144,8 @@ data class MigrationReport(
         },
         "candidates" to candidates.map { linkedMapOf("label" to it.label, "property" to it.property, "kind" to it.kind, "values" to it.values) },
         "kept" to kept.map { it.toMap() },
+        "collisions" to collisions.map { linkedMapOf("label" to it.label, "properties" to it.properties, "sample" to it.sample) },
+        "notes" to notes,
     )
 
     companion object {
@@ -154,6 +171,8 @@ data class MigrationReport(
             }.orEmpty(),
             candidates = tree["candidates"]?.map { Candidate(it["label"]!!.textValue()!!, it["property"]!!.textValue()!!, it["kind"]!!.textValue()!!, it["values"]!!.longValue()) }.orEmpty(),
             kept = tree["kept"]?.map { Kept.of(it) }.orEmpty(),
+            collisions = tree["collisions"]?.map { c -> Collision(c["label"]!!.textValue()!!, c["properties"]!!.map { it.textValue()!! }, c["sample"]!!.textValue()!!) }.orEmpty(),
+            notes = tree["notes"]?.map { it.textValue()!! }.orEmpty(),
         )
     }
 }
