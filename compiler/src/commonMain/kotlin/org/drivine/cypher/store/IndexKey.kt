@@ -13,7 +13,8 @@ import org.drivine.cypher.text.JavaText
  * expressions the index's DDL is made over (liberation-data/drivine-cypher-spec#286).
  *
  * On Oracle and SQLite the index holds a property's class and key ([column]: `OracleSql.indexClass` and `indexKey`,
- * `SqliteSql.indexClass` and `indexKey`). A lookup compares them with the value's own class and key. Where the value is given
+ * `SqliteSql.indexClass` and `indexKey`). A lookup compares them with the value's own class and key, save that SQLite's
+ * lets a list past its key, its JSON text, by its class (`SqliteCypherCompiler.indexedEqualityOfAny`, #354). Where the value is given
  * as the statement compiles, [of] works them out here, so the statement binds the two texts once, as the index's columns
  * hold them: written in the SQL over the bound value, as `OracleSql.valueClass` and `valueKey` write them, Oracle's key of
  * a value of any kind is a `CASE` that reads the value at each branch, and a lookup by id bound it 59 times (#286).
