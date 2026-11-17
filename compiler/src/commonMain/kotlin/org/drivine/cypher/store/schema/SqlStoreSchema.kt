@@ -35,6 +35,9 @@ abstract class SqlStoreSchema internal constructor() : StoreSchema {
     abstract override val ddl: SqlStoreDdl
 
     override val supportsIfNotExists = true
+
+    /** A uniqueness constraint is a unique index over its key, under its label, that a lookup reads (see [StoreSchema]); not on Oracle. */
+    override val uniquenessConstraintsServeRangeIndexes = true
     override val supportsNamedItems = true
 
     /** Whether a record's `status` is read: Oracle's, which lists a range index `INCOMPLETE`; the others list none. */
@@ -545,6 +548,13 @@ class OracleSchema(override val ddl: OracleDdl) : SqlStoreSchema() {
 
     override val indexesNamedApart: Boolean
         get() = true
+
+    /**
+     * Not served: a uniqueness constraint's unique index stands for a range index's labelled index alone, and the range
+     * index's record, which a constraint over one property makes served by it, is listed. Where that record is gone (a
+     * drop of the range index), its index over every node's property is gone with it, and an ensure makes them again.
+     */
+    override val uniquenessConstraintsServeRangeIndexes = false
 
     /**
      * A range index is the index over the property of every node (`ix`, of no label, which labels with a property of the

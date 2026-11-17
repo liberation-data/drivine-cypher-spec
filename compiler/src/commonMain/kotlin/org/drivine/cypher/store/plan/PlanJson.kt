@@ -127,7 +127,7 @@ internal object PlanJson {
         linkedMapOf(
             "kind" to it.kind.name, "label" to it.label, "properties" to it.properties, "name" to it.name, "dimensions" to it.dimensions,
             "similarity" to it.similarity?.name, "analyzer" to it.analyzer, "status" to it.status, "quantizationEnabled" to it.quantizationEnabled,
-            "hnswM" to it.hnswM, "hnswEfConstruction" to it.hnswEfConstruction,
+            "hnswM" to it.hnswM, "hnswEfConstruction" to it.hnswEfConstruction, "owningConstraint" to it.owningConstraint,
         )
     }
 
