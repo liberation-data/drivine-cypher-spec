@@ -1876,9 +1876,11 @@ class OracleCypherCompiler(
      * `SELECT DISTINCT` at any depth ([DISTINCT_SELECT]), so the parts of a `UNION` in a `CALL` and `db.labels()`'s query are
      * hinted too, though each read right without, and so are a query [once] keeps apart, a `WITH`'s query kept apart, as
      * one that passes a path on is, and one whose string holds those words: the hint changes a plan, not its rows. `count(DISTINCT …)` read right, and is not hinted.
+     * A `DISTINCT` that keeps the order of its rows is written as no `SELECT DISTINCT`, but numbers its rows and groups them
+     * (#316): it is told by its text too, at any depth ([NUMBERED_DISTINCT]).
      */
     override fun called(query: String) =
-        "SELECT /*+ NO_MERGE${if (DISTINCT_SELECT.containsMatchIn(query)) " NO_DECORRELATE" else ""} */ * FROM (\n${indent(query)}\n)"
+        "SELECT /*+ NO_MERGE${if (DISTINCT_SELECT.containsMatchIn(query) || NUMBERED_DISTINCT.containsMatchIn(query)) " NO_DECORRELATE" else ""} */ * FROM (\n${indent(query)}\n)"
 
     /** A fragment's term [sql] with its reads routed as a statement's are: see [finished]. */
     override fun finishedTerm(sql: String) = OracleLongReads.routed(sql)
@@ -2601,6 +2603,9 @@ class OracleCypherCompiler(
 
         /** A query, or a subquery of one, that keeps its rows distinct, hinted or not: see [called]. */
         private val DISTINCT_SELECT = Regex("""\bSELECT (?:/\*\+ .*? \*/ )?DISTINCT\b""")
+
+        /** A query, or a subquery of one, that keeps its rows distinct in the order they came, by their least number: see [called]. */
+        private val NUMBERED_DISTINCT = Regex("""\bMIN\(q\d+\.rn\) AS o1\b""")
 
         /** A query that opens with hints, and those hints: Oracle reads the first hint comment of a query alone. */
         private val HINTED = Regex("""SELECT /\*\+ (.*?) \*/""")

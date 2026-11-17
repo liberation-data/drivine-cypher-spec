@@ -37,6 +37,34 @@ class OracleCalledDistinctTest {
     }
 
     @Test
+    fun `a CALL whose DISTINCT keeps the order of its rows is not decorrelated`() {
+        // drivine-cypher-spec#316 numbers such rows and groups them, in no SELECT DISTINCT: that is told by its text too.
+        listOf(
+            "UNWIND [1, 1, 2] AS i CALL (i) { UNWIND [i, i] AS y WITH DISTINCT y RETURN y AS j } RETURN i, j" to listOf("NO_MERGE NO_DECORRELATE"),
+            "UNWIND [1, 1, 2] AS i CALL (i) { UNWIND [i, i] AS y RETURN DISTINCT y AS j } RETURN i, j" to listOf("NO_MERGE NO_DECORRELATE"),
+            "UNWIND [1, 1, 2] AS i CALL (i) { CALL (i) { UNWIND [i, i] AS y WITH DISTINCT y RETURN y AS j } RETURN j } CALL (i) { RETURN i AS k } RETURN i, j, k" to
+                listOf("NO_MERGE NO_DECORRELATE", "NO_MERGE NO_DECORRELATE", "NO_MERGE"),
+            "UNWIND [1, 1, 2] AS i CALL (i) { RETURN i AS j, COUNT { UNWIND [i, i] AS y WITH DISTINCT y LIMIT 1 RETURN y } AS n } RETURN i, j, n" to
+                listOf("NO_MERGE NO_DECORRELATE"),
+        ).forEach { (cypher, hints) ->
+            val sql = OracleCypherCompiler("g").compile(cypher).sql
+            assertTrue("ROW_NUMBER() OVER (ORDER BY" in sql, cypher)
+            assertFalse(Regex("""\bSELECT (?:/\*\+ .*? \*/ )?DISTINCT\b""").containsMatchIn(sql), cypher)
+            assertEquals(hints, calledHints(sql), cypher)
+        }
+    }
+
+    @Test
+    fun `a query kept apart that holds a DISTINCT keeping its order deeper in is not decorrelated either`() {
+        // The WITH that passes the path on is kept apart, its query holding the numbered DISTINCT before it, as one holding a
+        // SELECT DISTINCT at any depth is hinted.
+        val cypher = "UNWIND [1, 1, 2] AS i CALL (i) { UNWIND [i, i] AS y WITH DISTINCT y MATCH p = (n) WHERE id(n) = y WITH p, y RETURN y AS j } RETURN i, j"
+        val sql = OracleCypherCompiler("g").compile(cypher).sql
+        val hints = Regex("""SELECT /\*\+ (NO_MERGE.*?) \*/ \* FROM \(""").findAll(sql).map { it.groupValues[1] }.toList()
+        assertEquals(listOf("NO_MERGE NO_DECORRELATE", "NO_MERGE NO_DECORRELATE"), hints, sql)
+    }
+
+    @Test
     fun `a CALL that keeps a row whose item may be NaN apart is not decorrelated either`() {
         // drivine4j#685 numbers such a row apart beside its SELECT DISTINCT: the hint is kept.
         val nan = mapOf("p" to Double.NaN)
