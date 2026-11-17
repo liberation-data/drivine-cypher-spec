@@ -45,6 +45,9 @@ class OpenListTextTest {
         assertEquals("[1, x]", sqlite("RETURN toString({a: [1, 'x']}.a)"))
         assertEquals("[1, 2]", sqlite("RETURN toString(\$m.a.l)", mapOf("m" to mapOf("a" to mapOf("l" to listOf(1, 2))))))
         assertEquals("[1, 2]", sqlite("WITH \$m AS m RETURN toString(m['l'])", mapOf("m" to mapOf("l" to listOf(1, 2)))))
+        // head() and last() of a list given or bound, as an item of it is.
+        assertEquals("[1, a]", sqlite("RETURN toString(head(\$l))", mapOf("l" to listOf(listOf(1, "a"), 2))))
+        assertEquals("[1, a]", sqlite("WITH \$m AS m RETURN toString(last(m.l))", mapOf("m" to mapOf("l" to listOf(2, listOf(1, "a"))))))
     }
 
     @Test
@@ -57,7 +60,7 @@ class OpenListTextTest {
         val parameters = mapOf("m" to mapOf("n" to 1), "l" to listOf(1, 2))
         listOf(
             "RETURN toString([1, 2][0])", "RETURN toString(head([1, 2]))", "RETURN toString(last(['a', null]))",
-            "WITH [1, 2] AS l RETURN toString(l[0])", "RETURN toString(coalesce(\$m.n, 1))", "RETURN toString(\$l[0])",
+            "WITH [1, 2] AS l RETURN toString(l[0])", "RETURN toString(coalesce(\$m.n, 1))", "RETURN toString(\$l[0])", "RETURN toString(head(\$l))",
         ).forEach { cypher ->
             val sql = SqliteCypherCompiler("g").compile(cypher, parameters).sql
             assertFalse("#301" in sql, "$cypher: $sql")
@@ -75,6 +78,8 @@ class OpenListTextTest {
             sqlite("WITH \$m AS m RETURN toString(m.l)", mapOf("m" to mapOf("l" to listOf(1, mapOf("k" to 1))))),
             "toString() of a list or a map that holds a map read as the statement runs",
         )
+        // A map written among a list's items is no item of a known kind.
+        assertContains(sqlite("RETURN toString(head([{a: 1}, 2]))"), "(liberation-data/drivine-cypher-spec#301): it is a map")
     }
 
     @Test
@@ -98,7 +103,7 @@ class OpenListTextTest {
                 "MATCH (n) RETURN toString(n.tags)", "MATCH ()-[r]->() RETURN toString(r.tags)", "MATCH (n) RETURN toString(coalesce(n.tags, 'x'))",
                 "MATCH (n) RETURN n ORDER BY toString(n.name)", "MATCH (n) WHERE toString(n.age) = '1' RETURN n",
                 // A variable alone keeps no kind to tell a list by: an aggregate read by its item's name is one.
-                "MATCH (n) RETURN count(*) AS c ORDER BY toString(c)",
+                "MATCH (n) RETURN count(*) AS c ORDER BY toString(c)", "MATCH (n) WITH n.tags AS t RETURN toString(coalesce(t, 'x'))",
             ).forEach { cypher ->
                 val sql = compiler.compile(cypher, mapOf("p" to 3)).sql
                 assertFalse("#301" in sql, "${compiler::class.simpleName}: $cypher: $sql")

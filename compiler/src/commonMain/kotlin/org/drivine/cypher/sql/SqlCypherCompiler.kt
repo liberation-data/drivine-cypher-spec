@@ -7505,8 +7505,8 @@ abstract class SqlCypherCompiler(
 
         /**
          * Whether [written], of a kind the statement leaves open, may turn out a list that isn't a store's property as the statement
-         * runs: a member of a map given, written or bound ([holdsMap]), an item of such a map or of a list, or `coalesce()`,
-         * `head()`, `last()` or a CASE of one or of a list. A variable alone is none: what a WITH or a RETURN binds, an aggregate
+         * runs: a member of a map given, written or bound ([holdsMap]), an item of such a map or of a list, `head()` or `last()`
+         * of such a list, or `coalesce()`, `head()`, `last()` or a CASE of one or of a list. A variable alone is none: what a WITH or a RETURN binds, an aggregate
          * among it (`count(*) AS c`, read by name in an ORDER BY), keeps no kind to tell a list by. A property of a node or a
          * relationship is none either: it keeps the store's JSON text, as Neo4j's text of a list read from the store
          * would cost every `toString()` of a property thousands of characters of SQL (liberation-data/drivine-cypher-spec#297,
@@ -7517,8 +7517,10 @@ abstract class SqlCypherCompiler(
             is Expression.Property -> holdsMap(written.subject, scope)
             is Expression.Index -> (holdsMap(written.subject, scope) || written.subject is Expression.ListLiteral) && !noListItems(written.subject, scope)
             is Expression.Function -> written.name.lowercase().let { name ->
+                // head() and last() of a list given or bound are read as an item of it is.
                 name in LIST_PASSING && written.arguments.any {
-                    (name == "coalesce" || !noListItems(it, scope)) && (knownKind(it, scope) == Value.Known.LIST || mayHoldList(it, scope))
+                    (name == "coalesce" || !noListItems(it, scope)) &&
+                        (knownKind(it, scope) == Value.Known.LIST || mayHoldList(it, scope) || name != "coalesce" && holdsMap(it, scope))
                 }
             }
             is Expression.Case -> (written.alternatives.map { it.second } + listOfNotNull(written.otherwise))
