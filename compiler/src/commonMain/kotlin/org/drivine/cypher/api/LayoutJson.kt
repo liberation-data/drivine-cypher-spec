@@ -44,7 +44,8 @@ import org.drivine.cypher.store.migrate.LayoutMigration
  *   (liberation-data/drivine-cypher-spec#107, #329), the text a compiled statement that writes binds it as: each temporal value,
  *   given as a request's parameter gives one (`{"$temporal": "DATE", "text": "2024-01-01"}`, its kind as
  *   [org.drivine.cypher.sql.Temporal] names it), its tag `{"$t", "v", "s"}`, each map key that begins with `$` escaped, at any
- *   depth, and bytes the list of their signed values, `[1, 2, -1]`; one whose text is no value of its kind is an error. Each
+ *   depth, and bytes the list of their signed values, `[1, 2, -1]`; one whose text is no value of its kind, an offset with
+ *   seconds among them, is an error, with the message a statement given it is refused with ([CypherJson.temporalTag]). Each
  *   float as the store holds it: on Postgres a whole one with its fraction (`10000000.0`), on Oracle every one as extended
  *   JSON's double (`{"$numberDouble": "1.5"}`, NaN and the infinities `"NaN"`, `"Infinity"`, `"-Infinity"`), on SQLite an
  *   infinity as `9e999` or `-9e999`. A float the store holds as no number, Postgres's NaN and infinities and SQLite's NaN, is an
@@ -107,7 +108,6 @@ internal object LayoutJson {
         val of = Store.of(named) ?: throw IllegalArgumentException("A write request gives the store as $STORES, not $named.")
         // As a parameter is read: the value is at 2, inside the request's object.
         val value = TypedJson.value(given ?: throw IllegalArgumentException("A write request gives the value."), depth = 2)
-        temporalsOfTheirKind(value)
         // The text the store holds, spliced in as it is: a float's fraction, an infinity's 9e999 and Oracle's extended doubles kept.
         return "{\"value\":${StoreValues.text(value, of)}}"
     }
@@ -142,19 +142,6 @@ internal object LayoutJson {
 
     /** The stores a write request names, as a statement's request names them. */
     private const val STORES = "postgres, oracle or sqlite"
-
-    /**
-     * Refuses a temporal value in [value], at any depth, whose text is no value of its kind: [CypherJson.valueToTree] would
-     * write it as plain text, which the layout reads back as a string, not as the value the host marked.
-     */
-    private fun temporalsOfTheirKind(value: Any?) {
-        when (value) {
-            is org.drivine.cypher.json.TemporalValue ->
-                require(CypherJson.temporalTag(value) is ObjectNode) { "No ${value.kind.name} is ${value.text}." }
-            is Map<*, *> -> value.values.forEach(::temporalsOfTheirKind)
-            is List<*> -> value.forEach(::temporalsOfTheirKind)
-        }
-    }
 
     private fun expand(given: JsonNode?): String {
         val text = given?.takeIf { it.isTextual }?.textValue() ?: throw IllegalArgumentException("An expand request gives the statement as a text.")

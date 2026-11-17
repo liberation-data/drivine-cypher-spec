@@ -300,7 +300,10 @@ object CypherJson {
 
     /**
      * The tag of [value], where it is a temporal value, a [TemporalValue] or one of the platform's own temporal types, as the
-     * store layout holds one (see [ValueLayout]); null for any other value, and for one whose text is no value of its kind.
+     * store layout holds one (see [ValueLayout]); null for any other value. One whose text is no value of its kind, an offset
+     * with seconds among them (`-00:44:30`, as java.time writes a zone's local mean time), which the layout holds none of, is
+     * refused by name ([notOfItsKind]): written as its text, a parameter would be bound, and a save would store, a text, equal
+     * to no temporal value (liberation-data/drivine-cypher-spec#357). A value read from the store is a [JsonNode], never this.
      */
     fun temporalTag(value: Any?): JsonNode? {
         if (value == null || value is JsonNode) return null
@@ -312,9 +315,20 @@ object CypherJson {
             org.drivine.cypher.sql.Temporals.canonical(text, kind)
         } catch (e: IllegalArgumentException) {
             null
-        } ?: return TextNode(text)
+        } ?: throw org.drivine.cypher.CompilerException(notOfItsKind(kind, text))
         return ValueLayout.tag(kind, canonical)
     }
+
+    /**
+     * Why a value given as a temporal value of [kind], its text [text], is refused, as [temporalTag] refuses it: for an offset
+     * with seconds, that the store holds an offset to the minute.
+     */
+    internal fun notOfItsKind(kind: org.drivine.cypher.sql.Temporal, text: String): String =
+        "A value given as a ${kind.name} isn't one: $text" +
+            (if (kind.zoned && OFFSET_WITH_SECONDS.containsMatchIn(text)) " (the store holds an offset to the minute)." else ".")
+
+    /** An offset with seconds that a zoned text ends with: `-00:44:30`, `+024530`. */
+    private val OFFSET_WITH_SECONDS = Regex("[0-9][+-][0-9]{2}:?[0-9]{2}:?[0-9]{2}$")
 
     /** [value] as compact JSON text: as [encoder] writes it where it does (decimals written plain aside), else as its tree. */
     fun writeValueAsString(value: Any?, plainDecimals: Boolean = false, encoder: CypherEncoder? = null): String {
