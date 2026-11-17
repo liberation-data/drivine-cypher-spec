@@ -2268,6 +2268,45 @@ cases:
         cypher: "DROP CONSTRAINT cy_unique_at"
         rows: []
 
+  - name: "A list found by an equal list, whole numbers for its floats"
+    description: "A list is equal to a list of the same items, 1 to 1.0, and a node under a range index is found by one, as Neo4j 2026.10.1 finds it: by a list written, a list a WITH gives, a row's list, another node's property, or a list of temporal values (#354). SQLite's index held a list's JSON text as its key, [1.0,2.5] beside [1,2.5], and compared that text first, so it found none; a list is now let past that test by its class, and compared as JSON."
+    steps:
+      - only: [neo4j, sql]
+        cypher: "CREATE INDEX cy_list_id IF NOT EXISTS FOR (n:CyList) ON (n.id)"
+        rows: []
+      - only: [neo4j, sql]
+        cypher: "CALL db.awaitIndexes(300)"
+        rows: []
+      - only: [neo4j, sql]
+        cypher: "CREATE (:CyList {id: [1.0, 2.50], k: 5}), (:CyList {id: 4.0, k: 6}), (:CyList {id: [2, 3], k: 7}), (:CyList {id: [date('2024-01-02')], k: 8})"
+      - only: [neo4j, sql]
+        cypher: "MATCH (a:CyList {k: 5}) RETURN [a.id = [1, 2.5], a.id = [1.0, 2.5], a.id = [1, 2.5, 3]]"
+        rows: [[true, true, false]]
+      - only: [neo4j, sql]
+        cypher: "MATCH (a:CyList {id: [1, 2.5]}) RETURN a.k"
+        rows: [5]
+      - only: [neo4j, sql]
+        cypher: "WITH [1, 2.5] AS v MATCH (a:CyList {id: v}) RETURN a.k"
+        rows: [5]
+      - note: "Rows of more than one kind, so each is compared as a value of any kind."
+        only: [neo4j, sql]
+        cypher: "UNWIND $rows AS row MATCH (a:CyList {id: row.s}) RETURN a.k ORDER BY a.k"
+        parameters: {rows: [{s: [2.0, 3.0]}, {s: 4}, {s: [1, 2.5]}, {s: [9]}]}
+        rows: [5, 6, 7]
+      - only: [neo4j, sql]
+        cypher: "UNWIND $rows AS row MATCH (a:CyList) WHERE a.id = row.s RETURN a.k"
+        parameters: {rows: [{s: [1, 2.5]}]}
+        rows: [5]
+      - only: [neo4j, sql]
+        cypher: "MATCH (x:CyList) MATCH (a:CyList {id: x.id}) RETURN [x.k, a.k] ORDER BY x.k"
+        rows: [[5, 5], [6, 6], [7, 7], [8, 8]]
+      - only: [neo4j, sql]
+        cypher: "WITH [date('2024-01-02')] AS v MATCH (a:CyList {id: v}) RETURN a.k"
+        rows: [8]
+      - only: [neo4j, sql]
+        cypher: "DROP INDEX cy_list_id"
+        rows: []
+
   - name: "Unique over a property whose name begins with $"
     description: "A uniqueness constraint over a property named `$x` constrains the key a statement holds it at, `$$x` on a SQL store (see README.md, Values in the store), so a second node of the same value is refused there as on Neo4j, and a node is found by it (#161)."
     steps:
@@ -2449,3 +2488,19 @@ cases:
         cypher: "MATCH (n:CyWrite) WHERE NOT n.k = $g RETURN n.i ORDER BY n.i"
         parameters: {g: 1}
         rows: [0]
+
+  - name: "A stored truth value beside a number"
+    description: "Arithmetic of a truth value a node holds and a number fails the statement as it runs, on Neo4j 2026.10.2 (Cannot add `Boolean` and `Long`) and on the SQL stores, where it gave null (liberation-data/drivine-cypher-spec#345). A number stored beside it is added as before. The graph engines other than Neo4j are not pinned here."
+    steps:
+      - only: [neo4j, sql]
+        cypher: "CREATE (n:CyWrite {flag: true}) WITH n RETURN n.flag + 1"
+        error: true
+      - only: [sql]
+        cypher: "CREATE (:CyWrite {i: 1, flag: false})"
+        rows: []
+      - only: [sql]
+        cypher: "MATCH (n:CyWrite {i: 1}) RETURN n.flag - 1"
+        error: true
+      - only: [sql]
+        cypher: "MATCH (n:CyWrite {i: 1}) RETURN n.i + 1, 2 * n.i"
+        rows: [[2, 2]]

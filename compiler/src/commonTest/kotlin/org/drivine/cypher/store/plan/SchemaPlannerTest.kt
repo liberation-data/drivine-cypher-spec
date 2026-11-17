@@ -164,7 +164,10 @@ class SchemaPlannerTest {
         val listing = PlanAction.Query(sqlite.listIndexesQuery(SchemaItemKind.RANGE_INDEX), purpose = Purpose.LISTING)
         val first = assertIs<PlanStep.Run>(planner.start(request(Operation.Item(ItemCall.ENSURE, name)), 1))
         assertEquals(listOf(listing), first.actions)
-        val second = assertIs<PlanStep.Run>(planner.resume(first.state, listOf(PlanOutcome.Rows(emptyList())), 2))
+        // With no range index listed, the constraints are read: a uniqueness constraint over the property would serve it (#325).
+        val constraints = assertIs<PlanStep.Run>(planner.resume(first.state, listOf(PlanOutcome.Rows(emptyList())), 2))
+        assertEquals(listOf(PlanAction.Query(sqlite.listConstraintsQuery(), purpose = Purpose.LISTING)), constraints.actions)
+        val second = assertIs<PlanStep.Run>(planner.resume(constraints.state, listOf(PlanOutcome.Rows(emptyList())), 2))
         assertEquals(sqlite.createIndex(name).map { PlanAction.Execute(it, purpose = Purpose.DDL) } + listing, second.actions)
         val made = mapOf("kind" to "RANGE_INDEX", "label" to "Person", "properties" to listOf("name"), "name" to "Person_name_range", "details" to emptyMap<String, Any?>())
         val outcomes = second.actions.dropLast(1).map { PlanOutcome.Ran } + PlanOutcome.Rows(listOf(made))
@@ -359,6 +362,31 @@ class SchemaPlannerTest {
         val report = assertIs<PlanStep.Done>(step).report
         assertNull(report.failure)
         assertIs<EnsureResult.AlreadyMatching>(report.owners.single().results.single().result)
+    }
+
+    @Test
+    fun copiesOfARangeIndexAConstraintServesAreNotFilledInAgain() {
+        // A range index that ignores case, served by a uniqueness constraint over the same copies, is never listed (#325):
+        // its copies recorded, it is found as the constraint's, and they aren't filled in again on every ensure.
+        val ignoring = RangeIndexSpec("Person", "name", ignoreCase = true)
+        val constraint = SchemaItemInfo(SchemaItemKind.UNIQUENESS_CONSTRAINT, "Person", ignoring.made().properties, "Person_name_ci_unique")
+        var step = planner.start(request(Operation.Item(ItemCall.ENSURE, ignoring)), 0)
+        val run = mutableListOf<PlanAction>()
+        while (step is PlanStep.Run) {
+            val actions = step.actions
+            run += actions
+            step = planner.resume(step.state, actions.map {
+                when {
+                    it is PlanAction.Query && it.statement == sqlite.listConstraintsQuery() -> PlanOutcome.Rows(ListingRows.rows("sqlite", listOf(constraint), constraints = true))
+                    it is PlanAction.ReadLowerCopies -> PlanOutcome.Rows(listOf(listOf("Person", "name")))
+                    it is PlanAction.Query -> PlanOutcome.Rows(emptyList())
+                    else -> PlanOutcome.Ran
+                }
+            }, 0)
+        }
+        assertEquals(emptyList(), run.filterIsInstance<PlanAction.FillLowerCopies>())
+        val report = assertIs<PlanStep.Done>(step).report
+        assertEquals("Person_name_ci_unique", assertIs<EnsureResult.AlreadyMatching>(report.item!!.result).info.owningConstraint)
     }
 
     @Test

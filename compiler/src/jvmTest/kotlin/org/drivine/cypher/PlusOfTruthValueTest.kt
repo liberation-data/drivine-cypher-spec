@@ -13,7 +13,7 @@ import kotlin.test.assertFalse
  * drivine-cypher-spec#341: `+` of a truth value and a number, a truth value, a map or a temporal value, and of a map and a
  * number, gave null on the SQL stores, where Neo4j refuses it as it plans the statement. Where the statement makes, writes
  * or binds the kinds, each SQL store refuses it as it compiles (refusals.yaml); where a truth value is read as the statement
- * runs, it still gives null (a test of each side's kind in every `+` made a sum of sums too long). A truth value put together with a text, which gave null, is its text, and with a list an item
+ * runs, it fails the statement beside a number (drivine-cypher-spec#345), and gives null beside a value of open kind (a test of each side's kind in every `+` made a sum of sums too long). A truth value put together with a text, which gave null, is its text, and with a list an item
  * (queries.yaml's "A truth value put together with a text or a list"). This runs those on SQLite in memory, and checks the
  * SQL Postgres and Oracle are given.
  */
@@ -75,10 +75,12 @@ class PlusOfTruthValueTest {
     }
 
     @Test
-    fun `a truth value read as the statement runs beside a number is null as before`() {
-        listOf("UNWIND \$l AS b RETURN b + 1", "UNWIND \$l AS b RETURN 1.5 + b", "UNWIND \$l AS b RETURN b + b").forEach { cypher ->
-            assertEquals("null", sqlite(cypher, mapOf("l" to listOf(true))), cypher)
+    fun `a truth value read as the statement runs beside a number fails it and beside a value of open kind is null`() {
+        // drivine-cypher-spec#345: tested at the side read, beside a number the statement makes or gives (ArithmeticOfOpenKindTest).
+        listOf("UNWIND \$l AS b RETURN b + 1", "UNWIND \$l AS b RETURN 1.5 + b").forEach { cypher ->
+            assertContains(sqlite(cypher, mapOf("l" to listOf(true))), "Arithmetic of a truth value and a number fails, as in Neo4j: +", message = cypher)
         }
+        assertEquals("null", sqlite("UNWIND \$l AS b RETURN b + b", mapOf("l" to listOf(true))))
         assertEquals("2", sqlite("UNWIND \$l AS b RETURN b + 1", mapOf("l" to listOf(1))))
     }
 

@@ -846,6 +846,8 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
             noLength + "ELSE $text END"
     }
 
+    override fun failed(failure: String) = "to_jsonb($failure)"
+
     /**
      * A text that is no whole number, cast to one: Postgres fails with the text in its message. Joined by `concat`, which
      * is stable, not immutable, so the planner does not work out a failure of constants alone before any row, as it

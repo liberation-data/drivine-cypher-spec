@@ -42,7 +42,7 @@ internal object ListingRows {
         if (item.kind == SchemaItemKind.FULLTEXT_INDEX) item.analyzer?.let { config["fulltext.analyzer"] = it }
         return linkedMapOf(
             "name" to item.name, "type" to item.kind.name.removeSuffix("_INDEX"), "entityType" to "NODE", "labelsOrTypes" to listOf(item.label),
-            "properties" to item.properties, "options" to linkedMapOf("indexConfig" to config),
+            "properties" to item.properties, "options" to linkedMapOf("indexConfig" to config), "owningConstraint" to item.owningConstraint,
         )
     }
 

@@ -58,6 +58,27 @@ interface StoreSchema {
     val supportsTextIndex: Boolean
         get() = false
 
+    /**
+     * Whether a uniqueness constraint over one property is a unique index over it that a lookup reads, though the store
+     * lists it as the constraint's, not among its range indexes (Postgres, SQLite): a range index over that label and
+     * property is then served by it, and none is made beside it (liberation-data/drivine-cypher-spec#325). False where the
+     * store lists the constraint's index as a range index itself (Neo4j, FalkorDB); on Oracle, whose range index is also
+     * an index over every node's property that the constraint's index doesn't stand for; and where a constraint may be no
+     * index a lookup reads (Memgraph, until shown).
+     */
+    val uniquenessConstraintsServeRangeIndexes: Boolean
+        get() = false
+
+    /**
+     * Whether the store lists a uniqueness constraint's own index among its range indexes, under the constraint's name, and
+     * refuses to drop it apart from the constraint (Neo4j, 4.4 and 5 alike: "Index belongs to constraint"). A drop or a recreate
+     * of a range index then reads the constraints first, to leave such an index to its constraint
+     * (liberation-data/drivine-cypher-spec#325). Read from the constraints, not from `SHOW INDEXES`' `owningConstraint`, which
+     * Neo4j 4.4 hasn't.
+     */
+    val constraintIndexesListedAsIndexes: Boolean
+        get() = false
+
     /** Whether a uniqueness constraint needs an exact-match index over its properties made first (FalkorDB). */
     val constraintsRequireBackingIndex: Boolean
         get() = false

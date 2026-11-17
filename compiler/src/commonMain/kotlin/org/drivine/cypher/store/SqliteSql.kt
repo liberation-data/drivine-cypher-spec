@@ -71,7 +71,9 @@ object SqliteSql {
     /**
      * The key of the value at [path] of the JSON [json], beside its [indexClass]: a temporal value's tag's sort key `s`, or
      * its text `v` where it has none, a duration's; any other value as `->>` reads it, which SQLite compares as Neo4j does
-     * within a class, the integer 1 equal to the real 1.0, and each integer exactly.
+     * within a class, the integer 1 equal to the real 1.0, and each integer exactly. A list's is its JSON text, which differs
+     * where its items don't (`[1.0]` and `[1]`), so a lookup lets a list past it by its class and compares it as JSON
+     * (`SqliteCypherCompiler.indexedEqualityOfAny`, liberation-data/drivine-cypher-spec#354).
      */
     fun indexKey(json: String, path: String): String =
         "COALESCE($json ->> ${extended(path, ".${ValueLayout.KEY}")}, $json ->> ${extended(path, ".${ValueLayout.TEXT}")}, $json ->> $path)"
