@@ -285,6 +285,14 @@ class LayoutMigratorTest {
         assertEquals(Status.CURRENT, migrate(current, MigrationRequest(declarations))!!.status)
         val empty = Store(mapOf(1L to (listOf("DrivineStore") to "{}")), emptyMap())
         assertEquals(Status.EMPTY, migrate(empty, MigrationRequest(declarations))!!.status)
+        // Layout 2's graph whose stamp a clear deleted, loaded again (the verdict's row 12): it holds values, of this layout.
+        val migrator = LayoutMigrator(ddl)
+        val first = migrator.start(MigrationRequest(declarations)) as MigrationStep.Run
+        val judged = listOf(emptyList(), listOf(1L), listOf(mapOf("name" to ddl.lock, "type" to "TABLE")), emptyList(),
+            listOf(mapOf("nodes" to 1L, "lastNode" to 1L, "edges" to 0L, "lastEdge" to null)))
+        val report = (migrator.resume(first.state, judged.map { MigrationOutcome.Rows(it) }) as MigrationStep.Done).report
+        assertEquals(Status.CURRENT, report.status, report.message)
+        assertTrue(report.message!!.contains("holds values of store layout 2"), report.message)
     }
 
     @Test

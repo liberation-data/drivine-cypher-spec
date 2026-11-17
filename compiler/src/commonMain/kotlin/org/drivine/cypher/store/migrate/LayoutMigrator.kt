@@ -110,7 +110,11 @@ class LayoutMigrator(private val ddl: SqlStoreDdl) {
         }
         return when (verdict) {
             StoreLayout.Verdict.Current -> MigrationStep.Done(state.report.ended(Status.CURRENT, "The graph is in store layout ${LayoutMigration.TO}: there is nothing to migrate."))
-            is StoreLayout.Verdict.Stamp -> MigrationStep.Done(state.report.ended(Status.EMPTY, "The graph holds no values: a first connection stamps it layout ${LayoutMigration.TO}, with nothing to migrate."))
+            // A graph of this layout whose stamp a clear deleted (the verdict's row 12) holds values, of this layout.
+            is StoreLayout.Verdict.Stamp ->
+                if (verdict.assign) MigrationStep.Done(state.report.ended(Status.CURRENT,
+                    "The graph holds values of store layout ${LayoutMigration.TO}, its stamp gone: a first connection stamps it again, with nothing to migrate."))
+                else MigrationStep.Done(state.report.ended(Status.EMPTY, "The graph holds no values: a first connection stamps it layout ${LayoutMigration.TO}, with nothing to migrate."))
             is StoreLayout.Verdict.Refuse ->
                 if (verdict.from == LayoutMigration.FROM) scan(judged.copy(phase = Phase.SCAN), Table.NODES, 0)
                 else MigrationStep.Done(state.report.ended(Status.REFUSED, verdict.message))

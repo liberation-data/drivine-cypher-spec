@@ -31,9 +31,9 @@ sealed class MigrationStatements(val ddl: SqlStoreDdl) {
     abstract fun update(table: Table): String
 
     /**
-     * Reads Drivine's own nodes, the store's stamp and the schema marker, each `{"id", "props"}` in the order of their ids,
-     * and the size of the graph, `{"nodes", "lastNode", "edges", "lastEdge"}`: what a migration records as it begins, and
-     * reads again as it resumes, so a graph changed under it is refused ([LayoutMigrator]). A rewrite changes none of them.
+     * Reads Drivine's own nodes, the store's stamp and the schema marker, each `{"id", "props"}` in the order of their ids:
+     * with [sizes], what a migration records as it begins, and reads again as it resumes, so a graph changed under it is
+     * refused ([LayoutMigrator]). A rewrite changes none of them.
      */
     abstract val own: String
 
