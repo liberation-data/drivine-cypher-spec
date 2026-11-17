@@ -42,7 +42,8 @@ import org.drivine.schema.UniquenessConstraintSpec
  *    rewritten rows, the values it keeps, and the checkpoint after its last id are written in one transaction: so a row is
  *    rewritten exactly once, as a rewrite is not to be run again on a row it wrote (it would escape a tag's `$t`), and a
  *    migration stopped at any moment resumes strictly after the last batch it committed.
- * 5. **Check.** Each uniqueness constraint the catalog records is checked for keys that repeat in layout 2, by the schema
+ * 5. **Check.** Each uniqueness constraint the catalog recorded as the migration began, kept in its checkpoint (a dry run's
+ *    read from the catalog), is checked for keys that repeat in layout 2, by the schema
  *    plan's own sample of a constraint's conflicts, the store's SQL: a graph with any ends `collisions`, its checkpoint kept, for
  *    the user to correct with the store's own tools and resume.
  * 6. **Finish.** Any of the earlier layout's objects still listed are dropped with their records, the stamp given layout 2
@@ -51,7 +52,7 @@ import org.drivine.schema.UniquenessConstraintSpec
  *    report after a scan says both.
  *
  * What the checkpoint holds: where the write is, the digest of the declarations, whether it keeps values not of their kind,
- * and the fingerprint of the graph as the migration found it (Drivine's own nodes and its size, none of which a rewrite
+ * the uniqueness constraints to check, and the fingerprint of the graph as the migration found it (Drivine's own nodes and its size, none of which a rewrite
  * changes). A resume reads the graph's again,
  * and refuses a graph whose fingerprint differs, a graph changed under the migration, and declarations, or an option to keep
  * values not of their kind, that differ from those it began with, until every row is written: from then on what is left

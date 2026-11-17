@@ -255,21 +255,28 @@ class LayoutMigratorTest {
         assertTrue(stops > 15, "stopped at each of $stops actions")
     }
 
+    /**
+     * Two spellings of one moment, distinct texts in layout 1, one value in layout 2, under a uniqueness constraint, and
+     * layout 1's unique index over the texts: dropped before the writes, it can't refuse the rewrite that makes them one.
+     */
+    private fun colliding() = Store(
+        nodes = mapOf(
+            1L to (listOf("DrivineStore") to """{"key": "singleton", "layout": 1, "engine": "POSTGRES", "storeId": "s"}"""),
+            2L to (listOf("Event") to """{"at": "2024-03-15T10:30:00.5Z"}"""),
+            3L to (listOf("Event") to """{"at": "2024-03-15T10:30:00.500Z"}"""),
+        ),
+        edges = emptyMap(),
+    ).apply {
+        uniques.clear(); uniques += "Event" to listOf("at")
+        oldUnique = "Event" to "at"
+    }
+
+    private val collidingRequest = MigrationRequest(listOf(Declaration("Event", "at", Kind.DATE_TIME)), batchSize = 1)
+
     @Test
     fun keysThatCollideOnlyOnceRewrittenStopTheMigrationBeforeItsFinishAndAResumeAfterTheyAreCorrectedFinishesIt() {
-        // Two spellings of one moment, distinct texts in layout 1, one value in layout 2, under a uniqueness constraint.
-        val store = Store(
-            nodes = mapOf(
-                1L to (listOf("DrivineStore") to """{"key": "singleton", "layout": 1, "engine": "POSTGRES", "storeId": "s"}"""),
-                2L to (listOf("Event") to """{"at": "2024-03-15T10:30:00.5Z"}"""),
-                3L to (listOf("Event") to """{"at": "2024-03-15T10:30:00.500Z"}"""),
-            ),
-            edges = emptyMap(),
-        )
-        store.uniques.clear(); store.uniques += "Event" to listOf("at")
-        // Layout 1's unique index over the texts: dropped before the writes, it can't refuse the rewrite that makes them one.
-        store.oldUnique = "Event" to "at"
-        val request = MigrationRequest(listOf(Declaration("Event", "at", Kind.DATE_TIME)))
+        val store = colliding()
+        val request = collidingRequest
         // The dry run, over layout 1's texts, can't see it: its check is of possible collisions.
         assertTrue(migrate(store, request.copy(dryRun = true))!!.collisions.isEmpty())
         val stopped = migrate(store, request)!!
@@ -285,6 +292,26 @@ class LayoutMigratorTest {
         assertEquals(Status.MIGRATED, finished.status, finished.message)
         assertTrue(store.checkpoint == null && !store.oldIndex && store.stampLayout == 2)
         assertTrue(store.rewrites.values.all { it == 1 }, "each row rewritten once: ${store.rewrites}")
+    }
+
+    @Test
+    fun aMigrationOfCollidingKeysStoppedAfterAnyActionAndBegunAgainStillChecksTheConstraintItsCheckpointKept() {
+        // Stopped after the first checkpoint, among the drops that forget the constraint's record, or anywhere after: begun
+        // again, the check reads the constraint from the checkpoint, and the collision is named, never missed.
+        var stops = 0
+        var stopAt = 0
+        while (true) {
+            val store = colliding()
+            if (migrate(store, collidingRequest, stopAt = stopAt) != null) break
+            stops++
+            val report = migrate(store, collidingRequest)!!
+            assertEquals(Status.COLLISIONS, report.status, "stopped at action $stopAt: ${report.message}")
+            assertEquals(listOf("Event" to listOf("at")), report.collisions.map { it.label to it.properties }, "stopped at action $stopAt")
+            assertTrue(store.checkpoint != null && store.stampLayout == 1, "stopped at action $stopAt: kept part way through, not stamped")
+            assertTrue(store.rewrites.values.all { it == 1 }, "stopped at action $stopAt, a row rewritten twice: ${store.rewrites}")
+            stopAt++
+        }
+        assertTrue(stops > 15, "stopped at each of $stops actions")
     }
 
     @Test
@@ -304,6 +331,7 @@ class LayoutMigratorTest {
         val report = migrate(store, MigrationRequest(declarations, batchSize = 2, dryRun = true))!!
         assertEquals(Status.DRY_RUN, report.status)
         assertTrue(store.rewrites.isEmpty() && store.checkpoint == null && !store.prepared, "nothing written")
+        assertTrue(store.oldIndex && store.uniques.isNotEmpty(), "nothing dropped: layout 1's index and its records stand")
         assertEquals(MigrationReport.Counted(6, 3), report.tables["nodes"])
         // Person.met is a date in every row that has it, and declared nothing: a candidate.
         assertEquals(listOf(MigrationReport.Candidate("Person", "met", "date", 1)), report.candidates)
@@ -397,6 +425,29 @@ class LayoutMigratorTest {
         val report = migrate(store, MigrationRequest(declarations, batchSize = 2))!!
         assertEquals(Status.MIGRATED, report.status, report.message)
         assertEquals(expected(), store.rows.mapValues { (_, rows) -> rows.mapValues { it.value.second } })
+    }
+
+    @Test
+    fun aMigrationThatFindsAnothersCheckpointUnderTheLockIsRefusedWritingAndDroppingNothing() {
+        val store = store()
+        val request = MigrationRequest(declarations, batchSize = 2)
+        // The second judges and scans the graph before the first begins; the first stops part way through its writes.
+        assertNull(drive(store, LayoutMigrator(ddl).start(request)) { run -> run.actions.contains(MigrationAction.Prepare) })
+        val second = paused!!
+        assertNull(migrate(store, request, stopAt = 24))
+        val checkpoint = store.checkpoint!!.toMap()
+        val rewrites = store.rewrites.toMap()
+        store.oldIndex = true
+        val refused = drive(store, second)!!
+        assertEquals(Status.REFUSED, refused.status, refused.message)
+        assertTrue(refused.message!!.contains("began meanwhile"), refused.message)
+        assertEquals<Map<String, String>?>(checkpoint, store.checkpoint, "the first's checkpoint kept as it was")
+        assertEquals(rewrites, store.rewrites, "nothing written")
+        assertTrue(store.oldIndex, "nothing dropped")
+        val resumed = migrate(store, request)!!
+        assertEquals(Status.MIGRATED, resumed.status, resumed.message)
+        assertEquals(expected(), store.rows.mapValues { (_, rows) -> rows.mapValues { it.value.second } })
+        assertTrue(store.rewrites.values.all { it == 1 }, "each row rewritten once: ${store.rewrites}")
     }
 
     @Test

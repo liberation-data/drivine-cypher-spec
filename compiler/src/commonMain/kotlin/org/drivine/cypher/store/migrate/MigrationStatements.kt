@@ -63,8 +63,8 @@ sealed class MigrationStatements(val ddl: SqlStoreDdl) {
 
     /**
      * Reads each uniqueness constraint the catalog records, `{"label", "properties"}`, the properties their JSON text, as
-     * an earlier layout's records hold them: what a migration checks for keys that collide in this layout before its
-     * indexes are dropped.
+     * an earlier layout's records hold them: read before the earlier layout's objects and their records are dropped, and kept
+     * in the checkpoint, for a migration to check for keys that collide in this layout once its rows are written.
      */
     abstract val uniques: String
 
