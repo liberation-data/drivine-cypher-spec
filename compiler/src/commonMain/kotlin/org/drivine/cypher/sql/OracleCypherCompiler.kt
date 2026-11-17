@@ -2641,8 +2641,6 @@ class OracleCypherCompiler(
         /** The most bytes [asText] writes a number in: Java's text of a double, `-2.2250738585072014E-308`, and some to spare. */
         const val NUMBER_TEXT = 32
 
-        /** The key of a double in Oracle's extended JSON. */
-
         /** NaN, as `JSON_SERIALIZE(… EXTENDED)` writes it: see [holdsNaN]. */
         private const val EXTENDED_NAN = "{\"\$numberDouble\":\"Nan\"}"
 

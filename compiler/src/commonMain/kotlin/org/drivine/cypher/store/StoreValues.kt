@@ -55,6 +55,17 @@ object StoreValues {
         }
     }
 
+    /**
+     * Why [store]'s layout can't hold [value], the message [text] refuses it with; null where it holds it. A migration
+     * keeps such a value as it was, naming it (see [org.drivine.cypher.store.migrate.LayoutMigration]).
+     */
+    fun refusal(value: Any?, store: Store): String? = try {
+        text(value, store)
+        null
+    } catch (e: CompilerException) {
+        e.message
+    }
+
     /** Why a statement that writes is refused a float, the first named, that the store's JSON, the second, holds as no number. */
     internal const val NON_FINITE_WRITE = "A statement that writes is given %s, which %s holds as no number: it would store another value in its place."
 

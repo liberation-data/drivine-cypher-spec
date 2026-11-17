@@ -195,7 +195,7 @@ FullTextSearch.plan(store, graph, SearchRequest(labels, properties, query, index
 
 Over JSON it is the same entry, `CompileJson.compile` (`compile`, `drivine_compile`): a request with `search` in place of
 `cypher` is a search, and one that gives more than one of `cypher`, `search`, `searchIndex`, `vector`, `settings`,
-`fragment`, `read`, `temporalKey`, `layout`, `expand`, `write`, `storeStatements`, `schemaPlan` and `idSql` is an error.
+`fragment`, `read`, `temporalKey`, `layout`, `expand`, `write`, `rewrite`, `storeStatements`, `schemaPlan` and `idSql` is an error.
 
 ```json
 {"store": "postgres", "graph": {"name": "g"},
@@ -499,6 +499,16 @@ of its own, so the three libraries read rows, key a temporal value and judge a g
   value as (`StoreValues.text` on the JVM, which each compiler's parameters call), so a library's save plan and a node's
   properties are held as `CREATE` holds them, and as the other libraries hold them, with no writer of its own.
   `host.yaml`'s "Values a save writes" pins it.
+- **`rewrite`** takes a row of a layout-1 store, a node's or a relationship's `props` as the store gives their text
+  (Postgres's `props::text`, SQLite's text, Oracle's `JSON_SERIALIZE(props EXTENDED)`), the store, the node's labels or the
+  relationship's type, and what the migration is told of the properties' kinds,
+  `{"rewrite": "{\"born\":\"2024-03-15\"}", "store": "sqlite", "labels": ["Person"], "declarations": [{"label": "Person", "property": "born", "kind": "date"}]}`,
+  and gives the row as layout 2 holds it (#256): `{"value": …, "changed": true, "changes": [{"property": "born", "change":
+  "temporal"}], "invalid": [...]}`, the value spliced in as it is, exactly what `write` gives of the values the row holds.
+  A row is written only where `changed`; each of `invalid` is a declared value that is none of its kind, kept as it was,
+  with why. A kind is a temporal kind's word, `float` or `bytes`; declarations of one label's property as two kinds are an
+  error. `LayoutMigration.rewrite` on the JVM. The spec's README, "Migrating a store's layout", says what is rewritten, and
+  `migrate.yaml` pins it.
 
 ### The store's own statements and the schema plan
 
@@ -1085,6 +1095,9 @@ The JVM is the oracle. `./gradlew jvmOracle` writes, into `build/oracle`:
   built from.
 - `plans.json`: the spec's `plans.yaml` as JSON, which `StorePlanTest` reads on every target: each case's rounds that
   `org.drivine.cypher.store.plan`'s planner must give on each store, the answers it is given back, and its report.
+- `migrate.json`: the spec's `migrate.yaml` as JSON, which `LayoutMigrationTest` reads on every target: each layout-1
+  row that `LayoutMigration.rewrite`, and the JSON request `rewrite`, must give as layout 2 holds it on each store, with
+  its changes and its invalid values, and the declarations `LayoutMigration.refusal` refuses.
 - `host.json`: the spec's `host.yaml` as JSON, which `HostSpecTest` reads on every target: the `function` steps the
   module's host functions (`org.drivine.cypher.host.HostFunctions`) must give. `./gradlew hostSpecJson` writes it alone,
   into `build/host`, for `nativeExtensionCheck`.

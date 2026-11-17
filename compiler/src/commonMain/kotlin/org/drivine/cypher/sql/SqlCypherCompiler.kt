@@ -5810,12 +5810,32 @@ abstract class SqlCypherCompiler(
                 }
                 return of(guard(temporals.of(numbers, timezone, kind)))
             }
-            val given = arguments.single() as? Value.Json ?: throw CompilerException("${function.name}() takes a text or a map of its fields.")
+            fun refused(noun: String): Nothing = throw CompilerException("${function.name}() takes a text or a map of its fields, not $noun, as in Neo4j.")
+            val given = when (val argument = arguments.single()) {
+                is Value.Json -> argument
+                is Value.Bool -> refused("a truth value")
+                is Value.Entities -> refused("a list")
+                else -> throw CompilerException("${function.name}() takes a text or a map of its fields.")
+            }
+            // The kind the statement makes the argument, or a parameter or its key gives it.
+            val value = if (givenAsWritten(written)) given(written) else null
+            val known = given.known ?: when (value) {
+                is List<*> -> Value.Known.LIST
+                is Map<*, *> -> Value.Known.MAP
+                is Double, is Float -> Value.Known.FLOAT
+                is Number -> Value.Known.INTEGER
+                else -> Value.Known.of(value)
+            }
             // A map of its fields that a parameter gives or an expression makes, which Neo4j reads as the statement runs, is
             // refused, not read as a text or a tag, which gave null (drivine-cypher-spec#328).
-            if (given.known == Value.Known.MAP || givenAsWritten(written) && given(written) is Map<*, *>) {
-                unsupported("${function.name}() of a map a parameter or an expression gives")
-            }
+            if (known == Value.Known.MAP) unsupported("${function.name}() of a map a parameter or an expression gives")
+            // A list, a number or a truth value, which Neo4j fails as no text and no map of its fields, is refused so, where
+            // the SQL stores gave null (drivine-cypher-spec#331). Only one written or given, or arithmetic of such, which is never
+            // null: a function, a CASE or a variable may give null, which Neo4j takes, so it fails as it runs, below, where it is not.
+            fun neverNull(e: Expression): Boolean = givenAsWritten(e) || e is Expression.ListLiteral ||
+                e is Expression.Unary && e.operator == Expression.Unary.Operator.NEGATE && neverNull(e.operand) ||
+                e is Expression.Binary && e.operator in ARITHMETIC && neverNull(e.left) && neverNull(e.right)
+            if (known != null && known != Value.Known.TEXT && neverNull(written)) refused(known.noun)
             return when {
                 given.temporal == Temporal.DURATION && kind == Temporal.DURATION -> given
                 given.temporal != null && (kind == Temporal.DURATION || given.temporal == Temporal.DURATION) -> Value.Json(literalJson(null))
@@ -5826,8 +5846,11 @@ abstract class SqlCypherCompiler(
                     val fromTag = if (kind == Temporal.DURATION) "CASE WHEN ${tagKind(x)} = '${kind.function}' THEN ${tagText(x)} END"
                         else temporals.byTag(tagKind(x), tagText(x)) { from, t -> temporals.convert(t, from, kind) }
                     // A map read as the statement runs (`UNWIND $l AS m`, `l[0]`) fails it by name, as one the compiler sees is
-                    // refused above: it is no text and no tag, and gave null (drivine-cypher-spec#328).
-                    "CASE WHEN ${tagKind(x)} IS NOT NULL THEN $fromTag WHEN ${typeOf(x)} = 'object' THEN ${textFailing(TEMPORAL_OF_MAP, "${function.name}()")} ELSE $fromText END"
+                    // refused above: it is no text and no tag, and gave null (drivine-cypher-spec#328). So does a list, a number or
+                    // a truth value, as Neo4j fails it (drivine-cypher-spec#331).
+                    fun failed(noun: String) = textFailing(TEMPORAL_OF_KIND, "${function.name}() of $noun")
+                    "CASE WHEN ${tagKind(x)} IS NOT NULL THEN $fromTag ELSE CASE ${typeOf(x)} WHEN 'object' THEN ${textFailing(TEMPORAL_OF_MAP, "${function.name}()")} " +
+                        "WHEN 'array' THEN ${failed("a list")} WHEN 'number' THEN ${failed("a number")} WHEN 'boolean' THEN ${failed("a truth value")} ELSE $fromText END END"
                 })
             }
         }
@@ -8017,6 +8040,12 @@ abstract class SqlCypherCompiler(
          * make (drivine-cypher-spec#328): see `temporal`. The function's name follows.
          */
         const val TEMPORAL_OF_MAP = "A temporal value of a map read as the statement runs is Cypher, and is not compiled to SQL yet:"
+
+        /**
+         * What a temporal function fails with, as it runs, of a list, a number or a truth value read as the statement runs, as
+         * Neo4j fails it (drivine-cypher-spec#331): see `temporal`. The function's name and the value's kind follow.
+         */
+        const val TEMPORAL_OF_KIND = "A temporal value is made of a text or a map of its fields, as in Neo4j:"
 
         /**
          * Texts in the order of their Unicode code points, as Neo4j orders a map's keys where `toString()` writes it: UTF-16's

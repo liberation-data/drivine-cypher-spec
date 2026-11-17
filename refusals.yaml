@@ -268,6 +268,33 @@ cases:
       - cypher: "WITH {days: 1} AS m RETURN duration(m)"
         error: "duration() of a map a parameter or an expression gives is Cypher, and is not compiled to SQL yet."
 
+  - name: "A temporal value of a list, a number or a truth value"
+    description: "Neo4j fails a temporal function of a list, a number or a truth value, as no text and no map of its fields (temporal.yaml, \"A temporal value of a list, a number or a truth value\"). The SQL stores gave null (drivine-cypher-spec#331): one the compiler knows, written, given as a parameter or its key, or arithmetic of such, which is never null, is refused here, by its kind; any other, which may be null, as Neo4j takes, fails it by name as it runs."
+    steps:
+      - cypher: "RETURN localtime([1])"
+        error: "localtime() takes a text or a map of its fields, not a list, as in Neo4j."
+      - cypher: "RETURN date([2024, 3, 15])"
+        error: "date() takes a text or a map of its fields, not a list, as in Neo4j."
+      - cypher: "RETURN datetime([])"
+        error: "datetime() takes a text or a map of its fields, not a list, as in Neo4j."
+      - cypher: "RETURN date($l)"
+        parameters: {l: [2024]}
+        error: "date() takes a text or a map of its fields, not a list, as in Neo4j."
+      - cypher: "RETURN date(5)"
+        error: "date() takes a text or a map of its fields, not an integer, as in Neo4j."
+      - cypher: "RETURN localdatetime(-2.5)"
+        error: "localdatetime() takes a text or a map of its fields, not a float, as in Neo4j."
+      - cypher: "RETURN duration($p.d)"
+        parameters: {p: {d: 1}}
+        error: "duration() takes a text or a map of its fields, not an integer, as in Neo4j."
+      - cypher: "RETURN date(true)"
+        error: "date() takes a text or a map of its fields, not a truth value, as in Neo4j."
+      - cypher: "RETURN time($b)"
+        parameters: {b: false}
+        error: "time() takes a text or a map of its fields, not a truth value, as in Neo4j."
+      - cypher: "WITH 1 > 0 AS b RETURN localtime(b)"
+        error: "localtime() takes a text or a map of its fields, not a truth value, as in Neo4j."
+
   - name: "Temporal map not compiled yet"
     description: "A temporal value made from a map of fields the compiler doesn't handle yet is refused, naming what it is."
     steps:
