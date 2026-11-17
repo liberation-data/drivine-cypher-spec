@@ -25,7 +25,7 @@ import org.drivine.cypher.store.migrate.MigrationStatements.Table
  * - [collisions]: keys a uniqueness constraint the catalog records would refuse, with samples: after the writes, exactly, in
  *   layout 2; in a dry run, over layout 1's values, possible ones, which miss values that become equal only once rewritten
  *   and count a date and the text that spells it as one.
- * - [notes]: what a migration leaves to others, said in every report after a scan: the indexes, which an application's
+ * - [notes]: what a migration leaves to others, said in every report from the check on (a dry run's, `collisions` and `migrated`): the indexes, which an application's
  *   schema plan makes at its next start (until then statements give the same answers, unindexed), and the count store,
  *   unseeded as a fresh store's.
  */

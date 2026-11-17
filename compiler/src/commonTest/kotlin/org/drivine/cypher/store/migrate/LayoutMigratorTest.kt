@@ -37,7 +37,7 @@ class LayoutMigratorTest {
         /** Whether a migration's process holds the lock: released when the process stops, and never taken twice by one. */
         var locked = false
         val rewrites = mutableMapOf<Pair<Table, Long>, Int>()
-        /** Layout 1's index, until a finish drops it, and the uniqueness constraints the catalog records, each a label and its properties. */
+        /** Layout 1's index, until the drops before the writes drop it, and the uniqueness constraints the catalog records, each a label and its properties. */
         var oldIndex = true
         val uniques = mutableListOf("Person" to listOf("name"))
         /** The uniqueness constraints as declared, which the samples are of, whether or not their records are dropped yet. */
@@ -348,6 +348,7 @@ class LayoutMigratorTest {
         assertEquals(Status.INVALID, refused.status)
         assertEquals(listOf("'soon' is no date."), refused.properties["Person\u0000born"]!!.invalid.map { it.message })
         assertTrue(store.rewrites.isEmpty() && store.checkpoint == null, "nothing written")
+        assertTrue(refused.notes.isEmpty(), "no notes of a migration that wrote nothing")
         val kept = migrate(store, MigrationRequest(declarations, keepInvalid = true))!!
         assertEquals(Status.MIGRATED, kept.status)
         assertEquals(listOf(Kept("nodes", 8, listOf("Person"), "born", "date", "\"soon\"", "'soon' is no date.")), kept.kept)

@@ -49,7 +49,7 @@ import org.drivine.schema.UniquenessConstraintSpec
  * 6. **Finish.** Any of the earlier layout's objects still listed are dropped with their records, the stamp given layout 2
  *    (or assigned), the checkpoint table dropped last, and the graph judged again: it must be current. No index is made, as the application's
  *    schema plan makes its declared ones at its next start, and the count store is left empty, as a fresh store's; every
- *    report after a scan says both.
+ *    report from the check on (a dry run's, `collisions` and `migrated`) says both.
  *
  * What the checkpoint holds: where the write is, the digest of the declarations, whether it keeps values not of their kind,
  * the uniqueness constraints to check, and the fingerprint of the graph as the migration found it (Drivine's own nodes and its size, none of which a rewrite
@@ -386,7 +386,7 @@ class LayoutMigrator(private val ddl: SqlStoreDdl) {
         const val MIGRATED = "The graph is migrated to store layout 2: every value is rewritten, its earlier layout's indexes are dropped, and it is stamped layout 2."
 
         /**
-         * What every report after a scan says of what a migration doesn't do, which a user must know: the indexes are the
+         * What every report from the check on says of what a migration doesn't do, which a user must know: the indexes are the
          * application's schema plan's to make, and the count store is unseeded, as a fresh store's is.
          */
         val NOTES = listOf(
