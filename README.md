@@ -12,6 +12,7 @@ These files say what a statement in Drivine's flavour of Cypher gives on each st
 - `schema.yaml`: Neo4j's schema commands (`CREATE INDEX`, `CREATE CONSTRAINT`, `DROP …`, `CALL db.awaitIndexes`), and the schema spec a SQL store applies each as, or its refusal. They are read with no store. See [Schema commands](#schema-commands).
 - `store.yaml`: the store layout's DDL: the tables, the probe that finds them made, and each index and constraint as each store makes, drops and lists it, for the graph `drivine` and a set of schema specs, with a read for each index that the compiler must answer from it. Read with no store. See [The store layout](#the-store-layout). It also holds the store's schema: how each store's listings are read back, whether an item is a spec's and in its shape, and on a SQL store of which form, what each store can do, and what its errors say. See [The store's schema](#the-stores-schema).
 - `marker.yaml`: the schema marker (`_DrivineSchema`) and the stamps: the statements each store reads and writes the marker and the store's stamp (`DrivineStore`) with, the marker's inventory as it is written and read back, the version token, and the form of the stamp each node carries. Read with no store. See [The schema marker and the stamps](#the-schema-marker-and-the-stamps).
+- `migrate.yaml`: a store's layout migrated, from layout 1 to layout 2: each row of a node's or a relationship's properties as layout 1 held it, on each SQL store, rewritten as layout 2 holds it, under what the migration is told of the properties' kinds. Read with no store. See [Migrating a store's layout](#migrating-a-stores-layout).
 - `plans.yaml`: the schema plan: what a schema manager runs on each store, round by round, for an enforce, a recreate, an ensure or a remove, what the store answers, and what the manager reports, its log lines among it. Read with no store. See [The schema plan](#the-schema-plan).
 - `host.yaml`: what each library's own code does with the values compiled SQL hands it: the functions it registers on SQLite, and how it reads a column of a statement's rows. Read with no store. See [Host functions and readers](#host-functions-and-readers).
 - `search.yaml`: full-text search: the nodes a search finds on each store, over the graph the file's `graph` writes, and how closely each other store ranks a corpus, `search/docs-corpus.json`, as Neo4j's full-text index ranks it. See [Full-text search](#full-text-search).
@@ -383,6 +384,45 @@ A SQL store's layout is 2, a graph engine's 1, and a stamp with no `layout`, or 
 | 12 | none | some | an earlier layout's only, or none | refused, as row 6, as layout 1's |
 
 After a stamp verdict's statements a library reads the stamps back, lists the objects again, and asks again: the graph is then `"current"`, which the test checks of every stamp verdict, run as a library runs it, and anything else is refused, so a store raced by another library is never used on a guess. Asked with the objects first listed, a graph of row 9 would be told to stamp again. A drop that fails leaves the graph refused. An earlier layout's objects beside a stamp of this layout (row 4) are the schema plan's: a record it holds of another form is made again by it. A library from before layouts reads no `layout`, and can't refuse a graph this one wrote: the upgrade notes say not to point one at it; one that stamps a new graph between this library's verdict and its `assignIfAbsent` leaves a stamp of layout 1 there: on the next connection the graph is re-stamped where it holds nothing yet (row 5), and refused where it holds values (row 6).
+
+### Migrating a store's layout
+
+A graph of an earlier layout that holds values is refused ([the layout's verdict](#the-layouts-verdict)); a migration moves it to this one (#256), a step from each layout to the next, of which there is one: layout 1 to layout 2. Its first part, pinned here, is the rewrite of a row: the module's `LayoutMigration.rewrite`, or the JSON request `{"rewrite": …}`, gives each node's or relationship's `props`, as layout 1 held them, as layout 2 holds them, so every library migrates a row alike. The rest of a migration, which reads and writes the rows in batches, rebuilds the indexes, keeps the count store and moves the stamp, comes in a later change.
+
+Layout 1 held a value as the store's JSON alone: a temporal value as its ISO text, bytes as base64 text where a library wrote them so, and on Oracle every float a save wrote as a `NUMBER`. Which texts were temporal values, and which whole numbers floats, is lost, so a migration is told them: a declaration of a label's property, or a relationship type's, as `date`, `localtime`, `time`, `localdatetime`, `datetime`, `duration`, `float` or `bytes`, which a library gives from its model, and the command line as it is told. A text is never taken for a temporal value by its shape, as Neo4j orders a text shaped like a date as a text (#161). A property of no declaration is rewritten only where no declaration is needed:
+
+- a property whose name begins with `$`, or a key of a map in its value, is held with one more ([Keys of maps](#values-in-the-store));
+- on Oracle, a `NUMBER` with a fraction is a float, as no integer has one, and is a binary double. So a float id with a fraction, keyed as its `NUMBER` in layout 1 (`4.5`), is keyed as layout 2 keys a lookup of it (`d4.5E+000`).
+
+A declared property's value is made one of its kind, or of a list of them. A temporal kind's is its text, which must be a text of that kind as ISO 8601 writes it, `10:30` and `2024-03-15T10:30` without their seconds too: a space in place of the `T` between a date and its time is read as the `T` (Python's `str`), and a named zone after an offset (`+01:00[Europe/Paris]`), which layout 2 holds none of, is dropped; the value is its tag, canonical, with its sort key. A float's is a number, or NaN or an infinity as the texts `"NaN"`, `"Infinity"` and `"-Infinity"` a layout-1 save wrote them as. Bytes are base64 text, or a list of whole numbers from -128 to 255, those from 128 read as unsigned, and are the list of their signed values. A declared value that is none of its kind (a text of another kind, a named zone with no offset, an offset with seconds, a number declared a date, a text of no base64), or that the store's layout 2 can't hold (NaN on Postgres and SQLite, an infinity on Postgres), is kept as it was and named with why, as is a property a node's two labels declare two kinds; declarations of one label's property as two kinds are refused. A migration refuses to write a row with such a value, unless it is told to keep them as they are, and then names each.
+
+A row is read into the values it holds, and written as `StoreValues.text` writes those values for the store, exactly what a layout-2 save or `CREATE` writes of them, so a row migrated is held as the same values written anew. Each store gives a row's text as it reads its JSON back: Postgres its `jsonb`'s text (`props::text`), SQLite its text, and Oracle `JSON_SERIALIZE(props EXTENDED)`, whose binary doubles are extended JSON's `{"$numberDouble": …}`, and which reads the rewrite back with `JSON(… EXTENDED)`. A row with nothing to change needs no write.
+
+```yaml
+from: 1
+to: 2
+declarationRefusals:
+  - {name: "...", declarations: [{label: "Person", property: "born", kind: "date"}, ...], refusal: "The property born of Person is declared date and datetime: ..."}
+rewrites:
+  - name: "A property declared a date"
+    labels: ["Person"]
+    declarations: [{label: "Person", property: "born", kind: "date"}]
+    stores:
+      postgres:
+        props: '{"born": "2024-03-15", "name": "2024-03-15"}'
+        result: '{"born":{"$t":"date","v":"2024-03-15","s":"10000020240315"},"name":"2024-03-15"}'
+        changes: [{property: "born", change: "temporal"}]
+        invalid: [{property: "...", kind: "...", value: '<its JSON text>', message: "..."}]
+```
+
+| Key | What it is |
+|---|---|
+| `declarationRefusals` | Declarations a migration refuses, and its message (`LayoutMigration.refusal`). |
+| `labels` | The node's labels, or the relationship's type, the row is of: a declaration of any of them applies. |
+| `declarations` | What the migration is told: each `{label, property, kind}`, the property named as the user names it (`$x`, not `$$x`). |
+| `stores` | For each SQL store the case is pinned on, the row's text as that store gives it (`props`), and the text layout 2 holds it as (`result`), compared exactly: the rewrite's text, the JSON request's `value`. |
+| `changes` | What was changed, property by property, in the row's order, each `escapedKey`, `double` (an Oracle `NUMBER` made a binary double), `temporal`, `float` or `bytes`; none where the row needs no write, the JSON request's `changed` false. |
+| `invalid` | Each declared value kept as it was: its property, its declared kind, its JSON text and why. |
 
 ## The schema plan
 
