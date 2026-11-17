@@ -5687,6 +5687,9 @@ abstract class SqlCypherCompiler(
                 // A time of day has no date to give, as Neo4j has it.
                 if (kind.instant && !dated) fields.keys.firstOrNull { it in Temporals.CALENDAR_FIELDS }?.let { throw CompilerException("${function.name}() takes no field $it.") }
                 fields.keys.firstOrNull { it !in known }?.let { unsupported("${function.name}() of a map with $it") }
+                // A field of the time beside none of the one above it, as Neo4j refuses it (`{hour: 12, nanosecond: 1}`:
+                // "subsecond cannot be specified without minute"), where the stores made it with that one at 0 (#321).
+                if (kind.instant && kind != Temporal.DATE) timeFieldsInOrder(function.name, fields.keys)
                 val numbers = fields.filterKeys { it != "timezone" }.mapValues { number(comparable(json(it.value))) }
                 if (kind == Temporal.DURATION) return of(temporals.duration(numbers))
                 // A zone the statement writes or a parameter gives is read here: one by name, which no store's text holds yet,
@@ -5792,6 +5795,17 @@ abstract class SqlCypherCompiler(
         }
 
         /**
+         * Refuses a map of a temporal value's fields that gives a field of the time beside none of the one above it, as Neo4j
+         * refuses it: a minute needs an hour, a second a minute, and a millisecond, a microsecond or a nanosecond a second.
+         * Neo4j names the first missing, `subsecond cannot be specified without minute`; this names the field and the one it needs.
+         */
+        private fun timeFieldsInOrder(name: String, keys: Set<String>) {
+            listOf("minute" to "hour", "second" to "minute", "millisecond" to "second", "microsecond" to "second", "nanosecond" to "second").forEach { (field, above) ->
+                if (field in keys && above !in keys) throw CompilerException("$name() takes a $field beside ${FIELD_NOUNS[above] ?: "a $above"}.")
+            }
+        }
+
+        /**
          * The SQL of a temporal value of [kind] that [function] makes of the map [written] with a `date`, a `time` or a
          * `datetime`, another temporal value whose fields it takes, with the map's others laid over them: see [Temporals.over].
          * Fails as Neo4j fails: on a field [kind] has none of, a `datetime` beside a `date` or a `time`, a value written that is
@@ -5820,11 +5834,7 @@ abstract class SqlCypherCompiler(
                     throw CompilerException("$name() takes a date beside a time: a date, or a year with a month and a day, a week and a day of the week, an ordinal day, or a quarter and a day of the quarter.")
                 }
             }
-            if (timed && "time" !in keys && "datetime" !in keys) {
-                listOf("minute" to "hour", "second" to "minute", "millisecond" to "second", "microsecond" to "second", "nanosecond" to "second").forEach { (field, above) ->
-                    if (field in keys && above !in keys) throw CompilerException("$name() takes a $field beside ${FIELD_NOUNS[above] ?: "a $above"}.")
-                }
-            }
+            if (timed && "time" !in keys && "datetime" !in keys) timeFieldsInOrder(name, keys)
             fun base(key: String, kinds: List<Temporal>): Temporals.Base? {
                 val value = entries[key] ?: return null
                 val nouns = kinds.reversed().map { "a ${it.function}" }

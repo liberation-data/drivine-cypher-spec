@@ -204,6 +204,24 @@ cases:
         cypher: "RETURN datetime({year: 2024, month: 1, day: 1, timezone: 1})"
         error: "datetime() takes a time zone, not 1."
 
+  - name: "A field of the time beside none of the one above it"
+    description: "A map of a moment's fields that gives a minute without an hour, a second without a minute, or a millisecond, a microsecond or a nanosecond without a second is refused, as Neo4j refuses it (\"subsecond cannot be specified without minute\"); the SQL stores made it with the missing field at 0 (drivine-cypher-spec#321)."
+    steps:
+      - cypher: "RETURN datetime({year: 1984, month: 10, day: 11, hour: 12, nanosecond: 1, timezone: '+01:00'})"
+        error: "datetime() takes a nanosecond beside a second."
+      - cypher: "RETURN localtime({hour: 12, millisecond: 5})"
+        error: "localtime() takes a millisecond beside a second."
+      - cypher: "RETURN time({hour: 12, second: 5})"
+        error: "time() takes a second beside a minute."
+      - cypher: "RETURN localdatetime({year: 1984, month: 10, day: 11, minute: 5})"
+        error: "localdatetime() takes a minute beside an hour."
+      - note: "Of a date by another calendar."
+        cypher: "RETURN localdatetime({year: 2024, week: 1, dayOfWeek: 2, hour: 12, nanosecond: 1})"
+        error: "localdatetime() takes a nanosecond beside a second."
+      - note: "Beside a base, as before."
+        cypher: "WITH localdatetime('1984-10-11T12:00') AS o RETURN localdatetime({date: o, hour: 1, microsecond: 1})"
+        error: "localdatetime() takes a microsecond beside a second."
+
   - name: "Temporal map not compiled yet"
     description: "A temporal value made from a map of fields the compiler doesn't handle yet is refused, naming what it is."
     steps:
