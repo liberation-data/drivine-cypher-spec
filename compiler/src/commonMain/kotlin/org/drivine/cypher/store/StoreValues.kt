@@ -105,15 +105,16 @@ object StoreValues {
     /**
      * [node] with each float in it that is a whole number a decimal of one place, `10000000.0`, from its shortest decimal: the
      * double's exact value, `999999999999999983222784.0` for `1e24`, is no number Postgres works out or reads as that float. NaN
-     * and the infinities are the numbers that stand for them: see [PostgresCypherCompiler].
+     * and the infinities are the numbers that stand for them: see [PostgresCypherCompiler]. A new tree: [node], which may be a
+     * host's own, given again as a retry gives it, is left as it was.
      */
     private fun wholeFloats(node: JsonNode): JsonNode = when {
         (node.isDouble || node.isFloat) && !node.doubleValue().isFinite() ->
             DecimalNode(PostgresCypherCompiler.standIn(node.doubleValue()), PostgresCypherCompiler.standInText(node.doubleValue()))
         (node.isDouble || node.isFloat) && node.doubleValue().let { it.isFinite() && it == kotlin.math.round(it) } ->
             PostgresCypherCompiler.wholePlain(jvmDoubleText(node.doubleValue())).let { DecimalNode(BigDecimal.parseString(it), it) }
-        node is ObjectNode -> node.apply { properties().toList().forEach { (key, value) -> set<JsonNode>(key, wholeFloats(value)) } }
-        node is ArrayNode -> node.apply { (0 until size()).forEach { set(it, wholeFloats(get(it))) } }
+        node is ObjectNode -> ObjectNode().apply { node.properties().forEach { (key, value) -> set<JsonNode>(key, wholeFloats(value)) } }
+        node is ArrayNode -> ArrayNode().apply { node.forEach { add(wholeFloats(it)) } }
         else -> node
     }
 
@@ -139,15 +140,16 @@ object StoreValues {
      * [node] with each float in it written as extended JSON's double, `{"$numberDouble": "1.5"}`, its text as Java writes
      * it (`"NaN"`, `"Infinity"` and `"-Infinity"` among them), calling [doubled] for each. Every float, as the store layout
      * holds one (#146): a binary double, which `JSON(… EXTENDED)` reads of extended JSON's double, and not of JSON's `1.5`,
-     * which it reads as a `NUMBER`. A `BigDecimal` is no float: it stays the number it is, every digit kept.
+     * which it reads as a `NUMBER`. A `BigDecimal` is no float: it stays the number it is, every digit kept. A new tree, as
+     * [wholeFloats] makes: a tree of the host's, read again, would otherwise hold extended JSON's keys.
      */
     internal fun oracleDoubles(node: JsonNode, doubled: () -> Unit): JsonNode = when {
         node.isDouble || node.isFloat -> {
             doubled()
             JsonNodeFactory.instance.objectNode().put(DOUBLE, jvmDoubleText(node.doubleValue()))
         }
-        node is ObjectNode -> node.apply { properties().toList().forEach { (key, value) -> set<JsonNode>(key, oracleDoubles(value, doubled)) } }
-        node is ArrayNode -> node.apply { (0 until size()).forEach { set(it, oracleDoubles(get(it), doubled)) } }
+        node is ObjectNode -> ObjectNode().apply { node.properties().forEach { (key, value) -> set<JsonNode>(key, oracleDoubles(value, doubled)) } }
+        node is ArrayNode -> ArrayNode().apply { node.forEach { add(oracleDoubles(it, doubled)) } }
         else -> node
     }
 }

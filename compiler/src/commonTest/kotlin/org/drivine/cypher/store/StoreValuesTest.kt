@@ -7,6 +7,7 @@ import org.drivine.cypher.api.CypherCompiler
 import org.drivine.cypher.api.GraphOptions
 import org.drivine.cypher.api.Refusal
 import org.drivine.cypher.api.Store
+import org.drivine.cypher.json.ArrayNode
 import org.drivine.cypher.json.CypherEncoder
 import org.drivine.cypher.json.DoubleNode
 import org.drivine.cypher.json.JsonNode
@@ -107,6 +108,29 @@ class StoreValuesTest {
         assertFailsWith<CompilerException> { StoreValues.text(nan, Store.SQLITE, encoder) }
         assertEquals("{\"r\":[{\"\$numberDouble\":\"NaN\"}]}", StoreValues.text(nan, Store.ORACLE, encoder))
         assertEquals("{\"r\":[9e999]}", StoreValues.text(mapOf("r" to listOf(Reading(Double.POSITIVE_INFINITY))), Store.SQLITE, encoder))
+    }
+
+    @Test
+    fun aTreeGivenIsLeftAsItWasSoWritingItAgainWritesTheSame() {
+        // A host's save may write one tree twice, as a retry does, and a compiler reads a parameter more than once.
+        fun tree() = ObjectNode().apply { set<JsonNode>("f", DoubleNode(1e7)); set<JsonNode>("l", ArrayNode().add(DoubleNode(1.5))) }
+        for (store in Store.entries) {
+            val given = tree()
+            val first = StoreValues.text(given, store)
+            assertEquals(tree(), given, "on $target, ${store.id}: the tree given")
+            assertEquals(first, StoreValues.text(given, store), "on $target, ${store.id}: written again")
+            val compiled = CypherCompiler.compile(store, GraphOptions("g"), "CREATE (n:N {x: \$x})", mapOf("x" to given))
+            assertEquals(compiled, CypherCompiler.compile(store, GraphOptions("g"), "CREATE (n:N {x: \$x})", mapOf("x" to given)), "on $target, ${store.id}: compiled again")
+            assertEquals(tree(), given, "on $target, ${store.id}: the tree compiled")
+        }
+    }
+
+    @Test
+    fun aTreesNaNIsRefusedAsADoublesIs() {
+        // A tree given as a parameter holds NaN as a Double does: a statement that writes it is refused, not given a stand-in or a text.
+        for (store in Store.entries) for (nan in listOf<Any>(DoubleNode(Double.NaN), ObjectNode().apply { set<JsonNode>("n", DoubleNode(Double.NaN)) })) {
+            assertEquals(refused(store, Double.NaN), refused(store, nan), "on $target, ${store.id}, $nan")
+        }
     }
 
     @Test
