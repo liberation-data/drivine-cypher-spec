@@ -65,11 +65,10 @@ object IdSql {
      * label. Each label is given as the node holds it and written into the SQL escaped, a quote in it as the store's JSON and
      * literal write one. No labels at all is a true condition, `1 = 1`, which each store accepts.
      */
-    fun hasLabels(store: Store, alias: String, labels: List<String>): String = when {
-        labels.isEmpty() -> "1 = 1"
-        store == Store.POSTGRES -> PostgresSql.hasLabels(alias, labels)
-        store == Store.ORACLE -> OracleSql.hasLabels(alias, labels)
-        else -> SqliteSql.hasLabels(alias, labels)
+    fun hasLabels(store: Store, alias: String, labels: List<String>): String = if (labels.isEmpty()) "1 = 1" else when (store) {
+        Store.POSTGRES -> PostgresSql.hasLabels(alias, labels)
+        Store.ORACLE -> OracleSql.hasLabels(alias, labels)
+        Store.SQLITE -> SqliteSql.hasLabels(alias, labels)
     }
 
     /** Refuses the stamp as an id: [IndexKey.column] is made over a property, and Postgres's stamp column is no `jsonb`. */
