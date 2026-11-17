@@ -7378,7 +7378,7 @@ abstract class SqlCypherCompiler(
                     val taken = name == "head" || name == "last"
                     // A value known to be no temporal value, written or given, has no tag to read.
                     val readsTag = name == "tostring" && !untemporal(one(), function.arguments.singleOrNull())
-                    val open = name == "tostring" && function.arguments.singleOrNull()?.let { openKind(one(), it) && mayHoldList(it, scope) } == true
+                    val open = name == "tostring" && function.arguments.singleOrNull()?.let { openKind(one()) && mayHoldList(it, scope) } == true
                     val result = shared(argument) { (x) ->
                         val worked = if (readsTag) "CASE WHEN ${tagKind(x)} IS NOT NULL THEN ${scalar(tagText(x))} ELSE ${function(name, x)!!} END" else function(name, x)!!
                         if (open) textOfOpen(x, worked) else worked
@@ -7495,13 +7495,13 @@ abstract class SqlCypherCompiler(
             }
 
         /**
-         * Whether [value], written as [written], is of a kind the statement leaves open, so that it may turn out a list or a map as
+         * Whether [value] is of a kind the statement leaves open, so that it may turn out a list or a map as
          * it runs: a value read from the store, or a member of a map given or written, not one the statement makes a text, a list,
          * a temporal value or of a known kind, nor one it works out as it runs ([Value.Json.inflight], a temporal value's tag,
-         * never a list), nor a literal or a parameter given as a number, a text or a truth value.
+         * never a list). A literal or a parameter given as a number, a text or a truth value [mayHoldList] tells apart ([noList]).
          */
-        private fun openKind(value: Value, written: Expression?): Boolean = value is Value.Json && value.temporal == null && value.inflight == null &&
-            !value.text && !value.list && value.known == null && written?.let(::given).let { it !is String && it !is Number && it !is Boolean }
+        private fun openKind(value: Value): Boolean = value is Value.Json && value.temporal == null && value.inflight == null &&
+            !value.text && !value.list && value.known == null
 
         /**
          * Whether [written], of a kind the statement leaves open, may turn out a list that isn't a store's property as the statement
