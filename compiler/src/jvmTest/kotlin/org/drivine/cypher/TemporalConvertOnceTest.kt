@@ -84,10 +84,31 @@ class TemporalConvertOnceTest {
     }
 
     /** [cypher]'s SQL on [store], as a host is given it. */
-    private fun length(store: String, cypher: String): Int {
+    private fun sql(store: String, cypher: String): String {
         val request = """{"store":"$store","graph":{"name":"cypher"},"cypher":${JsonPrimitive(cypher)},"parameters":{}}"""
         val response = Json.parseToJsonElement(CompileJson.compile(request)).jsonObject
-        return response["sql"]!!.jsonPrimitive.content.length
+        return response["sql"]!!.jsonPrimitive.content
+    }
+
+    private fun length(store: String, cypher: String): Int = sql(store, cypher).length
+
+    /**
+     * Postgres's `regexp_replace` and Oracle's `REGEXP_REPLACE` read a group in the value the replacement's SQL gives, a
+     * backslash and a digit, so the `CASE`'s `'\2'` gives the converted text's own fraction, none where the group didn't take
+     * part. A backslash written twice there (`'\\2'`) would give the text `\2` itself. What each gives is the spec's
+     * (temporal.yaml); this holds the replacement as the stores are given it, and that no converted text is bound and chosen
+     * around.
+     */
+    @Test
+    fun `the fraction is chosen in the replacement on Postgres and Oracle`() {
+        val seconds = "'^([^:]*:[0-9]{2}:[0-9]{2})([.][0-9]+)?', ('\\1' || CASE WHEN "
+        listOf("postgres", "oracle").forEach { store ->
+            val written = sql(store, "MATCH (n:CyTemporal) RETURN localtime(n.at)")
+            val replacements = Regex(Regex.escape(seconds)).findAll(written).count()
+            assertTrue(replacements > 0, "$store: no fraction chosen in a replacement")
+            assertEquals(replacements, Regex(Regex.escape(" ELSE '\\2' END))")).findAll(written).count(), "$store: $written")
+            assertTrue(Regex("""REGEXP_REPLACE\(sh[0-9]+\.v1, '\^\(\[\^:]""").findAll(written).none(), "$store: a converted text bound and chosen around: $written")
+        }
     }
 
     /**
