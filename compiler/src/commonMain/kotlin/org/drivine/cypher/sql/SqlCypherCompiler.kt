@@ -7378,8 +7378,10 @@ abstract class SqlCypherCompiler(
                     val taken = name == "head" || name == "last"
                     // A value known to be no temporal value, written or given, has no tag to read.
                     val readsTag = name == "tostring" && !untemporal(one(), function.arguments.singleOrNull())
+                    val open = name == "tostring" && function.arguments.singleOrNull()?.let { openKind(one(), it) && mayHoldList(it, scope) } == true
                     val result = shared(argument) { (x) ->
-                        if (readsTag) "CASE WHEN ${tagKind(x)} IS NOT NULL THEN ${scalar(tagText(x))} ELSE ${function(name, x)!!} END" else function(name, x)!!
+                        val worked = if (readsTag) "CASE WHEN ${tagKind(x)} IS NOT NULL THEN ${scalar(tagText(x))} ELSE ${function(name, x)!!} END" else function(name, x)!!
+                        if (open) textOfOpen(x, worked) else worked
                     }
                     Value.Json(
                         result,
@@ -7491,6 +7493,53 @@ abstract class SqlCypherCompiler(
             if (entries.isEmpty()) literal("{}") else shared(json) { (x) ->
                 entries.sortedWith(compareBy(CODE_POINT_ORDER) { it.first }).joinToString(" || ', ' || ", prefix = "'{' || ", postfix = " || '}'") { (key, item) -> "${literal("$key: ")} || ${writtenText(item, propertyOf(x, key), scope)}" }
             }
+
+        /**
+         * Whether [value], written as [written], is of a kind the statement leaves open, so that it may turn out a list or a map as
+         * it runs: a value read from the store, or a member of a map given or written, not one the statement makes a text, a list,
+         * a temporal value or of a known kind, nor one it works out as it runs ([Value.Json.inflight], a temporal value's tag,
+         * never a list), nor a literal or a parameter given as a number, a text or a truth value.
+         */
+        private fun openKind(value: Value, written: Expression?): Boolean = value is Value.Json && value.temporal == null && value.inflight == null &&
+            !value.text && !value.list && value.known == null && written?.let(::given).let { it !is String && it !is Number && it !is Boolean }
+
+        /**
+         * Whether [written], of a kind the statement leaves open, may turn out a list that isn't a store's property as the statement
+         * runs: a member of a map given, written or bound ([holdsMap]), an item of such a map or of a list, or `coalesce()`,
+         * `head()`, `last()` or a CASE of one or of a list. A variable alone is none: what a WITH or a RETURN binds, an aggregate
+         * among it (`count(*) AS c`, read by name in an ORDER BY), keeps no kind to tell a list by. A property of a node or a
+         * relationship is none either: it keeps the store's JSON text, as Neo4j's text of a list read from the store
+         * would cost every `toString()` of a property thousands of characters of SQL (liberation-data/drivine-cypher-spec#297,
+         * #346 for a property's list).
+         */
+        private fun mayHoldList(written: Expression, scope: Map<String, Value>): Boolean = when (written) {
+            is Expression.Property -> holdsMap(written.subject, scope)
+            is Expression.Index -> holdsMap(written.subject, scope) || written.subject is Expression.ListLiteral
+            is Expression.Function -> written.name.lowercase() in LIST_PASSING &&
+                written.arguments.any { knownKind(it, scope) == Value.Known.LIST || mayHoldList(it, scope) }
+            is Expression.Case -> (written.alternatives.map { it.second } + listOfNotNull(written.otherwise))
+                .any { knownKind(it, scope) == Value.Known.LIST || mayHoldList(it, scope) }
+            else -> false
+        }
+
+        /** Whether [subject] is a map, or a list, the statement writes, is given or binds, not a node or a relationship. */
+        private fun holdsMap(subject: Expression, scope: Map<String, Value>): Boolean = when (subject) {
+            is Expression.MapLiteral, is Expression.Parameter -> true
+            is Expression.Variable -> scope[subject.name] is Value.Json
+            is Expression.Property -> holdsMap(subject.subject, scope)
+            else -> false
+        }
+
+        /**
+         * `toString` of the JSON [x], bound once, of a kind the statement leaves open ([openKind]), whose text is [worked] where
+         * it is no list or map: a list as Neo4j writes one, item by item as it runs ([listText]), where it gave the store's JSON
+         * text; a map, but for a temporal value's tag, a failure by name, as its keys aren't known here
+         * (liberation-data/drivine-cypher-spec#297, #301 for the map's text). [x] is the one value [worked] reads, so a value an
+         * item's name stands for is written once (#338's multiplier).
+         */
+        private fun textOfOpen(x: String, worked: String): String =
+            "CASE WHEN ${typeOf(x)} = 'array' THEN ${scalar(listText(x, 1))} WHEN ${typeOf(x)} = 'object' AND ${tagKind(x)} IS NULL " +
+                "THEN ${scalar(textFailing(TEXT_OF_MAP_HELD, "a map"))} ELSE $worked END"
 
         /**
          * The text of the JSON item [json] that [written] gives: a number, a text or a truth value written, as itself; a list or a
@@ -7986,6 +8035,11 @@ abstract class SqlCypherCompiler(
          * What `toString()` of a list or a map fails with, as it runs, where it holds what its text is not known of here: see
          * `itemText`. What it holds follows.
          */
+        /** The functions that give one of their arguments, so may give a list where one is ([mayHoldList]). */
+        val LIST_PASSING = setOf("coalesce", "head", "last")
+
+        const val TEXT_OF_MAP_HELD = "toString() of a map read as the statement runs is not compiled to SQL yet (liberation-data/drivine-cypher-spec#301): it is"
+
         const val TEXT_OF_HELD = "toString() of a list or a map that holds a map read as the statement runs, a temporal value or a list nested deeper is not compiled to SQL yet: it holds"
 
         /**
