@@ -207,6 +207,8 @@ class OracleDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
                         RETURN;
                     EXCEPTION
                         WHEN e_exists THEN RETURN;
+                        -- The lock table's row, which another session inserted between this one's MERGE's look and its insert.
+                        WHEN DUP_VAL_ON_INDEX THEN RETURN;
                         WHEN e_busy THEN
                             IF attempt = $BUSY_ATTEMPTS THEN RAISE; END IF;
                             DBMS_SESSION.SLEEP(0.1);
