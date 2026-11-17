@@ -212,8 +212,9 @@ internal class VariableKinds(private val aggregates: (Expression) -> Boolean) {
             val hidden = imported.filterTo(LinkedHashSet()) { it in scope.hidden || (call.importsAll && !call.procedure && scope.horizon?.contains(it) == false) }
             // What its brackets import, it binds not again; and what a subquery around it has from outside stays outer within it (drivine4j#819).
             // What a leading WITH imports, Neo4j has declared in the subquery's own scope, as at the top (see [redeclared]).
+            // Not a procedure's: the WITH of its WHERE yields a variable as its item, and one bound already is refused as such, as without one.
             val bracketed = call.imports != null || call.importsAll
-            if (bracketed) shadowing += imported - dropped
+            if (bracketed && !call.procedure) shadowing += imported - dropped
             val outer = LinkedHashSet(scope.outer).apply { addAll(scope.shadowing) }
             clauses(clauses, Scope(inner, dropped, shadowing, scope.horizon, hidden, outer), kept = if (bracketed) inner.filterKeys { it !in dropped } else emptyMap())
         }
