@@ -34,7 +34,7 @@ import kotlin.io.encoding.Base64
  * whole numbers floats, is lost, and a migration is told it, property by property ([Declaration]), as a library knows it
  * from its model; it is never guessed (#161 refused a guess: Neo4j orders a text shaped like a date as a text). What no
  * declaration is needed for is rewritten for every property:
- * - a property whose name begins with `$` is held with one more ([ValueLayout.escape]);
+ * - a property whose name begins with `$`, or a key of a map in its value, is held with one more ([ValueLayout.escape]);
  * - on Oracle, a `NUMBER` with a fraction, which no integer has, is a float, a binary double in layout 2.
  *
  * The row is read into the values it holds and written as [StoreValues.text] writes them for the store, the text a
@@ -78,7 +78,7 @@ object LayoutMigration {
 
     /** What a rewrite changed of a property, as a report counts them. */
     enum class Change(val word: String) {
-        /** Its name began with `$`, and is held with one more. */
+        /** Its name, or a key of a map in its value, began with `$`, and is held with one more. */
         ESCAPED_KEY("escapedKey"),
 
         /** An Oracle `NUMBER` with a fraction, a float, made a binary double. */
@@ -270,13 +270,20 @@ object LayoutMigration {
 
     /**
      * [node], a value of a property [name] declared nothing, as a value, rewritten as needs no declaration: on Oracle, a
-     * `NUMBER` with a fraction a float ([Change.DOUBLE]), and an extended JSON double a float.
+     * `NUMBER` with a fraction a float ([Change.DOUBLE]), and an extended JSON double a float; a map's key that begins with
+     * `$`, which [StoreValues.text] escapes, [Change.ESCAPED_KEY].
      */
     private fun plain(node: JsonNode, store: Store, name: String, changes: MutableList<Changed>): Any? {
         oracleExtended(node, store)?.let { return it }
         return when {
             node is ArrayNode -> node.map { plain(it, store, name, changes) }
-            node is ObjectNode -> LinkedHashMap<String, Any?>().apply { node.properties().forEach { (k, v) -> put(k, plain(v, store, name, changes)) } }
+            node is ObjectNode -> {
+                // A map's key that begins with `$` is escaped at any depth too, so the row is to be written.
+                if (node.properties().any { (k, _) -> k.startsWith('$') } && changes.none { it.property == name && it.change == Change.ESCAPED_KEY }) {
+                    changes += Changed(name, Change.ESCAPED_KEY)
+                }
+                LinkedHashMap<String, Any?>().apply { node.properties().forEach { (k, v) -> put(k, plain(v, store, name, changes)) } }
+            }
             node is DoubleNode && store == Store.ORACLE -> {
                 // Oracle's JSON_SERIALIZE writes a NUMBER as JSON's number: one with a fraction is a float, as no integer has one.
                 if (node.value != kotlin.math.floor(node.value) && changes.none { it.property == name && it.change == Change.DOUBLE }) changes += Changed(name, Change.DOUBLE)

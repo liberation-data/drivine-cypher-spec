@@ -41,6 +41,19 @@ rewrites:
         props: '{"$t":1,"$$x":"a","a$":2}'
         result: '{"$$t":1,"$$$x":"a","a$":2}'
         changes: [{property: "$t", change: "escapedKey"}, {property: "$$x", change: "escapedKey"}]
+  - name: "A map's key that begins with $"
+    description: "A key of a map in a property's value is held with one more $ too, at any depth, so the row is to be written."
+    labels: ["Person"]
+    declarations: []
+    stores:
+      postgres:
+        props: '{"m": {"a": 2, "$k": {"$j": 1}}}'
+        result: '{"m":{"a":2,"$$k":{"$$j":1}}}'
+        changes: [{property: "m", change: "escapedKey"}]
+      sqlite:
+        props: '{"m":{"$k":{"$j":1},"a":2}}'
+        result: '{"m":{"$$k":{"$$j":1},"a":2}}'
+        changes: [{property: "m", change: "escapedKey"}]
   - name: "A NUMBER with a fraction on Oracle"
     description: "Layout 1's saves wrote every float on Oracle as a NUMBER; one with a fraction is a float, as no integer has one, and is a binary double in layout 2, with no declaration: a float id 4.5, keyed as 4.5 in layout 1, is keyed as layout 2 keys a lookup of it. A whole NUMBER stays an integer, unless declared a float; a binary double already is one."
     labels: ["Reading"]
@@ -130,22 +143,24 @@ rewrites:
       - {label: "Reading", property: "f", kind: "float"}
       - {label: "Reading", property: "nan", kind: "float"}
       - {label: "Reading", property: "inf", kind: "float"}
+      - {label: "Reading", property: "ninf", kind: "float"}
     stores:
       postgres:
-        props: '{"f": 1.5, "w": 2, "inf": "Infinity", "nan": "NaN"}'
-        result: '{"f":1.5,"w":2.0,"inf":"Infinity","nan":"NaN"}'
+        props: '{"f": 1.5, "w": 2, "inf": "Infinity", "nan": "NaN", "ninf": "-Infinity"}'
+        result: '{"f":1.5,"w":2.0,"inf":"Infinity","nan":"NaN","ninf":"-Infinity"}'
         changes: [{property: "w", change: "float"}]
         invalid:
           - {property: "inf", kind: "float", value: '"Infinity"', message: "A statement that writes is given NaN or an infinity, which Postgres's `jsonb` holds as no number: it would store another value in its place."}
           - {property: "nan", kind: "float", value: '"NaN"', message: "A statement that writes is given NaN or an infinity, which Postgres's `jsonb` holds as no number: it would store another value in its place."}
+          - {property: "ninf", kind: "float", value: '"-Infinity"', message: "A statement that writes is given NaN or an infinity, which Postgres's `jsonb` holds as no number: it would store another value in its place."}
       oracle:
-        props: '{"w":2,"f":1.5,"nan":"NaN","inf":"Infinity"}'
-        result: '{"w":{"$numberDouble":"2.0"},"f":{"$numberDouble":"1.5"},"nan":{"$numberDouble":"NaN"},"inf":{"$numberDouble":"Infinity"}}'
-        changes: [{property: "w", change: "float"}, {property: "f", change: "double"}, {property: "nan", change: "float"}, {property: "inf", change: "float"}]
+        props: '{"w":2,"f":1.5,"nan":"NaN","inf":"Infinity","ninf":"-Infinity"}'
+        result: '{"w":{"$numberDouble":"2.0"},"f":{"$numberDouble":"1.5"},"nan":{"$numberDouble":"NaN"},"inf":{"$numberDouble":"Infinity"},"ninf":{"$numberDouble":"-Infinity"}}'
+        changes: [{property: "w", change: "float"}, {property: "f", change: "double"}, {property: "nan", change: "float"}, {property: "inf", change: "float"}, {property: "ninf", change: "float"}]
       sqlite:
-        props: '{"w":2,"f":1.5,"nan":"NaN","inf":"Infinity"}'
-        result: '{"w":2.0,"f":1.5,"nan":"NaN","inf":9e999}'
-        changes: [{property: "w", change: "float"}, {property: "inf", change: "float"}]
+        props: '{"w":2,"f":1.5,"nan":"NaN","inf":"Infinity","ninf":"-Infinity"}'
+        result: '{"w":2.0,"f":1.5,"nan":"NaN","inf":9e999,"ninf":-9e999}'
+        changes: [{property: "w", change: "float"}, {property: "inf", change: "float"}, {property: "ninf", change: "float"}]
         invalid:
           - {property: "nan", kind: "float", value: '"NaN"', message: "A statement that writes is given NaN, which SQLite's JSON holds as no number: it would store another value in its place."}
   - name: "A list declared of floats"

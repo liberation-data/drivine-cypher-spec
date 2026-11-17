@@ -122,6 +122,16 @@ class LayoutJsonTest {
             "{\"layout\": {\"engine\": \"POSTGRES\", \"graph\": \"g\", \"stamps\": [{\"layout\": 4294967298}], \"foreignNodes\": false}}" to "A layout request's stamp gives its layout as a whole number: 4294967298.",
             "{\"layout\": {\"engine\": \"POSTGRES\", \"graph\": \"g\", \"stamps\": [], \"foreignNodes\": false, \"objects\": {}}}" to "A layout request gives the objects as a list.",
             "{\"layout\": {\"engine\": \"POSTGRES\", \"graph\": \"g\", \"stamps\": [], \"foreignNodes\": false, \"objects\": [\"x\"]}}" to "A layout request's object is a map.",
+            "{\"rewrite\": {}, \"store\": \"sqlite\", \"labels\": []}" to "A rewrite request gives the row as its JSON text.",
+            "{\"rewrite\": \"{}\", \"labels\": []}" to "A rewrite request gives the store: postgres, oracle or sqlite.",
+            "{\"rewrite\": \"{}\", \"store\": \"neo4j\", \"labels\": []}" to "A rewrite request gives the store as postgres, oracle or sqlite, not neo4j.",
+            "{\"rewrite\": \"{}\", \"store\": \"sqlite\"}" to "A rewrite request gives the labels as a list.",
+            "{\"rewrite\": \"{}\", \"store\": \"sqlite\", \"labels\": [1]}" to "A rewrite request's label is a text.",
+            "{\"rewrite\": \"{}\", \"store\": \"sqlite\", \"labels\": [], \"declarations\": {}}" to "A rewrite request gives the declarations as a list.",
+            "{\"rewrite\": \"{}\", \"store\": \"sqlite\", \"labels\": [], \"declarations\": [{\"label\": \"A\", \"kind\": \"date\"}]}" to "A rewrite request's declaration gives its property as a text.",
+            "{\"rewrite\": \"{}\", \"store\": \"sqlite\", \"labels\": [], \"declarations\": [{\"label\": \"A\", \"property\": \"p\", \"kind\": \"week\"}]}" to "No kind week to declare: date, localtime, time, localdatetime, datetime, duration, float, bytes.",
+            "{\"rewrite\": \"{}\", \"store\": \"sqlite\", \"labels\": [], \"declarations\": [{\"label\": \"A\", \"property\": \"p\", \"kind\": \"date\"}, {\"label\": \"A\", \"property\": \"p\", \"kind\": \"float\"}]}" to "The property p of A is declared date and float: declare one kind.",
+            "{\"rewrite\": \"[1]\", \"store\": \"sqlite\", \"labels\": []}" to "A row's properties are a JSON object, not [1].",
             "{\"read\": \"1\", \"cypher\": \"RETURN 1\"}" to "A request gives one of cypher, search, searchIndex, vector, settings, fragment, read, temporalKey, layout, expand, write, rewrite, storeStatements, schemaPlan and idSql.",
         )) {
             assertEquals(message, answer(request)["error"]?.textValue(), request)

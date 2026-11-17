@@ -60,9 +60,10 @@ class LayoutMigrationTest {
                 val answer = CypherJson.readTree(CompileJson.compile(CypherJson.writeValueAsString(request)))
                 val at = "on $target, $store: $name"
                 assertEquals(CypherJson.readTree(pinned["result"]!!.textValue()!!).let(CypherJson::writeValueAsString), CypherJson.writeValueAsString(answer["value"]!!), at)
-                assertEquals(pinned["changes"]?.size() ?: 0, answer["changes"]!!.size(), "$at: the changes")
+                fun rows(node: JsonNode?, vararg keys: String) = node?.map { row -> keys.map { row[it]?.textValue() } }.orEmpty()
+                assertEquals(rows(pinned["changes"], "property", "change"), rows(answer["changes"], "property", "change"), "$at: the changes")
                 assertEquals((pinned["changes"]?.size() ?: 0) > 0, answer["changed"]!!.booleanValue(), "$at: changed")
-                assertEquals(pinned["invalid"]?.map { it["message"]!!.textValue() }.orEmpty(), answer["invalid"]!!.map { it["message"]!!.textValue() }, "$at: the invalid values")
+                assertEquals(rows(pinned["invalid"], "property", "kind", "value", "message"), rows(answer["invalid"], "property", "kind", "value", "message"), "$at: the invalid values")
             }
         }
     }
