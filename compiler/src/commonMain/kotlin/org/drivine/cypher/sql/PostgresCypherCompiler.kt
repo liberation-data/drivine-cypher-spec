@@ -388,12 +388,12 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
         "ROW(CASE WHEN jsonb_typeof($x) = 'string' THEN '\"\"'::jsonb ELSE ${nullIfJsonNull(x)} END, ${codePointText(x)})"
     }
 
-    override fun add(a: String, b: String, given: Pair<Any?, Any?>) =
+    override fun add(a: String, b: String, given: Pair<Any?, Any?>, truths: Boolean) =
         "CASE WHEN jsonb_typeof($a) = 'number' AND jsonb_typeof($b) = 'number' THEN ${scalar("${number(a)} + ${number(b)}")} " +
             "WHEN jsonb_typeof($a) = 'array' AND jsonb_typeof($b) = 'array' THEN $a || $b " +
             "WHEN jsonb_typeof($a) = 'array' THEN $a || jsonb_build_array($b) " +
             "WHEN jsonb_typeof($b) = 'array' THEN jsonb_build_array($a) || $b " +
-            "WHEN jsonb_typeof($a) IN ('string', 'number') AND jsonb_typeof($b) IN ('string', 'number') THEN to_jsonb(${summedText(a, given)} || ${summedText(b, given.second to given.first)}) END"
+            "WHEN ${textSummed("jsonb_typeof($a)", "jsonb_typeof($b)", truths)} THEN to_jsonb(${summedText(a, given)} || ${summedText(b, given.second to given.first)}) END"
 
     /** The side [json] of a `+` whose sides the statement gives as [given], this side first, as text: see [summedText]. */
     private fun summedText(json: String, given: Pair<Any?, Any?>) = summedText(json, given.first, given.second, { "($it #>> '{}')" }, ::asText)

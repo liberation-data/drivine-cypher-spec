@@ -1327,12 +1327,12 @@ class OracleCypherCompiler(
     }
 
     /** A side that is a property is read from the properties by its own path: see [direct]. */
-    override fun add(a: String, b: String, given: Pair<Any?, Any?>) = direct(direct(
+    override fun add(a: String, b: String, given: Pair<Any?, Any?>, truths: Boolean) = direct(direct(
         "CASE WHEN ${typeOf(a)} = 'number' AND ${typeOf(b)} = 'number' THEN ${arithmetic(a, b, "+")} " +
             "WHEN ${kind(a)} = 'array' AND ${kind(b)} = 'array' THEN JSON_QUERY(JSON_ARRAY($a, $b RETURNING JSON), '\$[*][*]' RETURNING JSON WITH ARRAY WRAPPER) " +
             "WHEN ${kind(a)} = 'array' THEN JSON_TRANSFORM($a, APPEND '\$' = $b) " +
             "WHEN ${kind(b)} = 'array' THEN JSON_TRANSFORM($b, INSERT '\$[0]' = $a) " +
-            "WHEN ${typeOf(a)} IN ('string', 'number') AND ${typeOf(b)} IN ('string', 'number') THEN ${textSum(a, b, given)} END",
+            "WHEN ${textSummed(typeOf(a), typeOf(b), truths)} THEN ${textSum(a, b, given)} END",
         a), b)
 
     /**
