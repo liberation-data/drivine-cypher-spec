@@ -119,6 +119,9 @@ object LayoutMigration {
      * [rewrite]).
      */
     fun refusal(declarations: List<Declaration>): String? {
+        declarations.firstOrNull { it.label in org.drivine.cypher.store.marker.StoreLayout.OWN_LABELS }?.let {
+            return "${it.label} is Drivine's own label, whose properties take no declaration: a migration keeps them as they are."
+        }
         val kinds = declarations.groupBy { it.label to it.property }.filterValues { list -> list.map { it.kind }.distinct().size > 1 }
         val (key, list) = kinds.entries.firstOrNull() ?: return null
         return "The property ${key.second} of ${key.first} is declared ${list.map { it.kind.word }.distinct().joinToString(" and ")}: declare one kind."
@@ -178,6 +181,47 @@ object LayoutMigration {
         }
         return Rewrite(StoreValues.text(values, store), changes, invalid)
     }
+
+    /**
+     * What each property of the row [props], as [store] gives its text, holds, as a dry run tells which properties are to be
+     * declared (see [LayoutMigrator]): a property and its class, in the row's order. A text that reads as a temporal kind's
+     * text, as [rewrite] would read it declared that kind, is that kind's word (`date` …); any other text `text`; a whole
+     * number `whole`; a number with a fraction, or an Oracle binary double, `float`; a list whose items are all of one of
+     * these classes that class; anything else `other`.
+     */
+    fun observe(props: String, store: Store): List<Pair<String, String>> {
+        val tree = CypherJson.readTree(props) as? ObjectNode
+            ?: throw IllegalArgumentException("A row's properties are a JSON object, not $props.")
+        return tree.properties().map { (name, node) -> name to classOf(node, store) }
+    }
+
+    /** The class of [node], as [observe] gives it. */
+    private fun classOf(node: JsonNode, store: Store): String {
+        if (store == Store.ORACLE && node is ObjectNode && node.size() == 1 && node.fieldNames().asSequence().single() in DOUBLES) return FLOAT_CLASS
+        return when {
+            node is ArrayNode -> node.map { classOf(it, store) }.distinct().singleOrNull()?.takeIf { it != OTHER_CLASS } ?: OTHER_CLASS
+            node.isTextual -> temporalOf(node.textValue()!!) ?: "text"
+            node is LongNode || node is BigIntegerNode -> "whole"
+            node is DoubleNode -> if (store == Store.ORACLE && node.value == kotlin.math.floor(node.value)) "whole" else FLOAT_CLASS
+            else -> OTHER_CLASS
+        }
+    }
+
+    private const val FLOAT_CLASS = "float"
+    private const val OTHER_CLASS = "other"
+
+    /** Extended JSON's doubles, as Oracle writes a binary double. */
+    private val DOUBLES = setOf("\$numberDouble", "\$numberFloat")
+
+    /** The word of the temporal kind [text] reads as, declared that kind, or null where it reads as none. */
+    private fun temporalOf(text: String): String? = Kind.entries.filter { it.temporal != null }.firstOrNull { kind ->
+        try {
+            canonical(text, kind.temporal!!, kind)
+            true
+        } catch (e: Kept) {
+            false
+        }
+    }?.word
 
     /** A declared value made, and what it changed. */
     private class Made(val value: Any?, val change: Change)

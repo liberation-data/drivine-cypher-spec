@@ -510,6 +510,15 @@ of its own, so the three libraries read rows, key a temporal value and judge a g
   error. `LayoutMigration.rewrite` on the JVM. The spec's README, "Migrating a store's layout", says what is rewritten, and
   `migrate.yaml` pins it.
 
+- **`migrate`** runs a store's migration from layout 1 to layout 2 (#256) a round at a time, as `schemaPlan` runs a plan:
+  `{"migrate": {"store": "postgres", "graph": "g", "start": {"declarations": [...], "batchSize": 1000, "dryRun": false,
+  "keepInvalid": false}}}`, then `{"migrate": {"store": …, "graph": …, "resume": <state>, "outcomes": [<outcome>, …]}}`, each
+  answered `{"run": [<action>, …], "state": <state>}` or `{"done": <report>}`. An action is `{"type": "query" | "execute",
+  "statement", "parameters", "purpose"}`, `{"type": "transaction", "statements": [<execute>, …]}`, `{"type": "prepare"}` or
+  `{"type": "lock", "statement"}`; an outcome `{"type": "rows", "rows": [...]}`, `{"type": "ran"}` or `{"type": "failed",
+  "message"}`. `LayoutMigrator` on the JVM. The spec's README, "The migration's run", says what each step does and what
+  the host owes it.
+
 ### The store's own statements and the schema plan
 
 A library makes and stamps a store, and plans its indexes, with the module's own statements (#107, #135), each through the

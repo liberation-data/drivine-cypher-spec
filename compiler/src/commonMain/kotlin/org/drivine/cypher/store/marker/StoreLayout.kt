@@ -30,19 +30,20 @@ import org.drivine.cypher.store.ddl.StoreDdl
  * | 1 | of two layouts or more | any | any | [Verdict.Refuse]: stamped by two versions at once |
  * | 2 | of a later layout | any | any | [Verdict.Refuse]: written by a later Drivine, to be upgraded |
  * | 3 | any | any | a later layout's (`g_ix3_…`, `g_lock3`) | [Verdict.Refuse]: made by a later Drivine, to be upgraded |
- * | 4 | of this layout | any | any else | [Verdict.Current] |
- * | 5 | of an earlier layout, on a SQL store | none | any else | [Verdict.Stamp]: the earlier layout's objects dropped, then [StoreStampStatements.restampLayout]. Nothing is migrated |
- * | 6 | of an earlier layout, on a SQL store | some | any else | [Verdict.Refuse]: names its layout and this one, and the reload |
- * | 7 | none or of an earlier layout, on a graph engine | any | any | [Verdict.Current]: a graph engine holds layout 1, its own, with a stamp or without, and lists no objects |
- * | 8 | none | none | none of an earlier layout's | [Verdict.Current]: new, or cleared; the stamp is assigned as ever |
- * | 9 | none | none | an earlier layout's, whatever of this one's beside | [Verdict.Stamp]: those dropped, then asked again (the restamp finds no stamp, and changes nothing) |
- * | 10 | none | some | this layout's and an earlier one's | [Verdict.Refuse]: naming both |
- * | 11 | none | some | this layout's only | [Verdict.Stamp] with [Verdict.Stamp.assign]: a graph of this layout whose stamp a clear deleted (`MATCH (n) DETACH DELETE n` deletes Drivine's own nodes too), stamped again |
- * | 12 | none | some | an earlier layout's only, or none | [Verdict.Refuse]: as layout 1's, as row 6 |
+ * | 4 | any | any | a migration's checkpoint (`g_migrate2`, [SqlStoreDdl.migrate]), on a SQL store | [Verdict.Refuse]: a migration to this layout is under way, to be resumed |
+ * | 5 | of this layout | any | any else | [Verdict.Current] |
+ * | 6 | of an earlier layout, on a SQL store | none | any else | [Verdict.Stamp]: the earlier layout's objects dropped, then [StoreStampStatements.restampLayout]. Nothing is migrated |
+ * | 7 | of an earlier layout, on a SQL store | some | any else | [Verdict.Refuse]: names its layout and this one, and the reload |
+ * | 8 | none or of an earlier layout, on a graph engine | any | any | [Verdict.Current]: a graph engine holds layout 1, its own, with a stamp or without, and lists no objects |
+ * | 9 | none | none | none of an earlier layout's | [Verdict.Current]: new, or cleared; the stamp is assigned as ever |
+ * | 10 | none | none | an earlier layout's, whatever of this one's beside | [Verdict.Stamp]: those dropped, then asked again (the restamp finds no stamp, and changes nothing) |
+ * | 11 | none | some | this layout's and an earlier one's | [Verdict.Refuse]: naming both |
+ * | 12 | none | some | this layout's only | [Verdict.Stamp] with [Verdict.Stamp.assign]: a graph of this layout whose stamp a clear deleted (`MATCH (n) DETACH DELETE n` deletes Drivine's own nodes too), stamped again |
+ * | 13 | none | some | an earlier layout's only, or none | [Verdict.Refuse]: as layout 1's, as row 7 |
  *
  * A stamp whose `layout` is no number is read as one with none. DDL of another store than [verdict]'s `engine`
- * is the library's error, thrown. Without the store's DDL no object is known as any layout's, and the rows read so: none is new where empty (8), and refused
- * as layout 1's holding values (12). An earlier layout's objects beside a stamp of this layout (4) are the schema plan's: a
+ * is the library's error, thrown. Without the store's DDL no object is known as any layout's, and the rows read so: none is new where empty (9), and refused
+ * as layout 1's holding values (13). An earlier layout's objects beside a stamp of this layout (5) are the schema plan's: a
  * record it holds of another form is made again by it, and none is the verdict's.
  *
  * This layout's objects are its lock table ([SqlStoreDdl.lock]), which only this layout makes, and the names it generates
@@ -71,8 +72,12 @@ object StoreLayout {
          */
         data class Stamp(val drops: List<String>, val parameters: Map<String, Any?>, val assign: Boolean = false) : Verdict
 
-        /** The graph is not to be used: throw [message]. */
-        data class Refuse(val message: String) : Verdict
+        /**
+         * The graph is not to be used: throw [message]. Where [from] is given, the graph holds values of that earlier layout,
+         * which a migration moves to this one ([org.drivine.cypher.store.migrate.LayoutMigrator]); a library that doesn't
+         * migrate throws the message alike.
+         */
+        data class Refuse(val message: String, val from: Int? = null) : Verdict
     }
 
     /** The layout this module holds values in on the store whose stamp names [engine] (`POSTGRES`, `NEO4J` …): see [StoreStamp.engine]. */
@@ -119,11 +124,18 @@ object StoreLayout {
         fun reload(layout: Int) = Verdict.Refuse(
             "The graph '$graph' on $store was written in store layout $layout, and this version of Drivine reads layout $own only, which holds values otherwise. " +
                 "Reload it: export it with the Drivine version that wrote it and import it with this one; see the upgrade notes.",
+            from = layout,
         )
+        // A migration's checkpoint: the graph is part way from an earlier layout to this one, its values of both.
+        val migrating = sql != null && names.any { it.equals(sql.migrate, ignoreCase = true) }
         // The rows of the table above, in its order: the first the graph meets is its verdict.
         return when {
             stamped != null && stamped > own -> upgrade(stamped)
             later != null -> upgrade(later)
+            migrating -> Verdict.Refuse(
+                "The graph '$graph' on $store is part way through a migration to store layout $own, which holds some of its values in its earlier layout: " +
+                    "resume the migration, with the same declarations, to finish it; see the upgrade notes.",
+            )
             stamped == own -> Verdict.Current
             stamped != null && engine in SQL_ENGINES && !foreignNodes -> Verdict.Stamp(sql?.let { drops(it, objects) }.orEmpty(), StoreStamp.restampParameters(engine))
             stamped != null && engine in SQL_ENGINES -> reload(stamped)

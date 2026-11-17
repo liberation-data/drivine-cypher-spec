@@ -77,6 +77,31 @@ class LayoutMigrationTest {
     }
 
     @Test
+    fun eachStoresStatementsAreTheOnesMigrateYamlPins() {
+        val stores = spec["statements"] as ObjectNode
+        for ((name, ddl) in listOf(
+            "postgres" to org.drivine.cypher.store.ddl.PostgresDdl("drivine"),
+            "oracle" to org.drivine.cypher.store.ddl.OracleDdl("drivine"),
+            "sqlite" to org.drivine.cypher.store.ddl.SqliteDdl("drivine"),
+        )) {
+            val pinned = stores[name]!!
+            val statements = MigrationStatements.of(ddl)
+            for (table in MigrationStatements.Table.entries) {
+                assertEquals(pinned["readBatch"]!![table.word]!!.textValue(), statements.readBatch(table), "on $target, $name: readBatch ${table.word}")
+                assertEquals(pinned["update"]!![table.word]!!.textValue(), statements.update(table), "on $target, $name: update ${table.word}")
+            }
+            assertEquals(pinned["own"]!!.textValue(), statements.own, "on $target, $name: own")
+            assertEquals(pinned["sizes"]!!.textValue(), statements.sizes, "on $target, $name: sizes")
+            assertEquals(pinned["createCheckpoint"]!!.textValue(), statements.createCheckpoint, "on $target, $name: createCheckpoint")
+            assertEquals(pinned["readCheckpoint"]!!.textValue(), statements.readCheckpoint, "on $target, $name: readCheckpoint")
+            assertEquals(pinned["writeCheckpoint"]!!.textValue(), statements.writeCheckpoint, "on $target, $name: writeCheckpoint")
+            assertEquals(pinned["dropCheckpoint"]!!.textValue(), statements.dropCheckpoint, "on $target, $name: dropCheckpoint")
+            assertEquals(pinned["lock"]?.textValue(), statements.lock, "on $target, $name: lock")
+        }
+        assertEquals(setOf("postgres", "oracle", "sqlite"), stores.fieldNames().asSequence().toSet())
+    }
+
+    @Test
     fun declarationsThatGiveOnePropertyTwoKindsAreRefused() {
         for (case in spec["declarationRefusals"]!!) {
             assertEquals(case["refusal"]!!.textValue(), LayoutMigration.refusal(declarations(case)), "on $target: ${case["name"]!!.textValue()}")

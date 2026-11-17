@@ -31,12 +31,13 @@ class StoreLayoutTableTest {
     private enum class Stamps { NONE, CURRENT, EARLIER, NO_LAYOUT, NOT_A_NUMBER, LATER, MIXED, MIXED_EARLIER }
 
     /** The objects a store may list, each a name a layout generates, or another graph's, or entries of no name a library can read. */
-    private enum class Object { OLD, LOCK, OWN, LATER, LATER_LOCK, NEIGHBOUR, UNKNOWN }
+    private enum class Object { OLD, LOCK, OWN, LATER, LATER_LOCK, MIGRATING, NEIGHBOUR, UNKNOWN }
 
     private sealed interface Expected {
         data object Current : Expected
         data class Stamp(val drops: Boolean, val assign: Boolean) : Expected
-        data class Refuse(val says: String) : Expected
+        /** Refused with a message that [says] this, and, where a migration moves the graph, the layout it is [from]. */
+        data class Refuse(val says: String, val from: Int? = null) : Expected
     }
 
     /** A graph the verdict is asked of. */
@@ -54,17 +55,18 @@ class StoreLayoutTableTest {
         "1 stamps of two layouts" to { g -> if (g.stamps == Stamps.MIXED || (g.stamps == Stamps.MIXED_EARLIER && g.sql)) Expected.Refuse("two versions of Drivine stamped it") else null },
         "2 a later layout's stamp" to { g -> if (g.laterStamp) Expected.Refuse("by a later version of Drivine") else null },
         "3 a later layout's objects" to { g -> if (g.known(Object.LATER) || g.known(Object.LATER_LOCK)) Expected.Refuse("by a later version of Drivine") else null },
-        "4 this layout's stamp" to { g -> if (g.stamped && !g.earlierStamp) Expected.Current else null },
-        "5 an earlier stamp, no values" to { g -> if (g.earlierStamp && g.sql && !g.values) Expected.Stamp(drops = g.known(Object.OLD), assign = false) else null },
-        "6 an earlier stamp, values" to { g -> if (g.earlierStamp && g.sql) Expected.Refuse("Reload it") else null },
-        "7 no stamp or an earlier one, a graph engine" to { g -> if (!g.sql) Expected.Current else null },
-        "8 no stamp, no values, nothing earlier" to { g -> if (!g.values && !g.known(Object.OLD)) Expected.Current else null },
-        "9 no stamp, no values, something earlier" to { g -> if (!g.values) Expected.Stamp(drops = true, assign = false) else null },
-        "10 no stamp, values, both layouts' objects" to { g ->
+        "4 a migration's checkpoint" to { g -> if (g.known(Object.MIGRATING)) Expected.Refuse("part way through a migration to store layout 2") else null },
+        "5 this layout's stamp" to { g -> if (g.stamped && !g.earlierStamp) Expected.Current else null },
+        "6 an earlier stamp, no values" to { g -> if (g.earlierStamp && g.sql && !g.values) Expected.Stamp(drops = g.known(Object.OLD), assign = false) else null },
+        "7 an earlier stamp, values" to { g -> if (g.earlierStamp && g.sql) Expected.Refuse("Reload it", from = 1) else null },
+        "8 no stamp or an earlier one, a graph engine" to { g -> if (!g.sql) Expected.Current else null },
+        "9 no stamp, no values, nothing earlier" to { g -> if (!g.values && !g.known(Object.OLD)) Expected.Current else null },
+        "10 no stamp, no values, something earlier" to { g -> if (!g.values) Expected.Stamp(drops = true, assign = false) else null },
+        "11 no stamp, values, both layouts' objects" to { g ->
             if ((g.known(Object.LOCK) || g.known(Object.OWN)) && g.known(Object.OLD)) Expected.Refuse("has no store stamp, and holds objects of store layout") else null
         },
-        "11 no stamp, values, this layout's only" to { g -> if (g.known(Object.LOCK) || g.known(Object.OWN)) Expected.Stamp(drops = false, assign = true) else null },
-        "12 no stamp, values, nothing of this layout's" to { _ -> Expected.Refuse("written in store layout 1, and this version") },
+        "12 no stamp, values, this layout's only" to { g -> if (g.known(Object.LOCK) || g.known(Object.OWN)) Expected.Stamp(drops = false, assign = true) else null },
+        "13 no stamp, values, nothing of this layout's" to { _ -> Expected.Refuse("written in store layout 1, and this version", from = 1) },
     )
 
     private fun ddl(engine: String): StoreDdl = when (engine) {
@@ -99,6 +101,8 @@ class StoreLayoutTableTest {
                 Object.LATER -> listOf(mapOf("name" to "${graph}_ix3_personname_1a2b3c4d", "type" to "INDEX"))
                 // As Oracle lists it, every object whose name begins with the graph's.
                 Object.LATER_LOCK -> listOf(mapOf("name" to "${graph}_lock3", "type" to "TABLE"))
+                // A migration's checkpoint, part way through one.
+                Object.MIGRATING -> listOf(mapOf("name" to ((ddl as? SqlStoreDdl)?.migrate ?: "${graph}_migrate2").lowercase(), "type" to "TABLE"))
                 // Another graph's, whose name begins with this one's: never this graph's.
                 Object.NEIGHBOUR -> listOf(mapOf("name" to "${graph}_t_uq2_personname_1a2b3c4d", "type" to "INDEX"))
                 // Entries a library can't read a name from: no layout's.
@@ -132,7 +136,7 @@ class StoreLayoutTableTest {
             val ok = when (expected) {
                 Expected.Current -> got == StoreLayout.Verdict.Current
                 is Expected.Stamp -> got is StoreLayout.Verdict.Stamp && got.assign == expected.assign && got.drops.isNotEmpty() == expected.drops
-                is Expected.Refuse -> got is StoreLayout.Verdict.Refuse && got.message.contains(expected.says)
+                is Expected.Refuse -> got is StoreLayout.Verdict.Refuse && got.message.contains(expected.says) && got.from == expected.from
             }
             if (!ok) wrong += "$g, row $row: expected $expected, got $got"
         }
