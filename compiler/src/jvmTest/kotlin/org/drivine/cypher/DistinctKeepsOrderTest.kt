@@ -51,6 +51,11 @@ class DistinctKeepsOrderTest {
                 "[1, 33], [1, 26], [1, 19], [2, 34], [2, 27], [2, 20]",
             "$ordered WITH DISTINCT i % 37 AS k RETURN count(k), sum(k)" to "[37, 666]",
             "$ordered WITH DISTINCT i % 37 AS k WITH k LIMIT 5 RETURN collect(k)" to "[2, 14, 26, 1, 13]",
+            "$ordered WITH DISTINCT i % 37 AS k WITH k, 1 AS one RETURN k LIMIT 6" to "2, 14, 26, 1, 13, 25",
+            "$ordered WITH DISTINCT i % 37 AS k RETURN head(collect(k))" to "2",
+            "$ordered RETURN DISTINCT i % 37 AS k LIMIT 3 UNION ALL $ordered RETURN DISTINCT i % 5 AS k" to "2, 14, 26, 0, 4, 3, 2, 1",
+            "UNWIND range(1, 2000) AS i WITH i ORDER BY (i * 7919) % 2000 DESC LIMIT 100 WITH i, 1 AS one WITH DISTINCT i % 37 AS k LIMIT 5 RETURN k" to
+                "25, 13, 1, 26, 14",
         ).forEach { (cypher, rows) ->
             assertEquals(rows, sqlite(cypher).joinToString(", ") { it.replace(",", ", ") }, cypher)
         }

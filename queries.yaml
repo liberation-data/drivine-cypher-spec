@@ -570,6 +570,17 @@ cases:
       - cypher: "UNWIND range(1, 2000) AS i WITH i ORDER BY (i * 7919) % 2000 WITH DISTINCT i % 37 AS k WITH k LIMIT 5 RETURN collect(k)"
         only: [neo4j, sql]
         rows: [[2, 14, 26, 1, 13]]
+      - note: "The rows a WITH passes on are returned in their order; so is what reads collect()'s list."
+        cypher: "UNWIND range(1, 2000) AS i WITH i ORDER BY (i * 7919) % 2000 WITH DISTINCT i % 37 AS k WITH k, 1 AS one RETURN k LIMIT 6"
+        only: [neo4j, sql]
+        rows: [2, 14, 26, 1, 13, 25]
+      - cypher: "UNWIND range(1, 2000) AS i WITH i ORDER BY (i * 7919) % 2000 WITH DISTINCT i % 37 AS k RETURN head(collect(k))"
+        only: [neo4j, sql]
+        rows: [2]
+      - note: "Each part of a UNION ALL keeps its own order."
+        cypher: "UNWIND range(1, 2000) AS i WITH i ORDER BY (i * 7919) % 2000 RETURN DISTINCT i % 37 AS k LIMIT 3 UNION ALL UNWIND range(1, 2000) AS i WITH i ORDER BY (i * 7919) % 2000 RETURN DISTINCT i % 5 AS k"
+        only: [neo4j, sql]
+        rows: [2, 14, 26, 0, 4, 3, 2, 1]
       - note: "The order an UNWIND gives its rows in is kept too."
         cypher: "UNWIND [i IN range(1, 2000) | (i * 7919) % 2000] AS r WITH DISTINCT r % 37 AS k LIMIT 5 RETURN k"
         only: [neo4j, sql]
@@ -583,6 +594,10 @@ cases:
       - cypher: "UNWIND range(1, 2000) AS i WITH i ORDER BY (i * 7919) % 2000 DESC WITH DISTINCT i % 37 AS k, i % 2 AS p LIMIT 5 RETURN k, p"
         only: [neo4j, sql]
         rows: [[25, 1], [13, 0], [1, 1], [26, 0], [14, 1]]
+      - note: "The order of rows a LIMIT picked, carried on through a WITH."
+        cypher: "UNWIND range(1, 2000) AS i WITH i ORDER BY (i * 7919) % 2000 DESC LIMIT 100 WITH i, 1 AS one WITH DISTINCT i % 37 AS k LIMIT 5 RETURN k"
+        only: [neo4j, sql]
+        rows: [25, 13, 1, 26, 14]
       - note: "A CALL's rows are read in its order."
         cypher: "CALL { UNWIND [i IN range(1, 2000) | (i * 7919) % 2000] AS r RETURN DISTINCT r % 37 AS k } RETURN k LIMIT 5"
         only: [neo4j, sql]
