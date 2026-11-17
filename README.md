@@ -491,7 +491,7 @@ cases:
 | `runs` | The stores that run the step alike, each round's actions with the `now` it is planned at, the `done` moment the plan ends at, and the `report`. |
 | `report` | Each owner applied, in order: what each of its items gave, its `unbuilt` indexes, its `orphans`, the `marker` it wrote (null for none), its `failure`, and for a remove what it `removed`; for an `item`, its `result`, or whether it `dropped` one; the database's `failure`, or the store's error it `rethrown`, from the action of that round; and every `log` line at INFO and above, its level, logger and text. |
 
-A spec is a `store.yaml` case's, by its name, or written as its cases write one. An item, what a store has, is written as `store.yaml`'s listings write one. In a log line, `{engine}` is the store's name.
+A spec is a `store.yaml` case's, by its name, or written as its cases write one. An item, what a store has, is written as `store.yaml`'s listings write one, and a report's item also gives its `owningConstraint`, the uniqueness constraint whose index it is (A constraint's own index, below), null where it is none's. In a log line, `{engine}` is the store's name.
 
 **Actions.** Each round's actions are what the planner gives, in order, and each is answered as the store answers it:
 
