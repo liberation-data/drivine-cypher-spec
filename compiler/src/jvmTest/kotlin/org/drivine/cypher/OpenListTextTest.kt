@@ -102,4 +102,14 @@ class OpenListTextTest {
             }
         }
     }
+
+    @Test
+    fun `a map's failure reads the value as it runs, so Postgres doesn't raise it as it plans the statement`() {
+        // Postgres works a constant out as it plans, even in a CASE's branch not taken: a failure of constant text raised over
+        // texts in drivine4j's keyed lookup by toString(row.s).
+        val sql = PostgresCypherCompiler("g").compile("UNWIND \$rows AS row RETURN toString(row.s)", mapOf("rows" to listOf(mapOf("s" to "p5")))).sql
+        val message = "toString() of a map read as the statement runs is not compiled to SQL yet (liberation-data/drivine-cypher-spec#301): it is "
+        assertContains(sql, "CAST(concat('$message', CASE WHEN ")
+        assertFalse("CAST(concat('$message', 'a map')" in sql, sql)
+    }
 }

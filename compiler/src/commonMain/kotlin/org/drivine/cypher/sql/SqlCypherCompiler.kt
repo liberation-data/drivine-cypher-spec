@@ -7555,11 +7555,12 @@ abstract class SqlCypherCompiler(
          * it is no list or map: a list as Neo4j writes one, item by item as it runs ([listText]), where it gave the store's JSON
          * text; a map, but for a temporal value's tag, a failure by name, as its keys aren't known here
          * (liberation-data/drivine-cypher-spec#297, #301 for the map's text). [x] is the one value [worked] reads, so a value an
-         * item's name stands for is written once (#338's multiplier).
+         * item's name stands for is written once (#338's multiplier). The failure reads [x] as it runs, so a store that works out a
+         * constant as it plans the statement, Postgres's cast of a failure's text, doesn't raise it where the value is no map.
          */
         private fun textOfOpen(x: String, worked: String): String =
             "CASE WHEN ${typeOf(x)} = 'array' THEN ${scalar(listText(x, 1))} WHEN ${typeOf(x)} = 'object' AND ${tagKind(x)} IS NULL " +
-                "THEN ${scalar(textFailing(TEXT_OF_MAP_HELD, "a map"))} ELSE $worked END"
+                "THEN ${scalar("('' || ${textFailure(TEXT_OF_MAP_HELD, "CASE WHEN ${typeOf(x)} = 'object' THEN ${literal("a map")} END")})")} ELSE $worked END"
 
         /**
          * The text of the JSON item [json] that [written] gives: a number, a text or a truth value written, as itself; a list or a
