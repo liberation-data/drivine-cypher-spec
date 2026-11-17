@@ -68,6 +68,10 @@ class PlusOfTruthValueTest {
         assertEquals("\"afalse\"", sqlite("RETURN 'a' + \$b", mapOf("b" to false)))
         assertEquals("\"falsea\"", sqlite("RETURN \$b + 'a'", mapOf("b" to false)))
         assertEquals("\"atrue\"", sqlite("UNWIND \$l AS b RETURN 'a' + b", mapOf("l" to listOf(true))))
+        assertEquals("\"1true\"", sqlite("RETURN '1' + true"))
+        // A sum a truth value was put together in is a text or a list, so the next + takes a number.
+        assertEquals("\"atrue1\"", sqlite("RETURN 'a' + true + 1"))
+        assertEquals("[1,true,2]", sqlite("RETURN [1] + true + 2"))
     }
 
     @Test
