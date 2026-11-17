@@ -763,18 +763,34 @@ internal class VariableKinds(private val aggregates: (Expression) -> Boolean) {
     }
 
     /**
-     * Refuses [value], a property written, where it is a variable of [scope] bound as a node, a relationship or a path, or a
-     * list written that holds one, `[b]`, as Neo4j refuses it when it runs (its 22N01).
+     * Refuses [value], a property written, as Neo4j refuses it when it runs (its 22N01, inside 22G03): a variable of [scope]
+     * bound as a node, a relationship or a path, or a list written that holds one, `[b]`; a map, written, projected
+     * (`n {.id}`) or a variable bound to one written (`WITH {a: 1} AS m`); and a list written that holds a map or a list,
+     * `[{a: 1}]`, `[[1, 2]]`, `[m]` (liberation-data/drivine4j#561). The store would hold each as a document. A map or a list
+     * the statement doesn't fix the kind of, as a parameter's, is left to the store.
      */
     private fun stored(value: Expression, scope: Scope) {
         when (value) {
-            is Expression.Variable -> scope[value.name]?.takeIf { it in setOf(Kind.NODE, Kind.RELATIONSHIP, Kind.RELATIONSHIPS, Kind.PATH) }?.let { kind ->
-                throw CompilerException("${value.name} is ${kind.noun}, and a property holds no node, relationship or path, as in Neo4j: set a property of it, or its elementId(), instead.")
+            is Expression.Variable -> when (val kind = scope[value.name]) {
+                Kind.NODE, Kind.RELATIONSHIP, Kind.RELATIONSHIPS, Kind.PATH ->
+                    throw CompilerException("${value.name} is ${kind.noun}, and a property holds no node, relationship or path, as in Neo4j: set a property of it, or its elementId(), instead.")
+                Kind.MAP -> throw notProperty("a map")
+                else -> {}
             }
-            is Expression.ListLiteral -> value.items.forEach { stored(it, scope) }
+            is Expression.MapLiteral, is Expression.MapProjection -> throw notProperty("a map")
+            is Expression.ListLiteral -> value.items.forEach { item ->
+                val container = item is Expression.MapLiteral || item is Expression.MapProjection || item is Expression.ListLiteral ||
+                    item is Expression.Variable && scope[item.name].let { it == Kind.MAP || it == Kind.LIST }
+                if (container) throw notProperty("a list of maps or lists")
+                stored(item, scope)
+            }
             else -> {}
         }
     }
+
+    /** The refusal of a property written as [what], a map or a list of maps or lists, in #448's words (see `SqlCypherCompiler`'s `SET`). */
+    private fun notProperty(what: String) =
+        CompilerException("A property is a number, a text, a truth value, a temporal value or a list of them, not $what, as in Neo4j.")
 
     /** Refuses each entry of [properties], a map written of the properties a write makes or sets, as [stored] refuses a property. */
     private fun properties(properties: Expression, scope: Scope) {
