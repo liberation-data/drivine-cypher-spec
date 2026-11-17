@@ -222,6 +222,25 @@ cases:
         cypher: "WITH localdatetime('1984-10-11T12:00') AS o RETURN localdatetime({date: o, hour: 1, microsecond: 1})"
         error: "localdatetime() takes a microsecond beside a second."
 
+  - name: "A temporal value of a map a parameter or an expression gives"
+    description: "Neo4j makes a temporal value of a map however it is given, and refuses one of fields it doesn't take as the statement runs (temporal.yaml, \"A temporal value of a map a parameter or an expression gives\"). The SQL stores make one of a map the statement writes in the call; one a parameter gives, or an expression is known to make, is refused, and one only read as the statement runs fails it by name. It gave null (drivine-cypher-spec#328)."
+    steps:
+      - cypher: "RETURN localtime($m)"
+        parameters: {m: {hour: 12, minute: 30}}
+        error: "localtime() of a map a parameter or an expression gives is Cypher, and is not compiled to SQL yet."
+      - cypher: "RETURN localtime($p.m)"
+        parameters: {p: {m: {hour: 12}}}
+        error: "localtime() of a map a parameter or an expression gives is Cypher, and is not compiled to SQL yet."
+      - cypher: "WITH {hour: 12, minute: 30} AS m RETURN localtime(m)"
+        error: "localtime() of a map a parameter or an expression gives is Cypher, and is not compiled to SQL yet."
+      - cypher: "UNWIND [{hour: 1}, {hour: 2, minute: 3}] AS m RETURN localtime(m)"
+        error: "localtime() of a map a parameter or an expression gives is Cypher, and is not compiled to SQL yet."
+      - cypher: "RETURN date($m)"
+        parameters: {m: {year: 2024, month: 3, day: 15}}
+        error: "date() of a map a parameter or an expression gives is Cypher, and is not compiled to SQL yet."
+      - cypher: "WITH {days: 1} AS m RETURN duration(m)"
+        error: "duration() of a map a parameter or an expression gives is Cypher, and is not compiled to SQL yet."
+
   - name: "Temporal map not compiled yet"
     description: "A temporal value made from a map of fields the compiler doesn't handle yet is refused, naming what it is."
     steps:
