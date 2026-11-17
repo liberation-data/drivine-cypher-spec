@@ -92,6 +92,9 @@ class ArithmeticOfOpenKindTest {
         assertContains(sqlite("WITH collect(true) AS l RETURN l[0] - 1"), "$failure -")
         assertContains(sqlite("UNWIND [1, true] AS b RETURN b + 1"), "$failure +")
         assertContains(sqlite("RETURN \$m.b + 1", mapOf("m" to mapOf("b" to true))), "$failure +")
+        // A parameter given a number and negated is a number the statement gives too.
+        assertContains(sqlite("WITH collect(true) AS l UNWIND l AS b RETURN b + -\$n", mapOf("n" to 1)), "$failure +")
+        assertEquals("1", sqlite("WITH collect(2) AS l UNWIND l AS b RETURN b + -\$n", mapOf("n" to 1)))
     }
 
     @Test
@@ -135,6 +138,7 @@ class ArithmeticOfOpenKindTest {
             // A parameter given a number is a number the statement gives; given a text or null, it is no number.
             assertEquals(1, tests(compiler, "MATCH (n) RETURN n.flag + \$n", mapOf("n" to 1)), name)
             assertEquals(1, tests(compiler, "MATCH (n) RETURN \$n * n.flag", mapOf("n" to 1.5)), name)
+            assertEquals(1, tests(compiler, "MATCH (n) RETURN n.flag - -\$n", mapOf("n" to 1)), name)
             listOf("x", null).forEach { assertEquals(0, tests(compiler, "MATCH (n) RETURN n.flag + \$n", mapOf("n" to it)), "$name: $it") }
             // Arithmetic of arithmetic: one test at the value read, none around each level.
             assertEquals(1, tests(compiler, "MATCH (c) RETURN (((c.a + 1) + 1) + 1) + 1"), name)

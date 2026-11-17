@@ -5762,8 +5762,7 @@ abstract class SqlCypherCompiler(
             val others = listOf(y to binary.right, x to binary.left)
             val truth = listOf(x, y).zip(truths).withIndex().filter { it.value.second }.joinToString("") { (i, side) ->
                 val (other, written) = others[i]
-                val negated = (written as? Expression.Unary)?.takeIf { it.operator == Expression.Unary.Operator.NEGATE }?.operand
-                val present = if (given(written) is Number || negated?.let(::given) is Number) "" else " AND NOT ${isJsonNull(other)}"
+                val present = if (givenNumber(written)) "" else " AND NOT ${isJsonNull(other)}"
                 "WHEN ${isTruth(side.first)}$present THEN ${failed(textFailure(TRUTH_ARITHMETIC, literal(OPERATOR_WORDS.getValue(binary.operator))))} "
             }
             if (tested.none { it }) return if (truth.isEmpty()) arithmetic() else "CASE ${truth}ELSE ${arithmetic()} END"
@@ -5793,7 +5792,7 @@ abstract class SqlCypherCompiler(
          */
         private fun truthRead(binary: Expression.Binary, left: Value, right: Value, scope: Map<String, Value>): List<Boolean> {
             if (binary.operator !in TRUTH_TESTED) return listOf(false, false)
-            fun number(value: Value, written: Expression) = given(written) is Number ||
+            fun number(value: Value, written: Expression) = givenNumber(written) ||
                 givenKind(written, scope).let { it == Value.Known.INTEGER || it == Value.Known.FLOAT } ||
                 (value as? Value.Json)?.known.let { it == Value.Known.INTEGER || it == Value.Known.FLOAT }
             fun open(value: Value, written: Expression): Boolean {
@@ -5804,6 +5803,10 @@ abstract class SqlCypherCompiler(
             }
             return listOf(open(left, binary.left) && number(right, binary.right), open(right, binary.right) && number(left, binary.left))
         }
+
+        /** Whether [written] is a number the statement gives, so never null as it runs: written or bound ([given]), or negated (`-${'$'}n`). */
+        private fun givenNumber(written: Expression): Boolean = given(written) is Number ||
+            (written as? Expression.Unary)?.takeIf { it.operator == Expression.Unary.Operator.NEGATE }?.operand?.let(::given) is Number
 
         /**
          * [add] of the JSON [x] and [y], the values [left] and [right]: where the statement makes one a temporal value, it is put
