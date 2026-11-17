@@ -272,6 +272,9 @@ class OracleCypherCompiler(
      */
     override fun openSortKey(json: String) = shared(json) { (x) -> sortRank(x) }.let { rank -> listOf(rank, json) }
 
+    /** [openSortKey], a number ordered by its [numberKeys], [keys], after its kind and before its JSON, which orders it no further. */
+    override fun openSortKey(json: String, keys: List<String>) = openSortKey(json).let { (rank, value) -> listOf(rank) + numberOrder(keys) + value }
+
     /**
      * [openSortKey]'s rank of the JSON [x], a text: `1` for a map, `2` for a list, `2` and the place of a temporal value's kind in
      * [TAG_ORDER] then its sort key (a duration's text) for its tag, after every list and before every text, `3`; `4` for a truth
@@ -298,6 +301,24 @@ class OracleCypherCompiler(
 
     /** JSON's null is ranked null, as SQL's is, but `JSON` orders it apart from SQL's: so the value is read as [groupedNull] has it (#500). */
     override fun jsonNullSortKey(json: String) = openSortKey(json).let { (rank) -> listOf(rank, groupedNull(json)) }
+
+    /** [jsonNullSortKey], a number ordered by its [numberKeys], [keys], as [openSortKey] orders it. */
+    override fun jsonNullSortKey(json: String, keys: List<String>) = jsonNullSortKey(json).let { (rank, value) -> listOf(rank) + numberOrder(keys) + value }
+
+    /**
+     * The terms a number is ordered by, of its [numberKeys], [keys], the double and the `NUMBER`: where they are columns a query
+     * carries, the double, then the exact key worked out of the two ([exactOf]), with no read of the value; where they are reads
+     * of it, the double, then the `NUMBER` where it is an integer past 2^53 alone, each read once: within ±2^53 an integer and a
+     * float of one value tie, as in Neo4j (36 and 36.0 were ordered apart by the `NUMBER` of the one, the other's null). Read
+     * so, an integer past 2^53 is ordered among those of its double, but a float of that double comes after them, or before
+     * them descending, where it may be between two.
+     */
+    private fun numberOrder(keys: List<String>): List<String> {
+        if (keys.isEmpty()) return keys
+        val (d, n) = keys
+        return if (COLUMN_KEY.matches(d) && COLUMN_KEY.matches(n)) listOf(d, exactOf(n, d))
+            else listOf(d, "CASE WHEN ABS($n) > $EXACT_DOUBLES THEN $n END")
+    }
 
     /** Oracle groups by no subquery, so the value is not bound in one, as [nullIfJsonNull] binds a long one: it is read twice. */
     override fun comparedNull(json: String) = "CASE WHEN ${kind(json)} <> 'null' THEN $json END"
@@ -473,7 +494,13 @@ class OracleCypherCompiler(
      * `a.id + '->' + b.id`. A text past [BOUND_TEXT] characters is summed with a text or a number from its CLOB, and is null
      * added to a list, which takes it as JSON: read as JSON beside the subquery, it closed the session.
      */
-    override fun sharedSum(a: String, b: String, body: (List<String>) -> String): String {
+    override fun sharedSum(a: String, b: String, body: (List<String>) -> String): String = sharedSum(a, b, keyed = false, body = body)
+
+    /**
+     * [sharedSum], and where [keyed], a property's [numberKeys] bound by its own path too, each a column the body's reads of
+     * them are rewritten to: read from its JSON so bound, they would read it through its text ([itemProperty]).
+     */
+    private fun sharedSum(a: String, b: String, keyed: Boolean, body: (List<String>) -> String): String {
         val sides = listOf(a, b)
         val properties = sides.map(::besideLong)
         if (!binds(a, b) || properties.none { it }) return shared(a, b, body = body)
@@ -483,12 +510,21 @@ class OracleCypherCompiler(
             fun at(method: String) = "${path.dropLast(1)}$method'"
             listOf("CASE WHEN JSON_VALUE($props, ${at(".length()")} RETURNING NUMBER) > $BOUND_TEXT THEN NULL ELSE $json END", "JSON_VALUE($props, ${at(".type()")})", "JSON_VALUE($props, $path RETURNING CLOB)")
         }
-        return sharedBound(*columns.toTypedArray()) { names ->
+        // A property's keys after every other column, so those are named as they were before there were keys.
+        val keys = if (!keyed) emptyList() else sides.withIndex().filter { properties[it.index] }.flatMap { (_, json) ->
+            val (props, path) = propertyRead(json)!!
+            listOf(doubleKey(props, path), numberRead(props, path))
+        }
+        return sharedBound(*(columns + keys).toTypedArray()) { names ->
             val next = names.iterator()
             val bound = properties.map { property -> if (property) listOf(next.next(), next.next(), next.next()) else listOf(next.next()) }
-            // A property's kind and CLOB are read from their own columns: its JSON is null past BOUND_TEXT characters.
-            bound.filter { it.size == 3 }.fold(body(bound.map { it.first() })) { sql, (json, kindColumn, clob) ->
-                sql.replace(kind(json), kindColumn).replace("JSON_VALUE($json, '\$' RETURNING CLOB)", clob)
+            val keyColumns = if (keyed) bound.filter { it.size == 3 }.map { listOf(next.next(), next.next()) } else null
+            // A property's kind, CLOB and keys are read from their own columns: its JSON is null past BOUND_TEXT characters.
+            bound.filter { it.size == 3 }.withIndex().fold(body(bound.map { it.first() })) { sql, (i, columns) ->
+                val (json, kindColumn, clob) = columns
+                // The keys' reads first: the number's read asks its kind as [kind] does.
+                val keyed = keyColumns?.get(i)?.let { (d, n) -> sql.replace(doubleKey(json), d).replace(numberRead(json, "'\$'"), n) } ?: sql
+                keyed.replace(kind(json), kindColumn).replace("JSON_VALUE($json, '\$' RETURNING CLOB)", clob)
             }
         }
     }
@@ -505,7 +541,7 @@ class OracleCypherCompiler(
     override fun sharedCompared(a: String, b: String, body: (List<String>) -> String): String {
         if (asJson) return shared(a, b, body = body)
         if (propertyRead(a) != null || propertyRead(b) != null) readsCompared = true
-        return sharedSum(a, b) { sides -> sides.fold(body(sides)) { sql, side -> direct(sql, side) } }
+        return sharedSum(a, b, keyed = true) { sides -> sides.fold(body(sides)) { sql, side -> direct(sql, side) } }
     }
 
     /**
@@ -552,27 +588,34 @@ class OracleCypherCompiler(
      * Neither holds NaN, which is equal to nothing (#409): Oracle's JSON finds a `BINARY_DOUBLE` NaN equal to itself. Two values
      * that are equal as JSON hold NaN only where both do, so one side is tested, and neither beside a literal, which holds none
      * (see [nanFree]).
+     *
+     * Two numbers are compared by their keys, not as JSON, which compares them through a decimal `NUMBER` (see [valuesEqual]).
      */
     override fun jsonEquals(x: String, y: String) = jsonEquals(x, y, oneNaNFree = false)
 
-    /** [jsonEquals], where [oneNaNFree] says one side holds no NaN, and so neither is tested for it. */
-    private fun jsonEquals(x: String, y: String, oneNaNFree: Boolean): String {
+    /**
+     * [jsonEquals], where [oneNaNFree] says one side holds no NaN, and so neither is tested for it; where not [numbers], one
+     * side is known to be no number, and no number key is read ([valuesEqual]); and where [small], one side is a number from -2^53
+     * to 2^53 or no number, beside which the doubles alone decide ([numbersEqual]).
+     */
+    private fun jsonEquals(x: String, y: String, oneNaNFree: Boolean, numbers: Boolean = true, small: Boolean = false): String {
         fun guarded(equal: String, json: String) = if (oneNaNFree) equal else notNaN(equal, json)
+        fun scalarsEqual(a: String, b: String) = if (numbers) valuesEqual(a, b, small) else "$a = $b"
         if (asJson || written(x) && written(y)) {
-            if (oneNaNFree || nanFree(x) || nanFree(y)) return "$x = $y"
-            return sharedCompared(x, y) { (a, b) -> guarded("$a = $b", a) }
+            if (oneNaNFree || nanFree(x) || nanFree(y)) return scalarsEqual(x, y)
+            return sharedCompared(x, y) { (a, b) -> guarded(scalarsEqual(a, b), a) }
         }
         if (written(x) || written(y)) {
             val (other, value) = if (written(y)) x to y else y to x
-            if (writtenScalar(value) == false) return sharedCompared(other, value) { (a, b) -> if (nanFree(value)) oneSided(a, b) else guarded(oneSided(a, b), b) }
+            if (writtenScalar(value) == false) return sharedCompared(other, value) { (a, b) -> if (nanFree(value)) oneSided(a, b, equal = scalarsEqual(a, b)) else guarded(oneSided(a, b, equal = scalarsEqual(a, b)), b) }
             // Beside a value of one kind, a list or a map is not equal, and isn't compared as JSON, which refuses one that holds a
             // text past 32 KB.
-            return sharedCompared(other, value) { (a, b) -> oneSided(a, b, containers = false) }
+            return sharedCompared(other, value) { (a, b) -> oneSided(a, b, containers = false, equal = scalarsEqual(a, b)) }
         }
         return sharedCompared(x, y) { (a, b) ->
-            guarded("CASE WHEN ${short(a)} IS NOT NULL AND ${short(b)} IS NOT NULL THEN $a = $b " +
+            guarded("CASE WHEN ${short(a)} IS NOT NULL AND ${short(b)} IS NOT NULL THEN ${scalarsEqual(a, b)} " +
                 "WHEN ${kind(a)} = 'string' AND ${kind(b)} = 'string' THEN ${clobOrder(a, "=", b)} " +
-                "WHEN ${kind(a)} IS NULL OR ${kind(b)} IS NULL THEN NULL WHEN ${kind(a)} = 'string' OR ${kind(b)} = 'string' THEN FALSE ELSE $a = $b END", a)
+                "WHEN ${kind(a)} IS NULL OR ${kind(b)} IS NULL THEN NULL WHEN ${kind(a)} = 'string' OR ${kind(b)} = 'string' THEN FALSE ELSE ${scalarsEqual(a, b)} END", a)
         }
     }
 
@@ -580,7 +623,7 @@ class OracleCypherCompiler(
      * [jsonEquals], but where [given] is a number, a truth value, or a text of 1 to 4,000 bytes, which is read as a `VARCHAR2`:
      * then only the other side is tested (see [oneSided]), and beside a value the statement writes (see [written]), neither. A
      * property read from the store is not null as JSON, and so needs no test of its own. Where [given] is or holds NaN, as
-     * [jsonEquals] (#409).
+     * [jsonEquals] (#409). A number given is compared by its keys ([numbersEqual]), a text or a truth value as JSON.
      */
     override fun givenEquals(x: String, y: String, given: Any): String {
         if (holdsNonFinite(given, Double::isNaN)) return jsonEquals(x, y)
@@ -590,10 +633,13 @@ class OracleCypherCompiler(
         if (!asJson && past) {
             return sharedCompared(x, y) { (a, b) -> "(${OracleSql.valueClass(a)} = ${OracleSql.valueClass(b)} AND ${OracleSql.valueKey(a)} = ${OracleSql.valueKey(b)})" }
         }
-        if (asJson) return "$x = $y"
-        if (!readShort(given)) return jsonEquals(x, y)
-        if (written(x)) return "$x = $y"
-        return sharedCompared(x, y) { (a, b) -> oneSided(a, b) }
+        // A number by its keys (see numbersEqual), and a text or a truth value as JSON, which compares them as Cypher does.
+        val equal = if (given is Number) { a: String, b: String -> if (decimalExact(a) && decimalExact(b)) "$a = $b" else numbersEqual(a, b, small(given)) }
+            else { a: String, b: String -> "$a = $b" }
+        if (asJson) return equal(x, y)
+        if (!readShort(given)) return jsonEquals(x, y, oneNaNFree = false, numbers = false)
+        if (written(x)) return equal(x, y)
+        return sharedCompared(x, y) { (a, b) -> oneSided(a, b, equal = equal(a, b)) }
     }
 
     /**
@@ -641,10 +687,11 @@ class OracleCypherCompiler(
     }
 
     /**
-     * Whether the JSON value [a] is equal to [b], a value that is no text, or a text read as a `VARCHAR2`: as JSON, where [a] is
-     * read as a `VARCHAR2` too or is no text; else [a] is a text that is longer, or empty, and not equal.
+     * Whether the JSON value [a] is equal to [b], a value that is no text, or a text read as a `VARCHAR2`: as [equal] compares
+     * them, by default [valuesEqual], where [a] is read as a `VARCHAR2` too or is no text; else [a] is a text that is longer, or
+     * empty, and not equal.
      */
-    private fun oneSided(a: String, b: String, containers: Boolean = true) = "CASE WHEN ${shortOrNoText(a, containers)} THEN $a = $b ELSE FALSE END"
+    private fun oneSided(a: String, b: String, containers: Boolean = true, equal: String = valuesEqual(a, b)) = "CASE WHEN ${shortOrNoText(a, containers)} THEN $equal ELSE FALSE END"
 
     /**
      * Whether the JSON value [json] is read as a `VARCHAR2`, a text of 1 to [SHORT_TEXT] bytes, or is no text; SQL's null is no
@@ -720,35 +767,21 @@ class OracleCypherCompiler(
         return if (WRITTEN_FLOAT.matches(json)) true else null
     }
 
-    /**
-     * Oracle compares a `NUMBER` with a binary double as a double, so 2^53 + 1 was not greater than the float 2^53 (#161): beside a
-     * whole number from 2^53 on, written or given, the other number is read as a `NUMBER` and the two compared so, the given one
-     * as its exact digits. Null beside anything else, as [ordered] compares it.
-     */
-    override fun orderedPast(x: String, operator: String, y: String, left: Any?, right: Any?): String? {
-        fun exact(given: Any?) = when (given) {
-            is Long -> given.takeIf { it >= EXACT_DOUBLES || it <= -EXACT_DOUBLES }?.toString()
-            is Double -> given.takeIf { it == kotlin.math.floor(it) && kotlin.math.abs(it) >= EXACT_DOUBLES && kotlin.math.abs(it) < 9.2e18 }?.toLong()?.toString()
-            else -> null
-        }
-        val (l, r) = exact(left) to exact(right)
-        if (asJson || (l == null && r == null)) return null
-        return sharedCompared(x, y) { (a, b) ->
-            fun number(json: String, digits: String?) = digits ?: "JSON_VALUE($json, '\$' RETURNING NUMBER NULL ON ERROR)"
-            "CASE WHEN DECODE(${kind(a)}, 'double', 'number', ${kind(a)}) = 'number' AND DECODE(${kind(b)}, 'double', 'number', ${kind(b)}) = 'number' " +
-                "THEN ${number(a, l)} $operator ${number(b, r)} END"
-        }
-    }
+    /** As [ordered] where the statement does not make both sides integers. */
+    override fun ordered(x: String, operator: String, y: String) = ordered(x, operator, y, numbers = true)
 
     /**
-     * Two texts, as [textOrder] orders them; any other two of one kind as JSON. JSON ordered a text past 32 KB, read from the
-     * store on two rows or more, and closed the session on the first run or a later one (ORA-03113, #389). Its sides are
-     * bound, and a property read by its own path, by [sharedCompared]. NaN, which JSON orders after every number, and which
-     * Cypher orders with nothing, is false (#409).
+     * Two texts, as [textOrder] orders them: JSON ordered a text past 32 KB, read from the store on two rows or more, and
+     * closed the session on the first run or a later one (ORA-03113, #389). Two numbers by their keys ([numbersOrdered]), as
+     * Oracle's JSON orders them through a decimal `NUMBER`, which holds no double nearer 0 than 1e-130 or past 1e126 and rounds
+     * an integer beside a float near 2^53 (drivine-cypher-spec#309); NaN, which Cypher orders with nothing, is false (#409).
+     * Where they are not two numbers that may differ so ([numbers]), as two integers the statement makes, or beside a text or a
+     * truth value, as JSON, which orders them exactly and reads each once. Two truth values as JSON. Its sides are bound, and a
+     * property read by its own path, by [sharedCompared].
      */
-    override fun ordered(x: String, operator: String, y: String): String {
-        val numbers = shared(x, y) { (a, b) -> "(NOT (${isNaN(a)} OR ${isNaN(b)}) AND $a $operator $b)" }
-        return if (asJson) numbers else "CASE WHEN ${kind(x)} = 'string' THEN ${textOrder(x, operator, y)} ELSE $numbers END"
+    override fun ordered(x: String, operator: String, y: String, numbers: Boolean): String {
+        val ordered = shared(x, y) { (a, b) -> if (numbers) numbersOrdered(a, operator, b) else "$a $operator $b" }
+        return if (asJson) ordered else "CASE WHEN ${kind(x)} = 'string' THEN ${textOrder(x, operator, y)} ELSE $ordered END"
     }
 
     /**
@@ -773,6 +806,220 @@ class OracleCypherCompiler(
 
     /** The JSON [json] as a `VARCHAR2`, where it is a text of at most 4,000 bytes, a number or a truth value; else null. */
     private fun short(json: String) = "JSON_VALUE($json, '\$')"
+
+    /**
+     * A property's keys, read from the properties by its path, and a short value's, are read where it is; a long value's, and
+     * one a subquery works out, are read of the column that carries it, as each key would write the value out again, and work
+     * the subquery out again for each.
+     */
+    override fun carriesNumberKeys(json: String) =
+        (propertyRead(json) ?: keptRead(json)) != null || json.length <= SHARED_ABOVE && !json.contains("SELECT", ignoreCase = true)
+
+    override val keepsNumberKeys = true
+
+    /** A property's, read by its path: read of the column after, they would read it through its text ([itemProperty]). */
+    override fun carriesKeysAfter(json: String) = (propertyRead(json) ?: keptRead(json)) != null
+
+    /**
+     * The keys a number is compared, ordered and counted by (drivine-cypher-spec#309), where Oracle's JSON compares and sorts one
+     * through a decimal `NUMBER`, which holds magnitudes from 1e-130 to about 1e126: so 1e-200 was equal to 0, 1e200 to -1e200,
+     * and an integer beside a float near 2^53 was rounded. The double, [doubleKey], then the `NUMBER` where it is one, an
+     * integer ([numberRead]), of which, with the double, [exactKey] is worked out. A property is read by its own path, once for
+     * each key, from the stored properties: never from its value read through its text ([itemProperty]), which each read would
+     * work out again (an order by such keys read so took twice as long and more, where read from the property it took 11 to 18%
+     * longer than JSON's order). Where [json] is no number, both are null. Not grouped by, nor kept `DISTINCT` by: a group or
+     * `DISTINCT` compares a number as JSON, as before (drivine-cypher-spec#315).
+     */
+    override fun numberKeys(json: String): List<String> {
+        carriedKeys[json]?.let { return it }
+        val (x, path) = propertyRead(json) ?: keptRead(json) ?: (json to "'\$'")
+        return listOf(doubleKey(x, path), numberRead(x, path))
+    }
+
+    /**
+     * The value at the path [path] of the JSON [json] as a `BINARY_DOUBLE`, which holds every double, NaN and the infinities
+     * among them, and an integer as the double nearest it; null where it is no number, as `TYPE(STRICT)` reads a text or a
+     * truth value, which Oracle's lax read would make a number of.
+     */
+    private fun doubleKey(json: String, path: String = "'\$'") = carried(json, path, 0)
+        ?: idColumn(json, path)?.let { "TO_BINARY_DOUBLE($it)" } ?: "JSON_VALUE($json, $path RETURNING BINARY_DOUBLE NULL ON ERROR TYPE(STRICT))"
+
+    /** The column a query carries the key at [index] of [json] in ([carriedKeys]), where [path] reads it whole. */
+    private fun carried(json: String, path: String, index: Int) = if (path != "'\$'") null else carriedKeys[json]?.get(index)
+
+    /**
+     * The key column [json] is the id of, `JSON_SCALAR(n3.nid)`, as `id()` and `elementId()` give it, where [path] reads it
+     * whole: its keys are read of the column, a `NUMBER`. Read with `JSON_VALUE` of `JSON_SCALAR` of a column of the graph's
+     * tables, the statement gave no rows on Oracle (23.26), `RETURN k.node = elementId(c)` among them, where the same read
+     * of a value an unwound row holds gave the right ones (drivine-cypher-spec#309).
+     */
+    private fun idColumn(json: String, path: String) = if (path != "'\$'") null else ID_COLUMN.matchEntire(json)?.groupValues?.get(1)
+
+    /**
+     * What tells numbers apart that [doubleKey] finds equal: an integer past 2^53, held as a `NUMBER`, less the double nearest
+     * it, worked out exactly ([OracleSql.wholeNumber]); 0 for any other number, and for a value that is no number. Two numbers with one double differ only where
+     * one is such an integer, as a double past 2^53 is a whole number and any integer to 2^53 is a double's. Not the double
+     * read as a `NUMBER`, which Oracle does not make exactly: it reads the double 2^53 as 9007199254740993 (see [OracleSql.indexKey]).
+     * The number is read as a `NUMBER` where it is one ([numberRead]); its double is [doubleKey]'s, which a `NUMBER` read so is.
+     */
+    private fun exactKey(json: String, path: String = "'\$'"): String {
+        carried(json, path, 1)?.let { n -> return exactOf(n, carried(json, path, 0)!!) }
+        // The value bound where it is long, not its number's read, which a property's path would bind for each row.
+        return shared(json) { (x) -> exactOf(numberRead(x, path), doubleKey(x, path)) }
+    }
+
+    /** [exactKey] of the `NUMBER` [n] ([numberRead]) and the double [d] ([doubleKey]) of one value, read already. */
+    private fun exactOf(n: String, d: String) = "CASE WHEN ABS($n) > $EXACT_DOUBLES THEN $n - (${OracleSql.wholeNumber(d)}) ELSE 0 END"
+
+    /**
+     * The value at the path [path] of [json] as the `NUMBER` it is, where it is a `NUMBER` (an integer, not a double); else null:
+     * see [exactKey]. Its kind is asked first, apart, and the value read only where it is a number. A path that filters it, read
+     * of a list in Oracle's lax mode, tested each of its items, and `@.abs()` of a relationship's map among them, beside a null,
+     * crashed the session (ORA-00600 [koksccda1]): `a = a` of a list `[r1, r2] AS a` a WITH carries.
+     */
+    private fun numberRead(json: String, path: String) = idColumn(json, path)
+        ?: "CASE WHEN JSON_VALUE($json, ${path.dropLast(1)}.type()') = 'number' THEN JSON_VALUE($json, $path RETURNING NUMBER NULL ON ERROR TYPE(STRICT)) END"
+
+    /**
+     * The properties and the path of [json] where it is a property read through its text, as [itemProperty] reads one
+     * ([keptText]): so its [numberKeys] are read from the properties by the path, not from that text.
+     */
+    private fun keptRead(json: String): Pair<String, String>? {
+        // Where rows are grouped, such a value is a group's key as it is: its keys are read of it (see groupedTerms).
+        if (groupedTerms) return null
+        if (!json.startsWith(KEPT_HEAD)) return null
+        var keep = json.indexOf(KEPT_KEEP)
+        while (keep > 0) {
+            val props = json.substring(KEPT_HEAD.length, keep)
+            val close = SqlText.scanQuoted(json, keep + KEPT_KEEP.length, '\'', SqlText.Escape.DOUBLED)
+            if (close > 0) {
+                val path = json.substring(keep + KEPT_KEEP.length, close)
+                if (keptText(props, path) == json) return props to path
+            }
+            keep = json.indexOf(KEPT_KEEP, keep + 1)
+        }
+        return null
+    }
+
+    /**
+     * Whether the JSON values [a] and [b] are equal, numbers as Cypher compares them: by their keys ([numberKeys]), not as JSON.
+     * Any other two as JSON. Where [small], one is a number from -2^53 to 2^53, or NaN or an infinity, beside which the doubles
+     * alone decide: no integer past 2^53 has its double. NaN is equal to itself as a `BINARY_DOUBLE`: each caller tests for it,
+     * as [jsonEquals] does, where both sides may hold it. Each side is read more than once, so a long one is bound ([shared]).
+     */
+    private fun numbersEqual(a: String, b: String, small: Boolean = false): String = shared(a, b) { (x, y) ->
+        val (dx, dy) = doubleKey(x) to doubleKey(y)
+        // Null where either is no number, a double read of no other value (TYPE(STRICT)): the two are then compared as JSON.
+        val equal = if (small) "$dx = $dy" else "$dx = $dy AND ${exactKey(x)} = ${exactKey(y)}"
+        "COALESCE($equal, $x = $y)"
+    }
+
+    /**
+     * Whether the JSON values [a] and [b] are equal, as [numbersEqual] compares them; but as JSON alone where either is a list
+     * or a map, a text or a truth value the statement writes, which is no number.
+     */
+    private fun valuesEqual(a: String, b: String, small: Boolean = false) = when {
+        writtenNumberless(a) || writtenNumberless(b) -> "$a = $b"
+        // Two numbers written, each 0 or of a magnitude a decimal NUMBER holds exactly enough to tell doubles apart, and short of
+        // 2^53: as JSON, which compares them so, as before.
+        decimalExact(a) && decimalExact(b) -> "$a = $b"
+        else -> numbersEqual(a, b, small = small || writtenSmall(a) || writtenSmall(b))
+    }
+
+    /**
+     * Whether [json] is a number the statement writes that JSON compares as Cypher does: 0, or from 1e-129 to 2^53 in magnitude,
+     * which a decimal `NUMBER` holds, with every digit that tells two such doubles apart.
+     */
+    private fun decimalExact(json: String): Boolean {
+        val value = if (WRITTEN_FLOAT.matches(json)) json.substringAfter("('").substringBefore("')").toDoubleOrNull()
+            else writtenLiteral(json)?.takeIf { it.isNumber }?.doubleValue()
+        return value != null && (value == 0.0 || kotlin.math.abs(value) >= 1e-129 && kotlin.math.abs(value) < EXACT_DOUBLES)
+    }
+
+    /** Whether [json] is a value the statement writes that is no number: a list or a map, a text or a truth value. */
+    private fun writtenNumberless(json: String): Boolean = when (writtenScalar(json)) {
+        false -> true
+        true -> writtenLiteral(json)?.isNumber == false
+        null -> false
+    }
+
+    /** Whether [json] is a number the statement writes from -2^53 to 2^53 (see [small]). */
+    private fun writtenSmall(json: String): Boolean {
+        if (WRITTEN_FLOAT.matches(json)) return small(json.substringAfter("('").substringBefore("')").toDoubleOrNull())
+        return writtenLiteral(json)?.takeIf { it.isNumber }?.let { small(it.doubleValue()) } == true
+    }
+
+    /** The value of [json] where it is one literal as [literalJson] writes it, `JSON('…')`. */
+    private fun writtenLiteral(json: String) =
+        if (json.startsWith("JSON('") && json.endsWith("')")) runCatching { CypherJson.readTree(json.substring(6, json.length - 2).replace("''", "'")) }.getOrNull() else null
+
+    /**
+     * Whether [number] is from -2^53 to 2^53, NaN or an infinity: beside it two numbers' doubles alone decide, as no integer past
+     * 2^53, the one kind of number whose double tells it from another apart by less than it is, has the same double.
+     */
+    private fun small(number: Any?): Boolean = when (number) {
+        is Double -> number.isNaN() || number.isInfinite() || kotlin.math.abs(number) < EXACT_DOUBLES
+        is Float -> small(number.toDouble())
+        is Number -> wholeNumber(number)?.let { it > -EXACT_DOUBLES && it < EXACT_DOUBLES } ?: false
+        else -> false
+    }
+
+    /**
+     * Whether the JSON numbers [a] and [b] stand as [operator] says, `<`, `>=`…, by their keys ([numberKeys]): the doubles,
+     * and where they are equal, what tells an integer past 2^53 apart. NaN is ordered against nothing, so false (#409). Two
+     * values that are no numbers, truth values, as JSON. Each side is read more than once, so a long one is bound ([shared]).
+     */
+    private fun numbersOrdered(a: String, operator: String, b: String): String = shared(a, b) { (x, y) ->
+        val (dx, dy) = doubleKey(x) to doubleKey(y)
+        "CASE WHEN $dx IS NULL OR $dy IS NULL THEN $x $operator $y WHEN $dx <> $dy THEN ($dx $operator $dy AND $dx IS NOT NAN AND $dy IS NOT NAN) " +
+            "ELSE (${exactKey(x)} $operator ${exactKey(y)} AND $dx IS NOT NAN) END"
+    }
+
+    /**
+     * Beside a number written or given from -2^53 to 2^53, NaN or an infinity ([small]): by the doubles alone, which decide there,
+     * and only where the other is a number too, read so as `TYPE(STRICT)` reads no other value; null where it is no number, as
+     * Cypher orders no two values of two kinds. NaN is ordered against nothing, so false (#409). Null beside any other value,
+     * which [ordered] compares.
+     */
+    override fun orderedPast(x: String, operator: String, y: String, left: Any?, right: Any?): String? {
+        if (!(left is Number && small(left) || right is Number && small(right))) return null
+        return sharedCompared(x, y) { (a, b) ->
+            val (da, db) = doubleKey(a) to doubleKey(b)
+            "CASE WHEN $da IS NOT NULL AND $db IS NOT NULL THEN ($da $operator $db AND $da IS NOT NAN AND $db IS NOT NAN) END"
+        }
+    }
+
+    /** As [jsonEquals], each number written from -2^53 to 2^53 ([small]), beside which the doubles alone decide. */
+    override fun writtenItemEquals(item: String, value: String, items: List<Any?>) =
+        jsonEquals(item, value, oneNaNFree = false, small = items.all { it !is Number || small(it) })
+
+    /** As [jsonEquals], but with no number key read, beside a value that is no number. */
+    override fun numberlessEquals(x: String, y: String) = jsonEquals(x, y, oneNaNFree = false, numbers = false)
+
+    /** As JSON, which compares two integers exactly, and reads each once (see [numbersEqual]). */
+    override fun integerEquals(x: String, y: String, otherwise: () -> String) = "$x = $y"
+
+    /** A number among [items] by [numbersEqual]: as JSON, 1e-200 is in `[0]`. */
+    override fun testedItemEquals(item: String, value: String, items: List<Any?>) =
+        if (items.any { it is Number }) numbersEqual(item, value, small = items.all { it !is Number || small(it) }) else "$item = $value"
+
+    /**
+     * Each value once, a number by its keys ([numberKeys]), read where the value is, written out as nothing is bound under an
+     * aggregate: any other value as JSON, a number by its double, and an integer past 2^53 by the `NUMBER` it is, each read once
+     * for each row: such an integer that a double is equal to is counted twice. NaN, equal to nothing, is counted each time
+     * (drivine4j#558), where a double, which Oracle finds equal to itself, would count it once: a property's, and any where the
+     * statement is given or works out NaN ([bareNaN]). Else, as of an item of a stored list, a NaN is counted once, as
+     * `collect(DISTINCT …)` keeps it, as before (writes.yaml, "MERGE of a null or NaN property").
+     */
+    override fun distinctCount(json: String, counted: String): String {
+        val (d, n) = groupedNumberKeys(json)
+        // A NaN apart where it is a property's, or the statement is given or works out NaN ([bareNaN]); else once.
+        val apart = (propertyRead(json) ?: keptRead(json)) != null || bareNaN(counted) != null
+        val big = "ABS($n) > $EXACT_DOUBLES"
+        val doubles = if (apart) "CASE WHEN $d IS NAN OR $big THEN NULL ELSE $d END" else "CASE WHEN $big THEN NULL ELSE $d END"
+        return "(count(DISTINCT CASE WHEN $d IS NULL THEN $counted END) + count(DISTINCT $doubles) + count(DISTINCT CASE WHEN $big THEN $n END)" +
+            "${if (apart) " + count(CASE WHEN $d IS NAN THEN 1 END)" else ""})"
+    }
 
     /**
      * The properties and the path of [json] where it is a property as [propertyOf] reads it, `JSON_QUERY(props, '$.a' RETURNING
@@ -1284,7 +1531,11 @@ class OracleCypherCompiler(
         val direction = if (min) "ASC" else "DESC"
         // A temporal value's tag of a kind the statement does not know by its sort key, which its rank holds ([sortRank]), as MIN
         // reads no tag's order; any other value by its kind, and then as MIN orders it.
-        val order = if (key == null) "${sortRank(value)} $direction NULLS LAST" else "${kindOrder(value)} $direction NULLS LAST, $key $direction NULLS LAST"
+        // A number by its double after its kind (see numberKeys), read from the property by its path once; of those of one
+        // double, MIN or MAX of the JSON, as before. With its NUMBER too, the property was named five times, and min() and max()
+        // took 17% longer: an integer past 2^53 and a float of its double are not told apart (drivine-cypher-spec#315).
+        val order = if (key == null) (listOf(sortRank(value)) + groupedNumberKeys(value).take(1)).joinToString(", ") { "$it $direction NULLS LAST" }
+            else "${kindOrder(value)} $direction NULLS LAST, $key $direction NULLS LAST"
         return "${if (min) "MIN" else "MAX"}(${nullIfJsonNull(value)}) KEEP (DENSE_RANK FIRST ORDER BY $order)"
     }
 
@@ -2487,6 +2738,16 @@ class OracleCypherCompiler(
 
         /** What a property as [propertyOf] reads it starts with, its path's start, and what it ends with, its path's closing quote: see [propertyRead]. */
         private const val READ_HEAD = "JSON_QUERY("
+
+        /** A column a query carries, `p2.s1k1`: see [numberOrder]. */
+        private val COLUMN_KEY = Regex("""[A-Za-z_]\w*\.\w+""")
+
+        /** An id as `id()` and `elementId()` give it, `JSON_SCALAR` of a node's or a relationship's key column: see [idColumn]. */
+        private val ID_COLUMN = Regex("""JSON_SCALAR\(([A-Za-z_]\w*\.(?:\w+_)?(?:nid|eid))\)""")
+
+        /** How a property read through its text starts, and what comes before its path: see [keptText] and [keptRead]. */
+        private const val KEPT_HEAD = "JSON(JSON_QUERY(JSON_SERIALIZE(JSON_TRANSFORM("
+        private const val KEPT_KEEP = ", KEEP "
         private const val READ_PATH = ", '\$"
         private const val READ_TAIL = "' RETURNING JSON)"
 

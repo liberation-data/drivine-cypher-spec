@@ -109,6 +109,18 @@ sealed interface Value {
          * one compared, sorted or stored is made whole there (see [inflight]). Nothing else reads it, and it is not carried on.
          */
         val inflightItems: String? = null,
+        /**
+         * Whether the compiler makes it an integer, though the statement leaves its kind open to Neo4j: an id, `id(n)` or
+         * `elementId(n)`, the row's key. A store that compares other numbers by keys of their own compares it as it is, and a
+         * variable a `WITH` binds to it is one too (drivine-cypher-spec#309).
+         */
+        val integer: Boolean = false,
+        /**
+         * Where a query carries it out as a column, a `WITH`'s or a row's, the SQL of the store's number keys of it, each a column
+         * of its own beside it (`c1k1`, `c1k2`), read once where the value was worked out: a value read after reads them, not
+         * the value's column again, which may be a property read through its text (see `SqlCypherCompiler.numberKeys`).
+         */
+        val keys: List<String>? = null,
     ) : Value
 
     /** A kind of value the statement writes: see [Json.known]. [noun] names a value of it, as a message does. */

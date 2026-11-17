@@ -65,6 +65,29 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
     /** Where the statement is given or works out NaN or an infinity ([nonFinite]): SQLite's JSON holds no NaN, whose write is refused. */
     override fun bareNaN(json: String) = if (!nonFinite) null else isNaN(json)
 
+    /** Whether the JSON [json] is a number, an integer or a float: SQLite's `json_type` tells the two apart. */
+    private fun isNumber(json: String) = "json_type($json) IN ('integer', 'real')"
+
+    /**
+     * A number by its value as SQLite reads it out of the JSON, `->>`, an `INTEGER` or a `REAL`, and any other value by its JSON
+     * text: SQLite groups a value by its text, where `1` and `1.0`, and `0`, `0.0` and `-0.0`, are equal numbers, as in Neo4j,
+     * and other stores, keep them (drivine-cypher-spec#309). SQLite compares an integer with a float exactly, so an integer
+     * past 2^53 stays apart from the double nearest it. `DISTINCT` still keeps them apart (drivine-cypher-spec#315).
+     */
+    override fun groupedValue(json: String) =
+        listOf("CASE WHEN ${isNumber(json)} THEN NULL ELSE $json END", "CASE WHEN ${isNumber(json)} THEN $json ->> '\$' END")
+
+    /**
+     * As [groupedValue] keys it: the numbers by their values, counted apart from any other value, by its JSON text. NaN, which
+     * a statement given one holds as a value of its own ([bareNaN]), is counted each time, as before.
+     */
+    override fun distinctCount(json: String, counted: String): String {
+        val nan = bareNaN(counted)
+        val others = "CASE WHEN ${nan?.let { "$it OR " }.orEmpty()}${isNumber(json)} THEN NULL ELSE $counted END"
+        return "(count(DISTINCT $others) + count(DISTINCT CASE WHEN ${isNumber(json)} THEN $json ->> '\$' END)" +
+            "${nan?.let { " + count(CASE WHEN $it THEN 1 END)" }.orEmpty()})"
+    }
+
     override fun parameterJson(marker: String, text: String?) = marker
 
     override fun parameterCount(marker: String) = "CAST($marker AS INTEGER)"
