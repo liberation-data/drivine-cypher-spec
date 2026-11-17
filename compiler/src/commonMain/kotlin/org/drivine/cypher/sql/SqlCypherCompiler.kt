@@ -22,6 +22,7 @@ import org.drivine.cypher.ast.SetItem
 import org.drivine.cypher.json.CypherEncoder
 import org.drivine.cypher.json.CypherJson
 import org.drivine.cypher.store.ValueLayout
+import org.drivine.cypher.store.StoreValues
 import org.drivine.cypher.store.Stamps
 import org.drivine.schema.SimilarityFunction
 import org.drivine.schema.VectorIndexSpec
@@ -7878,23 +7879,11 @@ abstract class SqlCypherCompiler(
 
         fun literal(text: String) = "'${text.replace("'", "''")}'"
 
-        /** Why a store refuses a statement that writes and is given a float, the first named, its JSON, the second, holds as no number. */
-        const val NON_FINITE_WRITE = "A statement that writes is given %s, which %s holds as no number: it would store another value in its place."
-
         /**
          * Whether [value], a parameter's value as the caller gave it, is or holds a float that is [nonFinite], at any depth: by
-         * default NaN or an infinity.
+         * default NaN or an infinity. See [StoreValues.holdsNonFinite].
          */
-        fun holdsNonFinite(value: Any?, nonFinite: (Double) -> Boolean = { !it.isFinite() }): Boolean = when (value) {
-            is Double -> nonFinite(value)
-            is Float -> nonFinite(value.toDouble())
-            is Map<*, *> -> value.values.any { holdsNonFinite(it, nonFinite) }
-            is Iterable<*> -> value.any { holdsNonFinite(it, nonFinite) }
-            is Array<*> -> value.any { holdsNonFinite(it, nonFinite) }
-            is DoubleArray -> value.any(nonFinite)
-            is FloatArray -> value.any { nonFinite(it.toDouble()) }
-            else -> false
-        }
+        fun holdsNonFinite(value: Any?, nonFinite: (Double) -> Boolean = { !it.isFinite() }): Boolean = StoreValues.holdsNonFinite(value, nonFinite)
 
         /**
          * The most arguments a function takes on Postgres, and on the SQLite Drivine ships: a list or a map written by one

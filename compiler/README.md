@@ -134,7 +134,7 @@ Values are plain JSON, tagged only where JSON, or a host's reading of it, loses 
 | a float | `{"$float": "2.0"}` (or `{"$float": 2}`), or in a request a JSON number with a fraction or an exponent (`2.5`, `1e-7`). A host whose JSON writer drops a whole float's fraction (JavaScript writes `2.0` as `2`) tags its floats |
 | NaN, the infinities | `{"$float": "NaN"}`, `{"$float": "Infinity"}`, `{"$float": "-Infinity"}` |
 | a temporal value | `{"$temporal": "DATE", "text": "2026-11-07"}`: `DATE`, `LOCAL_TIME`, `TIME`, `LOCAL_DATE_TIME`, `DATE_TIME` or `DURATION`, and its ISO 8601 text. Untagged, its ISO text is a text: as in Neo4j, it is equal to no temporal value the statement makes and is not ordered beside one (`date('2026-11-07') = $d` is false for `"2026-11-07"`) |
-| bytes | `{"$bytes": "<base64>"}` |
+| bytes | `{"$bytes": "<base64>"}`, bound as the list of their signed values, `[1, 2, -1]`, as the store layout holds them |
 | a map with a key that starts with `$` | `{"$map": {"$key": …}}` |
 
 The values bound come back the same way, except that every float is tagged, whole or not: `{"$float": "2.0"}`,
@@ -487,10 +487,18 @@ of its own, so the three libraries read rows, key a temporal value and judge a g
   (`<TemporalArithmeticFunction.postgres(drivine)>`) written out as the module makes it: `store.yaml` holds the function of
   temporal arithmetic by its marker (drivine4j#418), so a runner expands each statement before it compares.
 - **`write`** takes a value as a request's parameters give one, each temporal value marked
-  `{"$temporal": "DATE", "text": "2024-01-01"}`, and gives it as the store layout holds it, `{"value": …}`: each temporal
-  value its tag `{"$t", "v", "s"}`, and each map key that begins with `$` with one more `$` before it, at any depth (#107).
-  It is what drivine4j writes a parameter, its save plan and a node's properties through, so a host writes them as the
-  other libraries do, with no writer of its own.
+  `{"$temporal": "DATE", "text": "2024-01-01"}`, and the store, `{"write": <value>, "store": "postgres"}`, and gives the
+  JSON text that store's layout holds it as, spliced in as it is, `{"value": …}` (#107, #329): each temporal value its tag
+  `{"$t", "v", "s"}`, each map key that begins with `$` with one more `$` before it, at any depth, and bytes the list of
+  their signed values, `[1, 2, -1]`, as a graph engine holds them. Each float is the store's own: on Postgres a whole one
+  with its fraction, `10000000.0`; on Oracle every one extended JSON's double, `{"$numberDouble": "1.5"}`, NaN and the
+  infinities `"NaN"`, `"Infinity"` and `"-Infinity"`, so a host parses what it writes there as extended JSON; on SQLite an
+  infinity `9e999` or `-9e999`. A float the store holds as no number, Postgres's NaN and infinities and SQLite's NaN, is
+  `{"error": …}`, with the message a statement that writes is refused with. `store` is `postgres`, `oracle` or `sqlite`, and
+  required: left out, or a graph engine's, it is an error. It is exactly the text a compiled statement that writes binds the
+  value as (`StoreValues.text` on the JVM, which each compiler's parameters call), so a library's save plan and a node's
+  properties are held as `CREATE` holds them, and as the other libraries hold them, with no writer of its own.
+  `host.yaml`'s "Values a save writes" pins it.
 
 ### The store's own statements and the schema plan
 

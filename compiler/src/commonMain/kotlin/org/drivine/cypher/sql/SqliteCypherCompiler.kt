@@ -2,6 +2,8 @@ package org.drivine.cypher.sql
 
 import org.drivine.cypher.CompilerException
 import org.drivine.cypher.store.SqliteCypherValues
+import org.drivine.cypher.store.StoreValues
+import org.drivine.cypher.api.Store
 import org.drivine.cypher.store.SqliteFunctions
 import org.drivine.cypher.store.SqliteSql
 import org.drivine.cypher.json.CypherEncoder
@@ -49,14 +51,15 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
 
     override fun literalJson(value: Any?) = literal(parameterText(value))
 
-    /** As JSON, NaN and the infinities as the class writes them. */
-    override fun parameterText(value: Any?): String =
-        if (!holdsNonFinite(value)) CypherJson.writeValueAsString(value, encoder = encoder)
-        else SqliteCypherValues.write(CypherJson.valueToTree(value, encoder))
+    /**
+     * As JSON, NaN and the infinities as the class writes them: as the store layout holds a value ([StoreValues.text], which a
+     * library's save writes too), where a statement that writes refuses NaN first.
+     */
+    override fun parameterText(value: Any?): String = StoreValues.sqlite(value, encoder)
 
     /** NaN, which SQLite's JSON holds as no number: an infinity it holds, as the number it writes for one. */
     override fun refuseNonFiniteWrite(parameters: Map<String, Any?>) {
-        if (parameters.values.any { holdsNonFinite(it, Double::isNaN) }) throw CompilerException(NON_FINITE_WRITE.formatted("NaN", "SQLite's JSON"))
+        StoreValues.nonFiniteRefusal(Store.SQLITE, parameters.values)?.let { throw CompilerException(it) }
     }
 
     /** Whether the JSON [json] is NaN, as a statement given one writes it: see the class. */

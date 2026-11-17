@@ -454,7 +454,9 @@ object StandIns {
         }
         repeat(300) {
             val bytes = random.nextBytes(random.nextInt(0, 40))
-            case("Y", listOf(hex(bytes)), bytes)
+            // Bytes as the list of their signed values, as drivine4j's Neo4jObjectMapper gives them and the store layout holds
+            // them (liberation-data/drivine-cypher-spec#329): not Jackson's base64 text of a byte[].
+            case("Y", listOf(hex(bytes)), bytes.toList())
         }
         repeat(500) {
             val a = randomText(random, 4); val b = randomText(random, 4)
