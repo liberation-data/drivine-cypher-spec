@@ -538,7 +538,7 @@ abstract class SqlCypherCompiler(
      * The query of a `CALL { … }`, [query], as the row that reads what it returns joins it: kept apart from that
      * row's query, where a store would merge the two and read a value bound in the row wrongly.
      */
-    protected open fun called(query: String, keepsDistinct: Boolean = false) = query
+    protected open fun called(query: String) = query
 
     /**
      * The query [query] that makes a value anew for each row, `randomUUID()`, kept apart from the query that reads it, where a
@@ -1739,12 +1739,6 @@ abstract class SqlCypherCompiler(
     private inner class Writer(val parameters: Parameters) {
         private var counter = 0
 
-        /**
-         * How many numbered `DISTINCT`s are compiled so far ([project]): a query compiled while it grew holds one, which [called]
-         * is told of, as it is of a `SELECT DISTINCT`.
-         */
-        private var numberedDistincts = 0
-
         private fun alias(prefix: String) = "$prefix${++counter}"
 
         /** The variables made here for a randomUUID() made first, for each row: no variable of the statement's, though one may be quoted as named alike. */
@@ -2062,9 +2056,7 @@ abstract class SqlCypherCompiler(
 
         /** A `WITH` [having] has read: see [with]. */
         private fun withHaving(select: Select, with: Clause.With, outer: Map<String, Value>, apart: Boolean, orderSeen: Boolean = true): Select {
-            val numberedBefore = numberedDistincts
             val projected = project(select, with.projection, final = false, orderSeen = orderSeen)
-            val numbered = numberedDistincts > numberedBefore
             val name = alias("w")
             val next = Select(outer)
             next.walks = select.walks
@@ -2077,7 +2069,7 @@ abstract class SqlCypherCompiler(
             val passesPath = projected.scope.values.any { it is Value.Path }
             fun source(query: String): String {
                 val sql = if (anew) once(query) else query
-                return "(\n${indent(if (apart || passesPath) called(sql, keepsDistinct = numbered) else sql)}\n) $name"
+                return "(\n${indent(if (apart || passesPath) called(sql) else sql)}\n) $name"
             }
             val source = source(projected.sql)
             next.source(source)
@@ -2176,12 +2168,11 @@ abstract class SqlCypherCompiler(
             if (call.query.clauses.last() !is Clause.Return) unsupported("A CALL { … } that returns nothing")
             if (call.query.clauses.any(::writes)) unsupported("A write in CALL { … }")
             val order = rowOrder
-            val numberedBefore = numberedDistincts
             val projected = if (call.query.unions.isEmpty()) calledPart(select, call, call.query.clauses, null, distinct = false) else calledUnion(select, call)
             rowOrder = order
             redeclared(projected.scope.keys, select.bound.keys)
             val name = alias("c")
-            select.join(lateral(called(projected.sql, keepsDistinct = numberedDistincts > numberedBefore), name, call.optional, projected.columns))
+            select.join(lateral(called(projected.sql), name, call.optional, projected.columns))
             projected.scope.forEach { (variable, value) ->
                 val returned = value.laterally(name, projected.columns)
                 // A value taken from a write's row is null where an OPTIONAL CALL finds nothing: it is read as the call returns it (#336).
@@ -3805,10 +3796,7 @@ abstract class SqlCypherCompiler(
             val numbered = projection.distinct && !aggregating && projection.orderBy.isEmpty() && select.order.isNotEmpty() &&
                 (orderSeen || projection.skip != null || projection.limit != null) &&
                 items.none { item -> variablesIn(item.expression).any(Procedure::reads) }
-            if (numbered) {
-                selectList += "ROW_NUMBER() OVER (ORDER BY ${orderOf(select)}) AS rn"
-                numberedDistincts++
-            }
+            if (numbered) selectList += "ROW_NUMBER() OVER (ORDER BY ${orderOf(select)}) AS rn"
             val sorts = projection.orderBy.mapIndexed { i, sort ->
                 val column = "s${i + 1}"
                 // An order term that is an item, as written, is that item: so it may be ordered by where rows are compared.

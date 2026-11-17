@@ -12,7 +12,7 @@ import kotlin.test.assertTrue
  * drivine-cypher-spec#316: a `DISTINCT` of rows that come in an order keeps each row where the first of its kind came, as Neo4j
  * keeps it, where that order can be seen: its rows are numbered in their order and grouped, each ordered by its least number.
  * A `SELECT DISTINCT` keeps no order: Oracle hashes or sorts its rows, and Postgres may. What the stores give is the spec's, in
- * `queries.yaml` ("DISTINCT keeps the order its rows come in"): this runs those steps on SQLite in memory, and pins the SQL.
+ * `queries.yaml` ("An ordered DISTINCT keeps the first row of each kind where it came"): this runs those steps on SQLite in memory, and pins the SQL.
  */
 class DistinctKeepsOrderTest {
 
@@ -75,6 +75,20 @@ class DistinctKeepsOrderTest {
             "RETURN COUNT { $unwound RETURN DISTINCT r % 37 AS k LIMIT 3 } AS n",
             // A write reads the rows in their order.
             "UNWIND [3, 1, 3] AS x WITH DISTINCT x CREATE (:N {x: x})",
+            // The rows a WITH passes on are returned in their order; so is what reads collect()'s list.
+            "$ordered WITH DISTINCT i % 37 AS k WITH k, 1 AS one RETURN k",
+            "$ordered WITH DISTINCT i % 37 AS k WITH k WHERE k > 20 RETURN k",
+            "$ordered WITH DISTINCT i % 37 AS k RETURN head(collect(k))",
+            "$ordered WITH DISTINCT i % 37 AS k RETURN collect(k)[1..3], last(collect(k))",
+            "$ordered WITH DISTINCT i % 37 AS k RETURN [x IN collect(k) WHERE x > 30]",
+            "$ordered WITH DISTINCT i % 37 AS k RETURN collect(DISTINCT k)",
+            "$ordered WITH DISTINCT i % 37 AS k RETURN count(*), collect(k)",
+            "$ordered WITH DISTINCT i % 37 AS k WITH collect(k) AS ks UNWIND ks AS x RETURN x",
+            "$ordered WITH DISTINCT i % 37 AS k OPTIONAL MATCH (n {k: k}) RETURN k",
+            "$ordered RETURN DISTINCT i % 37 AS k UNION ALL RETURN 99 AS k",
+            "$ordered WITH DISTINCT [i % 37, {a: i % 2}] AS k RETURN k",
+            "UNWIND [3, 1, 3, 2] AS x WITH DISTINCT * RETURN x",
+            "MATCH (n) WITH n ORDER BY n.x WITH DISTINCT n RETURN n",
         ).forEach { cypher ->
             compilers.forEach { compiler ->
                 val sql = compiler.compile(cypher).sql
@@ -109,6 +123,7 @@ class DistinctKeepsOrderTest {
             "$ordered WITH DISTINCT i % 37 AS k RETURN k % 2 AS p, count(*) AS n",
             "$ordered WITH DISTINCT i % 37 AS k WITH k WHERE k > 3 UNWIND [k, k] AS x RETURN count(DISTINCT x)",
             "$unwound WITH DISTINCT r % 37 AS k RETURN sum(k)",
+            "$ordered WITH DISTINCT toString(i % 37) AS k RETURN min(k), max(k)",
             "UNWIND [1, 2, 3] AS o RETURN o, EXISTS { UNWIND [1, 1, 2] AS j WITH DISTINCT j WHERE j = o RETURN j }",
             "UNWIND [1, 2, 3] AS o RETURN o, COUNT { UNWIND [1, 1, 2] AS j RETURN DISTINCT j + o }",
             "UNWIND [1, 2, 3] AS o RETURN o, COUNT { UNWIND [1, 1, 2] AS j WITH DISTINCT j RETURN j }",
@@ -151,6 +166,8 @@ class DistinctKeepsOrderTest {
         listOf(
             "UNWIND range(1, 2000) AS i WITH i ORDER BY (i * 7919) % 2000 LIMIT 100 WITH DISTINCT i % 37 AS k LIMIT 5 RETURN k",
             "UNWIND range(1, 2000) AS i WITH i ORDER BY (i * 7919) % 2000 SKIP 100 WITH DISTINCT i % 37 AS k LIMIT 5 RETURN k",
+            // Two clauses back too.
+            "UNWIND range(1, 2000) AS i WITH i ORDER BY (i * 7919) % 2000 LIMIT 100 WITH i, 1 AS one WITH DISTINCT i % 37 AS k LIMIT 5 RETURN k",
         ).forEach { cypher ->
             compilers.forEach { compiler ->
                 val sql = compiler.compile(cypher).sql
