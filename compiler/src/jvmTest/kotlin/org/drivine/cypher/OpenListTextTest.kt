@@ -33,6 +33,7 @@ class OpenListTextTest {
         assertEquals("[1, a]", sqlite("WITH [[1, 'a'], 2] AS l RETURN toString(l[0])"))
         assertEquals("[1, a]", sqlite("RETURN toString(head([[1, 'a'], 2]))"))
         assertEquals("[1, a]", sqlite("RETURN toString(CASE WHEN true THEN [1, 'a'] ELSE \$x END)", mapOf("x" to 1)))
+        assertEquals("[1, a]", sqlite("RETURN toString(CASE WHEN false THEN \$x ELSE [1, 'a'] END)", mapOf("x" to 1)))
         assertEquals("[1, 2]", sqlite("WITH \$m AS m RETURN toString(m.l)", mapOf("m" to mapOf("l" to listOf(1, 2)))))
         assertEquals("[1, a]", sqlite("RETURN toString(coalesce([1, 'a'], [2]))"))
         assertEquals("[1, a]", sqlite("RETURN toString(last([2, [1, 'a']]))"))
