@@ -50,6 +50,20 @@ class TemporalOfMapTest {
     }
 
     @Test
+    fun `a value of a known kind that is null as the statement runs gives null as Neo4j gives it`() {
+        assertEquals("null", sqlite("WITH toFloat(\$x) AS f RETURN date(f) AS r", mapOf("x" to null)))
+        assertEquals("null", sqlite("WITH CASE WHEN false THEN 1 END AS n RETURN date(n) AS r"))
+        assertEquals("null", sqlite("WITH CASE WHEN false THEN [1] END AS l RETURN localtime(l) AS r"))
+        assertEquals("null", sqlite("RETURN date(toFloat(\$x) + 1) AS r", mapOf("x" to null)))
+        assertEquals("null", sqlite("RETURN date(-toFloat(\$x)) AS r", mapOf("x" to null)))
+        assertEquals("null", sqlite("RETURN date(reduce(a = null, x IN [] | 1)) AS r"))
+        assertEquals("null", sqlite("RETURN date(\$x) AS r", mapOf("x" to null)))
+        assertContains(sqlite("RETURN date('2024-03-15') AS r"), "2024-03-15")
+        assertEquals("fails: '5' is no date.", sqlite("RETURN date('5') AS r"))
+        assertContains(sqlite("WITH date('2024-03-15') AS d RETURN localdatetime(d) AS r"), "2024-03-15T00:00")
+    }
+
+    @Test
     fun `a map a list parameter gives as the statement runs fails it by name`() {
         val failed = sqlite("UNWIND \$l AS m RETURN localtime(m) AS r", mapOf("l" to listOf(mapOf("hour" to 1L))))
         assertContains(failed, "A temporal value of a map read as the statement runs is Cypher, and is not compiled to SQL yet: localtime()")
@@ -78,6 +92,8 @@ class TemporalOfMapTest {
         assertContains(sqlite("WITH collect([1]) AS l RETURN localtime(l[0]) AS r"), "$prefix localtime() of a list")
         assertContains(sqlite("WITH [[1]] AS ls RETURN duration(ls[0]) AS r"), "$prefix duration() of a list")
         assertContains(sqlite("UNWIND [[1], 2, true] AS l RETURN localtime(l) AS r"), "$prefix localtime() of a list")
+        assertContains(sqlite("UNWIND [[1], [2]] AS l RETURN localtime(l) AS r"), "$prefix localtime() of a list")
+        assertContains(sqlite("WITH 5 AS n RETURN date(n) AS r"), "$prefix date() of a number")
         assertContains(sqlite("RETURN date(toFloat(2.5)) AS r"), "$prefix date() of a number")
         assertContains(sqlite("RETURN date(CASE WHEN 1 = 1 THEN true END) AS r"), "$prefix date() of a truth value")
         assertContains(sqlite("WITH collect(5) AS l RETURN date(l[0]) AS r"), "$prefix date() of a number")
@@ -102,7 +118,6 @@ class TemporalOfMapTest {
             assertEquals("date() takes a text or a map of its fields, not a list, as in Neo4j.", refused("RETURN date(\$l)", mapOf("l" to listOf(2024L))))
             assertEquals("duration() takes a text or a map of its fields, not an integer, as in Neo4j.", refused("RETURN duration(\$p.d)", mapOf("p" to mapOf("d" to 1L))))
             assertEquals("time() takes a text or a map of its fields, not a truth value, as in Neo4j.", refused("RETURN time(\$b)", mapOf("b" to false)))
-            assertEquals("localtime() takes a text or a map of its fields, not a list, as in Neo4j.", refused("UNWIND [[1], [2]] AS l RETURN localtime(l)"))
             assertEquals("date() takes a text or a map of its fields, not a truth value, as in Neo4j.", refused("MATCH (n) RETURN date(n.x > 1)"))
         }
     }

@@ -5733,9 +5733,12 @@ abstract class SqlCypherCompiler(
             // refused, not read as a text or a tag, which gave null (drivine-cypher-spec#328).
             if (known == Value.Known.MAP) unsupported("${function.name}() of a map a parameter or an expression gives")
             // A list, a number or a truth value, which Neo4j fails as no text and no map of its fields, is refused so, where
-            // the SQL stores gave null (drivine-cypher-spec#331). Not of a function or a CASE, which may give null, which Neo4j
-            // takes: such a value fails as it runs, below, where it is not null.
-            if (known != null && known != Value.Known.TEXT && written !is Expression.Function && written !is Expression.Case) refused(known.noun)
+            // the SQL stores gave null (drivine-cypher-spec#331). Only one written or given, or arithmetic of such, which is never
+            // null: a function, a CASE or a variable may give null, which Neo4j takes, so it fails as it runs, below, where it is not.
+            fun neverNull(e: Expression): Boolean = givenAsWritten(e) || e is Expression.ListLiteral ||
+                e is Expression.Unary && e.operator == Expression.Unary.Operator.NEGATE && neverNull(e.operand) ||
+                e is Expression.Binary && e.operator in ARITHMETIC && neverNull(e.left) && neverNull(e.right)
+            if (known != null && known != Value.Known.TEXT && neverNull(written)) refused(known.noun)
             return when {
                 given.temporal == Temporal.DURATION && kind == Temporal.DURATION -> given
                 given.temporal != null && (kind == Temporal.DURATION || given.temporal == Temporal.DURATION) -> Value.Json(literalJson(null))

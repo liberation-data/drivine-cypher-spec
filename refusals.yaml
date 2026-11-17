@@ -242,7 +242,7 @@ cases:
         error: "duration() of a map a parameter or an expression gives is Cypher, and is not compiled to SQL yet."
 
   - name: "A temporal value of a list, a number or a truth value"
-    description: "Neo4j fails a temporal function of a list, a number or a truth value, as no text and no map of its fields (temporal.yaml, \"A temporal value of a list, a number or a truth value\"). The SQL stores gave null (drivine-cypher-spec#331): one the compiler knows, written, given as a parameter or its key, or made by an expression of a known kind, is refused here, by its kind; one only read as the statement runs fails it by name."
+    description: "Neo4j fails a temporal function of a list, a number or a truth value, as no text and no map of its fields (temporal.yaml, \"A temporal value of a list, a number or a truth value\"). The SQL stores gave null (drivine-cypher-spec#331): one the compiler knows, written, given as a parameter or its key, or arithmetic of such, which is never null, is refused here, by its kind; any other, which may be null, as Neo4j takes, fails it by name as it runs."
     steps:
       - cypher: "RETURN localtime([1])"
         error: "localtime() takes a text or a map of its fields, not a list, as in Neo4j."
@@ -250,8 +250,6 @@ cases:
         error: "date() takes a text or a map of its fields, not a list, as in Neo4j."
       - cypher: "RETURN datetime([])"
         error: "datetime() takes a text or a map of its fields, not a list, as in Neo4j."
-      - cypher: "UNWIND [[1], [2]] AS l RETURN localtime(l)"
-        error: "localtime() takes a text or a map of its fields, not a list, as in Neo4j."
       - cypher: "RETURN date($l)"
         parameters: {l: [2024]}
         error: "date() takes a text or a map of its fields, not a list, as in Neo4j."
