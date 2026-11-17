@@ -150,23 +150,14 @@ class DistinctKeepsOrderTest {
     }
 
     @Test
-    fun `the ORDER BY of a WITH a numbered DISTINCT reads is left out where it picks no rows`() {
-        // ROW_NUMBER() sorts the rows by the same terms: a second sort of them is all the ORDER BY would add.
+    fun `the ORDER BY of a WITH a numbered DISTINCT reads is kept`() {
+        // ROW_NUMBER() sorts the rows by the same terms, but without the sort before it Postgres and Oracle plan the window worse.
         listOf(
             "$ordered WITH DISTINCT i % 37 AS k LIMIT 5 RETURN k",
             "$ordered MATCH (n) WITH DISTINCT n.k AS k LIMIT 5 RETURN k",
             "$ordered WITH i, i % 2 AS p WITH DISTINCT i % 37 AS k LIMIT 5 RETURN k",
-        ).forEach { cypher ->
-            compilers.forEach { compiler ->
-                val sql = compiler.compile(cypher).sql
-                assertFalse(Regex("""^\s*ORDER BY""", RegexOption.MULTILINE).containsMatchIn(numberedRows(sql)), "${compiler::class.simpleName}: $cypher\n$sql")
-            }
-        }
-        // A SKIP or a LIMIT picks the rows by it: it is kept.
-        listOf(
             "UNWIND range(1, 2000) AS i WITH i ORDER BY (i * 7919) % 2000 LIMIT 100 WITH DISTINCT i % 37 AS k LIMIT 5 RETURN k",
             "UNWIND range(1, 2000) AS i WITH i ORDER BY (i * 7919) % 2000 SKIP 100 WITH DISTINCT i % 37 AS k LIMIT 5 RETURN k",
-            // Two clauses back too.
             "UNWIND range(1, 2000) AS i WITH i ORDER BY (i * 7919) % 2000 LIMIT 100 WITH i, 1 AS one WITH DISTINCT i % 37 AS k LIMIT 5 RETURN k",
         ).forEach { cypher ->
             compilers.forEach { compiler ->
