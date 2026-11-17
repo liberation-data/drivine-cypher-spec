@@ -5637,6 +5637,9 @@ abstract class SqlCypherCompiler(
                 // A time of day has no date to give, as Neo4j has it.
                 if (kind.instant && !dated) fields.keys.firstOrNull { it in Temporals.CALENDAR_FIELDS }?.let { throw CompilerException("${function.name}() takes no field $it.") }
                 fields.keys.firstOrNull { it !in known }?.let { unsupported("${function.name}() of a map with $it") }
+                // A field of the time beside none of the one above it, as Neo4j refuses it (`{hour: 12, nanosecond: 1}`:
+                // "subsecond cannot be specified without minute"), where the stores made it with that one at 0 (#321).
+                if (kind.instant && kind != Temporal.DATE) timeFieldsInOrder(function.name, fields.keys)
                 val numbers = fields.filterKeys { it != "timezone" }.mapValues { number(comparable(json(it.value))) }
                 if (kind == Temporal.DURATION) return of(temporals.duration(numbers))
                 // A zone the statement writes or a parameter gives is read here: one by name, which no store's text holds yet,
@@ -5751,7 +5754,18 @@ abstract class SqlCypherCompiler(
          * time, and a number written that is not whole or past its field's range. A zone by name, or an offset with seconds, is
          * refused as [zone] refuses it, or where an expression gives it fails as [zoneGuard] has it.
          */
-        private fun fromTemporal(kind: Temporal, function: Expression.Function, written: Expression.MapLiteral, scope: Map<String, Value>): String {
+        /**
+     * Refuses a map of a temporal value's fields that gives a field of the time beside none of the one above it, as Neo4j
+     * refuses it: a minute needs an hour, a second a minute, and a millisecond, a microsecond or a nanosecond a second.
+     * Neo4j names the first missing, `subsecond cannot be specified without minute`; this names the field and the one it needs.
+     */
+    private fun timeFieldsInOrder(name: String, keys: Set<String>) {
+        listOf("minute" to "hour", "second" to "minute", "millisecond" to "second", "microsecond" to "second", "nanosecond" to "second").forEach { (field, above) ->
+            if (field in keys && above !in keys) throw CompilerException("$name() takes a $field beside ${FIELD_NOUNS[above] ?: "a $above"}.")
+        }
+    }
+
+    private fun fromTemporal(kind: Temporal, function: Expression.Function, written: Expression.MapLiteral, scope: Map<String, Value>): String {
             val name = function.name
             val entries = written.entries.toMap()
             val keys = entries.keys
@@ -5770,11 +5784,7 @@ abstract class SqlCypherCompiler(
                     throw CompilerException("$name() takes a date beside a time: a date, or a year with a month and a day, a week and a day of the week, an ordinal day, or a quarter and a day of the quarter.")
                 }
             }
-            if (timed && "time" !in keys && "datetime" !in keys) {
-                listOf("minute" to "hour", "second" to "minute", "millisecond" to "second", "microsecond" to "second", "nanosecond" to "second").forEach { (field, above) ->
-                    if (field in keys && above !in keys) throw CompilerException("$name() takes a $field beside ${FIELD_NOUNS[above] ?: "a $above"}.")
-                }
-            }
+            if (timed && "time" !in keys && "datetime" !in keys) timeFieldsInOrder(name, keys)
             fun base(key: String, kinds: List<Temporal>): Temporals.Base? {
                 val value = entries[key] ?: return null
                 val nouns = kinds.reversed().map { "a ${it.function}" }

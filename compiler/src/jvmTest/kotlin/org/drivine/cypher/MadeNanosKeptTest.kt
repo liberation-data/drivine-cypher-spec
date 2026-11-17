@@ -32,7 +32,7 @@ class MadeNanosKeptTest {
         assertTrue("12:00:00.645876123" in sqlite("RETURN $made AS r", mapOf("n" to 645876123)))
         // It was marked as the compiler's own text of six digits, so moved untested: 12:00:01.645876, its nanoseconds cut.
         assertEquals("refused", sqlite("RETURN $made + duration('PT1S') AS r", mapOf("n" to 645876123)))
-        assertEquals("refused", sqlite("RETURN localdatetime({year: 2024, week: 1, nanosecond: 645876123}) + duration('PT1S') AS r"))
+        assertEquals("refused", sqlite("RETURN localdatetime({year: 2024, week: 1, hour: 0, minute: 0, second: 0, nanosecond: 645876123}) + duration('PT1S') AS r"))
     }
 
     @Test
@@ -45,17 +45,17 @@ class MadeNanosKeptTest {
     @Test
     fun `a nanosecond field out of its range fails and writes no text`() {
         // It wrote 01:00:00.000000-001, which is no temporal value's text.
-        assertEquals("refused", sqlite("RETURN localtime({hour: 1, nanosecond: \$n}) AS r", mapOf("n" to -1)))
-        assertEquals("refused", sqlite("RETURN localtime({hour: 1, nanosecond: 1000000001}) AS r"))
+        assertEquals("refused", sqlite("RETURN localtime({hour: 1, minute: 0, second: 0, nanosecond: \$n}) AS r", mapOf("n" to -1)))
+        assertEquals("refused", sqlite("RETURN localtime({hour: 1, minute: 0, second: 0, nanosecond: 1000000001}) AS r"))
         // Beside a millisecond its fraction went past the second: it wrote 01:00:00.1004999999.
-        assertEquals("refused", sqlite("RETURN localtime({hour: 1, millisecond: 5, nanosecond: 999999999}) AS r"))
+        assertEquals("refused", sqlite("RETURN localtime({hour: 1, minute: 0, second: 0, millisecond: 5, nanosecond: 999999999}) AS r"))
     }
 
     @Test
     fun `Postgres and Oracle write the nanoseconds into a made text and cut a stored one to the microsecond where it is truncated or converted`() {
         for (compiler in listOf(PostgresCypherCompiler("g"), OracleCypherCompiler("g"))) {
             val name = compiler::class.simpleName
-            val made = compiler.compile("RETURN localtime({hour: 12, nanosecond: \$n}) AS r", mapOf("n" to 645876123)).sql
+            val made = compiler.compile("RETURN localtime({hour: 12, minute: 0, second: 0, nanosecond: \$n}) AS r", mapOf("n" to 645876123)).sql
             assertTrue("('\\1.' || " in made && "'FM000')" in made, "$name: $made")
             assertTrue(Temporals.SUB_MICRO.replace("'", "''") in made, "$name, the range: $made")
             val truncated = compiler.compile("MATCH (n) RETURN localtime.truncate('second', n.t) AS r", emptyMap()).sql
