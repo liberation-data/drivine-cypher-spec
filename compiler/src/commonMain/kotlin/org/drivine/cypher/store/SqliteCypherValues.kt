@@ -94,7 +94,8 @@ object SqliteCypherValues {
 
     /**
      * `a + b`, as Cypher adds two values: numbers summed, a whole number where both are; lists joined, or an item put at a
-     * list's end or start; a text and a text or a number written one after the other. Null for any other two.
+     * list's end or start; a text and a text, a number or a truth value written one after the other, as Neo4j writes
+     * `'a' + true` (liberation-data/drivine-cypher-spec#341). Null for any other two.
      */
     fun add(a: JsonNode, b: JsonNode): JsonNode? = when {
         isNumeric(a) && isNumeric(b) ->
@@ -106,7 +107,8 @@ object SqliteCypherValues {
             }
         a.isArray -> JsonNodeFactory.instance.arrayNode().addAll(a.toList()).apply { if (b.isArray) addAll(b.toList()) else add(b) }
         b.isArray -> JsonNodeFactory.instance.arrayNode().add(a).addAll(b.toList())
-        (a.isTextual || isNumeric(a)) && (b.isTextual || isNumeric(b)) -> JsonNodeFactory.instance.textNode(text(a) + text(b))
+        (a.isTextual || isNumeric(a) || a.isBoolean) && (b.isTextual || isNumeric(b) || b.isBoolean) && (a.isTextual || b.isTextual) ->
+            JsonNodeFactory.instance.textNode(text(a) + text(b))
         else -> null
     }
 
@@ -156,7 +158,7 @@ object SqliteCypherValues {
     /** [node], a number, as a double: NaN for [NAN]. */
     private fun double(node: JsonNode) = if (isNaN(node)) Double.NaN else node.doubleValue()
 
-    /** The text [node], a text or a number, is put together with another as: NaN and an infinity as Java writes them. */
+    /** The text [node], a text, a number or a truth value, is put together with another as: NaN and an infinity as Java writes them. */
     private fun text(node: JsonNode) = if (isNaN(node)) "NaN" else node.asText()
 
     /**

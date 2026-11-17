@@ -179,6 +179,13 @@ abstract class SqlStoreDdl(val name: String, final override val engine: String, 
      */
     val lock = "${name}_lock${ValueLayout.LAYOUT}"
 
+    /**
+     * The table a migration of the graph to this layout keeps its checkpoint in, while it runs
+     * ([org.drivine.cypher.store.migrate.LayoutMigrator]): only a migration makes it, and it is dropped when the migration is
+     * done, so a graph that has it is part way through one, which [org.drivine.cypher.store.marker.StoreLayout.verdict] refuses.
+     */
+    val migrate = "${name}_migrate${ValueLayout.LAYOUT}"
+
     /** The row of [lock] an executor locks to make a schema change. */
     val lockRow = LOCK_ROW
 

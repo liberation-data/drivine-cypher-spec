@@ -1350,10 +1350,21 @@ abstract class SqlCypherCompiler(
     protected fun itemRank(json: String): String = "COALESCE(${kindOrder(json)}, 6)"
 
     /**
-     * `a + b` of the JSON values [a] and [b]: numbers added, lists joined, texts put together. [given] is what the statement
-     * gives each as, where it does, or [MadeText] where it makes it a text without giving it: see [summedText].
+     * `a + b` of the JSON values [a] and [b]: numbers added, lists joined, texts put together, and with [truths] a truth value
+     * and a text too ([textSummed]). [given] is what the statement gives each as, where it does, or [MadeText] where it makes it
+     * a text without giving it: see [summedText].
      */
-    protected abstract fun add(a: String, b: String, given: Pair<Any?, Any?> = null to null): String
+    protected abstract fun add(a: String, b: String, given: Pair<Any?, Any?> = null to null, truths: Boolean = false): String
+
+    /**
+     * Whether `+` of two JSON values whose kinds are [x] and [y] (`number`, `string`, `boolean` …) puts them together as text: a
+     * text beside a text, a number or a truth value, as Neo4j writes `'a' + true` (liberation-data/drivine-cypher-spec#341),
+     * where a truth value beside a text gave null: where [truths], as [add] is told where a side may be one beside a side that
+     * may be a text. Each kind is read once, as before; without [truths], the SQL is as it was.
+     */
+    protected fun textSummed(x: String, y: String, truths: Boolean) =
+        if (truths) "$x || '+' || $y IN ('string+string', 'string+number', 'number+string', 'string+boolean', 'boolean+string')"
+        else "$x IN ('string', 'number') AND $y IN ('string', 'number')"
 
     /** A side of a `+` the statement makes a text, or null, though it does not give it: see [Value.Json.text]. */
     protected object MadeText
@@ -5194,6 +5205,31 @@ abstract class SqlCypherCompiler(
             }
         }
 
+        /**
+         * Refuses [binary], a `+` of [left] and [right], where the statement makes, writes or binds one a truth value (a
+         * condition among them, or a parameter given one: [givenKind]) and the other a number, a truth value, a map or a temporal
+         * value, or one a map and the other a number: Neo4j refuses it when it plans the statement, where the SQL gave null
+         * (liberation-data/drivine-cypher-spec#341). A truth value is put together with a text or a list, as Neo4j gives
+         * `'a' + true` and `[1] + true`. A side whose kind is left open is compiled as before: a truth value read as the
+         * statement runs beside such a value still gives null, where Neo4j fails as it runs.
+         */
+        private fun sumOfKind(binary: Expression.Binary, left: Value, right: Value, scope: Map<String, Value>) {
+            fun kind(value: Value, written: Expression): Value.Known? = if (value is Value.Bool) Value.Known.BOOLEAN else givenKind(written, scope)
+            fun noun(value: Value, written: Expression): String? =
+                if ((value as? Value.Json)?.temporal != null) "a temporal value"
+                else kind(value, written)?.takeIf { it != Value.Known.TEXT && it != Value.Known.LIST }?.noun
+            val sides = listOf(left to binary.left, right to binary.right)
+            val numbers = setOf(Value.Known.INTEGER, Value.Known.FLOAT)
+            for ((side, other) in listOf(sides[0] to sides[1], sides[1] to sides[0])) {
+                val against = noun(other.first, other.second) ?: continue
+                when (kind(side.first, side.second)) {
+                    Value.Known.BOOLEAN -> throw CompilerException("+ of a truth value takes a text or a list, not $against, as in Neo4j.")
+                    Value.Known.MAP -> if (kind(other.first, other.second) in numbers) throw CompilerException("+ of a map takes a map or a list, not $against, as in Neo4j.")
+                    else -> {}
+                }
+            }
+        }
+
         /** Refuses [expression], an operand of [operator], where its kind is known ([knownKind]) to be other than a truth value, as Neo4j refuses it. */
         private fun requireCondition(expression: Expression, scope: Map<String, Value>, operator: String) {
             val kind = knownKind(expression, scope) ?: return
@@ -5361,6 +5397,15 @@ abstract class SqlCypherCompiler(
          */
         private fun kindOf(values: List<Pair<Expression, Value>>): Temporal? =
             values.filter { (written, _) -> written != Expression.Literal(null) }.map { (_, value) -> (value as? Value.Json)?.temporal }.distinct().singleOrNull()
+
+        /**
+         * Whether [value], given as [given] where the statement gives it, is known to be neither a text nor a truth value: a
+         * number, a list, a map, a temporal value, a node or a relationship. Beside such a side, a `+` puts no truth value
+         * together with a text, so [add] need not read for one (see [textSummed]).
+         */
+        private fun untexted(value: Value, given: Any?): Boolean =
+            given is Number || given is List<*> || given is Map<*, *> || isList(value) || value is Value.Node || value is Value.Relationship ||
+                (value as? Value.Json)?.let { it.temporal != null || it.known in setOf(Value.Known.INTEGER, Value.Known.FLOAT, Value.Known.LIST, Value.Known.MAP) } == true
 
         /** Whether the statement makes [value] a list: see [Value.Json.list]. */
         private fun isList(value: Value): Boolean = value is Value.Entities || (value as? Value.Json)?.list == true
@@ -6224,6 +6269,7 @@ abstract class SqlCypherCompiler(
                 }
             }
             val (left, right) = compared(expression(binary.left, scope), expression(binary.right, scope), binary)
+            if (binary.operator == Operator.ADD) sumOfKind(binary, left, right, scope)
             temporalBinary(binary.operator, left, right, binary.left, binary.right)?.let { return it }
             val a = comparable(json(left))
             val b = comparable(json(right))
@@ -6271,10 +6317,11 @@ abstract class SqlCypherCompiler(
                     // is written as its own text; a text put together with a text, or a number given, is a text.
                     val (givenLeft, givenRight) = given(binary.left) to given(binary.right)
                     val (textLeft, textRight) = (isText(left) || givenLeft is String) to (isText(right) || givenRight is String)
+                    val truths = !(textLeft && textRight) && !untexted(left, givenLeft) && !untexted(right, givenRight)
                     Value.Json(
                         sharedSum(a, b) { (x, y) ->
                             val given = (givenLeft ?: MadeText.takeIf { textLeft }) to (givenRight ?: MadeText.takeIf { textRight })
-                            temporalRefused(binary, left, right, x, y) { addTagged(x, left, y, right, textLeft, textRight) { p, q -> add(p, q, given) } }
+                            temporalRefused(binary, left, right, x, y) { addTagged(x, left, y, right, textLeft, textRight) { p, q -> add(p, q, given, truths) } }
                         },
                         items = itemsOf(left)?.takeIf { it == itemsOf(right) }, itemItems = itemItemsOf(left)?.takeIf { it == itemItemsOf(right) },
                         temporals = hasTemporals(left) || hasTemporals(right),

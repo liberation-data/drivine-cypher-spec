@@ -14,6 +14,7 @@ import org.drivine.cypher.store.ddl.OracleDdl
 import org.drivine.cypher.store.ddl.PostgresDdl
 import org.drivine.cypher.store.ddl.SqliteDdl
 import org.drivine.cypher.store.marker.StoreLayout
+import org.drivine.cypher.store.migrate.LayoutMigration
 
 /**
  * The store layout's questions for a host with no Kotlin types, asked of the JSON entry ([CompileJson]) as a request
@@ -36,7 +37,9 @@ import org.drivine.cypher.store.marker.StoreLayout
  *   Answered `{"verdict": "current"}`, `{"verdict": "stamp", "drops": [<statement>, …], "assign": false, "parameters": {…}}`:
  *   run the drops, then the restamp with the parameters, or where `assign`, the stamp's `assignIfAbsent` with its own
  *   parameters, as the graph has no stamp to give the layout, then read the stamps, list the objects again, and ask again; or
- *   `{"verdict": "refuse", "message": "…"}`.
+ *   `{"verdict": "refuse", "message": "…"}`, with `"from": 1` where the graph holds values of that earlier layout, which a
+ *   migration moves to this one (`migrate`, [MigrateJson]), and `"inProgress": true` where it holds a migration's
+ *   checkpoint, which the migration resumes.
  * - `{"write": <a value>, "store": "postgres" | "oracle" | "sqlite"}`: the value as that store's layout holds it, [StoreValues.text]
  *   (liberation-data/drivine-cypher-spec#107, #329), the text a compiled statement that writes binds it as: each temporal value,
  *   given as a request's parameter gives one (`{"$temporal": "DATE", "text": "2024-01-01"}`, its kind as
@@ -49,6 +52,14 @@ import org.drivine.cypher.store.marker.StoreLayout
  *   whole number past 2^53 exactly. The store is required: a graph engine's (`neo4j`) is an error. Answered
  *   `{"value": <the text, as it is>}`, so a host that writes its parameters, its save plan or a node's properties in layout 2
  *   writes them as the other libraries do, with no writer of its own.
+ * - `{"rewrite": "<a row's JSON text>", "store": "postgres" | "oracle" | "sqlite", "labels": ["Person"], "declarations":
+ *   [{"label": "Person", "property": "born", "kind": "date"}]}`: [LayoutMigration.rewrite] of a layout-1 node's or
+ *   relationship's properties, as the store gives their text (Oracle's `JSON_SERIALIZE(props EXTENDED)`), for a node of
+ *   the labels (a relationship's type, for one), each declared property's value made of its kind (a temporal kind's word,
+ *   `float` or `bytes`). Answered `{"value": <the text layout 2 holds, as it is>, "changed": true, "changes": [{"property":
+ *   "born", "change": "temporal"}, …], "invalid": [{"property": …, "kind": …, "value": <its JSON text>, "message": …}, …]}`;
+ *   a row to write where `changed`. Declarations that give one label's property two kinds are an error, with
+ *   [LayoutMigration.refusal]'s message. See `migrate.yaml`.
  * - `{"expand": "<a statement of store.yaml's>"}`: [GeneratedFunctions.expand], each marker of a generated function in it
  *   (`<TemporalArithmeticFunction.postgres(drivine)>`) written out as the module makes it, as a runner of `store.yaml` reads
  *   the statements it compares. Answered `{"text": "…"}`.
@@ -57,7 +68,7 @@ import org.drivine.cypher.store.marker.StoreLayout
 internal object LayoutJson {
 
     /** The request kinds this answers, each the key a request gives in place of `cypher`. */
-    val KINDS = listOf("read", "temporalKey", "layout", "expand", "write")
+    val KINDS = listOf("read", "temporalKey", "layout", "expand", "write", "rewrite")
 
     /** The answer to [tree], a request that gives one of [KINDS]. */
     fun answer(tree: ObjectNode): String = try {
@@ -66,6 +77,7 @@ internal object LayoutJson {
             tree.has("temporalKey") -> temporalKey(tree["temporalKey"])
             tree.has("expand") -> expand(tree["expand"])
             tree.has("write") -> write(tree["write"], tree["store"])
+            tree.has("rewrite") -> rewrite(tree)
             else -> layout(tree["layout"])
         }
     } catch (e: Exception) {
@@ -98,6 +110,34 @@ internal object LayoutJson {
         temporalsOfTheirKind(value)
         // The text the store holds, spliced in as it is: a float's fraction, an infinity's 9e999 and Oracle's extended doubles kept.
         return "{\"value\":${StoreValues.text(value, of)}}"
+    }
+
+    private fun rewrite(tree: ObjectNode): String {
+        val props = tree["rewrite"]?.takeIf { it.isTextual }?.textValue()
+            ?: throw IllegalArgumentException("A rewrite request gives the row as its JSON text.")
+        val named = tree["store"]?.textValue() ?: throw IllegalArgumentException("A rewrite request gives the store: $STORES.")
+        val store = Store.of(named) ?: throw IllegalArgumentException("A rewrite request gives the store as $STORES, not $named.")
+        val labels = (tree["labels"] as? ArrayNode ?: throw IllegalArgumentException("A rewrite request gives the labels as a list."))
+            .map { it.textValue() ?: throw IllegalArgumentException("A rewrite request's label is a text.") }
+        val declarations = when (val given = tree["declarations"]?.takeUnless { it.isNull }) {
+            null -> emptyList()
+            is ArrayNode -> given.map { row ->
+                fun text(key: String) = row[key]?.textValue() ?: throw IllegalArgumentException("A rewrite request's declaration gives its $key as a text.")
+                val word = text("kind")
+                val kind = LayoutMigration.Kind.of(word)
+                    ?: throw IllegalArgumentException("No kind $word to declare: ${LayoutMigration.Kind.entries.joinToString { it.word }}.")
+                LayoutMigration.Declaration(text("label"), text("property"), kind)
+            }
+            else -> throw IllegalArgumentException("A rewrite request gives the declarations as a list.")
+        }
+        LayoutMigration.refusal(declarations)?.let { throw IllegalArgumentException(it) }
+        val done = LayoutMigration.rewrite(props, store, labels, declarations)
+        fun json(value: Any?) = CypherJson.writeValueAsString(CypherJson.valueToTree(value))
+        val changes = done.changes.joinToString(",", "[", "]") { "{\"property\":${json(it.property)},\"change\":${json(it.change.word)}}" }
+        val invalid = done.invalid.joinToString(",", "[", "]") {
+            "{\"property\":${json(it.property)},\"kind\":${json(it.kind.word)},\"value\":${json(it.value)},\"message\":${json(it.message)}}"
+        }
+        return "{\"value\":${done.props},\"changed\":${done.changed},\"changes\":$changes,\"invalid\":$invalid}"
     }
 
     /** The stores a write request names, as a statement's request names them. */
@@ -172,7 +212,8 @@ internal object LayoutJson {
             is StoreLayout.Verdict.Stamp ->
                 "{\"verdict\":\"stamp\",\"drops\":${CypherJson.writeValueAsString(CypherJson.valueToTree(verdict.drops))},\"assign\":${verdict.assign}," +
                     "\"parameters\":${CypherJson.writeValueAsString(CypherJson.valueToTree(verdict.parameters))}}"
-            is StoreLayout.Verdict.Refuse -> "{\"verdict\":\"refuse\",\"message\":${CypherJson.writeValueAsString(CypherJson.valueToTree(verdict.message))}}"
+            is StoreLayout.Verdict.Refuse -> "{\"verdict\":\"refuse\",\"message\":${CypherJson.writeValueAsString(CypherJson.valueToTree(verdict.message))}" +
+                (verdict.from?.let { ",\"from\":$it" } ?: "") + (if (verdict.inProgress) ",\"inProgress\":true" else "") + "}"
         }
     }
 
