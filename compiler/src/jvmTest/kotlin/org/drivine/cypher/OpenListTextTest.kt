@@ -57,10 +57,10 @@ class OpenListTextTest {
 
     @Test
     fun `a value known to be no list, or an item of a list of none, is compiled with no read of a list`() {
-        val parameters = mapOf("m" to mapOf("n" to 1), "l" to listOf(1, 2))
+        val parameters = mapOf("m" to mapOf("n" to 1), "l" to listOf(1, 2), "k" to listOf(1, null))
         listOf(
             "RETURN toString([1, 2][0])", "RETURN toString(head([1, 2]))", "RETURN toString(last(['a', null]))",
-            "WITH [1, 2] AS l RETURN toString(l[0])", "RETURN toString(coalesce(\$m.n, 1))", "RETURN toString(\$l[0])", "RETURN toString(head(\$l))",
+            "WITH [1, 2] AS l RETURN toString(l[0])", "RETURN toString(coalesce(\$m.n, 1))", "RETURN toString(\$l[0])", "RETURN toString(head(\$l))", "RETURN toString(last(\$k))",
         ).forEach { cypher ->
             val sql = SqliteCypherCompiler("g").compile(cypher, parameters).sql
             assertFalse("#301" in sql, "$cypher: $sql")
