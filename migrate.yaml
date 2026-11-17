@@ -42,7 +42,7 @@ rewrites:
         result: '{"$$t":1,"$$$x":"a","a$":2}'
         changes: [{property: "$t", change: "escapedKey"}, {property: "$$x", change: "escapedKey"}]
   - name: "A map's key that begins with $"
-    description: "A key of a map in a property's value is held with one more $ too, at any depth, so the row is to be written."
+    description: "A key of a map in a property's value is held with one more $ too, at any depth, so the row is to be written; on Oracle a map of one such key, which is none of extended JSON's, too."
     labels: ["Person"]
     declarations: []
     stores:
@@ -50,6 +50,10 @@ rewrites:
         props: '{"m": {"a": 2, "$k": {"$j": 1}}}'
         result: '{"m":{"a":2,"$$k":{"$$j":1}}}'
         changes: [{property: "m", change: "escapedKey"}]
+      oracle:
+        props: '{"m":{"$k":{"$j":1},"a":2},"n":{"$k":1}}'
+        result: '{"m":{"$$k":{"$$j":1},"a":2},"n":{"$$k":1}}'
+        changes: [{property: "m", change: "escapedKey"}, {property: "n", change: "escapedKey"}]
       sqlite:
         props: '{"m":{"$k":{"$j":1},"a":2}}'
         result: '{"m":{"$$k":{"$$j":1},"a":2}}'
