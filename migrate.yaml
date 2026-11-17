@@ -151,7 +151,7 @@ rewrites:
           - {property: "i", kind: "datetime", value: '"1900-01-01T00:00+00:09:21[Europe/Paris]"', message: "'1900-01-01T00:00+00:09:21[Europe/Paris]' has the offset with seconds +00:09:21, which layout 2 can't hold."}
           - {property: "j", kind: "datetime", value: '"1900-01-01T00:00:00+00:09:21"', message: "'1900-01-01T00:00:00+00:09:21' has the offset with seconds +00:09:21, which layout 2 can't hold."}
   - name: "A property declared a float"
-    description: "A whole number is made a float, and a float stays one; NaN and the infinities, which layout 1's saves wrote as texts, are made floats where the store holds them, and are kept as texts, named, where it doesn't: Postgres holds none of them, SQLite no NaN."
+    description: "A whole number is made a float, and a float stays one; NaN and the infinities, which layout 1's saves wrote as texts, are made floats where the store holds them, and are kept as texts, named, where it doesn't: Postgres holds none of them, SQLite no NaN. On Oracle a binary double, NaN too, already is one, and is changed in nothing."
     labels: ["Reading"]
     declarations:
       - {label: "Reading", property: "w", kind: "float"}
@@ -159,6 +159,8 @@ rewrites:
       - {label: "Reading", property: "nan", kind: "float"}
       - {label: "Reading", property: "inf", kind: "float"}
       - {label: "Reading", property: "ninf", kind: "float"}
+      - {label: "Reading", property: "dnan", kind: "float"}
+      - {label: "Reading", property: "d", kind: "float"}
     stores:
       postgres:
         props: '{"f": 1.5, "w": 2, "inf": "Infinity", "nan": "NaN", "ninf": "-Infinity"}'
@@ -169,8 +171,8 @@ rewrites:
           - {property: "nan", kind: "float", value: '"NaN"', message: "A statement that writes is given NaN or an infinity, which Postgres's `jsonb` holds as no number: it would store another value in its place."}
           - {property: "ninf", kind: "float", value: '"-Infinity"', message: "A statement that writes is given NaN or an infinity, which Postgres's `jsonb` holds as no number: it would store another value in its place."}
       oracle:
-        props: '{"w":2,"f":1.5,"nan":"NaN","inf":"Infinity","ninf":"-Infinity"}'
-        result: '{"w":{"$numberDouble":"2.0"},"f":{"$numberDouble":"1.5"},"nan":{"$numberDouble":"NaN"},"inf":{"$numberDouble":"Infinity"},"ninf":{"$numberDouble":"-Infinity"}}'
+        props: '{"w":2,"f":1.5,"nan":"NaN","inf":"Infinity","ninf":"-Infinity","dnan":{"$numberDouble":"NaN"},"d":{"$numberDouble":"1.5"}}'
+        result: '{"w":{"$numberDouble":"2.0"},"f":{"$numberDouble":"1.5"},"nan":{"$numberDouble":"NaN"},"inf":{"$numberDouble":"Infinity"},"ninf":{"$numberDouble":"-Infinity"},"dnan":{"$numberDouble":"NaN"},"d":{"$numberDouble":"1.5"}}'
         changes: [{property: "w", change: "float"}, {property: "f", change: "double"}, {property: "nan", change: "float"}, {property: "inf", change: "float"}, {property: "ninf", change: "float"}]
       sqlite:
         props: '{"w":2,"f":1.5,"nan":"NaN","inf":"Infinity","ninf":"-Infinity"}'
