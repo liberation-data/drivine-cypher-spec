@@ -117,10 +117,10 @@ internal class VariableKinds(private val aggregates: (Expression) -> Boolean) {
      * a `CREATE` or a `MERGE` may name a variable bound already, as Neo4j takes it there. [kept] stay in scope after each
      * `WITH` that does not name them, as what a `CALL`'s brackets import does, and a subquery's variables from outside it.
      * Those of an `EXISTS { … }` or a `COUNT { … }`, [returning], bind with their `RETURN`'s aliases too; and an `UNWIND` binds
-     * none of [declared], what a `CALL { … }`'s leading `WITH` imports, while it is in scope (see [redeclared]).
+     * no variable in scope again (see [redeclared]).
      */
     private fun clauses(
-        clauses: List<Clause>, scope: Scope, foreach: Boolean = false, kept: Map<String, Kind> = emptyMap(), returning: Boolean = false, declared: Set<String> = emptySet(),
+        clauses: List<Clause>, scope: Scope, foreach: Boolean = false, kept: Map<String, Kind> = emptyMap(), returning: Boolean = false,
     ): Map<String, Kind> {
         var current = scope
         var returned = emptyMap<String, Kind>()
@@ -134,7 +134,7 @@ internal class VariableKinds(private val aggregates: (Expression) -> Boolean) {
                     expression(clause.list, current)
                     valued(clause.list, condition = false)
                     rebinding(clause.variable, current.shadowing)
-                    if (clause.variable in declared && current[clause.variable] != null && clause.variable !in current.dropped) throw redeclared(clause.variable)
+                    if (clause.variable !in current.shadowing && current[clause.variable] != null && clause.variable !in current.dropped) throw redeclared(clause.variable)
                     current[clause.variable] = Kind.ANY
                 }
                 is Clause.With -> {
@@ -215,7 +215,7 @@ internal class VariableKinds(private val aggregates: (Expression) -> Boolean) {
             val bracketed = call.imports != null || call.importsAll
             if (bracketed) shadowing += imported - dropped
             val outer = LinkedHashSet(scope.outer).apply { addAll(scope.shadowing) }
-            clauses(clauses, Scope(inner, dropped, shadowing, scope.horizon, hidden, outer), kept = if (bracketed) inner.filterKeys { it !in dropped } else emptyMap(), declared = if (bracketed) emptySet() else imported)
+            clauses(clauses, Scope(inner, dropped, shadowing, scope.horizon, hidden, outer), kept = if (bracketed) inner.filterKeys { it !in dropped } else emptyMap())
         }
         return parts.first().mapValues { (name, kind) -> if (parts.all { it[name] == kind }) kind else Kind.ANY }
     }
@@ -359,13 +359,14 @@ internal class VariableKinds(private val aggregates: (Expression) -> Boolean) {
     }
 
     /**
-     * [variable], which a `CALL { … }`'s leading `WITH` imports, `CALL { WITH m1 UNWIND ['u'] AS m1 … }`, bound again by an
-     * `UNWIND` while it is in scope: Neo4j has it declared in the subquery's own scope, as a variable of the top is, and
-     * refuses it as declared already (its 42N59, "Variable `m1` already declared"), not as shadowing (drivine4j#819). A
-     * `WITH`'s alias projects it anew there, as Neo4j takes it.
+     * [variable] bound again by an `UNWIND` while it is in scope, `MATCH (m1) UNWIND ['u'] AS m1`, after a `WITH` that passes
+     * it on, or where a `CALL { … }`'s leading `WITH` imports it, `CALL { WITH m1 UNWIND ['u'] AS m1 … }`, which Neo4j has
+     * declared in the subquery's own scope, as at the top: Neo4j refuses it as declared already (its 42N59, "Variable `m1`
+     * already declared"), where the compiler gave the `UNWIND`'s value for it (drivine4j#819). One from outside a subquery is
+     * refused as shadowing instead (see [rebinding]); a `WITH`'s alias projects it anew, as Neo4j takes it.
      */
     private fun redeclared(variable: String) =
-        CompilerException("Variable `$variable` already declared, as in Neo4j: the leading WITH of a CALL { … } imports it, so an UNWIND binds it not again. Rename it.")
+        CompilerException("Variable `$variable` already declared, as in Neo4j: an UNWIND binds no variable in scope again. Rename it.")
 
     /**
      * Within a property a `CREATE` or a `MERGE` makes ([making]), the first binding again [rebinding] finds, held until

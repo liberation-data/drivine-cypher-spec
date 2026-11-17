@@ -5344,6 +5344,26 @@ cases:
         rows: [["The Matrix", 3], ["The Matrix Reloaded", 3]]
   # rebinding.yaml's cells, to here.
 
+  - name: "Rebinding a variable a CALL { … }'s leading WITH imports"
+    description: "A name a CALL { … }'s leading WITH imports, WITH m1 or WITH *, is declared in the subquery's own scope, as at the top: a WITH's alias projects it anew, a CALL within may import it, and a pattern reads it, as Neo4j 2026.10.1 gives them; an UNWIND that binds it again is refused (see refusals.yaml, \"Rebinding a variable from outside a subquery refused: after a WITH passes it on, and beyond the table\") (drivine4j#819)."
+    steps:
+      - cypher: "MATCH (m1:Movie) CALL { WITH * WITH 'w' AS m1 RETURN m1 AS y } RETURN y"
+        only: [neo4j, sql]
+        rows: ["w", "w", "w"]
+      - cypher: "MATCH (m1:Movie) CALL { WITH * WITH m1.title AS m1 RETURN m1 AS y } RETURN y ORDER BY y"
+        only: [neo4j, sql]
+        rows: ["Johnny Mnemonic", "The Matrix", "The Matrix Reloaded"]
+      - cypher: "MATCH (m1:Movie) CALL { WITH m1 WITH 'w' AS m1 RETURN m1 AS y } RETURN y"
+        only: [neo4j, sql]
+        rows: ["w", "w", "w"]
+      - cypher: "MATCH (m1:Movie) CALL { WITH m1 CALL (m1) { RETURN 'x' AS z } RETURN z AS y } RETURN y"
+        only: [neo4j, sql]
+        rows: ["x", "x", "x"]
+      - note: "No movie has a relationship to itself."
+        cypher: "MATCH (m1:Movie) CALL { WITH m1 MATCH (m1)-[]->(m1) RETURN m1 AS y } RETURN y"
+        only: [neo4j, sql]
+        rows: []
+
   - name: "A CALL in the order of a RETURN that groups or is DISTINCT, and CALL (*) where a projection groups"
     description: "The same places as refusals.yaml's \"A CALL in the order of a RETURN that groups or is DISTINCT, and CALL (*) where a projection groups\" that Neo4j gives rows for: a CALL (*) there that reads nothing the projection can't, a CALL whose brackets name an item, a projection that groups within the subquery, whose own items a CALL within reads, a comprehension's, a quantifier's, a reduce()'s or a pattern comprehension's own variable that a CALL names, a subquery's own variable that a CALL in a subquery within it names, in its WHERE or its items, a procedure's CALL whose WHERE reads a subquery's own variable, a subquery in an aggregate of the order, which reads what is bound before the projection, and one in the order or the WHERE of a WITH within the subquery, which reads what is in scope there; and, Neo4j's alone, a variable a WITH within the subquery drops, read in its WHERE (drivine4j#681, #426, #504)."
     steps:
