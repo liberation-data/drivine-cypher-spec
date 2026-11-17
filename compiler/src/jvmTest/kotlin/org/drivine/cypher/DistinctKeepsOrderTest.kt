@@ -94,6 +94,14 @@ class DistinctKeepsOrderTest {
             "$ordered WITH DISTINCT [i % 37, {a: i % 2}] AS k RETURN k",
             "UNWIND [3, 1, 3, 2] AS x WITH DISTINCT * RETURN x",
             "MATCH (n) WITH n ORDER BY n.x WITH DISTINCT n RETURN n",
+            // A FOREACH or a MERGE writes for the rows in their order, as a CREATE does.
+            "$ordered WITH DISTINCT i % 37 AS k FOREACH (x IN [k] | CREATE (:N {x: x}))",
+            "$ordered WITH DISTINCT i % 37 AS k MERGE (n:N {k: k})",
+            // A SKIP after a WITH that filters, a collect() in a CASE, a DISTINCT read by another, and a part of a UNION.
+            "$ordered WITH DISTINCT i % 37 AS k WITH k WHERE k > 20 RETURN k SKIP 2",
+            "$ordered WITH DISTINCT i % 37 AS k RETURN CASE WHEN true THEN head(collect(k)) END",
+            "$ordered WITH DISTINCT i % 37 AS k RETURN DISTINCT k % 5 AS m",
+            "$ordered RETURN DISTINCT i % 37 AS k UNION RETURN 99 AS k",
         ).forEach { cypher ->
             compilers.forEach { compiler ->
                 val sql = compiler.compile(cypher).sql
