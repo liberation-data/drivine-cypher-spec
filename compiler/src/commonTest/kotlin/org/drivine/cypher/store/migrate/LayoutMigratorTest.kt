@@ -349,6 +349,19 @@ class LayoutMigratorTest {
     }
 
     @Test
+    fun aValueNotOfItsKindWrittenAfterTheScanIsReportedWithOnlyTheRowsWritten() {
+        // Stopped before the second batch, nodes 3 and 4, is written; then node 4 changed, after node 3, which its batch would rewrite.
+        val store = store()
+        assertNull(migrate(store, MigrationRequest(declarations, batchSize = 2), stopAt = 19))
+        store.rows[Table.NODES]!![4L] = listOf("Person") to """{"born": "soon"}"""
+        val report = migrate(store, MigrationRequest(declarations, batchSize = 2))!!
+        assertEquals(Status.INVALID, report.status, report.message)
+        assertNull(store.rewrites[Table.NODES to 3L], "nothing of node 4's batch written")
+        // The report counts the first batch, which was written, and nothing of node 4's, which wasn't.
+        assertEquals(MigrationReport.Counted(2, 1), report.tables["nodes"])
+    }
+
+    @Test
     fun aFailedActionEndsTheMigrationWithTheStoresMessage() {
         val migrator = LayoutMigrator(ddl)
         val first = migrator.start(MigrationRequest(declarations)) as MigrationStep.Run

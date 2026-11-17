@@ -201,8 +201,8 @@ class LayoutMigrator(private val ddl: SqlStoreDdl) {
         for (row in rows.map { it.toRow() }) {
             val done = LayoutMigration.rewrite(row.props, statements.store, row.labels, state.request.declarations)
             if (done.invalid.isNotEmpty() && !state.request.keepInvalid) {
-                // A value the scan didn't find: the graph was written to since. Nothing of this batch is written.
-                return MigrationStep.Done(report.ended(Status.INVALID,
+                // A value the scan didn't find: the graph was written to since. Nothing of this batch is written, nor counted.
+                return MigrationStep.Done(state.report.ended(Status.INVALID,
                     "The graph '${ddl.name}' holds a value of row ${row.id} not of its declared kind, which the scan before the writes didn't find: it was written to during the migration. Nothing of that row's batch was written: correct it, and resume the migration once nothing else writes to the graph."))
             }
             if (done.changed) writes += MigrationAction.Execute(statements.update(table), linkedMapOf("id" to row.id, "props" to done.props), purpose = "rewrite")
@@ -269,7 +269,11 @@ sealed interface MigrationAction {
     /** [statements] run in one transaction, all of them or none: a batch's rewrites, the values it keeps, and its checkpoint. */
     data class Transaction(val statements: List<Execute>) : MigrationAction
 
-    /** The store's tables made as this layout makes them: the library's `prepare` of the store's stamp (`ensuring`, or `ddl`), run as at a first connection, without the verdict. */
+    /**
+     * The store's tables made as this layout makes them, all of what a first connection runs to make them: Postgres's and
+     * Oracle's `ensuring`, and every statement of SQLite's `ddl` (not only the stamp's `prepare`, which on SQLite makes the
+     * node table alone), run without the verdict, which would refuse the graph.
+     */
     data object Prepare : MigrationAction
 
     /** [statement] run on a connection of the library's own, in a transaction it holds open until the migration is done, so its row lock is held to the end. */
