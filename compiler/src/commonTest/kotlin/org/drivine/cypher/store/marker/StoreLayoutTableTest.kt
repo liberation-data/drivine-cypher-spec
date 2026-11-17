@@ -37,7 +37,7 @@ class StoreLayoutTableTest {
         data object Current : Expected
         data class Stamp(val drops: Boolean, val assign: Boolean) : Expected
         /** Refused with a message that [says] this, and, where a migration moves the graph, the layout it is [from]. */
-        data class Refuse(val says: String, val from: Int? = null) : Expected
+        data class Refuse(val says: String, val from: Int? = null, val inProgress: Boolean = false) : Expected
     }
 
     /** A graph the verdict is asked of. */
@@ -55,7 +55,7 @@ class StoreLayoutTableTest {
         "1 stamps of two layouts" to { g -> if (g.stamps == Stamps.MIXED || (g.stamps == Stamps.MIXED_EARLIER && g.sql)) Expected.Refuse("two versions of Drivine stamped it") else null },
         "2 a later layout's stamp" to { g -> if (g.laterStamp) Expected.Refuse("by a later version of Drivine") else null },
         "3 a later layout's objects" to { g -> if (g.known(Object.LATER) || g.known(Object.LATER_LOCK)) Expected.Refuse("by a later version of Drivine") else null },
-        "4 a migration's checkpoint" to { g -> if (g.known(Object.MIGRATING)) Expected.Refuse("part way through a migration to store layout 2") else null },
+        "4 a migration's checkpoint" to { g -> if (g.known(Object.MIGRATING)) Expected.Refuse("part way through a migration to store layout 2", inProgress = true) else null },
         "5 this layout's stamp" to { g -> if (g.stamped && !g.earlierStamp) Expected.Current else null },
         "6 an earlier stamp, no values" to { g -> if (g.earlierStamp && g.sql && !g.values) Expected.Stamp(drops = g.known(Object.OLD), assign = false) else null },
         "7 an earlier stamp, values" to { g -> if (g.earlierStamp && g.sql) Expected.Refuse("Reload it", from = 1) else null },
@@ -136,7 +136,7 @@ class StoreLayoutTableTest {
             val ok = when (expected) {
                 Expected.Current -> got == StoreLayout.Verdict.Current
                 is Expected.Stamp -> got is StoreLayout.Verdict.Stamp && got.assign == expected.assign && got.drops.isNotEmpty() == expected.drops
-                is Expected.Refuse -> got is StoreLayout.Verdict.Refuse && got.message.contains(expected.says) && got.from == expected.from
+                is Expected.Refuse -> got is StoreLayout.Verdict.Refuse && got.message.contains(expected.says) && got.from == expected.from && got.inProgress == expected.inProgress
             }
             if (!ok) wrong += "$g, row $row: expected $expected, got $got"
         }

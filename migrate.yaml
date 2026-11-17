@@ -79,6 +79,9 @@ declarationRefusals:
   - name: "One label's property declared two kinds"
     declarations: [{label: "Person", property: "born", kind: "date"}, {label: "Person", property: "born", kind: "datetime"}]
     refusal: "The property born of Person is declared date and datetime: declare one kind."
+  - name: "Drivine's own label declared"
+    declarations: [{label: "_DrivineSchema", property: "version", kind: "float"}]
+    refusal: "_DrivineSchema is Drivine's own label, whose properties take no declaration: a migration keeps them as they are."
 rewrites:
   - name: "A row with nothing to change"
     description: "Texts, integers, truth values and lists of them, with no property declared: held alike in both layouts."

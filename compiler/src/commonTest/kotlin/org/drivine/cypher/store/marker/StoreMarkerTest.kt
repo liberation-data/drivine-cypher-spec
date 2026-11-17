@@ -245,7 +245,7 @@ class StoreMarkerTest {
                     assertEquals(StoreStamp.restampParameters(StoreStamp.engine(ddl)), stamp.parameters, "$name: the re-stamp's parameters")
                     assertEquals(expected["stamp"]!!["assign"]?.booleanValue() ?: false, stamp.assign, "$name: whether it is stamped anew")
                 }
-                else -> assertEquals(StoreLayout.Verdict.Refuse(expected["refuse"]!!.textValue()!!, expected["from"]?.longValue()?.toInt()), verdict, name)
+                else -> assertEquals(StoreLayout.Verdict.Refuse(expected["refuse"]!!.textValue()!!, expected["from"]?.longValue()?.toInt(), expected["inProgress"]?.booleanValue() ?: false), verdict, name)
             }
             checked++
         }

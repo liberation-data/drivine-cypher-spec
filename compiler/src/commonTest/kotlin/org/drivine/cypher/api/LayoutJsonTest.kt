@@ -56,6 +56,7 @@ class LayoutJsonTest {
                     assertEquals("refuse", got["verdict"]?.textValue(), "on $target, $name: $got")
                     assertEquals(expected["refuse"]!!.textValue(), got["message"]?.textValue(), "on $target, $name")
                     assertEquals(expected["from"]?.longValue(), got["from"]?.longValue(), "on $target, $name: the layout a migration moves it from")
+                    assertEquals(expected["inProgress"]?.booleanValue() ?: false, got["inProgress"]?.booleanValue() ?: false, "on $target, $name: part way through a migration")
                 }
             }
             checked++

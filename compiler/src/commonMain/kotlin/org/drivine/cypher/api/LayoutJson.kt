@@ -38,7 +38,8 @@ import org.drivine.cypher.store.migrate.LayoutMigration
  *   run the drops, then the restamp with the parameters, or where `assign`, the stamp's `assignIfAbsent` with its own
  *   parameters, as the graph has no stamp to give the layout, then read the stamps, list the objects again, and ask again; or
  *   `{"verdict": "refuse", "message": "…"}`, with `"from": 1` where the graph holds values of that earlier layout, which a
- *   migration moves to this one (`migrate`, [MigrateJson]).
+ *   migration moves to this one (`migrate`, [MigrateJson]), and `"inProgress": true` where it holds a migration's
+ *   checkpoint, which the migration resumes.
  * - `{"write": <a value>, "store": "postgres" | "oracle" | "sqlite"}`: the value as that store's layout holds it, [StoreValues.text]
  *   (liberation-data/drivine-cypher-spec#107, #329), the text a compiled statement that writes binds it as: each temporal value,
  *   given as a request's parameter gives one (`{"$temporal": "DATE", "text": "2024-01-01"}`, its kind as
@@ -212,7 +213,7 @@ internal object LayoutJson {
                 "{\"verdict\":\"stamp\",\"drops\":${CypherJson.writeValueAsString(CypherJson.valueToTree(verdict.drops))},\"assign\":${verdict.assign}," +
                     "\"parameters\":${CypherJson.writeValueAsString(CypherJson.valueToTree(verdict.parameters))}}"
             is StoreLayout.Verdict.Refuse -> "{\"verdict\":\"refuse\",\"message\":${CypherJson.writeValueAsString(CypherJson.valueToTree(verdict.message))}" +
-                (verdict.from?.let { ",\"from\":$it" } ?: "") + "}"
+                (verdict.from?.let { ",\"from\":$it" } ?: "") + (if (verdict.inProgress) ",\"inProgress\":true" else "") + "}"
         }
     }
 

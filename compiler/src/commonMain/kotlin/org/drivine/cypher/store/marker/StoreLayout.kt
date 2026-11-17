@@ -75,9 +75,10 @@ object StoreLayout {
         /**
          * The graph is not to be used: throw [message]. Where [from] is given, the graph holds values of that earlier layout,
          * which a migration moves to this one ([org.drivine.cypher.store.migrate.LayoutMigrator]); a library that doesn't
-         * migrate throws the message alike.
+         * migrate throws the message alike. [inProgress] where the graph holds a migration's checkpoint (row 4), which the
+         * migration resumes.
          */
-        data class Refuse(val message: String, val from: Int? = null) : Verdict
+        data class Refuse(val message: String, val from: Int? = null, val inProgress: Boolean = false) : Verdict
     }
 
     /** The layout this module holds values in on the store whose stamp names [engine] (`POSTGRES`, `NEO4J` …): see [StoreStamp.engine]. */
@@ -135,6 +136,7 @@ object StoreLayout {
             migrating -> Verdict.Refuse(
                 "The graph '$graph' on $store is part way through a migration to store layout $own, which holds some of its values in its earlier layout: " +
                     "resume the migration, with the same declarations, to finish it; see the upgrade notes.",
+                inProgress = true,
             )
             stamped == own -> Verdict.Current
             stamped != null && engine in SQL_ENGINES && !foreignNodes -> Verdict.Stamp(sql?.let { drops(it, objects) }.orEmpty(), StoreStamp.restampParameters(engine))

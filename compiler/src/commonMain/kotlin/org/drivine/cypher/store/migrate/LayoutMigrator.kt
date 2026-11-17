@@ -98,11 +98,13 @@ class LayoutMigrator(private val ddl: SqlStoreDdl) {
         val objects = rows(outcomes[2]).map { map(it) }
         val fingerprint = fingerprint(rows(outcomes[3]), rows(outcomes[4]))
         val judged = state.copy(fingerprint = fingerprint)
-        if (objects.any { (it["name"] as? String).equals(ddl.migrate, ignoreCase = true) }) {
+        val verdict = StoreLayout.verdict(engine, ddl.name, stampRows, foreign, objects, ddl)
+        // A checkpoint is resumed, but a graph a later Drivine wrote, or two stamped at once, is refused first, as the verdict's rows order them.
+        if (verdict is StoreLayout.Verdict.Refuse && verdict.inProgress) {
             if (state.request.dryRun) return MigrationStep.Done(state.report.ended(Status.IN_PROGRESS, IN_PROGRESS))
-            return run(judged.copy(phase = Phase.RESUME), *lockAnd(MigrationAction.Query(statements.readCheckpoint, purpose = "checkpoint")))
+            return run(judged.copy(phase = Phase.RESUME, locked = true), *lockAnd(MigrationAction.Query(statements.readCheckpoint, purpose = "checkpoint")))
         }
-        return when (val verdict = StoreLayout.verdict(engine, ddl.name, stampRows, foreign, objects, ddl)) {
+        return when (verdict) {
             StoreLayout.Verdict.Current -> MigrationStep.Done(state.report.ended(Status.CURRENT, "The graph is in store layout ${LayoutMigration.TO}: there is nothing to migrate."))
             is StoreLayout.Verdict.Stamp -> MigrationStep.Done(state.report.ended(Status.EMPTY, "The graph holds no values: a first connection stamps it layout ${LayoutMigration.TO}, with nothing to migrate."))
             is StoreLayout.Verdict.Refuse ->
@@ -153,19 +155,21 @@ class LayoutMigrator(private val ddl: SqlStoreDdl) {
             scannedAll.invalidCount > 0 && !state.request.keepInvalid -> MigrationStep.Done(scannedAll.ended(Status.INVALID, invalidMessage(scannedAll)))
             state.request.dryRun -> MigrationStep.Done(scannedAll.ended(Status.DRY_RUN, "A dry run: nothing was written."))
             else -> run(
-                next.copy(phase = Phase.BEGIN, table = Table.NODES, after = 0, report = scannedAll.copy(tables = emptyMap())),
+                next.copy(phase = Phase.BEGIN, table = Table.NODES, after = 0, report = scannedAll.copy(tables = emptyMap()), locked = true),
                 MigrationAction.Prepare,
+                // A migration begun again from its scan, its checkpoint table made and nothing written, holds the lock already.
                 *lockAnd(
                     MigrationAction.Execute(statements.createCheckpoint, purpose = "checkpoint"),
                     MigrationAction.Query(statements.readCheckpoint, purpose = "checkpoint"),
+                    held = state.locked,
                 ),
             )
         }
     }
 
-    /** The lock's action, where the store takes one, before [actions]. */
-    private fun lockAnd(vararg actions: MigrationAction): Array<MigrationAction> =
-        (listOfNotNull(statements.lock?.let { MigrationAction.Lock(it) }) + actions).toTypedArray()
+    /** The lock's action, where the store takes one and the migration doesn't hold it already ([held]), before [actions]. */
+    private fun lockAnd(vararg actions: MigrationAction, held: Boolean = false): Array<MigrationAction> =
+        (listOfNotNull(statements.lock?.takeUnless { held }?.let { MigrationAction.Lock(it) }) + actions).toTypedArray()
 
     private fun begun(state: MigrationState, rows: List<Any?>): MigrationStep {
         // Read under the lock: another migration's checkpoint is there where two began at once, and it is resumed, not begun again.
@@ -317,7 +321,8 @@ enum class Phase { JUDGE, RESUME, SCAN, BEGIN, WRITE, FINAL }
 
 /**
  * Where a migration has got to: the [request], the [phase], the [table] and the id [after] which the next batch is read, the
- * [fingerprint] of the graph as the migration found it, and the [report] so far. A plain value, written as JSON by [toJson]
+ * [fingerprint] of the graph as the migration found it, the [report] so far, and whether the migration has taken its lock
+ * ([MigrationAction.Lock], taken once: a second, from another connection, would wait on the first). A plain value, written as JSON by [toJson]
  * and read back by [fromJson], so a library holds it between rounds as it likes.
  */
 @DrivineInternalApi
@@ -328,6 +333,7 @@ data class MigrationState(
     val after: Long,
     val fingerprint: String?,
     val report: MigrationReport,
+    val locked: Boolean = false,
 ) {
     fun toJson(): String = PlanJson.writePlain(linkedMapOf(
         "request" to linkedMapOf(
@@ -335,7 +341,7 @@ data class MigrationState(
             "batchSize" to request.batchSize, "dryRun" to request.dryRun, "keepInvalid" to request.keepInvalid,
         ),
         "phase" to phase.name.lowercase(), "table" to table?.word, "after" to after, "fingerprint" to fingerprint,
-        "report" to report.toMap(),
+        "report" to report.toMap(), "locked" to locked,
     ))
 
     companion object {
@@ -349,7 +355,7 @@ data class MigrationState(
                 ),
                 Phase.valueOf(tree["phase"]!!.textValue()!!.uppercase()),
                 tableOf(tree["table"]), tree["after"]!!.longValue(), tree["fingerprint"]?.textValue(),
-                MigrationReport.of(tree["report"] as ObjectNode),
+                MigrationReport.of(tree["report"] as ObjectNode), tree["locked"]?.booleanValue() ?: false,
             )
         }
     }

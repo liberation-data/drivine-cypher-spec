@@ -819,7 +819,7 @@ storeLayout:
         - {name: "drivine_ix_personname_1a2b3c4d", type: "INDEX"}
         - {name: "drivine_lock2", type: "TABLE"}
         - {name: "drivine_migrate2", type: "TABLE"}
-      verdict: {refuse: "The graph 'drivine' on Postgres is part way through a migration to store layout 2, which holds some of its values in its earlier layout: resume the migration, with the same declarations, to finish it; see the upgrade notes."}
+      verdict: {refuse: "The graph 'drivine' on Postgres is part way through a migration to store layout 2, which holds some of its values in its earlier layout: resume the migration, with the same declarations, to finish it; see the upgrade notes.", inProgress: true}
     - name: "Part way through a migration, stamped this layout"
       # Stamped layout 2 before its checkpoint is dropped: still refused, until the migration is resumed and drops it.
       store: "sqlite"
@@ -828,7 +828,7 @@ storeLayout:
       objects:
         - {name: "drivine_lock2", type: "TABLE"}
         - {name: "drivine_migrate2", type: "TABLE"}
-      verdict: {refuse: "The graph 'drivine' on SQLite is part way through a migration to store layout 2, which holds some of its values in its earlier layout: resume the migration, with the same declarations, to finish it; see the upgrade notes."}
+      verdict: {refuse: "The graph 'drivine' on SQLite is part way through a migration to store layout 2, which holds some of its values in its earlier layout: resume the migration, with the same declarations, to finish it; see the upgrade notes.", inProgress: true}
   firstConnection:
     - name: "An earlier layout's graph holding values, with no stamp: refused before anything is made"
       store: "postgres"
