@@ -5756,9 +5756,15 @@ abstract class SqlCypherCompiler(
                 binary.operator == Operator.ADD && (isText(value) || isList(value) || given(written).let { it is String || it is List<*> })
             }
             val tested = open.zip(besideTextOrList).map { (maybe, beside) -> maybe && !beside }
-            // A truth value read beside a number fails the statement by name, tested at that side alone: see [truthRead].
-            val truth = listOf(x, y).zip(truths).filter { it.second }.joinToString("") { (json, _) ->
-                "WHEN ${isTruth(json)} THEN ${failed(textFailure(TRUTH_ARITHMETIC, literal(OPERATOR_WORDS.getValue(binary.operator))))} "
+            // A truth value read beside a number fails the statement by name, tested at that side alone: see [truthRead]. Beside a
+            // number the statement makes rather than gives, which may be null (`CASE WHEN c THEN 1 END`, `toFloat(n.x)`), only where
+            // that isn't null: a truth value beside null is null, as in Neo4j.
+            val others = listOf(y to binary.right, x to binary.left)
+            val truth = listOf(x, y).zip(truths).withIndex().filter { it.value.second }.joinToString("") { (i, side) ->
+                val (other, written) = others[i]
+                val negated = (written as? Expression.Unary)?.takeIf { it.operator == Expression.Unary.Operator.NEGATE }?.operand
+                val present = if (given(written) is Number || negated?.let(::given) is Number) "" else " AND NOT ${isJsonNull(other)}"
+                "WHEN ${isTruth(side.first)}$present THEN ${failed(textFailure(TRUTH_ARITHMETIC, literal(OPERATOR_WORDS.getValue(binary.operator))))} "
             }
             if (tested.none { it }) return if (truth.isEmpty()) arithmetic() else "CASE ${truth}ELSE ${arithmetic()} END"
             val tag = listOf(x, y).zip(open).map { (json, maybe) -> if (maybe) "${tagKind(json)} IS NOT NULL" else "FALSE" }

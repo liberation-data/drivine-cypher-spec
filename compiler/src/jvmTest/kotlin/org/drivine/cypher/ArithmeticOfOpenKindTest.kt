@@ -99,6 +99,11 @@ class ArithmeticOfOpenKindTest {
         assertEquals("2, 2.5, \"a1\", [2,1], null", sqlite("UNWIND \$l AS b RETURN b + 1", mapOf("l" to listOf(1, 1.5, "a", listOf(2), null))))
         assertEquals("0, null", sqlite("UNWIND \$l AS b RETURN b - 1", mapOf("l" to listOf(1, null))))
         assertEquals("null", sqlite("UNWIND [null] AS b RETURN b + 1"))
+        // A number the statement makes may be null as it runs, and a truth value beside null is null, as in Neo4j.
+        for (cypher in listOf("UNWIND \$l AS b RETURN b + CASE WHEN false THEN 1 END", "UNWIND \$l AS b RETURN b - toFloat(null)", "UNWIND \$l AS b RETURN 2 * (1 + round(null)) * b")) {
+            assertEquals("null", sqlite(cypher, mapOf("l" to listOf(true))), cypher)
+        }
+        assertContains(sqlite("UNWIND \$l AS b RETURN b + CASE WHEN true THEN 1 END", mapOf("l" to listOf(true))), "$failure +")
         // Put together with a text or a list, as #341 has it, and beside a value of open kind, null as before.
         assertEquals("[\"truea\",[true,1]]", sqlite("UNWIND \$l AS b RETURN [b + 'a', b + [1]]", mapOf("l" to listOf(true))))
         assertEquals("null", sqlite("UNWIND \$l AS b UNWIND \$l AS c RETURN b + c", mapOf("l" to listOf(true))))
