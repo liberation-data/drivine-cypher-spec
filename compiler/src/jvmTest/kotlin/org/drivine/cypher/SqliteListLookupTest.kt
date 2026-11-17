@@ -1,6 +1,10 @@
 package org.drivine.cypher
 
+import org.drivine.cypher.json.ArrayNode
+import org.drivine.cypher.json.CypherJson
 import org.drivine.cypher.sql.SqliteCypherCompiler
+import org.drivine.cypher.sql.Temporal
+import org.drivine.cypher.store.ValueLayout
 import org.drivine.cypher.store.ddl.DdlStatement
 import org.drivine.cypher.store.ddl.SqliteDdl
 import org.drivine.schema.RangeIndexSpec
@@ -90,6 +94,28 @@ class SqliteListLookupTest {
             assertTrue("X''" !in sql, "$cypher\n$sql")
             val plan = c.plan(sql)
             assertTrue(plan.any { Regex("""SEARCH n\d USING INDEX g_ix2_CyListid_\w+ \(<expr>=\? AND <expr>=\?\)""").matches(it) }, "$cypher\n$plan")
+        }
+    }
+
+    @Test
+    fun `a list of temporal values, a list of lists and the empty list are found by an equal list`() = store().use { c ->
+        c.createStatement().use { s ->
+            // A date as the store holds one, its tag with its sort key.
+            val date = CypherJson.writeValueAsString(ArrayNode().apply { add(ValueLayout.tag(Temporal.DATE, "2024-01-02")) })
+            s.execute("INSERT INTO g_node (labels, props) VALUES ('[\"CyList\"]', json_object('id', json('$date'), 'k', 8))")
+            s.execute("""INSERT INTO g_node (labels, props) VALUES ('["CyList"]', '{"id":[[1.0],[2,3.50]],"k":9}')""")
+            s.execute("""INSERT INTO g_node (labels, props) VALUES ('["CyList"]', '{"id":[],"k":40}')""")
+        }
+        listOf(
+            "WITH [date('2024-01-02')] AS v MATCH (a:CyList {id: v}) RETURN a.k" to listOf("8"),
+            "WITH [date('2024-01-03')] AS v MATCH (a:CyList {id: v}) RETURN a.k" to emptyList(),
+            "MATCH (x:CyList {k: 8}) MATCH (a:CyList {id: x.id}) RETURN a.k" to listOf("8"),
+            "WITH [[1], [2.0, 3.5]] AS v MATCH (a:CyList {id: v}) RETURN a.k" to listOf("9"),
+            "WITH [] AS v MATCH (a:CyList {id: v}) RETURN a.k" to listOf("40"),
+            "WITH [null] AS v MATCH (a:CyList {id: v}) RETURN a.k" to emptyList(),
+        ).forEach { (cypher, expected) ->
+            val sql = sql(cypher)
+            assertEquals(expected, c.rows(sql), "$cypher\n$sql")
         }
     }
 
