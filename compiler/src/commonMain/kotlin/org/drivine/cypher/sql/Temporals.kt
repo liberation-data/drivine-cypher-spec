@@ -290,12 +290,14 @@ class Temporals(
         LITERAL.matchEntire(text)?.let { quoted ->
             if (!SUB_MICRO_REGEX.containsMatchIn(quoted.groupValues[1].replace("''", "'"))) return written(converted(text))
         }
+        // The converted text is written once, the fraction chosen in its replacement: where the text's isn't past the
+        // microsecond, the converted text's own (`\2`, empty where it has none), so it is as converted. A choice made around
+        // the converted text wrote it twice where nothing binds it, as in a walk's sort term, so a statement of many
+        // conversions outgrew SQLite's limit (#338).
         return shared(listOf(text)) { (o) ->
-            shared(listOf(converted(o))) { (c) ->
-                val fraction = sql.group(o, literal(sql.regex("([.][0-9]+)")), 1)
-                val kept = sql.replace(c, literal(sql.regex(SECONDS)), "('\\1' || $fraction)")
-                "CASE WHEN ${sql.matches(o, literal(sql.regex(SUB_MICRO_DIGITS)))} THEN $kept ELSE $c END"
-            }
+            val fraction = sql.group(o, literal(sql.regex("([.][0-9]+)")), 1)
+            val chosen = "CASE WHEN ${sql.matches(o, literal(sql.regex(SUB_MICRO_DIGITS)))} THEN $fraction ELSE '\\2' END"
+            sql.replace(converted(o), literal(sql.regex(SECONDS)), "('\\1' || $chosen)")
         }
     }
 

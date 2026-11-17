@@ -1228,6 +1228,21 @@ cases:
       - only: [sql]
         cypher: "MATCH (n:CyTemporal {id: 'ns2'}) RETURN n.g + duration('PT1S')"
         error: true
+      - note: "Stored, and converted to each kind: a fraction past the microsecond kept beside an offset or none, and a fraction of six digits, three or none as the converted text writes it (#302, #338)."
+        only: [neo4j, sql]
+        cypher: "CREATE (:CyTemporal {id: 'ns3', a: datetime('2024-01-01T10:30:00.123456789+10:00'), b: localdatetime('2024-01-01T10:30:00.000000001'), c: time('10:30:00.123456789-05:30'), d: localdatetime('2024-01-01T10:30:00'), e: datetime('2024-01-01T10:30:00.123456-05:30'), f: localtime('10:30:00.123'), g: datetime('2024-01-01T10:30:00Z')})"
+      - only: [neo4j, sql]
+        cypher: "MATCH (n:CyTemporal {id: 'ns3'}) RETURN [toString(datetime(n.a)), toString(localdatetime(n.a)), toString(time(n.a)), toString(localtime(n.a)), toString(date(n.a))]"
+        rows: [["2024-01-01T10:30:00.123456789+10:00", "2024-01-01T10:30:00.123456789", "10:30:00.123456789+10:00", "10:30:00.123456789", "2024-01-01"]]
+      - only: [neo4j, sql]
+        cypher: "MATCH (n:CyTemporal {id: 'ns3'}) RETURN [toString(datetime(n.b)), toString(localdatetime(n.b)), toString(time(n.b)), toString(localtime(n.b)), toString(time(n.c)), toString(localtime(n.c))]"
+        rows: [["2024-01-01T10:30:00.000000001Z", "2024-01-01T10:30:00.000000001", "10:30:00.000000001Z", "10:30:00.000000001", "10:30:00.123456789-05:30", "10:30:00.123456789"]]
+      - only: [neo4j, sql]
+        cypher: "MATCH (n:CyTemporal {id: 'ns3'}) RETURN [toString(datetime(n.d)), toString(time(n.d)), toString(localtime(n.d)), toString(datetime(n.g)), toString(localdatetime(n.g)), toString(time(n.g)), toString(localtime(n.g))]"
+        rows: [["2024-01-01T10:30:00Z", "10:30:00Z", "10:30:00", "2024-01-01T10:30:00Z", "2024-01-01T10:30:00", "10:30:00Z", "10:30:00"]]
+      - only: [neo4j, sql]
+        cypher: "MATCH (n:CyTemporal {id: 'ns3'}) RETURN [toString(datetime(n.e)), toString(localdatetime(n.e)), toString(time(n.e)), toString(localtime(n.e)), toString(time(n.f)), toString(localtime(n.f))]"
+        rows: [["2024-01-01T10:30:00.123456-05:30", "2024-01-01T10:30:00.123456", "10:30:00.123456-05:30", "10:30:00.123456", "10:30:00.123Z", "10:30:00.123"]]
 
   - name: "A sum or an average of durations, or of other kinds"
     description: "Neo4j's sum() and avg() take integers, floats and durations, and pass nulls by: a duration's they work out, and any other kind fails. The SQL stores' sum adds numbers alone, so it gave 0, and the average null, for any other item (#281). Now each fails by name there: a duration as not yet worked out (#282), any other kind as Neo4j fails it. Where the statement makes the items, it fails as it compiles; where it reads one from the store or is given it, as it runs."
