@@ -125,16 +125,22 @@ rewrites:
       - {label: "Person", property: "c", kind: "datetime"}
       - {label: "Person", property: "d", kind: "date"}
       - {label: "Person", property: "e", kind: "date"}
+      - {label: "Person", property: "f", kind: "float"}
+      - {label: "Person", property: "g", kind: "duration"}
+      - {label: "Person", property: "h", kind: "date"}
     stores:
       sqlite:
-        props: '{"a":"yesterday","b":"2024-03-15T10:30","c":"2024-03-15T10:30[Europe/Paris]","d":42,"e":["2024-03-15","soon"]}'
-        result: '{"a":"yesterday","b":"2024-03-15T10:30","c":"2024-03-15T10:30[Europe/Paris]","d":42,"e":["2024-03-15","soon"]}'
+        props: '{"a":"yesterday","b":"2024-03-15T10:30","c":"2024-03-15T10:30[Europe/Paris]","d":42,"e":["2024-03-15","soon"],"f":"many","g":"2024-03-15","h":"2024-02-30"}'
+        result: '{"a":"yesterday","b":"2024-03-15T10:30","c":"2024-03-15T10:30[Europe/Paris]","d":42,"e":["2024-03-15","soon"],"f":"many","g":"2024-03-15","h":"2024-02-30"}'
         invalid:
           - {property: "a", kind: "date", value: '"yesterday"', message: "'yesterday' is no date."}
           - {property: "b", kind: "date", value: '"2024-03-15T10:30"', message: "'2024-03-15T10:30' is a localdatetime, not a date."}
           - {property: "c", kind: "datetime", value: '"2024-03-15T10:30[Europe/Paris]"', message: "'2024-03-15T10:30[Europe/Paris]' names a zone without its offset, which layout 2 can't hold: give the offset, as in 2024-03-15T10:30+01:00."}
           - {property: "d", kind: "date", value: '42', message: "42 is no text, so no date."}
           - {property: "e", kind: "date", value: '["2024-03-15","soon"]', message: "'soon' is no date."}
+          - {property: "f", kind: "float", value: '"many"', message: "\"many\" is no number, so no float."}
+          - {property: "g", kind: "duration", value: '"2024-03-15"', message: "'2024-03-15' is no duration."}
+          - {property: "h", kind: "date", value: '"2024-02-30"', message: "'2024-02-30' is no date: Text '2024-02-30' could not be parsed: Invalid date 'FEBRUARY 30'"}
   - name: "A property declared a float"
     description: "A whole number is made a float, and a float stays one; NaN and the infinities, which layout 1's saves wrote as texts, are made floats where the store holds them, and are kept as texts, named, where it doesn't: Postgres holds none of them, SQLite no NaN."
     labels: ["Reading"]
@@ -177,20 +183,26 @@ rewrites:
         result: '{"l":[1.5,2.0]}'
         changes: [{property: "l", change: "float"}]
   - name: "A property declared bytes"
-    description: "Base64 text and a list of unsigned bytes are each the list of their signed values, as layout 2 and the graph engines hold bytes; a list of signed bytes already is one."
+    description: "Base64 text and a list of unsigned bytes are each the list of their signed values, as layout 2 and the graph engines hold bytes; a list of signed bytes already is one. Text of no base64, a list with an item that is no byte (past 255, or no whole number), and a value of neither are kept as they were, and named."
     labels: ["File"]
     declarations:
       - {label: "File", property: "a", kind: "bytes"}
       - {label: "File", property: "b", kind: "bytes"}
       - {label: "File", property: "c", kind: "bytes"}
       - {label: "File", property: "d", kind: "bytes"}
+      - {label: "File", property: "e", kind: "bytes"}
+      - {label: "File", property: "f", kind: "bytes"}
+      - {label: "File", property: "g", kind: "bytes"}
     stores:
       postgres:
-        props: '{"a": "AQL/", "b": [1, 2, 255], "c": [1, 2, -1], "d": "!!"}'
-        result: '{"a":[1,2,-1],"b":[1,2,-1],"c":[1,2,-1],"d":"!!"}'
+        props: '{"a": "AQL/", "b": [1, 2, 255], "c": [1, 2, -1], "d": "!!", "e": [1, 256], "f": [1, 1.5], "g": 7}'
+        result: '{"a":[1,2,-1],"b":[1,2,-1],"c":[1,2,-1],"d":"!!","e":[1,256],"f":[1,1.5],"g":7}'
         changes: [{property: "a", change: "bytes"}, {property: "b", change: "bytes"}]
         invalid:
           - {property: "d", kind: "bytes", value: '"!!"', message: "'!!' is no base64 text, so no bytes."}
+          - {property: "e", kind: "bytes", value: '[1,256]', message: "[1,256] holds 256, which is no byte."}
+          - {property: "f", kind: "bytes", value: '[1,1.5]', message: "[1,1.5] holds 1.5, which is no byte."}
+          - {property: "g", kind: "bytes", value: '7', message: "7 is no base64 text or list of bytes."}
   - name: "A node of two labels that declare one property two kinds"
     description: "Its value can't be told: it is kept as it was, and named."
     labels: ["Person", "Robot"]
