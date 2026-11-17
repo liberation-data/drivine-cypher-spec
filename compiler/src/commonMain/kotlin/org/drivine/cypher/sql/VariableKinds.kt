@@ -336,7 +336,28 @@ internal class VariableKinds(private val aggregates: (Expression) -> Boolean) {
      * pattern's, which reads the one from outside, are not refused, as Neo4j takes them.
      */
     private fun rebinding(variable: String, outside: Set<String>) {
-        if (variable in outside) throw CompilerException("The variable $variable is shadowing a variable with the same name from the outer scope, as in Neo4j: rename it.")
+        if (variable !in outside) return
+        val refused = CompilerException("The variable $variable is shadowing a variable with the same name from the outer scope, as in Neo4j: rename it.")
+        if (!making) throw refused
+        shadowed = shadowed ?: refused
+    }
+
+    /**
+     * Within a property a `CREATE` or a `MERGE` makes ([making]), the first binding again [rebinding] finds, held until
+     * [madeHere] has looked: Neo4j refuses a subquery there that binds a variable the same clause makes for that (its 42I58),
+     * `CREATE (a), (m {f: COUNT { UNWIND [1] AS a RETURN a }})`, before as one shadowing it (its 42N07).
+     */
+    private var shadowed: CompilerException? = null
+    private var making = false
+
+    /** [properties] a `CREATE` or a `MERGE` makes, read over [scope] as any expression is, but a binding again held in [shadowed]. */
+    private fun madeExpression(properties: Expression, scope: Scope) {
+        making = true
+        try {
+            expression(properties, scope)
+        } finally {
+            making = false
+        }
     }
 
     /** [variable] where a pattern binds it as [kind]: bound so, or used so where it is bound already as that kind. */
@@ -373,8 +394,9 @@ internal class VariableKinds(private val aggregates: (Expression) -> Boolean) {
         val clause = if (merging) "MERGE" else "CREATE"
         pattern.nodes.forEach { node ->
             node.properties?.let {
-                expression(it, scope)
+                madeExpression(it, scope)
                 madeHere(it, own, clause)
+                shadowed?.let { shadowed = null; throw it }
                 if (pattern.relationships.isEmpty() && !foreach) declared(it, before)
                 valued(it, condition = false)
                 properties(it, scope)
@@ -396,8 +418,9 @@ internal class VariableKinds(private val aggregates: (Expression) -> Boolean) {
         }
         pattern.relationships.forEach { relationship ->
             relationship.properties?.let {
-                expression(it, scope)
+                madeExpression(it, scope)
                 madeHere(it, own, clause)
+                shadowed?.let { shadowed = null; throw it }
                 valued(it, condition = false)
                 properties(it, scope)
             }
