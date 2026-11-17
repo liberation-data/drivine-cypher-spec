@@ -164,7 +164,10 @@ class SchemaPlannerTest {
         val listing = PlanAction.Query(sqlite.listIndexesQuery(SchemaItemKind.RANGE_INDEX), purpose = Purpose.LISTING)
         val first = assertIs<PlanStep.Run>(planner.start(request(Operation.Item(ItemCall.ENSURE, name)), 1))
         assertEquals(listOf(listing), first.actions)
-        val second = assertIs<PlanStep.Run>(planner.resume(first.state, listOf(PlanOutcome.Rows(emptyList())), 2))
+        // With no range index listed, the constraints are read: a uniqueness constraint over the property would serve it (#325).
+        val constraints = assertIs<PlanStep.Run>(planner.resume(first.state, listOf(PlanOutcome.Rows(emptyList())), 2))
+        assertEquals(listOf(PlanAction.Query(sqlite.listConstraintsQuery(), purpose = Purpose.LISTING)), constraints.actions)
+        val second = assertIs<PlanStep.Run>(planner.resume(constraints.state, listOf(PlanOutcome.Rows(emptyList())), 2))
         assertEquals(sqlite.createIndex(name).map { PlanAction.Execute(it, purpose = Purpose.DDL) } + listing, second.actions)
         val made = mapOf("kind" to "RANGE_INDEX", "label" to "Person", "properties" to listOf("name"), "name" to "Person_name_range", "details" to emptyMap<String, Any?>())
         val outcomes = second.actions.dropLast(1).map { PlanOutcome.Ran } + PlanOutcome.Rows(listOf(made))

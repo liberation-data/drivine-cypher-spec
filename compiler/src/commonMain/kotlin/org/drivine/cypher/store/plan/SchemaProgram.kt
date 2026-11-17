@@ -567,6 +567,7 @@ internal class SchemaProgram(
         // Another item under a name Drivine gives this one's objects: never taken as made, and never made over.
         if (form is ItemForm.Mismatch) return mismatched(spec, existing, form)
         if (existing == null) {
+            servedByConstraint(spec)?.let { return EnsureResult.AlreadyMatching(it) }
             // A related item (of the kind and label, not the spec's) lets a store with an index a label (FalkorDB) make
             // only the properties missing.
             val related = items.firstOrNull { it.kind == spec.kind && it.label == spec.label }
@@ -602,6 +603,22 @@ internal class SchemaProgram(
         }
     }
 
+    /**
+     * The uniqueness constraint's index that serves [spec], a range index over one property, where the store keeps such a
+     * constraint as a unique index a lookup reads but lists it apart from its range indexes
+     * ([StoreSchema.uniquenessConstraintsServeRangeIndexes]): as the range index, owned by the constraint, so none is made
+     * beside it and a drop leaves it (liberation-data/drivine-cypher-spec#325). Null where there is none, or its build failed.
+     */
+    private fun servedByConstraint(spec: IndexSpec): SchemaItemInfo? {
+        if (spec.kind != SchemaItemKind.RANGE_INDEX || spec.properties.size != 1 || !store.uniquenessConstraintsServeRangeIndexes) return null
+        val constraint = constraints().firstOrNull {
+            it.kind == SchemaItemKind.UNIQUENESS_CONSTRAINT && it.label == spec.label && it.properties == spec.properties && !it.buildFailed
+        } ?: return null
+        val owner = constraint.name ?: "the uniqueness constraint on ${spec.label}${spec.properties}"
+        log(LogLevel.INFO, INDEX_MANAGER, "Range index on ${spec.label}${spec.properties} is served by $owner's index: nothing made beside it")
+        return SchemaItemInfo(kind = spec.kind, label = spec.label, properties = spec.properties, name = constraint.name, owningConstraint = owner)
+    }
+
     /** `IndexManager.find`: the index [spec] is, as the store lists it. */
     private fun findIndex(spec: IndexSpec, poll: Long? = null): SchemaItemInfo? {
         requireSupported(spec)
@@ -612,7 +629,22 @@ internal class SchemaProgram(
     /** `IndexManager.drop`. */
     private fun dropIndex(spec: IndexSpec): Boolean {
         val existing = findIndex(spec) ?: return false
+        if (leftToConstraint(existing, spec, "dropped")) return false
         dropExisting(existing, spec.made())
+        return true
+    }
+
+    /**
+     * Whether [existing], the index [spec] is, is a constraint's own ([SchemaItemInfo.owningConstraint]), which the store
+     * refuses to drop apart from it (Neo4j: "Index belongs to constraint"): so it is left, and said so, as [what] (dropped or
+     * recreated) it isn't (liberation-data/drivine-cypher-spec#325).
+     */
+    private fun leftToConstraint(existing: SchemaItemInfo, spec: IndexSpec, what: String): Boolean {
+        val owner = existing.owningConstraint ?: return false
+        log(
+            LogLevel.INFO, INDEX_MANAGER,
+            "Range index on ${spec.label}${spec.properties} is the index of constraint $owner, so it is not $what: drop the constraint to drop it",
+        )
         return true
     }
 
@@ -629,6 +661,7 @@ internal class SchemaProgram(
         // its name is gone the listing leaves the record out, and it is still to be forgotten, and written again in this
         // version's form.
         val found = findIndex(spec)
+        if (found != null && leftToConstraint(found, spec, "recreated")) return EnsureResult.AlreadyMatching(found)
         val aliases = if (found != null) aliasesOfIndex(spec) else emptyList()
         val cleared = clearMismatched(spec, found) { findIndex(spec) }
         cleared.drift?.let { return it }

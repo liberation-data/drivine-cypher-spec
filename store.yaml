@@ -1539,24 +1539,24 @@ catalog:
       indexes:
         VECTOR_INDEX: |-
           SHOW INDEXES
-          YIELD name, type, entityType, labelsOrTypes, properties, options
-          RETURN {name: name, type: type, entityType: entityType, labelsOrTypes: labelsOrTypes, properties: properties, options: options}
+          YIELD name, type, entityType, labelsOrTypes, properties, options, owningConstraint
+          RETURN {name: name, type: type, entityType: entityType, labelsOrTypes: labelsOrTypes, properties: properties, options: options, owningConstraint: owningConstraint}
         RANGE_INDEX: |-
           SHOW INDEXES
-          YIELD name, type, entityType, labelsOrTypes, properties, options
-          RETURN {name: name, type: type, entityType: entityType, labelsOrTypes: labelsOrTypes, properties: properties, options: options}
+          YIELD name, type, entityType, labelsOrTypes, properties, options, owningConstraint
+          RETURN {name: name, type: type, entityType: entityType, labelsOrTypes: labelsOrTypes, properties: properties, options: options, owningConstraint: owningConstraint}
         FULLTEXT_INDEX: |-
           SHOW INDEXES
-          YIELD name, type, entityType, labelsOrTypes, properties, options
-          RETURN {name: name, type: type, entityType: entityType, labelsOrTypes: labelsOrTypes, properties: properties, options: options}
+          YIELD name, type, entityType, labelsOrTypes, properties, options, owningConstraint
+          RETURN {name: name, type: type, entityType: entityType, labelsOrTypes: labelsOrTypes, properties: properties, options: options, owningConstraint: owningConstraint}
         UNIQUENESS_CONSTRAINT: |-
           SHOW INDEXES
-          YIELD name, type, entityType, labelsOrTypes, properties, options
-          RETURN {name: name, type: type, entityType: entityType, labelsOrTypes: labelsOrTypes, properties: properties, options: options}
+          YIELD name, type, entityType, labelsOrTypes, properties, options, owningConstraint
+          RETURN {name: name, type: type, entityType: entityType, labelsOrTypes: labelsOrTypes, properties: properties, options: options, owningConstraint: owningConstraint}
         TEXT_INDEX: |-
           SHOW INDEXES
-          YIELD name, type, entityType, labelsOrTypes, properties, options
-          RETURN {name: name, type: type, entityType: entityType, labelsOrTypes: labelsOrTypes, properties: properties, options: options}
+          YIELD name, type, entityType, labelsOrTypes, properties, options, owningConstraint
+          RETURN {name: name, type: type, entityType: entityType, labelsOrTypes: labelsOrTypes, properties: properties, options: options, owningConstraint: owningConstraint}
       constraints: |-
         SHOW CONSTRAINTS
         YIELD name, type, entityType, labelsOrTypes, properties

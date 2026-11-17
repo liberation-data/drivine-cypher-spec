@@ -25,6 +25,10 @@ import org.drivine.DrivineInternalApi
  * @param analyzer fulltext indexes only: the engine-reported analyzer, or null where the engine
  *   does not surface one (FalkorDB, Memgraph). Null means "unobservable", not "default" — drift is
  *   never reported against an analyzer the engine won't tell us about.
+ * @param owningConstraint the name of the constraint that owns this index, where the engine lists a constraint's own index
+ *   among its indexes (Neo4j's `owningConstraint`), or where a uniqueness constraint's index serves a range index on a
+ *   store that keeps it as the constraint's (Postgres, Oracle, SQLite): such an index is the constraint's, never one a
+ *   drop or a recreate of an index takes (liberation-data/drivine-cypher-spec#325). Null for any other.
  * @param status engine-reported status where applicable (FalkorDB constraints:
  *   `OPERATIONAL` / `UNDER CONSTRUCTION` / `FAILED`; FalkorDB indexes, the status of their label's:
  *   `OPERATIONAL` / `UNDER CONSTRUCTION`)
@@ -41,6 +45,7 @@ data class SchemaItemInfo(
     val quantizationEnabled: Boolean? = null,
     val hnswM: Int? = null,
     val hnswEfConstruction: Int? = null,
+    val owningConstraint: String? = null,
 ) {
 
     /**

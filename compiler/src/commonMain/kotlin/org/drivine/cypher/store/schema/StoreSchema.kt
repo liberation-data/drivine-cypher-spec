@@ -58,6 +58,16 @@ interface StoreSchema {
     val supportsTextIndex: Boolean
         get() = false
 
+    /**
+     * Whether a uniqueness constraint over one property is a unique index over it that a lookup reads, though the store
+     * lists it as the constraint's, not among its range indexes (Postgres, SQLite): a range index over that label and
+     * property is then served by it, and none is made beside it (liberation-data/drivine-cypher-spec#325). False where the
+     * store lists the constraint's index as a range index itself (Neo4j, FalkorDB, Oracle's record of it), or where a
+     * constraint may be no index a lookup reads (Memgraph, until shown).
+     */
+    val uniquenessConstraintsServeRangeIndexes: Boolean
+        get() = false
+
     /** Whether a uniqueness constraint needs an exact-match index over its properties made first (FalkorDB). */
     val constraintsRequireBackingIndex: Boolean
         get() = false

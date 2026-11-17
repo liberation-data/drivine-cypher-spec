@@ -35,6 +35,9 @@ abstract class SqlStoreSchema internal constructor() : StoreSchema {
     abstract override val ddl: SqlStoreDdl
 
     override val supportsIfNotExists = true
+
+    /** A uniqueness constraint is a unique index over its key, under its label, that a lookup reads (see [StoreSchema]). */
+    override val uniquenessConstraintsServeRangeIndexes = true
     override val supportsNamedItems = true
 
     /** Whether a record's `status` is read: Oracle's, which lists a range index `INCOMPLETE`; the others list none. */

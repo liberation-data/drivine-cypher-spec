@@ -402,6 +402,7 @@ class StorePlanTest {
             it.quantizationEnabled?.let { v -> m["quantizationEnabled"] = v }
             it.hnswM?.let { v -> m["hnswM"] = v.toLong() }
             it.hnswEfConstruction?.let { v -> m["hnswEfConstruction"] = v.toLong() }
+            it.owningConstraint?.let { v -> m["owningConstraint"] = v }
         }
     }
 
@@ -466,6 +467,7 @@ class StorePlanTest {
         quantizationEnabled = node["quantizationEnabled"]?.booleanValue(),
         hnswM = node["hnswM"]?.longValue()?.toInt(),
         hnswEfConstruction = node["hnswEfConstruction"]?.longValue()?.toInt(),
+        owningConstraint = node["owningConstraint"]?.textValue(),
     )
 
     private fun cause(node: JsonNode): Cause = Cause(

@@ -81,7 +81,8 @@ class Neo4jSchema(private val elementIdFunction: String = "elementId") : StoreSc
                 name = name,
                 analyzer = indexConfig?.get("fulltext.analyzer") as? String,
             )
-            else -> SchemaItemInfo(kind = kind, label = label, properties = properties, name = name)
+            // A uniqueness constraint's own index is listed as a range index: the constraint's, which a drop leaves (#325).
+            else -> SchemaItemInfo(kind = kind, label = label, properties = properties, name = name, owningConstraint = map["owningConstraint"] as? String)
         }
     }
 
