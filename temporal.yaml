@@ -1945,3 +1945,11 @@ cases:
         cypher: "RETURN date($m)"
         parameters: {m: null}
         rows: [null]
+      - note: "A map read only as the statement runs, an item of a list, fails the statement on the SQL stores, where it gave null."
+        only: [sql]
+        cypher: "WITH collect({hour: 1}) AS l RETURN localtime(l[0])"
+        error: true
+      - only: [sql]
+        cypher: "UNWIND $l AS m RETURN duration(m)"
+        parameters: {l: [{days: 1}]}
+        error: true
