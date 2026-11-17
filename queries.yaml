@@ -609,6 +609,18 @@ cases:
         cypher: "UNWIND range(1, 2000) AS i WITH i ORDER BY (i * 7919) % 2000 WITH DISTINCT i % 37 AS k RETURN count(k), sum(k)"
         only: [neo4j, sql]
         rows: [[37, 666]]
+      - note: "A later sort keeps the order its ties came in. The SQL stores' sorts aren't stable, so their ties lose the earlier order (liberation-data/drivine-cypher-spec#335, post-north-star)."
+        cypher: "UNWIND range(1, 2000) AS i WITH i ORDER BY (i * 7919) % 2000 WITH i ORDER BY i % 3 WITH DISTINCT i % 37 AS k LIMIT 3 RETURN k"
+        except: [memgraph, falkordb, neptune, sql]
+        rows: [14, 26, 1]
+
+  - name: "DISTINCT keeps the order its rows come in"
+    description: "WITH DISTINCT keeps each value where its first row came, in the order the rows come in, and a LIMIT after it keeps the first of them (#316)."
+    steps:
+      - cypher: "UNWIND [{k: 3}, {k: 1}, {k: 2}, {k: 1}] AS m WITH m ORDER BY m.k DESC WITH DISTINCT m.k AS k RETURN collect(k)"
+        rows: [[3, 2, 1]]
+      - cypher: "UNWIND [{k: 3}, {k: 1}, {k: 2}, {k: 1}] AS m WITH m ORDER BY m.k DESC WITH DISTINCT m.k AS k LIMIT 2 RETURN collect(k)"
+        rows: [[3, 2]]
 
   - name: "min and max of mixed kinds"
     description: "min() and max() of mixed kinds of values order them as Cypher does."

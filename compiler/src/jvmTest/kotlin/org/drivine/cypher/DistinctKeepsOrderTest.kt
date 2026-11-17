@@ -56,6 +56,9 @@ class DistinctKeepsOrderTest {
             "$ordered RETURN DISTINCT i % 37 AS k LIMIT 3 UNION ALL $ordered RETURN DISTINCT i % 5 AS k" to "2, 14, 26, 0, 4, 3, 2, 1",
             "UNWIND range(1, 2000) AS i WITH i ORDER BY (i * 7919) % 2000 DESC LIMIT 100 WITH i, 1 AS one WITH DISTINCT i % 37 AS k LIMIT 5 RETURN k" to
                 "25, 13, 1, 26, 14",
+            // "DISTINCT keeps the order its rows come in", a few rows of maps.
+            "UNWIND [{k: 3}, {k: 1}, {k: 2}, {k: 1}] AS m WITH m ORDER BY m.k DESC WITH DISTINCT m.k AS k RETURN collect(k)" to "[3, 2, 1]",
+            "UNWIND [{k: 3}, {k: 1}, {k: 2}, {k: 1}] AS m WITH m ORDER BY m.k DESC WITH DISTINCT m.k AS k LIMIT 2 RETURN collect(k)" to "[3, 2]",
         ).forEach { (cypher, rows) ->
             assertEquals(rows, sqlite(cypher).joinToString(", ") { it.replace(",", ", ") }, cypher)
         }
@@ -102,6 +105,7 @@ class DistinctKeepsOrderTest {
             "$ordered WITH DISTINCT i % 37 AS k RETURN CASE WHEN true THEN head(collect(k)) END",
             "$ordered WITH DISTINCT i % 37 AS k RETURN DISTINCT k % 5 AS m",
             "$ordered RETURN DISTINCT i % 37 AS k UNION RETURN 99 AS k",
+            "UNWIND [{k: 3}, {k: 1}, {k: 2}, {k: 1}] AS m WITH m ORDER BY m.k DESC WITH DISTINCT m.k AS k LIMIT 2 RETURN collect(k)",
         ).forEach { cypher ->
             compilers.forEach { compiler ->
                 val sql = compiler.compile(cypher).sql
