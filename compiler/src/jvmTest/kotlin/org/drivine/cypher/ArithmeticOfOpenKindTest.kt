@@ -122,10 +122,15 @@ class ArithmeticOfOpenKindTest {
     @Test
     fun `each store tests a side read once beside a number and nothing else`() {
         compilers.forEach { compiler ->
-            fun tests(compiler: org.drivine.cypher.sql.SqlCypherCompiler, cypher: String) = compiler.compile(cypher).sql.split(failure).size - 1
+            fun tests(compiler: org.drivine.cypher.sql.SqlCypherCompiler, cypher: String, parameters: Map<String, Any?> = emptyMap()) =
+                compiler.compile(cypher, parameters).sql.split(failure).size - 1
             val name = compiler::class.simpleName
             assertEquals(1, tests(compiler, "MATCH (n) RETURN n.flag + 1"), name)
             assertEquals(1, tests(compiler, "MATCH (n) RETURN n.flag - 1"), name)
+            // A parameter given a number is a number the statement gives; given a text or null, it is no number.
+            assertEquals(1, tests(compiler, "MATCH (n) RETURN n.flag + \$n", mapOf("n" to 1)), name)
+            assertEquals(1, tests(compiler, "MATCH (n) RETURN \$n * n.flag", mapOf("n" to 1.5)), name)
+            listOf("x", null).forEach { assertEquals(0, tests(compiler, "MATCH (n) RETURN n.flag + \$n", mapOf("n" to it)), "$name: $it") }
             // Arithmetic of arithmetic: one test at the value read, none around each level.
             assertEquals(1, tests(compiler, "MATCH (c) RETURN (((c.a + 1) + 1) + 1) + 1"), name)
             assertEquals(1, tests(compiler, "MATCH (c) RETURN (((c.a * 2) - 1) / 3) + 1"), name)
@@ -133,7 +138,7 @@ class ArithmeticOfOpenKindTest {
             // No number beside it, or a side known: no test.
             listOf(
                 "MATCH (c) RETURN c.a + c.b + c.c + c.d", "MATCH (c) RETURN c.day + duration('P1D') + duration('P1D') + duration('P1D') + duration('P1D')",
-                "MATCH (c) RETURN c.a + 'x'", "MATCH (c) RETURN c.a + [1]", "RETURN 1 + 2", "UNWIND [1, 2] AS i RETURN i + 1", "MATCH (c) RETURN size(c.l) + 1",
+                "MATCH (c) RETURN c.a + 'x'", "MATCH (c) RETURN c.a + [1]", "MATCH (c) RETURN c.a + {k: 1}", "MATCH (c) RETURN c.a + date('2024-01-01')", "RETURN 1 + 2", "UNWIND [1, 2] AS i RETURN i + 1", "MATCH (c) RETURN size(c.l) + 1",
             ).forEach { assertEquals(0, tests(compiler, it), "$name: $it") }
         }
     }
