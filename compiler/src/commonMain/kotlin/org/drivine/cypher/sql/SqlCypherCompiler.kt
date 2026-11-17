@@ -552,6 +552,54 @@ abstract class SqlCypherCompiler(
     protected open fun existsQuery(query: String) = query
 
     /**
+     * The truth of an `EXISTS { … }`, of a pattern as a predicate or of a subquery's query, [query], as [predicateQuery] gives
+     * it: `EXISTS (…)`, on lines of its own where [laidOut]. A store whose planner gets some such `EXISTS` wrong writes it
+     * otherwise: see Oracle's. Its Cypher reads a table for certain where [readsTable] ([readsTable] of a query or patterns).
+     */
+    protected open fun existsOf(query: String, laidOut: Boolean, readsTable: Boolean) =
+        if (laidOut) "EXISTS (\n${indent(query)}\n)" else "EXISTS ($query)"
+
+    /**
+     * Whether the Cypher of an `EXISTS { … }` reads a table for certain, whatever SQL it is written as: only where it is one
+     * query, no `UNION`, of one or more `MATCH`es, none optional, each with or without a `WHERE`, at least one of which matches
+     * a node not [bound] there, by the query, an earlier `MATCH` of it or an earlier pattern of its own, or a relationship of
+     * at least one step, in a pattern with no shortest path, no quantified path and no relationship that may take no step
+     * ([readsTable] of patterns), and then nothing or a `RETURN` that has no aggregate in its items or its order (an
+     * expression's subquery, `COUNT { … }`, is not one), no `DISTINCT`, no `*`, no `SKIP` and no `LIMIT`. Any other query, one
+     * with an `OPTIONAL MATCH`, a `CALL`, a `WITH`, an `UNWIND` or a write among them, is taken to read none, which costs a
+     * store that counts such an `EXISTS` only speed.
+     */
+    protected fun readsTable(query: Query, bound: Set<String>): Boolean {
+        val returns = query.clauses.lastOrNull() as? Clause.Return
+        val matches = query.clauses.dropLast(if (returns == null) 0 else 1)
+        if (query.unions.isNotEmpty() || matches.isEmpty() || matches.any { it !is Clause.Match || it.optional }) return false
+        if (returns != null) with(returns.projection) {
+            if (distinct || star || skip != null || limit != null) return false
+            if ((items.map { it.expression } + orderBy.map { it.expression }).any { contains(it, ::isAggregate) }) return false
+        }
+        val names = bound.toMutableSet()
+        return matches.filterIsInstance<Clause.Match>().any { match -> readsTable(match.patterns, names).also { names += match.patterns.flatMap(::named) } }
+    }
+
+    /**
+     * Whether [patterns] read a table for certain: one of them, with no shortest path, no quantified path and no relationship
+     * that may take no step, matches a node not [bound] or named by an earlier pattern of them, or a relationship of at least
+     * one step: see [readsTable].
+     */
+    protected fun readsTable(patterns: List<Pattern>, bound: Set<String>): Boolean {
+        val names = bound.toMutableSet()
+        return patterns.any { p ->
+            (
+                p.shortest == null && p.relationships.none { it.group != null || (it.range?.min ?: 1) < 1 } &&
+                    (p.relationships.isNotEmpty() || p.nodes.any { it.variable == null || it.variable !in names })
+                ).also { names += named(p) }
+        }
+    }
+
+    /** The names [pattern] binds: its path's, its nodes' and its relationships'. */
+    private fun named(pattern: Pattern) = listOfNotNull(pattern.variable) + pattern.nodes.mapNotNull { it.variable } + pattern.relationships.mapNotNull { it.variable }
+
+    /**
      * The query [query] of a subquery that a condition reads, as the store's planner is given it: the query of an `EXISTS (…)`
      * or a `NOT EXISTS (…)`, of an `x IN (…)`, and the count a `COUNT { … }` or a quantifier compares. Each such subquery the
      * compiler writes is given here. A store whose planner merges two of them wrongly keeps it from doing so: see Oracle's.
@@ -4745,7 +4793,9 @@ abstract class SqlCypherCompiler(
             is Expression.PatternPredicate -> exists(listOf(expression.pattern), null, scope)
             is Expression.Exists -> exists(expression.patterns, expression.where, scope)
             is Expression.Subquery -> when (expression.kind) {
-                Expression.Subquery.Kind.EXISTS -> Value.Bool("EXISTS (\n${indent(predicateQuery(existsQuery(correlated(expression.query, scope, "EXISTS { … }", identified = false))))}\n)")
+                Expression.Subquery.Kind.EXISTS -> Value.Bool(
+                    existsOf(predicateQuery(existsQuery(correlated(expression.query, scope, "EXISTS { … }", identified = false))), laidOut = true, readsTable(expression.query, scope.keys)),
+                )
                 Expression.Subquery.Kind.COUNT ->
                     Value.Json(scalar("(${predicateQuery("SELECT count(*) FROM (\n${indent(correlated(expression.query, scope, "COUNT { … }"))}\n) ${alias("q")}")})"))
             }
@@ -4835,7 +4885,7 @@ abstract class SqlCypherCompiler(
             val inner = Select(scope)
             patterns(inner, patterns)
             where?.let { filter(inner, it) }
-            return Value.Bool("EXISTS (${predicateQuery((listOf(inner.head("1")) + inner.from() + listOfNotNull(inner.whereClause())).joinToString(" "))})")
+            return Value.Bool(existsOf(predicateQuery((listOf(inner.head("1")) + inner.from() + listOfNotNull(inner.whereClause())).joinToString(" ")), laidOut = false, readsTable(patterns, scope.keys)))
         }
 
         /**

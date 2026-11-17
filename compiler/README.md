@@ -467,7 +467,8 @@ of its own, so the three libraries read rows, key a temporal value and judge a g
   never rounds a whole number past 2^53 first (a fraction is read as a double, as the host's own reader would). The answer is `{"value": …}`: each temporal value's tag read as its text, and each map's
   keys unescaped (`$$k` read as `$k`), at any depth. A column that nests its arrays and objects more than 64 deep is an
   error, as a request is. With `"typed": true`, a tag is instead `{"$t": kind, "v": text}`, and a
-  map with a `$t` key of its own is `{"$t": "map", "v": …}`. `host.yaml`'s reads pin it.
+  map with a `$t` key of its own is `{"$t": "map", "v": …}`. `host.yaml`'s reads pin it. An infinity is answered as the
+  number SQLite writes for one, `9e999` or `-9e999`, which the host's JSON reader reads back as one.
 - **`temporalKey`** gives the sort key `s` of a temporal value's canonical text: `{"key": "…"}`, or null for a duration. A
   `v` that is not its kind's canonical text (`10:00` for a `localtime`, where it is `10:00:00`) is an error. A
   host writes it into a tag of its own (`{"$t", "v", "s"}`) where it builds a stored value itself. `host.yaml`'s keys pin it.

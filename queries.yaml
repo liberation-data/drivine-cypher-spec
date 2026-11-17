@@ -1434,6 +1434,133 @@ cases:
       - cypher: "MATCH (p:Person {name: 'Keanu'}) RETURN COUNT { MATCH (p)-[:ACTED_IN]->(m) WITH m WHERE m.released < 2000 RETURN m.title }"
         rows: [2]
 
+  - name: "EXISTS { } and COUNT { } of the row alone"
+    description: "An EXISTS { } or a COUNT { } whose query reads only the row it is in, as a MATCH of a node bound already with a label, is true or counted for each row as its query finds a row, as a WHERE, an item of a RETURN or a WITH, an order or within an expression (drivine4j#829)."
+    steps:
+      - note: "EXISTS { } and COUNT { } whose query reads only the row, its node's labels: as a WHERE, an item of a RETURN and a WITH, and an order. Oracle gave such an EXISTS null or false as a value, and sorted by it as if all were alike."
+        cypher: "MATCH (n) WHERE NOT n:Code AND EXISTS { MATCH (n:Movie) RETURN n.title AS y } RETURN coalesce(n.title, n.name) AS k ORDER BY k"
+        rows: ["Johnny Mnemonic", "The Matrix", "The Matrix Reloaded"]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k, EXISTS { MATCH (n:Movie) RETURN n.title AS y } AS y ORDER BY k"
+        rows: [["Carrie", false], ["Hugo", false], ["Johnny Mnemonic", true], ["Keanu", false], ["Laurence", false], ["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (n) WHERE NOT n:Code WITH n, EXISTS { MATCH (n:Movie) RETURN n.title AS y } AS y RETURN coalesce(n.title, n.name) AS k, y ORDER BY k"
+        rows: [["Carrie", false], ["Hugo", false], ["Johnny Mnemonic", true], ["Keanu", false], ["Laurence", false], ["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k ORDER BY EXISTS { MATCH (n:Movie) RETURN n.title AS y }, k"
+        rows: ["Carrie", "Hugo", "Keanu", "Laurence", "Johnny Mnemonic", "The Matrix", "The Matrix Reloaded"]
+      - cypher: "MATCH (n) WHERE NOT n:Code AND NOT EXISTS { MATCH (n:Movie) RETURN n.title AS y } RETURN coalesce(n.title, n.name) AS k ORDER BY k"
+        rows: ["Carrie", "Hugo", "Keanu", "Laurence"]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k, NOT EXISTS { MATCH (n:Movie) RETURN n.title AS y } AS y ORDER BY k"
+        rows: [["Carrie", true], ["Hugo", true], ["Johnny Mnemonic", false], ["Keanu", true], ["Laurence", true], ["The Matrix", false], ["The Matrix Reloaded", false]]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k ORDER BY EXISTS { MATCH (n:Movie) RETURN n.title AS y } DESC, k"
+        rows: ["Johnny Mnemonic", "The Matrix", "The Matrix Reloaded", "Carrie", "Hugo", "Keanu", "Laurence"]
+      - note: "The query returns a new variable, a WITH's of the row's property."
+        cypher: "MATCH (n) WHERE NOT n:Code AND EXISTS { MATCH (n:Movie) WITH n.title AS t RETURN t AS y } RETURN coalesce(n.title, n.name) AS k ORDER BY k"
+        rows: ["Johnny Mnemonic", "The Matrix", "The Matrix Reloaded"]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k, EXISTS { MATCH (n:Movie) WITH n.title AS t RETURN t AS y } AS y ORDER BY k"
+        rows: [["Carrie", false], ["Hugo", false], ["Johnny Mnemonic", true], ["Keanu", false], ["Laurence", false], ["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (n) WHERE NOT n:Code WITH n, EXISTS { MATCH (n:Movie) WITH n.title AS t RETURN t AS y } AS y RETURN coalesce(n.title, n.name) AS k, y ORDER BY k"
+        rows: [["Carrie", false], ["Hugo", false], ["Johnny Mnemonic", true], ["Keanu", false], ["Laurence", false], ["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k ORDER BY EXISTS { MATCH (n:Movie) WITH n.title AS t RETURN t AS y }, k"
+        rows: ["Carrie", "Hugo", "Keanu", "Laurence", "Johnny Mnemonic", "The Matrix", "The Matrix Reloaded"]
+      - cypher: "MATCH (n) WHERE NOT n:Code AND NOT EXISTS { MATCH (n:Movie) WITH n.title AS t RETURN t AS y } RETURN coalesce(n.title, n.name) AS k ORDER BY k"
+        rows: ["Carrie", "Hugo", "Keanu", "Laurence"]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k, NOT EXISTS { MATCH (n:Movie) WITH n.title AS t RETURN t AS y } AS y ORDER BY k"
+        rows: [["Carrie", true], ["Hugo", true], ["Johnny Mnemonic", false], ["Keanu", true], ["Laurence", true], ["The Matrix", false], ["The Matrix Reloaded", false]]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k ORDER BY EXISTS { MATCH (n:Movie) WITH n.title AS t RETURN t AS y } DESC, k"
+        rows: ["Johnny Mnemonic", "The Matrix", "The Matrix Reloaded", "Carrie", "Hugo", "Keanu", "Laurence"]
+      - note: "The query reads the graph, a relationship to a new node, and returns that node's property: Oracle got these right."
+        cypher: "MATCH (n) WHERE NOT n:Code AND EXISTS { MATCH (n:Movie)<-[:ACTED_IN]-(a) RETURN a.name AS y } RETURN coalesce(n.title, n.name) AS k ORDER BY k"
+        rows: ["Johnny Mnemonic", "The Matrix", "The Matrix Reloaded"]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k, EXISTS { MATCH (n:Movie)<-[:ACTED_IN]-(a) RETURN a.name AS y } AS y ORDER BY k"
+        rows: [["Carrie", false], ["Hugo", false], ["Johnny Mnemonic", true], ["Keanu", false], ["Laurence", false], ["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (n) WHERE NOT n:Code WITH n, EXISTS { MATCH (n:Movie)<-[:ACTED_IN]-(a) RETURN a.name AS y } AS y RETURN coalesce(n.title, n.name) AS k, y ORDER BY k"
+        rows: [["Carrie", false], ["Hugo", false], ["Johnny Mnemonic", true], ["Keanu", false], ["Laurence", false], ["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k ORDER BY EXISTS { MATCH (n:Movie)<-[:ACTED_IN]-(a) RETURN a.name AS y }, k"
+        rows: ["Carrie", "Hugo", "Keanu", "Laurence", "Johnny Mnemonic", "The Matrix", "The Matrix Reloaded"]
+      - cypher: "MATCH (n) WHERE NOT n:Code AND NOT EXISTS { MATCH (n:Movie)<-[:ACTED_IN]-(a) RETURN a.name AS y } RETURN coalesce(n.title, n.name) AS k ORDER BY k"
+        rows: ["Carrie", "Hugo", "Keanu", "Laurence"]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k, NOT EXISTS { MATCH (n:Movie)<-[:ACTED_IN]-(a) RETURN a.name AS y } AS y ORDER BY k"
+        rows: [["Carrie", true], ["Hugo", true], ["Johnny Mnemonic", false], ["Keanu", true], ["Laurence", true], ["The Matrix", false], ["The Matrix Reloaded", false]]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k ORDER BY EXISTS { MATCH (n:Movie)<-[:ACTED_IN]-(a) RETURN a.name AS y } DESC, k"
+        rows: ["Johnny Mnemonic", "The Matrix", "The Matrix Reloaded", "Carrie", "Hugo", "Keanu", "Laurence"]
+      - note: "A COUNT { } of the same queries, which Oracle got right."
+        cypher: "MATCH (n) WHERE NOT n:Code AND COUNT { MATCH (n:Movie) RETURN n.title AS y } >= 1 RETURN coalesce(n.title, n.name) AS k ORDER BY k"
+        rows: ["Johnny Mnemonic", "The Matrix", "The Matrix Reloaded"]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k, COUNT { MATCH (n:Movie) RETURN n.title AS y } AS y ORDER BY k"
+        rows: [["Carrie", 0], ["Hugo", 0], ["Johnny Mnemonic", 1], ["Keanu", 0], ["Laurence", 0], ["The Matrix", 1], ["The Matrix Reloaded", 1]]
+      - cypher: "MATCH (n) WHERE NOT n:Code WITH n, COUNT { MATCH (n:Movie) RETURN n.title AS y } AS y RETURN coalesce(n.title, n.name) AS k, y ORDER BY k"
+        rows: [["Carrie", 0], ["Hugo", 0], ["Johnny Mnemonic", 1], ["Keanu", 0], ["Laurence", 0], ["The Matrix", 1], ["The Matrix Reloaded", 1]]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k ORDER BY COUNT { MATCH (n:Movie) RETURN n.title AS y }, k"
+        rows: ["Carrie", "Hugo", "Keanu", "Laurence", "Johnny Mnemonic", "The Matrix", "The Matrix Reloaded"]
+      - cypher: "MATCH (n) WHERE NOT n:Code AND COUNT { MATCH (n:Movie) WITH n.title AS t RETURN t AS y } >= 1 RETURN coalesce(n.title, n.name) AS k ORDER BY k"
+        rows: ["Johnny Mnemonic", "The Matrix", "The Matrix Reloaded"]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k, COUNT { MATCH (n:Movie) WITH n.title AS t RETURN t AS y } AS y ORDER BY k"
+        rows: [["Carrie", 0], ["Hugo", 0], ["Johnny Mnemonic", 1], ["Keanu", 0], ["Laurence", 0], ["The Matrix", 1], ["The Matrix Reloaded", 1]]
+      - cypher: "MATCH (n) WHERE NOT n:Code WITH n, COUNT { MATCH (n:Movie) WITH n.title AS t RETURN t AS y } AS y RETURN coalesce(n.title, n.name) AS k, y ORDER BY k"
+        rows: [["Carrie", 0], ["Hugo", 0], ["Johnny Mnemonic", 1], ["Keanu", 0], ["Laurence", 0], ["The Matrix", 1], ["The Matrix Reloaded", 1]]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k ORDER BY COUNT { MATCH (n:Movie) WITH n.title AS t RETURN t AS y }, k"
+        rows: ["Carrie", "Hugo", "Keanu", "Laurence", "Johnny Mnemonic", "The Matrix", "The Matrix Reloaded"]
+      - cypher: "MATCH (n) WHERE NOT n:Code AND COUNT { MATCH (n:Movie)<-[:ACTED_IN]-(a) RETURN a.name AS y } >= 1 RETURN coalesce(n.title, n.name) AS k ORDER BY k"
+        rows: ["Johnny Mnemonic", "The Matrix", "The Matrix Reloaded"]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k, COUNT { MATCH (n:Movie)<-[:ACTED_IN]-(a) RETURN a.name AS y } AS y ORDER BY k"
+        rows: [["Carrie", 0], ["Hugo", 0], ["Johnny Mnemonic", 1], ["Keanu", 0], ["Laurence", 0], ["The Matrix", 3], ["The Matrix Reloaded", 2]]
+      - cypher: "MATCH (n) WHERE NOT n:Code WITH n, COUNT { MATCH (n:Movie)<-[:ACTED_IN]-(a) RETURN a.name AS y } AS y RETURN coalesce(n.title, n.name) AS k, y ORDER BY k"
+        rows: [["Carrie", 0], ["Hugo", 0], ["Johnny Mnemonic", 1], ["Keanu", 0], ["Laurence", 0], ["The Matrix", 3], ["The Matrix Reloaded", 2]]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k ORDER BY COUNT { MATCH (n:Movie)<-[:ACTED_IN]-(a) RETURN a.name AS y }, k"
+        rows: ["Carrie", "Hugo", "Keanu", "Laurence", "Johnny Mnemonic", "The Matrix Reloaded", "The Matrix"]
+      - note: "The statement drivine4j#819's table found: Oracle gave null for y."
+        cypher: "MATCH (:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, EXISTS { MATCH (m1:Movie) RETURN m1.title AS y } AS y ORDER BY title"
+        rows: [["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, EXISTS { MATCH (m1:Person) RETURN m1.title AS y } AS y ORDER BY title"
+        rows: [["The Matrix", false], ["The Matrix Reloaded", false]]
+      - cypher: "MATCH (:Person {name: 'Carrie'})-[:ACTED_IN]->(m1) RETURN m1.title AS title, EXISTS { MATCH (m1) RETURN m1.title AS y } AS y ORDER BY title"
+        rows: [["The Matrix", true], ["The Matrix Reloaded", true]]
+      - note: "Other queries of the row alone: none, a pattern, a node, a WHERE, a WITH, a LIMIT, an OPTIONAL MATCH, a UNION, and the EXISTS in a CASE, a comprehension and an AND."
+        cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k, EXISTS { MATCH (n:Movie) } AS y ORDER BY k"
+        rows: [["Carrie", false], ["Hugo", false], ["Johnny Mnemonic", true], ["Keanu", false], ["Laurence", false], ["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k, EXISTS { (n:Movie) } AS y ORDER BY k"
+        rows: [["Carrie", false], ["Hugo", false], ["Johnny Mnemonic", true], ["Keanu", false], ["Laurence", false], ["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k, EXISTS { MATCH (n:Movie) RETURN n } AS y ORDER BY k"
+        rows: [["Carrie", false], ["Hugo", false], ["Johnny Mnemonic", true], ["Keanu", false], ["Laurence", false], ["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k, EXISTS { MATCH (n:Movie) WHERE n.released > 2000 RETURN n.title AS y } AS y ORDER BY k"
+        rows: [["Carrie", false], ["Hugo", false], ["Johnny Mnemonic", false], ["Keanu", false], ["Laurence", false], ["The Matrix", false], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k, EXISTS { WITH n WHERE n:Movie RETURN n.title AS y } AS y ORDER BY k"
+        rows: [["Carrie", false], ["Hugo", false], ["Johnny Mnemonic", true], ["Keanu", false], ["Laurence", false], ["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k, EXISTS { WITH n MATCH (n:Movie) RETURN n.title AS y } AS y ORDER BY k"
+        rows: [["Carrie", false], ["Hugo", false], ["Johnny Mnemonic", true], ["Keanu", false], ["Laurence", false], ["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k, EXISTS { MATCH (n:Movie) WITH n WHERE n.released > 2000 RETURN n.title AS y } AS y ORDER BY k"
+        rows: [["Carrie", false], ["Hugo", false], ["Johnny Mnemonic", false], ["Keanu", false], ["Laurence", false], ["The Matrix", false], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k, EXISTS { MATCH (n:Movie) RETURN n.title AS y ORDER BY y LIMIT 1 } AS y ORDER BY k"
+        rows: [["Carrie", false], ["Hugo", false], ["Johnny Mnemonic", true], ["Keanu", false], ["Laurence", false], ["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k, EXISTS { OPTIONAL MATCH (n:Movie) RETURN n.title AS y } AS y ORDER BY k"
+        rows: [["Carrie", true], ["Hugo", true], ["Johnny Mnemonic", true], ["Keanu", true], ["Laurence", true], ["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k, EXISTS { MATCH (n:Movie) RETURN n.title AS y UNION MATCH (n:Person) RETURN n.name AS y } AS y ORDER BY k"
+        rows: [["Carrie", true], ["Hugo", true], ["Johnny Mnemonic", true], ["Keanu", true], ["Laurence", true], ["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k, EXISTS { MATCH (n:Movie) RETURN n.title AS y UNION MATCH (n:Code) RETURN n.code AS y } AS y ORDER BY k"
+        rows: [["Carrie", false], ["Hugo", false], ["Johnny Mnemonic", true], ["Keanu", false], ["Laurence", false], ["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k, CASE WHEN EXISTS { MATCH (n:Movie) RETURN n.title AS y } THEN 'y' ELSE 'n' END AS y ORDER BY k"
+        rows: [["Carrie", "n"], ["Hugo", "n"], ["Johnny Mnemonic", "y"], ["Keanu", "n"], ["Laurence", "n"], ["The Matrix", "y"], ["The Matrix Reloaded", "y"]]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k, [x IN [1] WHERE EXISTS { MATCH (n:Movie) RETURN n.title AS y }] AS y ORDER BY k"
+        rows: [["Carrie", []], ["Hugo", []], ["Johnny Mnemonic", [1]], ["Keanu", []], ["Laurence", []], ["The Matrix", [1]], ["The Matrix Reloaded", [1]]]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k, [x IN [1] | EXISTS { MATCH (n:Movie) RETURN n.title AS y }] AS y ORDER BY k"
+        rows: [["Carrie", [false]], ["Hugo", [false]], ["Johnny Mnemonic", [true]], ["Keanu", [false]], ["Laurence", [false]], ["The Matrix", [true]], ["The Matrix Reloaded", [true]]]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k, EXISTS { MATCH (n:Movie) RETURN n.title AS y } AND n.released > 2000 AS y ORDER BY k"
+        rows: [["Carrie", false], ["Hugo", false], ["Johnny Mnemonic", false], ["Keanu", false], ["Laurence", false], ["The Matrix", false], ["The Matrix Reloaded", true]]
+      - note: "A query of the row alone whose WHERE holds a subquery that reads the graph."
+        cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k, EXISTS { WITH n WHERE n:Movie AND EXISTS { (n)<-[:ACTED_IN]-(:Person {name: 'Carrie'}) } RETURN 1 AS y } AS y ORDER BY k"
+        rows: [["Carrie", false], ["Hugo", false], ["Johnny Mnemonic", false], ["Keanu", false], ["Laurence", false], ["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k, EXISTS { MATCH (n:Movie) WHERE COUNT { (n)<--() } > 1 RETURN n.title AS y } AS y ORDER BY k"
+        rows: [["Carrie", false], ["Hugo", false], ["Johnny Mnemonic", false], ["Keanu", false], ["Laurence", false], ["The Matrix", true], ["The Matrix Reloaded", true]]
+      - note: "Controls: a list's rows, a COUNT { } of a pattern, a pattern comprehension."
+        cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k, EXISTS { UNWIND [n] AS z WITH z WHERE z:Movie RETURN z } AS y ORDER BY k"
+        rows: [["Carrie", false], ["Hugo", false], ["Johnny Mnemonic", true], ["Keanu", false], ["Laurence", false], ["The Matrix", true], ["The Matrix Reloaded", true]]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k, COUNT { MATCH (n:Movie) WHERE n.released > 2000 RETURN n.title AS y } AS y ORDER BY k"
+        rows: [["Carrie", 0], ["Hugo", 0], ["Johnny Mnemonic", 0], ["Keanu", 0], ["Laurence", 0], ["The Matrix", 0], ["The Matrix Reloaded", 1]]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k, COUNT { (n:Movie) } AS y ORDER BY k"
+        rows: [["Carrie", 0], ["Hugo", 0], ["Johnny Mnemonic", 1], ["Keanu", 0], ["Laurence", 0], ["The Matrix", 1], ["The Matrix Reloaded", 1]]
+      - cypher: "MATCH (n) WHERE NOT n:Code RETURN coalesce(n.title, n.name) AS k, [(n:Movie)<-[:ACTED_IN]-(a) | a.name] AS y ORDER BY k"
+        rows: [["Carrie", []], ["Hugo", []], ["Johnny Mnemonic", ["Keanu"]], ["Keanu", []], ["Laurence", []], ["The Matrix", ["Carrie", "Laurence", "Keanu"]], ["The Matrix Reloaded", ["Keanu", "Carrie"]]]
+        unorderedLists: true
+
   - name: "EXISTS { } over UNWIND"
     description: "An EXISTS { } whose body unwinds a list is true where the body gives a row, in a RETURN, a WHERE, a CASE or a list comprehension, whatever order the body gives its rows in; an ORDER BY that a LIMIT or a SKIP of the body reads still picks the rows they keep (drivine4j#449)."
     steps:

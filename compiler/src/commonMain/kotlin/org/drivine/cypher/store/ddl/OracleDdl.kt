@@ -42,6 +42,10 @@ class OracleDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
 
     override val lockTable: String get() = "CREATE TABLE IF NOT EXISTS $lock (name VARCHAR2(128) PRIMARY KEY)"
 
+    /**
+     * A `MERGE`, which does not read again before it inserts: of two sessions making the store at once, the second is
+     * refused on the lock table's key (`ORA-00001`), which [ensuring], as it runs it, takes as the row put.
+     */
     override val lockSeed: String get() =
         "MERGE INTO $lock l USING (SELECT '$lockRow' AS name FROM dual) s ON (l.name = s.name) WHEN NOT MATCHED THEN INSERT (name) VALUES (s.name)"
 
@@ -180,7 +184,8 @@ class OracleDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
      * it, says the rest is. It is looked for before anything is run: a schema statement wants its
      * table to itself, and would be turned away by a writer at work on a store that needs nothing
      * made. A graph made by an earlier version is replaced, and keeps its tables. One that another
-     * process made in the meantime (`ORA-00955`) is taken as made. A statement turned away because
+     * process made in the meantime (`ORA-00955`) is taken as made, and so is the lock table's row
+     * ([lockSeed]) where another process inserted it in the meantime (`ORA-00001`). A statement turned away because
      * another session holds a lock it wants (`ORA-00054`), as one making the same store from another
      * pool or process does, is tried again a tenth of a second later, for up to [BUSY_ATTEMPTS] tries:
      * Oracle's DDL does not wait for a lock unless the session is told to, and telling it would outlast
@@ -207,6 +212,8 @@ class OracleDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
                         RETURN;
                     EXCEPTION
                         WHEN e_exists THEN RETURN;
+                        -- The lock table's row, which another session inserted between this one's MERGE's look and its insert.
+                        WHEN DUP_VAL_ON_INDEX THEN RETURN;
                         WHEN e_busy THEN
                             IF attempt = $BUSY_ATTEMPTS THEN RAISE; END IF;
                             DBMS_SESSION.SLEEP(0.1);
