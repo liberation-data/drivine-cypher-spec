@@ -263,5 +263,17 @@ class LayoutJsonTest {
         }
     }
 
+    @Test
+    fun aRewriteRequestOfNoDeclarationsDeclaresNothing() {
+        // Declarations left out, or null, are none: a property is rewritten only as needs no declaration.
+        for (declarations in listOf("", ", \"declarations\": null")) {
+            val request = "{\"rewrite\": ${json("{\"born\":\"2024-03-15\",\"\$t\":1}")}, \"store\": \"sqlite\", \"labels\": [\"Person\"]$declarations}"
+            assertEquals(
+                "{\"value\":{\"born\":\"2024-03-15\",\"\$\$t\":1},\"changed\":true,\"changes\":[{\"property\":\"\$t\",\"change\":\"escapedKey\"}],\"invalid\":[]}",
+                CompileJson.compile(request), "on $target, $request",
+            )
+        }
+    }
+
     private fun texts(node: JsonNode): List<String> = (node as ArrayNode).map { it.textValue()!! }
 }

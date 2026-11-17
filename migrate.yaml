@@ -64,9 +64,9 @@ rewrites:
         result: '{"id":{"$numberDouble":"4.5"},"n":2,"l":[{"$numberDouble":"1.5"},2],"d":{"$numberDouble":"1.5"},"w":{"$numberDouble":"2.0"}}'
         changes: [{property: "id", change: "double"}, {property: "l", change: "double"}]
   - name: "A property declared a date"
-    description: "A text of a property declared a date is its tag, canonical, with its sort key; a property of the same text declared nothing stays a text."
+    description: "A text of a property declared a date is its tag, canonical, with its sort key; a property of the same text declared nothing for the row's labels, only for another label, stays a text."
     labels: ["Person"]
-    declarations: [{label: "Person", property: "born", kind: "date"}]
+    declarations: [{label: "Person", property: "born", kind: "date"}, {label: "Robot", property: "name", kind: "date"}]
     stores:
       postgres:
         props: '{"born": "2024-03-15", "name": "2024-03-15"}'
@@ -169,6 +169,19 @@ rewrites:
         changes: [{property: "w", change: "float"}, {property: "inf", change: "float"}, {property: "ninf", change: "float"}]
         invalid:
           - {property: "nan", kind: "float", value: '"NaN"', message: "A statement that writes is given NaN, which SQLite's JSON holds as no number: it would store another value in its place."}
+  - name: "A whole number past a long declared a float"
+    description: "Made the float nearest it, as any whole number declared a float is; declared nothing, it stays the whole number it is."
+    labels: ["Reading"]
+    declarations: [{label: "Reading", property: "f", kind: "float"}]
+    stores:
+      postgres:
+        props: '{"f": 10000000000000000000, "n": 10000000000000000000}'
+        result: '{"f":10000000000000000000.0,"n":10000000000000000000}'
+        changes: [{property: "f", change: "float"}]
+      sqlite:
+        props: '{"f":10000000000000000000,"n":10000000000000000000}'
+        result: '{"f":1.0E19,"n":10000000000000000000}'
+        changes: [{property: "f", change: "float"}]
   - name: "A list declared of floats"
     description: "Each whole number in it made a float; on Oracle a NUMBER with a fraction in it is the change any such NUMBER is."
     labels: ["Reading"]
@@ -183,7 +196,7 @@ rewrites:
         result: '{"l":[1.5,2.0]}'
         changes: [{property: "l", change: "float"}]
   - name: "A property declared bytes"
-    description: "Base64 text and a list of unsigned bytes are each the list of their signed values, as layout 2 and the graph engines hold bytes; a list of signed bytes already is one. Text of no base64, a list with an item that is no byte (past 255, or no whole number), and a value of neither are kept as they were, and named."
+    description: "Base64 text and a list of unsigned bytes are each the list of their signed values, as layout 2 and the graph engines hold bytes; a list of signed bytes, from -128, already is one. Text of no base64, a list with an item that is no byte (past 255, before -128, or no whole number), and a value of neither are kept as they were, and named."
     labels: ["File"]
     declarations:
       - {label: "File", property: "a", kind: "bytes"}
@@ -193,24 +206,31 @@ rewrites:
       - {label: "File", property: "e", kind: "bytes"}
       - {label: "File", property: "f", kind: "bytes"}
       - {label: "File", property: "g", kind: "bytes"}
+      - {label: "File", property: "h", kind: "bytes"}
     stores:
       postgres:
-        props: '{"a": "AQL/", "b": [1, 2, 255], "c": [1, 2, -1], "d": "!!", "e": [1, 256], "f": [1, 1.5], "g": 7}'
-        result: '{"a":[1,2,-1],"b":[1,2,-1],"c":[1,2,-1],"d":"!!","e":[1,256],"f":[1,1.5],"g":7}'
+        props: '{"a": "AQL/", "b": [1, 2, 255], "c": [-128, 2, -1], "d": "!!", "e": [1, 256], "f": [1, 1.5], "g": 7, "h": [-129]}'
+        result: '{"a":[1,2,-1],"b":[1,2,-1],"c":[-128,2,-1],"d":"!!","e":[1,256],"f":[1,1.5],"g":7,"h":[-129]}'
         changes: [{property: "a", change: "bytes"}, {property: "b", change: "bytes"}]
         invalid:
           - {property: "d", kind: "bytes", value: '"!!"', message: "'!!' is no base64 text, so no bytes."}
           - {property: "e", kind: "bytes", value: '[1,256]', message: "[1,256] holds 256, which is no byte."}
           - {property: "f", kind: "bytes", value: '[1,1.5]', message: "[1,1.5] holds 1.5, which is no byte."}
           - {property: "g", kind: "bytes", value: '7', message: "7 is no base64 text or list of bytes."}
+          - {property: "h", kind: "bytes", value: '[-129]', message: "[-129] holds -129, which is no byte."}
   - name: "A node of two labels that declare one property two kinds"
-    description: "Its value can't be told: it is kept as it was, and named."
+    description: "Its value can't be told: it is kept as it was, and named. A property both labels declare one kind is made that kind's."
     labels: ["Person", "Robot"]
-    declarations: [{label: "Person", property: "born", kind: "date"}, {label: "Robot", property: "born", kind: "datetime"}]
+    declarations:
+      - {label: "Person", property: "born", kind: "date"}
+      - {label: "Robot", property: "born", kind: "datetime"}
+      - {label: "Person", property: "made", kind: "date"}
+      - {label: "Robot", property: "made", kind: "date"}
     stores:
       sqlite:
-        props: '{"born":"2024-03-15"}'
-        result: '{"born":"2024-03-15"}'
+        props: '{"born":"2024-03-15","made":"2024-03-16"}'
+        result: '{"born":"2024-03-15","made":{"$t":"date","v":"2024-03-16","s":"10000020240316"}}'
+        changes: [{property: "made", change: "temporal"}]
         invalid:
           - {property: "born", kind: "date", value: '"2024-03-15"', message: "A node of the labels Person, Robot has born declared date and datetime: it is kept as it was."}
   - name: "A relationship's property"
