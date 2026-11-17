@@ -36,9 +36,11 @@ import org.drivine.cypher.store.plan.PlanJson
  *    rewritten exactly once, as a rewrite is not to be run again on a row it wrote (it would escape a tag's `$t`), and a
  *    migration stopped at any moment resumes strictly after the last batch it committed.
  *
- * What the checkpoint holds: where the write is, the digest of the declarations, and the fingerprint of the graph as the
- * migration found it (Drivine's own nodes and its size, none of which a rewrite changes). A resume reads the graph's again,
- * and refuses a graph whose fingerprint or declarations differ, a graph changed under the migration. The indexes, the
+ * What the checkpoint holds: where the write is, the digest of the declarations, whether it keeps values not of their kind,
+ * and the fingerprint of the graph as the migration found it (Drivine's own nodes and its size, none of which a rewrite
+ * changes). A resume reads the graph's again,
+ * and refuses a graph whose fingerprint differs, a graph changed under the migration, and declarations, or an option to keep
+ * values not of their kind, that differ from those it began with. The indexes, the
  * count store and the stamp come in the next step of the migration (#256); until then a graph whose values are all
  * rewritten keeps its checkpoint, and [StoreLayout.verdict] refuses it as part way through a migration.
  *
@@ -131,6 +133,9 @@ class LayoutMigrator(private val ddl: SqlStoreDdl) {
             "The graph '${ddl.name}' has changed since its migration to store layout ${LayoutMigration.TO} began: its stamp, its schema marker or its size is not as the migration found it. Restore it from the backup taken before the migration."
         checkpoint.declarations != digest(state.request.declarations) ->
             "The migration of the graph '${ddl.name}' to store layout ${LayoutMigration.TO} began with other declarations: resume it with the same ones, as it rewrote values by them."
+        checkpoint.keepInvalid != state.request.keepInvalid ->
+            "The migration of the graph '${ddl.name}' to store layout ${LayoutMigration.TO} began ${if (checkpoint.keepInvalid) "with" else "without"} the option to keep invalid values as text: " +
+                "resume it ${if (checkpoint.keepInvalid) "with" else "without"} it too, as the scan before its writes found the graph's values by it."
         else -> null
     }
 
@@ -178,7 +183,7 @@ class LayoutMigrator(private val ddl: SqlStoreDdl) {
             return MigrationStep.Done(state.report.ended(Status.REFUSED,
                 "Another migration of the graph '${ddl.name}' to store layout ${LayoutMigration.TO} began meanwhile: resume it, once it has stopped."))
         }
-        val checkpoint = Checkpoint(Table.NODES, 0, state.fingerprint!!, digest(state.request.declarations), state.report.copy(tables = emptyMap()))
+        val checkpoint = Checkpoint(Table.NODES, 0, state.fingerprint!!, digest(state.request.declarations), state.request.keepInvalid, state.report.copy(tables = emptyMap()))
         return run(state.copy(phase = Phase.WRITE),
             MigrationAction.Transaction(listOf(writeCheckpoint(checkpoint))),
             read(Table.NODES, 0, state.request.batchSize))
@@ -205,7 +210,7 @@ class LayoutMigrator(private val ddl: SqlStoreDdl) {
         val more = rows.size >= state.request.batchSize
         val nextTable = if (more) table else if (table == Table.NODES) Table.EDGES else null
         val nextAfter = if (more) last else 0L
-        val checkpoint = Checkpoint(nextTable, nextAfter, state.fingerprint!!, digest(state.request.declarations), report)
+        val checkpoint = Checkpoint(nextTable, nextAfter, state.fingerprint!!, digest(state.request.declarations), state.request.keepInvalid, report)
         val next = state.copy(table = nextTable, after = nextAfter, report = report)
         val transaction = MigrationAction.Transaction(writes + writeCheckpoint(checkpoint))
         return if (nextTable != null) run(next, transaction, read(nextTable, nextAfter, state.request.batchSize))
@@ -372,11 +377,11 @@ internal fun declarationsOf(node: JsonNode?): List<LayoutMigration.Declaration> 
 
 private fun tableOf(node: JsonNode?): Table? = node?.textValue()?.let { word -> Table.entries.first { it.word == word } }
 
-/** The checkpoint a migration keeps: see [LayoutMigrator]. [table] is null once every row is written. */
-internal data class Checkpoint(val table: Table?, val after: Long, val fingerprint: String, val declarations: String, val report: MigrationReport) {
+/** The checkpoint a migration keeps: see [LayoutMigrator]. [table] is null once every row is written; [keepInvalid] is the request's, which a resume is to give alike. */
+internal data class Checkpoint(val table: Table?, val after: Long, val fingerprint: String, val declarations: String, val keepInvalid: Boolean, val report: MigrationReport) {
     fun toJson(): String = PlanJson.writePlain(linkedMapOf(
         "from" to LayoutMigration.FROM, "to" to LayoutMigration.TO, "table" to table?.word, "after" to after,
-        "fingerprint" to fingerprint, "declarations" to declarations, "report" to report.toMap(),
+        "fingerprint" to fingerprint, "declarations" to declarations, "keepInvalid" to keepInvalid, "report" to report.toMap(),
     ))
 
     companion object {
@@ -386,7 +391,7 @@ internal data class Checkpoint(val table: Table?, val after: Long, val fingerpri
                 "The checkpoint is of a migration from layout ${tree["from"]} to ${tree["to"]}, which this version doesn't run."
             }
             return Checkpoint(tableOf(tree["table"]), tree["after"]!!.longValue(), tree["fingerprint"]!!.textValue()!!,
-                tree["declarations"]!!.textValue()!!, MigrationReport.of(tree["report"] as ObjectNode))
+                tree["declarations"]!!.textValue()!!, tree["keepInvalid"]!!.booleanValue(), MigrationReport.of(tree["report"] as ObjectNode))
         }
     }
 }

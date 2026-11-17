@@ -253,6 +253,22 @@ class LayoutMigratorTest {
     }
 
     @Test
+    fun aResumeWithoutTheOptionToKeepInvalidValuesThatItBeganWithIsRefused() {
+        // Begun keeping a value not of its kind, stopped once its first batches are written, before the one that keeps it.
+        val store = store()
+        store.rows[Table.EDGES]!![6L] = listOf("KNOWS") to """{"since": "soon"}"""
+        assertNull(migrate(store, MigrationRequest(declarations, batchSize = 2, keepInvalid = true), stopAt = 19))
+        assertTrue(store.checkpoint?.containsKey("checkpoint") == true, "stopped part way through its writes")
+        val refused = migrate(store, MigrationRequest(declarations, batchSize = 2))!!
+        assertEquals(Status.REFUSED, refused.status, refused.message)
+        assertTrue(refused.message!!.contains("began with the option to keep invalid values as text"), refused.message)
+        assertNull(store.rewrites[Table.EDGES to 1L], "nothing written by the refused resume")
+        val kept = migrate(store, MigrationRequest(declarations, batchSize = 2, keepInvalid = true))!!
+        assertEquals(Status.REWRITTEN, kept.status, kept.message)
+        assertEquals(listOf(6L), kept.kept.map { it.id })
+    }
+
+    @Test
     fun aGraphPartWayThroughAMigrationThatALaterDrivineWroteToIsRefusedNotResumed() {
         val store = store()
         // Stopped after its first batch is written, then written to by a later Drivine, which made its own lock table.
