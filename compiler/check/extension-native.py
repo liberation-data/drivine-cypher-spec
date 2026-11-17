@@ -118,7 +118,7 @@ def host_steps(connection, host):
         for index, step in enumerate(case["steps"], 1):
             name = step.get("function")
             if name is None:
-                continue  # A read, of each library's row reader.
+                continue  # A read, a sort key or a write: no host function.
             if name not in registered:
                 pending.add(name)
                 continue

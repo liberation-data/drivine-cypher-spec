@@ -244,17 +244,20 @@ object CypherJson {
      * [value] as a tree. [encoder], where given, is asked first of each value in it that is not already a tree, and its
      * tree taken where it gives one: see [CypherEncoder].
      */
-    @OptIn(kotlin.io.encoding.ExperimentalEncodingApi::class)
     fun valueToTree(value: Any?, encoder: CypherEncoder? = null): JsonNode {
         if (value is JsonNode) return value
         fun valueToTree(value: Any?) = valueToTree(value, encoder)
-        // A temporal value is its tag, and a map's keys are escaped, as the store layout holds them, whatever the host's encoder
-        // would write: a map or a list that holds either is walked here, each item asked of the encoder (see ValueLayout).
+        // A temporal value is its tag, a map's keys are escaped, and bytes are the list of their signed values, as the store
+        // layout holds them, whatever the host's encoder would write: a map or a list that holds any of them is walked here,
+        // each item asked of the encoder (see ValueLayout).
         temporalTag(value)?.let { return it }
         if (laidOut(value)) when (value) {
             is Map<*, *> -> return ObjectNode().apply { value.forEach { (k, v) -> set<JsonNode>(ValueLayout.escape(k.toString()), valueToTree(v)) } }
             is Iterable<*> -> return ArrayNode().apply { value.forEach { add(valueToTree(it)) } }
             is Array<*> -> return ArrayNode().apply { value.forEach { add(valueToTree(it)) } }
+            // As a graph engine holds bytes, and drivine4j's Neo4jObjectMapper writes them: [1, 2, -1], not base64 text, which
+            // the store would read back as a text (liberation-data/drivine-cypher-spec#329).
+            is ByteArray -> return ArrayNode().apply { value.forEach { add(LongNode(it.toLong())) } }
         }
         encoder?.tree(value)?.let { return it }
         return when (value) {
@@ -278,18 +281,17 @@ object CypherJson {
             is DoubleArray -> ArrayNode().apply { value.forEach { add(DoubleNode(it)) } }
             is FloatArray -> ArrayNode().apply { value.forEach { add(FloatNode(it)) } }
             is BooleanArray -> ArrayNode().apply { value.forEach { add(BooleanNode(it)) } }
-            // As Jackson writes a byte[]: its base64 text.
-            is ByteArray -> TextNode(kotlin.io.encoding.Base64.encode(value))
             is Enum<*> -> TextNode(value.name)
             else -> platformTree(value) ?: throw IllegalArgumentException("SPIKE: no JSON for a ${value::class.simpleName}")
         }
     }
 
     /**
-     * Whether [value], a map or a list, holds at any depth a temporal value or a map with a key that begins with `$`, which
-     * the store layout holds otherwise than a host's encoder writes them: see [valueToTree].
+     * Whether [value] is bytes, or a map or a list that holds at any depth a temporal value, bytes or a map with a key that
+     * begins with `$`, which the store layout holds otherwise than a host's encoder writes them: see [valueToTree].
      */
     private fun laidOut(value: Any?): Boolean = when (value) {
+        is ByteArray -> true
         is Map<*, *> -> value.keys.any { it.toString().startsWith('$') } || value.values.any { temporalTag(it) != null || laidOut(it) }
         is Iterable<*> -> value.any { temporalTag(it) != null || laidOut(it) }
         is Array<*> -> value.any { temporalTag(it) != null || laidOut(it) }

@@ -23,6 +23,7 @@ import org.drivine.cypher.ast.SetItem
 import org.drivine.cypher.json.CypherEncoder
 import org.drivine.cypher.json.CypherJson
 import org.drivine.cypher.store.ValueLayout
+import org.drivine.cypher.store.StoreValues
 import org.drivine.cypher.store.Stamps
 import org.drivine.schema.SimilarityFunction
 import org.drivine.schema.VectorIndexSpec
@@ -5765,6 +5766,11 @@ abstract class SqlCypherCompiler(
                 return of(guard(temporals.of(numbers, timezone, kind)))
             }
             val given = arguments.single() as? Value.Json ?: throw CompilerException("${function.name}() takes a text or a map of its fields.")
+            // A map of its fields that a parameter gives or an expression makes, which Neo4j reads as the statement runs, is
+            // refused, not read as a text or a tag, which gave null (drivine-cypher-spec#328).
+            if (given.known == Value.Known.MAP || givenAsWritten(written) && given(written) is Map<*, *>) {
+                unsupported("${function.name}() of a map a parameter or an expression gives")
+            }
             return when {
                 given.temporal == Temporal.DURATION && kind == Temporal.DURATION -> given
                 given.temporal != null && (kind == Temporal.DURATION || given.temporal == Temporal.DURATION) -> Value.Json(literalJson(null))
@@ -5774,7 +5780,9 @@ abstract class SqlCypherCompiler(
                     val fromText = if (kind == Temporal.DURATION) temporals.duration(text(x)) else temporals.convert(text(x), kind)
                     val fromTag = if (kind == Temporal.DURATION) "CASE WHEN ${tagKind(x)} = '${kind.function}' THEN ${tagText(x)} END"
                         else temporals.byTag(tagKind(x), tagText(x)) { from, t -> temporals.convert(t, from, kind) }
-                    "CASE WHEN ${tagKind(x)} IS NOT NULL THEN $fromTag ELSE $fromText END"
+                    // A map read as the statement runs (`UNWIND $l AS m`, `l[0]`) fails it by name, as one the compiler sees is
+                    // refused above: it is no text and no tag, and gave null (drivine-cypher-spec#328).
+                    "CASE WHEN ${tagKind(x)} IS NOT NULL THEN $fromTag WHEN ${typeOf(x)} = 'object' THEN ${textFailing(TEMPORAL_OF_MAP, "${function.name}()")} ELSE $fromText END"
                 })
             }
         }
@@ -7930,23 +7938,11 @@ abstract class SqlCypherCompiler(
 
         fun literal(text: String) = "'${text.replace("'", "''")}'"
 
-        /** Why a store refuses a statement that writes and is given a float, the first named, its JSON, the second, holds as no number. */
-        const val NON_FINITE_WRITE = "A statement that writes is given %s, which %s holds as no number: it would store another value in its place."
-
         /**
          * Whether [value], a parameter's value as the caller gave it, is or holds a float that is [nonFinite], at any depth: by
-         * default NaN or an infinity.
+         * default NaN or an infinity. See [StoreValues.holdsNonFinite].
          */
-        fun holdsNonFinite(value: Any?, nonFinite: (Double) -> Boolean = { !it.isFinite() }): Boolean = when (value) {
-            is Double -> nonFinite(value)
-            is Float -> nonFinite(value.toDouble())
-            is Map<*, *> -> value.values.any { holdsNonFinite(it, nonFinite) }
-            is Iterable<*> -> value.any { holdsNonFinite(it, nonFinite) }
-            is Array<*> -> value.any { holdsNonFinite(it, nonFinite) }
-            is DoubleArray -> value.any(nonFinite)
-            is FloatArray -> value.any { nonFinite(it.toDouble()) }
-            else -> false
-        }
+        fun holdsNonFinite(value: Any?, nonFinite: (Double) -> Boolean = { !it.isFinite() }): Boolean = StoreValues.holdsNonFinite(value, nonFinite)
 
         /**
          * The most arguments a function takes on Postgres, and on the SQLite Drivine ships: a list or a map written by one
@@ -7968,6 +7964,12 @@ abstract class SqlCypherCompiler(
          * `itemText`. What it holds follows.
          */
         const val TEXT_OF_HELD = "toString() of a list or a map that holds a map read as the statement runs, a temporal value or a list nested deeper is not compiled to SQL yet: it holds"
+
+        /**
+         * What a temporal function fails with, as it runs, of a map read as the statement runs, which it is not compiled to
+         * make (drivine-cypher-spec#328): see `temporal`. The function's name follows.
+         */
+        const val TEMPORAL_OF_MAP = "A temporal value of a map read as the statement runs is Cypher, and is not compiled to SQL yet:"
 
         /**
          * Texts in the order of their Unicode code points, as Neo4j orders a map's keys where `toString()` writes it: UTF-16's

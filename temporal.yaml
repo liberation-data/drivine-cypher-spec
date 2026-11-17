@@ -1899,3 +1899,57 @@ cases:
       - cypher: "MATCH (n:CyTemporal) WHERE n.id IN ['d', 'lt', 'du', 'sA'] RETURN [min(n.v) = date('2024-03-15'), max(n.v)]"
         only: [neo4j, sql]
         rows: [[true, "A"]]
+
+  - name: "A temporal value of a map a parameter or an expression gives"
+    description: "Neo4j makes a temporal value of a map however it is given, as of one written in the call, and refuses one of fields it doesn't take as the statement runs. The SQL stores refuse each by name (refusals.yaml, \"A temporal value of a map a parameter or an expression gives\"), where they gave null (drivine-cypher-spec#328). Captured from Neo4j 2026.10.2."
+    steps:
+      - only: [neo4j]
+        cypher: "RETURN toString(localtime($m))"
+        parameters: {m: {hour: 12, minute: 30}}
+        rows: ["12:30:00"]
+      - only: [neo4j]
+        cypher: "WITH {hour: 12, minute: 30} AS m RETURN toString(localtime(m))"
+        rows: ["12:30:00"]
+      - only: [neo4j]
+        cypher: "UNWIND [{hour: 1}, {hour: 2, minute: 3}] AS m RETURN toString(localtime(m))"
+        rows: ["01:00:00", "02:03:00"]
+      - only: [neo4j]
+        cypher: "RETURN toString(datetime($m))"
+        parameters: {m: {year: 2024, month: 1, day: 1, hour: 12, timezone: "+01:00"}}
+        rows: ["2024-01-01T12:00:00+01:00"]
+      - only: [neo4j]
+        cypher: "RETURN toString(localdatetime($m))"
+        parameters: {m: {year: 2024, week: 1, dayOfWeek: 2, hour: 1}}
+        rows: ["2024-01-02T01:00:00"]
+      - only: [neo4j]
+        cypher: "WITH {datetime: datetime('2024-01-01T00:00Z'), hour: 3} AS m RETURN toString(datetime(m))"
+        rows: ["2024-01-01T03:00:00Z"]
+      - only: [neo4j]
+        cypher: "RETURN toString(duration($m))"
+        parameters: {m: {days: 1, hours: 2}}
+        rows: ["P1DT2H"]
+      - note: "Refused as the statement runs: a sub-second field without a minute (as written in the call, #321), a field no such value has, no field."
+        only: [neo4j]
+        cypher: "RETURN toString(localtime($m))"
+        parameters: {m: {hour: 12, nanosecond: 1}}
+        error: true
+      - only: [neo4j]
+        cypher: "RETURN toString(date($m))"
+        parameters: {m: {year: 2024, month: 3, day: 15, nope: 1}}
+        error: true
+      - only: [neo4j]
+        cypher: "RETURN toString(date($m))"
+        parameters: {m: {}}
+        error: true
+      - note: "A null is null."
+        cypher: "RETURN date($m)"
+        parameters: {m: null}
+        rows: [null]
+      - note: "A map read only as the statement runs, an item of a list, fails the statement on the SQL stores, where it gave null."
+        only: [sql]
+        cypher: "WITH collect({hour: 1}) AS l RETURN localtime(l[0])"
+        error: true
+      - only: [sql]
+        cypher: "UNWIND $l AS m RETURN duration(m)"
+        parameters: {l: [{days: 1}]}
+        error: true

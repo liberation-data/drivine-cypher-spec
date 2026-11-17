@@ -54,7 +54,7 @@ import kotlin.io.encoding.ExperimentalEncodingApi
  *   one (JavaScript), and for NaN and the infinities, which JSON has no number for;
  * - `{"$temporal": "DATE" | "LOCAL_TIME" | "TIME" | "LOCAL_DATE_TIME" | "DATE_TIME" | "DURATION", "text": "<ISO 8601>"}`
  *   is a temporal value of that kind;
- * - `{"$bytes": "<base64>"}` is a byte array;
+ * - `{"$bytes": "<base64>"}` is a byte array, bound as the list of its signed values, `[1, 2, -1]`, as the store layout holds it;
  * - `{"$map": {...}}` is the map it holds, its keys taken as they are: how a map with a key that starts with `$` is written;
  * - any other map is the map it is.
  *
