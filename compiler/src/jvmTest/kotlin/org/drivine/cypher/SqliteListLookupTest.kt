@@ -53,7 +53,7 @@ class SqliteListLookupTest {
     private fun Connection.rows(sql: String): List<String> =
         createStatement().use { s -> s.executeQuery(sql).use { r -> buildList { while (r.next()) add(r.getString(1)) } } }
 
-    /** The plan's lines that read the node table `alias` by the index over `id`. */
+    /** The detail of each line of the statement's query plan. */
     private fun Connection.plan(sql: String): List<String> =
         createStatement().use { s -> s.executeQuery("EXPLAIN QUERY PLAN $sql").use { r -> buildList { while (r.next()) add(r.getString(4)) } } }
 
