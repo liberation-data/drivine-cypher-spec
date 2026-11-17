@@ -1,0 +1,206 @@
+# A store's layout migrated from layout 1 to layout 2 (liberation-data/drivine-cypher-spec#256). See README.md, "Migrating a
+# store's layout". Each of `rewrites` is a row of layout 1, the JSON text a store gives of a node's or a relationship's
+# properties, rewritten as layout 2 holds it, for a node of `labels` (a relationship's type, for one) under
+# `declarations`: what the module's LayoutMigration.rewrite, or the JSON request {"rewrite": …}, gives, compared exactly.
+from: 1
+to: 2
+declarationRefusals:
+  - name: "One label's property declared two kinds"
+    declarations: [{label: "Person", property: "born", kind: "date"}, {label: "Person", property: "born", kind: "datetime"}]
+    refusal: "The property born of Person is declared date and datetime: declare one kind."
+rewrites:
+  - name: "A row with nothing to change"
+    description: "Texts, integers, truth values and lists of them, with no property declared: held alike in both layouts."
+    labels: ["Person"]
+    declarations: []
+    stores:
+      postgres: {props: '{"ok": true, "age": 36, "name": "Ada", "tags": ["a", "b"]}', result: '{"ok":true,"age":36,"name":"Ada","tags":["a","b"]}'}
+      oracle: {props: '{"name":"Ada","age":36,"ok":true,"tags":["a","b"]}', result: '{"name":"Ada","age":36,"ok":true,"tags":["a","b"]}'}
+      sqlite: {props: '{"name":"Ada","age":36,"ok":true,"tags":["a","b"]}', result: '{"name":"Ada","age":36,"ok":true,"tags":["a","b"]}'}
+  - name: "Floats on Postgres and SQLite"
+    description: "A float with a point is a float in both layouts, on Postgres and SQLite; a whole number is an integer, unless declared a float."
+    labels: ["Reading"]
+    declarations: []
+    stores:
+      postgres: {props: '{"a": 2.0, "b": 1.5, "c": 10000000000000000}', result: '{"a":2.0,"b":1.5,"c":10000000000000000}'}
+      sqlite: {props: '{"a":2.0,"b":1.5,"c":10000000000000000}', result: '{"a":2.0,"b":1.5,"c":10000000000000000}'}
+  - name: "A property whose name begins with $"
+    description: "Held with one more $ in layout 2, at any depth of $, whatever its value; one with a $ after its first character is held as it is."
+    labels: ["Person"]
+    declarations: []
+    stores:
+      postgres:
+        props: '{"a$": 2, "$t": 1, "$$x": "a"}'
+        result: '{"a$":2,"$$t":1,"$$$x":"a"}'
+        changes: [{property: "$t", change: "escapedKey"}, {property: "$$x", change: "escapedKey"}]
+      oracle:
+        props: '{"$t":1,"$$x":"a","a$":2}'
+        result: '{"$$t":1,"$$$x":"a","a$":2}'
+        changes: [{property: "$t", change: "escapedKey"}, {property: "$$x", change: "escapedKey"}]
+      sqlite:
+        props: '{"$t":1,"$$x":"a","a$":2}'
+        result: '{"$$t":1,"$$$x":"a","a$":2}'
+        changes: [{property: "$t", change: "escapedKey"}, {property: "$$x", change: "escapedKey"}]
+  - name: "A NUMBER with a fraction on Oracle"
+    description: "Layout 1's saves wrote every float on Oracle as a NUMBER; one with a fraction is a float, as no integer has one, and is a binary double in layout 2, with no declaration: a float id 4.5, keyed as 4.5 in layout 1, is keyed as layout 2 keys a lookup of it. A whole NUMBER stays an integer, unless declared a float; a binary double already is one."
+    labels: ["Reading"]
+    declarations: []
+    stores:
+      oracle:
+        props: '{"id":4.5,"n":2,"l":[1.5,2],"d":{"$numberDouble":"1.5"},"w":{"$numberDouble":2}}'
+        result: '{"id":{"$numberDouble":"4.5"},"n":2,"l":[{"$numberDouble":"1.5"},2],"d":{"$numberDouble":"1.5"},"w":{"$numberDouble":"2.0"}}'
+        changes: [{property: "id", change: "double"}, {property: "l", change: "double"}]
+  - name: "A property declared a date"
+    description: "A text of a property declared a date is its tag, canonical, with its sort key; a property of the same text declared nothing stays a text."
+    labels: ["Person"]
+    declarations: [{label: "Person", property: "born", kind: "date"}]
+    stores:
+      postgres:
+        props: '{"born": "2024-03-15", "name": "2024-03-15"}'
+        result: '{"born":{"$t":"date","v":"2024-03-15","s":"10000020240315"},"name":"2024-03-15"}'
+        changes: [{property: "born", change: "temporal"}]
+      oracle:
+        props: '{"born":"2024-03-15","name":"2024-03-15"}'
+        result: '{"born":{"$t":"date","v":"2024-03-15","s":"10000020240315"},"name":"2024-03-15"}'
+        changes: [{property: "born", change: "temporal"}]
+      sqlite:
+        props: '{"born":"2024-03-15","name":"2024-03-15"}'
+        result: '{"born":{"$t":"date","v":"2024-03-15","s":"10000020240315"},"name":"2024-03-15"}'
+        changes: [{property: "born", change: "temporal"}]
+  - name: "Moments as each library's layout 1 wrote them"
+    description: "drivine4j's text with a fraction of one digit, JavaScript's toISOString in UTC, java.time's ZonedDateTime with its named zone after the offset, which layout 2 holds no more of, and Python's str, a space between the date and the time: each its tag, canonical, its sort key that of its moment in UTC, then its offset."
+    labels: ["Event"]
+    declarations:
+      - {label: "Event", property: "a", kind: "datetime"}
+      - {label: "Event", property: "b", kind: "datetime"}
+      - {label: "Event", property: "c", kind: "datetime"}
+      - {label: "Event", property: "d", kind: "datetime"}
+    stores:
+      sqlite:
+        props: '{"a":"2024-03-15T10:30:00.5+02:00","b":"2024-03-15T08:30:00.500Z","c":"2024-03-15T10:30+01:00[Europe/Paris]","d":"2024-03-15 10:30:00+02:00"}'
+        result: '{"a":{"$t":"datetime","v":"2024-03-15T10:30:00.500+02:00","s":"10000020240315083000500000000072000"},"b":{"$t":"datetime","v":"2024-03-15T08:30:00.500Z","s":"10000020240315083000500000000064800"},"c":{"$t":"datetime","v":"2024-03-15T10:30:00+01:00","s":"10000020240315093000000000000068400"},"d":{"$t":"datetime","v":"2024-03-15T10:30:00+02:00","s":"10000020240315083000000000000072000"}}'
+        changes: [{property: "a", change: "temporal"}, {property: "b", change: "temporal"}, {property: "c", change: "temporal"}, {property: "d", change: "temporal"}]
+  - name: "Each other temporal kind"
+    description: "A local moment, a local time and a time written without their seconds, and durations, one of a week: each its tag, canonical; a duration has no sort key."
+    labels: ["Event"]
+    declarations:
+      - {label: "Event", property: "ldt", kind: "localdatetime"}
+      - {label: "Event", property: "lt", kind: "localtime"}
+      - {label: "Event", property: "t", kind: "time"}
+      - {label: "Event", property: "dur", kind: "duration"}
+      - {label: "Event", property: "week", kind: "duration"}
+    stores:
+      postgres:
+        props: '{"t": "10:30+02:00", "lt": "10:30", "dur": "PT36H", "ldt": "2024-03-15T10:30", "week": "P1W"}'
+        result: '{"t":{"$t":"time","v":"10:30:00+02:00","s":"095400000000000072000"},"lt":{"$t":"localtime","v":"10:30:00","s":"37800000000000"},"dur":{"$t":"duration","v":"PT36H"},"ldt":{"$t":"localdatetime","v":"2024-03-15T10:30:00","s":"10000020240315103000000000000"},"week":{"$t":"duration","v":"P7D"}}'
+        changes: [{property: "t", change: "temporal"}, {property: "lt", change: "temporal"}, {property: "dur", change: "temporal"}, {property: "ldt", change: "temporal"}, {property: "week", change: "temporal"}]
+  - name: "A list declared of dates"
+    description: "Each item its tag."
+    labels: ["Person"]
+    declarations: [{label: "Person", property: "days", kind: "date"}]
+    stores:
+      sqlite:
+        props: '{"days":["2024-03-15","2024-03-16"]}'
+        result: '{"days":[{"$t":"date","v":"2024-03-15","s":"10000020240315"},{"$t":"date","v":"2024-03-16","s":"10000020240316"}]}'
+        changes: [{property: "days", change: "temporal"}]
+  - name: "Values that are no value of their declared kind"
+    description: "Each is kept as it was, and named, with why: a migration refuses to write them unless told to keep them so. A list with one such item is kept whole."
+    labels: ["Person"]
+    declarations:
+      - {label: "Person", property: "a", kind: "date"}
+      - {label: "Person", property: "b", kind: "date"}
+      - {label: "Person", property: "c", kind: "datetime"}
+      - {label: "Person", property: "d", kind: "date"}
+      - {label: "Person", property: "e", kind: "date"}
+    stores:
+      sqlite:
+        props: '{"a":"yesterday","b":"2024-03-15T10:30","c":"2024-03-15T10:30[Europe/Paris]","d":42,"e":["2024-03-15","soon"]}'
+        result: '{"a":"yesterday","b":"2024-03-15T10:30","c":"2024-03-15T10:30[Europe/Paris]","d":42,"e":["2024-03-15","soon"]}'
+        invalid:
+          - {property: "a", kind: "date", value: '"yesterday"', message: "'yesterday' is no date."}
+          - {property: "b", kind: "date", value: '"2024-03-15T10:30"', message: "'2024-03-15T10:30' is a localdatetime, not a date."}
+          - {property: "c", kind: "datetime", value: '"2024-03-15T10:30[Europe/Paris]"', message: "'2024-03-15T10:30[Europe/Paris]' names a zone without its offset, which layout 2 can't hold: give the offset, as in 2024-03-15T10:30+01:00."}
+          - {property: "d", kind: "date", value: '42', message: "42 is no text, so no date."}
+          - {property: "e", kind: "date", value: '["2024-03-15","soon"]', message: "'soon' is no date."}
+  - name: "A property declared a float"
+    description: "A whole number is made a float, and a float stays one; NaN and the infinities, which layout 1's saves wrote as texts, are made floats where the store holds them, and are kept as texts, named, where it doesn't: Postgres holds none of them, SQLite no NaN."
+    labels: ["Reading"]
+    declarations:
+      - {label: "Reading", property: "w", kind: "float"}
+      - {label: "Reading", property: "f", kind: "float"}
+      - {label: "Reading", property: "nan", kind: "float"}
+      - {label: "Reading", property: "inf", kind: "float"}
+    stores:
+      postgres:
+        props: '{"f": 1.5, "w": 2, "inf": "Infinity", "nan": "NaN"}'
+        result: '{"f":1.5,"w":2.0,"inf":"Infinity","nan":"NaN"}'
+        changes: [{property: "w", change: "float"}]
+        invalid:
+          - {property: "inf", kind: "float", value: '"Infinity"', message: "A statement that writes is given NaN or an infinity, which Postgres's `jsonb` holds as no number: it would store another value in its place."}
+          - {property: "nan", kind: "float", value: '"NaN"', message: "A statement that writes is given NaN or an infinity, which Postgres's `jsonb` holds as no number: it would store another value in its place."}
+      oracle:
+        props: '{"w":2,"f":1.5,"nan":"NaN","inf":"Infinity"}'
+        result: '{"w":{"$numberDouble":"2.0"},"f":{"$numberDouble":"1.5"},"nan":{"$numberDouble":"NaN"},"inf":{"$numberDouble":"Infinity"}}'
+        changes: [{property: "w", change: "float"}, {property: "f", change: "double"}, {property: "nan", change: "float"}, {property: "inf", change: "float"}]
+      sqlite:
+        props: '{"w":2,"f":1.5,"nan":"NaN","inf":"Infinity"}'
+        result: '{"w":2.0,"f":1.5,"nan":"NaN","inf":9e999}'
+        changes: [{property: "w", change: "float"}, {property: "inf", change: "float"}]
+        invalid:
+          - {property: "nan", kind: "float", value: '"NaN"', message: "A statement that writes is given NaN, which SQLite's JSON holds as no number: it would store another value in its place."}
+  - name: "A list declared of floats"
+    description: "Each whole number in it made a float; on Oracle a NUMBER with a fraction in it is the change any such NUMBER is."
+    labels: ["Reading"]
+    declarations: [{label: "Reading", property: "l", kind: "float"}]
+    stores:
+      oracle:
+        props: '{"l":[1.5,2]}'
+        result: '{"l":[{"$numberDouble":"1.5"},{"$numberDouble":"2.0"}]}'
+        changes: [{property: "l", change: "double"}, {property: "l", change: "float"}]
+      postgres:
+        props: '{"l": [1.5, 2]}'
+        result: '{"l":[1.5,2.0]}'
+        changes: [{property: "l", change: "float"}]
+  - name: "A property declared bytes"
+    description: "Base64 text and a list of unsigned bytes are each the list of their signed values, as layout 2 and the graph engines hold bytes; a list of signed bytes already is one."
+    labels: ["File"]
+    declarations:
+      - {label: "File", property: "a", kind: "bytes"}
+      - {label: "File", property: "b", kind: "bytes"}
+      - {label: "File", property: "c", kind: "bytes"}
+      - {label: "File", property: "d", kind: "bytes"}
+    stores:
+      postgres:
+        props: '{"a": "AQL/", "b": [1, 2, 255], "c": [1, 2, -1], "d": "!!"}'
+        result: '{"a":[1,2,-1],"b":[1,2,-1],"c":[1,2,-1],"d":"!!"}'
+        changes: [{property: "a", change: "bytes"}, {property: "b", change: "bytes"}]
+        invalid:
+          - {property: "d", kind: "bytes", value: '"!!"', message: "'!!' is no base64 text, so no bytes."}
+  - name: "A node of two labels that declare one property two kinds"
+    description: "Its value can't be told: it is kept as it was, and named."
+    labels: ["Person", "Robot"]
+    declarations: [{label: "Person", property: "born", kind: "date"}, {label: "Robot", property: "born", kind: "datetime"}]
+    stores:
+      sqlite:
+        props: '{"born":"2024-03-15"}'
+        result: '{"born":"2024-03-15"}'
+        invalid:
+          - {property: "born", kind: "date", value: '"2024-03-15"', message: "A node of the labels Person, Robot has born declared date and datetime: it is kept as it was."}
+  - name: "A relationship's property"
+    description: "Declared by the relationship's type, as a node's is by its label."
+    labels: ["KNOWS"]
+    declarations: [{label: "KNOWS", property: "since", kind: "date"}]
+    stores:
+      postgres:
+        props: '{"since": "2020-01-01"}'
+        result: '{"since":{"$t":"date","v":"2020-01-01","s":"10000020200101"}}'
+        changes: [{property: "since", change: "temporal"}]
+  - name: "A property whose name begins with $, declared"
+    description: "Declared by the name the user gives it; held with one more $, as its value's tag."
+    labels: ["Person"]
+    declarations: [{label: "Person", property: "$at", kind: "date"}]
+    stores:
+      oracle:
+        props: '{"$at":"2024-03-15"}'
+        result: '{"$$at":{"$t":"date","v":"2024-03-15","s":"10000020240315"}}'
+        changes: [{property: "$at", change: "escapedKey"}, {property: "$at", change: "temporal"}]
