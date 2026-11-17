@@ -503,6 +503,8 @@ class OracleCypherCompiler(
     private fun sharedSum(a: String, b: String, keyed: Boolean, body: (List<String>) -> String): String {
         val sides = listOf(a, b)
         val properties = sides.map(::besideLong)
+        // Two properties' keys bound once: beside a value given or written, one read of a few, the form is as it was (#309's cost).
+        if (keyed && !binds(a, b) && properties.all { it }) return keysBound(sides, body(sides))
         if (!binds(a, b) || properties.none { it }) return shared(a, b, body = body)
         val columns = sides.withIndex().flatMap { (i, json) ->
             if (!properties[i]) return@flatMap listOf(json)
@@ -527,6 +529,22 @@ class OracleCypherCompiler(
                 keyed.replace(kind(json), kindColumn).replace("JSON_VALUE($json, '\$' RETURNING CLOB)", clob)
             }
         }
+    }
+
+    /**
+     * [sql], a comparison of two short properties, with each of the [properties]' [numberKeys] read once, by its own path, a column of a
+     * subquery the comparison reads them by name from: written where each is used, a property was read up to a dozen times in
+     * one comparison of two (drivine-cypher-spec#309), and such a statement, after others in the session, crashed the Oracle
+     * server process (ORA-07445). Only the keys are bound, numbers both: a property's JSON bound so and read as a CLOB, a text
+     * past 32 KB closed the session (#370), so it is still read where it is, as [direct] reads it. Where [sql] reads no key, as
+     * where neither side may be a number, it is as it was.
+     */
+    private fun keysBound(properties: List<String>, sql: String): String {
+        val keys = properties.flatMap { json -> propertyRead(json)!!.let { (props, path) -> listOf(doubleKey(props, path), numberRead(props, path)) } }
+            .distinct().filter { it in sql }
+        // Bound once already, by a comparison [sql] holds: `=` asks of its sides first, then compares them by keys it binds.
+        if (keys.isEmpty() || !bindsHere || keys.all { key -> sql.split(key).size == 2 && "$key AS v" in sql }) return sql
+        return sharedBound(*keys.toTypedArray()) { names -> keys.zip(names).fold(sql) { body, (key, name) -> body.replace(key, name) } }
     }
 
     /**

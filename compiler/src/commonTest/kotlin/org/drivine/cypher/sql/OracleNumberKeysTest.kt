@@ -25,10 +25,34 @@ class OracleNumberKeysTest {
     private fun big(props: String, path: String) =
         "CASE WHEN JSON_VALUE($props, '$path.type()') = 'number' THEN JSON_VALUE($props, '$path' RETURNING NUMBER NULL ON ERROR TYPE(STRICT)) END"
 
+    /**
+     * The subquery a comparison of short properties reads their [keys] from, each once, as `sh1.v1`, `sh1.v2`…: its name, by
+     * which the comparison names them (see `OracleCypherCompiler.keysBound`).
+     */
+    private fun keysBound(sql: String, vararg keys: String): String {
+        val columns = keys.withIndex().joinToString(", ") { (i, key) -> "$key AS v${i + 1}" }
+        val bound = Regex("FROM \\(SELECT /\\*\\+ NO_MERGE \\*/ ${Regex.escape(columns)}\\) (sh\\d+)\\)").find(sql)
+        assertTrue(bound != null, sql)
+        keys.forEach { assertEquals(1, Regex(Regex.escape(it)).findAll(sql).count(), sql) }
+        return bound!!.groupValues[1]
+    }
+
     /** No key is read from a value read through its text, nor from a column that carries one. */
     private fun assertNoKeyOfARoutedValue(sql: String) {
         assertTrue(!Regex("JSON_VALUE\\(JSON\\(JSON_QUERY\\(JSON_SERIALIZE[^)]*\\)[^']*'[^']*' RETURNING (BINARY_DOUBLE|NUMBER)").containsMatchIn(sql), sql)
         assertTrue(!Regex("JSON_VALUE\\([pw]\\d+\\.[sc]\\d+, '\\$[^']*' RETURNING (BINARY_DOUBLE|NUMBER)").containsMatchIn(sql), sql)
+    }
+
+    @Test
+    fun aComparisonOfTwoPropertiesReadsEachKeyOnceInASubquery() {
+        val sql = compiler.compile("MATCH (a:N), (b:N) WHERE a.val < b.val RETURN a, b", emptyMap()).sql
+        // Each property's double and NUMBER, each read once, as columns of the subquery the comparison reads them from.
+        for (node in listOf("n1", "n3").filter { "$it.props" in sql }) {
+            assertEquals(1, Regex(Regex.escape(double("$node.props", "$.val"))).findAll(sql).count(), sql)
+            assertEquals(1, Regex(Regex.escape(big("$node.props", "$.val"))).findAll(sql).count(), sql)
+        }
+        assertTrue(Regex("\\(SELECT /\\*\\+ NO_MERGE \\*/ ${Regex.escape(double("n1.props", "$.val"))} AS v1").containsMatchIn(sql), sql)
+        assertNoKeyOfARoutedValue(sql)
     }
 
     @Test
@@ -64,11 +88,13 @@ class OracleNumberKeysTest {
     fun twoPropertiesAreComparedAndOrderedByTheirKeys() {
         val equal = compiler.compile("MATCH (n:K), (m:K) RETURN n.k = m.k", emptyMap()).sql
         // Null where either is no number, and then compared as JSON.
-        assertTrue("COALESCE(${double("n1.props", "$.k")} = ${double("n2.props", "$.k")} AND CASE WHEN ABS(${big("n1.props", "$.k")}" in equal, equal)
+        val e = keysBound(equal, double("n1.props", "$.k"), big("n1.props", "$.k"), double("n2.props", "$.k"), big("n2.props", "$.k"))
+        assertTrue("COALESCE($e.v1 = $e.v3 AND CASE WHEN ABS($e.v2)" in equal, equal)
         assertNoKeyOfARoutedValue(equal)
         val less = compiler.compile("MATCH (n:K), (m:K) RETURN n.k < m.k", emptyMap()).sql
         // NaN is ordered against nothing; the doubles decide, and where they are equal, what an integer past 2^53 is beyond its double.
-        assertTrue("WHEN ${double("n1.props", "$.k")} <> ${double("n2.props", "$.k")} THEN (${double("n1.props", "$.k")} < ${double("n2.props", "$.k")} AND ${double("n1.props", "$.k")} IS NOT NAN AND ${double("n2.props", "$.k")} IS NOT NAN) ELSE (CASE WHEN ABS(${big("n1.props", "$.k")}" in less, less)
+        val l = keysBound(less, double("n1.props", "$.k"), big("n1.props", "$.k"), double("n2.props", "$.k"), big("n2.props", "$.k"))
+        assertTrue("WHEN $l.v1 <> $l.v3 THEN ($l.v1 < $l.v3 AND $l.v1 IS NOT NAN AND $l.v3 IS NOT NAN) ELSE (CASE WHEN ABS($l.v2)" in less, less)
         assertNoKeyOfARoutedValue(less)
     }
 
@@ -76,7 +102,8 @@ class OracleNumberKeysTest {
     fun aCaseSubjectAndARelationshipsPropertyAreComparedByTheirKeys() {
         // A simple CASE compares its subject with each alternative as = does: by the keys, read from the properties.
         val case = compiler.compile("MATCH (n:K), (m:K) RETURN CASE n.k WHEN m.k THEN 1 END", emptyMap()).sql
-        assertTrue("COALESCE(${double("n1.props", "$.k")} = ${double("n2.props", "$.k")} AND CASE WHEN ABS(${big("n1.props", "$.k")}" in case, case)
+        val c = keysBound(case, double("n1.props", "$.k"), big("n1.props", "$.k"), double("n2.props", "$.k"), big("n2.props", "$.k"))
+        assertTrue("COALESCE($c.v1 = $c.v3 AND CASE WHEN ABS($c.v2)" in case, case)
         assertNoKeyOfARoutedValue(case)
         // A relationship's property is keyed as a node's is, from its own properties.
         val rel = compiler.compile("MATCH ()-[r:R]->() RETURN r.k ORDER BY r.k", emptyMap()).sql

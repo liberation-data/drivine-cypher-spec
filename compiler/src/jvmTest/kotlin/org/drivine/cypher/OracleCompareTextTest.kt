@@ -43,6 +43,10 @@ class OracleCompareTextTest {
     private fun numbersOrdered(x: String, y: String, dx: String, dy: String, ex: String, ey: String, operator: String) =
         "CASE WHEN $dx IS NULL OR $dy IS NULL THEN $x $operator $y WHEN $dx <> $dy THEN ($dx $operator $dy AND $dx IS NOT NAN AND $dy IS NOT NAN) ELSE ($ex $operator $ey AND $dx IS NOT NAN) END"
 
+    /** The double and the `NUMBER` of `t` of [node], bound as the columns from `v[first]`, as a comparison of two properties binds them. */
+    private fun keys(node: String, first: Int = 1) =
+        "${double("$node.props", "\$.t")} AS v$first, CASE WHEN JSON_VALUE($node.props, '\$.t.type()') = 'number' THEN JSON_VALUE($node.props, '\$.t' RETURNING NUMBER NULL ON ERROR TYPE(STRICT)) END AS v${first + 1}"
+
     private fun property(node: String, clob: Boolean = false) = "JSON_VALUE($node.props, '\$.t'${if (clob) " RETURNING CLOB" else ""})"
 
     @Test
@@ -52,24 +56,27 @@ class OracleCompareTextTest {
             // Two texts, then two temporal values' tags of one kind by their sort keys (see ValueLayout).
             val ordered = sql("MATCH (n:Doc), (m:Doc) WHERE n.t $operator m.t RETURN count(*)")
             val text = texts(n[0], n[1], n[2], n[3], operator)
-            // Two numbers by their keys, read by the properties' own paths (drivine-cypher-spec#309).
+            // Two numbers by their keys, each read once by the property's own path, as a column the comparison names
+            // (drivine-cypher-spec#309).
             val numbers = numbersOrdered(
                 "JSON_QUERY(n1.props, '\$.t' RETURNING JSON)", OracleReads.routedRead("n2.props", "'\$.t'"),
-                double("n1.props", "\$.t"), double("n2.props", "\$.t"), exact("n1.props", "\$.t"), exact("n2.props", "\$.t"), operator,
+                "sh1.v1", "sh1.v3", exactOf("sh1.v2", "sh1.v1"), exactOf("sh1.v4", "sh1.v3"), operator,
             )
+            assertTrue(" FROM (SELECT /*+ NO_MERGE */ ${keys("n1")}, ${keys("n2", 3)}) sh1)" in ordered, ordered)
             assertTrue(ordered.contains("THEN CASE WHEN JSON_VALUE(n1.props, '\$.t.type()') = 'string' THEN $text ELSE $numbers END WHEN "), ordered)
             assertTrue(!ordered.contains("JSON_VALUE(JSON_QUERY("), ordered)
         }
         // Equal as JSON where both are read as VARCHAR2s, as is quicker than reading their kinds; else as CLOBs where both are
         // texts, null where either isn't there, and not equal where one is a text.
         val equal = sql("MATCH (n:Doc), (m:Doc) RETURN n.t = m.t, n.t <> m.t")
-        val (dn, dm) = double("n1.props", "\$.t") to double("n2.props", "\$.t")
-        val json = "COALESCE($dn = $dm AND ${exact("n1.props", "\$.t")} = ${exact("n2.props", "\$.t")}, " +
+        // Each comparison's keys bound once, in its own subquery, `SH` here, as a pattern of any of them.
+        val json = "COALESCE(SH.v1 = SH.v3 AND ${exactOf("SH.v2", "SH.v1")} = ${exactOf("SH.v4", "SH.v3")}, " +
             "JSON_QUERY(n1.props, '\$.t' RETURNING JSON) = JSON_QUERY(n2.props, '\$.t' RETURNING JSON))"
         val kinds = "JSON_VALUE(n1.props, '\$.t.type()') = 'string' %s JSON_VALUE(n2.props, '\$.t.type()') = 'string'"
         val compared = "CASE WHEN ${n[0]} IS NOT NULL AND ${n[1]} IS NOT NULL THEN $json WHEN ${kinds.format("AND")} THEN ${clobs(n[2], n[3], "=")} " +
             "WHEN JSON_VALUE(n1.props, '\$.t.type()') IS NULL OR JSON_VALUE(n2.props, '\$.t.type()') IS NULL THEN NULL WHEN ${kinds.format("OR")} THEN FALSE ELSE $json END"
-        assertEquals(2, Regex(Regex.escape(compared)).findAll(equal).count(), equal)
+        assertEquals(2, Regex(Regex.escape(compared).replace("SH", "\\E(sh\\d+)\\Q")).findAll(equal).count(), equal)
+        assertEquals(2, Regex(Regex.escape(" FROM (SELECT /*+ NO_MERGE */ ${keys("n1")}, ${keys("n2", 3)}) ")).findAll(equal).count(), equal)
         assertTrue(!equal.contains("JSON_VALUE(JSON_QUERY("), equal)
         // A query of one table that compares a property is not rewritten by Oracle's JSON table transformation, which lost the
         // reads of a node's properties beside a quantifier's subquery; one that compares none is, as before.

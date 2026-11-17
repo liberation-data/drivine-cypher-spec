@@ -484,6 +484,9 @@ abstract class SqlCypherCompiler(
     /** Whether [shared] binds [values]: where one is long, and values are bound here at all. */
     protected fun binds(vararg values: String) = sharing && values.any { it.length > SHARED_ABOVE }
 
+    /** Whether values are bound here at all, as [binds] asks first: not where a subquery would take an aggregate from its group. */
+    protected val bindsHere get() = sharing
+
     /** [body] over the sides [a] and [b] of a `+`, as [shared] binds them: see Oracle's. */
     protected open fun sharedSum(a: String, b: String, body: (List<String>) -> String): String = shared(a, b, body = body)
 
