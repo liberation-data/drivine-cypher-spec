@@ -118,7 +118,7 @@ rewrites:
         result: '{"days":[{"$t":"date","v":"2024-03-15","s":"10000020240315"},{"$t":"date","v":"2024-03-16","s":"10000020240316"}]}'
         changes: [{property: "days", change: "temporal"}]
   - name: "Values that are no value of their declared kind"
-    description: "Each is kept as it was, and named, with why: a migration refuses to write them unless told to keep them so. A list with one such item is kept whole."
+    description: "Each is kept as it was, and named, with why: a migration refuses to write them unless told to keep them so. A list with one such item is kept whole. An offset with seconds, as java.time and Python write a moment in a named zone before its standard time (Paris's +00:09:21 before 1911), is named as such, with its named zone or without."
     labels: ["Person"]
     declarations:
       - {label: "Person", property: "a", kind: "date"}
@@ -129,10 +129,12 @@ rewrites:
       - {label: "Person", property: "f", kind: "float"}
       - {label: "Person", property: "g", kind: "duration"}
       - {label: "Person", property: "h", kind: "date"}
+      - {label: "Person", property: "i", kind: "datetime"}
+      - {label: "Person", property: "j", kind: "datetime"}
     stores:
       sqlite:
-        props: '{"a":"yesterday","b":"2024-03-15T10:30","c":"2024-03-15T10:30[Europe/Paris]","d":42,"e":["2024-03-15","soon"],"f":"many","g":"2024-03-15","h":"2024-02-30"}'
-        result: '{"a":"yesterday","b":"2024-03-15T10:30","c":"2024-03-15T10:30[Europe/Paris]","d":42,"e":["2024-03-15","soon"],"f":"many","g":"2024-03-15","h":"2024-02-30"}'
+        props: '{"a":"yesterday","b":"2024-03-15T10:30","c":"2024-03-15T10:30[Europe/Paris]","d":42,"e":["2024-03-15","soon"],"f":"many","g":"2024-03-15","h":"2024-02-30","i":"1900-01-01T00:00+00:09:21[Europe/Paris]","j":"1900-01-01T00:00:00+00:09:21"}'
+        result: '{"a":"yesterday","b":"2024-03-15T10:30","c":"2024-03-15T10:30[Europe/Paris]","d":42,"e":["2024-03-15","soon"],"f":"many","g":"2024-03-15","h":"2024-02-30","i":"1900-01-01T00:00+00:09:21[Europe/Paris]","j":"1900-01-01T00:00:00+00:09:21"}'
         invalid:
           - {property: "a", kind: "date", value: '"yesterday"', message: "'yesterday' is no date."}
           - {property: "b", kind: "date", value: '"2024-03-15T10:30"', message: "'2024-03-15T10:30' is a localdatetime, not a date."}
@@ -142,6 +144,8 @@ rewrites:
           - {property: "f", kind: "float", value: '"many"', message: "\"many\" is no number, so no float."}
           - {property: "g", kind: "duration", value: '"2024-03-15"', message: "'2024-03-15' is no duration."}
           - {property: "h", kind: "date", value: '"2024-02-30"', message: "'2024-02-30' is no date: Text '2024-02-30' could not be parsed: Invalid date 'FEBRUARY 30'"}
+          - {property: "i", kind: "datetime", value: '"1900-01-01T00:00+00:09:21[Europe/Paris]"', message: "'1900-01-01T00:00+00:09:21[Europe/Paris]' has the offset with seconds +00:09:21, which layout 2 can't hold."}
+          - {property: "j", kind: "datetime", value: '"1900-01-01T00:00:00+00:09:21"', message: "'1900-01-01T00:00:00+00:09:21' has the offset with seconds +00:09:21, which layout 2 can't hold."}
   - name: "A property declared a float"
     description: "A whole number is made a float, and a float stays one; NaN and the infinities, which layout 1's saves wrote as texts, are made floats where the store holds them, and are kept as texts, named, where it doesn't: Postgres holds none of them, SQLite no NaN."
     labels: ["Reading"]

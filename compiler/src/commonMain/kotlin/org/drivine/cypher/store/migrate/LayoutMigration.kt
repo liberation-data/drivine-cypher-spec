@@ -133,8 +133,8 @@ object LayoutMigration {
      * temporal kind's value is its text, which must be a text of that kind as ISO 8601 writes it (`2024-03-15`,
      * `10:30`, `2024-03-15T10:30:00.123+02:00`, `P1DT2H`), a space in place of the `T` between a date and its time too, and
      * a named zone after an offset (`+01:00[Europe/Paris]`) dropped, as layout 2 holds none; it is held canonical, its tag
-     * worked out of it. A float's is a number. Bytes are base64 text, or a list of whole numbers from -128 to 255, those
-     * from 128 read as unsigned. A value a store can't hold in layout 2, NaN on Postgres say, is invalid too, with the
+     * worked out of it; one with an offset with seconds (`+00:09:21`), which layout 2 holds none of, is invalid. A float's
+     * is a number. Bytes are base64 text, or a list of whole numbers from -128 to 255, those from 128 read as unsigned. A value a store can't hold in layout 2, NaN on Postgres say, is invalid too, with the
      * message a write is refused with. A row of two labels that declare one property two kinds has it invalid.
      */
     fun rewrite(props: String, store: Store, labels: List<String>, declarations: List<Declaration>): Rewrite {
@@ -228,6 +228,12 @@ object LayoutMigration {
      */
     private val NAMED_ZONE = Regex("""^(.*?)\[[A-Za-z0-9_+\-/:]+]$""")
 
+    /**
+     * An offset with seconds at a text's end, as java.time and Python write a moment in a named zone before its standard
+     * time (`1900-01-01T00:00+00:09:21[Europe/Paris]`), which no store's text holds (see `refusals.yaml`).
+     */
+    private val OFFSET_WITH_SECONDS = Regex("""[+-][0-9]{2}:[0-9]{2}:[0-9]{2}$""")
+
     /** A date and its time apart by a space, as Python's `str` writes a moment: the two in the groups. */
     private val SPACED = Regex("""^(-?[0-9]{4}-[0-9]{2}-[0-9]{2}) ([0-9]{2}:.*)$""")
 
@@ -236,12 +242,13 @@ object LayoutMigration {
         var given = text
         NAMED_ZONE.find(given)?.let { found ->
             val before = found.groupValues[1]
-            if (!Temporal.OFFSET_REGEX.containsMatchIn(before)) {
+            if (!Temporal.OFFSET_REGEX.containsMatchIn(before) && !OFFSET_WITH_SECONDS.containsMatchIn(before)) {
                 throw Kept("'$text' names a zone without its offset, which layout 2 can't hold: give the offset, as in 2024-03-15T10:30+01:00.")
             }
             given = before
         }
         SPACED.find(given)?.let { given = "${it.groupValues[1]}T${it.groupValues[2]}" }
+        if (kind != Temporal.DURATION) OFFSET_WITH_SECONDS.find(given)?.let { throw Kept("'$text' has the offset with seconds ${it.value}, which layout 2 can't hold.") }
         val found = if (kind == Temporal.DURATION) Temporal.DURATION.takeIf { it.regex.matches(given) }
         else Temporal.instants.firstOrNull { it.regex.matches(given) }
         if (found == null) throw Kept("'$text' is no ${declared.word}.")
