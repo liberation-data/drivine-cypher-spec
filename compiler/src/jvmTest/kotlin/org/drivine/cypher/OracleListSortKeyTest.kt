@@ -45,10 +45,12 @@ class OracleListSortKeyTest {
         // Its rank nests a temporal value's tag's (layout 2), so only its ends are matched.
         val sql = oracle("MATCH (n:A) RETURN n.l AS l ORDER BY l")
         assertEquals(0, declarations(sql), sql)
-        assertTrue(Regex("""ORDER BY DECODE\(JSON_VALUE\((\S+), '\$\.type\(\)'\), .*\), \1$""").containsMatchIn(sql), sql)
+        // A number by its keys, carried beside it, between its kind and its JSON: its double, and the exact key worked out of its
+        // double's and its NUMBER's columns (drivine-cypher-spec#309).
+        assertTrue(Regex("""ORDER BY DECODE\(JSON_VALUE\((\S+), '\$\.type\(\)'\), .*\), \1k1, CASE WHEN ABS\(\1k2\) .*? ELSE 0 END, \1$""").containsMatchIn(sql), sql)
         val nullable = OracleCypherCompiler("g").compile("UNWIND \$ms AS m RETURN m.l AS l ORDER BY l", mapOf("ms" to listOf(mapOf("l" to listOf(1)), mapOf("l" to null)))).sql
         assertEquals(0, declarations(nullable), nullable)
-        assertTrue(Regex("""ORDER BY DECODE\(JSON_VALUE\((\S+), '\$\.type\(\)'\), .*\), NVL\(\1, JSON\('null'\)\)$""").containsMatchIn(nullable), nullable)
+        assertTrue(Regex("""ORDER BY DECODE\(JSON_VALUE\((\S+), '\$\.type\(\)'\), .*\), \1k1, CASE WHEN ABS\(\1k2\) .*? ELSE 0 END, NVL\(\1, JSON\('null'\)\)$""").containsMatchIn(nullable), nullable)
     }
 
     @Test

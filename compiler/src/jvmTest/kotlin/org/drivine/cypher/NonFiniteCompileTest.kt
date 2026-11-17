@@ -80,9 +80,10 @@ class NonFiniteCompileTest {
         assertTrue(counted(OracleCypherCompiler("g").compile("UNWIND [0.0, 1.0] AS z RETURN count(DISTINCT z / z)").sql))
         // So is NaN worked out of an infinity Oracle stores, as ∞ - ∞ is.
         assertTrue(counted(OracleCypherCompiler("g").compile("MATCH (n:A) RETURN count(DISTINCT n.x - n.x)").sql))
-        // Not where the statement works out none, nor of a value made a text, a list or a map: on Oracle, which may store NaN, too,
-        // as testing each value read cost a count(DISTINCT …) 2.6 times as long.
-        assertFalse(counted(OracleCypherCompiler("g").compile("MATCH (n:A) RETURN count(DISTINCT n.x)").sql))
+        // On Oracle, which may store NaN, a number read is counted by its keys, which keep a NaN stored apart as they read it
+        // (drivine-cypher-spec#309): Oracle's double finds NaN equal to itself.
+        assertTrue(counted(OracleCypherCompiler("g").compile("MATCH (n:A) RETURN count(DISTINCT n.x)").sql))
+        // Not where the statement works out none, nor of a value made a text, a list or a map, on the stores that hold no NaN.
         assertFalse(counted(PostgresCypherCompiler("g").compile("MATCH (n:A) RETURN count(DISTINCT n.x)").sql))
         assertFalse(counted(SqliteCypherCompiler("g").compile("MATCH (n:A) RETURN count(DISTINCT n.x)").sql))
         listOf("toString(x)", "[x]", "{a: x}").forEach { value ->

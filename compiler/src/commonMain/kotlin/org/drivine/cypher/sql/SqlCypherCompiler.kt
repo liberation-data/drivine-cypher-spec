@@ -369,6 +369,7 @@ abstract class SqlCypherCompiler(
         nonFinite = given || (nonFiniteWorkedOut(false) && (worksOutNonFinite(query, parameters) || (infinitiesStored && worksOutNaN(query, parameters))))
         nanWorkedOut = given || worksOutNonFinite(query, parameters) || worksOutNaN(query, parameters)
         idsAtMost(mostIds(query))
+        carriedKeys.clear()
         procedural = false
         // The functions the statements compiled before declared are set aside, and put back after: one the fragment calls is
         // seen though such a statement declared it already, and none it declares is left for the next statement.
@@ -440,6 +441,7 @@ abstract class SqlCypherCompiler(
         nonFinite = given || (nonFiniteWorkedOut(writes) && (worksOutNonFinite(query, parameters) || (infinitiesStored && worksOutNaN(query, parameters))))
         nanWorkedOut = given || worksOutNonFinite(query, parameters) || worksOutNaN(query, parameters)
         idsAtMost(mostIds(query))
+        carriedKeys.clear()
         if (query.unions.isNotEmpty()) return withFunctions(union(query, parameters))
         if (!writes) {
             val writer = Writer(Parameters(parameters, ::parameterJson, ::parameterCount, text = ::parameterText, asPath = parameterPath))
@@ -1091,8 +1093,9 @@ abstract class SqlCypherCompiler(
     protected open fun keyEquals(x: String, kind: String, key: String, given: Any): String? = null
 
     /**
-     * [x] [operator] [y], JSON values, where the statement writes or is given [left] or [right], one of them a whole number from
-     * 2^53 on that the store compares with a float inexactly: null where it compares them as it compares any two (see Oracle's).
+     * [x] [operator] [y], JSON values, where the statement writes or is given [left] or [right], and they are not both integers it
+     * makes: a store that compares a number so given otherwise than any two values says how (see Oracle's); null where it
+     * compares them as it compares any two.
      */
     protected open fun orderedPast(x: String, operator: String, y: String, left: Any?, right: Any?): String? = null
 
@@ -1120,6 +1123,111 @@ abstract class SqlCypherCompiler(
 
     /** Whether the JSON values [x] and [y], of one kind, a number, a text or a truth value, stand as [operator] says (`<`, `>=`…). */
     protected open fun ordered(x: String, operator: String, y: String) = "$x $operator $y"
+
+    /**
+     * [ordered], where [numbers] says the two may be numbers that are not both integers the statement makes (see `integral`):
+     * where not, as they are both integers, or either is a text or a truth value the statement makes or is given, a store that
+     * compares other numbers by keys of their own may compare these as they are, which orders them exactly.
+     */
+    protected open fun ordered(x: String, operator: String, y: String, numbers: Boolean) = ordered(x, operator, y)
+
+    /**
+     * Whether the JSON values [x] and [y], which the statement makes integers both (see `integral`), are equal: as [otherwise]
+     * compares any two values, unless a store that compares other numbers by keys of their own compares two integers more
+     * cheaply as they are.
+     */
+    protected open fun integerEquals(x: String, y: String, otherwise: () -> String) = otherwise()
+
+    /**
+     * Whether the JSON values [x] and [y], neither of them null, are equal, where the statement makes or is given one of them a
+     * text or a truth value, which is no number: as [jsonEquals], unless a store compares numbers by keys of its own, which it
+     * then needn't read.
+     */
+    protected open fun numberlessEquals(x: String, y: String) = jsonEquals(x, y)
+
+    /**
+     * Whether an item of a list of [items], each a text, a number, a truth value or null, is equal to the JSON value [value],
+     * where the store's [givenItemsTest] has passed it: a plain equality, unless a store whose JSON equality loses a number's
+     * value compares a number otherwise.
+     */
+    protected open fun testedItemEquals(item: String, value: String, items: List<Any?>) = "$item = $value"
+
+    /**
+     * Whether an item of a list the statement writes, of literals, lists and maps, is equal to the JSON value [value], as [jsonEquals]
+     * compares them: [items] are the literals' values, each list or map an empty list. A store that compares numbers by keys of
+     * its own may compare one more cheaply beside written numbers it knows.
+     */
+    protected open fun writtenItemEquals(item: String, value: String, items: List<Any?>) = jsonEquals(item, value)
+
+    /**
+     * The keys a store compares, sorts and counts the JSON value [json] by beside the value itself, where it may be a number and
+     * the store's JSON loses a number's value in comparing it: none by default, where the JSON's own order and equality are
+     * Cypher's for numbers. Each is a SQL value: the first null where [json] is no number, which so tells it from any number.
+     */
+    protected open fun numberKeys(json: String): List<String> = emptyList()
+
+    /**
+     * Whether a query that carries the JSON value [json] out as a column carries its [numberKeys] beside it, read where the value
+     * is: else they are read of the column in the query after, as a long value worked out in the query, written out again for
+     * each key, would grow the statement.
+     */
+    protected open fun carriesNumberKeys(json: String) = true
+
+    /**
+     * The number keys of the values a query carries with them, by the SQL a value is read by after it, `w3.c1`: the columns
+     * that carry its keys (see [Value.Json.keys]), noted where the value is read, for the store to read in place of the value's
+     * own keys. Set aside as each statement is compiled.
+     */
+    protected val carriedKeys = mutableMapOf<String, List<String>>()
+
+    /**
+     * The terms a group keys the JSON value [json], which may be a number, by in its place, where the store's comparison of it
+     * as a value keeps two equal numbers apart: SQLite's, of their text, kept `1` from `1.0` and `0.0` from `0`. Not `DISTINCT`,
+     * which keeps its rows in the order they come in, as a `GROUP BY` would not (drivine-cypher-spec#315).
+     * Null where the value keys it, as on a store that compares numbers by their values (Postgres's `jsonb`), or where the store
+     * groups a number as its JSON compares it, as Oracle does (drivine-cypher-spec#315).
+     */
+    protected open fun groupedValue(json: String): List<String>? = null
+
+    /**
+     * Whether a query carries the [numberKeys] of the JSON value [json] beside it to the query after, where that reads it: where
+     * they are read cheaply here, as a property's by its path, and only dearly of the column after, as through its text.
+     */
+    protected open fun carriesKeysAfter(json: String) = false
+
+    /**
+     * Whether the terms compiled read the values of a query that groups its rows, where a value the groups are keyed by is grouped
+     * as it is, and its number keys must be read of it, not of the property it is read from by the property's own path, which is
+     * no group's key (ORA-00979): see [groupedReads].
+     */
+    protected var groupedTerms = false
+        private set
+
+    /** [work], its terms [groupedTerms] where [grouped]. */
+    protected fun <T> groupedReads(grouped: Boolean, work: () -> T): T {
+        val was = groupedTerms
+        groupedTerms = grouped || was
+        try {
+            return work()
+        } finally {
+            groupedTerms = was
+        }
+    }
+
+    /** Whether the store compares, sorts and counts a number by [numberKeys]: by default it keeps none. */
+    protected open val keepsNumberKeys = false
+
+    /** [openSortKey] of the JSON value [json], where [keys] are its [numberKeys], read where they are read. */
+    protected open fun openSortKey(json: String, keys: List<String>): List<String> = openSortKey(json)
+
+    /** [jsonNullSortKey] of the JSON value [json], where [keys] are its [numberKeys], read where they are read. */
+    protected open fun jsonNullSortKey(json: String, keys: List<String>): List<String> = jsonNullSortKey(json)
+
+    /**
+     * `count(DISTINCT …)` of the JSON value [json], whose count reads [counted] (JSON's null as SQL's), where it may be a float:
+     * null where the store counts [counted] once each as it counts any value.
+     */
+    protected open fun distinctCount(json: String, counted: String): String? = null
 
     /**
      * Where the JSON list [x] comes beside the JSON list [y], neither of them null, as Cypher orders two lists in a comparison
@@ -2074,7 +2182,7 @@ abstract class SqlCypherCompiler(
             try {
                 var select = Select(scope)
                 for (clause in query.clauses) {
-                    if (clause is Clause.Return) return project(select, clause.projection, final = false).sql
+                    if (clause is Clause.Return) return project(select, clause.projection, final = false, keysAfter = false).sql
                     select = read(select, clause, scope)
                 }
                 return (listOf(select.head("1")) + from(select) + listOfNotNull(select.whereClause())).joinToString("\n")
@@ -2314,7 +2422,8 @@ abstract class SqlCypherCompiler(
             val names = returns.first().projection.items.map { it.name }
             if (returns.any { r -> r.projection.items.map { it.name }.toSet() != names.toSet() }) throw CompilerException("Each query of a UNION returns the same names, as in Cypher.")
             val distinct = !query.unions.first().all
-            val projected = comparingParts(distinct) { parts.map { calledPart(select, call, it, names, distinct) } }
+            // Each query's columns alike: none carries number keys, which one query's value may have and another's not.
+            val projected = comparingParts(distinct) { keyless { parts.map { calledPart(select, call, it, names, distinct) } } }
             if (projected.map { p -> p.scope.values.map { it::class } }.distinct().size > 1) unsupported("A UNION in CALL { … } whose queries return values of different kinds")
             // A map or a list that holds a node carries a column more, of its identity. Where one query's value has it and another's
             // has none, as `{x: c}` beside `{x: 1}`, the other gives its value as its identity, which it is, so their columns match
@@ -2366,6 +2475,8 @@ abstract class SqlCypherCompiler(
             // It is a list ([Value.Json.list]) only where each query makes it one, so that an order sorts the others' numbers and
             // maps by their kinds, not as lists; and it holds no null ([Value.Json.flat]) only where each query's holds none. It keeps
             // its keys' order ([Value.Json.ordered]) where any query's does, as each is then written as one that does ([orderedJson]).
+            // It is an integer the compiler makes ([Value.Json.integer]) only where each query's is: else a store that compares other
+            // numbers by keys of their own would compare another query's float as JSON (drivine-cypher-spec#309).
             val first = unidentified(projected.first())
             val scope = projected.first().scope.mapValues { (variable, value) ->
                 val all = projected.map { it.scope.getValue(variable) as? Value.Json }
@@ -2379,6 +2490,7 @@ abstract class SqlCypherCompiler(
                     text = all.all { it?.text == true }, texts = all.all { it?.texts == true },
                     known = all.map { it?.known }.distinct().singleOrNull(), itemsKnown = unionItems(all.map { it?.itemsKnown }), jsonNull = all.any { it?.jsonNull == true },
                     list = all.all { it?.list == true }, itemLists = all.all { it?.itemLists == true }, flat = all.all { it?.flat == true },
+                    integer = all.all { it?.integer == true },
                     // Its identity is the column beside it where any query gives one, the first query's own or its value's.
                     identity = if (variable in byProperties) null else value.identity ?: first[variable]?.let { (column, _) -> "$PENDING.${column}_identity" },
                     tagText = null, tagKey = null,
@@ -3094,7 +3206,7 @@ abstract class SqlCypherCompiler(
                             list = values[variable]?.list == true, itemLists = values[variable]?.itemLists == true,
                             text = values[variable]?.text == true, texts = values[variable]?.texts == true,
                             rowKeys = if (written) listOf(key) else null, fromList = !written, known = values[variable]?.known,
-                            itemsKnown = values[variable]?.itemsKnown,
+                            itemsKnown = values[variable]?.itemsKnown, integer = values[variable]?.integer == true,
                         ),
                     )
                     // A list or a path that is null is held as JSON's null, and read as SQL's.
@@ -3631,14 +3743,52 @@ abstract class SqlCypherCompiler(
         )
 
         /**
+         * The columns of a projection's query that carry an item's [numberKeys] beside it, by the item's column, `p3.c1`: an order
+         * of the item in the query after reads them, not the item's column again (see [project]).
+         */
+        private val keyedColumns = mutableMapOf<String, List<String>>()
+
+        /**
+         * Whether no value is [keyed], and none carries keys it was given: in the queries of a `UNION` in `CALL { … }`, whose
+         * columns are matched, where one query's value may have them and another's not.
+         */
+        private var keysLeft = false
+
+        /** [work], no value [keyed] in it. */
+        private fun <T> keyless(work: () -> T): T {
+            val was = keysLeft
+            keysLeft = true
+            try {
+                return work()
+            } finally {
+                keysLeft = was
+            }
+        }
+
+        /**
+         * [value], where it may be a number, with the store's number keys of it ([Value.Json.keys]) to carry beside it for a query
+         * after to read, where they are read cheaply here and dearly there, as a property's by its path ([carriesKeysAfter]). As
+         * it is where the store keeps none, or reads them of the column after.
+         */
+        private fun keyed(value: Value): Value {
+            if (value !is Value.Json || !keepsNumberKeys || !value.mayBeNumber() || value.keys != null) return value
+            val sql = value.inflight ?: value.sql
+            if (!carriesNumberKeys(sql) || !carriesKeysAfter(sql)) return value
+            return value.copy(keys = groupedNumberKeys(sql).ifEmpty { return value })
+        }
+
+        /**
          * The query a `WITH` or a `RETURN` makes of [select]: its items as columns, grouped where it
          * aggregates, or is `DISTINCT` and orders by an aggregate ([groupsRows]), then ordered, skipped and limited. Rows it does not order, group or keep distinct
          * stay in the order [select] reads them, as a graph engine keeps them. With [statement], it is the statement's own last
          * `RETURN`, or one of its `UNION`'s, not a subquery's: it names the statement's columns ([returned]), and where the
          * statement is compiled [typed], gives its nodes and relationships tagged ([output]), and its `result` as the host's
          * driver reads it back (`returned(json)`, which Oracle encodes again with `oracleReencodeJson`).
+         * Where [keysAfter], a query after may read its items' number keys, which are carried beside them ([keyed]): a final
+         * `RETURN`, or a `COUNT { … }`'s or an `EXISTS { … }`'s, whose columns nothing reads, carries none; nor does a query
+         * that compares its rows (`DISTINCT`, `GROUP BY`), which compares an item as its JSON (drivine-cypher-spec#315).
          */
-        fun project(select: Select, written: Projection, final: Boolean, statement: Boolean = false): Projected {
+        fun project(select: Select, written: Projection, final: Boolean, statement: Boolean = false, keysAfter: Boolean = !final): Projected {
             // As in Neo4j, a star gives the variables in the order of their names, before the items named after it.
             // Not a randomUUID() made first for a CALL or a condition (see `anewCall`), which the statement never named.
             val starred = select.bound.keys.filterNot { it in madeAnew }.sorted()
@@ -3653,13 +3803,13 @@ abstract class SqlCypherCompiler(
             )
             // Before aggregatesFirst, which names each variable it groups by as an item of its own.
             requireExplicitGrouping(items, projection.orderBy, select.scope.keys, projection.distinct)
-            anewFirst(select, projection, items)?.let { (made, kept) -> return project(made, kept, final, statement) }
-            casesFirst(select, projection, items)?.let { (cased, kept) -> return project(cased, kept, final, statement) }
+            anewFirst(select, projection, items)?.let { (made, kept) -> return project(made, kept, final, statement, keysAfter) }
+            casesFirst(select, projection, items)?.let { (cased, kept) -> return project(cased, kept, final, statement, keysAfter) }
             // After casesFirst, which refuses what it must of an aggregate's CASE before working it out first.
-            sharedFirst(select, projection, items)?.let { (shared, kept) -> return project(shared, kept, final, statement) }
-            sortsFirst(select, projection, items)?.let { (sorted, kept) -> return project(sorted, kept, final, statement) }
-            aggregatesFirst(select, projection, items)?.let { (grouped, kept) -> return project(grouped, kept, final, statement) }
-            heldFirst(select, projection, items)?.let { (held, keyed) -> return project(held, keyed, final, statement) }
+            sharedFirst(select, projection, items)?.let { (shared, kept) -> return project(shared, kept, final, statement, keysAfter) }
+            sortsFirst(select, projection, items)?.let { (sorted, kept) -> return project(sorted, kept, final, statement, keysAfter) }
+            aggregatesFirst(select, projection, items)?.let { (grouped, kept) -> return project(grouped, kept, final, statement, keysAfter) }
+            heldFirst(select, projection, items)?.let { (held, keyed) -> return project(held, keyed, final, statement, keysAfter) }
             if (final && items.size > 1) {
                 warn(
                     "The statement returns ${items.size} items (${items.joinToString { it.name }}). Prefer returning a single map or value, such as RETURN { key1: val1, key2: val2 }: " +
@@ -3671,7 +3821,20 @@ abstract class SqlCypherCompiler(
             val aggregating = groupsRows(projection, items)
             // Where rows are compared (DISTINCT, GROUP BY), each item is compared as [compared] has it.
             val compared = projection.distinct || aggregating
-            val columns = compiled.mapIndexed { i, (_, value) -> "c${i + 1}" to (if (compared) compared(value) else value) }
+            // An item that may be a number carries the store's number keys beside it where a query after reads them (see
+            // numberKeys): read once here, where the value is, as a property by its own path. Not where rows are compared (DISTINCT,
+            // GROUP BY), which compare an item as JSON, by itself alone, keys and all: grouped by them too, an aggregate over a few
+            // walks took a third as long again and more (drivine-cypher-spec#315 keeps the numbers JSON groups as one).
+            val columns = compiled.mapIndexed { i, (_, value) ->
+                val column = if (compared) compared(value) else value
+                // Where no query after reads it, or in a query of a UNION in CALL { … }, whose columns are matched, a value carried
+                // with keys is carried without them.
+                "c${i + 1}" to when {
+                    contains(items[i].expression, ::isAggregate) -> column
+                    !keysLeft && !compared && keysAfter -> keyed(column)
+                    else -> (column as? Value.Json)?.takeIf { it.keys != null }?.copy(keys = null) ?: column
+                }
+            }
             val selectList = columns.flatMap { (column, value) -> value.columns(column) }.toMutableList()
             // A row of DISTINCT whose item is NaN, equal to nothing, is kept apart, as Neo4j keeps it (drivine4j#685): its own
             // number beside it, which no other row has. Only where an item may be NaN ([bareNaN]), so a statement given and working
@@ -3686,6 +3849,12 @@ abstract class SqlCypherCompiler(
             }
             // An order is written over the items' names, and where nothing is grouped or kept distinct, the variables too.
             val name = alias("p")
+            // An item carried with the store's number keys ([keyed]), where no rows are compared: an order of the item in the query
+            // after reads them from their columns, where read of the item's column again they would be read through a property's
+            // text.
+            columns.forEach { (column, value) ->
+                (value as? Value.Json)?.keys?.let { keys -> keyedColumns["$name.$column"] = keys.indices.map { "$name.${column}k${it + 1}" } }
+            }
             // Where rows are compared, an order term of the items that is no item is read over their columns, once compared:
             // a group is keyed by an item, and by no part of one.
             val itemColumns = items.zip(columns).associate { (item, pair) -> item.name to pair.second.columnsOf(name, pair.first) }
@@ -3698,11 +3867,23 @@ abstract class SqlCypherCompiler(
             val anew = items.filter { contains(it.expression, ::isAnew) }.map { it.name }.toSet()
             var sortsAnew = false
             fun carried(column: String, value: () -> Value, aggregates: Expression) {
-                val (carried, sorts) = aggregating(aggregates) { sortTerm(value()) }
+                val (carried, numbered, sorts) = aggregating(aggregates) { sortTerm(value()) }
                 selectList += "$carried AS $column"
-                sorted[column] = sorts
+                // The value's number keys (see numberKeys) carried beside it, each read once, where the value is read, where
+                // the store reads them so ([carriesNumberKeys]): read again of the column in the query after, a property read
+                // through its text would be read through it for each. Any other value's are read of its column there.
+                // Not where rows are compared: read of the value by its path beside a GROUP BY of its JSON, a key was no group's
+                // (ORA-00979); they are read of the column it is carried in, after.
+                if (!numbered || compared || !carriesNumberKeys(carried)) {
+                    sorted[column] = { at -> sorts(at, if (numbered) numberKeys(at) else emptyList()) }
+                    return
+                }
+                val keyColumns = numberKeys(carried).mapIndexed { k, key -> "${column}k${k + 1}".also { selectList += "$key AS $it" } }
+                sorted[column] = { at -> sorts(at, keyColumns.map { "$name.$it" }) }
             }
-            val sorts = projection.orderBy.mapIndexed { i, sort ->
+            // Where rows are grouped, a term's number keys are read of the values the groups are keyed by, not by their paths
+            // (see groupedReads).
+            val sorts = groupedReads(aggregating) { projection.orderBy.mapIndexed { i, sort ->
                 val column = "s${i + 1}"
                 // An order term that is an item, as written, is that item: so it may be ordered by where rows are compared.
                 val item = items.indexOfFirst { it.expression == sort.expression }
@@ -3740,7 +3921,7 @@ abstract class SqlCypherCompiler(
                     }
                 }
                 column to sort.descending
-            }.ifEmpty {
+            } }.ifEmpty {
                 if (compared) emptyList() else select.order.mapIndexed { i, (term, descending) ->
                     val name = "o${i + 1}"
                     selectList += "$term AS $name"
@@ -6107,14 +6288,18 @@ abstract class SqlCypherCompiler(
                     // Two temporal values' tags of one kind, not durations, by their sort keys, as Cypher orders them: a side in flight
                     // by the key of its text, where it has none.
                     else {
-                        // A whole number from 2^53 on, written or given, beside a number: as the store compares it exactly, where one is.
-                        listOf(binary.left, binary.right).map { given(it) }.let { (gl, gr) -> orderedPast(a, operator, b, gl, gr) }?.let { return Value.Bool(it) }
+                        // A number written or given beside a value: as the store compares it, where it compares one so (see Oracle's).
+                        // Two integers the statement makes are compared as any two values (see ordered).
+                        val integers = integral(left, binary.left) && integral(right, binary.right)
+                        if (!integers) listOf(binary.left, binary.right).map { given(it) }.let { (gl, gr) -> orderedPast(a, operator, b, gl, gr) }?.let { return Value.Bool(it) }
+                        // Where a side is a text or a truth value the statement makes or is given, the two are no numbers.
+                        val numbers = !integers && listOf(left to binary.left, right to binary.right).none { (value, written) -> numberless(value, written) }
                         val flights = listOf(left, right).map { json(it) }
                         fun key(json: String, side: Int) = if (flights[side].inflight != null) keyOf(json) else tagKey(json)
                         // Where a side is known to be no temporal value, a text or a number written or given, no pair of tags is compared.
                         val tags = !untemporal(left, binary.left) && !untemporal(right, binary.right)
                         Value.Bool(sharedCompared(comparable(inFlight(flights[0])), comparable(inFlight(flights[1]))) { (x, y) ->
-                            "CASE WHEN ${typeOf(x)} = ${typeOf(y)} AND ${typeOf(x)} IN ('number', 'string', 'boolean') THEN ${ordered(x, operator, y)} " +
+                            "CASE WHEN ${typeOf(x)} = ${typeOf(y)} AND ${typeOf(x)} IN ('number', 'string', 'boolean') THEN ${ordered(x, operator, y, numbers)} " +
                                 (if (tags) "WHEN ${tagKind(x)} = ${tagKind(y)} AND ${tagKind(x)} <> '${Temporal.DURATION.function}' THEN ${key(x, 0)} $operator ${key(y, 1)} " else "") + "END"
                         })
                     }
@@ -6381,8 +6566,10 @@ abstract class SqlCypherCompiler(
             val entities = left is Value.Entities && right is Value.Entities && left.relationships == right.relationships
             val a = if (entities) (left as Value.Entities).ids else comparable(json(left))
             val b = if (entities) (right as Value.Entities).ids else comparable(json(right))
+            // A list or a map, or a text or a truth value, made or given beside any value: no number keys are read (see numberlessEquals).
+            val numberless = numberless(left, leftWritten) || numberless(right, rightWritten)
             // Either may hold a null, which makes the comparison null where no item or entry differs.
-            if (!plain) return nullableEquals(a, b, ::jsonEquals)
+            if (!plain) return nullableEquals(a, b, if (numberless) ::numberlessEquals else ::jsonEquals)
             val given = written?.let(::given)
             // A value the statement is given is known as it compiles; one it isn't, as an unwound row's, may be of any kind,
             // and is compared with the index's text as each of its kinds can be: else the join reads every node for each row (#617).
@@ -6402,7 +6589,16 @@ abstract class SqlCypherCompiler(
             val keyed = if (given != null && comparesByKey(a, given)) boundKey(written, given)?.let { (kind, key) -> keyEquals(a, kind, key, given) } else null
             // The parameter's own JSON, which the comparison by its key doesn't read, is bound only where the SQL reads it elsewhere.
             if (keyed != null && written is Expression.Parameter) parameters.mayLeaveUnread(written.name)
-            val equal = if (given != null) (keyed ?: givenEquals(a, b, given)).let { if (stored || keyed != null) it else "CASE WHEN NOT ${isJsonNull(a)} THEN $it END" } else sharedCompared(a, b) { (x, y) -> "CASE WHEN NOT ${isJsonNull(x)} AND NOT ${isJsonNull(y)} THEN ${jsonEquals(x, y)} END" }
+            // Two integers the statement makes are compared as the store compares them, which is exact for them (see integerEquals).
+            val integers = leftWritten != null && rightWritten != null && integral(left, leftWritten) && integral(right, rightWritten)
+            fun equals(x: String, y: String) = when {
+                integers -> integerEquals(x, y) { jsonEquals(x, y) }
+                numberless -> numberlessEquals(x, y)
+                else -> jsonEquals(x, y)
+            }
+            val equal = if (given != null) (keyed ?: if (integers) integerEquals(a, b) { givenEquals(a, b, given) } else givenEquals(a, b, given))
+                .let { if (stored || keyed != null) it else "CASE WHEN NOT ${isJsonNull(a)} THEN $it END" }
+            else sharedCompared(a, b) { (x, y) -> "CASE WHEN NOT ${isJsonNull(x)} AND NOT ${isJsonNull(y)} THEN ${equals(x, y)} END" }
             if (indexed != null) indexedEmitted = true
             return if (indexed != null) "($indexed AND $equal)" else equal
         }
@@ -6800,9 +6996,15 @@ abstract class SqlCypherCompiler(
             // Where the store tests the value alone beside such items (see givenItemsTest), it is tested once, beside the EXISTS,
             // and not in each item's comparison, which is then a plain equality.
             val test = items?.let(::givenItemsTest)
+            // A list written of literals, lists and maps, whose numbers the store may compare more cheaply (see writtenItemEquals).
+            val written = (binary.right as? Expression.ListLiteral)?.items?.takeIf { id == null && !identities }
+                ?.map { item -> if (item is Expression.Literal) item.value else if (item is Expression.ListLiteral || item is Expression.MapLiteral) emptyList<Any?>() else null }
+                ?.takeIf { (binary.right as Expression.ListLiteral).items.all { it is Expression.Literal || it is Expression.ListLiteral || it is Expression.MapLiteral } }
             fun matches(item: String, value: String) = when {
-                id != null || test != null -> "$item = $value"
+                id != null -> "$item = $value"
+                test != null -> testedItemEquals(item, value, items!!)
                 items != null -> givenItemEquals(item, value, items)
+                written != null -> writtenItemEquals(item, value, written)
                 else -> equals(item, value)
             }
             /** Whether an item of the list [l], read as [i], is equal to the value [v], and [v] meets the store's test where it has one. */
@@ -6849,7 +7051,7 @@ abstract class SqlCypherCompiler(
                 cases += "WHEN ${held?.let { "NOT ($it) AND " }.orEmpty()}${found(l, v, i)} THEN TRUE"
                 if (!(within && whole)) {
                     val k = alias("i")
-                    val undecided = if (id != null) isJsonNull(item(k)) else "(${nullableEquals(item(k), v, equals)}) IS NULL"
+                    val undecided = if (id != null) isJsonNull(item(k)) else "(${nullableEquals(item(k), v, written?.let { w -> { a: String, b: String -> writtenItemEquals(a, b, w) } } ?: equals)}) IS NULL"
                     cases += "WHEN EXISTS (${predicateQuery("SELECT 1 FROM ${elementsOf(right, l, k)} WHERE $undecided")}) THEN NULL"
                 }
                 "CASE ${cases.joinToString(" ")} ELSE FALSE END"
@@ -6916,6 +7118,26 @@ abstract class SqlCypherCompiler(
         /** Whether [expression] is a value the statement gives, as [given] reads it, whatever it is: written, a parameter or a parameter's key. */
         private fun givenAsWritten(expression: Expression): Boolean = expression is Expression.Literal || expression is Expression.Parameter ||
             (expression is Expression.Property && expression.subject is Expression.Parameter)
+
+        /**
+         * Whether the statement makes [value], compiled from [expression], an integer: known as one ([Value.Json.known]), a whole
+         * number it is given, or a count (`count()`, `count(*)`, `COUNT { … }`) or a size. Two such values compare as the store compares any two values, which is
+         * exact for integers, where a store compares other numbers by keys of their own (see Oracle's [numberKeys]).
+         */
+        private fun integral(value: Value, expression: Expression): Boolean =
+            (value as? Value.Json)?.let { it.known == Value.Known.INTEGER || it.integer } == true ||
+                given(expression).let { it is Long || it is Int || it is Short || it is Byte } ||
+                (expression is Expression.Function && expression.name.lowercase() in COUNTS) || expression is Expression.CountStar ||
+                (expression is Expression.Subquery && expression.kind == Expression.Subquery.Kind.COUNT)
+
+        /**
+         * Whether the statement makes [value], compiled from [expression], no number: a text, a truth value, a list or a map, a
+         * temporal value, a node or a relationship, one that holds one, a list of them, or one given so.
+         */
+        private fun numberless(value: Value, expression: Expression?): Boolean = value !is Value.Json ||
+            value.known.let { it == Value.Known.TEXT || it == Value.Known.BOOLEAN || it == Value.Known.LIST || it == Value.Known.MAP } ||
+            value.text || value.list || value.identity != null || value.temporal != null ||
+            expression?.let(::given).let { it is String || it is Boolean || it is List<*> || it is Map<*, *> }
 
         /** The value [expression] is where the statement gives it: written, or bound to a parameter or a parameter's key; null where it is not given, or is null. */
         private fun given(expression: Expression): Any? = when (expression) {
@@ -7011,8 +7233,8 @@ abstract class SqlCypherCompiler(
                 "labels" -> (one() as? Value.Node)?.let { Value.Json(readOfDeleted(it, it.labels)) } ?: throw CompilerException("labels() takes a node.")
                 "type" -> (one() as? Value.Relationship)?.let { Value.Json(scalar(it.type), text = true) } ?: throw CompilerException("type() takes a relationship.")
                 "id", "elementid" -> when (val subject = one()) {
-                    is Value.Node -> Value.Json(scalar(subject.nid))
-                    is Value.Relationship -> Value.Json(scalar(subject.eid))
+                    is Value.Node -> Value.Json(scalar(subject.nid), integer = true)
+                    is Value.Relationship -> Value.Json(scalar(subject.eid), integer = true)
                     else -> throw CompilerException("${function.name}() takes a node or a relationship.")
                 }
                 "length" -> (one() as? Value.Path)?.let { Value.Json(idCount(it.eids)) } ?: throw CompilerException("length() takes a path.")
@@ -7523,6 +7745,8 @@ abstract class SqlCypherCompiler(
         private fun counted(value: Value, distinct: Boolean): String {
             val counted = countable(value)
             // Not asked of a value the statement makes of a kind that is no float, nor of a temporal value, which is none.
+            // Where the store counts a number by keys of its own, as Oracle does, NaN among them.
+            if (distinct && (value as? Value.Json)?.let(::mayBeFloat) == true) distinctCount(identified(value), counted)?.let { return it }
             val nan = (value as? Value.Json)?.takeIf { distinct && mayBeFloat(it) }?.let { bareNaN(counted) }
                 ?: return "count(${if (distinct) "DISTINCT " else ""}$counted)"
             // Asked as WHEN, not NOT: a store's test may be null where a value holds no NaN (SQLite's of a map without its key),
@@ -7560,7 +7784,8 @@ abstract class SqlCypherCompiler(
 
         /** A value as JSON, for a projection or a comparison. A node is its properties, its stamp among them, as drivine gives a node. */
         fun json(value: Value): Value.Json = when (value) {
-            is Value.Json -> value
+            // A value carried with its number keys: the store reads them, not its column (see carriedKeys).
+            is Value.Json -> value.also { v -> v.keys?.let { carriedKeys[v.sql] = it } }
             is Value.Bool -> Value.Json(boolJson(value.sql))
             // One the statement deleted has no properties, as in Neo4j (drivine4j#420).
             is Value.Node -> Value.Json(nodeJson(value).let { if (value.deletable) "CASE WHEN ${isDeleted(value)} THEN ${literalJson(emptyMap<String, Any>())} ELSE $it END" else it })
@@ -7629,7 +7854,27 @@ abstract class SqlCypherCompiler(
          * What an order sorts a value by: JSON's order for a value, a node by its properties. JSON's null, as a map
          * or a list the statement builds holds it, is SQL's null, which comes last, as a graph engine orders null.
          */
-        private fun sortable(value: Value): List<String> = sortTerm(value).let { (carried, sorts) -> sorts(carried) }
+        private fun sortable(value: Value): List<String> =
+            sortTerm(value).let { (carried, numbered, sorts) ->
+                // A long value worked out is sorted as the store sorts it, with no keys, which would write it out again for each.
+                sorts(carried, if (!numbered) emptyList() else keyedColumns[carried] ?: if (carriesNumberKeys(carried)) numberKeys(carried) else emptyList())
+            }
+
+        /**
+         * A value as an order sorts it: [carried], the value as a column carries it; [numbered], whether it is sorted by its
+         * [numberKeys] too; and [sorts], the terms that sort it, of that column and the keys.
+         */
+        private inner class SortTerm(val carried: String, val numbered: Boolean, val sorts: (String, List<String>) -> List<String>) {
+            operator fun component1() = carried
+            operator fun component2() = numbered
+            operator fun component3() = sorts
+        }
+
+        /** Whether [value] is sorted by the store's [numberKeys]: where it keeps any, and the value may be a number. */
+        private fun numbered(value: Value.Json) = keepsNumberKeys && value.mayBeNumber()
+
+        /** A [SortTerm] of a value of one kind, which no number key sorts. */
+        private fun sortTerm(carried: String, sorts: (String) -> List<String>) = SortTerm(carried, false) { column, _ -> sorts(column) }
 
         /**
          * What [sortable] sorts [value] by, in two: the value as a column carries it, and the terms that sort it, of that column.
@@ -7638,24 +7883,25 @@ abstract class SqlCypherCompiler(
          * list of them by its moments, another list by [listSortKeys] (on Oracle a key, and the list where the key may tie), any
          * other by [sortKey].
          */
-        private fun sortTerm(value: Value): Pair<String, (String) -> List<String>> = when {
-            value is Value.Bool -> value.sql to { listOf(it) }
+        private fun sortTerm(value: Value): SortTerm = when {
+            value is Value.Bool -> sortTerm(value.sql) { listOf(it) }
             // A temporal value the statement makes of a kind sorts by its tag's sort key, a zoned one as the moment it is, then its
             // offset; a duration by its text.
             value is Value.Json && value.temporal != null ->
-                comparable(value) to { listOf(if (value.temporal == Temporal.DURATION) tagText(it) else tagKey(it)) }
+                sortTerm(comparable(value)) { listOf(if (value.temporal == Temporal.DURATION) tagText(it) else tagKey(it)) }
             // A list of temporal values the statement makes of a kind sorts item by item by their sort keys: of one kind, a list, it
             // needs no rank of its kind.
-            value is Value.Json && value.list && value.items != null && value.items != Temporal.DURATION -> comparable(value) to { listOf(momentsKey(it, value.items)) }
+            value is Value.Json && value.list && value.items != null && value.items != Temporal.DURATION -> sortTerm(comparable(value)) { listOf(momentsKey(it, value.items)) }
             value is Value.Json && value.itemLists && value.itemItems != null && value.itemItems != Temporal.DURATION ->
-                comparable(value) to { listOf(momentsKey(it, value.itemItems, depth = 2)) }
+                sortTerm(comparable(value)) { listOf(momentsKey(it, value.itemItems, depth = 2)) }
             // A list the statement makes sorts as Cypher sorts lists, item by item; any other value as the store sorts its JSON.
-            isList(value) -> comparable(json(value)) to { listSortKeys(it) }
+            isList(value) -> sortTerm(comparable(json(value))) { listSortKeys(it) }
             // A text has no tag whose key it is sorted by.
-            isText(value) -> comparable(json(value)) to { listOf(textSortKey(it)) }
-            value !is Value.Json || value.temporal != null -> comparable(json(value)) to { listOf(sortKey(it)) }
-            mayBeJsonNull(value) -> comparable(json(value)) to { jsonNullSortKey(it) }
-            else -> comparable(json(value)) to { openSortKey(it) }
+            isText(value) -> sortTerm(comparable(json(value))) { listOf(textSortKey(it)) }
+            value !is Value.Json || value.temporal != null -> sortTerm(comparable(json(value))) { listOf(sortKey(it)) }
+            // A value that may be a number, by the store's number keys too, where it keeps any (see numberKeys).
+            mayBeJsonNull(value) -> SortTerm(comparable(json(value)), numbered(value as Value.Json)) { column, keys -> jsonNullSortKey(column, keys) }
+            else -> SortTerm(comparable(json(value)), numbered(value as Value.Json)) { column, keys -> openSortKey(column, keys) }
         }
     }
 
@@ -7806,6 +8052,9 @@ abstract class SqlCypherCompiler(
 
         /** The functions that read a value without giving it on, so read it as it is in flight (see [Value.Json.inflight]). */
         val READS_IN_FLIGHT = setOf("size", "length", "tostring", "tointeger", "tofloat", "toboolean")
+
+        /** The functions that give an integer or null, whatever they are given: see `integral`. */
+        val COUNTS = setOf("count", "size", "length")
 
         /**
          * A fragment's row ([FragmentVariable.row]): a name that ends with `_`, as none of the rows and columns the compiler names
@@ -8718,7 +8967,8 @@ abstract class SqlCypherCompiler(
     /** The select-list entries that carry this value out of a query, under [name]. */
     private fun Value.columns(name: String): List<String> = when (this) {
         // A value in flight is carried so, and made whole where it is read whole (see [columnsOf]).
-        is Value.Json -> listOf("${inflight ?: sql} AS $name") + listOfNotNull(identity?.let { "$it AS ${name}_identity" })
+        is Value.Json -> listOf("${inflight ?: sql} AS $name") + listOfNotNull(identity?.let { "$it AS ${name}_identity" }) +
+            keys.orEmpty().mapIndexed { k, key -> "$key AS ${name}k${k + 1}" }
         is Value.Entities -> listOf("$ids AS $name")
         is Value.Bool -> listOf("$sql AS $name")
         is Value.Node -> listOf("$nid AS ${name}_nid", "$labels AS ${name}_labels", "$props AS ${name}_props", "$stamp AS ${name}_stamp")
@@ -8740,7 +8990,7 @@ abstract class SqlCypherCompiler(
             // never given its key (see [Value.Json.inflight]).
             is Value.Json -> "$prefix$base".let { column ->
                 copy(sql = if (inflight != null) completed(column) else column, identity = identity?.let { "$prefix${base}_identity" }, tagText = null, tagKey = null,
-                    inflight = inflight?.let { column }, inflightItems = null)
+                    inflight = inflight?.let { column }, inflightItems = null, keys = keys?.indices?.map { "$prefix${base}k${it + 1}" })
             }
             is Value.Entities -> Value.Entities("$prefix$base", relationships, flat = flat)
             is Value.Bool -> Value.Bool("$prefix$base")
@@ -8764,7 +9014,7 @@ abstract class SqlCypherCompiler(
 
     /** This value with each piece of its SQL [transform]ed. */
     private fun Value.mapSql(transform: (String) -> String): Value = when (this) {
-        is Value.Json -> copy(sql = transform(sql), identity = identity?.let(transform), tagText = tagText?.let(transform), tagKey = tagKey?.let(transform), inflight = inflight?.let(transform), inflightItems = inflightItems?.let(transform))
+        is Value.Json -> copy(sql = transform(sql), identity = identity?.let(transform), tagText = tagText?.let(transform), tagKey = tagKey?.let(transform), inflight = inflight?.let(transform), inflightItems = inflightItems?.let(transform), keys = keys?.map(transform))
         is Value.Entities -> copy(ids = transform(ids), gathered = gathered?.let(transform))
         is Value.Bool -> copy(sql = transform(sql))
         is Value.Node -> copy(nid = transform(nid), labels = transform(labels), props = transform(props), stamp = transform(stamp))
@@ -8774,7 +9024,7 @@ abstract class SqlCypherCompiler(
 
     /** The columns [columns] gives this value under [name], each named and whether it holds JSON, in the same order. */
     private fun Value.columnKinds(name: String): List<Pair<String, Boolean>> = when (this) {
-        is Value.Json -> listOf(name to true) + listOfNotNull(identity?.let { "${name}_identity" to true })
+        is Value.Json -> listOf(name to true) + listOfNotNull(identity?.let { "${name}_identity" to true }) + keys.orEmpty().indices.map { "${name}k${it + 1}" to false }
         is Value.Entities -> listOf(name to true)
         is Value.Bool -> listOf(name to false)
         is Value.Node -> listOf("${name}_nid" to false, "${name}_labels" to true, "${name}_props" to true, "${name}_stamp" to false)
@@ -8783,11 +9033,32 @@ abstract class SqlCypherCompiler(
     }
 
     /**
+     * Whether this value may be a number that is no integer the statement makes: not where it makes it of another kind, a
+     * text, a list, a temporal value, a truth value, a map, or an integer, which the store's JSON compares exactly.
+     */
+    private fun Value.Json.mayBeNumber() = (known == null || known == Value.Known.FLOAT) && !integer && !text && !list && temporal == null && identity == null
+
+    /**
+     * [numberKeys] of [json] written out, not bound in a subquery: as a query carries them beside the value ([keyed]), and
+     * under an aggregate, which binds none.
+     */
+    protected fun groupedNumberKeys(json: String): List<String> {
+        val was = sharing
+        sharing = false
+        try {
+            return numberKeys(json)
+        } finally {
+            sharing = was
+        }
+    }
+
+    /**
      * What a projection that aggregates is grouped by, to keep this value: a node by its columns; a value in flight as it is
-     * carried ([columns]), which keeps the groups of a whole one.
+     * carried ([columns]), which keeps the groups of a whole one; and a value that may be a number as the store groups one by
+     * its value ([groupedValue]), where it groups its JSON otherwise.
      */
     private fun Value.groupKeys(): List<String> = when (this) {
-        is Value.Json -> listOf(inflight ?: sql) + listOfNotNull(identity)
+        is Value.Json -> (inflight ?: sql).let { value -> (if (mayBeNumber()) groupedValue(value) else null) ?: listOf(value) } + listOfNotNull(identity)
         is Value.Entities -> listOf(ids)
         is Value.Bool -> listOf(sql)
         is Value.Node -> listOf(nid, labels, props, stamp)
