@@ -81,18 +81,19 @@ rewrites:
         result: '{"born":{"$t":"date","v":"2024-03-15","s":"10000020240315"},"name":"2024-03-15"}'
         changes: [{property: "born", change: "temporal"}]
   - name: "Moments as each library's layout 1 wrote them"
-    description: "drivine4j's text with a fraction of one digit, JavaScript's toISOString in UTC, java.time's ZonedDateTime with its named zone after the offset, which layout 2 holds no more of, and Python's str, a space between the date and the time: each its tag, canonical, its sort key that of its moment in UTC, then its offset."
+    description: "drivine4j's text with a fraction of one digit, JavaScript's toISOString in UTC, java.time's ZonedDateTime with its named zone after the offset, which layout 2 holds no more of, a zone of a fixed offset too (GMT+01:00), and Python's str, a space between the date and the time: each its tag, canonical, its sort key that of its moment in UTC, then its offset."
     labels: ["Event"]
     declarations:
       - {label: "Event", property: "a", kind: "datetime"}
       - {label: "Event", property: "b", kind: "datetime"}
       - {label: "Event", property: "c", kind: "datetime"}
       - {label: "Event", property: "d", kind: "datetime"}
+      - {label: "Event", property: "e", kind: "datetime"}
     stores:
       sqlite:
-        props: '{"a":"2024-03-15T10:30:00.5+02:00","b":"2024-03-15T08:30:00.500Z","c":"2024-03-15T10:30+01:00[Europe/Paris]","d":"2024-03-15 10:30:00+02:00"}'
-        result: '{"a":{"$t":"datetime","v":"2024-03-15T10:30:00.500+02:00","s":"10000020240315083000500000000072000"},"b":{"$t":"datetime","v":"2024-03-15T08:30:00.500Z","s":"10000020240315083000500000000064800"},"c":{"$t":"datetime","v":"2024-03-15T10:30:00+01:00","s":"10000020240315093000000000000068400"},"d":{"$t":"datetime","v":"2024-03-15T10:30:00+02:00","s":"10000020240315083000000000000072000"}}'
-        changes: [{property: "a", change: "temporal"}, {property: "b", change: "temporal"}, {property: "c", change: "temporal"}, {property: "d", change: "temporal"}]
+        props: '{"a":"2024-03-15T10:30:00.5+02:00","b":"2024-03-15T08:30:00.500Z","c":"2024-03-15T10:30+01:00[Europe/Paris]","d":"2024-03-15 10:30:00+02:00","e":"2024-03-15T10:30+01:00[GMT+01:00]"}'
+        result: '{"a":{"$t":"datetime","v":"2024-03-15T10:30:00.500+02:00","s":"10000020240315083000500000000072000"},"b":{"$t":"datetime","v":"2024-03-15T08:30:00.500Z","s":"10000020240315083000500000000064800"},"c":{"$t":"datetime","v":"2024-03-15T10:30:00+01:00","s":"10000020240315093000000000000068400"},"d":{"$t":"datetime","v":"2024-03-15T10:30:00+02:00","s":"10000020240315083000000000000072000"},"e":{"$t":"datetime","v":"2024-03-15T10:30:00+01:00","s":"10000020240315093000000000000068400"}}'
+        changes: [{property: "a", change: "temporal"}, {property: "b", change: "temporal"}, {property: "c", change: "temporal"}, {property: "d", change: "temporal"}, {property: "e", change: "temporal"}]
   - name: "Each other temporal kind"
     description: "A local moment, a local time and a time written without their seconds, and durations, one of a week: each its tag, canonical; a duration has no sort key."
     labels: ["Event"]

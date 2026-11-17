@@ -3,7 +3,6 @@ package org.drivine.cypher.store.migrate
 import com.ionspin.kotlin.bignum.decimal.BigDecimal
 import com.ionspin.kotlin.bignum.integer.BigInteger
 import org.drivine.DrivineInternalApi
-import org.drivine.cypher.CompilerException
 import org.drivine.cypher.api.Store
 import org.drivine.cypher.json.ArrayNode
 import org.drivine.cypher.json.BigIntegerNode
@@ -223,8 +222,11 @@ object LayoutMigration {
     /** The texts a layout-1 save wrote NaN and the infinities as. */
     private val NON_FINITE = mapOf("NaN" to Double.NaN, "Infinity" to Double.POSITIVE_INFINITY, "-Infinity" to Double.NEGATIVE_INFINITY)
 
-    /** A named zone after an offset (`…+01:00[Europe/Paris]`), the text before it in the group; or after none. */
-    private val NAMED_ZONE = Regex("""^(.*?)\[[A-Za-z0-9_+\-/]+]$""")
+    /**
+     * A named zone after an offset (`…+01:00[Europe/Paris]`, or java.time's fixed-offset `[GMT+01:00]`), the text before it
+     * in the group; or after none.
+     */
+    private val NAMED_ZONE = Regex("""^(.*?)\[[A-Za-z0-9_+\-/:]+]$""")
 
     /** A date and its time apart by a space, as Python's `str` writes a moment: the two in the groups. */
     private val SPACED = Regex("""^(-?[0-9]{4}-[0-9]{2}-[0-9]{2}) ([0-9]{2}:.*)$""")
