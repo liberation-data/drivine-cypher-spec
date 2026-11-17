@@ -792,6 +792,8 @@ class OracleCypherCompiler(
     /** Whether the texts [texts] gives its body are CLOBs: see [scalar], [startsWith], [endsWith], [containsText], [split], [replaceText] and [reversedText], which read them otherwise. */
     private var long = false
 
+    override fun isTruth(json: String) = "${kind(json)} = 'boolean'"
+
     override fun boolOf(json: String) = shared(json) { (x) -> "CASE WHEN ${kind(x)} = 'boolean' THEN JSON_VALUE($x, '$' RETURNING BOOLEAN) END" }
 
     override fun float(sql: String) = "TO_BINARY_DOUBLE($sql)"
@@ -2409,6 +2411,8 @@ class OracleCypherCompiler(
             "WHEN $size <> ${index.dimensions} THEN TO_CLOB(TO_CHAR(${failure("The index '$name' is of vectors of ${index.dimensions} dimensions, and the query vector has", size)})) " +
             noLength + "ELSE JSON_SERIALIZE($json RETURNING CLOB) END"
     }
+
+    override fun failed(failure: String) = "JSON_SCALAR($failure)"
 
     /** A text that is no number, read as one: Oracle fails with ORA-01722, whose ORA-03302 detail gives the text. */
     override fun failure(message: String, value: String) = "TO_NUMBER(${literal("$message ")} || TO_CHAR($value))"

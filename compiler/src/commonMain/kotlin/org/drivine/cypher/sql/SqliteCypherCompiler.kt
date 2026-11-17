@@ -94,6 +94,9 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
             noLength + "ELSE $json END"
     }
 
+    /** SQLite's `CASE` takes a value of any type in each branch. */
+    override fun failed(failure: String) = failure
+
     /** SQLite has no failing expression of its own: Drivine's function fails with the text. */
     override fun failure(message: String, value: String) = "${SqliteFunctions.FAIL}(${literal("$message ")} || $value)"
 
@@ -104,6 +107,8 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
     private fun kindOf(json: String) =
         "(CASE json_type($json) WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'text' THEN 'string' WHEN 'true' THEN 'boolean' " +
             "WHEN 'false' THEN 'boolean' WHEN 'array' THEN 'array' WHEN 'object' THEN 'object' WHEN 'null' THEN 'null' END)"
+
+    override fun isTruth(json: String) = "json_type($json) IN ('true', 'false')"
 
     override fun isJsonNull(json: String) = "COALESCE(json_type($json), 'null') = 'null'"
 
