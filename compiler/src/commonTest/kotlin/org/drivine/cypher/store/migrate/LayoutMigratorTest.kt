@@ -336,6 +336,16 @@ class LayoutMigratorTest {
         assertTrue(store.checkpoint != checkpoint, "the batches before it written")
         assertEquals(1, store.rewrites[Table.EDGES to 1L])
         assertNull(store.rewrites[Table.EDGES to 5L])
+        // Resumed as it is, it is refused again; nor is it kept, as the migration began without keeping such values: the value
+        // is corrected, as the message says, and the migration resumed finishes.
+        val again = migrate(store, MigrationRequest(declarations, batchSize = 2))!!
+        assertEquals(Status.INVALID, again.status, again.message)
+        assertTrue(again.message!!.contains("correct it"), again.message)
+        assertEquals(Status.REFUSED, migrate(store, MigrationRequest(declarations, batchSize = 2, keepInvalid = true))!!.status)
+        store.rows[Table.EDGES]!![5L] = listOf("KNOWS") to """{"since": "2019-02-03"}"""
+        assertEquals(Status.REWRITTEN, migrate(store, MigrationRequest(declarations, batchSize = 2))!!.status)
+        assertEquals(expected(), store.rows.mapValues { (_, rows) -> rows.mapValues { it.value.second } })
+        assertTrue(store.rewrites.values.all { it == 1 }, "each row rewritten once: ${store.rewrites}")
     }
 
     @Test

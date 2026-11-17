@@ -203,7 +203,7 @@ class LayoutMigrator(private val ddl: SqlStoreDdl) {
             if (done.invalid.isNotEmpty() && !state.request.keepInvalid) {
                 // A value the scan didn't find: the graph was written to since. Nothing of this batch is written.
                 return MigrationStep.Done(report.ended(Status.INVALID,
-                    "The graph '${ddl.name}' holds a value of row ${row.id} not of its declared kind, which the scan before the writes didn't find: it was written to during the migration. Nothing of that row's batch was written; resume the migration once nothing else writes to the graph."))
+                    "The graph '${ddl.name}' holds a value of row ${row.id} not of its declared kind, which the scan before the writes didn't find: it was written to during the migration. Nothing of that row's batch was written: correct it, and resume the migration once nothing else writes to the graph."))
             }
             if (done.changed) writes += MigrationAction.Execute(statements.update(table), linkedMapOf("id" to row.id, "props" to done.props), purpose = "rewrite")
             for (kept in done.invalid) writes += MigrationAction.Execute(statements.writeCheckpoint,
