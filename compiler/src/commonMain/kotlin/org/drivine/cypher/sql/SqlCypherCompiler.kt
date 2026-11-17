@@ -2064,10 +2064,10 @@ abstract class SqlCypherCompiler(
             // A value made anew for each row is one value however often the clauses after read it: see [once]. Kept apart
             // from the query that reads it, where that query must not have it merged in: see `casesFirst`.
             val anew = with.projection.items.any { item -> holdsAnew(item.expression) }
+            val sql = if (anew) once(projected.sql) else projected.sql
             // A path it passes on is kept apart too: Oracle merged the WITH's query into the one that reads it, and the
             // subqueries that read a path's nodes and relationships by the ids in its columns read the first row's on every row (#537).
             val passesPath = projected.scope.values.any { it is Value.Path }
-            val sql = if (anew) once(projected.sql) else projected.sql
             next.source("(\n${indent(if (apart || passesPath) called(sql) else sql)}\n) $name")
             // Rows an `UNWIND` read last are still read before what comes after a `WITH` of them: SQLite merges its query in.
             next.afterRows = select.afterRows?.let { name }
@@ -3860,9 +3860,9 @@ abstract class SqlCypherCompiler(
                 }
                 keys.distinct()
             }
-            // A numbered DISTINCT reads its source with the ORDER BY of the WITH before it, on purpose: without it, Postgres and
-            // Oracle plan the ROW_NUMBER() window worse, about 70% and 90% slower at 100k rows, against about 6% and 45% with it
-            // (drivine-cypher-spec#316).
+            // A numbered DISTINCT whose rows a WITH passes on reads that WITH's query with its ORDER BY, on purpose, though the
+            // ROW_NUMBER() sorts them by the same terms: without it, Postgres and Oracle plan the window worse, about 70% and 90%
+            // slower than a SELECT DISTINCT at 100k rows, against about 6% and 45% with it (drivine-cypher-spec#316).
             val rows = buildList {
                 add(select.head("${if (projection.distinct && !numbered) "DISTINCT " else ""}${selectList.joinToString(",\n       ")}"))
                 addAll(select.from())
