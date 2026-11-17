@@ -504,7 +504,7 @@ Values are written as in the other files: `{$float: "NaN"}` is NaN, `{$repeat: â
 - for each function its steps call, that a step of a paired case, run on SQLite, compiles to SQL that calls it: for `regexp`, SQL that holds the operator `REGEXP`;
 - for each `store` and `nonFinite` its steps read, that a step of a paired case, run on that store, compiles with that `nonFinite`;
 - for its `key` steps, that a step of a paired case makes a temporal value as the statement runs;
-- for each `store` its `write` steps name, that a step of a paired case, run on that store, is a statement that writes.
+- for each `store` its `write` steps name, `postgres`, `oracle` or `sqlite`, that a step of a paired case runs on that store (by its `only` and `except`) and its Cypher writes, holding `CREATE`, `MERGE` or `SET`: whether it compiles there or is refused, as a statement given a float its store holds as no number is, so Postgres's refused `CREATE` counts. A `write` step with no store, or a graph engine's, is refused before any store is written, and needs no pair.
 
 A change to a host vector names the store cases it moves, and a change to a paired store case shows which host vectors it leans on. A host case with no pairs, or whose pairs no longer rely on it, fails. But for `drivine_host_version`'s, which no compiled statement calls: a library calls it itself, once on each connection, to check its functions are those the compiler's SQL calls, so its case has no pairs (`pairs: {}`), and its steps are the only ones a runner checks no pair for.
 
