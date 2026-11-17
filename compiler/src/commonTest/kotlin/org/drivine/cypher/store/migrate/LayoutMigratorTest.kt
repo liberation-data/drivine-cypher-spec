@@ -45,7 +45,9 @@ class LayoutMigratorTest {
         fun own() = rows[Table.NODES]!!.filter { (_, row) -> row.first.any { it == "DrivineStore" || it == "_DrivineSchema" } }
 
         fun answer(action: MigrationAction): MigrationOutcome = when (action) {
-            is MigrationAction.Query -> MigrationOutcome.Rows(query(action))
+            // A checkpoint table another migration dropped is read as the store reads a table that isn't there.
+            is MigrationAction.Query -> if (action.statement == statements.readCheckpoint && checkpoint == null) MigrationOutcome.Failed("relation \"${ddl.migrate}\" does not exist")
+            else MigrationOutcome.Rows(query(action))
             is MigrationAction.Execute -> { execute(action, checkpoint, rows); MigrationOutcome.Ran }
             is MigrationAction.Transaction -> {
                 // All or none: applied to copies, which replace the store's once every statement has run.
@@ -83,7 +85,11 @@ class LayoutMigratorTest {
             ))
             statements.readCheckpoint -> checkpoint!!.entries.sortedBy { it.key }.map { mapOf("name" to it.key, "state" to it.value) }
             statements.uniques -> uniques.map { (label, properties) -> mapOf("label" to label, "properties" to PlanJson.writePlain(properties)) }
-            else -> if (action.compiled) collisions(action.statement) else {
+            else -> if (action.purpose == "collisions") {
+                // The store's own SQL, as the schema plan runs its sample: not Cypher to compile.
+                assertTrue(action.statement.startsWith("SELECT"), "a sample of collisions run as the store's SQL: ${action.statement}")
+                collisions(action.statement)
+            } else {
                 val table = Table.entries.first { statements.readBatch(it) == action.statement }
                 val after = (action.parameters["after"] as Number).toLong()
                 val limit = (action.parameters["limit"] as Number).toInt()
@@ -227,6 +233,8 @@ class LayoutMigratorTest {
             assertTrue(report.status == Status.MIGRATED || (report.status == Status.CURRENT && store.checkpoint == null), "stopped at action $stopAt: ${report.status} ${report.message}")
             assertEquals(expected().mapValues { (table, rows) -> rows.filterKeys { it in make().rows[table]!! } }, store.rows.mapValues { (_, rows) -> rows.mapValues { it.value.second } }, "stopped at action $stopAt")
             assertTrue(store.rewrites.values.all { it == 1 }, "stopped at action $stopAt, a row rewritten twice: ${store.rewrites}")
+            // Stopped after any drop, the records of layout 1's objects are forgotten all the same.
+            assertTrue(!store.oldIndex && store.uniques.isEmpty() && store.stampLayout == 2, "stopped at action $stopAt: layout 1's index and its records dropped, stamped layout 2")
             stopAt++
         }
         assertTrue(stops > 15, "stopped at each of $stops actions")
@@ -302,9 +310,9 @@ class LayoutMigratorTest {
 
     @Test
     fun aResumeOfAGraphChangedUnderTheMigrationOrByOtherDeclarationsIsRefused() {
-        // Judged (5 actions), scanned (6 batches), begun (4), the first checkpoint and the first batch written (2, and 1 read):
+        // Judged (5 actions), scanned (6 batches), begun (6), the first checkpoint and the first batch written (2, and 1 read):
         // stopped before the second batch is written.
-        val stopAt = 19
+        val stopAt = 21
         val changed = store()
         assertNull(migrate(changed, MigrationRequest(declarations, batchSize = 2), stopAt = stopAt))
         assertTrue(changed.checkpoint?.containsKey("checkpoint") == true, "stopped part way through its writes")
@@ -324,7 +332,7 @@ class LayoutMigratorTest {
         // Begun keeping a value not of its kind, stopped once its first batches are written, before the one that keeps it.
         val store = store()
         store.rows[Table.EDGES]!![6L] = listOf("KNOWS") to """{"since": "soon"}"""
-        assertNull(migrate(store, MigrationRequest(declarations, batchSize = 2, keepInvalid = true), stopAt = 19))
+        assertNull(migrate(store, MigrationRequest(declarations, batchSize = 2, keepInvalid = true), stopAt = 21))
         assertTrue(store.checkpoint?.containsKey("checkpoint") == true, "stopped part way through its writes")
         val refused = migrate(store, MigrationRequest(declarations, batchSize = 2))!!
         assertEquals(Status.REFUSED, refused.status, refused.message)
@@ -339,7 +347,7 @@ class LayoutMigratorTest {
     fun aGraphPartWayThroughAMigrationThatALaterDrivineWroteToIsRefusedNotResumed() {
         val store = store()
         // Stopped after its first batch is written, then written to by a later Drivine, which made its own lock table.
-        assertNull(migrate(store, MigrationRequest(declarations, batchSize = 2), stopAt = 19))
+        assertNull(migrate(store, MigrationRequest(declarations, batchSize = 2), stopAt = 21))
         store.extraObjects += mapOf("name" to "drivine_lock3", "type" to "TABLE")
         val report = migrate(store, MigrationRequest(declarations, batchSize = 2))!!
         assertEquals(Status.REFUSED, report.status)
@@ -390,10 +398,61 @@ class LayoutMigratorTest {
     }
 
     @Test
+    fun aMigrationThatWaitedOnTheLockWhileAnotherFinishedWritesNothingAndLeavesTheGraphCurrent() {
+        for (resuming in listOf(false, true)) {
+            val store = store()
+            val request = MigrationRequest(declarations, batchSize = 2)
+            // The second judges the graph before the first begins (as layout 1's, to scan), or once it has begun (as part way
+            // through, to resume); it is paused before the round that takes the lock.
+            val first = if (resuming) {
+                assertNull(drive(store, LayoutMigrator(ddl).start(request)) { run -> run.actions.any { it is MigrationAction.Transaction } })
+                paused!!
+            } else null
+            assertNull(drive(store, LayoutMigrator(ddl).start(request)) { run -> run.actions.any { it is MigrationAction.Lock } })
+            val second = paused!!
+            val running = first ?: run {
+                assertNull(drive(store, LayoutMigrator(ddl).start(request)) { run -> run.actions.any { it is MigrationAction.Transaction } })
+                paused!!
+            }
+            // The first holds the lock; the second runs up to it and waits there, the first's checkpoint table there.
+            val lockAt = second.actions.indexOfFirst { it is MigrationAction.Lock }
+            val before = second.actions.take(lockAt).map { store.answer(it) }
+            // The first finishes, dropping its checkpoint table, and lets the lock go; the second takes it.
+            assertEquals(Status.MIGRATED, drive(store, running)!!.status)
+            store.locked = false
+            val outcomes = before + second.actions.drop(lockAt).map { store.answer(it) }
+            val report = drive(store, LayoutMigrator(ddl).resume(MigrationState.fromJson(second.state.toJson()), outcomes))!!
+            assertEquals(Status.REFUSED, report.status, "resuming $resuming: ${report.message}")
+            assertTrue(report.message!!.contains("finished meanwhile"), report.message)
+            assertNull(store.checkpoint, "resuming $resuming: the table it made again dropped")
+            assertTrue(store.rewrites.values.all { it == 1 }, "each row rewritten once: ${store.rewrites}")
+            assertEquals(Status.CURRENT, migrate(store, request)!!.status)
+        }
+    }
+
+    @Test
+    fun aMigrationStoppedAfterItMadeItsCheckpointTableOnAGraphAnotherFinishedDropsItWhenBegunAgain() {
+        val store = store()
+        val request = MigrationRequest(declarations, batchSize = 2)
+        assertNull(drive(store, LayoutMigrator(ddl).start(request)) { run -> run.actions.contains(MigrationAction.Prepare) })
+        val second = paused!!
+        assertEquals(Status.MIGRATED, migrate(store, request)!!.status)
+        // The second makes its checkpoint table on the migrated graph, and stops: the graph reads as part way through a migration.
+        store.answer(second.actions.first())
+        assertTrue(store.checkpoint != null && store.checkpoint!!.isEmpty())
+        val report = migrate(store, request)!!
+        assertEquals(Status.REFUSED, report.status, report.message)
+        assertTrue(report.message!!.contains("finished meanwhile"), report.message)
+        assertNull(store.checkpoint, "the empty checkpoint table dropped")
+        assertTrue(store.rewrites.values.all { it == 1 }, "each row rewritten once: ${store.rewrites}")
+        assertEquals(Status.CURRENT, migrate(store, request)!!.status)
+    }
+
+    @Test
     fun aValueNotOfItsKindWrittenAfterTheScanRefusesItsBatchUnwritten() {
         // Stopped before the second batch is written, as in the test of a changed graph; then a row of a later batch changed.
         val store = store()
-        assertNull(migrate(store, MigrationRequest(declarations, batchSize = 2), stopAt = 19))
+        assertNull(migrate(store, MigrationRequest(declarations, batchSize = 2), stopAt = 21))
         store.rows[Table.EDGES]!![5L] = listOf("KNOWS") to """{"since": "soon"}"""
         val before = store.rows.mapValues { it.value.toMap() }
         val checkpoint = store.checkpoint!!.toMap()
@@ -421,7 +480,7 @@ class LayoutMigratorTest {
     fun aValueNotOfItsKindWrittenAfterTheScanIsReportedWithOnlyTheRowsWritten() {
         // Stopped before the second batch, nodes 3 and 4, is written; then node 4 changed, after node 3, which its batch would rewrite.
         val store = store()
-        assertNull(migrate(store, MigrationRequest(declarations, batchSize = 2), stopAt = 19))
+        assertNull(migrate(store, MigrationRequest(declarations, batchSize = 2), stopAt = 21))
         store.rows[Table.NODES]!![4L] = listOf("Person") to """{"born": "soon"}"""
         val report = migrate(store, MigrationRequest(declarations, batchSize = 2))!!
         assertEquals(Status.INVALID, report.status, report.message)
@@ -466,7 +525,7 @@ class LayoutMigratorTest {
         @Suppress("UNCHECKED_CAST")
         fun parameters() = PlanJson.plain(node["parameters"]!!) as Map<String, Any?>
         return when (node["type"]!!.textValue()) {
-            "query" -> MigrationAction.Query(node["statement"]!!.textValue()!!, parameters(), node["purpose"]!!.textValue()!!, node["compiled"]!!.booleanValue())
+            "query" -> MigrationAction.Query(node["statement"]!!.textValue()!!, parameters(), node["purpose"]!!.textValue()!!)
             "execute" -> MigrationAction.Execute(node["statement"]!!.textValue()!!, parameters(), node["purpose"]!!.textValue()!!)
             "transaction" -> MigrationAction.Transaction(node["statements"]!!.map { actionOf(it) as MigrationAction.Execute })
             "prepare" -> MigrationAction.Prepare

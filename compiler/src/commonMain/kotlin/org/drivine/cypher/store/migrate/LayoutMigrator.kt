@@ -33,16 +33,17 @@ import org.drivine.schema.UniquenessConstraintSpec
  * 3. **Begin.** The checkpoint table is made, first, so a graph stopped at any later moment is refused as part way through
  *    a migration; then the store's tables as layout 2 makes them (the library's `prepare`, run as at a first connection,
  *    without the verdict), and the lock a schema change takes is taken and held to the end. The checkpoint table is then
- *    read under the lock, with the stamps: a checkpoint already there is another migration's, which is resumed, not begun
- *    again; a stamp of layout 2 is another's that finished meanwhile, and the empty checkpoint table is dropped.
+ *    made again and read under the lock, with the stamps: a checkpoint already there is another migration's, which is
+ *    resumed, not begun again; a stamp of layout 2 and no checkpoint, beginning or resuming, is another's that finished
+ *    meanwhile, and the empty checkpoint table is dropped.
  * 4. **Write.** Every node, then every relationship, is read again in batches after the checkpoint's id, and each batch's
  *    rewritten rows, the values it keeps, and the checkpoint after its last id are written in one transaction: so a row is
  *    rewritten exactly once, as a rewrite is not to be run again on a row it wrote (it would escape a tag's `$t`), and a
  *    migration stopped at any moment resumes strictly after the last batch it committed.
  * 5. **Check.** Each uniqueness constraint the catalog records is checked for keys that repeat in layout 2, by the schema
- *    plan's own sample of a constraint's conflicts, compiled: a graph with any ends `collisions`, its checkpoint kept, for
+ *    plan's own sample of a constraint's conflicts, the store's SQL: a graph with any ends `collisions`, its checkpoint kept, for
  *    the user to correct with the store's own tools and resume.
- * 6. **Finish.** The earlier layout's objects are dropped with their records, the stamp given layout 2 (or assigned), the
+ * 6. **Finish.** The earlier layout's objects are dropped with their records (the records first), the stamp given layout 2 (or assigned), the
  *    checkpoint table dropped last, and the graph judged again: it must be current. No index is made, as the application's
  *    schema plan makes its declared ones at its next start, and the count store is left empty, as a fresh store's; every
  *    report after a scan says both.
@@ -91,7 +92,7 @@ class LayoutMigrator(private val ddl: SqlStoreDdl) {
         }
         return when (state.phase) {
             Phase.JUDGE -> judged(state, outcomes)
-            Phase.RESUME -> resumed(state, rows(outcomes.last()))
+            Phase.RESUME -> resumed(state, rows(outcomes[outcomes.size - 2]), rows(outcomes.last()))
             Phase.SCAN -> scanned(state, rows(outcomes.last()))
             Phase.BEGIN -> begun(state, rows(outcomes[outcomes.size - 2]), rows(outcomes.last()))
             Phase.ABANDON -> MigrationStep.Done(state.report.ended(Status.REFUSED, FINISHED_MEANWHILE.replace("{graph}", ddl.name)))
@@ -120,7 +121,7 @@ class LayoutMigrator(private val ddl: SqlStoreDdl) {
         if (verdict is StoreLayout.Verdict.Refuse && verdict.inProgress) {
             if (state.request.dryRun) return MigrationStep.Done(state.report.ended(Status.IN_PROGRESS, IN_PROGRESS))
             // Prepared again, as a migration stopped once its checkpoint table was made may not have made the lock table yet.
-            return run(judged.copy(phase = Phase.RESUME, locked = true), MigrationAction.Prepare, *lockAnd(MigrationAction.Query(statements.readCheckpoint, purpose = "checkpoint")))
+            return run(judged.copy(phase = Phase.RESUME, locked = true), MigrationAction.Prepare, *underLock())
         }
         return when (verdict) {
             StoreLayout.Verdict.Current -> MigrationStep.Done(state.report.ended(Status.CURRENT, "The graph is in store layout ${LayoutMigration.TO}: there is nothing to migrate."))
@@ -136,10 +137,11 @@ class LayoutMigrator(private val ddl: SqlStoreDdl) {
     }
 
     /** The checkpoint read under the lock, as a migration part way through is resumed. */
-    private fun resumed(state: MigrationState, rows: List<Any?>): MigrationStep {
+    private fun resumed(state: MigrationState, rows: List<Any?>, stampRows: List<Any?>): MigrationStep {
         val checkpoint = checkpointOf(rows)
-            // Made, and nothing written: a migration stopped as it began, which begins again from its scan.
-            ?: return scan(state.copy(phase = Phase.SCAN), Table.NODES, 0)
+            // Made, and nothing written: a migration stopped as it began, which begins again from its scan; or one that made
+            // its table, or waited on the lock, as another finished, whose empty table is dropped.
+            ?: return if (finishedMeanwhile(stampRows)) abandon(state) else scan(state.copy(phase = Phase.SCAN), Table.NODES, 0)
         refusalToResume(state, checkpoint)?.let { return MigrationStep.Done(state.report.ended(Status.REFUSED, it)) }
         val at = state.copy(phase = Phase.WRITE, table = checkpoint.table, after = checkpoint.after, report = checkpoint.report)
         return if (checkpoint.table == null) checkFor(at) else run(at, read(checkpoint.table, checkpoint.after, state.request.batchSize))
@@ -189,11 +191,7 @@ class LayoutMigrator(private val ddl: SqlStoreDdl) {
                 MigrationAction.Execute(statements.createCheckpoint, purpose = "checkpoint"),
                 MigrationAction.Prepare,
                 // A migration begun again from its scan, its checkpoint table made and nothing written, holds the lock already.
-                *lockAnd(
-                    MigrationAction.Query(statements.readCheckpoint, purpose = "checkpoint"),
-                    MigrationAction.Query(stamps.readStamps!!, purpose = "stamps"),
-                    held = state.locked,
-                ),
+                *underLock(held = state.locked),
             )
         }
     }
@@ -201,6 +199,24 @@ class LayoutMigrator(private val ddl: SqlStoreDdl) {
     /** The lock's action, where the store takes one and the migration doesn't hold it already ([held]), before [actions]. */
     private fun lockAnd(vararg actions: MigrationAction, held: Boolean = false): Array<MigrationAction> =
         (listOfNotNull(statements.lock?.takeUnless { held }?.let { MigrationAction.Lock(it) }) + actions).toTypedArray()
+
+    /**
+     * The lock, and under it the checkpoint table made again and read, with the stamps: a migration that waited on the lock
+     * while another finished finds that one's table dropped, and makes its own to read, empty, beside a stamp of this layout.
+     */
+    private fun underLock(held: Boolean = false) = lockAnd(
+        MigrationAction.Execute(statements.createCheckpoint, purpose = "checkpoint"),
+        MigrationAction.Query(statements.readCheckpoint, purpose = "checkpoint"),
+        MigrationAction.Query(stamps.readStamps!!, purpose = "stamps"),
+        held = held,
+    )
+
+    /** Whether [stampRows], read under the lock with no checkpoint, are another migration's that finished: of this layout. */
+    private fun finishedMeanwhile(stampRows: List<Any?>) = stampRows.any { layoutOf(map(it)["layout"]) == LayoutMigration.TO }
+
+    /** The empty checkpoint table dropped, of a migration another finished before it: see [finishedMeanwhile]. */
+    private fun abandon(state: MigrationState) =
+        run(state.copy(phase = Phase.ABANDON), MigrationAction.Execute(statements.dropCheckpoint, purpose = "checkpoint"))
 
     private fun begun(state: MigrationState, rows: List<Any?>, stampRows: List<Any?>): MigrationStep {
         // Read under the lock: another migration's checkpoint is there where two began at once, and it is resumed, not begun again.
@@ -211,9 +227,7 @@ class LayoutMigrator(private val ddl: SqlStoreDdl) {
         // Another migration that judged the graph with this one, and finished, dropping its checkpoint, before this one took the
         // lock: the graph is stamped this layout, its values rewritten, and would be rewritten again. The empty checkpoint table
         // this one made is dropped, and the graph left as the other left it.
-        if (stampRows.any { layoutOf(map(it)["layout"]) == LayoutMigration.TO }) {
-            return run(state.copy(phase = Phase.ABANDON), MigrationAction.Execute(statements.dropCheckpoint, purpose = "checkpoint"))
-        }
+        if (finishedMeanwhile(stampRows)) return abandon(state)
         val checkpoint = Checkpoint(Table.NODES, 0, state.fingerprint!!, digest(state.request.declarations), state.request.keepInvalid, state.report.copy(tables = emptyMap()))
         return run(state.copy(phase = Phase.WRITE),
             MigrationAction.Transaction(listOf(writeCheckpoint(checkpoint))),
@@ -253,7 +267,7 @@ class LayoutMigrator(private val ddl: SqlStoreDdl) {
 
     /**
      * Each uniqueness constraint the catalog records, checked for keys that repeat, by the schema plan's own sample of what a
-     * constraint would refuse, compiled as any statement is: after the writes, over layout 2's values, exactly as the
+     * constraint would refuse, the store's SQL, run as the plan runs it: after the writes, over layout 2's values, exactly as the
      * index the application's next schema plan makes would refuse them; in a dry run, over layout 1's, as possible collisions.
      */
     private fun checkList(state: MigrationState, rows: List<Any?>): MigrationStep {
@@ -266,7 +280,7 @@ class LayoutMigrator(private val ddl: SqlStoreDdl) {
         if (uniques.isEmpty()) return afterCheck(state.copy(uniques = emptyList()), emptyList())
         val schema = StoreSchema.of(ddl)
         return run(state.copy(phase = Phase.CHECK, uniques = uniques), *uniques.map { unique ->
-            MigrationAction.Query(schema.sampleConflictsQuery(UniquenessConstraintSpec(unique.first(), unique.drop(1)), SAMPLES), purpose = "collisions", compiled = true)
+            MigrationAction.Query(schema.sampleConflictsQuery(UniquenessConstraintSpec(unique.first(), unique.drop(1)), SAMPLES), purpose = "collisions")
         }.toTypedArray())
     }
 
@@ -298,7 +312,10 @@ class LayoutMigrator(private val ddl: SqlStoreDdl) {
         val objects = rows(outcomes[0]).map { map(it) }
         val stamped = rows(outcomes[1]).isNotEmpty()
         val kept = keptOf(rows(outcomes[2]))
-        val drops = StoreLayout.drops(ddl, objects).map { MigrationAction.Execute(it, purpose = "drop") }
+        // The records first: a finish stopped after an object's drop lists it no more, so begun again would never forget its
+        // record, which keeps the application's schema plan from recording the item it makes again (a record is made once).
+        val drops = StoreLayout.drops(ddl, objects).partition { it.startsWith("DELETE ") }.let { (records, objects) -> records + objects }
+            .map { MigrationAction.Execute(it, purpose = "drop") }
         val stamp = if (stamped) MigrationAction.Execute(statements.stampLayout, purpose = "stamp") else MigrationAction.AssignStamp
         return run(state.copy(phase = Phase.FINISH, report = state.report.copy(kept = kept)),
             *drops.toTypedArray(), stamp,
@@ -370,8 +387,8 @@ class LayoutMigrator(private val ddl: SqlStoreDdl) {
 @DrivineInternalApi
 sealed interface MigrationAction {
 
-    /** A statement whose rows the migration reads, each as one JSON object a library reads into a map, as it reads `readStamps`'. [purpose] says what it is for (`stamps`, `batch`, `checkpoint` …), for the library to name where it fails: the report of a failure gives the store's message alone. Where [compiled], the statement is Cypher, which the library compiles for its store and runs as it runs any statement (a uniqueness constraint's sample of collisions, `{properties, count, nodes}` rows). */
-    data class Query(val statement: String, val parameters: Map<String, Any?> = emptyMap(), val purpose: String, val compiled: Boolean = false) : MigrationAction
+    /** A statement whose rows the migration reads, each as one JSON object a library reads into a map, as it reads `readStamps`'. [purpose] says what it is for (`stamps`, `batch`, `checkpoint`, `collisions` …), for the library to name where it fails: the report of a failure gives the store's message alone. */
+    data class Query(val statement: String, val parameters: Map<String, Any?> = emptyMap(), val purpose: String) : MigrationAction
 
     /** A statement run for what it does, in auto-commit: DDL, on Oracle committed as it runs. */
     data class Execute(val statement: String, val parameters: Map<String, Any?> = emptyMap(), val purpose: String) : MigrationAction

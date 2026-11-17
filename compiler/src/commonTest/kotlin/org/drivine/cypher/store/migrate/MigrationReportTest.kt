@@ -86,7 +86,11 @@ class MigrationReportTest {
             listOf("Person", "Robot") to """{"born": "soon", "${'$'}x": {"${'$'}y": 1}, "met": "2024-03-15"}""",
             listOf("Person") to """{"born": "2024-03-15"}""",
         ), declarations, Store.POSTGRES).withCandidates(declarations)
-            .copy(kept = listOf(Kept("nodes", 1, listOf("Person", "Robot"), "born", "date", "\"soon\"", "'soon' is no date.")))
+            .copy(
+                kept = listOf(Kept("nodes", 1, listOf("Person", "Robot"), "born", "date", "\"soon\"", "'soon' is no date.")),
+                collisions = listOf(MigrationReport.Collision("Person", listOf("name", "born"), """{"count":2,"nodes":[{"elementId":1}],"properties":{"name":"Ada"}}""")),
+                notes = listOf("A note."),
+            )
             .ended(Status.MIGRATED, "done")
         assertEquals(1, report.invalidCount)
         val text = PlanJson.writePlain(report.toMap())

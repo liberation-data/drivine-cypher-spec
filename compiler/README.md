@@ -515,8 +515,8 @@ of its own, so the three libraries read rows, key a temporal value and judge a g
   "keepInvalid": false}}}` (any of them left out: no declarations, and these defaults; a key a start doesn't know is
   refused), then `{"migrate": {"store": …, "graph": …, "resume": <state>, "outcomes": [<outcome>, …]}}`, each
   answered `{"run": [<action>, …], "state": <state>}` or `{"done": <report>}`. An action is `{"type": "query" | "execute",
-  "statement", "parameters", "purpose"}`, `{"type": "transaction", "statements": [<execute>, …]}`, `{"type": "prepare"}` or
-  `{"type": "lock", "statement"}` or `{"type": "assignStamp"}`, a query `compiled` where its statement is Cypher; an outcome `{"type": "rows", "rows": [...]}`, `{"type": "ran"}` or `{"type": "failed",
+  "statement", "parameters", "purpose"}`, `{"type": "transaction", "statements": [<execute>, …]}`, `{"type": "prepare"}`,
+  `{"type": "lock", "statement"}` or `{"type": "assignStamp"}`; an outcome `{"type": "rows", "rows": [...]}`, `{"type": "ran"}` or `{"type": "failed",
   "message"}`. `LayoutMigrator` on the JVM. The spec's README, "The migration's run", says what each step does and what
   the host owes it.
 
