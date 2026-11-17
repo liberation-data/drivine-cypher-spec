@@ -55,6 +55,8 @@ class LayoutJsonTest {
                 else -> {
                     assertEquals("refuse", got["verdict"]?.textValue(), "on $target, $name: $got")
                     assertEquals(expected["refuse"]!!.textValue(), got["message"]?.textValue(), "on $target, $name")
+                    assertEquals(expected["from"]?.longValue(), got["from"]?.longValue(), "on $target, $name: the layout a migration moves it from")
+                    assertEquals(expected["inProgress"]?.booleanValue() ?: false, got["inProgress"]?.booleanValue() ?: false, "on $target, $name: part way through a migration")
                 }
             }
             checked++
@@ -132,7 +134,7 @@ class LayoutJsonTest {
             "{\"rewrite\": \"{}\", \"store\": \"sqlite\", \"labels\": [], \"declarations\": [{\"label\": \"A\", \"property\": \"p\", \"kind\": \"week\"}]}" to "No kind week to declare: date, localtime, time, localdatetime, datetime, duration, float, bytes.",
             "{\"rewrite\": \"{}\", \"store\": \"sqlite\", \"labels\": [], \"declarations\": [{\"label\": \"A\", \"property\": \"p\", \"kind\": \"date\"}, {\"label\": \"A\", \"property\": \"p\", \"kind\": \"float\"}]}" to "The property p of A is declared date and float: declare one kind.",
             "{\"rewrite\": \"[1]\", \"store\": \"sqlite\", \"labels\": []}" to "A row's properties are a JSON object, not [1].",
-            "{\"read\": \"1\", \"cypher\": \"RETURN 1\"}" to "A request gives one of cypher, search, searchIndex, vector, settings, fragment, read, temporalKey, layout, expand, write, rewrite, storeStatements, schemaPlan and idSql.",
+            "{\"read\": \"1\", \"cypher\": \"RETURN 1\"}" to "A request gives one of cypher, search, searchIndex, vector, settings, fragment, read, temporalKey, layout, expand, write, rewrite, storeStatements, schemaPlan, idSql and migrate.",
         )) {
             assertEquals(message, answer(request)["error"]?.textValue(), request)
         }

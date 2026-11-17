@@ -4,10 +4,84 @@
 # `declarations`: what the module's LayoutMigration.rewrite, or the JSON request {"rewrite": …}, gives, compared exactly.
 from: 1
 to: 2
+statements:
+  # The statements a migration runs on each store, for the graph `drivine` (MigrationStatements): see README.md, "Migrating a
+  # store's layout". Each binds its parameters by name; each that gives rows gives each as one JSON object.
+  postgres:
+    readBatch:
+      nodes: |-
+        SELECT jsonb_build_object('id', nid, 'labels', labels, 'props', props::text) FROM drivine_node
+        WHERE nid > CAST($after AS bigint) ORDER BY nid LIMIT CAST($limit AS integer)
+      edges: |-
+        SELECT jsonb_build_object('id', eid, 'labels', jsonb_build_array(type), 'props', props::text) FROM drivine_edge
+        WHERE eid > CAST($after AS bigint) ORDER BY eid LIMIT CAST($limit AS integer)
+    update:
+      nodes: "UPDATE drivine_node SET props = CAST($props AS jsonb) WHERE nid = CAST($id AS bigint)"
+      edges: "UPDATE drivine_edge SET props = CAST($props AS jsonb) WHERE eid = CAST($id AS bigint)"
+    own: "SELECT jsonb_build_object('id', n.nid, 'props', n.props::text) FROM drivine_node n WHERE (n.labels @> '[\"DrivineStore\"]' OR n.labels @> '[\"_DrivineSchema\"]') ORDER BY n.nid"
+    sizes: "SELECT jsonb_build_object('nodes', (SELECT count(*) FROM drivine_node), 'lastNode', (SELECT max(nid) FROM drivine_node), 'edges', (SELECT count(*) FROM drivine_edge), 'lastEdge', (SELECT max(eid) FROM drivine_edge))"
+    createCheckpoint: "CREATE TABLE IF NOT EXISTS drivine_migrate2 (name text PRIMARY KEY, state text NOT NULL)"
+    readCheckpoint: "SELECT jsonb_build_object('name', name, 'state', state) FROM drivine_migrate2 ORDER BY name"
+    writeCheckpoint: |-
+      INSERT INTO drivine_migrate2 (name, state) VALUES (CAST($name AS text), CAST($state AS text))
+      ON CONFLICT (name) DO UPDATE SET state = EXCLUDED.state
+    dropCheckpoint: "DROP TABLE IF EXISTS drivine_migrate2"
+    lock: "SELECT name FROM drivine_lock2 WHERE name = 'schema' FOR UPDATE"
+  oracle:
+    readBatch:
+      nodes: |-
+        SELECT JSON_OBJECT('id' VALUE nid, 'labels' VALUE labels, 'props' VALUE JSON_SERIALIZE(props RETURNING CLOB EXTENDED) RETURNING JSON) FROM drivine_node
+        WHERE nid > $after ORDER BY nid FETCH FIRST $limit ROWS ONLY
+      edges: |-
+        SELECT JSON_OBJECT('id' VALUE eid, 'labels' VALUE JSON_ARRAY(type), 'props' VALUE JSON_SERIALIZE(props RETURNING CLOB EXTENDED) RETURNING JSON) FROM drivine_edge
+        WHERE eid > $after ORDER BY eid FETCH FIRST $limit ROWS ONLY
+    update:
+      nodes: "UPDATE drivine_node SET props = JSON($props EXTENDED) WHERE nid = $id"
+      edges: "UPDATE drivine_edge SET props = JSON($props EXTENDED) WHERE eid = $id"
+    own: "SELECT JSON_OBJECT('id' VALUE n.nid, 'props' VALUE JSON_SERIALIZE(n.props RETURNING CLOB EXTENDED) RETURNING JSON) FROM drivine_node n WHERE (INSTR(',' || LTRIM(RTRIM(JSON_SERIALIZE(n.labels), ']'), '[') || ',\"', ',\"DrivineStore\",\"') > 0 OR INSTR(',' || LTRIM(RTRIM(JSON_SERIALIZE(n.labels), ']'), '[') || ',\"', ',\"_DrivineSchema\",\"') > 0) ORDER BY n.nid"
+    sizes: "SELECT JSON_OBJECT('nodes' VALUE (SELECT COUNT(*) FROM drivine_node), 'lastNode' VALUE (SELECT MAX(nid) FROM drivine_node), 'edges' VALUE (SELECT COUNT(*) FROM drivine_edge), 'lastEdge' VALUE (SELECT MAX(eid) FROM drivine_edge) NULL ON NULL RETURNING JSON) FROM dual"
+    createCheckpoint: "CREATE TABLE IF NOT EXISTS drivine_migrate2 (name VARCHAR2(400) PRIMARY KEY, state CLOB NOT NULL)"
+    readCheckpoint: "SELECT JSON_OBJECT('name' VALUE name, 'state' VALUE state RETURNING JSON) FROM drivine_migrate2 ORDER BY name"
+    writeCheckpoint: |-
+      MERGE INTO drivine_migrate2 c USING (SELECT $name AS name, TO_CLOB($state) AS state FROM dual) s ON (c.name = s.name)
+      WHEN MATCHED THEN UPDATE SET c.state = s.state WHEN NOT MATCHED THEN INSERT (name, state) VALUES (s.name, s.state)
+    dropCheckpoint: "DROP TABLE IF EXISTS drivine_migrate2"
+    lock: "SELECT name FROM drivine_lock2 WHERE name = 'schema' FOR UPDATE WAIT 10"
+  sqlite:
+    readBatch:
+      nodes: |-
+        /* drivine:json */
+        SELECT json_object('id', nid, 'labels', json(labels), 'props', props) FROM drivine_node
+        WHERE nid > $after ORDER BY nid LIMIT $limit
+      edges: |-
+        /* drivine:json */
+        SELECT json_object('id', eid, 'labels', json_array(type), 'props', props) FROM drivine_edge
+        WHERE eid > $after ORDER BY eid LIMIT $limit
+    update:
+      nodes: "UPDATE drivine_node SET props = $props WHERE nid = $id"
+      edges: "UPDATE drivine_edge SET props = $props WHERE eid = $id"
+    own: |-
+      /* drivine:json */
+      SELECT json_object('id', n.nid, 'props', n.props) FROM drivine_node n WHERE (instr(n.labels, '"DrivineStore"') > 0 OR instr(n.labels, '"_DrivineSchema"') > 0) ORDER BY n.nid
+    sizes: |-
+      /* drivine:json */
+      SELECT json_object('nodes', (SELECT count(*) FROM drivine_node), 'lastNode', (SELECT max(nid) FROM drivine_node), 'edges', (SELECT count(*) FROM drivine_edge), 'lastEdge', (SELECT max(eid) FROM drivine_edge))
+    createCheckpoint: "CREATE TABLE IF NOT EXISTS drivine_migrate2 (name TEXT PRIMARY KEY, state TEXT NOT NULL)"
+    readCheckpoint: |-
+      /* drivine:json */
+      SELECT json_object('name', name, 'state', state) FROM drivine_migrate2 ORDER BY name
+    writeCheckpoint: |-
+      INSERT INTO drivine_migrate2 (name, state) VALUES ($name, $state)
+      ON CONFLICT (name) DO UPDATE SET state = excluded.state
+    dropCheckpoint: "DROP TABLE IF EXISTS drivine_migrate2"
+    lock: null
 declarationRefusals:
   - name: "One label's property declared two kinds"
     declarations: [{label: "Person", property: "born", kind: "date"}, {label: "Person", property: "born", kind: "datetime"}]
     refusal: "The property born of Person is declared date and datetime: declare one kind."
+  - name: "Drivine's own label declared"
+    declarations: [{label: "_DrivineSchema", property: "version", kind: "float"}]
+    refusal: "_DrivineSchema is Drivine's own label, whose properties take no declaration: a migration keeps them as they are."
 rewrites:
   - name: "A row with nothing to change"
     description: "Texts, integers, truth values and lists of them, with no property declared: held alike in both layouts."

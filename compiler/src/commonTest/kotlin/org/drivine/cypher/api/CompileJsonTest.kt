@@ -353,8 +353,8 @@ class CompileJsonTest {
                 "{\"settings\": {\"other\": 1}}" to "give no other",
                 "{\"settings\": 3}" to "settings are a JSON object",
                 "{\"settings\": null}" to "settings are a JSON object",
-                "{\"settings\": {}, \"cypher\": \"RETURN 1\"}" to "one of cypher, search, searchIndex, vector, settings, fragment, read, temporalKey, layout, expand, write, rewrite, storeStatements, schemaPlan and idSql",
-                "{\"settings\": {}, \"search\": {}}" to "one of cypher, search, searchIndex, vector, settings, fragment, read, temporalKey, layout, expand, write, rewrite, storeStatements, schemaPlan and idSql",
+                "{\"settings\": {}, \"cypher\": \"RETURN 1\"}" to "one of cypher, search, searchIndex, vector, settings, fragment, read, temporalKey, layout, expand, write, rewrite, storeStatements, schemaPlan, idSql and migrate",
+                "{\"settings\": {}, \"search\": {}}" to "one of cypher, search, searchIndex, vector, settings, fragment, read, temporalKey, layout, expand, write, rewrite, storeStatements, schemaPlan, idSql and migrate",
             )) {
                 val answer = CompileJson.compile(request)
                 assertTrue(answer.startsWith("{\"error\":") && error in answer, "$request: $answer")

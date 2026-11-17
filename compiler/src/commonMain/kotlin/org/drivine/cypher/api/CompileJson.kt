@@ -98,7 +98,7 @@ object CompileJson {
         // A full-text search, asked of the same entry: a request with "search" or "searchIndex" in place of "cypher", and a
         // vector search, with "vector". A request asks one thing: one that gives two would have the other read past as though
         // it were not there.
-        val kinds = listOf("cypher", "search", "searchIndex", "vector", "settings", "fragment") + LayoutJson.KINDS + StoreJson.KIND + SchemaPlanJson.KIND + IdSqlJson.KIND
+        val kinds = listOf("cypher", "search", "searchIndex", "vector", "settings", "fragment") + LayoutJson.KINDS + StoreJson.KIND + SchemaPlanJson.KIND + IdSqlJson.KIND + MigrateJson.KIND
         if (kinds.count { tree.has(it) } > 1) {
             return error("A request gives one of ${kinds.dropLast(1).joinToString()} and ${kinds.last()}.")
         }
@@ -112,6 +112,8 @@ object CompileJson {
         if (tree.has(SchemaPlanJson.KIND)) return SchemaPlanJson.answer(tree)
         // A lookup of a node by its id, as the store's index is made over it: see IdSqlJson.
         if (tree.has(IdSqlJson.KIND)) return IdSqlJson.answer(tree)
+        // A store's layout migrated, a round at a time: see MigrateJson.
+        if (tree.has(MigrateJson.KIND)) return MigrateJson.answer(tree)
         if (tree.has("settings")) return settings(tree["settings"])
         if (tree.has("fragment")) return FragmentJson.answer(tree)
         val call = try {

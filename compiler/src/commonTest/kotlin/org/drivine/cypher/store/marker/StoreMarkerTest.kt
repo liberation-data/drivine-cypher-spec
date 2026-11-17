@@ -245,7 +245,7 @@ class StoreMarkerTest {
                     assertEquals(StoreStamp.restampParameters(StoreStamp.engine(ddl)), stamp.parameters, "$name: the re-stamp's parameters")
                     assertEquals(expected["stamp"]!!["assign"]?.booleanValue() ?: false, stamp.assign, "$name: whether it is stamped anew")
                 }
-                else -> assertEquals(StoreLayout.Verdict.Refuse(expected["refuse"]!!.textValue()!!), verdict, name)
+                else -> assertEquals(StoreLayout.Verdict.Refuse(expected["refuse"]!!.textValue()!!, expected["from"]?.longValue()?.toInt(), expected["inProgress"]?.booleanValue() ?: false), verdict, name)
             }
             checked++
         }
@@ -316,7 +316,7 @@ class StoreMarkerTest {
             assertEquals("${graph}_lock2", ddl.lock, "$name: the lock table the case names is the store's")
             // As the graph stands after the setup: no stamp, a node of the application's, and no object of this layout's.
             val verdict = StoreLayout.verdict(StoreStamp.engine(ddl), graph, emptyList(), true, emptyList(), ddl)
-            assertEquals(StoreLayout.Verdict.Refuse(case["refuse"]!!.textValue()!!.replace("{graph}", graph)), verdict, name)
+            assertEquals(case["refuse"]!!.textValue()!!.replace("{graph}", graph), (verdict as? StoreLayout.Verdict.Refuse)?.message, name)
             checked++
         }
         assertEquals(3, checked, "a case for each SQL store")
