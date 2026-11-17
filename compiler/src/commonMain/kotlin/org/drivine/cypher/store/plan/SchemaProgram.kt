@@ -645,13 +645,12 @@ internal class SchemaProgram(
     }
 
     /**
-     * The constraint whose own index [existing], the index [spec] is, is ([SchemaItemInfo.owningConstraint], or read from the
-     * constraints, [owningConstraint]), which the store refuses to drop apart from it (Neo4j: "Index belongs to constraint"): so
-     * it is left, and said so, as [what] (dropped or recreated) it isn't (liberation-data/drivine-cypher-spec#325). Null where
-     * it is no constraint's.
+     * The constraint whose own index [existing], the index [spec] is, is, read from the constraints ([owningConstraint]),
+     * which the store refuses to drop apart from it (Neo4j: "Index belongs to constraint"): so it is left, and said so, as
+     * [what] (dropped or recreated) it isn't (liberation-data/drivine-cypher-spec#325). Null where it is no constraint's.
      */
     private fun leftToConstraint(existing: SchemaItemInfo, spec: IndexSpec, what: String): String? {
-        val owner = existing.owningConstraint ?: owningConstraint(existing) ?: return null
+        val owner = owningConstraint(existing) ?: return null
         log(
             LogLevel.INFO, INDEX_MANAGER,
             "Range index on ${spec.label}${spec.properties} is the index of constraint $owner, so it is not $what: drop the constraint to drop it",
