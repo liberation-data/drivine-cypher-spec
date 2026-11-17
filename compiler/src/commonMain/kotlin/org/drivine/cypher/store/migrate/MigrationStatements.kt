@@ -46,7 +46,11 @@ sealed class MigrationStatements(val ddl: SqlStoreDdl) {
     /** Reads every row of the checkpoint table, each `{"name", "state"}`, in the order of their names. */
     abstract val readCheckpoint: String
 
-    /** Writes the row of the checkpoint table named `$name` its `state`, `$state`, in its place where there is one. */
+    /**
+     * Writes the row of the checkpoint table named `$name` its `state`, `$state`, in its place where there is one. A state
+     * holds the report so far, which a graph of many values not of their kind makes long: on Oracle a library binds it as a
+     * CLOB, as a text past 4,000 bytes bound as a `VARCHAR2` is refused.
+     */
     abstract val writeCheckpoint: String
 
     /** Drops the checkpoint table, safe to run again. */

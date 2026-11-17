@@ -260,7 +260,7 @@ class LayoutMigrator(private val ddl: SqlStoreDdl) {
 @DrivineInternalApi
 sealed interface MigrationAction {
 
-    /** A statement whose rows the migration reads, each as one JSON object a library reads into a map, as it reads `readStamps`'. [purpose] names it in the report of a failure. */
+    /** A statement whose rows the migration reads, each as one JSON object a library reads into a map, as it reads `readStamps`'. [purpose] says what it is for (`stamps`, `batch`, `checkpoint` …), for the library to name where it fails: the report of a failure gives the store's message alone. */
     data class Query(val statement: String, val parameters: Map<String, Any?> = emptyMap(), val purpose: String) : MigrationAction
 
     /** A statement run for what it does, in auto-commit: DDL, on Oracle committed as it runs. */
