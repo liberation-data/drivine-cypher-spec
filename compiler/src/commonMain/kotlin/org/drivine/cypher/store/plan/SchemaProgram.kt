@@ -619,6 +619,16 @@ internal class SchemaProgram(
         return SchemaItemInfo(kind = spec.kind, label = spec.label, properties = spec.properties, name = constraint.name, owningConstraint = owner)
     }
 
+    /**
+     * The name of the uniqueness constraint whose own index [existing], a range index, is, on a store that lists such an index
+     * among its range indexes under the constraint's name ([StoreSchema.constraintIndexesListedAsIndexes]): read from the
+     * constraints. Null where it is no constraint's.
+     */
+    private fun owningConstraint(existing: SchemaItemInfo): String? {
+        if (existing.kind != SchemaItemKind.RANGE_INDEX || existing.name == null || !store.constraintIndexesListedAsIndexes) return null
+        return constraints().firstOrNull { it.kind == SchemaItemKind.UNIQUENESS_CONSTRAINT && it.name == existing.name }?.name
+    }
+
     /** `IndexManager.find`: the index [spec] is, as the store lists it. */
     private fun findIndex(spec: IndexSpec, poll: Long? = null): SchemaItemInfo? {
         requireSupported(spec)
@@ -629,23 +639,24 @@ internal class SchemaProgram(
     /** `IndexManager.drop`. */
     private fun dropIndex(spec: IndexSpec): Boolean {
         val existing = findIndex(spec) ?: return false
-        if (leftToConstraint(existing, spec, "dropped")) return false
+        if (leftToConstraint(existing, spec, "dropped") != null) return false
         dropExisting(existing, spec.made())
         return true
     }
 
     /**
-     * Whether [existing], the index [spec] is, is a constraint's own ([SchemaItemInfo.owningConstraint]), which the store
-     * refuses to drop apart from it (Neo4j: "Index belongs to constraint"): so it is left, and said so, as [what] (dropped or
-     * recreated) it isn't (liberation-data/drivine-cypher-spec#325).
+     * The constraint whose own index [existing], the index [spec] is, is ([SchemaItemInfo.owningConstraint], or read from the
+     * constraints, [owningConstraint]), which the store refuses to drop apart from it (Neo4j: "Index belongs to constraint"): so
+     * it is left, and said so, as [what] (dropped or recreated) it isn't (liberation-data/drivine-cypher-spec#325). Null where
+     * it is no constraint's.
      */
-    private fun leftToConstraint(existing: SchemaItemInfo, spec: IndexSpec, what: String): Boolean {
-        val owner = existing.owningConstraint ?: return false
+    private fun leftToConstraint(existing: SchemaItemInfo, spec: IndexSpec, what: String): String? {
+        val owner = existing.owningConstraint ?: owningConstraint(existing) ?: return null
         log(
             LogLevel.INFO, INDEX_MANAGER,
             "Range index on ${spec.label}${spec.properties} is the index of constraint $owner, so it is not $what: drop the constraint to drop it",
         )
-        return true
+        return owner
     }
 
     /** `IndexManager.recreate`. */
@@ -661,7 +672,7 @@ internal class SchemaProgram(
         // its name is gone the listing leaves the record out, and it is still to be forgotten, and written again in this
         // version's form.
         val found = findIndex(spec)
-        if (found != null && leftToConstraint(found, spec, "recreated")) return EnsureResult.AlreadyMatching(found)
+        if (found != null) leftToConstraint(found, spec, "recreated")?.let { owner -> return EnsureResult.AlreadyMatching(found.copy(owningConstraint = owner)) }
         val aliases = if (found != null) aliasesOfIndex(spec) else emptyList()
         val cleared = clearMismatched(spec, found) { findIndex(spec) }
         cleared.drift?.let { return it }

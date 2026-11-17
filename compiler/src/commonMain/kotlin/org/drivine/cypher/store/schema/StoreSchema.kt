@@ -69,6 +69,16 @@ interface StoreSchema {
     val uniquenessConstraintsServeRangeIndexes: Boolean
         get() = false
 
+    /**
+     * Whether the store lists a uniqueness constraint's own index among its range indexes, under the constraint's name, and
+     * refuses to drop it apart from the constraint (Neo4j, 4.4 and 5 alike: "Index belongs to constraint"). A drop or a recreate
+     * of a range index then reads the constraints first, to leave such an index to its constraint
+     * (liberation-data/drivine-cypher-spec#325). Read from the constraints, not from `SHOW INDEXES`' `owningConstraint`, which
+     * Neo4j 4.4 hasn't.
+     */
+    val constraintIndexesListedAsIndexes: Boolean
+        get() = false
+
     /** Whether a uniqueness constraint needs an exact-match index over its properties made first (FalkorDB). */
     val constraintsRequireBackingIndex: Boolean
         get() = false

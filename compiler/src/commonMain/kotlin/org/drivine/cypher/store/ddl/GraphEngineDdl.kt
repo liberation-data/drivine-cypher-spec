@@ -103,8 +103,8 @@ object Neo4jDdl : StoreDdl {
 
     override fun listIndexesQuery(kind: SchemaItemKind): String = """
         SHOW INDEXES
-        YIELD name, type, entityType, labelsOrTypes, properties, options, owningConstraint
-        RETURN {name: name, type: type, entityType: entityType, labelsOrTypes: labelsOrTypes, properties: properties, options: options, owningConstraint: owningConstraint}
+        YIELD name, type, entityType, labelsOrTypes, properties, options
+        RETURN {name: name, type: type, entityType: entityType, labelsOrTypes: labelsOrTypes, properties: properties, options: options}
     """.trimIndent()
 
     override fun listConstraintsQuery(): String = """

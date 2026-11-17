@@ -25,10 +25,11 @@ import org.drivine.DrivineInternalApi
  * @param analyzer fulltext indexes only: the engine-reported analyzer, or null where the engine
  *   does not surface one (FalkorDB, Memgraph). Null means "unobservable", not "default" — drift is
  *   never reported against an analyzer the engine won't tell us about.
- * @param owningConstraint the name of the constraint that owns this index, where the engine lists a constraint's own index
- *   among its indexes (Neo4j's `owningConstraint`), or where a uniqueness constraint's index serves a range index on a
- *   store that keeps it as the constraint's (Postgres, SQLite): such an index is the constraint's, never one a
- *   drop or a recreate of an index takes (liberation-data/drivine-cypher-spec#325). Null for any other.
+ * @param owningConstraint the name of the uniqueness constraint whose index serves a range index, on a store that keeps
+ *   such an index as the constraint's (Postgres, SQLite): such an index is the constraint's, never one a drop or a recreate
+ *   of an index takes (liberation-data/drivine-cypher-spec#325). Neo4j's constraint's own index, listed among its range
+ *   indexes, is told by the constraints listing as a drop or a recreate reads it, not by a listing's column, as Neo4j 4.4
+ *   has no `owningConstraint`. Null for any other.
  * @param status engine-reported status where applicable (FalkorDB constraints:
  *   `OPERATIONAL` / `UNDER CONSTRUCTION` / `FAILED`; FalkorDB indexes, the status of their label's:
  *   `OPERATIONAL` / `UNDER CONSTRUCTION`)

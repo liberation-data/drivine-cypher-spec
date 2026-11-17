@@ -669,6 +669,9 @@ cases:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
               - now: 1000000
                 actions:
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
                   - {execute: {drop: "Range index"}}
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
               - now: 1000000
@@ -4070,6 +4073,9 @@ cases:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}, {kind: "RANGE_INDEX", label: "Person", properties: ["name", "born"], name: "Person_name_born_range"}]}
               - now: 1000000
                 actions:
+                  - {query: {listing: "constraints"}, items: []}
+              - now: 1000000
+                actions:
                   - {execute: {drop: "Range index over two properties"}}
             done: 1000000
             report:
@@ -4118,6 +4124,9 @@ cases:
               - now: 1000000
                 actions:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "constraints"}, items: []}
               - now: 1000000
                 actions:
                   - {execute: {drop: "Range index"}}
@@ -4245,6 +4254,9 @@ cases:
                   - {query: {marker: "scopes"}, rows: ["schema"]}
                   - {query: {marker: "read.items", scope: "schema"}, rows: ["RANGE_INDEX:Person:name,born:Person_name_born_range"]}
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name", "born"], name: "Person_name_born_range"}]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "constraints"}, items: []}
               - now: 1000000
                 actions:
                   - {execute: {drop: "Range index over two properties"}}
@@ -8156,11 +8168,27 @@ cases:
                 - ["WARN", "IndexManager", "Recreated {engine} RANGE_INDEX on Person[name] — previously indexed data may be stale (vector indexes: stored embeddings need re-embedding)"]
       - operation: {item: {call: "DROP", spec: "Range index"}}
         runs:
-          - stores: ["sqlite", "postgres", "neo4j"]
+          - stores: ["sqlite", "postgres"]
             rounds:
               - now: 1000000
                 actions:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
+              - now: 1000000
+                actions:
+                  - {execute: {drop: "Range index"}}
+            done: 1000000
+            report:
+              item: {result: null, dropped: true}
+              log:
+                - ["INFO", "IndexManager", "Dropped {engine} RANGE_INDEX on Person[name]"]
+          - stores: ["neo4j"]
+            rounds:
+              - now: 1000000
+                actions:
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "constraints"}, items: []}
               - now: 1000000
                 actions:
                   - {execute: {drop: "Range index"}}
@@ -8193,15 +8221,19 @@ cases:
             report:
               item: {result: null, dropped: false}
               log: []
-      # A uniqueness constraint's own index, which Neo4j lists as a range index: left to the constraint by a drop and a
-      # recreate, which Neo4j refuses of it ("Index belongs to constraint"), and found by an ensure (liberation-data/drivine-cypher-spec#325).
+      # A uniqueness constraint's own index, which Neo4j lists as a range index under the constraint's name: told from the
+      # constraints and left to the constraint by a drop and a recreate, which Neo4j refuses of it ("Index belongs to
+      # constraint"), and found by an ensure (liberation-data/drivine-cypher-spec#325).
       - operation: {item: {call: "DROP", spec: "Range index"}}
         runs:
           - stores: ["neo4j"]
             rounds:
               - now: 1000000
                 actions:
-                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_unique", owningConstraint: "Person_name_unique"}]}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_unique"}]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["name"], name: "Person_name_unique"}]}
             done: 1000000
             report:
               item: {result: null, dropped: false}
@@ -8222,7 +8254,10 @@ cases:
             rounds:
               - now: 1000000
                 actions:
-                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_unique", owningConstraint: "Person_name_unique"}]}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_unique"}]}
+              - now: 1000000
+                actions:
+                  - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["name"], name: "Person_name_unique"}]}
             done: 1000000
             report:
               item: {result: {alreadyMatching: {kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_unique", owningConstraint: "Person_name_unique"}}, dropped: null}
@@ -8262,13 +8297,13 @@ cases:
             rounds:
               - now: 1000000
                 actions:
-                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_unique", owningConstraint: "Person_name_unique"}]}
+                  - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_unique"}]}
               - now: 1000000
                 actions:
                   - {awaitIndex: {name: "Person_name_unique", timeout: 60}}
             done: 1000000
             report:
-              item: {result: {alreadyMatching: {kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_unique", owningConstraint: "Person_name_unique"}}, dropped: null}
+              item: {result: {alreadyMatching: {kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_unique"}}, dropped: null}
               log: []
           # Postgres and SQLite list a uniqueness constraint's unique index as the constraint's alone: it serves a range index
           # over its label and property, and none is made beside it.
