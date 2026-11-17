@@ -418,6 +418,28 @@ class StoreDdlTest {
         (key + pair + range).filter { "CREATE" !in it }.forEach { assertTrue("e_busy" !in it && "e_exists" !in it, it) }
     }
 
+    /**
+     * drivine-cypher-spec#324: sessions making one Oracle store at once each ran the lock table's seed, a `MERGE`, and the
+     * second was refused on the lock table's key (`ORA-00001`). `ensuring`'s `make` takes that as the row put. It takes it
+     * so for whatever it runs, so each other statement it runs is one that can't raise `ORA-00001`: no row written, and no
+     * unique index, whose build over duplicate rows Oracle refuses with `ORA-01452`, never to be hidden.
+     */
+    @Test
+    fun oracleEnsuringTakesTheLockRowAnotherSessionInsertedAsPutAndNothingElse() {
+        val ensuring = oracle.ensuring
+        assertTrue(
+            Regex("""WHEN e_exists THEN RETURN;\s+(--[^\n]*\n\s+)?WHEN DUP_VAL_ON_INDEX THEN RETURN;\s+WHEN e_busy THEN""").containsMatchIn(ensuring),
+            "make takes a row another session inserted as put:\n$ensuring",
+        )
+        val made = Regex("""make\('((?:[^']|'')*)'\);""").findAll(ensuring).map { it.groupValues[1].replace("''", "'") }.toList()
+        // Made with the store, and again where an earlier version made it without the count store.
+        assertEquals(2, made.count { it == oracle.lockSeed }, "the lock table's row is put through make:\n$ensuring")
+        val ddl = listOf("CREATE TABLE IF NOT EXISTS ", "CREATE INDEX IF NOT EXISTS ", "CREATE MULTIVALUE INDEX IF NOT EXISTS ", "CREATE OR REPLACE PROPERTY GRAPH ", "ALTER TABLE ")
+        made.filter { it != oracle.lockSeed }.forEach { statement ->
+            assertTrue(ddl.any { statement.startsWith(it) }, "make runs no other statement that could raise ORA-00001:\n$statement")
+        }
+    }
+
     @Test
     fun catalogIsListedAndAliasedAsDrivine4jDid() {
         val catalog = store["catalog"]!!
