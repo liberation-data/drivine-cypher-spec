@@ -41,7 +41,12 @@ internal class VariableKinds(private val aggregates: (Expression) -> Boolean) {
      * a value there may read them, but a pattern names none of them (see [use]), in a subquery's too. One bound again within, as a
      * comprehension's variable, is no longer one of them. Of those, the ones a `WITH` that neither groups nor is `DISTINCT`
      * drops that no `WITH` before it had dropped ([shadowing]): Neo4j still reads them there, so a quantified path pattern's group names none of them as its own
-     * (see [grouped]).
+     * (see [grouped]). [shadowing] holds the names a subquery has from outside it too, those a `CALL`'s brackets import and those in
+     * scope for an `EXISTS { … }` or a `COUNT { … }`: within it, a `WITH`'s or an `UNWIND`'s alias, or a `CALL`'s item, binds
+     * none of them again, nor, in an `EXISTS { … }` or a `COUNT { … }`, its `RETURN`'s alias, as Neo4j refuses (its 42N07,
+     * drivine4j#819; see [rebinding]); a `WITH` that passes one on as it is keeps it so. A `CALL () { … }` within, which imports
+     * none, binds them as its own, but they stay [outer] in it, at any depth, and a `CALL`'s item there names none of them
+     * either: Neo4j has it so within an `EXISTS { … }` or a `COUNT { … }`, and the names a `CALL` imports are taken alike.
      *
      * Within the `WHERE` or the order of a `WITH` or a `RETURN` that groups or is DISTINCT, in a subquery there at any depth
      * too, [horizon] holds the names that projection can read, its items and what a subquery reads from outside it: Neo4j
@@ -59,8 +64,9 @@ internal class VariableKinds(private val aggregates: (Expression) -> Boolean) {
         val shadowing: MutableSet<String> = LinkedHashSet(),
         var horizon: Set<String>? = null,
         val hidden: MutableSet<String> = LinkedHashSet(),
+        val outer: MutableSet<String> = LinkedHashSet(),
     ) {
-        fun copy() = Scope(LinkedHashMap(kinds), LinkedHashSet(dropped), LinkedHashSet(shadowing), horizon, LinkedHashSet(hidden))
+        fun copy() = Scope(LinkedHashMap(kinds), LinkedHashSet(dropped), LinkedHashSet(shadowing), horizon, LinkedHashSet(hidden), LinkedHashSet(outer))
 
         /** A copy, with [names] bound within an expression, as a comprehension's variable, of any kind. */
         fun binding(vararg names: String) = copy().also { scope -> names.forEach { scope[it] = Kind.ANY } }
@@ -70,6 +76,7 @@ internal class VariableKinds(private val aggregates: (Expression) -> Boolean) {
             dropped -= name
             shadowing -= name
             hidden -= name
+            outer -= name
         }
     }
 
@@ -99,15 +106,22 @@ internal class VariableKinds(private val aggregates: (Expression) -> Boolean) {
         val kept = outer.kinds.filterKeys { name -> name !in outer.dropped }
         // Within a horizon, what [outer] reads joins it, but what a CALL (*) hides, as Neo4j reads a CALL's brackets as of where the subquery is (drivine4j#681).
         val horizon = outer.horizon?.plus(kept.keys - outer.hidden)
-        return (listOf(query.clauses) + query.unions.map { it.clauses }).map { part -> clauses(part, outer.copy().also { it.horizon = horizon }, kept = kept) }
+        // What it reads from outside, it binds not again (drivine4j#819).
+        return (listOf(query.clauses) + query.unions.map { it.clauses }).map { part ->
+            clauses(part, outer.copy().also { it.horizon = horizon; it.shadowing += kept.keys }, kept = kept, returning = true)
+        }
     }
 
     /**
      * [clauses] in turn, over [scope]: what their `RETURN` returns, of the kinds it returns. Within a `FOREACH`, [foreach],
      * a `CREATE` or a `MERGE` may name a variable bound already, as Neo4j takes it there. [kept] stay in scope after each
      * `WITH` that does not name them, as what a `CALL`'s brackets import does, and a subquery's variables from outside it.
+     * Those of an `EXISTS { … }` or a `COUNT { … }`, [returning], bind with their `RETURN`'s aliases too; and an `UNWIND` binds
+     * no variable in scope again (see [redeclared]).
      */
-    private fun clauses(clauses: List<Clause>, scope: Scope, foreach: Boolean = false, kept: Map<String, Kind> = emptyMap()): Map<String, Kind> {
+    private fun clauses(
+        clauses: List<Clause>, scope: Scope, foreach: Boolean = false, kept: Map<String, Kind> = emptyMap(), returning: Boolean = false,
+    ): Map<String, Kind> {
         var current = scope
         var returned = emptyMap<String, Kind>()
         for (clause in clauses) {
@@ -119,13 +133,23 @@ internal class VariableKinds(private val aggregates: (Expression) -> Boolean) {
                 is Clause.Unwind -> {
                     expression(clause.list, current)
                     valued(clause.list, condition = false)
+                    rebinding(clause.variable, current.shadowing)
+                    if (clause.variable !in current.shadowing && current[clause.variable] != null && clause.variable !in current.dropped) throw redeclared(clause.variable)
                     current[clause.variable] = Kind.ANY
                 }
-                is Clause.With -> current = projected(clause.projection, current, clause.where, kept.keys).also { next ->
-                    // Into its kinds alone, so one an outer WITH's WHERE still reads, kept in a subquery of an order there, stays shadowing (drivine4j#681).
-                    kept.forEach { (name, kind) -> if (next[name] == null) next.kinds[name] = kind }
+                is Clause.With -> {
+                    // An item that passes a variable on as it is, WITH m1, binds nothing again.
+                    clause.projection.items.forEach { if ((it.expression as? Expression.Variable)?.name != it.name) rebinding(it.name, current.shadowing) }
+                    current = projected(clause.projection, current, clause.where, kept.keys).also { next ->
+                        // Into its kinds alone, so one an outer WITH's WHERE still reads, kept in a subquery of an order there, stays shadowing (drivine4j#681).
+                        kept.forEach { (name, kind) -> if (next[name] == null) next.kinds[name] = kind }
+                    }
                 }
-                is Clause.Return -> returned = projected(clause.projection, current, null, kept.keys).kinds
+                is Clause.Return -> {
+                    // EXISTS { RETURN 'x' AS m1 } binds m1 again, as Neo4j has it (drivine4j#819).
+                    if (returning) clause.projection.items.forEach { if ((it.expression as? Expression.Variable)?.name != it.name) rebinding(it.name, current.shadowing) }
+                    returned = projected(clause.projection, current, null, kept.keys).kinds
+                }
                 is Clause.Create -> {
                     val made = mutableSetOf<String>()
                     val before = current.copy()
@@ -156,7 +180,10 @@ internal class VariableKinds(private val aggregates: (Expression) -> Boolean) {
                     inner[clause.variable] = Kind.ANY
                     clauses(clause.clauses, inner, foreach = true)
                 }
-                is Clause.Call -> called(clause, current).forEach { (name, kind) -> current[name] = kind }
+                is Clause.Call -> called(clause, current).forEach { (name, kind) ->
+                    rebinding(name, current.shadowing + current.outer)
+                    current[name] = kind
+                }
             }
         }
         return returned
@@ -183,7 +210,13 @@ internal class VariableKinds(private val aggregates: (Expression) -> Boolean) {
             val shadowing = scope.shadowing.filterTo(LinkedHashSet()) { it in imported }
             // What CALL (*) imports there that the projection can't read, is refused where it is read (drivine4j#681); not a procedure's.
             val hidden = imported.filterTo(LinkedHashSet()) { it in scope.hidden || (call.importsAll && !call.procedure && scope.horizon?.contains(it) == false) }
-            clauses(clauses, Scope(inner, dropped, shadowing, scope.horizon, hidden), kept = if (call.imports != null || call.importsAll) inner.filterKeys { it !in dropped } else emptyMap())
+            // What its brackets import, it binds not again; and what a subquery around it has from outside stays outer within it (drivine4j#819).
+            // What a leading WITH imports, Neo4j has declared in the subquery's own scope, as at the top (see [redeclared]).
+            // Not a procedure's: the WITH of its WHERE yields a variable as its item, and one bound already is refused as such, as without one.
+            val bracketed = call.imports != null || call.importsAll
+            if (bracketed && !call.procedure) shadowing += imported - dropped
+            val outer = LinkedHashSet(scope.outer).apply { addAll(scope.shadowing) }
+            clauses(clauses, Scope(inner, dropped, shadowing, scope.horizon, hidden, outer), kept = if (bracketed) inner.filterKeys { it !in dropped } else emptyMap())
         }
         return parts.first().mapValues { (name, kind) -> if (parts.all { it[name] == kind }) kind else Kind.ANY }
     }
@@ -240,22 +273,24 @@ internal class VariableKinds(private val aggregates: (Expression) -> Boolean) {
         }
         // What a WITH outside drops stays dropped after a subquery's own WITH, but for an item that names it again.
         // The clauses after it are within whatever projection [scope] is within, as it is.
-        val next = if (projection.star) scope.copy() else Scope(dropped = LinkedHashSet(scope.dropped), shadowing = LinkedHashSet(scope.shadowing), horizon = scope.horizon, hidden = LinkedHashSet(scope.hidden))
+        val next = if (projection.star) scope.copy() else Scope(dropped = LinkedHashSet(scope.dropped), shadowing = LinkedHashSet(scope.shadowing), horizon = scope.horizon, hidden = LinkedHashSet(scope.hidden), outer = LinkedHashSet(scope.outer))
         projection.items.forEach { next[it.name] = kindOf(it.expression, scope) }
+        // An item that passes a name from outside the subquery on as it is, WITH m1, keeps it from outside, so it is bound again no more after (drivine4j#819).
+        projection.items.forEach { if ((it.expression as? Expression.Variable)?.name == it.name && it.name in scope.shadowing) next.shadowing += it.name }
         val groups = projection.distinct || projection.items.any { aggregates(it.expression) }
         // Its own WHERE and order are within it, where it groups: they read its items, and what a subquery reads from outside it,
         // within a projection that groups outside it too (drivine4j#681).
         val horizon = if (!groups) scope.horizon else (next.kinds.keys + kept).toSet()
         // What an outer WITH's WHERE reads that it drops stays shadowing in a subquery's order, as in its WHERE, and what a
         // WITH outside dropped stays dropped there, as after it.
-        val reading = Scope(scope.kinds.mapValuesTo(LinkedHashMap()) { Kind.ANY }.apply { putAll(next.kinds) }, LinkedHashSet(next.dropped), LinkedHashSet(next.shadowing), horizon, LinkedHashSet(next.hidden))
+        val reading = Scope(scope.kinds.mapValuesTo(LinkedHashMap()) { Kind.ANY }.apply { putAll(next.kinds) }, LinkedHashSet(next.dropped), LinkedHashSet(next.shadowing), horizon, LinkedHashSet(next.hidden), LinkedHashSet(next.outer))
         where?.let {
             val dropped = scope.kinds.keys.filterTo(LinkedHashSet(next.dropped)) { name -> next[name] == null && name !in kept }
             // Not one a WITH before had dropped already, which Neo4j reads here no more than there.
             val shadowing = if (groups) LinkedHashSet(next.shadowing) else dropped.filterTo(LinkedHashSet(next.shadowing)) { it !in scope.dropped }
-            expression(it, Scope(LinkedHashMap(reading.kinds), dropped, shadowing, horizon, LinkedHashSet(next.hidden)))
+            expression(it, Scope(LinkedHashMap(reading.kinds), dropped, shadowing, horizon, LinkedHashSet(next.hidden), LinkedHashSet(next.outer)))
         }
-        val items = Scope(scope.kinds.filterKeys { it in kept }.mapValuesTo(LinkedHashMap()) { Kind.ANY }.apply { putAll(next.kinds) }, LinkedHashSet(next.dropped), LinkedHashSet(next.shadowing), horizon, LinkedHashSet(next.hidden))
+        val items = Scope(scope.kinds.filterKeys { it in kept }.mapValuesTo(LinkedHashMap()) { Kind.ANY }.apply { putAll(next.kinds) }, LinkedHashSet(next.dropped), LinkedHashSet(next.shadowing), horizon, LinkedHashSet(next.hidden), LinkedHashSet(next.outer))
         // Read first, so a pattern that names a variable the order can't read is refused for that (42N29), before as a value (42I34), as Neo4j does.
         projection.orderBy.forEach {
             expression(it.expression, if (groups && !aggregates(it.expression)) items.copy() else reading)
@@ -309,6 +344,49 @@ internal class VariableKinds(private val aggregates: (Expression) -> Boolean) {
         names.forEach { if (scope[it] == null) scope[it] = Kind.ANY }
     }
 
+    /**
+     * [variable] bound again within a subquery, by a `WITH`'s or an `UNWIND`'s alias, a `CALL`'s item, or an `EXISTS { … }`'s
+     * or a `COUNT { … }`'s `RETURN` alias, where it is one of [outside], the names the subquery has from outside it (see
+     * [Scope.shadowing] and [Scope.outer]), after a `WITH` that passes it on as it is too: Neo4j refuses it (its 42N07,
+     * drivine4j#819), where the compiler gave the subquery's own value for it. A `FOREACH`'s variable, and a pattern's,
+     * which reads the one from outside, are not refused, as Neo4j takes them. One a `CALL { … }`'s leading `WITH` imports is
+     * not from outside: see [redeclared].
+     */
+    private fun rebinding(variable: String, outside: Set<String>) {
+        if (variable !in outside) return
+        val refused = CompilerException("The variable $variable is shadowing a variable with the same name from the outer scope, as in Neo4j: rename it.")
+        if (!making) throw refused
+        shadowed = shadowed ?: refused
+    }
+
+    /**
+     * [variable] bound again by an `UNWIND` while it is in scope, `MATCH (m1) UNWIND ['u'] AS m1`, after a `WITH` that passes
+     * it on, or where a `CALL { … }`'s leading `WITH` imports it, `CALL { WITH m1 UNWIND ['u'] AS m1 … }`, which Neo4j has
+     * declared in the subquery's own scope, as at the top: Neo4j refuses it as declared already (its 42N59, "Variable `m1`
+     * already declared"), where the compiler gave the `UNWIND`'s value for it (drivine4j#819). One from outside a subquery is
+     * refused as shadowing instead (see [rebinding]); a `WITH`'s alias projects it anew, as Neo4j takes it.
+     */
+    private fun redeclared(variable: String) =
+        CompilerException("Variable `$variable` already declared, as in Neo4j: an UNWIND binds no variable in scope again. Rename it.")
+
+    /**
+     * Within a property a `CREATE` or a `MERGE` makes ([making]), the first binding again [rebinding] finds, held until
+     * [madeHere] has looked: Neo4j refuses a subquery there that binds a variable the same clause makes for that (its 42I58),
+     * `CREATE (a), (m {f: COUNT { UNWIND [1] AS a RETURN a }})`, before as one shadowing it (its 42N07).
+     */
+    private var shadowed: CompilerException? = null
+    private var making = false
+
+    /** [properties] a `CREATE` or a `MERGE` makes, read over [scope] as any expression is, but a binding again held in [shadowed]. */
+    private fun madeExpression(properties: Expression, scope: Scope) {
+        making = true
+        try {
+            expression(properties, scope)
+        } finally {
+            making = false
+        }
+    }
+
     /** [variable] where a pattern binds it as [kind]: bound so, or used so where it is bound already as that kind. */
     private fun use(variable: String, kind: Kind, scope: Scope) {
         // One a WITH does not pass on, in its WHERE: read there as a new node, it would match every row (drivine4j#504).
@@ -343,8 +421,9 @@ internal class VariableKinds(private val aggregates: (Expression) -> Boolean) {
         val clause = if (merging) "MERGE" else "CREATE"
         pattern.nodes.forEach { node ->
             node.properties?.let {
-                expression(it, scope)
+                madeExpression(it, scope)
                 madeHere(it, own, clause)
+                shadowed?.let { shadowed = null; throw it }
                 if (pattern.relationships.isEmpty() && !foreach) declared(it, before)
                 valued(it, condition = false)
                 properties(it, scope)
@@ -366,8 +445,9 @@ internal class VariableKinds(private val aggregates: (Expression) -> Boolean) {
         }
         pattern.relationships.forEach { relationship ->
             relationship.properties?.let {
-                expression(it, scope)
+                madeExpression(it, scope)
                 madeHere(it, own, clause)
+                shadowed?.let { shadowed = null; throw it }
                 valued(it, condition = false)
                 properties(it, scope)
             }
