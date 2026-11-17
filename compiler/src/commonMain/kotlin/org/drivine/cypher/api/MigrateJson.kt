@@ -27,11 +27,13 @@ import org.drivine.cypher.store.plan.PlanJson
  *   for each of its actions that ran, in order: all of them, or those up to and with the first that failed.
  *
  * Answered `{"run": [<action>, …], "state": <state>}`, or `{"done": <report>}` ([org.drivine.cypher.store.migrate.MigrationReport]).
- * An action is one of `{"type": "query", "statement", "parameters", "purpose"}` (answered `{"type": "rows", "rows": […]}`,
- * each row the JSON object it gives, read as a map), `{"type": "execute", …}` (run in auto-commit), `{"type":
- * "transaction", "statements": [<execute>, …]}` (all of them in one transaction, or none), `{"type": "prepare"}` (the store's
- * tables made as at a first connection, without the verdict) and `{"type": "lock", "statement"}` (run on a connection of the
- * host's own, in a transaction held open until the migration is done); each but a query is answered `{"type": "ran"}`, and
+ * An action is one of `{"type": "query", "statement", "parameters", "purpose", "compiled"}` (answered `{"type": "rows",
+ * "rows": […]}`, each row the JSON object it gives, read as a map; where `compiled`, the statement is Cypher, compiled for
+ * the store as any statement is), `{"type": "execute", …}` (run in auto-commit), `{"type": "transaction", "statements":
+ * [<execute>, …]}` (all of them in one transaction, or none), `{"type": "prepare"}` (the store's tables made as at a first
+ * connection, without the verdict), `{"type": "lock", "statement"}` (run on a connection of the host's own, in a transaction
+ * held open until the migration is done) and `{"type": "assignStamp"}` (the stamp's `assignIfAbsent` with the host's own id
+ * and moment, where the graph has no stamp); each but a query is answered `{"type": "ran"}`, and
  * any `{"type": "failed", "message": …}`.
  */
 @DrivineInternalApi
@@ -92,10 +94,11 @@ internal object MigrateJson {
     }
 
     private fun action(action: MigrationAction): Map<String, Any?> = when (action) {
-        is MigrationAction.Query -> linkedMapOf("type" to "query", "statement" to action.statement, "parameters" to action.parameters, "purpose" to action.purpose)
+        is MigrationAction.Query -> linkedMapOf("type" to "query", "statement" to action.statement, "parameters" to action.parameters, "purpose" to action.purpose, "compiled" to action.compiled)
         is MigrationAction.Execute -> linkedMapOf("type" to "execute", "statement" to action.statement, "parameters" to action.parameters, "purpose" to action.purpose)
         is MigrationAction.Transaction -> linkedMapOf("type" to "transaction", "statements" to action.statements.map(::action))
         MigrationAction.Prepare -> linkedMapOf("type" to "prepare")
+        MigrationAction.AssignStamp -> linkedMapOf("type" to "assignStamp")
         is MigrationAction.Lock -> linkedMapOf("type" to "lock", "statement" to action.statement)
     }
 }

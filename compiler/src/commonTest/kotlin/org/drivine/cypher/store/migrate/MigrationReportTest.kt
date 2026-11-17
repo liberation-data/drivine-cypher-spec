@@ -87,7 +87,7 @@ class MigrationReportTest {
             listOf("Person") to """{"born": "2024-03-15"}""",
         ), declarations, Store.POSTGRES).withCandidates(declarations)
             .copy(kept = listOf(Kept("nodes", 1, listOf("Person", "Robot"), "born", "date", "\"soon\"", "'soon' is no date.")))
-            .ended(Status.REWRITTEN, "done")
+            .ended(Status.MIGRATED, "done")
         assertEquals(1, report.invalidCount)
         val text = PlanJson.writePlain(report.toMap())
         assertEquals(report, MigrationReport.of(CypherJson.readTree(text) as ObjectNode), text)
