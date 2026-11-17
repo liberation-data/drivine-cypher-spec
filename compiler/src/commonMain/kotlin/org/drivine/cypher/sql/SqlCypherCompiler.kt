@@ -5745,6 +5745,17 @@ abstract class SqlCypherCompiler(
         }
 
         /**
+         * Refuses a map of a temporal value's fields that gives a field of the time beside none of the one above it, as Neo4j
+         * refuses it: a minute needs an hour, a second a minute, and a millisecond, a microsecond or a nanosecond a second.
+         * Neo4j names the first missing, `subsecond cannot be specified without minute`; this names the field and the one it needs.
+         */
+        private fun timeFieldsInOrder(name: String, keys: Set<String>) {
+            listOf("minute" to "hour", "second" to "minute", "millisecond" to "second", "microsecond" to "second", "nanosecond" to "second").forEach { (field, above) ->
+                if (field in keys && above !in keys) throw CompilerException("$name() takes a $field beside ${FIELD_NOUNS[above] ?: "a $above"}.")
+            }
+        }
+
+        /**
          * The SQL of a temporal value of [kind] that [function] makes of the map [written] with a `date`, a `time` or a
          * `datetime`, another temporal value whose fields it takes, with the map's others laid over them: see [Temporals.over].
          * Fails as Neo4j fails: on a field [kind] has none of, a `datetime` beside a `date` or a `time`, a value written that is
@@ -5754,18 +5765,7 @@ abstract class SqlCypherCompiler(
          * time, and a number written that is not whole or past its field's range. A zone by name, or an offset with seconds, is
          * refused as [zone] refuses it, or where an expression gives it fails as [zoneGuard] has it.
          */
-        /**
-     * Refuses a map of a temporal value's fields that gives a field of the time beside none of the one above it, as Neo4j
-     * refuses it: a minute needs an hour, a second a minute, and a millisecond, a microsecond or a nanosecond a second.
-     * Neo4j names the first missing, `subsecond cannot be specified without minute`; this names the field and the one it needs.
-     */
-    private fun timeFieldsInOrder(name: String, keys: Set<String>) {
-        listOf("minute" to "hour", "second" to "minute", "millisecond" to "second", "microsecond" to "second", "nanosecond" to "second").forEach { (field, above) ->
-            if (field in keys && above !in keys) throw CompilerException("$name() takes a $field beside ${FIELD_NOUNS[above] ?: "a $above"}.")
-        }
-    }
-
-    private fun fromTemporal(kind: Temporal, function: Expression.Function, written: Expression.MapLiteral, scope: Map<String, Value>): String {
+        private fun fromTemporal(kind: Temporal, function: Expression.Function, written: Expression.MapLiteral, scope: Map<String, Value>): String {
             val name = function.name
             val entries = written.entries.toMap()
             val keys = entries.keys
