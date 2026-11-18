@@ -46,6 +46,8 @@ class FragmentsTest {
                 val got = CypherJson.readTree(CompileJson.compile(request(case, store)))
                 val pinned = case["sql"]?.get(store) as? ArrayNode ?: throw AssertionError("on $target, $name pins no terms on $store: $got")
                 assertEquals(pinned.map { it.textValue() }, (got["terms"] as? ArrayNode)?.map { it.textValue() }, "on $target, $name on $store: $got")
+                // The labels each row the condition keeps carries, none where the case pins none (drivine-cypher-spec#373).
+                assertEquals(case["impliedLabels"]?.get(store)?.let(::json) ?: "{}", json(got["impliedLabels"]), "on $target, $name on $store implies")
                 checked++
             }
         }
