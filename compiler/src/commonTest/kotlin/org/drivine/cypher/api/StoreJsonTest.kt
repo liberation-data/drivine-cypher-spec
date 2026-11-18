@@ -96,6 +96,15 @@ class StoreJsonTest {
     }
 
     @Test
+    fun oraclesSessionComparesTextByCodePointWhateverItsNlsSettings() {
+        val got = answer("{\"storeStatements\": {\"store\": \"oracle\", \"graph\": \"g\"}}")["session"] as ArrayNode
+        assertEquals(listOf("ALTER SESSION SET NLS_COMP = BINARY NLS_SORT = BINARY"), got.map { it.textValue() }, "on $target")
+        for (store in listOf("postgres", "sqlite", "neo4j")) {
+            assertTrue(answer("{\"storeStatements\": {\"store\": \"$store\", \"graph\": \"g\"}}")["session"] == null, "on $target, $store sets no session")
+        }
+    }
+
+    @Test
     fun eachSqlStoresDdlIsWhatStoreYamlPins() {
         // store.yaml's tables hold each statement with its generated functions marked: expanded, they are the store's own.
         val store = CypherJson.readTree(oracleFile("store.json"))

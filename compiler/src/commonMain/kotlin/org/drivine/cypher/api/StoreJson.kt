@@ -8,6 +8,7 @@ import org.drivine.cypher.store.ddl.MemgraphDdl
 import org.drivine.cypher.store.ddl.Neo4jDdl
 import org.drivine.cypher.store.ddl.OracleDdl
 import org.drivine.cypher.store.ddl.OracleFunctionProbes
+import org.drivine.cypher.store.ddl.OracleSession
 import org.drivine.cypher.store.ddl.PostgresDdl
 import org.drivine.cypher.store.ddl.SqliteDdl
 import org.drivine.cypher.store.ddl.StoreDdl
@@ -36,7 +37,8 @@ import org.drivine.schema.made
  *     in `probes`, the statement that finds whether the session may call the functions each compiler flag names, by the
  *     flag's name (`nullsEqualStored`, `eraStored`, `temporalArithmeticStored`), and in `noFunction`, the error numbers a
  *     probe fails with where it finds none
- *     ([OracleFunctionProbes]);
+ *     ([OracleFunctionProbes]); and on Oracle, `session`, the statements each connection runs once as it opens, so text is
+ *     compared by its code points whatever the session's NLS settings ([OracleSession]);
  *   - `stamp`, [StoreStampStatements.of] the store: `prepare`, `assignIfAbsent`, `readStamps`, `foreignNodes`,
  *     `restampLayout`, `layoutObjects` and `constraint`, the statements that make the stamp's uniqueness constraint after
  *     `prepare`, each null where the store has none;
@@ -104,6 +106,7 @@ internal object StoreJson {
             is OracleDdl -> {
                 answer["ddl"] = ddl.ddl; answer["ensuring"] = ddl.ensuring; answer["functions"] = ddl.functions; answer["versions"] = ddl.versions
                 answer["storedFunctions"] = linkedMapOf("probes" to OracleFunctionProbes.probes(ddl.name), "noFunction" to OracleFunctionProbes.NO_FUNCTION)
+                answer["session"] = OracleSession.STATEMENTS
             }
             is SqliteDdl -> { answer["ddl"] = ddl.ddl; answer["ensuring"] = null }
             else -> {}
