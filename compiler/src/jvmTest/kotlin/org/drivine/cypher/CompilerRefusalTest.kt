@@ -955,7 +955,7 @@ class CompilerRefusalTest {
     @Test
     fun `a value read of a map or a list, a list bare, and a map set as properties, are no map written as a property`() {
         // drivine4j#561: each stored by Neo4j 2026.10.1, as captured; refusals.yaml's "Map or list of lists written as a property"
-        // pins what it refuses. A map given as a parameter is left to the store (#820).
+        // pins what it refuses. A map given as a parameter compiles, and fails as its row is written (#820, UnstorableGivenWriteTest).
         listOf(PostgresCypherCompiler("g"), OracleCypherCompiler("g"), SqliteCypherCompiler("g")).forEach { compiler ->
             listOf(
                 "MATCH (n) WITH n, {a: 1} AS m SET n.p = keys(m)",
