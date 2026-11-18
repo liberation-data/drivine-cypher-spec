@@ -113,6 +113,7 @@ class StoreValuesTest {
         assertEquals("{\"rows\":[{\"f\":[1.0,2.5]}]}", StoreValues.text(mapOf("rows" to listOf(mapOf("f" to listOf(1L, 2.5)))), Store.SQLITE))
         // A float given as a float stays one, a whole one too: [1.0, 2] is [1.0, 2.0].
         assertEquals("[1.0,2.0]", StoreValues.text(listOf(1.0, 2L), Store.POSTGRES))
+        assertEquals("[2.5,1.0]", StoreValues.text(listOf(2.5f, 1L), Store.SQLITE))
         assertEquals("[1,2.5]", StoreValues.text(listOf(1L, 2.5), Store.POSTGRES, widen = false))
         // Where a statement reads it, it is bound as it is: RETURN [1, 2.5] gives [1, 2.5], as in Neo4j.
         assertEquals("[1,2.5]", bound(Store.POSTGRES, listOf(1L, 2.5)))

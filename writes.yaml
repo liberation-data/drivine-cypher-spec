@@ -1315,6 +1315,9 @@ cases:
         rows: [[2, [3.0, 0.5], [1, 2]], [3, [0.5, 4.0], null], [4, [2.0, 0.5], null], [5, [1.0, 2.5], null]]
       - cypher: "MATCH (n:CyWrite {id: 2}) CREATE (n)-[r:R {w: [1, 0.5]}]->(:CyWrite {id: 6}) RETURN r.w"
         rows: [[1.0, 0.5]]
+      - cypher: "CREATE (n:CyWrite {id: 7, f: [-1, 2.5], g: [1, -0.5], h: [-1, 2], l: $l}) RETURN [n.f, n.g, n.h, n.l]"
+        parameters: {l: [-3, 0.5]}
+        rows: [[[-1.0, 2.5], [1.0, -0.5], [-1, 2], [-3.0, 0.5]]]
       - cypher: "RETURN [1, 2.5], toString([1, 2.5][0])"
         rows: [[[1, 2.5], "1"]]
 

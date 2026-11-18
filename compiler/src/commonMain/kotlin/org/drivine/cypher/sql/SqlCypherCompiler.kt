@@ -3512,7 +3512,9 @@ abstract class SqlCypherCompiler(
                 entries -> givenRows(written, scope)?.flatMap(::keys)?.toSet().orEmpty()
                 written is Expression.Parameter -> if (parameterTree(written.name)?.let(::mixedNumbers) == true) setOf("") else emptySet()
                 written is Expression.ListLiteral -> {
-                    val items = written.items.map { item -> givenItems(item, scope) ?: return null }.flatten().filterNotNull()
+                    // An item negated, as `-1` is read, is of the kind of what it negates: `[-1, 2.5]` is widened too.
+                    fun unsigned(item: Expression) = (item as? Expression.Unary)?.takeIf { it.operator == Expression.Unary.Operator.NEGATE }?.operand ?: item
+                    val items = written.items.map { item -> givenItems(unsigned(item), scope) ?: return null }.flatten().filterNotNull()
                     if (items.any { it.isDouble || it.isFloat } && items.any { it.isIntegralNumber }) setOf("") else emptySet()
                 }
                 else -> if (givenRows(written, scope)?.any { it != null && mixedNumbers(it) } == true) setOf("") else emptySet()

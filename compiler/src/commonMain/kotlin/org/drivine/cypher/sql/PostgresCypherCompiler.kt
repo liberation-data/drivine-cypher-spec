@@ -247,11 +247,6 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
         else shared(json) { (x) -> "(jsonb_typeof($x) = 'array' AND $x @> '[null]')" }
 
     /**
-     * The pairs of [x]'s and [y]'s items, and of their items', at any depth, walked together: a list's by place, a map's by key, where
-     * the two are lists or maps both. A place or a key that one has and the other has not pairs a value with SQL's null. Each
-     * one's items and keys are arrays unnested, as [listKey]'s are, so the planner's estimate brings in no JIT.
-     */
-    /**
      * A list's numbers each a float, where they are all numbers and one is a float: `jsonb` keeps a number's text, so a float
      * is one written with a fraction or an exponent (as [StoreValues.postgres] writes each), and a whole number is made one by
      * its text with `.0`, as a float that is a whole number is held. A map of properties has each of its values so.
@@ -263,6 +258,11 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
             "THEN (SELECT jsonb_agg(CASE WHEN CAST(wi.v AS text) ~ '[.eE]' THEN wi.v ELSE to_jsonb(CAST(CAST(wi.v AS text) || '.0' AS numeric)) END ORDER BY wi.n) " +
             "FROM jsonb_array_elements($json) WITH ORDINALITY wi (v, n)) ELSE $json END"
 
+    /**
+     * The pairs of [x]'s and [y]'s items, and of their items', at any depth, walked together: a list's by place, a map's by key, where
+     * the two are lists or maps both. A place or a key that one has and the other has not pairs a value with SQL's null. Each
+     * one's items and keys are arrays unnested, as [listKey]'s are, so the planner's estimate brings in no JIT.
+     */
     override fun nullsEqual(x: String, y: String, equals: (String, String) -> String): String {
         fun entries(json: String, alias: String) =
             "SELECT CAST(${alias}e.n AS text) AS k, ${alias}e.v FROM unnest(ARRAY(SELECT jsonb_array_elements(CASE WHEN jsonb_typeof($json) = 'array' THEN $json END))) WITH ORDINALITY ${alias}e (v, n) " +

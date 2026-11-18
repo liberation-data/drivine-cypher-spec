@@ -30,6 +30,10 @@ class WidenedListWriteTest {
         val widened = listOf(
             "CREATE (:A {f: [1, 2.5]})" to emptyMap(),
             "CREATE (:A {f: [2.5, 1]})" to emptyMap(),
+            // A number negated is of the kind of the one it negates.
+            "CREATE (:A {f: [-1, 2.5]})" to emptyMap(),
+            "CREATE (:A {f: [1, -2.5]})" to emptyMap(),
+            "CREATE (:A {f: \$l})" to mapOf("l" to mixed),
             "MATCH (n:A) SET n.f = \$l" to mapOf("l" to mixed),
             "MATCH (n:A) SET n.f = \$l RETURN \$l" to mapOf("l" to mixed),
             "MATCH (n:A) SET n.f = [1, \$x]" to mapOf("x" to 2.5),
@@ -54,6 +58,8 @@ class WidenedListWriteTest {
         val plain = listOf(
             "CREATE (:A {f: [1, 2]})" to emptyMap(),
             "CREATE (:A {f: [1.0, 2.5]})" to emptyMap(),
+            "CREATE (:A {f: [-1, 2]})" to emptyMap(),
+            "CREATE (:A)" to emptyMap(),
             "CREATE (:A {f: [1, 'x']})" to emptyMap(),
             "MATCH (n:A) SET n.f = \$l" to mapOf("l" to listOf(1, 2)),
             "MATCH (n:A) SET n.f = \$l" to mapOf("l" to listOf(0.5, 2.5)),
