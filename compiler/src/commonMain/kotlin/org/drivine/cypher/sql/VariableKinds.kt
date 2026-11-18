@@ -32,6 +32,13 @@ internal class VariableKinds(private val aggregates: (Expression) -> Boolean) {
         NODE("a node"), RELATIONSHIP("a relationship"), RELATIONSHIPS("a list of relationships"), PATH("a path"),
         INTEGER("an integer"), FLOAT("a float"), TEXT("a text"), BOOLEAN("a truth value"), LIST("a list"), MAP("a map"),
 
+        /**
+         * A map an `UNWIND` gives of a list written of maps, `UNWIND [{a: 1}] AS m`. Neo4j types it a map when it compiles the
+         * statement for `size()` alone (#364): a write of it as a property, or a pattern that reads it as a node, fails only
+         * as each row runs, and not over no rows, so it is any value to all else ([fits], [stored]).
+         */
+        UNWOUND_MAP("a map"),
+
         /** Any kind at all: a value whose kind the statement leaves open. */
         ANY("a value"),
     }
@@ -135,7 +142,9 @@ internal class VariableKinds(private val aggregates: (Expression) -> Boolean) {
                     valued(clause.list, condition = false)
                     rebinding(clause.variable, current.shadowing)
                     if (clause.variable !in current.shadowing && current[clause.variable] != null && clause.variable !in current.dropped) throw redeclared(clause.variable)
-                    current[clause.variable] = Kind.ANY
+                    current[clause.variable] = (clause.list as? Expression.ListLiteral)?.items
+                        ?.takeIf { items -> items.isNotEmpty() && items.all { it is Expression.MapLiteral || it is Expression.MapProjection } }
+                        ?.let { Kind.UNWOUND_MAP } ?: Kind.ANY
                 }
                 is Clause.With -> {
                     // An item that passes a variable on as it is, WITH m1, binds nothing again.
@@ -402,7 +411,8 @@ internal class VariableKinds(private val aggregates: (Expression) -> Boolean) {
     }
 
     /** Whether a variable bound as [bound] may be used where a pattern takes [kind]. */
-    private fun fits(bound: Kind, kind: Kind) = bound == kind || bound == Kind.ANY || (kind == Kind.RELATIONSHIPS && bound == Kind.LIST)
+    private fun fits(bound: Kind, kind: Kind) =
+        bound == kind || bound == Kind.ANY || bound == Kind.UNWOUND_MAP || (kind == Kind.RELATIONSHIPS && bound == Kind.LIST)
 
     private fun conflict(variable: String, bound: Kind, used: Kind) =
         CompilerException("$variable is ${bound.noun}, and is used as ${used.noun}: a variable is of one kind, as in Neo4j.")
@@ -1003,17 +1013,21 @@ internal class VariableKinds(private val aggregates: (Expression) -> Boolean) {
     }
 
     /**
-     * A function of a variable whose kind it does not take, as Neo4j refuses it: `size()` of a path, and `size()` of a
-     * pattern, `size((a)-->())` (Neo4j's 42I52). Read after its arguments, so a pattern there that names a new variable is
-     * refused for that first, as Neo4j does.
+     * A function of a value whose kind it does not take, as Neo4j refuses it: `size()` of a path, `size()` of a pattern,
+     * `size((a)-->())` (Neo4j's 42I52), and `size()` of a map written, `{a: 1}` or `n {.a}`, of a variable a `WITH` binds to
+     * one, or of one an `UNWIND` gives of a list written of maps, and `size()` of a node or a relationship (Neo4j's 22G03,
+     * drivine-cypher-spec#364; the SQL stores gave null). Read after its arguments, so a pattern there that
+     * names a new variable is refused for that first, as Neo4j does.
      */
     private fun function(function: Expression.Function, scope: Scope) {
-        if (function.name.equals("size", ignoreCase = true) && function.arguments.singleOrNull() is Expression.PatternPredicate) {
+        if (!function.name.equals("size", ignoreCase = true)) return
+        val argument = function.arguments.singleOrNull() ?: return
+        if (argument is Expression.PatternPredicate) {
             throw CompilerException("size() takes a list or a text, not a pattern, as in Neo4j: COUNT { … } counts a pattern's matches.")
         }
-        val argument = (function.arguments.singleOrNull() as? Expression.Variable)?.let { scope[it.name] } ?: return
-        if (function.name.equals("size", ignoreCase = true) && argument == Kind.PATH) {
-            throw CompilerException("size() takes a list or a text, not a path, as in Neo4j: length() takes a path.")
-        }
+        val kind = if (argument is Expression.MapProjection) Kind.MAP else kindOf(argument, scope)
+        if (kind == Kind.PATH) throw CompilerException("size() takes a list or a text, not a path, as in Neo4j: length() takes a path.")
+        if (kind == Kind.MAP || kind == Kind.UNWOUND_MAP) throw CompilerException("size() takes a list or a text, not a map, as in Neo4j.")
+        if (kind == Kind.NODE || kind == Kind.RELATIONSHIP) throw CompilerException("size() takes a list or a text, not ${kind.noun}, as in Neo4j.")
     }
 }
