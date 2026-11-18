@@ -4279,8 +4279,11 @@ abstract class SqlCypherCompiler(
          * as it was, in the order these are seen: a term holding an aggregate or randomUUID(); one holding a subquery, whose
          * names neither [scoped] nor [variablesIn] sees; one that reads an item's name where it is not replaced, where a name
          * the comprehension binds would hide it or a variable of the item's expression, in a pattern or as a map projection's
-         * variable; and one that, so read, is an item or binds nothing. An item made anew, randomUUID(), that such a term
-         * reads is made first, in a `WITH *` before the term's, and read from there by both.
+         * variable; and one that, so read, is an item or binds nothing. Of a term left so for its subquery or for an item's name,
+         * each largest part that [partFirst] accepts, found through [strictOperands] alone, and that [shared] would bind a value
+         * in is worked out first in the same `WITH *`, once however many terms hold it or are it, and the term reads its column
+         * (drivine4j#809): left whole, `ORDER BY COUNT { … } * datetime(b.at).minute` compiled to hundreds of kilobytes. An item made
+         * anew, randomUUID(), that such a term reads is made first, in a `WITH *` before the term's, and read from there by both.
          */
         private fun sortsFirst(select: Select, projection: Projection, items: List<Projection.Item>): Pair<Select, Projection>? {
             if (!sharing || !select.walks || projection.distinct || items.any { contains(it.expression, ::isAggregate) }) return null
@@ -4288,17 +4291,34 @@ abstract class SqlCypherCompiler(
             val terms = linkedMapOf<Expression, Expression>()
             // Each item made anew that a term reads, by its name, and the column it is made first in.
             val made = linkedMapOf<String, String>()
+            // Of a term left as it was, the parts worked out first, and the terms read over them.
+            val parts = linkedSetOf<Expression>()
+            val overParts = linkedSetOf<Expression>()
+            // An item that is the variable of its own name, `b AS b`, is read alike where the parts are worked out.
+            val renamed = named.filter { (name, item) -> item != Expression.Variable(name) }.keys
+            fun partsFirst(term: Expression) {
+                val found = mutableListOf<Expression>()
+                fun visit(e: Expression) {
+                    if (partFirst(e, renamed) && items.none { it.expression == e } && binds(e, select)) found += e
+                    else strictOperands(e)?.forEach(::visit)
+                }
+                visit(term)
+                if (found.isEmpty()) return
+                parts += found
+                overParts += term
+            }
             projection.orderBy.map { it.expression }.distinct().forEach { term ->
                 // An aggregate is sorted by as `project` sorts it; so is a randomUUID() of its own.
                 if (contains(term) { isAggregate(it) || isAnew(it) }) return@forEach
-                // A subquery's, `COUNT { … }`'s, names are seen by neither scoped nor variablesIn: one there is read as it was.
-                if (holdsSubquery(term)) return@forEach
+                // A subquery's, `COUNT { … }`'s, names are seen by neither scoped nor variablesIn: one there is read as it was,
+                // but for its parts that read no item.
+                if (holdsSubquery(term)) return@forEach partsFirst(term)
                 // Each item's name read first as a name no variable has, so one left where it is not replaced is seen.
                 val marked = scoped(term) { v, local ->
                     v.takeIf { it.name in named && it.name !in local && local.none { name -> name in variablesIn(named.getValue(it.name)) } }
                         ?.let { Expression.Variable("#item ${it.name}") }
                 }
-                if (variablesIn(marked).any { it in named }) return@forEach
+                if (variablesIn(marked).any { it in named }) return@forEach partsFirst(term)
                 val read = scoped(marked) { v, _ -> if (v.name.startsWith("#item ")) named[v.name.removePrefix("#item ")] else null }
                 // A term that is an item, as written or by its name, is sorted by as `project` sorts it: by the item, bound as it is.
                 if (items.none { it.expression == read } && binds(read, select)) {
@@ -4310,7 +4330,7 @@ abstract class SqlCypherCompiler(
                     }
                 }
             }
-            if (terms.isEmpty()) return null
+            if (terms.isEmpty() && parts.isEmpty()) return null
             // An item made anew for each row, randomUUID(), that a term reads is made first, in a WITH of its own, as a WITH's
             // items read none of each other; the projection, compiled again, reads it and works the term out over its column.
             // Worked out in the term, it would be made again, and the rows sorted by a value none of them is given.
@@ -4321,14 +4341,46 @@ abstract class SqlCypherCompiler(
             }
             // Named as no variable is, unless quoted so.
             val names = terms.keys.associateWith { "#sort${++counter}" }
-            val with = Projection(false, true, terms.map { (term, read) -> Projection.Item(read, names.getValue(term)) }, emptyList(), null, null)
+            // A part that another term is, as read, is read from that term's column: worked out again, it is bound twice.
+            val whole = terms.entries.associate { (term, read) -> read to names.getValue(term) }
+            val columns = parts.associateWith { whole[it] ?: "#sort${++counter}" }
+            val worked = terms.map { (term, read) -> Projection.Item(read, names.getValue(term)) } +
+                parts.filter { it !in whole }.map { Projection.Item(it, columns.getValue(it)) }
+            fun overColumns(term: Expression) = replaced(term) { e -> columns[e]?.let(Expression::Variable) ?: e.takeIf { strictOperands(it) == null } }
+            val with = Projection(false, true, worked, emptyList(), null, null)
             val kept = projection.copy(
                 star = false,
                 items = items,
-                orderBy = projection.orderBy.map { sort -> names[sort.expression]?.let { sort.copy(expression = Expression.Variable(it)) } ?: sort },
+                orderBy = projection.orderBy.map { sort ->
+                    names[sort.expression]?.let { sort.copy(expression = Expression.Variable(it)) } ?: sort.takeIf { it.expression in overParts }?.let { it.copy(expression = overColumns(it.expression)) } ?: sort
+                },
             )
             // Kept apart, as sharedFirst keeps its own, so no store merges the value it binds back into the query beside the walk.
             return with(select, Clause.With(with, null), select.scope.filterKeys { it !in select.bound }, apart = true) to kept
+        }
+
+        /**
+         * Whether [part] of an order term [sortsFirst] leaves as it was may be worked out first: it reads no item's name in [items],
+         * nor anything whose names [variablesIn] doesn't see (a subquery anywhere, in a comprehension's own expressions too; a
+         * pattern; a map projection), and neither aggregates nor makes a value anew.
+         */
+        private fun partFirst(part: Expression, items: Set<String>): Boolean =
+            !holdsSubquery(part) && !contains(part) {
+                isAggregate(it) || isAnew(it) || it is Expression.PatternComprehension || it is Expression.PatternPredicate ||
+                    it is Expression.Exists || it is Expression.MapProjection
+            } && variablesIn(part).none { it in items }
+
+        /**
+         * The operands of [expression] where it always reads each of them, an operation of arithmetic, a comparison, a negation or a key read, so a
+         * part [sortsFirst] works out of one first is worked out where the term would work it out anyway; null for anything
+         * else, which a part is not looked for in: a `CASE`, `coalesce()`, `AND` or a comprehension may read an operand only
+         * for some rows, and one worked out first for every row could fail where the term doesn't.
+         */
+        private fun strictOperands(expression: Expression): List<Expression>? = when (expression) {
+            is Expression.Binary -> if (expression.operator in ARITHMETIC || expression.operator in COMPARISONS) listOf(expression.left, expression.right) else null
+            is Expression.Unary -> if (expression.operator == Expression.Unary.Operator.NEGATE) listOf(expression.operand) else null
+            is Expression.Property -> listOf(expression.subject)
+            else -> null
         }
 
         /**

@@ -603,6 +603,72 @@ class CompiledSizeTest {
             assertTrue(size < 60_000, "${compiler::class.simpleName}: $distinct: $size characters")
         }
     }
+
+    @Test
+    fun `of a term sorted by beside a variable-length walk that holds a subquery, or reads an item in a pattern, the parts reading no item are worked out first`() {
+        // drivine4j#809: such a term is left to `project`, which binds nothing beside a walk, so the temporal operand of its
+        // arithmetic was written out again at each level: up to 533 KB on Oracle, which took 24 seconds to plan and ran out of
+        // memory (ORA-04036). The operand is worked out first, as a WITH would work it out, and the term reads its column.
+        val walk = "MATCH (a:E)-[:NEXT*1..2]->(b:E)"
+        val minute = "datetime(b.at).minute"
+        val items = "RETURN a.id AS a, b.id AS bb ORDER BY"
+        val terms = listOf(
+            "COUNT { MATCH (x:E) WHERE x.id <= a }",
+            "size([(b)<-[:NEXT]-(x:E {id: a}) | x.id])",
+            "b{.m, a}.a",
+        )
+        compilers.forEach { compiler ->
+            terms.forEach { term ->
+                val sorting = "$walk $items $term * $minute DESC, a, bb"
+                val first = "$walk WITH a, b, $minute AS t $items $term * t DESC, a, bb"
+                val (size, reference) = listOf(sorting, first).map { compiler.compile(it, emptyMap()).sql.length }
+                assertTrue(size < reference * 1.2, "${compiler::class.simpleName}: $sorting: $size characters, $reference with a WITH first")
+            }
+        }
+    }
+
+    @Test
+    fun `beside a variable-length walk the part two terms sorted by share is worked out first once, and so is one reading an item that is its own variable`() {
+        val walk = "MATCH (a:E)-[:NEXT*1..2]->(b:E)"
+        val minute = "datetime(b.at).minute"
+        val below = "COUNT { MATCH (x:E) WHERE x.id <= a }"
+        val above = "COUNT { MATCH (x:E) WHERE x.id >= a }"
+        compilers.forEach { compiler ->
+            fun size(statement: String) = compiler.compile(statement, emptyMap()).sql.length
+            // Worked out once, as one item of a WITH: worked out once for each term, it would be about two items' size.
+            val shared = size("$walk RETURN a.id AS a ORDER BY $below * $minute DESC, $above + $minute")
+            val once = size("$walk WITH a, b, $minute AS t RETURN a.id AS a ORDER BY $below * t DESC, $above + t")
+            val twice = size("$walk WITH a, b, $minute AS t, $minute AS u RETURN a.id AS a ORDER BY $below * t DESC, $above + u")
+            assertTrue(shared < (once + twice) / 2, "${compiler::class.simpleName}: $shared characters, $once worked out once, $twice twice")
+            // An item `b AS b` read in the part is the variable it is, in a WITH's ORDER BY as in a RETURN's, and beside an
+            // item made anew, randomUUID(), that another term reads. A part is found under a negation and a comparison too. A part that another
+            // term is, worked out whole, reads that term's column. A larger part that reads an item's name is not worked out
+            // first, where the name is not yet bound, but its own part that reads none is.
+            listOf(
+                "$walk RETURN a.id AS c ORDER BY COUNT { MATCH (x:E) WHERE x.id <= c } * (c + $minute)" to
+                    "$walk WITH a, b, $minute AS t RETURN a.id AS c ORDER BY COUNT { MATCH (x:E) WHERE x.id <= c } * (c + t)",
+                "$walk RETURN a.id AS a ORDER BY $minute, $below * $minute" to "$walk WITH a, b, $minute AS t RETURN a.id AS a ORDER BY t, $below * t",
+                "$walk RETURN a.id AS a ORDER BY -($below * $minute)" to "$walk WITH a, b, $minute AS t RETURN a.id AS a ORDER BY -($below * t)",
+                "$walk RETURN a.id AS a ORDER BY $below > $minute" to "$walk WITH a, b, $minute AS t RETURN a.id AS a ORDER BY $below > t",
+                "$walk WITH a.id AS a, b ORDER BY $below * $minute SKIP 1 RETURN a" to "$walk WITH a.id AS a, b, $minute AS t WITH a, b ORDER BY $below * t SKIP 1 RETURN a",
+                "$walk RETURN a, b ORDER BY COUNT { MATCH (x:E) WHERE x.id <= a.id } * $minute" to
+                    "$walk WITH a, b, $minute AS t RETURN a, b ORDER BY COUNT { MATCH (x:E) WHERE x.id <= a.id } * t",
+                "$walk RETURN randomUUID() AS u ORDER BY u + coalesce(toString($minute), ''), COUNT { MATCH (x:E) WHERE x.id <= u } * $minute" to
+                    "$walk WITH b, randomUUID() AS u WITH b, u, u + coalesce(toString($minute), '') AS t, $minute AS s RETURN u ORDER BY t, COUNT { MATCH (x:E) WHERE x.id <= u } * s",
+            ).forEach { (sorting, first) ->
+                val (size, reference) = listOf(sorting, first).map(::size)
+                assertTrue(size < reference * 1.2, "${compiler::class.simpleName}: $sorting: $size characters, $reference with a WITH first")
+            }
+        }
+    }
+
+    @Test
+    fun `a part of a term sorted by beside a variable-length walk that holds a subquery in a comprehension is not worked out first`() {
+        // The subquery reads the item `c`, which variablesIn doesn't see there: worked out first, where no item is named yet,
+        // the part failed to compile, `c is not defined`.
+        val statement = "MATCH (a:E)-[:NEXT*1..2]->(b:E) RETURN b.id AS c ORDER BY size([y IN [1] WHERE COUNT { MATCH (z:E) WHERE z.id = c } > 0]) * datetime(b.at).minute"
+        compilers.forEach { it.compile(statement, emptyMap()) }
+    }
 }
 
 
