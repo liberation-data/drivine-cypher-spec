@@ -1050,9 +1050,10 @@ class OracleCypherCompiler(
      * list, and of one a `WITH` passed on. Its text read straight from the list by its path, `JSON_VALUE(list, '$[0]'
      * RETURNING CLOB)`, ran clean too, but a value the item is read as whole, returned or passed on, needs it as JSON. An
      * item is read as text only where it is a text: the list is written out whole for it, so a short text of a long list
-     * costs that list's length. To remove it, read the item with `JSON_QUERY(… RETURNING JSON)` again, once an Oracle release
-     * no longer crashes on the repro in `docs/oracle-long-json-string-crash.md`, and `CypherQueryOracleTest`'s "a text past
-     * 32 KB that is an item of a list" test still passes without it.
+     * costs that list's length. An item of a list of moments, never a text, is read as JSON with no test (see [element]). To
+     * remove it, read the item with `JSON_QUERY(… RETURNING JSON)` again, once an Oracle release no longer crashes on the repro
+     * in `docs/oracle-long-json-string-crash.md`, and `CypherQueryOracleTest`'s "a text past 32 KB that is an item of a list"
+     * test still passes without it.
      */
     private fun listItem(json: String, path: String, passing: String = "") = throughText(json, path, "${path.dropLast(1)}.type()'", passing)
 
@@ -1076,13 +1077,21 @@ class OracleCypherCompiler(
     }
 
     /**
-     * Counted from the end where negative: a JSON path counts from the start. Read as [listItem] reads an item. The
-     * statement is then not rewritten by Oracle's JSON table transformation (see [readsByPlace]).
+     * Counted from the end where negative: a JSON path counts from the start. Read as [listItem] reads an item, but for an
+     * item of a list of moments. The statement is then not rewritten by Oracle's JSON table transformation (see [readsByPlace]).
      */
-    override fun element(json: String, index: String) = shared(json, index) { (list, i) ->
+    override fun element(json: String, index: String) = element(json, index, null)
+
+    /**
+     * An item of a list of moments ([items]) is a tag, a JSON object, never a text, so it is read as JSON with no test of
+     * its kind: [listItem]'s text branch, which writes the whole list out as text, made Oracle's hard parse of the min and
+     * max of a list of moments worked out in the query, each read by index, 6.2 seconds where 0.53 without (#244).
+     */
+    override fun element(json: String, index: String, items: Temporal?) = shared(json, index) { (list, i) ->
         readsByPlace = true
         val at = "JSON_VALUE($i, '$' RETURNING NUMBER)"
-        listItem(list, "'\$[\$i]'", " PASSING CASE WHEN $at < 0 THEN JSON_VALUE($list, '\$.size()' RETURNING NUMBER) + $at ELSE $at END AS \"i\"")
+        val passing = " PASSING CASE WHEN $at < 0 THEN JSON_VALUE($list, '\$.size()' RETURNING NUMBER) + $at ELSE $at END AS \"i\""
+        if (items != null) "JSON_QUERY($list, '\$[\$i]'$passing RETURNING JSON)" else listItem(list, "'\$[\$i]'", passing)
     }
 
     /**
