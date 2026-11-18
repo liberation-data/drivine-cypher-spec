@@ -41,6 +41,15 @@ class TemporalOfItsKindJvmTest {
             "A value given as a DATE_TIME isn't one: 1971-01-01T00:00:00-00:44:30 (the store holds an offset to the minute).",
     )
 
+    @Test
+    fun `a JVM temporal value past the years the store holds is refused by name, with no word of an offset`() {
+        val message = "A value given as a DATE_TIME isn't one: +1000000000-12-31T23:59:59.999999999Z."
+        for (store in Store.entries) {
+            assertEquals(Refusal(message), CypherCompiler.compile(store, GraphOptions("g"), "RETURN \$t AS r", mapOf("t" to Instant.MAX)), store.id)
+            assertEquals(message, StoreValues.refusal(mapOf("at" to Instant.MAX), store), store.id)
+        }
+    }
+
     private val compilers = listOf(PostgresCypherCompiler("g"), OracleCypherCompiler("g"), SqliteCypherCompiler("g"))
 
     @Test

@@ -28,6 +28,8 @@ class TemporalOfItsKindTest {
         Triple("DATE_TIME", "1971-01-01T00:00:00-00:44:30", "A value given as a DATE_TIME isn't one: 1971-01-01T00:00:00-00:44:30 (the store holds an offset to the minute)."),
         Triple("DATE_TIME", "1971-01-01T00:00:00+004430", "A value given as a DATE_TIME isn't one: 1971-01-01T00:00:00+004430 (the store holds an offset to the minute)."),
         Triple("TIME", "12:00:00-00:44:30", "A value given as a TIME isn't one: 12:00:00-00:44:30 (the store holds an offset to the minute)."),
+        // A local kind holds no offset, so its message says nothing of one.
+        Triple("LOCAL_DATE_TIME", "1971-01-01T00:00:00-00:44:30", "A value given as a LOCAL_DATE_TIME isn't one: 1971-01-01T00:00:00-00:44:30."),
         Triple("DATE", "2024-13-01", "A value given as a DATE isn't one: 2024-13-01."),
         Triple("DURATION", "x", "A value given as a DURATION isn't one: x."),
     )
