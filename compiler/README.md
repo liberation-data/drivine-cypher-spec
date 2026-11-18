@@ -734,7 +734,7 @@ int drivine_host_version(void);               /* the host functions' version the
 A NULL request is answered as an empty one, with `{"error": …}`. `drivine_compile` gives NULL only where it can't allocate
 the answer. The answer is the host's to free, with `drivine_free` and nothing else, as the library allocates it.
 
-Each call stands alone, so a host may call it from several threads at once.
+Each call stands alone, so a host may call it from several threads at once. The parse caches every call shares are read one statement at a time, and the rest of a compile runs alongside the others. Before [#385](https://github.com/liberation-data/drivine-cypher-spec/issues/385), two calls at once could corrupt those caches.
 
 ### The SQLite extension
 

@@ -40,7 +40,9 @@ object CypherReader {
      * listener to report it; then, only where SLL bails, again from the first token with LL, whose error is the one
      * a statement that is not Cypher is refused with. The lexer is the same in both stages, and refuses as it did.
      */
-    fun read(cypher: String): Query {
+    fun read(cypher: String): Query = ParserCaches.parsing.locked { readLocked(cypher) }
+
+    private fun readLocked(cypher: String): Query {
         val lexer = lexer(cypher)
         val tokens = CommonTokenStream(lexer)
         val sll = CypherParser(tokens)
@@ -66,13 +68,13 @@ object CypherReader {
     }
 
     /** The statement [cypher], parsed with LL prediction alone: what [read] gives where SLL bails. */
-    internal fun readFullContext(cypher: String): Query {
+    internal fun readFullContext(cypher: String): Query = ParserCaches.parsing.locked {
         val lexer = lexer(cypher)
         val tokens = CommonTokenStream(lexer)
         val parser = CypherParser(tokens)
         val caches = ParserCaches.of(lexer.atn, parser.atn)
         ParserCaches.reading(lexer, caches)
-        return query(fullContext(tokens, caches, parser).oC_Statement().oC_Query())
+        query(fullContext(tokens, caches, parser).oC_Statement().oC_Query())
     }
 
     private fun fullContext(tokens: CommonTokenStream, caches: ParserCaches.Set, parser: CypherParser = CypherParser(tokens)): OC_CypherContext =
