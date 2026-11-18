@@ -489,6 +489,12 @@ class FragmentsTest {
         assertEquals(emptyMap(), oracle().condition("NOT n.name = ${'$'}q", people, given).impliedLabels)
         assertEquals(emptyMap(), oracle().value("n.name = ${'$'}q", people, given).impliedLabels)
         assertEquals(emptyMap(), oracle().order("n.name", false, people, given).impliedLabels)
+        // A value's or an order's subquery's WHERE is the first condition compiled, and still no condition of the fragment's.
+        val exists = "NOT EXISTS { (n)-[:KNOWS]->() WHERE n.name = ${'$'}q }"
+        for (fragment in listOf(oracle().value(exists, people, given), oracle().order(exists, false, people, given))) {
+            assertTrue(fragment.terms.none { it.contains("CASE WHEN JSON_EXISTS(people_.labels") }, fragment.terms.toString())
+            assertEquals(emptyMap(), fragment.impliedLabels, exists)
+        }
         // A subquery beside the equality, before or after it, leaves the equality the fragment's own condition's.
         for (beside in listOf(
             "NOT EXISTS { (n)-[:KNOWS]->() WHERE n.name = ${'$'}q } AND n.name = ${'$'}q",

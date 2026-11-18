@@ -315,7 +315,7 @@ abstract class SqlCypherCompiler(
      */
     @DrivineInternalApi
     fun condition(cypher: String, variables: Map<String, FragmentVariable>, parameters: Map<String, Any?> = emptyMap()): SqlFragment =
-        fragment(cypher, variables, parameters) { writer, expression, scope -> listOf(writer.condition(expression, scope)) }
+        fragment(cypher, variables, parameters) { writer, expression, scope -> writer.fragmentCondition = true; listOf(writer.condition(expression, scope)) }
 
     /** The value [cypher], one Cypher expression, as the store's JSON: see [condition] and [SqlFragment]. */
     @DrivineInternalApi
@@ -1843,6 +1843,12 @@ abstract class SqlCypherCompiler(
         /** How many conditions [conditioned] is compiling, one within another: 1 in a fragment's own. */
         private var conditions = 0
 
+        /**
+         * Whether the fragment is a condition: a value's or an order's subquery's `WHERE` is the first [conditions] counts, and
+         * is no condition every row the library's query keeps passes, so [indexedOf] answers none of it.
+         */
+        var fragmentCondition = false
+
         /** [expression] in [scope] as the store's JSON, as a fragment's value: see [SqlFragment]. */
         fun valueJson(expression: Expression, scope: Map<String, Value>): String = comparable(json(expression(expression, scope)))
 
@@ -1854,12 +1860,12 @@ abstract class SqlCypherCompiler(
          * as a pattern's properties name it to an index: null in a statement, which names its own in its patterns. Asked only of
          * an `=` the row must pass to be kept, as a pattern's properties are: the index's test is null, not false, for a value
          * it doesn't hold (a list, a long text), which under a `NOT`, an `OR` or in a value would keep or drop the wrong rows. And
-         * only of the fragment's own condition, not one within it ([conditions]): a subquery's or a quantifier's `WHERE` may stand
+         * only of the fragment's own condition ([fragmentCondition]), not one within it ([conditions]): a subquery's or a quantifier's `WHERE` may stand
          * under a `NOT` or beside an `OR`, where its test of the index's label isn't one every row the fragment keeps passes,
          * and a library that reads it as one tests the label no more (drivine-cypher-spec#373).
          */
         private fun indexedOf(expression: Expression, value: Expression, scope: Map<String, Value>): IndexedProperty? {
-            if (labelsOf.isEmpty() || conditions != 1) return null
+            if (labelsOf.isEmpty() || !fragmentCondition || conditions != 1) return null
             val property = expression as? Expression.Property ?: return null
             val name = (property.subject as? Expression.Variable)?.name ?: return null
             val node = scope[name] as? Value.Node ?: return null
