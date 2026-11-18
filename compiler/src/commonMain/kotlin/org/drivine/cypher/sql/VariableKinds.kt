@@ -34,7 +34,7 @@ internal class VariableKinds(private val aggregates: (Expression) -> Boolean) {
         INTEGER("an integer"), FLOAT("a float"), TEXT("a text"), BOOLEAN("a truth value"), LIST("a list"), MAP("a map"),
 
         /**
-         * A map Neo4j types a map when it compiles the statement for `size()` alone (#364): one an `UNWIND` gives of a list
+         * A value Neo4j types a map when it compiles the statement, for `size()` alone (#364): one an `UNWIND` gives of a list
          * written of maps, `UNWIND [{a: 1}] AS m`, or a map projection a `WITH` binds, `WITH n {.a} AS m`. A write of it as a
          * property, or a pattern that reads it as a node, fails only as each row runs, and not over no rows, so it is any
          * value to all else ([fits], [stored]).
