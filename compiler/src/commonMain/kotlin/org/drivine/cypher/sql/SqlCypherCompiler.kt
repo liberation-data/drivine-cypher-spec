@@ -1822,6 +1822,9 @@ abstract class SqlCypherCompiler(
          */
         var labelsOf: Map<String, List<String>> = emptyMap()
 
+        /** How many conditions [conditioned] is compiling, one within another: 1 in a fragment's own. */
+        private var conditions = 0
+
         /** [expression] in [scope] as the store's JSON, as a fragment's value: see [SqlFragment]. */
         fun valueJson(expression: Expression, scope: Map<String, Value>): String = comparable(json(expression(expression, scope)))
 
@@ -1832,10 +1835,13 @@ abstract class SqlCypherCompiler(
          * The property [expression] reads, where it is one of a fragment's node whose labels the library gave ([labelsOf]),
          * as a pattern's properties name it to an index: null in a statement, which names its own in its patterns. Asked only of
          * an `=` the row must pass to be kept, as a pattern's properties are: the index's test is null, not false, for a value
-         * it doesn't hold (a list, a long text), which under a `NOT`, an `OR` or in a value would keep or drop the wrong rows.
+         * it doesn't hold (a list, a long text), which under a `NOT`, an `OR` or in a value would keep or drop the wrong rows. And
+         * only of the fragment's own condition, not one within it ([conditions]): a subquery's or a quantifier's `WHERE` may stand
+         * under a `NOT` or beside an `OR`, where its test of the index's label isn't one every row the fragment keeps passes,
+         * and a library that reads it as one tests the label no more (drivine-cypher-spec#373).
          */
         private fun indexedOf(expression: Expression, value: Expression, scope: Map<String, Value>): IndexedProperty? {
-            if (labelsOf.isEmpty()) return null
+            if (labelsOf.isEmpty() || conditions != 1) return null
             val property = expression as? Expression.Property ?: return null
             val name = (property.subject as? Expression.Variable)?.name ?: return null
             val node = scope[name] as? Value.Node ?: return null
@@ -2983,8 +2989,9 @@ abstract class SqlCypherCompiler(
                 val compiled = expression(value, scope)
                 equality(
                     Value.Json(propertyOf(props, key), flat = true), compiled, value, scalar(value, scope) || isFlat(compiled),
-                    // Not [scalar]: a text the statement works out may be one the index doesn't hold ([indexHolds]).
-                    of = IndexedProperty(props, key, labels, givenRowsScalar(value, scope)),
+                    // Not [scalar]: a text the statement works out may be one the index doesn't hold ([indexHolds]). Not for a
+                    // fragment's row, whose pattern is within a subquery, which may stand under a `NOT` ([indexedOf]).
+                    of = if (props in labelsOf) null else IndexedProperty(props, key, labels, givenRowsScalar(value, scope)),
                 )
             }
             is Expression.Parameter -> throw CompilerException(
@@ -4655,12 +4662,14 @@ abstract class SqlCypherCompiler(
             comparedKeys = ComparedKeys()
             filtering = true
             conjoining = true
+            conditions++
             return try {
                 bool(expression(where, scope)) to comparedKeys
             } finally {
                 filtering = false
                 conjoining = false
                 comparedKeys = outer
+                conditions--
             }
         }
 

@@ -365,7 +365,7 @@ class FragmentsTest {
         assertTrue(column >= 0, sql)
         assertTrue(column < sql.indexOf("(SELECT"), "the index's column outside any query: $sql")
         assertTrue(sql.contains(" END = (SELECT "), "compared with the value worked out in a query of its own: $sql")
-        assertTrue(!sql.contains(" IS NULL)"), "a text the index holds, compared as one: $sql")
+        assertTrue(!sql.contains(" IS NULL AND INSTR("), "a text the index holds, compared as one: $sql")
     }
 
     /**
@@ -402,7 +402,8 @@ class FragmentsTest {
     private fun bare(condition: String, parameters: Map<String, Any?>): Boolean {
         fun compiled(value: String, given: Map<String, Any?>) =
             OracleCypherCompiler("g", indexedProperties = setOf("Person" to "name")).compile("MATCH (n:Person {name: $value}) RETURN n.name", given).sql
-        fun escapes(sql: String) = Regex(" IS NULL\\)").findAll(sql).count()
+        // The key's null, let through for a node of the index's label alone (drivine-cypher-spec#373).
+        fun escapes(sql: String) = Regex(" IS NULL AND INSTR\\(").findAll(sql).count()
         val sql = compiled(condition.substringAfter("n.name = "), parameters)
         val labelled = Regex("CASE WHEN JSON_EXISTS\\(n\\d+\\.labels").containsMatchIn(sql)
         return labelled && escapes(sql) == escapes(compiled("${'$'}x", mapOf("x" to "Ada")))
@@ -435,6 +436,52 @@ class FragmentsTest {
             "n.name = coalesce(${'$'}m.name, ${'$'}p)" to mapOf("m" to emptyMap<String, Any?>(), "p" to ""),
         )
         for ((condition, parameters) in cases) assertTrue(!bare(condition, parameters), "$condition $parameters")
+    }
+
+    /**
+     * A worked-out text the labelled index may not hold is let through where its key is null, as the index's test is null for
+     * it: and only for a node of each label whose index the term reads, as the index's test is, so a library that reads the
+     * term as that label's test, and tests the label no more, keeps no node of another label (drivine-cypher-spec#373).
+     */
+    @Test
+    fun aValueLetThroughByItsKeysNullIsLetThroughOnlyForANodeOfTheIndexsLabels() {
+        val long = mapOf("p" to "X".repeat(4001))
+        fun oracle(vararg labels: String) = OracleCypherCompiler("g", indexedProperties = labels.map { it to "lower" }.toSet())
+        fun escape(sql: String) = Regex("IS NULL AND (INSTR\\(.*?\\) > 0(?: AND INSTR\\(.*?\\) > 0)*)\\)\\)").find(sql)?.groupValues?.get(1)
+        val one = oracle("Person").condition("n.lower = toLower(${'$'}p)", people, long).sql
+        assertEquals(org.drivine.cypher.store.OracleSql.carriesLabel("people_", "Person"), escape(one), one)
+        // With two labels each indexed, each is tested, as the labelled term tests each; with one, that one alone.
+        val both = mapOf("n" to FragmentVariable.Node("people_", listOf("Person", "Admin")))
+        val two = oracle("Person", "Admin").condition("n.lower = toLower(${'$'}p)", both, long).sql
+        assertEquals(listOf("Person", "Admin").joinToString(" AND ") { org.drivine.cypher.store.OracleSql.carriesLabel("people_", it) }, escape(two), two)
+        val indexedOnce = oracle("Person").condition("n.lower = toLower(${'$'}p)", both, long).sql
+        assertEquals(org.drivine.cypher.store.OracleSql.carriesLabel("people_", "Person"), escape(indexedOnce), indexedOnce)
+        // The labels' test, by their text, is none the index over labels answers.
+        assertTrue(!one.substringAfter(" IS NULL AND ").contains("JSON_EXISTS(people_.labels"), one)
+    }
+
+    /**
+     * A test of the labelled index is written only in the fragment's own condition: a subquery's or a quantifier's `WHERE`, or
+     * a pattern's properties within a subquery, may stand under a `NOT` or beside an `OR`, where the label's test isn't one
+     * each row the fragment keeps passes, and a library that reads it as one tests the label no more (drivine-cypher-spec#373).
+     */
+    @Test
+    fun theLabelledIndexIsReadOnlyInTheFragmentsOwnCondition() {
+        fun oracle() = OracleCypherCompiler("g", indexedProperties = setOf("Person" to "name"))
+        val given = mapOf("q" to "Ada")
+        for (within in listOf(
+            "NOT EXISTS { (n)-[:KNOWS]->() WHERE n.name = ${'$'}q }",
+            "n.age > 1 OR EXISTS { (n)-[:KNOWS]->() WHERE n.name = ${'$'}q }",
+            "NOT EXISTS { (n)-[:KNOWS]->(n:Person {name: ${'$'}q}) }",
+            "NOT any(x IN [1] WHERE n.name = ${'$'}q)",
+            "all(x IN [] WHERE n.name = ${'$'}q)",
+        )) {
+            val sql = oracle().condition(within, people, given).sql
+            assertTrue(!sql.contains("CASE WHEN JSON_EXISTS(people_.labels"), "$within: $sql")
+        }
+        // A subquery's own node is still read through its label's index: the term is its row's, not the library's.
+        val inner = oracle().condition("EXISTS { (n)-[:KNOWS]->(m:Person {name: ${'$'}q}) }", people, given).sql
+        assertTrue(Regex("CASE WHEN JSON_EXISTS\\(n\\d+\\.labels").containsMatchIn(inner), inner)
     }
 
     /**
