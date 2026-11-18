@@ -164,6 +164,8 @@ class CompilerRefusalTest {
                 "MATCH (n) WHERE size(n {.a}) > 0 RETURN n",
                 "RETURN SIZE({})",
                 "UNWIND [{a: 1}] AS m RETURN size(m)",
+                "MATCH (x:Nothing) WITH x {.a} AS m RETURN size(m)",
+                "UNWIND [{a: 1}] AS m CALL (m) { RETURN size(m) AS s } RETURN s",
                 "MATCH (x:Nothing) UNWIND [{a: 1}, {b: 2}] AS m RETURN [size(m)]",
                 "MATCH (n) UNWIND [{a: 1}, n {.a}] AS m WITH m RETURN size(m)",
             ).forEach { cypher ->
@@ -187,6 +189,8 @@ class CompilerRefusalTest {
                 // Of an UNWIND's map, Neo4j fails these only as each row runs, and not over no rows.
                 "UNWIND [{a: 1}, null] AS m RETURN size(m)",
                 "MATCH (x:Nothing) UNWIND [{a: 1}] AS m CREATE (:A {p: m})",
+                "MATCH (x:Nothing) WITH x {.a} AS m CREATE (:B {p: m})",
+                "CALL { UNWIND [{a: 1}] AS m RETURN m UNION RETURN 'xy' AS m } RETURN size(m)",
                 "UNWIND [{a: 1}] AS m RETURN m.a, keys(m)",
                 "MATCH ()-[r*1..2]->() RETURN size(r)",
                 "MATCH (x:Nothing) UNWIND [{a: 1}] AS m CREATE (:A {p: [m]})",
