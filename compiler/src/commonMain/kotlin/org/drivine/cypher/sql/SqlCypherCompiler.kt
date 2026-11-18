@@ -391,7 +391,11 @@ abstract class SqlCypherCompiler(
             if (functions.isNotEmpty() || terms.any { calledFunctions(it).isNotEmpty() }) {
                 throw CompilerException("A fragment calls a function the store declares for a statement, which SQL a library writes doesn't declare: $cypher")
             }
-            return SqlFragment(terms, writer.parameters.valuesOf(terms.joinToString("\n")), nonFinite, fragmentHints(terms))
+            val implied = variables.mapNotNull { (name, variable) ->
+                val node = variable as? FragmentVariable.Node ?: return@mapNotNull null
+                writer.implied["${node.row}.props"]?.let { labels -> node.labels.filter(labels::contains) }?.takeIf { it.isNotEmpty() }?.let { name to it }
+            }.toMap()
+            return SqlFragment(terms, writer.parameters.valuesOf(terms.joinToString("\n")), nonFinite, fragmentHints(terms), implied)
         } finally {
             functions.clear()
             functions += declared
@@ -988,6 +992,14 @@ abstract class SqlCypherCompiler(
      * so no statement binds a name its SQL doesn't hold.
      */
     protected open fun indexAnswers(of: IndexedProperty?): Boolean = false
+
+    /**
+     * The labels a node must carry for a test of [indexedEquality], [indexedEqualityOfAny], [indexedKeyEquality] or
+     * [indexedTagEquality] of the property [of] names to be true of it: Oracle's, of the labels whose index it reads, which is
+     * null for a node without one. None where the store's test holds for a node of any label, as Postgres's and SQLite's do.
+     * A fragment's answer gives them where such a test is one its condition's row must pass ([SqlFragment.impliedLabels]).
+     */
+    protected open fun impliedLabels(of: IndexedProperty): List<String> = emptyList()
 
     /**
      * Whether the store's index holds the value [given], a text or a truth value, as a text a test of [indexedEquality] finds:
@@ -1821,6 +1833,12 @@ abstract class SqlCypherCompiler(
          * is another node, of no labels known. Empty in a statement.
          */
         var labelsOf: Map<String, List<String>> = emptyMap()
+
+        /**
+         * The labels each of a fragment's rows, by its properties' column, must carry for its condition to hold: those of each
+         * test an index answers that the condition's row must pass ([impliedLabels]), as [indexedOf] gives them.
+         */
+        val implied: MutableMap<String, MutableSet<String>> = mutableMapOf()
 
         /** How many conditions [conditioned] is compiling, one within another: 1 in a fragment's own. */
         private var conditions = 0
@@ -6741,6 +6759,7 @@ abstract class SqlCypherCompiler(
             if (keyed != null && written is Expression.Parameter) parameters.mayLeaveUnread(written.name)
             val equal = if (given != null) (keyed ?: givenEquals(a, b, given)).let { if (stored || keyed != null) it else "CASE WHEN NOT ${isJsonNull(a)} THEN $it END" } else sharedCompared(a, b) { (x, y) -> "CASE WHEN NOT ${isJsonNull(x)} AND NOT ${isJsonNull(y)} THEN ${jsonEquals(x, y)} END" }
             if (indexed != null) indexedEmitted = true
+            if (indexed != null && of != null && of.props in labelsOf) implied.getOrPut(of.props) { mutableSetOf() } += impliedLabels(of)
             return if (indexed != null) "($indexed AND $equal)" else equal
         }
 

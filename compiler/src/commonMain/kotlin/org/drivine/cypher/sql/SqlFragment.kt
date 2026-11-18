@@ -21,7 +21,11 @@ import org.drivine.DrivineInternalApi
  * read by its key. None on Postgres and SQLite. A condition's term is for a `WHERE` to keep rows by: it may be false where
  * Cypher's truth is null, so a library never negates it in SQL, and writes `NOT` in the Cypher. A value is for the library's
  * SQL to group or bind within it, not to compare with SQL's operators (a condition compares, as Cypher does), nor a column
- * read back as a statement's rows are, which Oracle re-encodes as it returns it.
+ * read back as a statement's rows are, which Oracle re-encodes as it returns it. [impliedLabels] are, by each node variable,
+ * the labels of the library's that every row a condition keeps carries, as a test of their index that the row must pass is
+ * true only of a node with them: on Oracle, an equality of a property the graph's labelled index is over, as a conjunct of
+ * the condition's own and not within a subquery or a quantifier. A library's query need not test those labels again. Empty
+ * on Postgres and SQLite, whose indexes' tests hold for a node of any label, and for a value or an order.
  */
 @DrivineInternalApi
 data class SqlFragment(
@@ -29,6 +33,7 @@ data class SqlFragment(
     val parameters: Map<String, Any?>,
     val nonFinite: Boolean = false,
     val hints: List<String> = emptyList(),
+    val impliedLabels: Map<String, List<String>> = emptyMap(),
 ) {
     /** The fragment's one term: a condition's or a value's. */
     val sql: String get() = terms.single()

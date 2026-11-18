@@ -858,6 +858,8 @@ class OracleCypherCompiler(
         return of.labels.filter { (it to of.key) in indexedKeys }.ifEmpty { null }
     }
 
+    override fun impliedLabels(of: IndexedProperty): List<String> = indexedLabels(of).orEmpty()
+
     override val indexKeyStore = org.drivine.cypher.api.Store.ORACLE
 
     /**

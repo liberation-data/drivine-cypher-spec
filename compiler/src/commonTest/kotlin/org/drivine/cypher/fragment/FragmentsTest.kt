@@ -454,8 +454,10 @@ class FragmentsTest {
         val both = mapOf("n" to FragmentVariable.Node("people_", listOf("Person", "Admin")))
         val two = oracle("Person", "Admin").condition("n.lower = toLower(${'$'}p)", both, long).sql
         assertEquals(listOf("Person", "Admin").joinToString(" AND ") { org.drivine.cypher.store.OracleSql.carriesLabel("people_", it) }, escape(two), two)
-        val indexedOnce = oracle("Person").condition("n.lower = toLower(${'$'}p)", both, long).sql
-        assertEquals(org.drivine.cypher.store.OracleSql.carriesLabel("people_", "Person"), escape(indexedOnce), indexedOnce)
+        val indexedOnce = oracle("Person").condition("n.lower = toLower(${'$'}p)", both, long)
+        assertEquals(org.drivine.cypher.store.OracleSql.carriesLabel("people_", "Person"), escape(indexedOnce.sql), indexedOnce.sql)
+        assertEquals(mapOf("n" to listOf("Person")), indexedOnce.impliedLabels)
+        assertEquals(mapOf("n" to listOf("Person", "Admin")), oracle("Person", "Admin").condition("n.lower = toLower(${'$'}p)", both, long).impliedLabels)
         // The labels' test, by their text, is none the index over labels answers.
         assertTrue(!one.substringAfter(" IS NULL AND ").contains("JSON_EXISTS(people_.labels"), one)
     }
@@ -463,10 +465,10 @@ class FragmentsTest {
     /**
      * A test of the labelled index is written only in the fragment's own condition: a subquery's or a quantifier's `WHERE`, or
      * a pattern's properties within a subquery, may stand under a `NOT` or beside an `OR`, where the label's test isn't one
-     * each row the fragment keeps passes, and a library that reads it as one tests the label no more (drivine-cypher-spec#373).
+     * each row the fragment keeps passes (drivine-cypher-spec#373). The fragment's answer then implies no label.
      */
     @Test
-    fun theLabelledIndexIsReadOnlyInTheFragmentsOwnCondition() {
+    fun theLabelledIndexIsReadOnlyInTheFragmentsOwnConditionAndImpliesItsLabelsThere() {
         fun oracle() = OracleCypherCompiler("g", indexedProperties = setOf("Person" to "name"))
         val given = mapOf("q" to "Ada")
         for (within in listOf(
@@ -476,12 +478,26 @@ class FragmentsTest {
             "NOT any(x IN [1] WHERE n.name = ${'$'}q)",
             "all(x IN [] WHERE n.name = ${'$'}q)",
         )) {
-            val sql = oracle().condition(within, people, given).sql
-            assertTrue(!sql.contains("CASE WHEN JSON_EXISTS(people_.labels"), "$within: $sql")
+            val fragment = oracle().condition(within, people, given)
+            assertTrue(!fragment.sql.contains("CASE WHEN JSON_EXISTS(people_.labels"), "$within: ${fragment.sql}")
+            assertEquals(emptyMap(), fragment.impliedLabels, within)
         }
+        assertEquals(mapOf("n" to listOf("Person")), oracle().condition("n.name = ${'$'}q AND n.age > 1", people, given).impliedLabels)
+        assertEquals(emptyMap(), oracle().condition("n.name = ${'$'}q OR n.age > 1", people, given).impliedLabels)
+        assertEquals(emptyMap(), oracle().value("n.name = ${'$'}q", people, given).impliedLabels)
         // A subquery's own node is still read through its label's index: the term is its row's, not the library's.
-        val inner = oracle().condition("EXISTS { (n)-[:KNOWS]->(m:Person {name: ${'$'}q}) }", people, given).sql
-        assertTrue(Regex("CASE WHEN JSON_EXISTS\\(n\\d+\\.labels").containsMatchIn(inner), inner)
+        val inner = oracle().condition("EXISTS { (n)-[:KNOWS]->(m:Person {name: ${'$'}q}) }", people, given)
+        assertTrue(Regex("CASE WHEN JSON_EXISTS\\(n\\d+\\.labels").containsMatchIn(inner.sql), inner.sql)
+        assertEquals(emptyMap(), inner.impliedLabels)
+        // Postgres's and SQLite's indexes hold for a node of any label: no label is implied.
+        for (compiler in listOf(PostgresCypherCompiler("g"), SqliteCypherCompiler("g"))) {
+            assertEquals(emptyMap(), compiler.condition("n.name = ${'$'}q", people, given).impliedLabels)
+        }
+        val answer = CypherJson.readTree(CompileJson.compile(
+            "{\"store\": \"oracle\", \"graph\": {\"name\": \"g\", \"indexedProperties\": [[\"Person\", \"name\"]]}, " +
+                "\"fragment\": {\"condition\": \"n.name = ${'$'}q\", \"variables\": {\"n\": {\"node\": \"people_\", \"labels\": [\"Person\"]}}}, \"parameters\": {\"q\": \"Ada\"}}",
+        ))
+        assertEquals("{\"n\":[\"Person\"]}", json(answer["impliedLabels"]), "$answer")
     }
 
     /**
