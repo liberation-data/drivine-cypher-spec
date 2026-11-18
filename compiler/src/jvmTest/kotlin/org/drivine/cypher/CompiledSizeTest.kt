@@ -337,14 +337,15 @@ class CompiledSizeTest {
         val compiler = PostgresCypherCompiler("g")
         val property = compiler.compile("MATCH (c:Claim) RETURN c.name ORDER BY c.name").sql.substringAfter("ORDER BY ")
         // The kind read once (#284): a number reaches its own value with one test, not three.
-        val flatList = Regex("""WHEN 'array' THEN CAST\(g_list_key\(p2\.s1\) AS jsonb\) """)
+        val flatList = Regex("""WHEN 'array' THEN jsonb_build_array\(2, CAST\(g_list_key\(p2\.s1\) AS jsonb\)\) """)
         assertTrue(flatList.containsMatchIn(property) && "RECURSIVE" !in property, property)
         assertEquals(1, Regex("jsonb_typeof").findAll(property.substringBefore(", (CASE")).count(), property)
         assertEquals(
-            "ROW(CASE jsonb_typeof(p2.s1) WHEN 'string' THEN '\"\"'::jsonb " +
-                "WHEN 'object' THEN CASE WHEN (p2.s1 ->> '\$t') IS NOT NULL THEN jsonb_build_object('k', CASE (p2.s1 ->> '\$t') WHEN 'datetime' THEN 1 WHEN 'localdatetime' THEN 2 " +
-                "WHEN 'date' THEN 3 WHEN 'time' THEN 4 WHEN 'localtime' THEN 5 WHEN 'duration' THEN 6 ELSE 0 END, 's', COALESCE(p2.s1 -> 's', p2.s1 -> 'v')) ELSE p2.s1 END " +
-                "ELSE NULLIF(p2.s1, 'null'::jsonb) END, " +
+            // Each kind with its rank ahead of it, in the one CASE, as Cypher orders kinds (drivine4j#307).
+            "ROW(CASE jsonb_typeof(p2.s1) WHEN 'string' THEN '[3, \"\"]'::jsonb " +
+                "WHEN 'object' THEN CASE WHEN (p2.s1 ->> '\$t') IS NOT NULL THEN jsonb_build_array(CASE (p2.s1 ->> '\$t') WHEN 'datetime' THEN 2.1 WHEN 'localdatetime' THEN 2.2 " +
+                "WHEN 'date' THEN 2.3 WHEN 'time' THEN 2.4 WHEN 'localtime' THEN 2.5 WHEN 'duration' THEN 2.6 ELSE 0 END, COALESCE(p2.s1 -> 's', p2.s1 -> 'v')) ELSE jsonb_build_array(1, p2.s1) END " +
+                "WHEN 'boolean' THEN jsonb_build_array(4, p2.s1) WHEN 'number' THEN jsonb_build_array(5, p2.s1) END, " +
                 "(CASE WHEN jsonb_typeof(p2.s1) = 'string' THEN (p2.s1 #>> '{}') END) COLLATE \"C\")",
             property.replace(flatList, ""),
         )
