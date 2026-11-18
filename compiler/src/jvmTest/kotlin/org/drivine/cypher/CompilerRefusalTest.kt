@@ -154,6 +154,59 @@ class CompilerRefusalTest {
     }
 
     @Test
+    fun `size() of a map, a node or a relationship is refused, not given as null`() {
+        // Neo4j 2026.10.1: 22G03 "Type mismatch: expected String, Vector or List<T> but was Map", when it compiles the statement (#364).
+        listOf(PostgresCypherCompiler("g"), OracleCypherCompiler("g"), SqliteCypherCompiler("g")).forEach { compiler ->
+            listOf(
+                "RETURN size({a: 1, b: 2})",
+                "WITH {a: 1, b: 2} AS m RETURN size(m)",
+                "MATCH (n) WITH n, {a: 1} AS m SET n.p = size(m)",
+                "MATCH (n) WHERE size(n {.a}) > 0 RETURN n",
+                "RETURN SIZE({})",
+                "UNWIND [{a: 1}] AS m RETURN size(m)",
+                "MATCH (x:Nothing) WITH x {.a} AS m RETURN size(m)",
+                "UNWIND [{a: 1}] AS m CALL (m) { RETURN size(m) AS s } RETURN s",
+                "MATCH (x:Nothing) UNWIND [{a: 1}, {b: 2}] AS m RETURN [size(m)]",
+                "MATCH (n) UNWIND [{a: 1}, n {.a}] AS m WITH m RETURN size(m)",
+            ).forEach { cypher ->
+                val refused = assertThrows<CompilerException>("${compiler::class.simpleName}: $cypher") { compiler.compile(cypher) }.message!!
+                assertEquals("size() takes a list or a text, not a map, as in Neo4j.", refused)
+            }
+            listOf(
+                "MATCH (n) RETURN size(n)" to "a node",
+                "MATCH (n) WITH n AS m RETURN size(m)" to "a node",
+                "MATCH (x:Nothing)-[r]->() RETURN size(r)" to "a relationship",
+            ).forEach { (cypher, what) ->
+                val refused = assertThrows<CompilerException>("${compiler::class.simpleName}: $cypher") { compiler.compile(cypher) }.message!!
+                assertEquals("size() takes a list or a text, not $what, as in Neo4j.", refused)
+            }
+            // A map's value, a list or a text, and a map given as a parameter, known only as the statement runs, are compiled.
+            listOf(
+                "WITH {a: [1, 2]} AS m RETURN size(m.a)",
+                "WITH {a: 'xy'} AS m RETURN size(m.a)",
+                "RETURN size([{a: 1}])",
+                "WITH {a: 1} AS m WITH [1, 2] AS m RETURN size(m)",
+                // Of an UNWIND's map, Neo4j fails these only as each row runs, and not over no rows.
+                "UNWIND [{a: 1}, null] AS m RETURN size(m)",
+                "MATCH (x:Nothing) UNWIND [{a: 1}] AS m CREATE (:A {p: m})",
+                "MATCH (x:Nothing) WITH x {.a} AS m CREATE (:B {p: m})",
+                "CALL { UNWIND [{a: 1}] AS m RETURN m UNION RETURN 'xy' AS m } RETURN size(m)",
+                "UNWIND [{a: 1}] AS m RETURN m.a, keys(m)",
+                "MATCH ()-[r*1..2]->() RETURN size(r)",
+                "MATCH (x:Nothing) UNWIND [{a: 1}] AS m CREATE (:A {p: [m]})",
+                // An UNWIND of no maps, and a variable bound again as another value, are not refused as a map.
+                "UNWIND [] AS m RETURN size(m)",
+                "UNWIND [{a: 1}] AS m WITH 'xy' AS m RETURN size(m)",
+                "UNWIND [{a: 1}] AS m RETURN [m IN ['xy'] | size(m)]",
+            ).forEach { compiler.compile(it) }
+            // A pattern over an UNWIND's map is not refused here as a map used as a node: only as the compiler refuses an unwound item there.
+            val matched = assertThrows<CompilerException> { compiler.compile("MATCH (x:Nothing) UNWIND [{a: 1}] AS m MATCH (m) RETURN m") }.message!!
+            assertEquals("m is not a node, and is used as one in a pattern.", matched)
+            compiler.compile("RETURN size(\$m)", mapOf("m" to mapOf("a" to 1)))
+        }
+    }
+
+    @Test
     fun `round() compiles a precision below 0 or past 2147483647, written, negated or given, to fail on the row that rounds a number by it`() {
         // Neo4j reads the precision only when it rounds (#305), so none is refused when compiling, in both forms.
         listOf(PostgresCypherCompiler("g"), OracleCypherCompiler("g"), SqliteCypherCompiler("g")).forEach { compiler ->
