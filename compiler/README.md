@@ -540,7 +540,9 @@ JSON entry, so TypeScript and Python run what drivine4j runs from the Kotlin typ
     in `probes`, by each compiler flag's name (`nullsEqualStored`, `eraStored`, `temporalArithmeticStored`), the statement
     that finds whether the session may call the functions the flag names, and in `noFunction`, the Oracle error numbers that
     mean it may not (904, 942, 1031, 6575).
-    A library compiles with every flag it may call (drivine4j#808, #811);
+    A library compiles with every flag it may call (drivine4j#808, #811); and `session`, the statements a library runs once
+    on each connection as it opens it, before any other, so text is compared and sorted by its code points whatever the
+    session's `NLS_COMP` and `NLS_SORT` (`["ALTER SESSION SET NLS_COMP = BINARY NLS_SORT = BINARY"]`, #372);
   - `stamp` and `marker`, the statements of each node's stamp and of the schema marker, as `marker.yaml` pins them, each with
     the `constraint` that keeps one, after `prepare`.
 
