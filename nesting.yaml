@@ -5124,10 +5124,9 @@ cells:
     nesting: ["a list comprehension's WHERE"]
     reference: "a plain read of p"
     cypher: "MATCH (p:Person) WITH p AS q, count(*) AS c WHERE size([w1 IN [q] WHERE p.name IS NOT NULL]) > 0 RETURN q.name ORDER BY q.name"
-    neo4j: "rows"
-    rows: []
+    neo4j: "not pinned"
     error: "p is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used."
-    note: "Neo4j reads the WITH's grouping key here by the expression it groups by, p, where the SQL stores don't yet, and refuse it."
+    note: "Neo4j's answer differs by environment here, no rows on one and every row on another, so it is not pinned (liberation-data/drivine-cypher-spec#366); the SQL stores refuse it."
   - context: "a WITH that drops p and groups, in its WHERE"
     nesting: ["EXISTS { pattern }", "EXISTS { pattern }"]
     reference: "a QPP group naming p"
@@ -6214,10 +6213,9 @@ cells:
     nesting: ["a list comprehension's WHERE", "a list comprehension's WHERE"]
     reference: "a plain read of p"
     cypher: "MATCH (p:Person) WITH p AS q, count(*) AS c WHERE size([w1 IN [q] WHERE size([w2 IN [w1] WHERE p.name IS NOT NULL]) > 0]) > 0 RETURN q.name ORDER BY q.name"
-    neo4j: "rows"
-    rows: []
+    neo4j: "not pinned"
     error: "p is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used."
-    note: "Neo4j reads the WITH's grouping key here by the expression it groups by, p, where the SQL stores don't yet, and refuse it."
+    note: "Neo4j's answer differs by environment here, no rows on one and every row on another, so it is not pinned (liberation-data/drivine-cypher-spec#366); the SQL stores refuse it."
   - context: "a WITH that drops p and groups, in its ORDER BY"
     nesting: []
     reference: "a QPP group naming p"

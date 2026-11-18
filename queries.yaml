@@ -3843,10 +3843,6 @@ cases:
       - cypher: "MATCH (p:Person) WITH p AS q, count(*) AS c WHERE size([w1 IN [q] WHERE EXISTS { (w1) ((a)-->(b))+ () }]) > 0 RETURN q.name ORDER BY q.name"
         only: [neo4j, sql]
         rows: ["Carrie", "Keanu", "Laurence"]
-      - note: "Neo4j reads the WITH's grouping key here by the expression it groups by, p, where the SQL stores don't yet, and refuse it."
-        cypher: "MATCH (p:Person) WITH p AS q, count(*) AS c WHERE size([w1 IN [q] WHERE p.name IS NOT NULL]) > 0 RETURN q.name ORDER BY q.name"
-        only: [neo4j]
-        rows: []
       - cypher: "MATCH (p:Person) WITH p AS q, count(*) AS c WHERE EXISTS { (q)-->(m1) WHERE EXISTS { (m1) ((p)-->(b))+ () } } RETURN q.name ORDER BY q.name"
         only: [neo4j, sql]
         rows: ["Keanu", "Laurence"]
@@ -4141,10 +4137,6 @@ cases:
       - cypher: "MATCH (p:Person) WITH p AS q, count(*) AS c WHERE size([w1 IN [q] WHERE size([w2 IN [w1] WHERE EXISTS { (w2) ((a)-->(b))+ () }]) > 0]) > 0 RETURN q.name ORDER BY q.name"
         only: [neo4j, sql]
         rows: ["Carrie", "Keanu", "Laurence"]
-      - note: "Neo4j reads the WITH's grouping key here by the expression it groups by, p, where the SQL stores don't yet, and refuse it."
-        cypher: "MATCH (p:Person) WITH p AS q, count(*) AS c WHERE size([w1 IN [q] WHERE size([w2 IN [w1] WHERE p.name IS NOT NULL]) > 0]) > 0 RETURN q.name ORDER BY q.name"
-        only: [neo4j]
-        rows: []
 
   - name: "Nesting of a dropped variable: a WITH that drops p and groups, in its ORDER BY"
     description: "nesting.yaml's cells in a WITH that drops p and groups, in its ORDER BY that Neo4j gives rows for, and the SQL stores, but where a note says they refuse it (see refusals.yaml, \"Nesting of a dropped variable refused: a WITH that drops p and groups, in its ORDER BY\"; drivine4j#681)."
