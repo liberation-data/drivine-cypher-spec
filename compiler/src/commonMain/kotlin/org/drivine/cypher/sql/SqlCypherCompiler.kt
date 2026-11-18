@@ -930,6 +930,12 @@ abstract class SqlCypherCompiler(
     /** The item of the JSON list [json] at the JSON [index], counted from the end where it is negative. */
     protected abstract fun element(json: String, index: String): String
 
+    /**
+     * [element], of a list whose every item the statement makes of the temporal kind [items] (see [Value.Json.items]), so an
+     * item read from it is that kind's tag, never a text: see Oracle's.
+     */
+    protected open fun element(json: String, index: String, items: Temporal?): String = element(json, index)
+
     /** The value of the JSON map [json] at the key the JSON [key] holds, a text an expression gives (`m[k]`). */
     protected abstract fun keyed(json: String, key: String): String
 
@@ -4811,7 +4817,7 @@ abstract class SqlCypherCompiler(
                     listed is Value.Entities && !contains(expression.subject, ::isAggregate) ->
                         entityAt(listed as Value.Entities, at, givenKind(index, scope) != Value.Known.INTEGER)
                     // An item of a list that holds a node or a relationship holds it by identity too: see [Value.Json.identity].
-                    known is Number -> (if (subjectKind == Value.Known.LIST || untested) element(subject(), at) else listItem(subject(), at)).let { item ->
+                    known is Number -> (if (subjectKind == Value.Known.LIST || untested) element(subject(), at, itemsOf(listed)) else listItem(subject(), at)).let { item ->
                         Value.Json(
                             item, temporal = itemsOf(listed), items = itemItemsOf(listed), entries = itemEntriesOf(listed),
                             identity = identityOf(listed, item, true) { element(it, at) },
@@ -4826,7 +4832,7 @@ abstract class SqlCypherCompiler(
                             // any key is null, as in Neo4j.
                             fun unlessNull(message: String) = "CASE WHEN NOT ${isJsonNull(map)} THEN ${scalar(textFailure(message, typeOf(key)))} END"
                             val byNumber = when {
-                                !tested || subjectKind == Value.Known.LIST || untested -> element(map, key)
+                                !tested || subjectKind == Value.Known.LIST || untested -> element(map, key, itemsOf(listed))
                                 subjectKind == Value.Known.MAP -> unlessNull(NUMBER_KEY_OF_MAP)
                                 else -> listItem(map, key)
                             }
