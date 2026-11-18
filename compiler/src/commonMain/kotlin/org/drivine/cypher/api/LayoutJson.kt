@@ -41,7 +41,7 @@ import org.drivine.cypher.store.migrate.LayoutMigration
  *   migration moves to this one (`migrate`, [MigrateJson]), and `"inProgress": true` where it holds a migration's
  *   checkpoint, which the migration resumes.
  * - `{"write": <a value>, "store": "postgres" | "oracle" | "sqlite"}`: the value as that store's layout holds it, [StoreValues.text]
- *   (liberation-data/drivine-cypher-spec#107, #329), the text a compiled statement that writes binds it as: each temporal value,
+ *   (liberation-data/drivine-cypher-spec#107, #329), the text a compiled statement that writes stores of it: each temporal value,
  *   given as a request's parameter gives one (`{"$temporal": "DATE", "text": "2024-01-01"}`, its kind as
  *   [org.drivine.cypher.sql.Temporal] names it), its tag `{"$t", "v", "s"}`, each map key that begins with `$` escaped, at any
  *   depth, and bytes the list of their signed values, `[1, 2, -1]`; one whose text is no value of its kind, an offset with
@@ -49,8 +49,9 @@ import org.drivine.cypher.store.migrate.LayoutMigration
  *   float as the store holds it: on Postgres a whole one with its fraction (`10000000.0`), on Oracle every one as extended
  *   JSON's double (`{"$numberDouble": "1.5"}`, NaN and the infinities `"NaN"`, `"Infinity"`, `"-Infinity"`), on SQLite an
  *   infinity as `9e999` or `-9e999`. A float the store holds as no number, Postgres's NaN and infinities and SQLite's NaN, is an
- *   error, with the message a statement that writes is refused with. Every other value is written as the request gives it, a
- *   whole number past 2^53 exactly. The store is required: a graph engine's (`neo4j`) is an error. Answered
+ *   error, with the message a statement that writes is refused with. A list of numbers that holds a float and a whole number,
+ *   at any depth, has each of its numbers a float, as Neo4j stores it (#377). Every other value is written as the request gives
+ *   it, a whole number past 2^53 exactly. The store is required: a graph engine's (`neo4j`) is an error. Answered
  *   `{"value": <the text, as it is>}`, so a host that writes its parameters, its save plan or a node's properties in layout 2
  *   writes them as the other libraries do, with no writer of its own.
  * - `{"rewrite": "<a row's JSON text>", "store": "postgres" | "oracle" | "sqlite", "labels": ["Person"], "declarations":

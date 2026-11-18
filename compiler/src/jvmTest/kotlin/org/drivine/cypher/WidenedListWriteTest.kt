@@ -46,6 +46,14 @@ class WidenedListWriteTest {
             "UNWIND \$rows AS row MATCH (n:A {id: row.id}) SET n += row" to mapOf("rows" to listOf(mapOf("id" to 1, "f" to mixed))),
             "MERGE (:A {f: [1, 2.5]})" to emptyMap(),
             "MATCH (a:A) CREATE (a)-[:R {w: [1, 0.5]}]->(:A)" to emptyMap(),
+            // Each clause that writes a property widens it as SET and CREATE do.
+            "MATCH (n:A) SET n = {f: [1, 2.5]}" to emptyMap(),
+            "MATCH ()-[r:R]->() SET r.w = [1, 0.5]" to emptyMap(),
+            "MERGE (n:A {id: 1}) ON CREATE SET n.f = [1, 2.5]" to emptyMap(),
+            "MERGE (n:A {id: 1}) ON MATCH SET n.f = [1, 2.5]" to emptyMap(),
+            "MATCH (n:A) FOREACH (x IN [1] | SET n.f = [1, 2.5])" to emptyMap(),
+            "FOREACH (x IN [1, 2.5] | CREATE (:A {f: [x, 3]}))" to emptyMap(),
+            "MATCH (n:A) CALL { CREATE (:B {f: [1, 2.5]}) }" to emptyMap(),
         )
         for ((compiler, mark) in compilers) for ((cypher, parameters) in widened) {
             val sql = compiler.compile(cypher, parameters).sql
@@ -64,6 +72,7 @@ class WidenedListWriteTest {
             "MATCH (n:A) SET n.f = \$l" to mapOf("l" to listOf(1, 2)),
             "MATCH (n:A) SET n.f = \$l" to mapOf("l" to listOf(0.5, 2.5)),
             "MATCH (n:A) SET n.f = 2.5" to emptyMap(),
+            "MATCH (n:A) SET n.f = [1, \$x]" to mapOf("x" to 2),
             "CREATE (n:A \$props)" to mapOf("props" to mapOf("f" to listOf(1, 2), "g" to 2.5)),
             "UNWIND \$rows AS row CREATE (:A {f: row.f})" to mapOf("rows" to listOf(mapOf("f" to listOf(1, 2)))),
             // Read, not stored: Neo4j gives [1, 2.5].

@@ -37,7 +37,8 @@ import kotlin.io.encoding.Base64
  * - on Oracle, a `NUMBER` with a fraction, which no integer has, is a float, a binary double in layout 2.
  *
  * The row is read into the values it holds and written as [StoreValues.text] writes them for the store, the text a
- * layout-2 save or `CREATE` writes, so a row migrated is held exactly as the same values written anew.
+ * layout-2 save or `CREATE` writes, so a row migrated is held exactly as the same values written anew: but that a list of whole
+ * and fractional numbers, which those write with each number a float (#377), is kept as it was, see [rewrite].
  *
  * What each store gives as a row's text, and reads back: Postgres its `jsonb`'s text (`props::text`), SQLite its text,
  * Oracle `JSON_SERIALIZE(props EXTENDED)`, whose binary doubles are extended JSON's `{"$numberDouble": …}`, and whose
