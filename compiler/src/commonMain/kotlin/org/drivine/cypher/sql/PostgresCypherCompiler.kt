@@ -354,11 +354,30 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
      * kinds sorted after texts, went through three tests before its own value, and a sort of 100,000 numbers to its first 100
      * took a fifth as long again as one of texts (#284). A map that is no tag is itself, as `jsonb` orders it.
      */
-    override fun sortKey(json: String) = shared(json) { (x) ->
-        "ROW(CASE jsonb_typeof($x) WHEN 'string' THEN '\"\"'::jsonb " +
-            "WHEN 'object' THEN CASE WHEN ${tagKind(x)} IS NOT NULL THEN jsonb_build_object('k', ${tagRank(x, "0") { "$it" }}, 's', COALESCE($x -> 's', $x -> 'v')) ELSE $x END " +
-            "WHEN 'array' THEN CAST(${flatListKey(x)} AS jsonb) " +
-            "ELSE ${nullIfJsonNull(x)} END, ${codePointText(x)})"
+    override fun sortKey(json: String) = sortKey(json, ranked = false)
+
+    /**
+     * [sortKey] where the statement leaves the kind open (drivine4j#307): each value with where its kind comes, as [kindOrder]
+     * ranks them, ahead of it, as the list `[rank, value]`, so values of several kinds sort as Cypher sorts them, a map, a list,
+     * the temporal kinds, a text, a truth value, a number, where `jsonb` sorts a text first and a number before a truth value.
+     * `jsonb` compares lists of one length item by item, so the rank decides first. In the one `CASE` over the kind that
+     * [sortKey] reads already, and not a second order term: an extra test of the kind in an order of 100,000 rows to its first
+     * 100 took a fifth as long again (#284). JSON's null is SQL's, ranked nowhere, so it ties with SQL's null still (#500).
+     */
+    override fun openSortKey(json: String) = listOf(sortKey(json, ranked = true))
+
+    /** [sortKey], each value with [ranked] the list of its kind's rank and itself: see [openSortKey]. */
+    private fun sortKey(json: String, ranked: Boolean) = shared(json) { (x) ->
+        fun rank(rank: String, value: String) = if (ranked) "jsonb_build_array($rank, $value)" else value
+        val text = if (ranked) "'[3, \"\"]'::jsonb" else "'\"\"'::jsonb"
+        // Ranked, a tag's rank is its kind's already, so only its sort key follows it.
+        val tag = if (ranked) "jsonb_build_array(${tagRank(x, "0")}, COALESCE($x -> 's', $x -> 'v'))"
+        else "jsonb_build_object('k', ${tagRank(x, "0") { "$it" }}, 's', COALESCE($x -> 's', $x -> 'v'))"
+        "ROW(CASE jsonb_typeof($x) WHEN 'string' THEN $text " +
+            "WHEN 'object' THEN CASE WHEN ${tagKind(x)} IS NOT NULL THEN $tag ELSE ${rank("1", x)} END " +
+            "WHEN 'array' THEN ${rank("2", "CAST(${flatListKey(x)} AS jsonb)")} " +
+            (if (ranked) "WHEN 'boolean' THEN jsonb_build_array(4, $x) WHEN 'number' THEN jsonb_build_array(5, $x) END" else "ELSE ${nullIfJsonNull(x)} END") +
+            ", ${codePointText(x)})"
     }
 
     /**

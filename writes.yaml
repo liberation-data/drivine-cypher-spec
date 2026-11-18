@@ -1446,15 +1446,11 @@ cases:
     description: "A property read from the store may be of any kind: ORDER BY sorts a list, then a text, a truth value, a number, and a missing property last."
     steps:
       - cypher: "CREATE (:CyWrite {v: 2}), (:CyWrite {v: 'b'}), (:CyWrite {v: true}), (:CyWrite {v: [1]}), (:CyWrite {v: 1.5}), (:CyWrite {v: 'B'}), (:CyWrite {v: false}), (:CyWrite)"
-      - note: "Postgres sorts a number before a truth value, and a list last (drivine4j#307)."
-        cypher: "MATCH (k:CyWrite) RETURN k.v ORDER BY k.v"
-        except: [postgres]
+      - cypher: "MATCH (k:CyWrite) RETURN k.v ORDER BY k.v"
         rows: [[1], "B", "b", false, true, 1.5, 2, null]
       - cypher: "MATCH (k:CyWrite) RETURN k.v ORDER BY k.v DESC"
-        except: [postgres]
         rows: [null, 2, 1.5, true, false, "b", "B", [1]]
       - cypher: "MATCH (k:CyWrite) WITH k ORDER BY k.v SKIP 2 LIMIT 2 RETURN k.v"
-        except: [postgres]
         rows: ["b", false]
 
   - name: "A stored text past 4000 bytes"

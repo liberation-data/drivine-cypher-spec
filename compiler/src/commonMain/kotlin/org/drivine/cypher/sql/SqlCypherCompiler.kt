@@ -1189,9 +1189,9 @@ abstract class SqlCypherCompiler(
     /**
      * What an order sorts the JSON value [json] by where the statement leaves its kind open, a term after another: values of
      * several kinds as Cypher orders their kinds ([kindOrder]), null last, and those of one kind among themselves. As [sortKey]
-     * where a store does not override it: Postgres's takes `jsonb`'s order of kinds, a number before a truth value, which is
-     * not yet Cypher's (#307). Oracle's and SQLite's JSON orders put a number before a text, so their terms are where the kind
-     * comes, then the value. A value the statement makes of one kind sorts by [sortKey] alone.
+     * where a store does not override it. Each store's JSON orders kinds otherwise, `jsonb` a number before a truth value and
+     * Oracle's and SQLite's a number before a text, so each one's term is where the kind comes, then the value: Postgres's in one
+     * key (drivine4j#307). A value the statement makes of one kind sorts by [sortKey] alone.
      */
     protected open fun openSortKey(json: String): List<String> = listOf(sortKey(json))
 
