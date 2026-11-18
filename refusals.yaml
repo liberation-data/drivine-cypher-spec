@@ -3492,6 +3492,34 @@ cases:
       - cypher: "MATCH (a), (b), (c) RETURN size(()-[:REL*0..2]->()<-[:REL]-(:A {num: 5}))"
         error: "size() takes a list or a text, not a pattern, as in Neo4j: COUNT { … } counts a pattern's matches."
 
+  - name: "size() of a map"
+    description: "size() of a map written, a map projection or a variable a WITH binds to a map is refused, as Neo4j 2026.10.1 refuses it when it compiles the statement (22G03, \"Type mismatch: expected String, Vector or List<T> but was Map\"). The SQL stores gave null (#364). So is a map projection a WITH binds, and a map an UNWIND gives of a list written of maps alone, over no rows too, which Neo4j types a map for size() as it compiles, though it fails a write of either only as each row runs. A map given as a parameter, or one Neo4j meets only as the statement runs, is not refused here."
+    steps:
+      - cypher: "RETURN size({a: 1, b: 2})"
+        error: "size() takes a list or a text, not a map, as in Neo4j."
+      - cypher: "WITH {a: 1, b: 2} AS m RETURN size(m)"
+        error: "size() takes a list or a text, not a map, as in Neo4j."
+      - cypher: "MATCH (n) WITH n, {a: 1} AS m SET n.p = size(m)"
+        error: "size() takes a list or a text, not a map, as in Neo4j."
+      - cypher: "MATCH (n) WHERE size(n {.a}) > 0 RETURN n"
+        error: "size() takes a list or a text, not a map, as in Neo4j."
+      - cypher: "UNWIND [{a: 1}, {b: 2}] AS m RETURN size(m)"
+        error: "size() takes a list or a text, not a map, as in Neo4j."
+      - cypher: "MATCH (x:Nothing) UNWIND [{a: 1}] AS m RETURN size(m)"
+        error: "size() takes a list or a text, not a map, as in Neo4j."
+      - cypher: "MATCH (x:Nothing) WITH x {.a} AS m RETURN size(m)"
+        error: "size() takes a list or a text, not a map, as in Neo4j."
+
+  - name: "size() of a node or a relationship"
+    description: "size() of a node or a relationship is refused, as Neo4j 2026.10.1 refuses it when it compiles the statement, over no rows too (22G03, \"Invalid input 'NODE' for argument at index 0 of function size()\"). The SQL stores gave null (#364). size() of a variable-length relationship's list is its length."
+    steps:
+      - cypher: "MATCH (n) RETURN size(n)"
+        error: "size() takes a list or a text, not a node, as in Neo4j."
+      - cypher: "MATCH (n) WITH n AS m RETURN size(m)"
+        error: "size() takes a list or a text, not a node, as in Neo4j."
+      - cypher: "MATCH (x:Nothing)-[r]->() RETURN size(r)"
+        error: "size() takes a list or a text, not a relationship, as in Neo4j."
+
   - name: "Pattern expression with a new variable"
     description: "A pattern used as an expression, which tests for a match and binds nothing, is refused where it names a node or relationship variable not bound before it, as Neo4j (its 42N29) refuses it. In a property a CREATE or a MERGE makes, a node's or a relationship's, a variable the same clause makes is not bound before it, as Neo4j 2026.10.1 has it (liberation-data/drivine4j#814): compiled, it was read as the node made."
     steps:
