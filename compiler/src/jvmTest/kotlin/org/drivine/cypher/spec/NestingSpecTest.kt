@@ -13,7 +13,9 @@ import kotlin.test.assertTrue
  * `nesting.yaml`'s cells as the libraries run them (liberation-data/drivine4j#681): each cell the SQL stores refuse is a
  * step of `refusals.yaml` with the message the cell pins, and each Neo4j gives rows for a step of `queries.yaml` with its
  * rows, run on the SQL stores too where they compile it, over that file's graph, which the table's statements were run
- * over. `NestingTableTest` holds the compiler to the table on every target.
+ * over. A cell whose Neo4j answer differs by environment says `neo4j: "not pinned"` (liberation-data/drivine-cypher-spec#366):
+ * the SQL stores' refusal of it stays a step of `refusals.yaml`, and it is no step of `queries.yaml`. `NestingTableTest`
+ * holds the compiler to the table on every target.
  */
 class NestingSpecTest {
 
@@ -51,6 +53,15 @@ class NestingSpecTest {
                 // On the SQL stores too, but where they refuse it.
                 assertEquals(if (cell.error == null) listOf("neo4j", "sql") else listOf("neo4j"), it.only, cell.cypher)
             }
+        }
+    }
+
+    @Test
+    fun `each cell whose Neo4j answer is not pinned is refused on the SQL stores, says why, and is no step of queries yaml`() {
+        val steps = CypherSpec.load("queries.yaml").cases.flatMap { it.steps }.map { it.cypher }.toSet()
+        cells.filter { it.neo4j == "not pinned" }.forEach { cell ->
+            assertTrue(cell.error != null && cell.note != null && cell.rows == null, "${cell.cypher} pins no refusal, no note, or rows")
+            assertTrue(cell.cypher !in steps, "${cell.cypher} is a step of queries.yaml")
         }
     }
 

@@ -23,6 +23,9 @@ import org.drivine.schema.VectorIndexSpec
  */
 @DrivineInternalApi
 class Neo4jSchema(private val elementIdFunction: String = "elementId") : StoreSchema {
+    /** Neo4j lists a uniqueness constraint's own index among its range indexes, under the constraint's name (#325). */
+    override val constraintIndexesListedAsIndexes = true
+
 
     override val ddl: StoreDdl = Neo4jDdl
     override val supportsIfNotExists = true

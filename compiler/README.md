@@ -579,10 +579,13 @@ JSON entry, so TypeScript and Python run what drivine4j runs from the Kotlin typ
   - `hasIdIn` (`alias`, `key`, `parameter`, the SQL of a JSON array of each id's JSON text, `["\"a\"", "1"]`, and on
     SQLite `nodes`, the node table, and `labels`);
   - `keyText`, a temporal id's tag read as its text, as a write plan keys a node; `property`; and `hasProperty`, each with
-    `alias` and `key`.
+    `alias` and `key`;
+  - `hasLabels` (`alias`, `labels`, a list of the node's labels), the test a lookup by its id makes of each label beside
+    `hasId`: on Postgres and SQLite each as the label's partial index is made, so the labelled index answers the lookup, and
+    on Oracle each by its text, as its index over the id is no label's; `1 = 1` for no labels.
 
   Each key is given as the node holds it, escaped where it begins with `$`; the stamp's key is its column, and is refused as an
-  id. `json` and `parameter` are written into the SQL as given, in the host's own placeholder; on Oracle and SQLite `json` is
+  id. Each label is given as the node holds it, and is written into the SQL escaped, a quote in it too. `json` and `parameter` are written into the SQL as given, in the host's own placeholder; on Oracle and SQLite `json` is
   written more than once, so a host binds it by name (`:id`, not `?`).
 
   ```json

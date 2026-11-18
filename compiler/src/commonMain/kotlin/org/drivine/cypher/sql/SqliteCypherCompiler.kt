@@ -94,6 +94,9 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
             noLength + "ELSE $json END"
     }
 
+    /** SQLite's `CASE` takes a value of any type in each branch. */
+    override fun failed(failure: String) = failure
+
     /** SQLite has no failing expression of its own: Drivine's function fails with the text. */
     override fun failure(message: String, value: String) = "${SqliteFunctions.FAIL}(${literal("$message ")} || $value)"
 
@@ -104,6 +107,8 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
     private fun kindOf(json: String) =
         "(CASE json_type($json) WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'text' THEN 'string' WHEN 'true' THEN 'boolean' " +
             "WHEN 'false' THEN 'boolean' WHEN 'array' THEN 'array' WHEN 'object' THEN 'object' WHEN 'null' THEN 'null' END)"
+
+    override fun isTruth(json: String) = "json_type($json) IN ('true', 'false')"
 
     override fun isJsonNull(json: String) = "COALESCE(json_type($json), 'null') = 'null'"
 
@@ -186,8 +191,25 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
             "${SqliteSql.indexClass(props, path)} = '${kind.function}' AND ${SqliteSql.indexKey(props, path)} = ${if (binds(key)) "(SELECT $key)" else key}"
         }
 
-    /** As [indexedEquality], for a value of any kind: its class and key are worked out as the index's are, the same for every kind. */
-    override fun indexedEqualityOfAny(property: String, value: String, of: IndexedProperty?, scalar: Boolean): String? = indexedEquality(property, value, of)
+    /**
+     * As [indexedEquality], for a value of any kind: its class and key are worked out as the index's are. A list's key is its
+     * JSON text, which differs where its items don't (`[1.0,2.5]` and `[1,2.5]`, or a temporal item's tag written with its key
+     * and without), so a list is let through by its class alone, to be compared as JSON (liberation-data/drivine-cypher-spec#354).
+     * The key is tested as a range, from the value's key to itself, or for a list from the empty text to the empty blob, which
+     * holds every text: SQLite reads the index by a range as by an equality, where an `OR` beside the key had it read every node
+     * of the label for each row. Where the value is known to be no list or map ([scalar]) the key is compared as it is.
+     */
+    override fun indexedEqualityOfAny(property: String, value: String, of: IndexedProperty?, scalar: Boolean): String? {
+        if (scalar) return indexedEquality(property, value, of)
+        return SqlText.arrowRead(property)?.let { (props, path) ->
+            val held = SqliteSql.indexKey(props, path)
+            shared(value) { (x) ->
+                val list = "json_type($x) = 'array'"
+                "${SqliteSql.indexClass(props, path)} = ${SqliteSql.valueClass(x)} AND $held >= CASE WHEN $list THEN '' ELSE ${SqliteSql.valueKey(x)} END " +
+                    "AND $held <= CASE WHEN $list THEN X'' ELSE ${SqliteSql.valueKey(x)} END"
+            }
+        }
+    }
 
     /** SQLite compares an `INTEGER PRIMARY KEY` with a float by its value, so `5.0` reads the row whose key is `5`. */
     override fun keyValue(json: String) = shared(json) { (x) -> "(CASE WHEN json_type($x) IN ('integer', 'real') THEN $x ->> '\$' END)" }

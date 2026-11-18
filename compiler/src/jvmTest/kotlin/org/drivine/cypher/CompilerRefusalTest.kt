@@ -951,4 +951,27 @@ class CompilerRefusalTest {
             refused("MATCH (p:Person) RETURN toString(collect(p.born) + collect(p.name))"),
         )
     }
+
+    @Test
+    fun `a value read of a map or a list, a list bare, and a map set as properties, are no map written as a property`() {
+        // drivine4j#561: each stored by Neo4j 2026.10.1, as captured; refusals.yaml's "Map or list of lists written as a property"
+        // pins what it refuses. A map given as a parameter is left to the store (#820).
+        listOf(PostgresCypherCompiler("g"), OracleCypherCompiler("g"), SqliteCypherCompiler("g")).forEach { compiler ->
+            listOf(
+                "MATCH (n) WITH n, {a: 1} AS m SET n.p = keys(m)",
+                "MATCH (n) WITH n, {a: 1} AS m SET n.p = [m.a, m.a]",
+                "MATCH (n) WITH n, [1, 2] AS l SET n.p = l",
+                "MATCH (n) WITH n, [1, 2] AS l SET n.p = [x IN l | x]",
+                "MATCH (n) SET n.p = CASE WHEN n.x > 1 THEN 1 ELSE 2 END",
+                "MATCH (n) SET n.p = [date('2024-01-02'), date('2024-01-03')]",
+                "MATCH (n) WITH n, {a: 1} AS m SET n += m",
+                "MATCH (n) WITH n, {a: 1} AS m SET n = m",
+                "MATCH (n) UNWIND [1, 2] AS m SET n.p = [m]",
+                "MATCH (n) WITH n, {a: 1} AS m FOREACH (m IN [1] | SET n.p = m)",
+                "MATCH (n) SET n.p = \$m",
+            ).forEach { cypher ->
+                runCatching { compiler.compile(cypher, mapOf("m" to mapOf("a" to 1))) }.exceptionOrNull()?.let { throw AssertionError("${compiler::class.simpleName}: $cypher: ${it.message}", it) }
+            }
+        }
+    }
 }

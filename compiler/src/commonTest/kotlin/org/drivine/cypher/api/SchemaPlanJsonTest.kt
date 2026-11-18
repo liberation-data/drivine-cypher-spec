@@ -21,6 +21,8 @@ import org.drivine.cypher.store.schema.Cause
 import org.drivine.cypher.store.schema.StoreError
 import org.drivine.schema.EnsureResult
 import org.drivine.schema.RangeIndexSpec
+import org.drivine.schema.SchemaItemInfo
+import org.drivine.schema.SchemaItemKind
 import org.drivine.schema.SchemaMode
 import org.drivine.schema.SchemaPolicy
 import org.drivine.schema.UniquenessConstraintSpec
@@ -134,6 +136,13 @@ class SchemaPlanJsonTest {
             "\"policy\": {\"mode\": \"FAIL_FAST\", \"recreateOnDrift\": false, \"recreateOnStartup\": false, \"violationSampleSize\": 10, \"replaceBlockingIndex\": false}, \"buildTimeoutMillis\": 60000}, \"now\": 1700000000000}}"
         val got = CypherJson.readTree(CompileJson.compile(request))
         assertTrue(got["run"] != null || got["done"] != null, "on $target: $got")
+    }
+
+    @Test
+    fun anItemsOwningConstraintIsWritten() {
+        // A host reads a range index left to, or served by, a uniqueness constraint as the constraint's (#325).
+        val item = SchemaItemInfo(SchemaItemKind.RANGE_INDEX, "Person", listOf("name"), name = "Person_name_unique", owningConstraint = "Person_name_unique")
+        assertEquals("Person_name_unique", PlanJson.item(item)?.get("owningConstraint"), "on $target")
     }
 
     @Test
