@@ -3476,7 +3476,8 @@ abstract class SqlCypherCompiler(
          * [evaluate] of [written] into [VALUE], [value] the JSON it writes, a property's or with [entries] a map of properties,
          * and the statement failed where that is or has a list that holds null ([refuseNullItems]), or where the statement gives
          * it as no property Neo4j stores ([unstorableGiven]), and [target], the id of the node or relationship a `SET` writes to,
-         * is not null.
+         * is not null. A list of whole and fractional numbers the statement gives in it is then widened in [VALUE], each of its
+         * numbers a float, as Neo4j stores one ([widenedGiven], #377).
          */
         private fun evaluateWritten(written: Expression?, entries: Boolean, target: String? = null, value: (Map<String, Value>) -> String) {
             var tests: List<String>? = emptyList()
@@ -3499,7 +3500,8 @@ abstract class SqlCypherCompiler(
          * Where the value [written] gives in [scope], a property's or with [entries] a map of properties, may be a list of numbers
          * that holds a float and a whole number, which Neo4j stores with each a float (#377), and the statement gives it: written,
          * as a parameter, or as an item of a list given ([givenRows]); the keys of the map that may hold one, with [entries], or
-         * none for a property's; null where it gives none. A list worked out as it runs, as `[1, n.x]`, is stored as it is (#380).
+         * the one key `""` for a property's; null where it gives none. A list worked out as it runs, as `[1, n.x]`, is stored as
+         * it is (#380).
          * A value given only to be read is not widened: `RETURN [1, 2.5]` gives `[1, 2.5]`, as in Neo4j.
          */
         private fun widenedGiven(written: Expression?, scope: Map<String, Value>, entries: Boolean): Set<String>? {

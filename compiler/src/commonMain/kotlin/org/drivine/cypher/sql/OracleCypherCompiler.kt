@@ -187,7 +187,8 @@ class OracleCypherCompiler(
      * statement that writes binds all its parameters as one text, and reads as extended JSON only those of them with such
      * a double in them: see [propertyOf], and [parametersText] for one where a parameter holds such a key. The floats are
      * written as the store layout holds them ([StoreValues.text], which a library's save writes too, and which refuses a
-     * value keyed as extended JSON's where this writes it as JSON).
+     * value keyed as extended JSON's where this writes it as JSON), but not widened: a list the statement stores is widened
+     * as it writes it (#377).
      */
     override fun parameterText(value: Any?): String {
         val tree = CypherJson.valueToTree(value, encoder)

@@ -40,7 +40,8 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
     override fun parameterJson(marker: String, text: String?) = "CAST($marker AS jsonb)"
 
     /**
-     * [value] as JSON text, as the store layout holds it ([StoreValues.text], which a library's save writes too): each float
+     * [value] as JSON text, as the store layout holds it ([StoreValues.text], which a library's save writes too, but not widened:
+     * a list the statement stores is widened as it writes it, #377): each float
      * in it that is a whole number written out in full with a fraction, `10000000.0`, which `jsonb` keeps a float. NaN and
      * the infinities are the numbers that stand for them (see the class), which a statement that writes refuses first.
      */

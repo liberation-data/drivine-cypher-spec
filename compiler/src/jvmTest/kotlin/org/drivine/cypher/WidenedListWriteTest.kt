@@ -75,6 +75,7 @@ class WidenedListWriteTest {
             "MATCH (n:A) SET n.f = [1, \$x]" to mapOf("x" to 2),
             "CREATE (n:A \$props)" to mapOf("props" to mapOf("f" to listOf(1, 2), "g" to 2.5)),
             "UNWIND \$rows AS row CREATE (:A {f: row.f})" to mapOf("rows" to listOf(mapOf("f" to listOf(1, 2)))),
+            "UNWIND \$rows AS row MATCH (n:A {id: row.id}) SET n = row" to mapOf("rows" to listOf(mapOf("id" to 1, "f" to listOf(1, 2), "g" to 2.5))),
             // Read, not stored: Neo4j gives [1, 2.5].
             "RETURN [1, 2.5]" to emptyMap(),
             "MATCH (n:A) RETURN n, \$l" to mapOf("l" to mixed),

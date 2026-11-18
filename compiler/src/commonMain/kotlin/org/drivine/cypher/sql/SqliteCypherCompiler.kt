@@ -53,7 +53,8 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
 
     /**
      * As JSON, NaN and the infinities as the class writes them: as the store layout holds a value ([StoreValues.text], which a
-     * library's save writes too), where a statement that writes refuses NaN first.
+     * library's save writes too, but not widened: a list the statement stores is widened as it writes it, #377), where a
+     * statement that writes refuses NaN first.
      */
     override fun parameterText(value: Any?): String = StoreValues.sqlite(value, encoder)
 
