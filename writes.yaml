@@ -755,6 +755,19 @@ cases:
         cypher: "MATCH (n:CyWrite) MERGE (m:CyWrite {id: n.id}) ON MATCH SET m.f = n.id RETURN [n.id, m.f] ORDER BY n.id"
         rows: [["a", "a"], ["b", "b"], ["c", "c"], ["d", "d"]]
 
+  - name: "A value read of a map, or an empty list, written as a property"
+    description: "A key read of a map written or bound by a WITH, and an empty list, are stored as a property, as Neo4j 2026.10.1 stores them, though a map or a list of lists is refused (see refusals.yaml, Map or list of lists written as a property; drivine4j#561)."
+    steps:
+      - only: [neo4j, sql]
+        cypher: "CREATE (x:CyMade {p: {a: 1}.a}) RETURN x.p"
+        rows: [1]
+      - only: [neo4j, sql]
+        cypher: "WITH {a: 1} AS m CREATE (x:CyMade {p: m.a}) RETURN x.p"
+        rows: [1]
+      - only: [neo4j, sql]
+        cypher: "CREATE (x:CyMade {p: []}) RETURN x.p"
+        rows: [[]]
+
   - name: "A value worked out of a node, a relationship or a path, set as a property"
     description: "What Neo4j 2026.10.1 stores of a node, a relationship or a path written as a property: a property of it, in a list or a map written, what a function or a test gives of it, and a list comprehension mapping each to a property, by SET and in what a CREATE makes. The node, the relationship or the path itself is refused (see refusals.yaml, \"Node or relationship set as a property\"), and these are not (drivine4j#814)."
     steps:
