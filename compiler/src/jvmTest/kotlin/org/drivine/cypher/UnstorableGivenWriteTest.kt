@@ -48,6 +48,8 @@ class UnstorableGivenWriteTest {
             Triple("UNWIND \$rows AS row CREATE (n:A) SET n += row", rows, "a map"),
             Triple("UNWIND \$rows AS row CREATE (:A {p: [row.m]})", rows, "a list of maps or lists"),
             Triple("UNWIND \$ids AS id CREATE (:A {p: [id, 'x']})", mapOf("ids" to listOf(1, 2)), "a list of more than one kind"),
+            // Of rows whose item is of a kind each, a truth value beside it makes each row's list of more than one.
+            Triple("UNWIND \$rows AS row CREATE (:A {p: [row.a, true]})", mapOf("rows" to listOf(mapOf("a" to 1), mapOf("a" to "x"))), "a list of more than one kind"),
         )
         for (compiler in compilers()) for ((cypher, parameters, what) in given) {
             val sql = sql(compiler, cypher, parameters)
@@ -67,6 +69,9 @@ class UnstorableGivenWriteTest {
             "MATCH (n:A) SET n = \$props" to mapOf("props" to mapOf("id" to 1, "tags" to listOf("a", "b"), "none" to null)),
             "UNWIND \$rows AS row CREATE (n:A) SET n += row" to mapOf("rows" to listOf(mapOf("a" to 1), mapOf("a" to "x"))),
             "UNWIND \$rows AS row CREATE (:A {p: [row.a, 2]})" to mapOf("rows" to listOf(mapOf("a" to 1), mapOf("a" to 1.5))),
+            // Each row's list is of one kind, though the rows are of different kinds: [1], then ['x'].
+            "UNWIND \$rows AS row CREATE (:A {p: [row.a]})" to mapOf("rows" to listOf(mapOf("a" to 1), mapOf("a" to "x"))),
+            "UNWIND \$rows AS row CREATE (:A {p: [row.a, row.b]})" to mapOf("rows" to listOf(mapOf("a" to 1, "b" to 2), mapOf("a" to "x", "b" to "y"))),
             // A map given whose value is read by key is that value.
             "MATCH (n:A) SET n.p = \$m.a" to mapOf("m" to mapOf("a" to 1)),
         )

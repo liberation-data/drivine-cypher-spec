@@ -3513,9 +3513,12 @@ abstract class SqlCypherCompiler(
             !entries && written is Expression.ListLiteral -> {
                 // Each item as the JSON each row gives it, where every item is given: a literal, a parameter or an unwound item.
                 val items = written.items.map { item -> givenItems(item, scope) ?: return null }
+                // The kinds each item is of, over the rows: two items of no kind in common are of two in every row that holds
+                // both, which one item of two kinds over the rows is not, as `[row.a]` of rows `{a: 1}` and `{a: 'x'}`, stored.
+                val kinds = items.map { rows -> rows.mapNotNull { it?.let(::itemKind) }.toSet() }.filter { it.isNotEmpty() }
                 when {
                     items.any { rows -> rows.any { it != null && it.isContainerNode && !ValueLayout.isTag(it) } } -> "a list of maps or lists"
-                    items.flatten().mapNotNull { it?.let(::itemKind) }.distinct().size > 1 -> "a list of more than one kind"
+                    kinds.withIndex().any { (i, a) -> kinds.drop(i + 1).any { b -> a.none(b::contains) } } -> "a list of more than one kind"
                     else -> null
                 }
             }
@@ -3653,7 +3656,7 @@ abstract class SqlCypherCompiler(
                     // A map written, or a list written that holds one or a list, is no property, as Neo4j refuses it, and as drivine's saves do.
                     val written = item.value
                     if (written is Expression.MapLiteral || written is Expression.ListLiteral && written.items.any { it is Expression.MapLiteral || it is Expression.ListLiteral }) {
-                        throw CompilerException("A property is a number, a text, a truth value, a temporal value or a list of them, not ${if (written is Expression.MapLiteral) "a map" else "a list of maps or lists"}, as in Neo4j.")
+                        throw CompilerException(notProperty(if (written is Expression.MapLiteral) "a map" else "a list of maps or lists"))
                     }
                     evaluateWritten(item.value, entries = false, target = row) { scope -> comparable(json(expression(item.value, scope))) }
                     if (table == nodes && item.key == Stamps.PROPERTY) execute("UPDATE $nodes SET stamp = ${text(VALUE)} WHERE nid = $row")
