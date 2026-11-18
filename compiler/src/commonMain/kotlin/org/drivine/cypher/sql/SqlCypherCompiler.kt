@@ -3489,6 +3489,7 @@ abstract class SqlCypherCompiler(
          * step; none where the statement writes none, which then costs nothing; null where it surely writes one. Where a `SET`
          * writes to [target], it fails only where that is not null: Neo4j sets nothing on null, and works out no value for it
          * (openCypher's Set1 [8]). The id is read in the `SELECT`, as the `UPDATE` reads it, not in Oracle's PL/SQL `IF`.
+         * [message] is what it fails with: [NULL_ITEM], or [unstorableGiven]'s refusal, with no [tests], for a value given.
          */
         private fun refuseNullItems(tests: List<String>?, target: String?, message: String = NULL_ITEM) {
             if (tests == null && target == null) return step(ProcedureStep.Raise(message))

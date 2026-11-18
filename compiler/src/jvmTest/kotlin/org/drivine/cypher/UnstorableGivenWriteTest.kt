@@ -74,9 +74,24 @@ class UnstorableGivenWriteTest {
             "UNWIND \$rows AS row CREATE (:A {p: [row.a, row.b]})" to mapOf("rows" to listOf(mapOf("a" to 1, "b" to 2), mapOf("a" to "x", "b" to "y"))),
             // A map given whose value is read by key is that value.
             "MATCH (n:A) SET n.p = \$m.a" to mapOf("m" to mapOf("a" to 1)),
+            // A list with an item worked out as it runs is left to the store.
+            "MATCH (n:A) SET n.p = [1, n.id]" to emptyMap(),
         )
         for (compiler in compilers()) for ((cypher, parameters) in stored) {
             val sql = sql(compiler, cypher, parameters)
+            assertFalse(refusals.any(sql::contains), "$cypher\n$sql")
+        }
+    }
+
+    @Test
+    fun `a list given that holds null is refused for the null, not for its kinds`() {
+        val nullItem = refusal("a list that holds null")
+        for (compiler in compilers()) for ((cypher, parameters) in listOf(
+            "MATCH (n:A) SET n.p = [1, \$x]" to mapOf("x" to null),
+            "UNWIND \$rows AS row CREATE (:A {p: [row.a, 'x']})" to mapOf("rows" to listOf(emptyMap<String, Any?>())),
+        )) {
+            val sql = sql(compiler, cypher, parameters)
+            assertTrue(sql.contains(nullItem), "$cypher\n$sql")
             assertFalse(refusals.any(sql::contains), "$cypher\n$sql")
         }
     }
