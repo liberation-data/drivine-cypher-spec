@@ -179,7 +179,9 @@ object LayoutMigration {
                 values[name] = was
             }
         }
-        return Rewrite(StoreValues.text(values, store), changes, invalid)
+        // A list stored already of whole and fractional numbers is kept as it is: widened (#377), it would be so in a row the
+        // migration writes for another change, and not in one it leaves.
+        return Rewrite(StoreValues.text(values, store, widen = false), changes, invalid)
     }
 
     /**

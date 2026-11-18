@@ -1455,6 +1455,21 @@ class OracleCypherCompiler(
         "EXISTS (${predicateQuery("SELECT 1 FROM (SELECT JSON_SERIALIZE($json RETURNING CLOB) AS t FROM DUAL) ni " +
             "WHERE DBMS_LOB.SUBSTR(ni.t, 1, 1) = '${if (entries) "{" else "["}' AND ${serializedNulls("ni.t", "[[,]null[],]")}")})"
 
+    /**
+     * A list's numbers each a float, where they are all numbers and one is a float (a `double`): each `number` made a binary
+     * double, as a float is held. A map of properties has each of its values at [keys] so, set where it has one.
+     */
+    override fun widenedNumbers(json: String, entries: Boolean, keys: Set<String>): String {
+        fun list(x: String) = "CASE WHEN JSON_VALUE($x, '\$.type()') = 'array' AND JSON_EXISTS($x, '\$[*]?(@.type() == \"double\" || @.type() == \"float\")') " +
+            "AND NOT JSON_EXISTS($x, '\$[*]?(@.type() != \"number\" && @.type() != \"double\" && @.type() != \"float\")') " +
+            "THEN (SELECT JSON_ARRAYAGG(CASE WHEN wi.t = 'number' THEN JSON_SCALAR(TO_BINARY_DOUBLE(wi.n)) ELSE wi.j END ORDER BY wi.o RETURNING JSON) " +
+            "FROM JSON_TABLE($x, '\$[*]' COLUMNS (o FOR ORDINALITY, t VARCHAR2(16) PATH '\$.type()', n NUMBER PATH '\$', j JSON PATH '\$')) wi) ELSE $x END"
+        return if (entries) "JSON_TRANSFORM($json, ${keys.joinToString(", ") { key ->
+            "SET ${OracleSql.path(key)} = ${list("JSON_QUERY($json, ${OracleSql.path(key)} RETURNING JSON)")} IGNORE ON MISSING"
+        }} RETURNING JSON)"
+        else list(json)
+    }
+
     /** Whether JSON's text of [json], its texts and keys taken out, matches [pattern]: see [holdsNull]. */
     private fun serializedHolds(json: String, pattern: String): String {
         val short = "JSON_SERIALIZE($json RETURNING VARCHAR2(4000) NULL ON ERROR)"

@@ -251,6 +251,18 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
      * the two are lists or maps both. A place or a key that one has and the other has not pairs a value with SQL's null. Each
      * one's items and keys are arrays unnested, as [listKey]'s are, so the planner's estimate brings in no JIT.
      */
+    /**
+     * A list's numbers each a float, where they are all numbers and one is a float: `jsonb` keeps a number's text, so a float
+     * is one written with a fraction or an exponent (as [StoreValues.postgres] writes each), and a whole number is made one by
+     * its text with `.0`, as a float that is a whole number is held. A map of properties has each of its values so.
+     */
+    override fun widenedNumbers(json: String, entries: Boolean, keys: Set<String>): String =
+        if (entries) "CASE WHEN jsonb_typeof($json) = 'object' THEN (SELECT COALESCE(jsonb_object_agg(we.key, ${widenedNumbers("we.value", false, keys)}), '{}'::jsonb) FROM jsonb_each($json) we) ELSE $json END"
+        else "CASE WHEN jsonb_typeof($json) = 'array' AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements($json) wn WHERE jsonb_typeof(wn) <> 'number') " +
+            "AND EXISTS (SELECT 1 FROM jsonb_array_elements($json) wf WHERE CAST(wf AS text) ~ '[.eE]') " +
+            "THEN (SELECT jsonb_agg(CASE WHEN CAST(wi.v AS text) ~ '[.eE]' THEN wi.v ELSE to_jsonb(CAST(CAST(wi.v AS text) || '.0' AS numeric)) END ORDER BY wi.n) " +
+            "FROM jsonb_array_elements($json) WITH ORDINALITY wi (v, n)) ELSE $json END"
+
     override fun nullsEqual(x: String, y: String, equals: (String, String) -> String): String {
         fun entries(json: String, alias: String) =
             "SELECT CAST(${alias}e.n AS text) AS k, ${alias}e.v FROM unnest(ARRAY(SELECT jsonb_array_elements(CASE WHEN jsonb_typeof($json) = 'array' THEN $json END))) WITH ORDINALITY ${alias}e (v, n) " +

@@ -38,12 +38,14 @@ import org.drivine.cypher.sql.formatted
 object StoreValues {
 
     /**
-     * [value] as [store]'s layout holds it, its JSON text: exactly what a compiled statement that writes binds it as. A value
+     * [value] as [store]'s layout holds it, its JSON text: exactly what a compiled statement that writes stores of it, each
+     * list of numbers that holds a float and a whole number with each a float, as Neo4j stores one ([widened], #377). A value
      * the store can't hold is refused, with a [CompilerException] whose message is the one a statement that writes is
-     * refused with. [encoder] is asked first of each value, as a compiler's is (see [CypherEncoder]).
+     * refused with. [encoder] is asked first of each value, as a compiler's is (see [CypherEncoder]). Not [widen]ed, it is
+     * what a statement binds the value as where it reads it, and what a layout migration keeps of a value stored already.
      */
-    fun text(value: Any?, store: Store, encoder: CypherEncoder? = null): String {
-        val tree = CypherJson.valueToTree(value, encoder)
+    fun text(value: Any?, store: Store, encoder: CypherEncoder? = null, widen: Boolean = true): String {
+        val tree = CypherJson.valueToTree(value, encoder).let { if (widen) widened(it) else it }
         nonFiniteRefusal(store, tree)?.let { throw CompilerException(it) }
         return when (store) {
             Store.POSTGRES -> postgres(tree, encoder)
@@ -103,6 +105,22 @@ object StoreValues {
         is FloatArray -> value.any { nonFinite(it.toDouble()) }
         else -> false
     }
+
+    /**
+     * [node] with each list in it, at any depth, of numbers that holds a float and a whole number, each of its numbers a float,
+     * as Neo4j stores such a list (#377): `[1, 2.5]` is `[1.0, 2.5]`. A value saved is held as Neo4j holds it, and as a
+     * statement that writes one holds it. A list of whole numbers alone stays one. A new tree where one is widened.
+     */
+    internal fun widened(node: JsonNode): JsonNode = when {
+        node is ArrayNode && mixedNumbers(node) -> ArrayNode().apply { node.forEach { add(if (it.isIntegralNumber) DoubleNode(it.doubleValue()) else it) } }
+        node is ArrayNode && node.any { it.isContainerNode } -> ArrayNode().apply { node.forEach { add(widened(it)) } }
+        node is ObjectNode && node.any { it.isContainerNode } -> ObjectNode().apply { node.properties().forEach { (key, value) -> set<JsonNode>(key, widened(value)) } }
+        else -> node
+    }
+
+    /** Whether [node] is a list of numbers that holds a float and a whole number: see [widened]. */
+    internal fun mixedNumbers(node: JsonNode): Boolean =
+        node.isArray && node.all { it.isNumber } && node.any { it.isDouble || it.isFloat } && node.any { it.isIntegralNumber }
 
     /**
      * [value] as Postgres's JSON text, each float in it that is a whole number written out in full with a fraction, `10000000.0`:

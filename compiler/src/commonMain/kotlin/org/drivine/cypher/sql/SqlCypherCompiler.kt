@@ -3,6 +3,7 @@ package org.drivine.cypher.sql
 import org.drivine.cypher.json.JsonNode
 import org.drivine.cypher.json.JsonNodeFactory
 import org.drivine.cypher.json.NullNode
+import org.drivine.cypher.json.ObjectNode
 import org.drivine.DrivineInternalApi
 import org.drivine.cypher.CompilerException
 import org.drivine.cypher.CypherReader
@@ -1098,6 +1099,14 @@ abstract class SqlCypherCompiler(
      * list itself counts, not a null value, which removes a property, nor a temporal value, which is a tagged map.
      */
     protected abstract fun nullItem(json: String, entries: Boolean): String
+
+    /**
+     * The JSON [json], a property's value a write works out, with each number of it a float where it is a list of numbers
+     * that holds a float, as Neo4j stores such a list (#377): `[1, 2.5]` is `[1.0, 2.5]`. Any other value is as it was. With
+     * [entries], a map of properties, each of its values so, of those at [keys] at least: a key it lacks stays lacking. Called
+     * only where the statement gives such a list ([SqlCypherCompiler.Writer]'s `widenedGiven`), so a write of none costs nothing.
+     */
+    protected abstract fun widenedNumbers(json: String, entries: Boolean, keys: Set<String>): String
 
     /**
      * Whether the JSON values [x] and [y], neither of them null, are equal, as Cypher compares values that may hold a null: item
@@ -3472,16 +3481,47 @@ abstract class SqlCypherCompiler(
         private fun evaluateWritten(written: Expression?, entries: Boolean, target: String? = null, value: (Map<String, Value>) -> String) {
             var tests: List<String>? = emptyList()
             var unstorable: String? = null
+            var widened: Set<String>? = null
             evaluate(VALUE, written) { scope ->
                 value(scope).also {
                     val carried = asCarried(scope)
                     tests = nullItemTests(written, carried, VALUE, entries)
                     unstorable = unstorableGiven(written, carried, entries)
+                    widened = widenedGiven(written, carried, entries)
                 }
             }
             unstorable?.let { refuseNullItems(null, target, notProperty(it)) }
             refuseNullItems(tests, target)
+            widened?.let { assign(VALUE, widenedNumbers(VALUE, entries, it)) }
         }
+
+        /**
+         * Where the value [written] gives in [scope], a property's or with [entries] a map of properties, may be a list of numbers
+         * that holds a float and a whole number, which Neo4j stores with each a float (#377), and the statement gives it: written,
+         * as a parameter, or as an item of a list given ([givenRows]); the keys of the map that may hold one, with [entries], or
+         * none for a property's; null where it gives none. A list worked out as it runs, as `[1, n.x]`, is stored as it is (#380).
+         * A value given only to be read is not widened: `RETURN [1, 2.5]` gives `[1, 2.5]`, as in Neo4j.
+         */
+        private fun widenedGiven(written: Expression?, scope: Map<String, Value>, entries: Boolean): Set<String>? {
+            fun keys(node: JsonNode?) = (node as? ObjectNode)?.properties()?.filter { (_, value) -> mixedNumbers(value) }?.map { it.key }.orEmpty()
+            val widened: Set<String> = when {
+                written == null -> emptySet()
+                entries && written is Expression.MapLiteral ->
+                    written.entries.filter { (_, value) -> widenedGiven(value, scope, entries = false) != null }.map { it.first }.toSet()
+                entries && written is Expression.Parameter -> keys(parameterTree(written.name)).toSet()
+                entries -> givenRows(written, scope)?.flatMap(::keys)?.toSet().orEmpty()
+                written is Expression.Parameter -> if (parameterTree(written.name)?.let(::mixedNumbers) == true) setOf("") else emptySet()
+                written is Expression.ListLiteral -> {
+                    val items = written.items.map { item -> givenItems(item, scope) ?: return null }.flatten().filterNotNull()
+                    if (items.any { it.isDouble || it.isFloat } && items.any { it.isIntegralNumber }) setOf("") else emptySet()
+                }
+                else -> if (givenRows(written, scope)?.any { it != null && mixedNumbers(it) } == true) setOf("") else emptySet()
+            }
+            return widened.takeIf { it.isNotEmpty() }
+        }
+
+        /** Whether the JSON [node] is a list of numbers that holds a float and a whole number: see [widenedGiven]. */
+        private fun mixedNumbers(node: JsonNode): Boolean = StoreValues.mixedNumbers(node)
 
         /**
          * Fails the statement where a property it writes is a list that holds null, as Neo4j fails it (drivine4j#557): for the row

@@ -212,7 +212,8 @@ class LayoutJsonTest {
         assertTrue(written["m"]!!["s"] == null && written["m"]!!["\$\$x"]!!["s"]!!.isTextual, "on $target: $written")
         // Postgres writes a whole float with its fraction, which jsonb keeps; Oracle every float as extended JSON's double.
         assertEquals("{\"value\":[10000000.0,1.5]}", CompileJson.compile("{\"write\": [1e7, 1.5], \"store\": \"postgres\"}"))
-        assertEquals("{\"value\":[{\"\$numberDouble\":\"1.0E7\"},2]}", CompileJson.compile("{\"write\": [1e7, 2], \"store\": \"oracle\"}"))
+        // A list of a float and a whole number is written with each a float, as Neo4j stores it (#377).
+        assertEquals("{\"value\":[{\"\$numberDouble\":\"1.0E7\"},{\"\$numberDouble\":\"2.0\"}]}", CompileJson.compile("{\"write\": [1e7, 2], \"store\": \"oracle\"}"))
         assertEquals("{\"value\":[1.0E7,9e999]}", CompileJson.compile("{\"write\": [1e7, {\"\$float\": \"Infinity\"}], \"store\": \"sqlite\"}"))
         assertTrue(answer("{\"write\": ${"[".repeat(65) + "]".repeat(65)}, \"store\": \"sqlite\"}")["error"] != null, "a value nested past MAX_DEPTH is refused")
     }
