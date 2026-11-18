@@ -486,7 +486,18 @@ class FragmentsTest {
         }
         assertEquals(mapOf("n" to listOf("Person")), oracle().condition("n.name = ${'$'}q AND n.age > 1", people, given).impliedLabels)
         assertEquals(emptyMap(), oracle().condition("n.name = ${'$'}q OR n.age > 1", people, given).impliedLabels)
+        assertEquals(emptyMap(), oracle().condition("NOT n.name = ${'$'}q", people, given).impliedLabels)
         assertEquals(emptyMap(), oracle().value("n.name = ${'$'}q", people, given).impliedLabels)
+        assertEquals(emptyMap(), oracle().order("n.name", false, people, given).impliedLabels)
+        // A subquery beside the equality, before or after it, leaves the equality the fragment's own condition's.
+        for (beside in listOf(
+            "NOT EXISTS { (n)-[:KNOWS]->() WHERE n.name = ${'$'}q } AND n.name = ${'$'}q",
+            "n.name = ${'$'}q AND NOT any(x IN [1] WHERE n.name = ${'$'}q)",
+        )) {
+            val fragment = oracle().condition(beside, people, given)
+            assertTrue(fragment.sql.contains("CASE WHEN JSON_EXISTS(people_.labels"), "$beside: ${fragment.sql}")
+            assertEquals(mapOf("n" to listOf("Person")), fragment.impliedLabels, beside)
+        }
         // A subquery's own node is still read through its label's index: the term is its row's, not the library's.
         val inner = oracle().condition("EXISTS { (n)-[:KNOWS]->(m:Person {name: ${'$'}q}) }", people, given)
         assertTrue(Regex("CASE WHEN JSON_EXISTS\\(n\\d+\\.labels").containsMatchIn(inner.sql), inner.sql)
