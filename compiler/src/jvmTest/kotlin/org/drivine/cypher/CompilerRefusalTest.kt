@@ -189,7 +189,15 @@ class CompilerRefusalTest {
                 "MATCH (x:Nothing) UNWIND [{a: 1}] AS m CREATE (:A {p: m})",
                 "UNWIND [{a: 1}] AS m RETURN m.a, keys(m)",
                 "MATCH ()-[r*1..2]->() RETURN size(r)",
+                "MATCH (x:Nothing) UNWIND [{a: 1}] AS m CREATE (:A {p: [m]})",
+                // An UNWIND of no maps, and a variable bound again as another value, are not refused as a map.
+                "UNWIND [] AS m RETURN size(m)",
+                "UNWIND [{a: 1}] AS m WITH 'xy' AS m RETURN size(m)",
+                "UNWIND [{a: 1}] AS m RETURN [m IN ['xy'] | size(m)]",
             ).forEach { compiler.compile(it) }
+            // A pattern over an UNWIND's map is not refused here as a map used as a node: only as the compiler refuses an unwound item there.
+            val matched = assertThrows<CompilerException> { compiler.compile("MATCH (x:Nothing) UNWIND [{a: 1}] AS m MATCH (m) RETURN m") }.message!!
+            assertEquals("m is not a node, and is used as one in a pattern.", matched)
             compiler.compile("RETURN size(\$m)", mapOf("m" to mapOf("a" to 1)))
         }
     }

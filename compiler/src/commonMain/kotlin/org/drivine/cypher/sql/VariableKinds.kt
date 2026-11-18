@@ -17,7 +17,8 @@ import org.drivine.cypher.ast.SetItem
  * with it, not for what the compiler does not take yet.
  *
  * Only a kind the statement fixes is known: a pattern's node, relationship, variable-length relationship or path, a value
- * written, and a variable a `WITH` passes on as it is. Any other value (a property, a parameter, an unwound item, a
+ * written, and a variable a `WITH` passes on as it is; and, for `size()` alone, an item an `UNWIND` gives of a list
+ * written of maps (see [Kind.UNWOUND_MAP]). Any other value (a property, a parameter, any other unwound item, a
  * function's result) may be of any kind, and is never refused here as being of another: what it is used as is left to
  * the compiler, as before.
  *
