@@ -4,6 +4,7 @@ import org.drivine.cypher.CompilerException
 import org.drivine.cypher.store.ddl.CatalogItem
 import org.drivine.cypher.store.ddl.DdlStatement
 import org.drivine.cypher.store.ddl.FalkorDbDdl
+import org.drivine.cypher.store.ddl.OracleDdl
 import org.drivine.cypher.store.ddl.SqlStoreDdl
 import org.drivine.cypher.store.ddl.UniqueRecreation
 import org.drivine.cypher.store.ddl.unsupportedTextIndex
@@ -79,6 +80,12 @@ internal class SchemaProgram(
 
     /** What finishes a recreate of an item cut off, or still running, for the line that says it is kept as it is: as [remake]. */
     private var finish = "Call recreate() to finish it."
+
+    /**
+     * Whether the store has refused to build an index online in this plan ([StoreSchema.isOnlineRefused]): each build
+     * after is run as one that blocks writes, with no try online first, and it is said once.
+     */
+    private var onlineRefused = false
 
     /** The names a mismatch has been said of: each once a plan, though a recreate after it reads it again. */
     private val mismatchesSaid = mutableSetOf<String>()
@@ -573,9 +580,11 @@ internal class SchemaProgram(
             // only the properties missing.
             val related = items.firstOrNull { it.kind == spec.kind && it.label == spec.label }
             warnUnsupportedTuning(spec)
-            ddl(store.ddl.createIndex(spec, related?.catalogItem))
+            val leftIncomplete = isLeftIncomplete(spec)
+            ddl(made(spec, related, leftIncomplete))
             val created = awaitBuilt(spec, findIndex(spec), build) ?: SchemaItemInfo.fromSpec(spec)
-            log(LogLevel.INFO, INDEX_MANAGER, "Created $engine ${spec.kind} on ${spec.label}${spec.properties}")
+            val completed = if (leftIncomplete) ": ${store.incompleteness(SchemaItemInfo.fromSpec(spec))}" else ""
+            log(LogLevel.INFO, INDEX_MANAGER, "${if (leftIncomplete) "Completed" else "Created"} $engine ${spec.kind} on ${spec.label}${spec.properties}$completed")
             logEffectiveVectorConfig(spec, created)
             return EnsureResult.Created(created)
         }
@@ -586,9 +595,9 @@ internal class SchemaProgram(
                 keepForm(spec, form)
                 return EnsureResult.AlreadyMatching(existing)
             }
-            ddl(store.ddl.createIndex(spec, existing.catalogItem))
+            ddl(store.ddl.completeIndex(spec, existing.catalogItem))
             val completed = awaitBuilt(spec, findIndex(spec), build) ?: SchemaItemInfo.fromSpec(spec)
-            log(LogLevel.INFO, INDEX_MANAGER, "Completed $engine ${spec.kind} on ${spec.label}${spec.properties}: it lacked part of what is made for it")
+            log(LogLevel.INFO, INDEX_MANAGER, "Completed $engine ${spec.kind} on ${spec.label}${spec.properties}: ${store.incompleteness(existing)}")
             return EnsureResult.Created(completed)
         }
         return if (store.matchesShape(existing, spec)) {
@@ -687,7 +696,7 @@ internal class SchemaProgram(
         // properties, which the create takes into account.
         val related = indexes(spec.kind).firstOrNull { it.kind == spec.kind && it.label == spec.label }
         warnUnsupportedTuning(spec)
-        ddl(store.ddl.createIndex(spec, related?.catalogItem))
+        ddl(made(spec, related, isLeftIncomplete(spec)))
         val created = awaitBuilt(spec, findIndex(spec), build) ?: SchemaItemInfo.fromSpec(spec)
         if (aliases.isNotEmpty()) alias(created, aliases)
         logEffectiveVectorConfig(spec, created)
@@ -698,6 +707,17 @@ internal class SchemaProgram(
         )
         return EnsureResult.Recreated(existing, created)
     }
+
+    /**
+     * Whether [spec]'s index stands incomplete under its name with no record listing it, as its listing last read shows
+     * ([StoreSchema.isLeftIncomplete]): a Postgres build cut short before its record was written.
+     */
+    private fun isLeftIncomplete(spec: IndexSpec): Boolean =
+        listings[store.ddl.listIndexesQuery(spec.kind)]?.let { store.isLeftIncomplete(spec, it) } == true
+
+    /** What makes [spec], [related] as [org.drivine.cypher.store.ddl.StoreDdl.createIndex] takes it: its create, or what completes it where [leftIncomplete]. */
+    private fun made(spec: IndexSpec, related: SchemaItemInfo?, leftIncomplete: Boolean): List<DdlStatement> =
+        if (leftIncomplete) store.ddl.completeIndex(spec, related?.catalogItem) else store.ddl.createIndex(spec, related?.catalogItem)
 
     /** A TEXT index is Neo4j's: refused elsewhere before anything is read or made, as one of another kind would look like it took effect. */
     private fun requireSupported(spec: IndexSpec) {
@@ -1372,17 +1392,47 @@ internal class SchemaProgram(
     private fun constraints(poll: Long? = null): List<SchemaItemInfo> =
         listingRows(store.ddl.listConstraintsQuery(), poll)?.let { store.parseConstraintRows(it) }.orEmpty()
 
-    /** Runs [statements], DDL, in order, stopping at the first the store refuses; the listings read before are read again after, whatever came of it. */
+    /**
+     * Runs [statements], DDL, in order, stopping at the first the store refuses; the listings read before are read again
+     * after, whatever came of it. A statement that builds or drops an index online, which the store refuses to do online
+     * here ([StoreSchema.isOnlineRefused]), is run again as one that blocks writes ([org.drivine.cypher.store.ddl.StoreDdl.blocking]), and so is each
+     * after it in the plan: said once, at WARN, as writes to the graph's nodes wait while each such index is built.
+     */
     private fun ddl(statements: List<DdlStatement>) {
         try {
             for (statement in statements) {
+                val blocking = store.ddl.blocking(statement)
+                if (onlineRefused && blocking != null) {
+                    execute(blocking)
+                    continue
+                }
                 val action = PlanAction.Execute(statement, purpose = Purpose.DDL)
                 val outcome = io.run(action)
-                if (outcome is PlanOutcome.Failed) throw RawFailure(outcome.error, action, io.lastRound)
+                if (outcome !is PlanOutcome.Failed) continue
+                if (blocking == null || !store.isOnlineRefused(outcome.error)) throw RawFailure(outcome.error, action, io.lastRound)
+                onlineRefused = true
+                log(
+                    LogLevel.WARN, INDEX_MANAGER,
+                    "$engine can't build an index online here (${messageOf(outcome.error)}), so it is built by a statement that blocks " +
+                        "writes to the graph's nodes until it is done. ${onlineAdvice()}",
+                )
+                execute(blocking)
             }
         } finally {
             listings.clear()
         }
+    }
+
+    /** What lets an index be built online where the store couldn't here: on Oracle, an edition with online builds; on Postgres, no transaction. */
+    private fun onlineAdvice(): String =
+        if (engine == OracleDdl.ENGINE) "An edition with online index builds (Enterprise Edition) builds it with writes going on."
+        else "Ensure the schema outside a transaction to build it with writes going on."
+
+    /** Runs [statement], DDL, and throws what the store refused it with. */
+    private fun execute(statement: DdlStatement) {
+        val action = PlanAction.Execute(statement, purpose = Purpose.DDL)
+        val outcome = io.run(action)
+        if (outcome is PlanOutcome.Failed) throw RawFailure(outcome.error, action, io.lastRound)
     }
 
     private fun log(level: LogLevel, logger: String, message: String) {

@@ -16,6 +16,7 @@ import org.drivine.schema.ConstraintSpec
 import org.drivine.schema.EnsureResult
 import org.drivine.schema.FalkorDbVectorOptions
 import org.drivine.schema.FullTextIndexSpec
+import org.drivine.schema.IndexSpec
 import org.drivine.schema.Neo4jVectorOptions
 import org.drivine.schema.SchemaItemInfo
 import org.drivine.schema.SchemaItemSpec
@@ -179,10 +180,22 @@ interface StoreSchema {
     }
 
     /**
-     * Whether [existing], an item the listing gave, lacks part of what its create makes, so that an ensure makes it again
-     * (Oracle's range index listed `INCOMPLETE`). Never, on a store whose items are made whole.
+     * Whether [existing], an item the listing gave, lacks part of what its create makes, so that an ensure completes it
+     * ([org.drivine.cypher.store.ddl.StoreDdl.completeIndex]): Oracle's range index listed `INCOMPLETE`, and Postgres's
+     * index left invalid ([org.drivine.cypher.store.ddl.PostgresDdl.INVALID]). Never, on a store whose items are made whole.
      */
     fun isIncomplete(existing: SchemaItemInfo): Boolean = false
+
+    /** What [existing], an item [isIncomplete], lacked, as the line that says it was completed gives it. */
+    fun incompleteness(existing: SchemaItemInfo): String = "it lacked part of what is made for it"
+
+    /**
+     * Whether [rows], the listing [spec] is found in, show [spec]'s index standing incomplete under its name with no
+     * record listing it, which its create would pass over: on Postgres, an index whose online build was cut short before
+     * its record was written, left invalid ([org.drivine.cypher.store.ddl.PostgresDdl.INVALID]). Its create then completes
+     * it ([org.drivine.cypher.store.ddl.StoreDdl.completeIndex]).
+     */
+    fun isLeftIncomplete(spec: IndexSpec, rows: List<Any?>): Boolean = false
 
     /**
      * What [rows], the rows of the listing [spec] is found in ([StoreDdl.listIndexesQuery] of its kind, or
@@ -259,6 +272,14 @@ interface StoreSchema {
      * expressions.
      */
     fun isAlreadyIndexed(error: StoreError): Boolean = false
+
+    /**
+     * Whether [error], from a statement that builds or drops an index online, says the store can't do it online here, so
+     * it is run again as a build that blocks writes ([org.drivine.cypher.store.ddl.StoreDdl.blocking]): Postgres's
+     * `CONCURRENTLY` in a transaction (`25001`), as on a connection a Spring transaction holds, and Oracle's `ONLINE` on an
+     * edition without it (`ORA-00439`). Never, on a store that builds no index online.
+     */
+    fun isOnlineRefused(error: StoreError): Boolean = false
 
     companion object {
 

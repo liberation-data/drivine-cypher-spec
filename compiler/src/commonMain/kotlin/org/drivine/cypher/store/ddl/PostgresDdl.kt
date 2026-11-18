@@ -353,32 +353,60 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
      */
     fun indexColumns(keys: List<String>): List<String> = keys.map { "(${PostgresSql.indexed("", it)})" }
 
+    /**
+     * What makes [spec]: its index built `CONCURRENTLY`, so that writes to the graph go on while it is built, a statement
+     * of its own outside any block, as Postgres builds one so only there. Where a transaction holds the connection, Postgres
+     * refuses it, and the index is built as [blocking] gives it. A build cut short leaves the index invalid under its name:
+     * the listing says so ([INVALID]), and [completeIndex] builds it again.
+     */
     override fun createIndex(spec: IndexSpec, existing: CatalogItem?): List<DdlStatement> = when (spec) {
-        is RangeIndexSpec -> {
-            val name = objectName(RANGE, listOf(spec.label) + spec.properties)
-            statements("CREATE INDEX IF NOT EXISTS $name ON ${over(spec.label, spec.keys)}", recorded(spec, name))
-        }
+        is RangeIndexSpec -> statements("$CREATE_INDEX ${madeName(spec)} ON ${over(spec.label, spec.keys)}", recorded(spec, madeName(spec)))
         is VectorIndexSpec -> {
             // An HNSW index over the embeddings of the label's nodes that are of its size: one of another size is left out, not refused.
-            val name = objectName(VECTOR, listOf(spec.label, spec.properties.single()))
             val key = spec.keys.single()
             statements(
                 "CREATE EXTENSION IF NOT EXISTS vector",
-                "CREATE INDEX IF NOT EXISTS $name ON $nodes USING hnsw ((${PostgresSql.embedding("", key, spec.dimensions)}) ${PostgresSql.operators(spec.similarity)}) " +
+                "$CREATE_INDEX ${madeName(spec)} ON $nodes USING hnsw ((${PostgresSql.embedding("", key, spec.dimensions)}) ${PostgresSql.operators(spec.similarity)}) " +
                     "WHERE ${hasLabel("", spec.label)} AND ${PostgresSql.holdsEmbedding("", key, spec.dimensions)}",
-                recorded(spec, name, vectorDetails(spec)),
+                recorded(spec, madeName(spec), vectorDetails(spec)),
             )
         }
         is FullTextIndexSpec -> {
             // Trigrams of the text a search reads, which answer whether it holds a term's words.
-            val name = objectName(FULLTEXT, listOf(spec.label) + spec.properties)
             statements(
                 "CREATE EXTENSION IF NOT EXISTS pg_trgm",
-                "CREATE INDEX IF NOT EXISTS $name ON $nodes USING gin ((${PostgresSql.searchedText("", spec.keys)}) gin_trgm_ops) WHERE ${hasLabel("", spec.label)}",
-                recorded(spec, name, analyzerDetails(spec.analyzer)),
+                "$CREATE_INDEX ${madeName(spec)} ON $nodes USING gin ((${PostgresSql.searchedText("", spec.keys)}) gin_trgm_ops) WHERE ${hasLabel("", spec.label)}",
+                recorded(spec, madeName(spec), analyzerDetails(spec.analyzer)),
             )
         }
         is TextIndexSpec -> throw unsupportedTextIndex(spec, engine)
+    }
+
+    /** The name the index of [spec] is made under. */
+    private fun madeName(spec: IndexSpec): String = when (spec) {
+        is RangeIndexSpec -> objectName(RANGE, listOf(spec.label) + spec.properties)
+        is VectorIndexSpec -> objectName(VECTOR, listOf(spec.label, spec.properties.single()))
+        is FullTextIndexSpec -> objectName(FULLTEXT, listOf(spec.label) + spec.properties)
+        is TextIndexSpec -> throw unsupportedTextIndex(spec, engine)
+    }
+
+    /**
+     * The index of [spec] that the listing found invalid, an online build of it cut short, dropped and built again. It is
+     * dropped by the name this version makes it under, which is the invalid one's: an ensure completes only an item of this
+     * version's form, and one no record lists is found under that name ([org.drivine.cypher.store.schema.StoreSchema.isLeftIncomplete]).
+     * `IF NOT EXISTS` would pass over the invalid index, which stands under the name.
+     */
+    override fun completeIndex(spec: IndexSpec, existing: CatalogItem?): List<DdlStatement> =
+        listOf(DdlStatement.Text("DROP INDEX CONCURRENTLY IF EXISTS ${madeName(spec)}")) + createIndex(spec, existing)
+
+    /**
+     * [statement] without `CONCURRENTLY`, which a transaction refuses: a build or a drop that blocks writes while it runs.
+     * Only a statement that begins so is one: a label or a name holding the words elsewhere is left as it is.
+     */
+    override fun blocking(statement: DdlStatement): DdlStatement? {
+        val text = (statement as? DdlStatement.Text)?.statement ?: return null
+        val verb = listOf("CREATE", "DROP").firstOrNull { text.startsWith("$it INDEX CONCURRENTLY ") } ?: return null
+        return DdlStatement.Text("$verb INDEX " + text.removePrefix("$verb INDEX CONCURRENTLY "))
     }
 
     override fun dropIndex(item: CatalogItem): List<DdlStatement> = forgotten(item)
@@ -434,16 +462,18 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
      * object of [objects], recorded or not, with what it is: its `type` (`relkind`), and of an index its `table`, whether
      * it is `unique`, its access `method`, the text of each of its `columns`, its predicate (`where`), as Postgres
      * writes them, and its operator classes (`opclasses`), which `store.schema` reads to tell another item under the name ([org.drivine.cypher.store.schema.ItemForm]).
+     * A record whose index is invalid, and not being built, has the `status` [INVALID] ([invalidStatus]), and so has such an
+     * index among the objects, recorded or not: a build cut short before its record was written leaves none.
      */
     private fun listed(kinds: String, objects: List<String>): String = if (objects.isEmpty()) """
-        SELECT jsonb_build_object('kind', kind, 'label', label, 'properties', properties::jsonb, 'name', name, 'details', details)
+        SELECT jsonb_build_object('kind', kind, 'label', label, 'properties', properties::jsonb, 'name', name, 'details', details, 'status', $invalidStatus)
         FROM $catalog c
         WHERE kind IN ($kinds)
           AND (object_name IS NULL OR to_regclass(object_name) IS NOT NULL)
         ORDER BY label, properties
     """.trimIndent() else """
         SELECT listed FROM (
-            SELECT 0 AS part, label, properties, jsonb_build_object('kind', kind, 'label', label, 'properties', properties::jsonb, 'name', name, 'details', details) AS listed
+            SELECT 0 AS part, label, properties, jsonb_build_object('kind', kind, 'label', label, 'properties', properties::jsonb, 'name', name, 'details', details, 'status', $invalidStatus) AS listed
             FROM $catalog c
             WHERE kind IN ($kinds)
               AND (object_name IS NULL OR to_regclass(object_name) IS NOT NULL)
@@ -452,7 +482,8 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
                    jsonb_build_object('object', o.relname, 'type', o.relkind, 'table', t.relname, 'unique', i.indisunique, 'method', a.amname,
                                       'columns', (SELECT jsonb_agg(pg_get_indexdef(i.indexrelid, k, true) ORDER BY k) FROM generate_series(1, i.indnatts) k),
                                       'where', pg_get_expr(i.indpred, i.indrelid, true),
-                                      'opclasses', (SELECT jsonb_agg(oc.opcname ORDER BY k.n) FROM unnest(i.indclass::oid[]) WITH ORDINALITY AS k(oid, n) JOIN pg_opclass oc ON oc.oid = k.oid))
+                                      'opclasses', (SELECT jsonb_agg(oc.opcname ORDER BY k.n) FROM unnest(i.indclass::oid[]) WITH ORDINALITY AS k(oid, n) JOIN pg_opclass oc ON oc.oid = k.oid),
+                                      'status', CASE WHEN ${leftInvalid("i")} THEN ${literal(INVALID)} END)
             FROM pg_class o
             LEFT JOIN pg_index i ON i.indexrelid = o.oid
             LEFT JOIN pg_class t ON t.oid = i.indrelid
@@ -461,6 +492,25 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
         ) l
         ORDER BY part, label, properties
     """.trimIndent()
+
+    /**
+     * [INVALID] where the record's index is invalid and no build of it is under way, null otherwise: an online build cut
+     * short, or failed, leaves it so ([leftInvalid]).
+     */
+    private val invalidStatus = """CASE WHEN EXISTS (
+                SELECT 1 FROM pg_index x
+                WHERE x.indexrelid = to_regclass(c.object_name) AND ${leftInvalid("x")}
+            ) THEN ${literal(INVALID)} END"""
+
+    /**
+     * Whether the index of [index], a `pg_index` row, is invalid and no build of it is under way. One being built online is
+     * invalid too until it is done, and another process's ensure must not drop it, so a build under way
+     * (`pg_stat_progress_create_index`) is passed over; and as Postgres hides which index another role's build is of
+     * (its `index_relid` reads null), any build in this database whose index is hidden is taken as maybe this one's.
+     */
+    private fun leftInvalid(index: String): String =
+        "NOT $index.indisvalid AND NOT EXISTS (SELECT 1 FROM pg_stat_progress_create_index p WHERE p.index_relid = $index.indexrelid " +
+            "OR (p.index_relid IS NULL AND p.datname = current_database()))"
 
     override fun listIndexesQuery(kind: SchemaItemKind): String = listed(literal(kind.name), objectKinds(kind))
 
@@ -486,6 +536,15 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
         const val UNIQUE = "uq"
         const val VECTOR = "v"
         const val FULLTEXT = "t"
+
+        /** How an index is begun: online, and only where there is none under its name. */
+        const val CREATE_INDEX = "CREATE INDEX CONCURRENTLY IF NOT EXISTS"
+
+        /**
+         * The `status` the listing gives a record whose index is invalid and not being built: an online build of it was cut
+         * short, or failed, and no statement reads it.
+         */
+        const val INVALID = "INVALID"
 
         /**
          * What the node table's comment says of a store this version made. A store an earlier version made has its functions

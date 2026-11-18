@@ -216,7 +216,9 @@ class StoreDdlTest {
      * Each SQL store's create is pinned to the form its record says ([SqlStoreDdl.CURRENT_FORM]), with a digest of its
      * statements: SHA-256 of their UTF-8, each after the first behind U+0000. A change to what a create makes changes its
      * digest, and is a new form: [SqlStoreDdl.CURRENT_FORM] goes up, and each case's `form` with it, so a store made in
-     * the form before is told apart from one made now (`store.schema`'s `ItemForm`).
+     * the form before is told apart from one made now (`store.schema`'s `ItemForm`). Each statement is digested as it
+     * blocks writes ([StoreDdl.blocking]): how an index is built, online or not, is no part of what it makes, so the same
+     * index built online is of the same form.
      */
     @Test
     fun eachSqlStoresCreateIsPinnedToItsFormByItsDigest() {
@@ -232,7 +234,8 @@ class StoreDdlTest {
                     continue
                 }
                 assertEquals(SqlStoreDdl.CURRENT_FORM.toLong(), expected["form"]?.longValue(), "$name on $id: the form it is pinned to")
-                val statements = stores.getValue(id).create(made, existing).drop(tables.getValue(id).size).map { (it as DdlStatement.Text).statement }
+                val ddl = stores.getValue(id)
+                val statements = ddl.create(made, existing).drop(tables.getValue(id).size).map { ((ddl.blocking(it) ?: it) as DdlStatement.Text).statement }
                 assertEquals(
                     expected["digest"]?.textValue(), digest(statements),
                     "$name on $id: its create is not the form ${SqlStoreDdl.CURRENT_FORM} it is pinned to. A change to what a create makes is a new form",
