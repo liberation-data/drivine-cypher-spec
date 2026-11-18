@@ -15,7 +15,7 @@ import org.drivine.schema.SimilarityFunction
  * - Memgraph: a range or text index as `SHOW INDEX INFO`'s columns, a vector index as a map, a constraint as
  *   `SHOW CONSTRAINT INFO`'s columns.
  * - FalkorDB: a row a label, its properties by type, an index's status the label's.
- * - Postgres, Oracle and SQLite: a record a row, with its `details`; Oracle's with its `status`.
+ * - Postgres, Oracle and SQLite: a record a row, with its `details`; Oracle's and Postgres's with its `status`.
  */
 internal object ListingRows {
 
@@ -88,7 +88,7 @@ internal object ListingRows {
         item.similarity?.let { details["similarity"] = it.name }
         item.analyzer?.let { details["analyzer"] = it }
         return linkedMapOf<String, Any?>("kind" to item.kind.name, "label" to item.label, "properties" to item.properties, "name" to item.name, "details" to details).also {
-            if (store == "oracle" && item.status != null) it["status"] = item.status
+            if ((store == "oracle" || store == "postgres") && item.status != null) it["status"] = item.status
         }
     }
 

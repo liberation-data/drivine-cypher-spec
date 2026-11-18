@@ -129,7 +129,7 @@ class IdSqlJsonTest {
             for ((name, made) in listOf("postgres" to (PostgresDdl("g") to PostgresDdl.RANGE), "sqlite" to (SqliteDdl("g") to SqliteDdl.RANGE))) {
                 val (ddl, range) = made
                 val head = "CREATE INDEX IF NOT EXISTS ${ddl.objectName(range, listOf(label, "id"))} ON "
-                val index = ddl.createIndex(spec, null).filterIsInstance<DdlStatement.Text>().map { it.statement }.single { it.startsWith(head) }
+                val index = ddl.createIndex(spec, null).map { ddl.blocking(it) ?: it }.filterIsInstance<DdlStatement.Text>().map { it.statement }.single { it.startsWith(head) }
                 val given = CypherJson.writeValueAsString(listOf(label, label))
                 val test = sql(name, "\"helper\": \"hasLabels\", \"alias\": \"\", \"labels\": $given")!!
                 val where = index.substringAfter(" WHERE ")

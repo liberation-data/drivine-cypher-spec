@@ -368,7 +368,7 @@ ${made.entries.joinToString("\n") { (function, making) ->
     }
 
     override fun createIndex(spec: IndexSpec, existing: CatalogItem?): List<DdlStatement> = when (spec) {
-        is RangeIndexSpec -> statements(*rangeIndex(spec).toTypedArray())
+        is RangeIndexSpec -> statements(*rangeIndex(spec, online = true).toTypedArray())
         is VectorIndexSpec -> vectorIndex(spec)
         is FullTextIndexSpec -> statements(textIndex(spec))
         is TextIndexSpec -> throw unsupportedTextIndex(spec, engine)
@@ -387,21 +387,26 @@ ${made.entries.joinToString("\n") { (function, making) ->
     /** See [sharedColumns]. */
     fun uniqueColumns(label: String, keys: List<String>): List<String> = keys.flatMap { OracleSql.uniqueIndex("n", label, keys, it) }
 
-    /** The index over the property of every node, whatever the label: what a save and a load by id find a node by. */
-    private fun sharedIndex(spec: RangeIndexSpec): Pair<String, String> {
+    /**
+     * The index over the property of every node, whatever the label: what a save and a load by id find a node by. With
+     * [online], it is built [ONLINE].
+     */
+    private fun sharedIndex(spec: RangeIndexSpec, online: Boolean = false): Pair<String, String> {
         val name = objectName(SHARED, spec.properties)
         val expressions = sharedColumns(spec.keys).joinToString(", ")
-        return name to busyWaiting("CREATE INDEX IF NOT EXISTS $name ON $nodes ($expressions)")
+        return name to busyWaiting("CREATE INDEX IF NOT EXISTS $name ON $nodes ($expressions)" + if (online) " $ONLINE" else "")
     }
 
     /**
      * A range index: the index over the property of every node, and the labelled index. It is
      * recorded with the name of its labelled index among its details, and a record already there
      * takes them: one made before there were labelled indexes is listed as incomplete (see
-     * [listed]), so `ensure` makes it again, and its labelled index with it.
+     * [listed]), so `ensure` makes it again, and its labelled index with it. With [online], each
+     * is built [ONLINE], as an index's own create builds them; a uniqueness constraint's are built
+     * as they were.
      */
-    private fun rangeIndex(spec: RangeIndexSpec): List<String> {
-        val (name, shared) = sharedIndex(spec)
+    private fun rangeIndex(spec: RangeIndexSpec, online: Boolean = false): List<String> {
+        val (name, shared) = sharedIndex(spec, online)
         val labelled = objectName(LABELLED, listOf(spec.label) + spec.properties)
         val scoped = labelledColumns(spec.label, spec.keys).joinToString(", ")
         // Not where a uniqueness constraint's index over the one property stands for it, as when the
@@ -418,7 +423,7 @@ ${made.entries.joinToString("\n") { (function, making) ->
             BEGIN
                 $standing;
                 IF v_unique = 0 THEN
-                    ${waitingOutBusy("CREATE INDEX IF NOT EXISTS $labelled ON $nodes n ($scoped)", 20)}
+                    ${waitingOutBusy("CREATE INDEX IF NOT EXISTS $labelled ON $nodes n ($scoped)" + if (online) " $ONLINE" else "", 20)}
                 END IF;
             END;
             """,
@@ -427,6 +432,17 @@ ${made.entries.joinToString("\n") { (function, making) ->
     }
 
     override fun dropIndex(item: CatalogItem): List<DdlStatement> = forgotten(item)
+
+    /**
+     * [statement] with its index built without `ONLINE`, which an edition without online builds refuses (`ORA-00439`): a
+     * build that blocks writes to the node table while it runs. The `ONLINE` ends the text of the DDL the block runs,
+     * `EXECUTE IMMEDIATE '…) ONLINE';`, which a label or a name holding the word, in a literal of its own, never ends so.
+     */
+    override fun blocking(statement: DdlStatement): DdlStatement? {
+        val text = (statement as? DdlStatement.Text)?.statement ?: return null
+        val plain = text.replace(") $ONLINE';", ")';")
+        return if (plain == text) null else DdlStatement.Text(plain)
+    }
 
     /**
      * A vector index. Oracle indexes a `VECTOR` column, and an embedding is a list among a node's
@@ -722,6 +738,12 @@ ${made.entries.joinToString("\n") { (function, making) ->
 
         /** The status a range index is listed with when it lacks what this version makes for it. */
         const val INCOMPLETE = "INCOMPLETE"
+
+        /**
+         * How a range index's indexes are built: online, so that writes to the node table go on while each is built. An
+         * edition without online builds refuses it (`ORA-00439`), and the index is built as [blocking] gives it.
+         */
+        const val ONLINE = "ONLINE"
 
         /** Why [name] cannot name a graph here; null where it can (see [SqlStoreDdl.refusal]). */
         fun refusal(name: String): String? = SqlStoreDdl.refusal(name, ENGINE, MAX_OBJECT_NAME)

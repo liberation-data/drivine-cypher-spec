@@ -90,6 +90,23 @@ interface StoreDdl {
      */
     fun createIndex(spec: IndexSpec, existing: CatalogItem? = null): List<DdlStatement>
 
+    /**
+     * What makes whole [spec], whose index [existing] the listing found incomplete
+     * ([org.drivine.cypher.store.schema.StoreSchema.isIncomplete]), or which stands incomplete with no record
+     * ([org.drivine.cypher.store.schema.StoreSchema.isLeftIncomplete], [existing] then the related item, as for
+     * [createIndex]): its create, which makes what it lacks (Oracle's), unless the store has more to do first. On
+     * Postgres, an index whose online build was cut short is left invalid under its name, which its create would pass
+     * over, so it is dropped first.
+     */
+    fun completeIndex(spec: IndexSpec, existing: CatalogItem?): List<DdlStatement> = createIndex(spec, existing)
+
+    /**
+     * [statement] as a build that blocks writes while it runs, where [statement] builds or drops an index online
+     * (Postgres's `CONCURRENTLY`, Oracle's `ONLINE`) and the store refused that
+     * ([org.drivine.cypher.store.schema.StoreSchema.isOnlineRefused]); null for a statement that does neither.
+     */
+    fun blocking(statement: DdlStatement): DdlStatement? = null
+
     /** What makes [spec]. */
     fun createConstraint(spec: ConstraintSpec): List<DdlStatement>
 

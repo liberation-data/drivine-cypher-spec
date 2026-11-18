@@ -14,6 +14,7 @@ import org.drivine.cypher.store.ddl.SqlStoreDdl
 import org.drivine.cypher.store.ValueLayout
 import org.drivine.cypher.store.ddl.SqliteDdl
 import org.drivine.schema.ConstraintSpec
+import org.drivine.schema.IndexSpec
 import org.drivine.schema.SchemaItemInfo
 import org.drivine.schema.SchemaItemKind
 import org.drivine.schema.SchemaItemSpec
@@ -23,7 +24,7 @@ import org.drivine.schema.made
 
 /**
  * The schema of a SQL store: what Drivine made is read back from the graph's catalog, a record a row, as a map of its
- * `kind`, `label`, `properties`, `name` and `details` (and on Oracle its `status`), since an index's expression doesn't say
+ * `kind`, `label`, `properties`, `name` and `details` (and on Oracle and Postgres its `status`), since an index's expression doesn't say
  * what it was made for. An index and a constraint are listed alike, and read alike.
  *
  * A record of a kind or a similarity this module doesn't know is refused, as drivine4j refuses it: the catalog is
@@ -40,9 +41,12 @@ abstract class SqlStoreSchema internal constructor() : StoreSchema {
     override val uniquenessConstraintsServeRangeIndexes = true
     override val supportsNamedItems = true
 
-    /** Whether a record's `status` is read: Oracle's, which lists a range index `INCOMPLETE`; the others list none. */
-    protected open val readsStatus: Boolean
-        get() = false
+    /**
+     * The `status`es of a record that are read: Oracle's [OracleDdl.INCOMPLETE], of a range index that lacks part of what
+     * is made for it, and Postgres's [PostgresDdl.INVALID], of an index left invalid; SQLite lists none.
+     */
+    protected open val statuses: Set<String>
+        get() = emptySet()
 
     override fun parseIndexRows(rows: List<Any?>): List<SchemaItemInfo> = rows.mapNotNull { row ->
         val map = row as? Map<*, *> ?: return@mapNotNull null
@@ -57,7 +61,7 @@ abstract class SqlStoreSchema internal constructor() : StoreSchema {
             dimensions = (details?.get("dimensions") as? Number)?.toInt(),
             similarity = (details?.get("similarity") as? String)?.let(SimilarityFunction::valueOf),
             analyzer = details?.get("analyzer") as? String,
-            status = if (readsStatus) map["status"] as? String else null,
+            status = (map["status"] as? String)?.takeIf { it in statuses },
         )
     }
 
@@ -324,8 +328,8 @@ abstract class SqlStoreSchema internal constructor() : StoreSchema {
  * objects, so a name can be taken by an index and a table); and of the index, the [table] it is on, whether it is [unique],
  * the text of each of its [columns] in order, as the store writes them, its [predicate] (a partial index's), its [method]
  * and [opclasses] (Postgres's), its [indexType] (Oracle's), and the [statement] that made it (SQLite's); of a table, its
- * [tableColumns], each its name and type (Oracle's); and of a trigger, the table it is on, as [table], and its [source]
- * (Oracle's).
+ * [tableColumns], each its name and type (Oracle's); of a trigger, the table it is on, as [table], and its [source]
+ * (Oracle's); and the index's [status], Postgres's [PostgresDdl.INVALID] where it is left invalid.
  */
 @DrivineInternalApi
 data class StoreObject(
@@ -341,6 +345,7 @@ data class StoreObject(
     val indexType: String? = null,
     val tableColumns: List<String> = emptyList(),
     val source: String? = null,
+    val status: String? = null,
 ) {
     /** Whether the name is taken by an index. */
     val isIndex: Boolean
@@ -353,7 +358,7 @@ data class StoreObject(
         /**
          * The objects [rows] give, by their names in upper case, as each store's listing gives them: `object`, the name;
          * `type`, the type; `table`; `unique`, a boolean (SQLite's `0` or `1`), or Oracle's `uniqueness`, `UNIQUE` or `NONUNIQUE`; `columns`;
-         * `where`; `method`; `opclasses`; `indexType`; `sql`; `tableColumns`; `source`, a list of lines or one text. The rows
+         * `where`; `method`; `opclasses`; `indexType`; `sql`; `tableColumns`; `source`, a list of lines or one text; `status`. The rows
          * of a name are one object.
          */
         fun read(rows: List<Any?>): StoreObjects {
@@ -389,6 +394,7 @@ data class StoreObject(
                     indexType = map["indexType"] as? String,
                     tableColumns = (map["tableColumns"] as? List<*>).orEmpty().map { it.toString() },
                     source = (map["source"] as? List<*>)?.joinToString("") { it?.toString().orEmpty() } ?: map["source"] as? String,
+                    status = map["status"] as? String,
                 )
                 objects.getOrPut(name.uppercase()) { mutableListOf() } += read
             }
@@ -400,6 +406,10 @@ data class StoreObject(
 /** Postgres's schema: errors told by their SQL state. */
 @DrivineInternalApi
 class PostgresSchema(override val ddl: PostgresDdl) : SqlStoreSchema() {
+
+    /** An index left invalid by a build cut short is listed [PostgresDdl.INVALID]: see [isIncomplete]. */
+    override val statuses: Set<String>
+        get() = setOf(PostgresDdl.INVALID)
 
     /**
      * Each item is one index, of the label's nodes. A vector's and a full-text index's expressions aren't compared, only
@@ -514,6 +524,25 @@ class PostgresSchema(override val ddl: PostgresDdl) : SqlStoreSchema() {
     /** `23505`: a second row for a unique key, or a unique index made over rows that already repeat one. */
     override fun isViolation(error: StoreError): Boolean = error.causes.any { it.isSqlError && it.sqlState == "23505" }
 
+    /** `25001`: `CONCURRENTLY` in a transaction, which Postgres refuses, as on a connection a Spring transaction holds. */
+    override fun isOnlineRefused(error: StoreError): Boolean = error.causes.any { it.isSqlError && it.sqlState == "25001" }
+
+    /**
+     * An index whose online build was cut short, or failed, which Postgres leaves invalid under its name and no statement
+     * reads: the listing gives it [PostgresDdl.INVALID], and an ensure drops it and builds it again
+     * ([PostgresDdl.completeIndex]). One still being built is not.
+     */
+    override fun isIncomplete(existing: SchemaItemInfo): Boolean = existing.status == PostgresDdl.INVALID
+
+    /** An index under the name [spec]'s is made under, of no record, listed [PostgresDdl.INVALID] among the objects. */
+    override fun isLeftIncomplete(spec: IndexSpec, rows: List<Any?>): Boolean {
+        val objects = StoreObject.read(rows)
+        return madeAs(spec).any { made -> objects[made.name]?.let { it.isIndex && it.status == PostgresDdl.INVALID } == true }
+    }
+
+    override fun incompleteness(existing: SchemaItemInfo): String =
+        "its build had been cut short or had failed, which left it invalid, so it was dropped and built again"
+
     /** A node's element id is its `nid`; [limit] of a key's nodes at most are named, the first made first. */
     override fun sampleConflictsQuery(spec: ConstraintSpec, limit: Int): String = sample(spec, SqlStoreDdl.storedKeys(spec.properties).map { PostgresSql.property("n", it) }, limit)
 
@@ -543,8 +572,8 @@ class PostgresSchema(override val ddl: PostgresDdl) : SqlStoreSchema() {
 @DrivineInternalApi
 class OracleSchema(override val ddl: OracleDdl) : SqlStoreSchema() {
 
-    override val readsStatus: Boolean
-        get() = true
+    override val statuses: Set<String>
+        get() = setOf(OracleDdl.INCOMPLETE)
 
     override val indexesNamedApart: Boolean
         get() = true
@@ -707,6 +736,9 @@ class OracleSchema(override val ddl: OracleDdl) : SqlStoreSchema() {
         /** `ORA-01408: such column list already indexed`. */
         const val ALREADY_INDEXED = 1408
 
+        /** `ORA-00439: feature not enabled`, as an edition without online index builds refuses `ONLINE`. */
+        const val FEATURE_NOT_ENABLED = 439
+
         /** What follows a table beside the nodes' name in its trigger's, and in its index's. */
         const val TRIGGER = "_t"
         const val INDEX = "_i"
@@ -732,6 +764,9 @@ class OracleSchema(override val ddl: OracleDdl) : SqlStoreSchema() {
 
     /** `ORA-01408`: an index over the same expressions is there already, which Oracle allows only one of. */
     override fun isAlreadyIndexed(error: StoreError): Boolean = error.causes.any { it.isSqlError && it.vendorCode == ALREADY_INDEXED }
+
+    /** `ORA-00439`: a feature the edition hasn't, here an index built `ONLINE`. */
+    override fun isOnlineRefused(error: StoreError): Boolean = error.causes.any { it.isSqlError && it.vendorCode == FEATURE_NOT_ENABLED }
 
     /**
      * Each node of a key that repeats is numbered within its key, and counted with it, so that a row names [limit] of its
