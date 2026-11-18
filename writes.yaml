@@ -1684,16 +1684,12 @@ cases:
       - cypher: "OPTIONAL MATCH (n:CyWrite {id: 9}) SET n.p = $m RETURN count(*)"
         parameters: {m: {a: 1}}
         rows: [1]
-      - note: "A SQL store fails where any row given is no property, though a WHERE, a MATCH that finds nothing for it or a LIMIT leaves that row out; Neo4j writes the others (drivine4j#820)."
+      - note: "A row a WITH passes on is no longer known as given, so a WHERE that leaves out the row that is no property leaves the write as Neo4j makes it. One it keeps is written as it is, where Neo4j fails it: drivine4j#820's second part."
         cypher: "UNWIND $rows AS row WITH row WHERE row.m = 1 CREATE (x:CyWrite {p: row.m}) RETURN count(x)"
         parameters: {rows: [{m: 1}, {m: {a: 1}}]}
-        only: [neo4j]
         rows: [1]
-      - cypher: "UNWIND $rows AS row WITH row WHERE row.m = 1 CREATE (x:CyWrite {p: row.m}) RETURN count(x)"
-        parameters: {rows: [{m: 1}, {m: {a: 1}}]}
-        only: [sql]
-        error: true
-      - cypher: "UNWIND $rows AS row MATCH (n:CyWrite {id: row.id}) SET n.q = row.m RETURN count(*)"
+      - note: "A SQL store fails where any row given is no property, though a MATCH that finds nothing for it or a LIMIT leaves that row out; Neo4j writes the others (drivine4j#820)."
+        cypher: "UNWIND $rows AS row MATCH (n:CyWrite {id: row.id}) SET n.q = row.m RETURN count(*)"
         parameters: {rows: [{id: 1, m: 1}, {id: 9, m: {a: 1}}]}
         only: [neo4j]
         rows: [1]
