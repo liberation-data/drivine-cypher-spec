@@ -46,6 +46,8 @@ class FragmentsTest {
                 val got = CypherJson.readTree(CompileJson.compile(request(case, store)))
                 val pinned = case["sql"]?.get(store) as? ArrayNode ?: throw AssertionError("on $target, $name pins no terms on $store: $got")
                 assertEquals(pinned.map { it.textValue() }, (got["terms"] as? ArrayNode)?.map { it.textValue() }, "on $target, $name on $store: $got")
+                // The labels each row the condition keeps carries, none where the case pins none (drivine-cypher-spec#373).
+                assertEquals(case["impliedLabels"]?.get(store)?.let(::json) ?: "{}", json(got["impliedLabels"]), "on $target, $name on $store implies")
                 checked++
             }
         }
@@ -365,7 +367,7 @@ class FragmentsTest {
         assertTrue(column >= 0, sql)
         assertTrue(column < sql.indexOf("(SELECT"), "the index's column outside any query: $sql")
         assertTrue(sql.contains(" END = (SELECT "), "compared with the value worked out in a query of its own: $sql")
-        assertTrue(!sql.contains(" IS NULL)"), "a text the index holds, compared as one: $sql")
+        assertTrue(!sql.contains(" IS NULL AND INSTR("), "a text the index holds, compared as one: $sql")
     }
 
     /**
@@ -402,7 +404,8 @@ class FragmentsTest {
     private fun bare(condition: String, parameters: Map<String, Any?>): Boolean {
         fun compiled(value: String, given: Map<String, Any?>) =
             OracleCypherCompiler("g", indexedProperties = setOf("Person" to "name")).compile("MATCH (n:Person {name: $value}) RETURN n.name", given).sql
-        fun escapes(sql: String) = Regex(" IS NULL\\)").findAll(sql).count()
+        // The key's null, let through for a node of the index's label alone (drivine-cypher-spec#373).
+        fun escapes(sql: String) = Regex(" IS NULL AND INSTR\\(").findAll(sql).count()
         val sql = compiled(condition.substringAfter("n.name = "), parameters)
         val labelled = Regex("CASE WHEN JSON_EXISTS\\(n\\d+\\.labels").containsMatchIn(sql)
         return labelled && escapes(sql) == escapes(compiled("${'$'}x", mapOf("x" to "Ada")))
@@ -435,6 +438,85 @@ class FragmentsTest {
             "n.name = coalesce(${'$'}m.name, ${'$'}p)" to mapOf("m" to emptyMap<String, Any?>(), "p" to ""),
         )
         for ((condition, parameters) in cases) assertTrue(!bare(condition, parameters), "$condition $parameters")
+    }
+
+    /**
+     * A worked-out text the labelled index may not hold is let through where its key is null, as the index's test is null for
+     * it: and only for a node of each label whose index the term reads, as the index's test is, so a library that reads the
+     * term as that label's test, and tests the label no more, keeps no node of another label (drivine-cypher-spec#373).
+     */
+    @Test
+    fun aValueLetThroughByItsKeysNullIsLetThroughOnlyForANodeOfTheIndexsLabels() {
+        val long = mapOf("p" to "X".repeat(4001))
+        fun oracle(vararg labels: String) = OracleCypherCompiler("g", indexedProperties = labels.map { it to "lower" }.toSet())
+        fun escape(sql: String) = Regex("IS NULL AND (INSTR\\(.*?\\) > 0(?: AND INSTR\\(.*?\\) > 0)*)\\)\\)").find(sql)?.groupValues?.get(1)
+        val one = oracle("Person").condition("n.lower = toLower(${'$'}p)", people, long).sql
+        assertEquals(org.drivine.cypher.store.OracleSql.carriesLabel("people_", "Person"), escape(one), one)
+        // With two labels each indexed, each is tested, as the labelled term tests each; with one, that one alone.
+        val both = mapOf("n" to FragmentVariable.Node("people_", listOf("Person", "Admin")))
+        val two = oracle("Person", "Admin").condition("n.lower = toLower(${'$'}p)", both, long).sql
+        assertEquals(listOf("Person", "Admin").joinToString(" AND ") { org.drivine.cypher.store.OracleSql.carriesLabel("people_", it) }, escape(two), two)
+        val indexedOnce = oracle("Person").condition("n.lower = toLower(${'$'}p)", both, long)
+        assertEquals(org.drivine.cypher.store.OracleSql.carriesLabel("people_", "Person"), escape(indexedOnce.sql), indexedOnce.sql)
+        assertEquals(mapOf("n" to listOf("Person")), indexedOnce.impliedLabels)
+        assertEquals(mapOf("n" to listOf("Person", "Admin")), oracle("Person", "Admin").condition("n.lower = toLower(${'$'}p)", both, long).impliedLabels)
+        // The labels' test, by their text, is none the index over labels answers.
+        assertTrue(!one.substringAfter(" IS NULL AND ").contains("JSON_EXISTS(people_.labels"), one)
+    }
+
+    /**
+     * A test of the labelled index is written only in the fragment's own condition: a subquery's or a quantifier's `WHERE`, or
+     * a pattern's properties within a subquery, may stand under a `NOT` or beside an `OR`, where the label's test isn't one
+     * each row the fragment keeps passes (drivine-cypher-spec#373). The fragment's answer then implies no label.
+     */
+    @Test
+    fun theLabelledIndexIsReadOnlyInTheFragmentsOwnConditionAndImpliesItsLabelsThere() {
+        fun oracle() = OracleCypherCompiler("g", indexedProperties = setOf("Person" to "name"))
+        val given = mapOf("q" to "Ada")
+        for (within in listOf(
+            "NOT EXISTS { (n)-[:KNOWS]->() WHERE n.name = ${'$'}q }",
+            "n.age > 1 OR EXISTS { (n)-[:KNOWS]->() WHERE n.name = ${'$'}q }",
+            "NOT EXISTS { (n)-[:KNOWS]->(n:Person {name: ${'$'}q}) }",
+            "NOT any(x IN [1] WHERE n.name = ${'$'}q)",
+            "all(x IN [] WHERE n.name = ${'$'}q)",
+        )) {
+            val fragment = oracle().condition(within, people, given)
+            assertTrue(!fragment.sql.contains("CASE WHEN JSON_EXISTS(people_.labels"), "$within: ${fragment.sql}")
+            assertEquals(emptyMap(), fragment.impliedLabels, within)
+        }
+        assertEquals(mapOf("n" to listOf("Person")), oracle().condition("n.name = ${'$'}q AND n.age > 1", people, given).impliedLabels)
+        assertEquals(emptyMap(), oracle().condition("n.name = ${'$'}q OR n.age > 1", people, given).impliedLabels)
+        assertEquals(emptyMap(), oracle().condition("NOT n.name = ${'$'}q", people, given).impliedLabels)
+        assertEquals(emptyMap(), oracle().value("n.name = ${'$'}q", people, given).impliedLabels)
+        assertEquals(emptyMap(), oracle().order("n.name", false, people, given).impliedLabels)
+        // A value's or an order's subquery's WHERE is the first condition compiled, and still no condition of the fragment's.
+        val exists = "NOT EXISTS { (n)-[:KNOWS]->() WHERE n.name = ${'$'}q }"
+        for (fragment in listOf(oracle().value(exists, people, given), oracle().order(exists, false, people, given))) {
+            assertTrue(fragment.terms.none { it.contains("CASE WHEN JSON_EXISTS(people_.labels") }, fragment.terms.toString())
+            assertEquals(emptyMap(), fragment.impliedLabels, exists)
+        }
+        // A subquery beside the equality, before or after it, leaves the equality the fragment's own condition's.
+        for (beside in listOf(
+            "NOT EXISTS { (n)-[:KNOWS]->() WHERE n.name = ${'$'}q } AND n.name = ${'$'}q",
+            "n.name = ${'$'}q AND NOT any(x IN [1] WHERE n.name = ${'$'}q)",
+        )) {
+            val fragment = oracle().condition(beside, people, given)
+            assertTrue(fragment.sql.contains("CASE WHEN JSON_EXISTS(people_.labels"), "$beside: ${fragment.sql}")
+            assertEquals(mapOf("n" to listOf("Person")), fragment.impliedLabels, beside)
+        }
+        // A subquery's own node is still read through its label's index: the term is its row's, not the library's.
+        val inner = oracle().condition("EXISTS { (n)-[:KNOWS]->(m:Person {name: ${'$'}q}) }", people, given)
+        assertTrue(Regex("CASE WHEN JSON_EXISTS\\(n\\d+\\.labels").containsMatchIn(inner.sql), inner.sql)
+        assertEquals(emptyMap(), inner.impliedLabels)
+        // Postgres's and SQLite's indexes hold for a node of any label: no label is implied.
+        for (compiler in listOf(PostgresCypherCompiler("g"), SqliteCypherCompiler("g"))) {
+            assertEquals(emptyMap(), compiler.condition("n.name = ${'$'}q", people, given).impliedLabels)
+        }
+        val answer = CypherJson.readTree(CompileJson.compile(
+            "{\"store\": \"oracle\", \"graph\": {\"name\": \"g\", \"indexedProperties\": [[\"Person\", \"name\"]]}, " +
+                "\"fragment\": {\"condition\": \"n.name = ${'$'}q\", \"variables\": {\"n\": {\"node\": \"people_\", \"labels\": [\"Person\"]}}}, \"parameters\": {\"q\": \"Ada\"}}",
+        ))
+        assertEquals("{\"n\":[\"Person\"]}", json(answer["impliedLabels"]), "$answer")
     }
 
     /**

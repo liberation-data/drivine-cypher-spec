@@ -839,10 +839,26 @@ class OracleCypherCompiler(
      * beside that `OR`, so where the value is known to be no list or map ([scalar]) it is left out.
      */
     override fun indexedEqualityOfAny(property: String, value: String, of: IndexedProperty?, scalar: Boolean): String? {
-        if (labelledEquals(of, value) == null) return null
-        if (scalar) return labelledEquals(of, value)
-        return shared(value) { (x) -> "(${labelledEquals(of, x)} OR ${OracleSql.valueKey(x)} IS NULL)" }
+        val labelled = labelledEquals(of, value) ?: return null
+        if (scalar) return labelled
+        // The value let through by its key's null is let through only for a node of each label the index is read for, as the
+        // index's own columns are null for any other: a library reads that index's test as its label's, and tests the label
+        // no more (drivine-cypher-spec#373). By the labels' text, as no index answers it, so Oracle reads no index over labels.
+        val alias = of!!.props.removeSuffix(".props")
+        val labels = indexedLabels(of)!!.joinToString(" AND ") { OracleSql.carriesLabel(alias, it) }
+        return shared(value) { (x) -> "(${labelledEquals(of, x)} OR (${OracleSql.valueKey(x)} IS NULL AND $labels))" }
     }
+
+    /**
+     * The labels of [of]'s node each of whose index over the property [labelledHeld] compares, so that each term it writes is
+     * true only of a node with every one of them; null where there are none, as [labelledHeld] writes none.
+     */
+    private fun indexedLabels(of: IndexedProperty?): List<String>? {
+        if (of == null || of.labels.isEmpty() || !of.props.endsWith(".props")) return null
+        return of.labels.filter { (it to of.key) in indexedKeys }.ifEmpty { null }
+    }
+
+    override fun impliedLabels(of: IndexedProperty): List<String> = indexedLabels(of).orEmpty()
 
     override val indexKeyStore = org.drivine.cypher.api.Store.ORACLE
 
@@ -880,9 +896,8 @@ class OracleCypherCompiler(
      * no such label.
      */
     private fun labelledHeld(of: IndexedProperty?, held: List<String>): String? {
-        if (of == null || of.labels.isEmpty() || !of.props.endsWith(".props")) return null
-        val alias = of.props.removeSuffix(".props")
-        val indexed = of.labels.filter { (it to of.key) in indexedKeys }.ifEmpty { return null }
+        val indexed = indexedLabels(of) ?: return null
+        val alias = of!!.props.removeSuffix(".props")
         return indexed.joinToString(" AND ") { label ->
             (OracleSql.labelledIndex(alias, label, of.key) + OracleSql.uniqueIndex(alias, label, listOf(of.key), of.key)).zip(held + held).joinToString(" AND ") { (column, it) -> "$column = $it" }
         }

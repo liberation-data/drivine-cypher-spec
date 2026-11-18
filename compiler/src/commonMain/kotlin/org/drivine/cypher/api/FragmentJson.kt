@@ -20,7 +20,8 @@ import org.drivine.cypher.sql.SqlFragment
  *
  * `fragment` gives one of `condition` ([org.drivine.cypher.sql.SqlCypherCompiler.condition]), `value`, or `order`, with
  * `descending` (false where left out), each a Cypher expression; and `variables`, each a row of the library's SQL: `{"node":
- * "<alias>", "labels": […]}` or `{"relationship": "<alias>"}`, the alias ending with `_` ([FragmentVariable.row]). Answered `{"terms": […], "parameters": {…}, "nonFinite": false, "hints": […]}`, on Oracle with
+ * "<alias>", "labels": […]}` or `{"relationship": "<alias>"}`, the alias ending with `_` ([FragmentVariable.row]). Answered `{"terms": […], "parameters": {…}, "nonFinite": false, "hints": […], "impliedLabels": {…}}`
+ * ([SqlFragment.impliedLabels], by variable), on Oracle with
  * `storedFunctions` as a statement's answer has it, the parameters written as a statement's are; `{"refusal": …}` where the
  * compiler refuses the expression; `{"error": …}` where the request is no request.
  */
@@ -105,6 +106,7 @@ internal object FragmentJson {
         append(",\"parameters\":"); TypedJson.write(fragment.parameters, this, 2)
         append(",\"nonFinite\":").append(fragment.nonFinite)
         append(",\"hints\":"); TypedJson.write(fragment.hints, this)
+        append(",\"impliedLabels\":"); TypedJson.write(fragment.impliedLabels, this)
         stored?.let { append(",\"storedFunctions\":{\"nullsEqual\":").append(it.nullsEqual).append(",\"era\":").append(it.era).append(",\"temporalArithmetic\":").append(it.temporalArithmetic).append('}') }
         append('}')
     }.toString()
