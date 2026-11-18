@@ -2061,7 +2061,7 @@ cases:
         error: "p is bound outside the quantified path pattern that names it."
 
   - name: "Nesting of a dropped variable refused: a WITH that drops p and groups, in its WHERE"
-    description: "nesting.yaml's cells in a WITH that drops p and groups, in its WHERE that the SQL stores refuse, each as Neo4j refuses it, but where a note says Neo4j gives rows (see queries.yaml, \"Nesting of a dropped variable: a WITH that drops p and groups, in its WHERE\"; drivine4j#681)."
+    description: "nesting.yaml's cells in a WITH that drops p and groups, in its WHERE that the SQL stores refuse, each as Neo4j refuses it, but where a note says Neo4j gives rows or that its answer is not pinned (see queries.yaml, \"Nesting of a dropped variable: a WITH that drops p and groups, in its WHERE\"; drivine4j#681)."
     steps:
       - cypher: "MATCH (p:Person) WITH p AS q, count(*) AS c WHERE EXISTS { (q)-->() WHERE p.name IS NOT NULL } RETURN q.name ORDER BY q.name"
         error: "p is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used."
@@ -2077,7 +2077,7 @@ cases:
         error: "The statement is not Cypher, at line 1, column 61: no viable alternative at input '[(q) ('"
       - cypher: "MATCH (p:Person) WITH p AS q, count(*) AS c WHERE size([(q)-->() WHERE p.name IS NOT NULL | 1]) > 0 RETURN q.name ORDER BY q.name"
         error: "p is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used."
-      - note: "Neo4j reads the WITH's grouping key here by the expression it groups by, p, where the SQL stores don't yet, and refuse it."
+      - note: "Neo4j's answer differs by environment here, no rows on one and four on another, so it is not pinned (liberation-data/drivine-cypher-spec#366); the SQL stores refuse it."
         cypher: "MATCH (p:Person) WITH p AS q, count(*) AS c WHERE size([w1 IN [q] WHERE p.name IS NOT NULL]) > 0 RETURN q.name ORDER BY q.name"
         error: "p is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used."
       - cypher: "MATCH (p:Person) WITH p AS q, count(*) AS c WHERE EXISTS { (q)-->(m1) WHERE EXISTS { (m1)-->() WHERE p.name IS NOT NULL } } RETURN q.name ORDER BY q.name"
@@ -2246,7 +2246,7 @@ cases:
         error: "The statement is not Cypher, at line 1, column 84: no viable alternative at input '[(w1) ('"
       - cypher: "MATCH (p:Person) WITH p AS q, count(*) AS c WHERE size([w1 IN [q] WHERE size([(w1)-->() WHERE p.name IS NOT NULL | 1]) > 0]) > 0 RETURN q.name ORDER BY q.name"
         error: "p is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used."
-      - note: "Neo4j reads the WITH's grouping key here by the expression it groups by, p, where the SQL stores don't yet, and refuse it."
+      - note: "Neo4j's answer differs by environment here, no rows on one and four on another, so it is not pinned (liberation-data/drivine-cypher-spec#366); the SQL stores refuse it."
         cypher: "MATCH (p:Person) WITH p AS q, count(*) AS c WHERE size([w1 IN [q] WHERE size([w2 IN [w1] WHERE p.name IS NOT NULL]) > 0]) > 0 RETURN q.name ORDER BY q.name"
         error: "p is not defined: a variable is bound by a pattern, a WITH or an UNWIND before it is used."
 
