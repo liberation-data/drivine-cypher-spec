@@ -1446,15 +1446,11 @@ cases:
     description: "A property read from the store may be of any kind: ORDER BY sorts a list, then a text, a truth value, a number, and a missing property last."
     steps:
       - cypher: "CREATE (:CyWrite {v: 2}), (:CyWrite {v: 'b'}), (:CyWrite {v: true}), (:CyWrite {v: [1]}), (:CyWrite {v: 1.5}), (:CyWrite {v: 'B'}), (:CyWrite {v: false}), (:CyWrite)"
-      - note: "Postgres sorts a number before a truth value, and a list last (drivine4j#307)."
-        cypher: "MATCH (k:CyWrite) RETURN k.v ORDER BY k.v"
-        except: [postgres]
+      - cypher: "MATCH (k:CyWrite) RETURN k.v ORDER BY k.v"
         rows: [[1], "B", "b", false, true, 1.5, 2, null]
       - cypher: "MATCH (k:CyWrite) RETURN k.v ORDER BY k.v DESC"
-        except: [postgres]
         rows: [null, 2, 1.5, true, false, "b", "B", [1]]
       - cypher: "MATCH (k:CyWrite) WITH k ORDER BY k.v SKIP 2 LIMIT 2 RETURN k.v"
-        except: [postgres]
         rows: ["b", false]
 
   - name: "A stored text past 4000 bytes"
@@ -1633,6 +1629,90 @@ cases:
         rows: [{id: 1, x: []}]
       - cypher: "MATCH ()-[r]->() RETURN count(r)"
         rows: [0]
+
+  - name: "A value given that Neo4j stores as no property"
+    description: "A statement that writes a property the statement gives, as a parameter, a row of a list it unwinds or a list written of such values and literals, that is a map, a list that holds a map or a list, or a list of more than one kind, fails as each row is written, as Neo4j fails it (drivine4j#820), and stores nothing. Whole and fractional numbers are one kind; Neo4j stores [1, 2.5]. Over no rows, or on a node that is null, it does not fail. Neo4j 2026.10.1: 22G03, with 22N01 for a map and 22N39 for a list."
+    steps:
+      - cypher: "CREATE (:CyWrite {id: 1})"
+      - note: "A SQL store stored the value as a document (drivine4j#820)."
+        cypher: "MATCH (n:CyWrite {id: 1}) SET n.p = $m"
+        parameters: {m: {a: 1}}
+        error: true
+      - cypher: "CREATE (:CyWrite {id: 2, p: $m})"
+        parameters: {m: {a: 1}}
+        error: true
+      - cypher: "MERGE (:CyWrite {id: 2, p: $m})"
+        parameters: {m: {a: 1}}
+        error: true
+      - cypher: "MATCH (n:CyWrite {id: 1}) SET n.p = $l"
+        parameters: {l: [{a: 1}]}
+        error: true
+      - cypher: "MATCH (n:CyWrite {id: 1}) SET n.p = $l"
+        parameters: {l: [[1, 2]]}
+        error: true
+      - cypher: "MATCH (n:CyWrite {id: 1}) SET n.p = $l"
+        parameters: {l: [1, "a"]}
+        error: true
+      - cypher: "MATCH (n:CyWrite {id: 1}) SET n.p = [true, $x]"
+        parameters: {x: 1}
+        error: true
+      - cypher: "MATCH (n:CyWrite {id: 1}) SET n = $props"
+        parameters: {props: {id: 1, p: {a: 1}}}
+        error: true
+      - cypher: "MATCH (n:CyWrite {id: 1}) SET n += $props"
+        parameters: {props: {p: [true, 1]}}
+        error: true
+      - cypher: "MATCH (n:CyWrite {id: 1}) CREATE (n)-[:R {p: $m}]->(:CyWrite {id: 3})"
+        parameters: {m: {a: 1}}
+        error: true
+      - note: "It fails on the second row, and the first row's node is not kept."
+        cypher: "UNWIND $rows AS row CREATE (:CyWrite {p: row.m})"
+        parameters: {rows: [{m: 1}, {m: {a: 1}}]}
+        error: true
+      - cypher: "UNWIND $rows AS row CREATE (:CyWrite {p: row.l})"
+        parameters: {rows: [{l: [1]}, {l: [1, "a"]}]}
+        error: true
+      - cypher: "UNWIND $ids AS id CREATE (:CyWrite {p: [id, 'x']})"
+        parameters: {ids: [1, 2]}
+        error: true
+      - cypher: "CREATE (:CyWrite {p: [1, 'a']})"
+        error: true
+      - note: "Over no rows, or on a node that is null, nothing is written, and nothing fails."
+        cypher: "MATCH (n:CyWrite {id: 9}) SET n.p = $m RETURN count(*)"
+        parameters: {m: {a: 1}}
+        rows: [0]
+      - cypher: "OPTIONAL MATCH (n:CyWrite {id: 9}) SET n.p = $m RETURN count(*)"
+        parameters: {m: {a: 1}}
+        rows: [1]
+      - note: "A SQL store fails where any row given is no property, though a WHERE, a MATCH that finds nothing for it or a LIMIT leaves that row out; Neo4j writes the others (drivine4j#820)."
+        cypher: "UNWIND $rows AS row WITH row WHERE row.m = 1 CREATE (x:CyWrite {p: row.m}) RETURN count(x)"
+        parameters: {rows: [{m: 1}, {m: {a: 1}}]}
+        only: [neo4j]
+        rows: [1]
+      - cypher: "UNWIND $rows AS row WITH row WHERE row.m = 1 CREATE (x:CyWrite {p: row.m}) RETURN count(x)"
+        parameters: {rows: [{m: 1}, {m: {a: 1}}]}
+        only: [sql]
+        error: true
+      - cypher: "UNWIND $rows AS row MATCH (n:CyWrite {id: row.id}) SET n.q = row.m RETURN count(*)"
+        parameters: {rows: [{id: 1, m: 1}, {id: 9, m: {a: 1}}]}
+        only: [neo4j]
+        rows: [1]
+      - cypher: "UNWIND $rows AS row MATCH (n:CyWrite {id: row.id}) SET n.q = row.m RETURN count(*)"
+        parameters: {rows: [{id: 1, m: 1}, {id: 9, m: {a: 1}}]}
+        only: [sql]
+        error: true
+      - cypher: "UNWIND $rows AS row WITH row LIMIT 1 CREATE (x:CyWrite {p: row.m}) RETURN count(x)"
+        parameters: {rows: [{m: 1}, {m: {a: 1}}]}
+        only: [neo4j]
+        rows: [1]
+      - cypher: "UNWIND $rows AS row WITH row LIMIT 1 CREATE (x:CyWrite {p: row.m}) RETURN count(x)"
+        parameters: {rows: [{m: 1}, {m: {a: 1}}]}
+        only: [sql]
+        error: true
+      - cypher: "MATCH (n:CyWrite {id: 1}) SET n.f = $f, n.e = $e"
+        parameters: {f: [1, 2.5], e: []}
+      - cypher: "MATCH (n:CyWrite {id: 1}) RETURN [n.id, size(n.f), n.f[1], n.e]"
+        rows: [[1, 2, 2.5, []]]
 
   - name: "NaN worked out from stored infinities"
     description: "NaN that a statement given no NaN or infinity works out, from infinities stored, is the float it is, as NaN given is: equal to nothing and ordered with nothing, kept by `+`, written by toString() as Java writes it, no map, sorted after every number, and NaN in a sum and a max(). SQLite's JSON holds no NaN, so its rows give it back from the value it stands in for it (see host.yaml), and it refuses a write of it. Postgres stores no infinity to start from."

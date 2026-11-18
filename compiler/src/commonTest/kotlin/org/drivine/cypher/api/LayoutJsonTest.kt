@@ -243,8 +243,8 @@ class LayoutJsonTest {
     fun aWriteOfNoValueOfItsKindOrForNoSqlStoreIsAnError() {
         // A temporal value whose text is no value of its kind is refused, not written as a text the layout reads as one.
         for ((request, message) in listOf(
-            "{\"write\": {\"\$temporal\": \"DATE\", \"text\": \"2024-1-1\"}, \"store\": \"postgres\"}" to "No DATE is 2024-1-1",
-            "{\"write\": [{\"a\": {\"\$temporal\": \"DURATION\", \"text\": \"1 day\"}}], \"store\": \"oracle\"}" to "No DURATION is 1 day",
+            "{\"write\": {\"\$temporal\": \"DATE\", \"text\": \"2024-1-1\"}, \"store\": \"postgres\"}" to "A value given as a DATE isn't one: 2024-1-1.",
+            "{\"write\": [{\"a\": {\"\$temporal\": \"DURATION\", \"text\": \"1 day\"}}], \"store\": \"oracle\"}" to "A value given as a DURATION isn't one: 1 day.",
             "{\"write\": {\"\$temporal\": \"DAY\", \"text\": \"2024-01-01\"}, \"store\": \"sqlite\"}" to "No temporal kind DAY",
             "{\"write\": {\"\$bytes\": 1}, \"store\": \"sqlite\"}" to "{\"\$bytes\": …} holds base64 text.",
             "{\"write\": {\"\$map\": 1}, \"store\": \"sqlite\"}" to "{\"\$map\": …} holds a map.",
