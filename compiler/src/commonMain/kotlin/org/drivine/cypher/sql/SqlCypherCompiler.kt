@@ -3465,12 +3465,21 @@ abstract class SqlCypherCompiler(
 
         /**
          * [evaluate] of [written] into [VALUE], [value] the JSON it writes, a property's or with [entries] a map of properties,
-         * and the statement failed where that is or has a list that holds null ([refuseNullItems]) and [target], the id of the
-         * node or relationship a `SET` writes to, is not null.
+         * and the statement failed where that is or has a list that holds null ([refuseNullItems]), or where the statement gives
+         * it as no property Neo4j stores ([unstorableGiven]), and [target], the id of the node or relationship a `SET` writes to,
+         * is not null.
          */
         private fun evaluateWritten(written: Expression?, entries: Boolean, target: String? = null, value: (Map<String, Value>) -> String) {
             var tests: List<String>? = emptyList()
-            evaluate(VALUE, written) { scope -> value(scope).also { tests = nullItemTests(written, asCarried(scope), VALUE, entries) } }
+            var unstorable: String? = null
+            evaluate(VALUE, written) { scope ->
+                value(scope).also {
+                    val carried = asCarried(scope)
+                    tests = nullItemTests(written, carried, VALUE, entries)
+                    unstorable = unstorableGiven(written, carried, entries)
+                }
+            }
+            unstorable?.let { refuseNullItems(null, target, notProperty(it)) }
             refuseNullItems(tests, target)
         }
 
@@ -3481,12 +3490,66 @@ abstract class SqlCypherCompiler(
          * writes to [target], it fails only where that is not null: Neo4j sets nothing on null, and works out no value for it
          * (openCypher's Set1 [8]). The id is read in the `SELECT`, as the `UPDATE` reads it, not in Oracle's PL/SQL `IF`.
          */
-        private fun refuseNullItems(tests: List<String>?, target: String?) {
-            if (tests == null && target == null) return step(ProcedureStep.Raise(NULL_ITEM))
+        private fun refuseNullItems(tests: List<String>?, target: String?, message: String = NULL_ITEM) {
+            if (tests == null && target == null) return step(ProcedureStep.Raise(message))
             if (tests?.isEmpty() == true) return
             val refused = listOfNotNull(target?.let { "$it IS NOT NULL" }, tests?.joinToString(" OR ")?.let { if (target == null) it else "($it)" })
             step(ProcedureStep.Select(COUNT, "CASE WHEN ${refused.joinToString(" AND ")} THEN 1 ELSE 0 END", ""))
-            branch("$COUNT = 1") { step(ProcedureStep.Raise(NULL_ITEM)) }
+            branch("$COUNT = 1") { step(ProcedureStep.Raise(message)) }
+        }
+
+        /**
+         * What the value [written] gives in [scope], a property's or with [entries] a map of properties, is where the statement
+         * gives it, and it is no property Neo4j stores (drivine4j#820): "a map", "a list of maps or lists" or "a list of more
+         * than one kind", as [unstorable] names it; null where it is one, or where the statement leaves it to be worked out as it
+         * runs. Given as a parameter, an item unwound from a list given ([givenRows]), or a list written of such items and literals.
+         * Of rows given, it is so where any row is: the statement then fails as it writes a row, though the row Neo4j fails on
+         * may be one a `WHERE` leaves out.
+         */
+        private fun unstorableGiven(written: Expression?, scope: Map<String, Value>, entries: Boolean): String? = when {
+            written == null -> null
+            entries && written is Expression.MapLiteral -> written.entries.firstNotNullOfOrNull { (_, value) -> unstorableGiven(value, scope, entries = false) }
+            written is Expression.Parameter -> parameterTree(written.name)?.let { unstorable(it, entries) }
+            !entries && written is Expression.ListLiteral -> {
+                // Each item as the JSON each row gives it, where every item is given: a literal, a parameter or an unwound item.
+                val items = written.items.map { item -> givenItems(item, scope) ?: return null }
+                when {
+                    items.any { rows -> rows.any { it != null && it.isContainerNode && !ValueLayout.isTag(it) } } -> "a list of maps or lists"
+                    items.flatten().mapNotNull { it?.let(::itemKind) }.distinct().size > 1 -> "a list of more than one kind"
+                    else -> null
+                }
+            }
+            else -> givenRows(written, scope)?.firstNotNullOfOrNull { row -> row?.let { unstorable(it, entries) } }
+        }
+
+        /** The JSON [item], an item of a list written, gives in each row, where the statement gives it ([unstorableGiven]); else null. */
+        private fun givenItems(item: Expression, scope: Map<String, Value>): List<JsonNode?>? = when (item) {
+            is Expression.Literal -> listOf(CypherJson.valueToTree(item.value, encoder))
+            is Expression.Parameter -> listOf(parameterTree(item.name))
+            else -> givenRows(item, scope)
+        }
+
+        /**
+         * Why the JSON [node], a property's or with [entries] a map of properties, is no property Neo4j stores: a map that is no
+         * temporal value's tag, a list that holds a map or a list, or a list of more than one kind ([itemKind]), whole and
+         * fractional numbers one kind; null where it is one. A null in a list is [holdsNullItem]'s.
+         */
+        private fun unstorable(node: JsonNode, entries: Boolean): String? = when {
+            entries -> if (node.isObject) node.firstNotNullOfOrNull { unstorable(it, entries = false) } else null
+            ValueLayout.isTag(node) -> null
+            node.isObject -> "a map"
+            node.isArray && node.any { it.isContainerNode && !ValueLayout.isTag(it) } -> "a list of maps or lists"
+            node.isArray && node.mapNotNull(::itemKind).distinct().size > 1 -> "a list of more than one kind"
+            else -> null
+        }
+
+        /** The kind of the JSON [node], an item of a list, as Neo4j keeps a list of one: a number, a text, a truth value or a temporal kind; null for null. */
+        private fun itemKind(node: JsonNode): String? = when {
+            ValueLayout.isTag(node) -> node[TAG]?.textValue()
+            node.isNumber -> "number"
+            node.isTextual -> "text"
+            node.isBoolean -> "boolean"
+            else -> null
         }
 
         /**
@@ -8244,6 +8307,9 @@ abstract class SqlCypherCompiler(
          * named by its text, or by its kind where it is no text.
          */
         const val ZONE_NOT_COMPILED = "A time zone that is not Z or an offset of hours and minutes (+hh:mm), such as a zone by name, an offset with seconds, '+01' or a value that is no text, is not compiled to SQL yet:"
+
+        /** Why a statement that writes [what] as a property fails, as Neo4j fails it, in [NULL_ITEM]'s words (drivine4j#820). */
+        fun notProperty(what: String) = "A property is a number, a text, a truth value, a temporal value or a list of them, not $what, as in Neo4j."
 
         /** Why a statement that writes a property that is a list that holds null fails, as Neo4j fails it (drivine4j#557). */
         const val NULL_ITEM = "A property is a number, a text, a truth value, a temporal value or a list of them, not a list that holds null, as in Neo4j."
