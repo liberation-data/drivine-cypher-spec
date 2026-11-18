@@ -16,9 +16,13 @@ import org.drivine.cypher.store.IdSql
  * - `hasId`, with `alias`, `key` and `json`, the SQL of the id's JSON as the host binds it ([IdSql.hasId]);
  * - `hasIdIn`, with `alias`, `key` and `parameter`, the SQL of a JSON array of each id's JSON text (`["\"a\"", "1"]`), and on
  *   SQLite `nodes`, the node table, and `labels`, a list of the node's labels ([IdSql.hasIdIn]);
- * - `keyText`, `property` and `hasProperty`, with `alias` and `key` ([IdSql.keyText], [IdSql.property], [IdSql.hasProperty]).
+ * - `keyText`, `property` and `hasProperty`, with `alias` and `key` ([IdSql.keyText], [IdSql.property], [IdSql.hasProperty]);
+ * - `hasLabels`, with `alias` and `labels`, a list of the node's labels, the test a lookup by its id makes of each beside
+ *   `hasId`: on Postgres and SQLite as the label's partial index is made, on Oracle by its text; `1 = 1` for none
+ *   ([IdSql.hasLabels]).
  *
- * Each key is given as the node holds it, escaped where it begins with `$`. `json` and `parameter` are written into the SQL as
+ * Each key is given as the node holds it, escaped where it begins with `$`. Each label is given as the node holds it too, and
+ * written into the SQL escaped, so a label with a quote (`'` or `"`) in it needs nothing of the host. `json` and `parameter` are written into the SQL as
  * given, in the host's own placeholder; on Oracle and SQLite `json` is written more than once, so it is bound by name.
  * Answered `{"sql": "…"}`.
  */
@@ -27,7 +31,7 @@ internal object IdSqlJson {
 
     const val KIND = "idSql"
 
-    private val HELPERS = listOf("hasId", "hasIdIn", "keyText", "property", "hasProperty")
+    private val HELPERS = listOf("hasId", "hasIdIn", "keyText", "property", "hasProperty", "hasLabels")
 
     /** The answer to [tree], a request that gives [KIND]. */
     fun answer(tree: ObjectNode): String = try {
@@ -53,6 +57,11 @@ internal object IdSqlJson {
             "keyText" -> IdSql.keyText(store, text("alias"), text("key"))
             "property" -> IdSql.property(store, text("alias"), text("key"))
             "hasProperty" -> IdSql.hasProperty(store, text("alias"), text("key"))
+            "hasLabels" -> IdSql.hasLabels(
+                store, text("alias"),
+                (given["labels"] as? ArrayNode ?: throw IllegalArgumentException("$KIND's hasLabels gives labels as a list of texts."))
+                    .map { it.takeIf { it.isTextual }?.textValue() ?: throw IllegalArgumentException("$KIND's hasLabels gives labels as a list of texts.") },
+            )
             else -> throw IllegalArgumentException("An $KIND request names its helper, one of ${HELPERS.joinToString(", ")}, not $helper.")
         }
         "{\"sql\":${CypherJson.writeValueAsString(CypherJson.valueToTree(sql))}}"
