@@ -243,11 +243,14 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
      * so a text entry is never read as JSON.
      */
     override fun unstorableItem(json: String, entries: Boolean): String {
-        fun tag(x: String) = "COALESCE(json_extract($x, '\$.\"${ValueLayout.KIND}\"') IN ($tagWords) AND json_type($x, '\$.${ValueLayout.TEXT}') = 'text', 0)"
+        // NaN, held as a map ([isNaN]), is a number here, so the write fails for it, as [finite] fails it.
+        fun tag(x: String) = "COALESCE(json_extract($x, '\$.\"${ValueLayout.KIND}\"') IN ($tagWords) AND json_type($x, '\$.${ValueLayout.TEXT}') = 'text', 0)" +
+            if (nonFinite) " OR COALESCE(${isNaN(x)}, 0)" else ""
+        // An item's value is JSON only where it is a map or a list: a text item's is its text, which no JSON function reads.
         fun item(type: String, x: String) = "CASE $type WHEN 'object' THEN CASE WHEN ${tag(x)} THEN 0 ELSE $UNSTORABLE_MAP END " +
-            "WHEN 'array' THEN (SELECT CASE WHEN MAX(ui.type = 'array' OR ui.type = 'object' AND NOT ${tag("ui.value")}) THEN $UNSTORABLE_NESTED " +
-            "WHEN COUNT(DISTINCT CASE ui.type WHEN 'object' THEN json_extract(ui.value, '\$.\"${ValueLayout.KIND}\"') WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' " +
-            "WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'null' THEN NULL ELSE ui.type END) > 1 THEN $UNSTORABLE_MIXED ELSE 0 END " +
+            "WHEN 'array' THEN (SELECT CASE WHEN MAX(CASE ui.type WHEN 'array' THEN 1 WHEN 'object' THEN NOT (${tag("ui.value")}) ELSE 0 END) THEN $UNSTORABLE_NESTED " +
+            "WHEN COUNT(DISTINCT CASE ui.type WHEN 'object' THEN CASE WHEN ${if (nonFinite) "COALESCE(${isNaN("ui.value")}, 0)" else "0"} THEN 'number' ELSE json_extract(ui.value, '\$.\"${ValueLayout.KIND}\"') END " +
+            "WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'null' THEN NULL ELSE ui.type END) > 1 THEN $UNSTORABLE_MIXED ELSE 0 END " +
             "FROM json_each($x) ui) ELSE 0 END"
         return if (!entries) item("json_type($json)", json)
         else "CASE WHEN json_type($json) = 'object' THEN COALESCE((SELECT uc.c FROM (SELECT ${item("ue.type", "ue.value")} AS c FROM json_each($json) ue) uc WHERE uc.c > 0 LIMIT 1), 0) ELSE 0 END"

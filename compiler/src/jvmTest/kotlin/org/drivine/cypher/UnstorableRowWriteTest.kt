@@ -22,7 +22,7 @@ class UnstorableRowWriteTest {
     private val tests = mapOf(
         PostgresCypherCompiler::class to "jsonb_typeof(ui) = 'array'",
         OracleCypherCompiler::class to "REGEXP_REPLACE(ns.c, ",
-        SqliteCypherCompiler::class to "ui.type = ''array''",
+        SqliteCypherCompiler::class to "CASE ui.type WHEN ''array'' THEN 1",
     )
 
     private fun sql(compiler: SqlCypherCompiler, cypher: String, parameters: Map<String, Any?>) = compiler.compile(cypher, parameters).sql
