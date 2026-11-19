@@ -1,5 +1,6 @@
 package org.drivine.cypher.sql
 
+import org.drivine.cypher.store.ValueLayout
 import org.drivine.DrivineInternalApi
 import org.drivine.cypher.CompilerException
 import org.drivine.cypher.ast.RelationshipPattern
@@ -246,6 +247,23 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
     override fun nullItem(json: String, entries: Boolean): String =
         if (entries) "EXISTS (SELECT 1 FROM jsonb_each(CASE WHEN jsonb_typeof($json) = 'object' THEN $json END) ni WHERE ${nullItem("ni.value", false)})"
         else shared(json) { (x) -> "(jsonb_typeof($x) = 'array' AND $x @> '[null]')" }
+
+    /** PL/pgSQL works out an expression that reads no table without a query of its own. */
+    override fun containerGuard(json: String) = "jsonb_typeof($json) IN ('array', 'object')"
+
+    /**
+     * A map is no tag where its kind isn't a tag's word or its text no text; a list's items read in one pass, its kinds counted
+     * apart, whole and fractional numbers one, a tag by its kind. A map of properties has its first such value's number.
+     */
+    override fun unstorableItem(json: String, entries: Boolean): String {
+        fun tag(x: String) = "COALESCE($x ->> '${ValueLayout.KIND}' IN ($tagWords) AND jsonb_typeof($x -> '${ValueLayout.TEXT}') = 'string', false)"
+        fun item(x: String) = "CASE jsonb_typeof($x) WHEN 'object' THEN CASE WHEN ${tag(x)} THEN 0 ELSE $UNSTORABLE_MAP END " +
+            "WHEN 'array' THEN (SELECT CASE WHEN bool_or(jsonb_typeof(ui) = 'array' OR jsonb_typeof(ui) = 'object' AND NOT ${tag("ui")}) THEN $UNSTORABLE_NESTED " +
+            "WHEN COUNT(DISTINCT CASE jsonb_typeof(ui) WHEN 'object' THEN ui ->> '${ValueLayout.KIND}' WHEN 'null' THEN NULL ELSE jsonb_typeof(ui) END) > 1 THEN $UNSTORABLE_MIXED ELSE 0 END " +
+            "FROM jsonb_array_elements($x) ui) ELSE 0 END"
+        return if (!entries) item(json)
+        else "CASE WHEN jsonb_typeof($json) = 'object' THEN COALESCE((SELECT uc.c FROM (SELECT ${item("ue.value")} AS c FROM jsonb_each($json) ue) uc WHERE uc.c > 0 LIMIT 1), 0) ELSE 0 END"
+    }
 
     /**
      * A list's numbers each a float, where they are all numbers and one is a float: `jsonb` keeps a number's text, so a float
