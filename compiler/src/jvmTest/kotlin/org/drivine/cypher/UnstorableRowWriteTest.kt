@@ -42,6 +42,9 @@ class UnstorableRowWriteTest {
             "UNWIND \$rows AS row WITH row MATCH (n:A) SET n += {p: row.m}" to rows,
             "UNWIND \$rows AS row WITH row MATCH (n:A) SET n = row" to rows,
             "WITH \$m AS m MATCH (n:A) SET n.p = m" to mapOf("m" to mapOf("a" to 1)),
+            "UNWIND \$rows AS row WITH row AS r WITH r LIMIT 5 CREATE (:X {p: r.m})" to rows,
+            // A WITH that works the value out is no row given passed on.
+            "UNWIND \$rows AS row WITH {m: row.m} AS r CREATE (:X {p: r.m})" to mapOf("rows" to listOf(mapOf("m" to 1))),
             "MATCH (n:A) SET n.p = \$m.a" to mapOf("m" to mapOf("a" to mapOf("b" to 1))),
             "WITH [{a: 1}] AS l MATCH (n:A) SET n.p = l" to emptyMap(),
             "MATCH (n:A) WITH n, {p: {a: 1}} AS m SET n += m" to emptyMap(),
@@ -62,9 +65,20 @@ class UnstorableRowWriteTest {
     }
 
     @Test
+    fun `Postgres tests a row only where its value is a list or a map, which PL-pgSQL tells with no query`() {
+        val sql = sql(PostgresCypherCompiler("g"), "UNWIND \$rows AS row WITH {m: row.m} AS r CREATE (:X {p: r.m})", mapOf("rows" to listOf(mapOf("m" to 1))))
+        assertTrue(sql.contains("IF jsonb_typeof(cy_value) IN ('array', 'object') THEN"), sql)
+    }
+
+    @Test
     fun `a value of a kind known when compiling, or seen as given, is not tested`() {
         val known = listOf(
             "UNWIND \$rows AS row CREATE (:X {p: row.v})" to mapOf("rows" to listOf(mapOf("v" to 1))),
+            // A WITH that passes a row given on as it is keeps it given, so rows that are all properties cost no test.
+            "UNWIND \$rows AS row WITH row CREATE (:X {p: row.v})" to mapOf("rows" to listOf(mapOf("v" to 1), mapOf("v" to "x"))),
+            "UNWIND \$rows AS row WITH row AS r WHERE r.v > 0 MATCH (n:A) SET n += r" to mapOf("rows" to listOf(mapOf("v" to 1))),
+            "UNWIND \$rows AS row WITH * LIMIT 1 CREATE (:X {p: row.l})" to mapOf("rows" to listOf(mapOf("l" to listOf(1, 2)))),
+            "WITH \$m AS m MATCH (n:A) SET n.p = m.a, n += m" to mapOf("m" to mapOf("a" to listOf(1, 2))),
             "CREATE (:X {p: \$v})" to mapOf("v" to "x"),
             "MATCH (n:A) SET n.p = 1",
             "MATCH (n:A) SET n.p = n.q",

@@ -1129,6 +1129,13 @@ abstract class SqlCypherCompiler(
     protected open fun unstorableItem(json: String, entries: Boolean, nullItem: Boolean): String =
         if (nullItem) "CASE WHEN ${nullItem(json, entries)} THEN $UNSTORABLE_NULL ELSE ${unstorableItem(json, entries)} END" else unstorableItem(json, entries)
 
+    /**
+     * A condition of the procedure's own, cheap to work out, that the JSON [json] is a list or a map: [unstorableItem]'s test
+     * of a row is made only where it holds, so a scalar written, the most of what rows give, costs no query of its own. Null
+     * where the store has none cheaper than the test.
+     */
+    protected open fun containerGuard(json: String): String? = null
+
     /** The words a temporal value's tag names its kind by ([ValueLayout.KIND]), as SQL's list of texts: see [unstorableItem]. */
     protected val tagWords: String = Temporal.entries.joinToString(", ") { "'${ValueLayout.word(it)}'" }
 
@@ -2152,8 +2159,29 @@ abstract class SqlCypherCompiler(
             // Rows an `UNWIND` read last are still read before what comes after a `WITH` of them: SQLite merges its query in.
             next.afterRows = select.afterRows?.let { name }
             projected.scope.forEach { (variable, value) -> next.bind(variable, value.columnsOf(name)) }
+            passedGiven(select, with.projection, next)
             projected.order.forEach { (column, descending) -> next.order += "$name.$column" to descending }
             return with.where?.let { filtered(next, it) } ?: next
+        }
+
+        /**
+         * What the statement gives that [projection], a `WITH`'s, passes on as it is, known as given in [next] too
+         * ([unwoundGiven]): a variable bound to an item unwound from a list given, as `row` of `WITH row` or `WITH row AS r`,
+         * or a parameter, as `WITH ${'$'}m AS m`, one row of it. A write of it is then tested as each row is written only where a
+         * row given is no property, as one of the variable before the `WITH` is (drivine4j#820): a `WHERE` or a `LIMIT` that
+         * leaves that row out still writes the others. A value the `WITH` works out, as `row.x` or `{a: row.a}`, is not known so.
+         */
+        private fun passedGiven(select: Select, projection: Projection, next: Select) {
+            val passed = projection.items.map { it.expression to it.name } +
+                if (projection.star) select.scope.keys.filter { key -> projection.items.none { it.name == key } }.map { Expression.Variable(it) to it } else emptyList()
+            for ((expression, name) in passed) {
+                val tree = when (expression) {
+                    is Expression.Variable -> (select.scope[expression.name] as? Value.Json)?.let { unwoundGiven[it.sql] }
+                    is Expression.Parameter -> parameterTree(expression.name)?.let { JsonNodeFactory.instance.arrayNode().add(it) }
+                    else -> null
+                } ?: continue
+                (next.scope[name] as? Value.Json)?.let { unwoundGiven[it.sql] = tree }
+            }
         }
 
         /**
@@ -3609,11 +3637,16 @@ abstract class SqlCypherCompiler(
                 val test = unstorableItem(VALUE, tested, nullItem = tests!!.isNotEmpty())
                 if (present == null) test else "CASE WHEN $present THEN $test ELSE 0 END"
             }
-            step(ProcedureStep.Select(COUNT, sql, ""))
-            if (tests == null || tests.isNotEmpty()) branch("$COUNT = $UNSTORABLE_NULL") { step(ProcedureStep.Raise(message)) }
-            if (tested == null) return
-            listOf(UNSTORABLE_MAP to "a map", UNSTORABLE_NESTED to "a list of maps or lists", UNSTORABLE_MIXED to "a list of more than one kind")
-                .forEach { (code, what) -> branch("$COUNT = $code") { step(ProcedureStep.Raise(notProperty(what))) } }
+            fun refuse() {
+                step(ProcedureStep.Select(COUNT, sql, ""))
+                if (tests == null || tests.isNotEmpty()) branch("$COUNT = $UNSTORABLE_NULL") { step(ProcedureStep.Raise(message)) }
+                if (tested == null) return
+                listOf(UNSTORABLE_MAP to "a map", UNSTORABLE_NESTED to "a list of maps or lists", UNSTORABLE_MIXED to "a list of more than one kind")
+                    .forEach { (code, what) -> branch("$COUNT = $code") { step(ProcedureStep.Raise(notProperty(what))) } }
+            }
+            // A value that is no list or map, most of those written, skips the test where the store tells so cheaply ([containerGuard]).
+            val guard = tested?.let { containerGuard(VALUE) }
+            if (guard == null) refuse() else branch(guard) { refuse() }
         }
 
         /**

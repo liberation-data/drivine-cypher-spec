@@ -252,6 +252,9 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
      * A map is no tag where its kind isn't a tag's word or its text no text; a list's items read in one pass, its kinds counted
      * apart, whole and fractional numbers one, a tag by its kind. A map of properties has its first such value's number.
      */
+    /** PL/pgSQL works out an expression that reads no table without a query of its own. */
+    override fun containerGuard(json: String) = "jsonb_typeof($json) IN ('array', 'object')"
+
     override fun unstorableItem(json: String, entries: Boolean): String {
         fun tag(x: String) = "COALESCE($x ->> '${ValueLayout.KIND}' IN ($tagWords) AND jsonb_typeof($x -> '${ValueLayout.TEXT}') = 'string', false)"
         fun item(x: String) = "CASE jsonb_typeof($x) WHEN 'object' THEN CASE WHEN ${tag(x)} THEN 0 ELSE $UNSTORABLE_MAP END " +

@@ -1826,6 +1826,10 @@ cases:
       - only: [neo4j, oracle]
         cypher: "MATCH (n:CyWrite) SET n.x = n.b + n.c[0] RETURN [n.x, n.x = n.x]"
         rows: [[{$float: "NaN"}, false]]
+      - note: "A list of floats worked out as it runs, NaN and an infinity among them, is one kind, and stored."
+        only: [neo4j, oracle]
+        cypher: "MATCH (n:CyWrite) SET n.y = [1.5, n.b + n.c[0], n.b] RETURN [size(n.y), n.y[0], n.y[2]]"
+        rows: [[3, 1.5, {$float: "Infinity"}]]
       - note: "The store fails as the statement runs: \"A statement that writes works out NaN, which SQLite's JSON holds as no number: it would store another value in its place.\""
         only: [sqlite]
         cypher: "MATCH (n:CyWrite) SET n.x = n.b + n.c[0]"
