@@ -1487,10 +1487,10 @@ class OracleCypherCompiler(
         val words = Temporal.entries.map { ValueLayout.word(it) }
         val letters = words.zip(listOf("P", "Q", "R", "S", "U", "V"))
         val tag = "\\{(\"(${ValueLayout.TEXT}|${ValueLayout.KEY})\":$string,)*\"\\${ValueLayout.KIND}\":\"(${words.joinToString("|")})\"(,\"(${ValueLayout.TEXT}|${ValueLayout.KEY})\":$string)*\\}"
-        // A float written as extended JSON's, as NaN and the infinities are (`{"$numberDouble":"Nan"}`, where plain JSON writes
-        // the text "Nan"), to a number first; then each tag to its kind's word between @s, the texts and the rest; the words,
-        // kept whole by their @s, to their letters.
-        var shape = "REGEXP_REPLACE(REGEXP_REPLACE(ni.t, '\\{\"\\\$number[A-Za-z]+\":\"[^\"]*\"\\}', '0'), '$tag', '@\\4@')"
+        // A value written as extended JSON's, a float (`{"$numberDouble":2}`, and NaN and the infinities `{"$numberDouble":"Nan"}`,
+        // where plain JSON writes the text "Nan") or another of Oracle's scalars, to a number first; then each tag to its kind's
+        // word between @s, the texts and the rest; the words, kept whole by their @s, to their letters.
+        var shape = "REGEXP_REPLACE(REGEXP_REPLACE(ni.t, '\\{\"\\\$(number|oracle)[A-Za-z]+\":(\"[^\"]*\"|[^{}\",]*)\\}', '0'), '$tag', '@\\4@')"
         shape = "REGEXP_REPLACE($shape, '$string', 't')"
         shape = "REGEXP_REPLACE(REPLACE(REPLACE(REPLACE($shape, 'true', 'b'), 'false', 'b'), 'null', 'z'), '-?[0-9][0-9.eE+-]*', 'n')"
         letters.forEach { (word, letter) -> shape = "REPLACE($shape, '@$word@', '$letter')" }
