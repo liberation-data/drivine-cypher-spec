@@ -43,7 +43,7 @@ abstract class SqlStoreSchema internal constructor() : StoreSchema {
 
     /**
      * The `status`es of a record that are read: Oracle's [OracleDdl.INCOMPLETE], of a range index that lacks part of what
-     * is made for it, and Postgres's [PostgresDdl.INVALID], of an index left invalid; SQLite lists none.
+     * is made for it, and Postgres's [PostgresDdl.INVALID], of an index left invalid, and [PostgresDdl.BUILDING], of one another session is building; SQLite lists none.
      */
     protected open val statuses: Set<String>
         get() = emptySet()

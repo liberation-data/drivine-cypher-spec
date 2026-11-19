@@ -947,7 +947,9 @@ internal class SchemaProgram(
         val invalid = form !is ItemForm.Mismatch && form !is ItemForm.Stale && form !is ItemForm.Newer &&
             if (found != null) store.isIncomplete(found) else isLeftIncomplete(spec)
         if (invalid) ddl(store.ddl.droppedIncomplete(spec))
-        val existing = if (invalid) null else found
+        // The drop leaves one another session began building since it was listed: waited for, as above, rather than built
+        // over (a create would queue behind it), and taken as made where it ends valid.
+        val existing = if (invalid) awaitBuildUnderWay(spec)?.takeUnless { store.isIncomplete(it) } else found
         // Another item under the name Drivine gives this one's index: never taken as made, and never made over.
         if (form is ItemForm.Mismatch) return mismatched(spec, existing, form)
         if (existing != null && existing.buildFailed) {

@@ -407,11 +407,14 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
      * invalid one's: as before [completeIndex] builds an index again, and as after a uniqueness constraint's online build
      * the data refuses (#382), which leaves its unique index invalid under the name, where `IF NOT EXISTS` would pass over it.
      *
-     * Dropped only if it is still invalid once its table is held: another session may have dropped it since it was listed,
-     * and built it again online, which is invalid too until it is done. The block's lock on the table waits for that build
-     * to end, and then finds the index valid and leaves it, where a `DROP INDEX CONCURRENTLY` would wait for it and then
-     * drop a valid index that holds the data unique. The cost is that writes to the graph's nodes wait while the block
-     * holds the table, which is only for the drop of an invalid index, or for no time where there is none.
+     * Dropped only where it is invalid with no build of it under way, as the listing gives it [INVALID] ([statusOf]), and
+     * still invalid once its table is held: another session may have dropped it since it was listed, and built it again
+     * online, which is invalid too until it is done. One being built is left, and the ensure waits for that build in the
+     * listing: a lock queued behind the build would hold up every read and write of the graph's nodes until it ended, and
+     * the block's snapshot would hold up the build's last phase, which waits for older snapshots, a deadlock. A
+     * `DROP INDEX CONCURRENTLY` would wait for that build and then drop a valid index that holds the data unique. The cost
+     * is that reads and writes of the graph's nodes wait while the block holds the table, which is only for the drop of an
+     * invalid index, or for no time where there is none.
      */
     override fun droppedIncomplete(spec: SchemaItemSpec): List<DdlStatement> {
         val name = madeObjectName(spec)
@@ -423,7 +426,7 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
                     DECLARE
                         v_table regclass;
                     BEGIN
-                        SELECT indrelid::regclass INTO v_table FROM pg_index WHERE indexrelid = to_regclass(${literal(name)}) AND NOT indisvalid;
+                        SELECT x.indrelid::regclass INTO v_table FROM pg_index x WHERE x.indexrelid = to_regclass(${literal(name)}) AND ${statusOf("x")} = ${literal(INVALID)};
                         IF v_table IS NOT NULL THEN
                             EXECUTE 'LOCK TABLE ' || v_table || ' IN ACCESS EXCLUSIVE MODE';
                             IF EXISTS (SELECT 1 FROM pg_index WHERE indexrelid = to_regclass(${literal(name)}) AND NOT indisvalid) THEN
