@@ -3554,7 +3554,8 @@ abstract class SqlCypherCompiler(
         /**
          * [evaluate] of [written] into [VALUE], [value] the JSON it writes, a property's or with [entries] a map of properties,
          * and the statement failed where that is or has a list that holds null ([refuseNullItems]), or where the statement gives
-         * it as no property Neo4j stores ([unstorableGiven]), and [target], the id of the node or relationship a `SET` writes to,
+         * it as no property Neo4j stores ([unstorableGiven]), or the row's value is ([unstorableItem], tested where its kind is not
+         * known as the statement compiles, [knownStorable]), and [target], the id of the node or relationship a `SET` writes to,
          * is not null. A list of whole and fractional numbers the statement gives in it is then widened in [VALUE], each of its
          * numbers a float, as Neo4j stores one ([widenedGiven], #377).
          */
@@ -3699,16 +3700,18 @@ abstract class SqlCypherCompiler(
 
         /**
          * Whether the value [written] gives in [scope], a property's or with [entries] a map of properties, is known when
-         * compiling to be one Neo4j stores, or to be seen as given ([unstorableGiven] refuses it where it is not), so that no row
+         * compiling to be one Neo4j stores, or given as one ([unstorableGiven] refuses one written whole that is not), so that no row
          * needs [unstorableItem]'s test: a number, a text, a truth value or a temporal value, a property read from the store,
          * which holds no map, a variable a `WITH` binds to a value of such a kind or a list of them, or a map written of such
          * values, or of the properties of a node or a relationship. Any other, as a key of a row a `WITH` passes on or an entry of
          * a parameter's map, is tested as each row is written (drivine4j#820).
          */
         private fun knownStorable(written: Expression?, scope: Map<String, Value>, entries: Boolean): Boolean = when {
-            written == null || written is Expression.Parameter -> true
+            written == null -> true
+            // A value given, as it is: [unstorableGiven] refuses one written whole, not one within a `coalesce()` or a `CASE`.
+            written is Expression.Parameter -> parameterTree(written.name)?.let { unstorable(it, entries) == null } ?: true
             !entries && written is Expression.ListLiteral -> givenListStorable(written, scope)
-            givenRows(written, scope) != null -> true
+            givenRows(written, scope) != null -> givenRows(written, scope).orEmpty().none { it != null && unstorable(it, entries) != null }
             entries && written is Expression.MapLiteral -> written.entries.all { (_, value) -> knownStorable(value, scope, entries = false) }
             entries -> written is Expression.Variable && (scope[written.name] is Value.Node || scope[written.name] is Value.Relationship) ||
                 written is Expression.Function && written.name.equals("properties", ignoreCase = true) &&

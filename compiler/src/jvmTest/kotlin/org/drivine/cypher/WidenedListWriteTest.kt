@@ -44,6 +44,9 @@ class WidenedListWriteTest {
             "UNWIND \$rows AS row CREATE (:A {f: [row.a, 2.5]})" to mapOf("rows" to listOf(mapOf("a" to 1))),
             "UNWIND \$rows AS row MATCH (n:A {id: row.id}) SET n = row" to mapOf("rows" to listOf(mapOf("id" to 1, "f" to mixed))),
             "UNWIND \$rows AS row MATCH (n:A {id: row.id}) SET n += row" to mapOf("rows" to listOf(mapOf("id" to 1, "f" to mixed))),
+            // A row or a parameter a WITH passes on as it is is still given (drivine4j#820).
+            "UNWIND \$rows AS row WITH row CREATE (:A {f: row.f})" to mapOf("rows" to listOf(mapOf("f" to mixed))),
+            "WITH \$props AS m MATCH (n:A) SET n += m" to mapOf("props" to mapOf("f" to mixed)),
             "MERGE (:A {f: [1, 2.5]})" to emptyMap(),
             "MATCH (a:A) CREATE (a)-[:R {w: [1, 0.5]}]->(:A)" to emptyMap(),
             // Each clause that writes a property widens it as SET and CREATE do.

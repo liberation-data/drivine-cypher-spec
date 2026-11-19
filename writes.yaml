@@ -1778,6 +1778,9 @@ cases:
       - cypher: "MATCH (n:CyWrite {id: 1}) CREATE (n)-[:R {p: coalesce(n.x, $m.a)}]->(:CyWrite {id: 3})"
         parameters: {m: {a: [1, "a"]}}
         error: true
+      - cypher: "MATCH (n:CyWrite {id: 1}) SET n.p = coalesce(n.x, $m)"
+        parameters: {m: {a: 1}}
+        error: true
       - note: "A temporal value is a property, alone and in a list of its kind, read out of a map worked out as it runs."
         cypher: "UNWIND $rows AS row WITH {d: date(row.s)} AS m MATCH (n:CyWrite {id: 1}) SET n.d = m.d, n.l = [m.d, date('2026-01-06')] RETURN [toString(n.d), [x IN n.l | toString(x)]]"
         parameters: {rows: [{s: "2026-01-05"}]}
