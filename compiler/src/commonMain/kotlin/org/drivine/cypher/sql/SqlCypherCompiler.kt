@@ -1113,6 +1113,26 @@ abstract class SqlCypherCompiler(
     protected abstract fun nullItem(json: String, entries: Boolean): String
 
     /**
+     * What the JSON [json], a property's value a write works out, is as no property Neo4j stores, or with [entries], a map of
+     * properties one of whose values is (drivine4j#820): [UNSTORABLE_MAP] for a map that is no temporal value's tag,
+     * [UNSTORABLE_NESTED] for a list that holds a map or a list, [UNSTORABLE_MIXED] for a list of more than one kind (a number,
+     * a text, a truth value or a temporal kind, whole and fractional numbers one kind, null none), and 0 for any other, as an
+     * integer. Tested as each row is written, where the statement leaves the value to be worked out as it runs: it reads the
+     * value once, and a scalar's test is its type's alone.
+     */
+    protected abstract fun unstorableItem(json: String, entries: Boolean): String
+
+    /**
+     * [unstorableItem]'s test of [json], with [nullItem] [UNSTORABLE_NULL] first where it is a list that holds null ([nullItem]),
+     * as one test: Oracle's reads the value once, as its text, as its [nullItem] does.
+     */
+    protected open fun unstorableItem(json: String, entries: Boolean, nullItem: Boolean): String =
+        if (nullItem) "CASE WHEN ${nullItem(json, entries)} THEN $UNSTORABLE_NULL ELSE ${unstorableItem(json, entries)} END" else unstorableItem(json, entries)
+
+    /** The words a temporal value's tag names its kind by ([ValueLayout.KIND]), as SQL's list of texts: see [unstorableItem]. */
+    protected val tagWords: String = Temporal.entries.joinToString(", ") { "'${ValueLayout.word(it)}'" }
+
+    /**
      * The JSON [json], a property's value a write works out, with each number of it a float where it is a list of numbers
      * that holds a float, as Neo4j stores such a list (#377): `[1, 2.5]` is `[1.0, 2.5]`. Any other value is as it was. With
      * [entries], a map of properties, each of its values so, of those at [keys] at least: a key it lacks stays lacking. Called
@@ -3513,17 +3533,23 @@ abstract class SqlCypherCompiler(
         private fun evaluateWritten(written: Expression?, entries: Boolean, target: String? = null, value: (Map<String, Value>) -> String) {
             var tests: List<String>? = emptyList()
             var unstorable: String? = null
+            var tested = false
             var widened: Set<String>? = null
             evaluate(VALUE, written) { scope ->
                 value(scope).also {
                     val carried = asCarried(scope)
                     tests = nullItemTests(written, carried, VALUE, entries)
-                    unstorable = unstorableGiven(written, carried, entries)
+                    // A row given that is no property is tested for as it is written, as a value worked out as it runs is: a
+                    // row a MATCH or a WHERE leaves out then fails nothing, as in Neo4j. Rows given that are all properties need no test.
+                    val given = unstorableGiven(written, carried, entries)
+                    val rows = written != null && givenRows(written, carried) != null
+                    unstorable = given.takeUnless { rows }
+                    tested = if (rows) given != null else given == null && !knownStorable(written, carried, entries)
                     widened = widenedGiven(written, carried, entries)
                 }
             }
             unstorable?.let { refuseNullItems(null, target, notProperty(it)) }
-            refuseNullItems(tests, target)
+            refuseNullItems(tests, target, unstorable = if (tested) entries else null)
             widened?.let { assign(VALUE, widenedNumbers(VALUE, entries, it)) }
         }
 
@@ -3565,13 +3591,84 @@ abstract class SqlCypherCompiler(
          * writes to [target], it fails only where that is not null: Neo4j sets nothing on null, and works out no value for it
          * (openCypher's Set1 [8]). The id is read in the `SELECT`, as the `UPDATE` reads it, not in Oracle's PL/SQL `IF`.
          * [message] is what it fails with: [NULL_ITEM], or [unstorableGiven]'s refusal, with no [tests], for a value given.
+         * With [unstorable], where [VALUE] is worked out as it runs ([knownStorable]), a property's or with it true a map of
+         * properties, it is tested by [unstorableItem] in the same step, its test for null among it: the row fails as it names
+         * (drivine4j#820), so a row a `WHERE` leaves out fails nothing.
          */
-        private fun refuseNullItems(tests: List<String>?, target: String?, message: String = NULL_ITEM) {
+        private fun refuseNullItems(tests: List<String>?, target: String?, message: String = NULL_ITEM, unstorable: Boolean? = null) {
             if (tests == null && target == null) return step(ProcedureStep.Raise(message))
-            if (tests?.isEmpty() == true) return
-            val refused = listOfNotNull(target?.let { "$it IS NOT NULL" }, tests?.joinToString(" OR ")?.let { if (target == null) it else "($it)" })
-            step(ProcedureStep.Select(COUNT, "CASE WHEN ${refused.joinToString(" AND ")} THEN 1 ELSE 0 END", ""))
-            branch("$COUNT = 1") { step(ProcedureStep.Raise(message)) }
+            if (tests?.isEmpty() == true && unstorable == null) return
+            val present = target?.let { "$it IS NOT NULL" }
+            // A value that surely holds null fails for it, whatever else it is; else the test for null, where there is one, is
+            // [nullItem]'s of the value, which [unstorableItem] makes as its own.
+            val tested = unstorable.takeIf { tests != null }
+            val sql = if (tested == null) {
+                val refused = listOfNotNull(present, tests?.joinToString(" OR ")?.let { if (target == null) it else "($it)" })
+                "CASE WHEN ${refused.joinToString(" AND ")} THEN $UNSTORABLE_NULL ELSE 0 END"
+            } else {
+                val test = unstorableItem(VALUE, tested, nullItem = tests!!.isNotEmpty())
+                if (present == null) test else "CASE WHEN $present THEN $test ELSE 0 END"
+            }
+            step(ProcedureStep.Select(COUNT, sql, ""))
+            if (tests == null || tests.isNotEmpty()) branch("$COUNT = $UNSTORABLE_NULL") { step(ProcedureStep.Raise(message)) }
+            if (tested == null) return
+            listOf(UNSTORABLE_MAP to "a map", UNSTORABLE_NESTED to "a list of maps or lists", UNSTORABLE_MIXED to "a list of more than one kind")
+                .forEach { (code, what) -> branch("$COUNT = $code") { step(ProcedureStep.Raise(notProperty(what))) } }
+        }
+
+        /**
+         * Whether the value [written] gives in [scope], a property's or with [entries] a map of properties, is known when
+         * compiling to be one Neo4j stores, or to be seen as given ([unstorableGiven] refuses it where it is not), so that no row
+         * needs [unstorableItem]'s test: a number, a text, a truth value or a temporal value, a property read from the store,
+         * which holds no map, a variable a `WITH` binds to a value of such a kind or a list of them, or a map written of such
+         * values, or of the properties of a node or a relationship. Any other, as a key of a row a `WITH` passes on or an entry of
+         * a parameter's map, is tested as each row is written (drivine4j#820).
+         */
+        /**
+         * Whether [expression] is known to be no list or map, as [scalar] knows it, or a `coalesce`, a `CASE` or a `+` of such
+         * values: a `+` of two values that are neither is a number, a text, a temporal value or a failure. See [knownStorable].
+         */
+        private fun scalarText(expression: Expression, scope: Map<String, Value>): Boolean = scalar(expression, scope) || when (expression) {
+            is Expression.Binary -> expression.operator == Operator.ADD && scalarText(expression.left, scope) && scalarText(expression.right, scope)
+            is Expression.Function -> expression.name.equals("coalesce", ignoreCase = true) && expression.arguments.all { scalarText(it, scope) }
+            is Expression.Case -> (expression.alternatives.map { it.second } + listOfNotNull(expression.otherwise)).all { scalarText(it, scope) }
+            else -> false
+        }
+
+        /**
+         * The value [expression] reads out of a parameter the statement is given, by keys of known text, as `$m.a` or `$m['a']`
+         * read it: null where it reads none so, or the parameter has no such key.
+         */
+        private fun parameterValue(expression: Expression): JsonNode? = when (expression) {
+            is Expression.Parameter -> parameterTree(expression.name)
+            is Expression.Property -> parameterValue(expression.subject)?.takeIf { it.isObject }?.get(expression.key)
+            is Expression.Index -> {
+                val key = (expression.index as? Expression.Literal)?.value as? String
+                    ?: (expression.index as? Expression.Parameter)?.let { parameters.value(it.name) as? String }
+                key?.let { k -> parameterValue(expression.subject)?.takeIf { it.isObject }?.get(k) }
+            }
+            else -> null
+        }
+
+        private fun knownStorable(written: Expression?, scope: Map<String, Value>, entries: Boolean): Boolean = when {
+            written == null || written is Expression.Parameter -> true
+            !entries && written is Expression.ListLiteral && written.items.all { givenItems(it, scope) != null } -> true
+            givenRows(written, scope) != null -> true
+            entries && written is Expression.MapLiteral -> written.entries.all { (_, value) -> knownStorable(value, scope, entries = false) }
+            entries -> written is Expression.Variable && (scope[written.name] is Value.Node || scope[written.name] is Value.Relationship) ||
+                written is Expression.Function && written.name.equals("properties", ignoreCase = true) &&
+                (written.arguments.singleOrNull() as? Expression.Variable)?.let { scope[it.name] is Value.Node || scope[it.name] is Value.Relationship } == true
+            scalarText(written, scope) -> true
+            written is Expression.Property || written is Expression.Index -> parameterValue(written)?.let { unstorable(it, entries = false) == null }
+                ?: ((written as? Expression.Property)?.subject as? Expression.Variable)?.let { scope[it.name] is Value.Node || scope[it.name] is Value.Relationship } == true
+            written is Expression.Function && written.name.equals("coalesce", ignoreCase = true) -> written.arguments.all { knownStorable(it, scope, entries = false) }
+            written is Expression.Function -> Temporal.ofFunction(written.name.lowercase()) != null
+            written is Expression.Case -> (written.alternatives.map { it.second } + listOfNotNull(written.otherwise)).all { knownStorable(it, scope, entries = false) }
+            written is Expression.Variable -> (scope[written.name] as? Value.Json)?.let { json ->
+                json.temporal != null || (json.known != null && json.known != Value.Known.LIST && json.known != Value.Known.MAP) ||
+                    (json.known == Value.Known.LIST && json.itemsKnown in STORABLE_ITEMS)
+            } == true
+            else -> false
         }
 
         /**
@@ -3579,8 +3676,8 @@ abstract class SqlCypherCompiler(
          * gives it, and it is no property Neo4j stores (drivine4j#820): "a map", "a list of maps or lists" or "a list of more
          * than one kind", as [unstorable] names it; null where it is one, or where the statement leaves it to be worked out as it
          * runs. Given as a parameter, an item unwound from a list given ([givenRows]), or a list written of such items and literals.
-         * Of rows given, it is so where any row is: the statement then fails as it writes a row, though the row Neo4j fails on
-         * may be one a `WHERE` leaves out.
+         * Of rows given, it is so where any row is: each row is then tested as it is written ([unstorableItem]), so one a `MATCH`
+         * or a `WHERE` leaves out fails nothing.
          */
         private fun unstorableGiven(written: Expression?, scope: Map<String, Value>, entries: Boolean): String? = when {
             written == null -> null
@@ -8395,6 +8492,15 @@ abstract class SqlCypherCompiler(
 
         /** Why a statement that writes a property that is a list that holds null fails, as Neo4j fails it (drivine4j#557). */
         const val NULL_ITEM = "A property is a number, a text, a truth value, a temporal value or a list of them, not a list that holds null, as in Neo4j."
+
+        /** The numbers a write's test of a row names what makes its value no property by: see [SqlCypherCompiler.unstorableItem]. */
+        const val UNSTORABLE_MAP = 1
+        const val UNSTORABLE_NESTED = 2
+        const val UNSTORABLE_MIXED = 3
+        const val UNSTORABLE_NULL = 4
+
+        /** The kinds of item a list a `WITH` binds may be of and be stored, as Neo4j types it ([Value.Items]): see `knownStorable`. */
+        private val STORABLE_ITEMS = setOf(Value.Items.NUMBER, Value.Items.TEXT, Value.Items.BOOLEAN, Value.Items.TEMPORAL)
 
         /**
          * The greatest start or length `substring()`, `left()` and `right()` take, and the greatest precision `round()`

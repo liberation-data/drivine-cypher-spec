@@ -1,5 +1,6 @@
 package org.drivine.cypher.sql
 
+import org.drivine.cypher.store.ValueLayout
 import org.drivine.cypher.CompilerException
 import org.drivine.cypher.store.SqliteCypherValues
 import org.drivine.cypher.store.StoreValues
@@ -236,6 +237,21 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
             if (entries) "(json_type($x) = 'object' AND EXISTS (SELECT 1 FROM json_each($x) AS ni WHERE ni.type = 'array' AND $held))"
             else "(json_type($x) = 'array' AND $held)"
         }
+
+    /**
+     * As Postgres's: a value's type read once, [json]'s own or, of a map of properties, each entry's as `json_each` gives it,
+     * so a text entry is never read as JSON.
+     */
+    override fun unstorableItem(json: String, entries: Boolean): String {
+        fun tag(x: String) = "COALESCE(json_extract($x, '\$.\"${ValueLayout.KIND}\"') IN ($tagWords) AND json_type($x, '\$.${ValueLayout.TEXT}') = 'text', 0)"
+        fun item(type: String, x: String) = "CASE $type WHEN 'object' THEN CASE WHEN ${tag(x)} THEN 0 ELSE $UNSTORABLE_MAP END " +
+            "WHEN 'array' THEN (SELECT CASE WHEN MAX(ui.type = 'array' OR ui.type = 'object' AND NOT ${tag("ui.value")}) THEN $UNSTORABLE_NESTED " +
+            "WHEN COUNT(DISTINCT CASE ui.type WHEN 'object' THEN json_extract(ui.value, '\$.\"${ValueLayout.KIND}\"') WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' " +
+            "WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'null' THEN NULL ELSE ui.type END) > 1 THEN $UNSTORABLE_MIXED ELSE 0 END " +
+            "FROM json_each($x) ui) ELSE 0 END"
+        return if (!entries) item("json_type($json)", json)
+        else "CASE WHEN json_type($json) = 'object' THEN COALESCE((SELECT uc.c FROM (SELECT ${item("ue.type", "ue.value")} AS c FROM json_each($json) ue) uc WHERE uc.c > 0 LIMIT 1), 0) ELSE 0 END"
+    }
 
     /**
      * A list's numbers each a float, where they are all numbers and one is a float (`real`): a whole number made one by its text

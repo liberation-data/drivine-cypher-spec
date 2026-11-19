@@ -74,8 +74,6 @@ class UnstorableGivenWriteTest {
             "UNWIND \$rows AS row CREATE (:A {p: [row.a, row.b]})" to mapOf("rows" to listOf(mapOf("a" to 1, "b" to 2), mapOf("a" to "x", "b" to "y"))),
             // A map given whose value is read by key is that value.
             "MATCH (n:A) SET n.p = \$m.a" to mapOf("m" to mapOf("a" to 1)),
-            // A list with an item worked out as it runs is left to the store.
-            "MATCH (n:A) SET n.p = [1, n.id]" to emptyMap(),
         )
         for (compiler in compilers()) for ((cypher, parameters) in stored) {
             val sql = sql(compiler, cypher, parameters)
