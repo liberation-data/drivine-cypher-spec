@@ -72,6 +72,9 @@ class IdSqlJsonTest {
         // On Postgres a number is the text `jsonb` gives back for it, `numeric`'s; elsewhere its JSON as written.
         assertEquals("0.00000010", keyOf("postgres", "1.0E-7"))
         assertEquals("1.0E-7", keyOf("sqlite", "1.0E-7"))
+        // On Oracle the plain digits JSON_VALUE reads, of a number and of a float held as extended JSON's double.
+        assertEquals(listOf("3", "3", "2.5", "42", "0.0000001", "100000000000000000000", "0"),
+            listOf("3.0", "{\"\$numberDouble\":\"3.0\"}", "{\"\$numberDouble\":\"2.5\"}", "42", "{\"\$numberDouble\":\"1.0E-7\"}", "{\"\$numberDouble\":\"1.0E20\"}", "-0.0").map { keyOf("oracle", it) })
         assertEquals(
             listOf("0.00000010", "-0.00000000015", "0.00001230", "2.0", "12", "0.1", "0.0", "100", "\"1.0E-7\"", "[1]"),
             listOf("1.0E-7", "-1.5E-10", "1.230e-5", "2.0", "12", "0.1", "-0.0", "1.0E+2", "\"1.0E-7\"", "[1]").map(IdSql::numericText),

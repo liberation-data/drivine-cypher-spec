@@ -104,18 +104,25 @@ object IdSql {
      * The key a write plan keys an id by on [store], as [planKey] reads it back from the node that holds it: [json] is the
      * id's JSON as the store's layout holds it ([StoreValues.text]). A text is [TEXT_MARK] and its text; a temporal value's
      * tag its text `v`; a number on Postgres the text `jsonb` gives back for it, `numeric`'s, with no exponent ([numericText]),
-     * and elsewhere its JSON as written; a truth value its word. So each library keys its ids as the store reads them, with
-     * no rule of its own.
+     * on Oracle the plain digits `JSON_VALUE` reads it as, a float held as extended JSON's double too (`3.0` as `3`, `1.0E-7`
+     * as `0.0000001`), and on SQLite its JSON as written; a truth value its word. So each library keys its ids as the store
+     * reads them, with no rule of its own.
      */
     fun planKeyOf(store: Store, json: String): String {
         val node = CypherJson.readTree(json)
+        val double = node.takeIf { store == Store.ORACLE && it.isObject && it.size() == 1 }?.get(StoreValues.DOUBLE)?.textValue()
         return when {
             node.isTextual -> TEXT_MARK + node.textValue()
             ValueLayout.isTag(node) -> node[ValueLayout.TEXT]!!.textValue()!!
             node.isNumber && store == Store.POSTGRES -> numericText(json.trim())
+            node.isNumber && store == Store.ORACLE -> plain(numericText(json.trim()))
+            double != null -> plain(numericText(double))
             else -> json.trim()
         }
     }
+
+    /** The number [text], as [numericText] writes one, with no zeros past its point, nor the point where none are left. */
+    private fun plain(text: String): String = if ('.' !in text) text else text.trimEnd('0').trimEnd('.').let { if (it == "-0") "0" else it }
 
     /**
      * The JSON number [json] as Postgres's `numeric` writes it (`1.0E-7` as `0.00000010`): its digits with no exponent, as many
