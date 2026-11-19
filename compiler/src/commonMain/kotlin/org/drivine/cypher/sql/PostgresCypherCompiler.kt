@@ -887,6 +887,16 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
      */
     override fun failure(message: String, value: String) = "CAST(concat(${literal("$message ")}, $value) AS integer)"
 
+    /**
+     * [failure] with an empty text read out of [of] beside it: `concat` keeps an `IF` or a `CASE` from working out a failure
+     * of constants, but not the planner's estimate of a comparison, which works out a stable function of constants in each
+     * branch of a `CASE` whose test it can't: a relationship's properties matched against `1 / n.i` failed every row, in a
+     * `MERGE` and an `OPTIONAL MATCH`, where no truth value was read (drivine-cypher-spec#399). Read out of the row, it is not
+     * a constant, so it is worked out only where a row takes its branch; it is no volatile function, which would keep the
+     * comparison from an index.
+     */
+    override fun failureOf(message: String, text: String, of: String) = "CAST(concat(${literal("$message ")}, $text, left(CAST($of AS text), 0)) AS integer)"
+
     override fun raise(message: String) = "RAISE EXCEPTION USING MESSAGE = ${literal(message)};"
 
     override fun idOf(json: String, key: String?) = if (key != null) "CAST($json ->> ${literal(key)} AS bigint)" else "CAST($json #>> '{}' AS bigint)"

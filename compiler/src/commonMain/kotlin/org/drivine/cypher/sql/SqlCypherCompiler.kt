@@ -1257,6 +1257,13 @@ abstract class SqlCypherCompiler(
     protected open fun textFailure(message: String, text: String): String = failure(message, text)
 
     /**
+     * [textFailure] of a [text] written in the statement, in a `CASE` whose test reads [of], the value it fails for: a store
+     * whose planner may work out a failure of constants alone before any row, as Postgres's does of one in a comparison it
+     * estimates, makes it read [of] too, so it is worked out only for a row that takes it (drivine-cypher-spec#399).
+     */
+    protected open fun failureOf(message: String, text: String, of: String): String = textFailure(message, text)
+
+    /**
      * [round] of [value], whose JSON [json] gives, or [value] itself where it is an infinity, as Neo4j rounds one, to any
      * places in range, by a precision and mode that are not null: on a store whose JSON holds the infinities, where its
      * SQL number, which [round] reads, holds none (Oracle's). There [round] is given the value to read as JSON bound where
@@ -1335,7 +1342,7 @@ abstract class SqlCypherCompiler(
     private fun ofNumbers(json: String, aggregate: String): String {
         // A number, as most items are, is told by its kind alone: a tag's kind is read only of an item that is none.
         val kind = "max(CASE WHEN ${notNumber(json)} THEN CASE WHEN ${tagKind(json)} = '${Temporal.DURATION.function}' THEN 2 ELSE 1 END END)"
-        return "CASE $kind WHEN 2 THEN ${scalar(failure(DURATION_SUM, "''"))} WHEN 1 THEN ${scalar(failure(NOT_SUMMED, "''"))} ELSE $aggregate END"
+        return "CASE $kind WHEN 2 THEN ${scalar(failureOf(DURATION_SUM, "''", kind))} WHEN 1 THEN ${scalar(failureOf(NOT_SUMMED, "''", kind))} ELSE $aggregate END"
     }
 
     /** Whether the JSON value [json] is neither a number, as [number] reads one, nor null: what a `sum` passes by. */
@@ -5907,7 +5914,7 @@ abstract class SqlCypherCompiler(
             val truth = listOf(x, y).zip(truths).withIndex().filter { it.value.second }.joinToString("") { (i, side) ->
                 val (other, written) = others[i]
                 val present = if (givenNumber(written)) "" else " AND NOT ${isJsonNull(other)}"
-                "WHEN ${isTruth(side.first)}$present THEN ${failed(textFailure(TRUTH_ARITHMETIC, literal(OPERATOR_WORDS.getValue(binary.operator))))} "
+                "WHEN ${isTruth(side.first)}$present THEN ${failed(failureOf(TRUTH_ARITHMETIC, literal(OPERATOR_WORDS.getValue(binary.operator)), side.first))} "
             }
             if (tested.none { it }) return if (truth.isEmpty()) arithmetic() else "CASE ${truth}ELSE ${arithmetic()} END"
             val tag = listOf(x, y).zip(open).map { (json, maybe) -> if (maybe) "${tagKind(json)} IS NOT NULL" else "FALSE" }
@@ -6061,8 +6068,8 @@ abstract class SqlCypherCompiler(
                     // A map read as the statement runs (`UNWIND $l AS m`, `l[0]`) fails it by name, as one the compiler sees is
                     // refused above: it is no text and no tag, and gave null (drivine-cypher-spec#328). So does a list, a number or
                     // a truth value, as Neo4j fails it (drivine-cypher-spec#331).
-                    fun failed(noun: String) = textFailing(TEMPORAL_OF_KIND, "${function.name}() of $noun")
-                    "CASE WHEN ${tagKind(x)} IS NOT NULL THEN $fromTag ELSE CASE ${typeOf(x)} WHEN 'object' THEN ${textFailing(TEMPORAL_OF_MAP, "${function.name}()")} " +
+                    fun failed(noun: String) = textFailing(TEMPORAL_OF_KIND, "${function.name}() of $noun", x)
+                    "CASE WHEN ${tagKind(x)} IS NOT NULL THEN $fromTag ELSE CASE ${typeOf(x)} WHEN 'object' THEN ${textFailing(TEMPORAL_OF_MAP, "${function.name}()", x)} " +
                         "WHEN 'array' THEN ${failed("a list")} WHEN 'number' THEN ${failed("a number")} WHEN 'boolean' THEN ${failed("a truth value")} ELSE $fromText END END"
                 })
             }
@@ -7865,8 +7872,8 @@ abstract class SqlCypherCompiler(
             else -> null
         }
 
-        /** [textFailure] as a SQL text, of [message] and the text [what], as a text's `CASE` gives it. */
-        private fun textFailing(message: String, what: String) = "('' || ${textFailure(message, literal(what))})"
+        /** [failureOf] as a SQL text, of [message] and the text [what], as a text's `CASE` that tests [of] gives it. */
+        private fun textFailing(message: String, what: String, of: String) = "('' || ${failureOf(message, literal(what), of)})"
 
         /**
          * The text of the item [json] of a list or a map read as the statement runs, [depth] lists deep: as `toString` writes a
@@ -7875,9 +7882,9 @@ abstract class SqlCypherCompiler(
          * [TEXT_DEPTH].
          */
         private fun itemText(json: String, depth: Int): String = shared(json) { (x) ->
-            val list = if (depth < TEXT_DEPTH) listText(x, depth + 1) else textFailing(TEXT_OF_HELD, "a list $TEXT_DEPTH deep")
+            val list = if (depth < TEXT_DEPTH) listText(x, depth + 1) else textFailing(TEXT_OF_HELD, "a list $TEXT_DEPTH deep", x)
             "CASE COALESCE(${typeOf(x)}, 'null') WHEN 'null' THEN 'null' WHEN 'string' THEN ${wholeText(x)} WHEN 'array' THEN $list " +
-                "WHEN 'object' THEN ${textFailing(TEXT_OF_HELD, "a map")} ELSE ${text(function("tostring", x)!!)} END"
+                "WHEN 'object' THEN ${textFailing(TEXT_OF_HELD, "a map", x)} ELSE ${text(function("tostring", x)!!)} END"
         }
 
         /** The text of the JSON list [json], not null, read item by item as the statement runs, as [itemText] writes each. */
