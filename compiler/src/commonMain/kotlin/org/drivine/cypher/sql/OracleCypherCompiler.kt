@@ -1479,7 +1479,8 @@ class OracleCypherCompiler(
      * drivine4j#531). The text is worked down to its shape: each tag to a letter of its kind (a `$t` is always a tag's, as
      * [ValueLayout] escapes a map's), each text to `t`, each number to `n`, each truth value to `b`, each null to `z`. A map is
      * then a `{` left, a list that holds a map or a list a `[` with one before its `]`, and a list of more than one kind one
-     * that no `[k(,k)*]` of one letter is; [nullItem]'s test is the one it makes, on the text with each text left empty.
+     * left once each list `[k(,k)*]` of one letter is taken out. [nullItem]'s test is the one it makes, on the text with each
+     * text left empty.
      */
     override fun unstorableItem(json: String, entries: Boolean, nullItem: Boolean): String {
         val string = "\"([^\"\\\\]|\\\\.)*\""
@@ -1499,7 +1500,8 @@ class OracleCypherCompiler(
             if (entries) null else "WHEN DBMS_LOB.SUBSTR(ns.c, 1, 1) = '{' THEN $UNSTORABLE_MAP",
             "WHEN REGEXP_LIKE(ns.c, '\\[[^]]*[[{]') THEN $UNSTORABLE_NESTED",
             if (entries) "WHEN REGEXP_LIKE(ns.c, ':\\{') THEN $UNSTORABLE_MAP" else null,
-            "WHEN REGEXP_COUNT(ns.c, '\\[[^][{}]*\\]') <> REGEXP_COUNT(ns.c, '\\[($one)?\\]') THEN $UNSTORABLE_MIXED",
+            // Each list of one kind taken out: a list left is of more than one.
+            "WHEN REGEXP_LIKE(REGEXP_REPLACE(ns.c, '\\[($one)?\\]', 'n'), '\\[[^][{}]*\\]') THEN $UNSTORABLE_MIXED",
         )
         // Not entries: a value that is no list (its text opens with no `[`) is no map either where its text opens with `{`
         // only as a tag's: the first case leaves a map to the shape's test, so it opens with `[` or `{`.

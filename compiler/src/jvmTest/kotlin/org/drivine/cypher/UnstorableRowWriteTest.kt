@@ -21,7 +21,7 @@ class UnstorableRowWriteTest {
     /** What each store tests a list's items by as it runs, as its SQL writes it: see each one's `unstorableItem`. */
     private val tests = mapOf(
         PostgresCypherCompiler::class to "jsonb_typeof(ui) = 'array'",
-        OracleCypherCompiler::class to "REGEXP_COUNT(ns.c, ",
+        OracleCypherCompiler::class to "REGEXP_REPLACE(ns.c, ",
         SqliteCypherCompiler::class to "ui.type = ''array''",
     )
 
