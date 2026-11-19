@@ -288,7 +288,7 @@ class OnlineIndexBuildTest {
             report.log.toString(),
         )
 
-        // One still being built, by another process that hasn't recorded it yet, is left to it.
+        // One valid, whose record the process that built it hasn't written yet, is left to it.
         val (building, _) = drive(postgres, name, listed = { if (it == postgresDdl.listIndexesQuery(SchemaItemKind.RANGE_INDEX)) listOf(nameIndexObject(null)) else emptyList() })
         assertEquals(listOf("CREATE INDEX CONCURRENTLY IF NOT EXISTS $index"), indexBuilds(building).map { it.substringBefore(" ON ") })
 
@@ -560,15 +560,21 @@ class OnlineIndexBuildTest {
         val recreation = postgresDdl.recreation(email)
         // An index under the name a recreate builds first, left invalid (no recreate of this version leaves one so, but a session
         // of another, or a REINDEX CONCURRENTLY cut short, can), where nothing stood under the constraint's name: it holds nothing unique.
-        val leftover = emailIndexObject(PostgresDdl.INVALID) + ("object" to recreation.temporary.lowercase())
+        var leftover = emailIndexObject(PostgresDdl.INVALID) + ("object" to recreation.temporary.lowercase())
         var built = false
         val listed = { statement: String -> if (statement == postgresDdl.listConstraintsQuery() && !built) listOf(leftover) else emptyList() }
         val execute = { statement: String -> if (statement.startsWith("CREATE UNIQUE INDEX")) built = true; null }
-        // An ensure doesn't keep it as the constraint's index: it makes the constraint.
-        val (ensured, report) = drive(postgres, email, listed = listed, execute = execute)
-        assertEquals(listOf("CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS $emailIndex"), indexBuilds(ensured).map { it.substringBefore(" ON ") })
-        assertIs<EnsureResult.Created>(report.item!!.result)
-        assertTrue(report.log.none { "is held by" in it.message }, report.log.toString())
+        // An ensure doesn't keep it as the constraint's index: it makes the constraint. Nor one still being built online,
+        // which another session's build may yet leave invalid.
+        for (status in listOf(PostgresDdl.INVALID, PostgresDdl.BUILDING)) {
+            leftover = emailIndexObject(status) + ("object" to recreation.temporary.lowercase())
+            built = false
+            val (ensured, report) = drive(postgres, email, listed = listed, execute = execute)
+            assertEquals(listOf("CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS $emailIndex"), indexBuilds(ensured).map { it.substringBefore(" ON ") }, status)
+            assertIs<EnsureResult.Created>(report.item!!.result, status)
+            assertTrue(report.log.none { "is held by" in it.message }, report.log.toString())
+        }
+        leftover = emailIndexObject(PostgresDdl.INVALID) + ("object" to recreation.temporary.lowercase())
         // A recreate doesn't put it in the constraint's place: it drops it, and builds the index again.
         built = false
         val (recreated, _) = drive(postgres, email, call = ItemCall.RECREATE, listed = listed, execute = execute)
@@ -808,5 +814,29 @@ class OnlineIndexBuildTest {
         val (still, late) = drive(postgres, name, listed = { if (it == listing) nameRecord(PostgresDdl.BUILDING) else emptyList() })
         assertEquals(emptyList(), indexBuilds(still))
         assertTrue("is still being built by another session" in late.failure.orEmpty(), "$late")
+    }
+
+    @Test
+    fun anIndexOfAnotherShapeBeingBuiltUnderTheNameIsDriftNotWaitedFor() {
+        // Not Drivine's index, built or not: drift at once, as one left invalid is, never waited for to the timeout and
+        // then taken as still being built.
+        val rangeListing = postgresDdl.listIndexesQuery(SchemaItemKind.RANGE_INDEX)
+        val other = nameIndexObject(PostgresDdl.BUILDING) + ("columns" to listOf("(props -> 'nickname'::text)"))
+        for (listing in listOf(listOf(other), nameRecord(PostgresDdl.BUILDING) + listOf(other))) {
+            var reads = 0
+            val (ran, report) = drive(postgres, name, listed = { if (it == rangeListing) listing.also { reads++ } else emptyList() })
+            assertEquals(emptyList(), indexBuilds(ran), "$listing")
+            assertIs<EnsureResult.Drift>(report.item!!.result, "$listing")
+            assertEquals(1, reads, "$listing")
+        }
+        val unique = emailIndexObject(PostgresDdl.BUILDING) + ("columns" to listOf("(props -> 'nickname'::text)"))
+        for (listing in listOf(listOf(unique), emailRecord(PostgresDdl.BUILDING) + listOf(unique))) {
+            var reads = 0
+            val (ran, report) = drive(postgres, email, listed = { if (it == postgresDdl.listConstraintsQuery()) listing.also { reads++ } else emptyList() })
+            assertEquals(emptyList(), indexBuilds(ran), "$listing")
+            assertNull(report.failure, "$listing")
+            assertTrue(report.item!!.result !is EnsureResult.Created && report.item!!.result !is EnsureResult.AlreadyMatching, "${report.item!!.result}")
+            assertEquals(1, reads, "$listing")
+        }
     }
 }

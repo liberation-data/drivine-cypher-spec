@@ -721,9 +721,14 @@ internal class SchemaProgram(
     private fun isLeftIncomplete(spec: SchemaItemSpec): Boolean =
         listings[listingOf(spec)]?.let { store.isLeftIncomplete(spec, it) } == true
 
-    /** Whether the listing [spec] was last found in shows another session building its index, of no record yet ([StoreSchema.isBeingBuilt]). */
-    private fun isBeingBuilt(spec: SchemaItemSpec): Boolean =
-        listings[listingOf(spec)]?.let { store.isBeingBuilt(spec, it) } == true
+    /**
+     * Whether [info], [spec] as last listed, is another session's build of it under way: one listed still being built, and
+     * not left invalid ([StoreSchema.isIncomplete]), or, of no record, an index under its name being built
+     * ([StoreSchema.isBeingBuilt]). Another item under the name ([ItemForm.Mismatch]) is none, built or not: it is drift.
+     */
+    private fun buildUnderWay(spec: SchemaItemSpec, info: SchemaItemInfo?): Boolean =
+        formOf(spec) !is ItemForm.Mismatch &&
+            if (info != null) info.buildInProgress && !store.isIncomplete(info) else listings[listingOf(spec)]?.let { store.isBeingBuilt(spec, it) } == true
 
     /** What makes [spec], [related] as [org.drivine.cypher.store.ddl.StoreDdl.createIndex] takes it: its create, or what completes it where [leftIncomplete]. */
     private fun made(spec: IndexSpec, related: SchemaItemInfo?, leftIncomplete: Boolean): List<DdlStatement> =
@@ -833,7 +838,7 @@ internal class SchemaProgram(
         if (store.indexOperationsAreAsync || store.awaitIndexStatement != null) return IndexWait.Ended(listed)
         val deadline = io.clock() + build.timeoutMillis
         var info = listed
-        while (if (info != null) info.buildInProgress && !store.isIncomplete(info) else isBeingBuilt(spec)) {
+        while (buildUnderWay(spec, info)) {
             val left = deadline - io.clock()
             if (left <= 0) {
                 return IndexWait.StillBuilding(
@@ -1329,8 +1334,7 @@ internal class SchemaProgram(
         var poll: Long? = null
         while (io.clock() + (poll ?: 0) < deadline) {
             val info = findConstraint(spec, poll)
-            val building = if (info != null) info.buildInProgress && !store.isIncomplete(info) else isBeingBuilt(spec)
-            if (!building) return info
+            if (!buildUnderWay(spec, info)) return info
             poll = POLL_MILLIS
         }
         throw OwnerFailure("Timed out after ${javaDuration(ASYNC_TIMEOUT_MILLIS)} waiting for constraint on ${spec.label}${spec.properties} to become operational")
