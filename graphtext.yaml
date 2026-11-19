@@ -1,0 +1,320 @@
+# The text each temporal value is held as on a graph engine that has no type for it: every temporal value on FalkorDB
+# and Neptune, and on Memgraph a time with an offset and a duration of months. There the text is the value, and the
+# engine's =, uniqueness constraint and ORDER BY compare it byte for byte, so each library sends one text for one value.
+# `texts` is read with no store: each library's runner gives each value to its own code that sends it to the engine, and
+# checks the text. `cases` run on the engines, as the statement files' cases do. See README.md, Values a graph engine
+# holds as text.
+label: CyGraphText
+
+texts:
+  - name: "A moment"
+    description: "A datetime is YYYY-MM-DDTHH:MM:SS.nnnnnnnnn and its offset as given, never moved to UTC: Z for an offset of zero, else ±hh:mm, or ±hh:mm:ss where the offset has seconds. The seconds and all nine digits of the fraction are always written, so text of one offset sorts as time. A named zone is dropped to the offset it has at that moment. A year is the store layout's: at least four digits, a - before one below 0, a + before one above 9999."
+    steps:
+      - note: "On a whole minute: the seconds and all nine digits of the fraction are written."
+        value: {$temporal: "DATE_TIME", text: "2026-01-05T10:11Z"}
+        text: "2026-01-05T10:11:00.000000000Z"
+        engines: ["falkordb", "neptune"]
+      - value: {$temporal: "DATE_TIME", text: "2026-01-05T10:11:12+02:00"}
+        text: "2026-01-05T10:11:12.000000000+02:00"
+        engines: ["falkordb", "neptune"]
+      - note: "A fraction of one digit."
+        value: {$temporal: "DATE_TIME", text: "2026-01-05T10:11:12.5+02:00"}
+        text: "2026-01-05T10:11:12.500000000+02:00"
+        engines: ["falkordb", "neptune"]
+      - note: "Three digits, at a negative offset."
+        value: {$temporal: "DATE_TIME", text: "2026-01-05T10:11:12.123-05:00"}
+        text: "2026-01-05T10:11:12.123000000-05:00"
+        engines: ["falkordb", "neptune"]
+      - note: "Six digits."
+        value: {$temporal: "DATE_TIME", text: "2026-01-05T10:11:12.123456Z"}
+        text: "2026-01-05T10:11:12.123456000Z"
+        engines: ["falkordb", "neptune"]
+      - note: "Nine digits, at an offset of hours and minutes."
+        value: {$temporal: "DATE_TIME", text: "2026-01-05T10:11:12.123456789+05:30"}
+        text: "2026-01-05T10:11:12.123456789+05:30"
+        engines: ["falkordb", "neptune"]
+      - note: "The least fraction, which v writes in nine digits too."
+        value: {$temporal: "DATE_TIME", text: "2026-01-05T10:11:12.000000001Z"}
+        text: "2026-01-05T10:11:12.000000001Z"
+        engines: ["falkordb", "neptune"]
+      - note: "An offset of zero is Z, however it is written."
+        value: {$temporal: "DATE_TIME", text: "2026-01-05T10:11:12+00:00"}
+        text: "2026-01-05T10:11:12.000000000Z"
+        engines: ["falkordb", "neptune"]
+      - value: {$temporal: "DATE_TIME", text: "2026-01-05T10:11:12-00:00"}
+        text: "2026-01-05T10:11:12.000000000Z"
+        engines: ["falkordb", "neptune"]
+      - note: "An offset with seconds, as java.time writes a zone's local mean time (Africa/Monrovia before 1972), is kept with its seconds: a graph engine holds the text, and the SQL stores refuse the value (README.md, Values)."
+        value: {$temporal: "DATE_TIME", text: "1971-01-01T00:00:00-00:44:30"}
+        text: "1971-01-01T00:00:00.000000000-00:44:30"
+        engines: ["falkordb", "neptune"]
+      - note: "The offsets' limits."
+        value: {$temporal: "DATE_TIME", text: "2026-01-05T10:11:12+18:00"}
+        text: "2026-01-05T10:11:12.000000000+18:00"
+        engines: ["falkordb", "neptune"]
+      - value: {$temporal: "DATE_TIME", text: "2026-01-05T10:11:12-18:00"}
+        text: "2026-01-05T10:11:12.000000000-18:00"
+        engines: ["falkordb", "neptune"]
+      - note: "A named zone is dropped to the offset it has at that moment: summer time."
+        value: {$temporal: "DATE_TIME", text: "2024-07-01T10:00:00+02:00[Europe/Paris]"}
+        text: "2024-07-01T10:00:00.000000000+02:00"
+        engines: ["falkordb", "neptune"]
+      - note: "Winter time."
+        value: {$temporal: "DATE_TIME", text: "2024-01-15T10:00:00+01:00[Europe/Paris]"}
+        text: "2024-01-15T10:00:00.000000000+01:00"
+        engines: ["falkordb", "neptune"]
+      - note: "The year 0, 1 BC, in four digits."
+        value: {$temporal: "DATE_TIME", text: "0000-01-01T00:00:00Z"}
+        text: "0000-01-01T00:00:00.000000000Z"
+        engines: ["falkordb", "neptune"]
+      - note: "A year before 0: a - and four digits."
+        value: {$temporal: "DATE_TIME", text: "-0044-03-15T12:00:00.1-05:00"}
+        text: "-0044-03-15T12:00:00.100000000-05:00"
+        engines: ["falkordb", "neptune"]
+      - note: "The last moment of four digits of year."
+        value: {$temporal: "DATE_TIME", text: "9999-12-31T23:59:59.999999999Z"}
+        text: "9999-12-31T23:59:59.999999999Z"
+        engines: ["falkordb", "neptune"]
+      - note: "A year past 9999: a + and its digits."
+        value: {$temporal: "DATE_TIME", text: "+10000-01-01T00:00:00Z"}
+        text: "+10000-01-01T00:00:00.000000000Z"
+        engines: ["falkordb", "neptune"]
+      - note: "The last moment Neo4j holds."
+        value: {$temporal: "DATE_TIME", text: "+999999999-12-31T23:59:59.999999999-18:00"}
+        text: "+999999999-12-31T23:59:59.999999999-18:00"
+        engines: ["falkordb", "neptune"]
+      - note: "The first."
+        value: {$temporal: "DATE_TIME", text: "-999999999-01-01T00:00:00+18:00"}
+        text: "-999999999-01-01T00:00:00.000000000+18:00"
+        engines: ["falkordb", "neptune"]
+
+  - name: "A local moment"
+    description: "A localdatetime is YYYY-MM-DDTHH:MM:SS.nnnnnnnnn: a moment's text without its offset."
+    steps:
+      - note: "On a whole minute."
+        value: {$temporal: "LOCAL_DATE_TIME", text: "2026-01-05T10:11"}
+        text: "2026-01-05T10:11:00.000000000"
+        engines: ["falkordb", "neptune"]
+      - value: {$temporal: "LOCAL_DATE_TIME", text: "2026-01-05T10:11:12"}
+        text: "2026-01-05T10:11:12.000000000"
+        engines: ["falkordb", "neptune"]
+      - value: {$temporal: "LOCAL_DATE_TIME", text: "2026-01-05T10:11:12.5"}
+        text: "2026-01-05T10:11:12.500000000"
+        engines: ["falkordb", "neptune"]
+      - value: {$temporal: "LOCAL_DATE_TIME", text: "2026-01-05T10:11:12.123"}
+        text: "2026-01-05T10:11:12.123000000"
+        engines: ["falkordb", "neptune"]
+      - value: {$temporal: "LOCAL_DATE_TIME", text: "2026-01-05T10:11:12.123456"}
+        text: "2026-01-05T10:11:12.123456000"
+        engines: ["falkordb", "neptune"]
+      - value: {$temporal: "LOCAL_DATE_TIME", text: "2026-01-05T10:11:12.123456789"}
+        text: "2026-01-05T10:11:12.123456789"
+        engines: ["falkordb", "neptune"]
+      - note: "The year 0."
+        value: {$temporal: "LOCAL_DATE_TIME", text: "0000-01-01T00:00"}
+        text: "0000-01-01T00:00:00.000000000"
+        engines: ["falkordb", "neptune"]
+      - note: "The last nanosecond of 2 BC."
+        value: {$temporal: "LOCAL_DATE_TIME", text: "-0001-12-31T23:59:59.999999999"}
+        text: "-0001-12-31T23:59:59.999999999"
+        engines: ["falkordb", "neptune"]
+      - note: "A year past 9999."
+        value: {$temporal: "LOCAL_DATE_TIME", text: "+10000-01-01T00:00"}
+        text: "+10000-01-01T00:00:00.000000000"
+        engines: ["falkordb", "neptune"]
+
+  - name: "A time"
+    description: "A time is HH:MM:SS.nnnnnnnnn and its offset as given, Z for zero: a moment's time and offset. It is text on Memgraph too, which has no time with an offset."
+    steps:
+      - note: "On a whole minute."
+        value: {$temporal: "TIME", text: "10:11Z"}
+        text: "10:11:00.000000000Z"
+        engines: ["falkordb", "neptune", "memgraph"]
+      - value: {$temporal: "TIME", text: "10:11:12+02:00"}
+        text: "10:11:12.000000000+02:00"
+        engines: ["falkordb", "neptune", "memgraph"]
+      - value: {$temporal: "TIME", text: "10:11:12.5+02:00"}
+        text: "10:11:12.500000000+02:00"
+        engines: ["falkordb", "neptune", "memgraph"]
+      - note: "A negative offset."
+        value: {$temporal: "TIME", text: "10:11:12.123-05:00"}
+        text: "10:11:12.123000000-05:00"
+        engines: ["falkordb", "neptune", "memgraph"]
+      - value: {$temporal: "TIME", text: "10:11:12.123456Z"}
+        text: "10:11:12.123456000Z"
+        engines: ["falkordb", "neptune", "memgraph"]
+      - value: {$temporal: "TIME", text: "10:11:12.123456789+05:30"}
+        text: "10:11:12.123456789+05:30"
+        engines: ["falkordb", "neptune", "memgraph"]
+      - note: "Z, however zero is written."
+        value: {$temporal: "TIME", text: "10:11:12+00:00"}
+        text: "10:11:12.000000000Z"
+        engines: ["falkordb", "neptune", "memgraph"]
+      - note: "An offset with seconds, kept."
+        value: {$temporal: "TIME", text: "10:11:12-00:44:30"}
+        text: "10:11:12.000000000-00:44:30"
+        engines: ["falkordb", "neptune", "memgraph"]
+      - note: "The least time, at the greatest offset."
+        value: {$temporal: "TIME", text: "00:00+18:00"}
+        text: "00:00:00.000000000+18:00"
+        engines: ["falkordb", "neptune", "memgraph"]
+      - note: "The greatest, at the least."
+        value: {$temporal: "TIME", text: "23:59:59.999999999-18:00"}
+        text: "23:59:59.999999999-18:00"
+        engines: ["falkordb", "neptune", "memgraph"]
+
+  - name: "A local time"
+    description: "A localtime is HH:MM:SS.nnnnnnnnn: a time's text without its offset."
+    steps:
+      - note: "On a whole minute."
+        value: {$temporal: "LOCAL_TIME", text: "10:11"}
+        text: "10:11:00.000000000"
+        engines: ["falkordb", "neptune"]
+      - value: {$temporal: "LOCAL_TIME", text: "10:11:12"}
+        text: "10:11:12.000000000"
+        engines: ["falkordb", "neptune"]
+      - value: {$temporal: "LOCAL_TIME", text: "10:11:12.5"}
+        text: "10:11:12.500000000"
+        engines: ["falkordb", "neptune"]
+      - value: {$temporal: "LOCAL_TIME", text: "10:11:12.123"}
+        text: "10:11:12.123000000"
+        engines: ["falkordb", "neptune"]
+      - value: {$temporal: "LOCAL_TIME", text: "10:11:12.123456"}
+        text: "10:11:12.123456000"
+        engines: ["falkordb", "neptune"]
+      - value: {$temporal: "LOCAL_TIME", text: "10:11:12.123456789"}
+        text: "10:11:12.123456789"
+        engines: ["falkordb", "neptune"]
+      - note: "Midnight."
+        value: {$temporal: "LOCAL_TIME", text: "00:00"}
+        text: "00:00:00.000000000"
+        engines: ["falkordb", "neptune"]
+      - note: "The last nanosecond of the day."
+        value: {$temporal: "LOCAL_TIME", text: "23:59:59.999999999"}
+        text: "23:59:59.999999999"
+        engines: ["falkordb", "neptune"]
+
+  - name: "A date"
+    description: "A date is YYYY-MM-DD, its year as a moment's."
+    steps:
+      - value: {$temporal: "DATE", text: "2026-01-05"}
+        text: "2026-01-05"
+        engines: ["falkordb", "neptune"]
+      - value: {$temporal: "DATE", text: "0000-01-01"}
+        text: "0000-01-01"
+        engines: ["falkordb", "neptune"]
+      - note: "2 BC."
+        value: {$temporal: "DATE", text: "-0001-12-31"}
+        text: "-0001-12-31"
+        engines: ["falkordb", "neptune"]
+      - value: {$temporal: "DATE", text: "-0044-03-15"}
+        text: "-0044-03-15"
+        engines: ["falkordb", "neptune"]
+      - value: {$temporal: "DATE", text: "9999-12-31"}
+        text: "9999-12-31"
+        engines: ["falkordb", "neptune"]
+      - value: {$temporal: "DATE", text: "+10000-01-01"}
+        text: "+10000-01-01"
+        engines: ["falkordb", "neptune"]
+      - note: "The last date Neo4j holds."
+        value: {$temporal: "DATE", text: "+999999999-12-31"}
+        text: "+999999999-12-31"
+        engines: ["falkordb", "neptune"]
+      - note: "The first."
+        value: {$temporal: "DATE", text: "-999999999-01-01"}
+        text: "-999999999-01-01"
+        engines: ["falkordb", "neptune"]
+
+  - name: "A duration"
+    description: "A duration is Cypher's toString of it, its canonical text v in the store layout: only the parts that aren't zero, months carried into years, minutes into hours and seconds into minutes but never hours into days, each part signed on its own, and PT0S for none. It pins equality alone: a duration has no order. On Memgraph, whose duration is microseconds alone, a duration of months is text; one without months is Memgraph's own duration."
+    steps:
+      - note: "No duration: PT0S."
+        value: {$temporal: "DURATION", text: "PT0S"}
+        text: "PT0S"
+        engines: ["falkordb", "neptune"]
+      - note: "None, written otherwise."
+        value: {$temporal: "DURATION", text: "P0D"}
+        text: "PT0S"
+        engines: ["falkordb", "neptune"]
+      - note: "Parts that cancel are none."
+        value: {$temporal: "DURATION", text: "P1Y-12M"}
+        text: "PT0S"
+        engines: ["falkordb", "neptune"]
+      - note: "Months carried into years."
+        value: {$temporal: "DURATION", text: "P14M"}
+        text: "P1Y2M"
+        engines: ["falkordb", "neptune", "memgraph"]
+      - value: {$temporal: "DURATION", text: "P12M"}
+        text: "P1Y"
+        engines: ["falkordb", "neptune", "memgraph"]
+      - note: "Negative months, carried, each part signed."
+        value: {$temporal: "DURATION", text: "P-14M"}
+        text: "P-1Y-2M"
+        engines: ["falkordb", "neptune", "memgraph"]
+      - value: {$temporal: "DURATION", text: "P1D"}
+        text: "P1D"
+        engines: ["falkordb", "neptune"]
+      - note: "A week is 7 days."
+        value: {$temporal: "DURATION", text: "P1W"}
+        text: "P7D"
+        engines: ["falkordb", "neptune"]
+      - value: {$temporal: "DURATION", text: "P1DT2H"}
+        text: "P1DT2H"
+        engines: ["falkordb", "neptune"]
+      - note: "A fraction of a day carried to the time, as 86,400 seconds."
+        value: {$temporal: "DURATION", text: "P1.5D"}
+        text: "P1DT12H"
+        engines: ["falkordb", "neptune"]
+      - note: "Hours are not carried into days: Cypher keeps days and seconds apart."
+        value: {$temporal: "DURATION", text: "PT25H"}
+        text: "PT25H"
+        engines: ["falkordb", "neptune"]
+      - note: "Minutes carried into hours."
+        value: {$temporal: "DURATION", text: "PT90M"}
+        text: "PT1H30M"
+        engines: ["falkordb", "neptune"]
+      - note: "Seconds carried into hours."
+        value: {$temporal: "DURATION", text: "PT3600S"}
+        text: "PT1H"
+        engines: ["falkordb", "neptune"]
+      - note: "A fraction of a second, with no trailing zeros."
+        value: {$temporal: "DURATION", text: "PT0.1S"}
+        text: "PT0.1S"
+        engines: ["falkordb", "neptune"]
+      - value: {$temporal: "DURATION", text: "PT1.123456S"}
+        text: "PT1.123456S"
+        engines: ["falkordb", "neptune"]
+      - note: "The least."
+        value: {$temporal: "DURATION", text: "PT0.000000001S"}
+        text: "PT0.000000001S"
+        engines: ["falkordb", "neptune"]
+      - note: "A negative fraction."
+        value: {$temporal: "DURATION", text: "PT-1.5S"}
+        text: "PT-1.5S"
+        engines: ["falkordb", "neptune"]
+      - value: {$temporal: "DURATION", text: "PT-0.5S"}
+        text: "PT-0.5S"
+        engines: ["falkordb", "neptune"]
+      - note: "Negative minutes, carried, each part signed."
+        value: {$temporal: "DURATION", text: "PT-90M"}
+        text: "PT-1H-30M"
+        engines: ["falkordb", "neptune"]
+      - note: "Parts of two signs, kept apart."
+        value: {$temporal: "DURATION", text: "P1DT-1H"}
+        text: "P1DT-1H"
+        engines: ["falkordb", "neptune"]
+      - value: {$temporal: "DURATION", text: "P1M-1D"}
+        text: "P1M-1D"
+        engines: ["falkordb", "neptune", "memgraph"]
+      - note: "A sign before the P signs each part."
+        value: {$temporal: "DURATION", text: "-P1DT2H"}
+        text: "P-1DT-2H"
+        engines: ["falkordb", "neptune"]
+      - note: "A fraction of a month is 30.436875 days, carried to the parts below: no months are left."
+        value: {$temporal: "DURATION", text: "P0.5M"}
+        text: "P15DT5H14M33S"
+        engines: ["falkordb", "neptune"]
+      - note: "Every part."
+        value: {$temporal: "DURATION", text: "P1Y2M3DT4H5M6.7S"}
+        text: "P1Y2M3DT4H5M6.7S"
+        engines: ["falkordb", "neptune", "memgraph"]
