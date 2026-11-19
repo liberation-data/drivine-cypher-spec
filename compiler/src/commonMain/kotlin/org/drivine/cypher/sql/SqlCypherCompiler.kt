@@ -3542,9 +3542,9 @@ abstract class SqlCypherCompiler(
                     // A row given that is no property is tested for as it is written, as a value worked out as it runs is: a
                     // row a MATCH or a WHERE leaves out then fails nothing, as in Neo4j. Rows given that are all properties need no test.
                     val given = unstorableGiven(written, carried, entries)
-                    val rows = written != null && givenRows(written, carried) != null
+                    val rows = given != null && byRows(written!!, carried, entries)
                     unstorable = given.takeUnless { rows }
-                    tested = if (rows) given != null else given == null && !knownStorable(written, carried, entries)
+                    tested = rows || given == null && !knownStorable(written, carried, entries)
                     widened = widenedGiven(written, carried, entries)
                 }
             }
@@ -3617,14 +3617,6 @@ abstract class SqlCypherCompiler(
         }
 
         /**
-         * Whether the value [written] gives in [scope], a property's or with [entries] a map of properties, is known when
-         * compiling to be one Neo4j stores, or to be seen as given ([unstorableGiven] refuses it where it is not), so that no row
-         * needs [unstorableItem]'s test: a number, a text, a truth value or a temporal value, a property read from the store,
-         * which holds no map, a variable a `WITH` binds to a value of such a kind or a list of them, or a map written of such
-         * values, or of the properties of a node or a relationship. Any other, as a key of a row a `WITH` passes on or an entry of
-         * a parameter's map, is tested as each row is written (drivine4j#820).
-         */
-        /**
          * Whether [expression] is known to be no list or map, as [scalar] knows it, or a `coalesce`, a `CASE` or a `+` of such
          * values: a `+` of two values that are neither is a number, a text, a temporal value or a failure. See [knownStorable].
          */
@@ -3650,6 +3642,14 @@ abstract class SqlCypherCompiler(
             else -> null
         }
 
+        /**
+         * Whether the value [written] gives in [scope], a property's or with [entries] a map of properties, is known when
+         * compiling to be one Neo4j stores, or to be seen as given ([unstorableGiven] refuses it where it is not), so that no row
+         * needs [unstorableItem]'s test: a number, a text, a truth value or a temporal value, a property read from the store,
+         * which holds no map, a variable a `WITH` binds to a value of such a kind or a list of them, or a map written of such
+         * values, or of the properties of a node or a relationship. Any other, as a key of a row a `WITH` passes on or an entry of
+         * a parameter's map, is tested as each row is written (drivine4j#820).
+         */
         private fun knownStorable(written: Expression?, scope: Map<String, Value>, entries: Boolean): Boolean = when {
             written == null || written is Expression.Parameter -> true
             !entries && written is Expression.ListLiteral && written.items.all { givenItems(it, scope) != null } -> true
@@ -3696,6 +3696,17 @@ abstract class SqlCypherCompiler(
                 }
             }
             else -> givenRows(written, scope)?.firstNotNullOfOrNull { row -> row?.let { unstorable(it, entries) } }
+        }
+
+        /**
+         * Whether [written], which [unstorableGiven] refuses, gives its value by the rows of a list given ([givenRows]): alone, as
+         * an item of a list written or, with [entries], as a value of a map written. Its rows are then tested as each is written
+         * ([unstorableItem]), so one a `MATCH` or a `WHERE` leaves out fails nothing, where any other value given fails every row.
+         */
+        private fun byRows(written: Expression, scope: Map<String, Value>, entries: Boolean): Boolean = givenRows(written, scope) != null || when {
+            entries && written is Expression.MapLiteral -> written.entries.any { (_, value) -> byRows(value, scope, entries = false) }
+            !entries && written is Expression.ListLiteral -> written.items.any { givenRows(it, scope) != null }
+            else -> false
         }
 
         /** The JSON [item], an item of a list written, gives in each row, where the statement gives it ([unstorableGiven]); else null. */

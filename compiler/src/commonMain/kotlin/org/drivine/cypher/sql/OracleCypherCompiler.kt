@@ -1496,7 +1496,7 @@ class OracleCypherCompiler(
         val open = if (entries) "{" else "["
         val cases = listOfNotNull(
             "WHEN DBMS_LOB.SUBSTR(ns.t, 1, 1) <> '$open' THEN 0",
-            if (nullItem) "WHEN DBMS_LOB.SUBSTR(ns.t, 1, 1) = '$open' AND REGEXP_LIKE(REGEXP_REPLACE(ns.t, '$string', '\"\"'), '[[,]null[],]') THEN $UNSTORABLE_NULL" else null,
+            if (nullItem) "WHEN DBMS_LOB.SUBSTR(ns.t, 1, 1) = '$open' AND ${serializedNulls("ns.t", "[[,]null[],]")} THEN $UNSTORABLE_NULL" else null,
             if (entries) null else "WHEN DBMS_LOB.SUBSTR(ns.c, 1, 1) = '{' THEN $UNSTORABLE_MAP",
             "WHEN REGEXP_LIKE(ns.c, '\\[[^]]*[[{]') THEN $UNSTORABLE_NESTED",
             if (entries) "WHEN REGEXP_LIKE(ns.c, ':\\{') THEN $UNSTORABLE_MAP" else null,

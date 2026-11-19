@@ -1732,6 +1732,12 @@ cases:
       - cypher: "UNWIND $rows AS row MATCH (n:CyWrite {id: row.id}) SET n.q = row.m RETURN count(*)"
         parameters: {rows: [{id: 1, m: 1}, {id: 9, m: {a: 1}}]}
         rows: [1]
+      - cypher: "UNWIND $rows AS row MATCH (n:CyWrite {id: row.id}) SET n += {q: row.m} RETURN count(*)"
+        parameters: {rows: [{id: 1, m: 1}, {id: 9, m: {a: 1}}]}
+        rows: [1]
+      - cypher: "UNWIND $rows AS row MATCH (n:CyWrite {id: row.id}) SET n.q = [row.m] RETURN count(*)"
+        parameters: {rows: [{id: 1, m: 1}, {id: 9, m: {a: 1}}]}
+        rows: [1]
       - cypher: "MATCH (n:CyWrite {id: 1}) SET n.f = $f, n.e = $e"
         parameters: {f: [1, 2.5], e: []}
       - cypher: "MATCH (n:CyWrite {id: 1}) RETURN [n.id, size(n.f), n.f[1], n.e]"

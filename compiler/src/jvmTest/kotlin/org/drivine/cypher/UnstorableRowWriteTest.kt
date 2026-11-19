@@ -48,6 +48,10 @@ class UnstorableRowWriteTest {
             // A list with an item worked out as it runs, as UnstorableGivenWriteTest's lists given are not.
             "MATCH (n:A) SET n.p = [1, n.q]" to emptyMap(),
             "MATCH (n:A) MERGE (n)-[r:R]->(:A {id: 2}) ON CREATE SET r.p = coalesce(n.q, \$m.a)" to mapOf("m" to mapOf("a" to listOf(1, "a"))),
+            // Rows given, in a map or a list written: a row a MATCH leaves out fails nothing, as `SET n.q = row.m` fails none.
+            "UNWIND \$rows AS row MATCH (n:A {id: row.id}) SET n += {q: row.m}" to rows,
+            "UNWIND \$rows AS row MATCH (n:A {id: row.id}) SET n.q = [row.m]" to rows,
+            "UNWIND \$rows AS row MATCH (n:A {id: row.id}) CREATE (n)-[:R {p: row.m}]->(:A)" to rows,
         )
         for (compiler in compilers()) for ((cypher, parameters) in tested) {
             val sql = sql(compiler, cypher, parameters)
