@@ -570,7 +570,13 @@ internal class SchemaProgram(
 
     private fun ensureMadeIndex(spec: IndexSpec, build: Build): EnsureResult {
         val items = indexes(spec.kind)
-        val existing = items.firstOrNull { store.matchesIdentity(it, spec) }
+        // Another session's online build of it under way (Postgres, #382), recorded or not: waited for, and read as it ended,
+        // so one the data refuses, or cut short, is built here rather than taken as made.
+        val waited = awaitIndexBuildUnderWay(spec, items.firstOrNull { store.matchesIdentity(it, spec) }, build)
+        if (waited is IndexWait.StillBuilding) {
+            return EnsureResult.AlreadyMatching(unbuilt(UnbuiltIndex(spec, stillBuilding = true, waited.message), waited.info, build) ?: SchemaItemInfo.fromSpec(spec))
+        }
+        val existing = (waited as IndexWait.Ended).info
         val form = formOf(spec)
         // Another item under a name Drivine gives this one's objects: never taken as made, and never made over.
         if (form is ItemForm.Mismatch) return mismatched(spec, existing, form)
@@ -715,6 +721,10 @@ internal class SchemaProgram(
     private fun isLeftIncomplete(spec: SchemaItemSpec): Boolean =
         listings[listingOf(spec)]?.let { store.isLeftIncomplete(spec, it) } == true
 
+    /** Whether the listing [spec] was last found in shows another session building its index, of no record yet ([StoreSchema.isBeingBuilt]). */
+    private fun isBeingBuilt(spec: SchemaItemSpec): Boolean =
+        listings[listingOf(spec)]?.let { store.isBeingBuilt(spec, it) } == true
+
     /** What makes [spec], [related] as [org.drivine.cypher.store.ddl.StoreDdl.createIndex] takes it: its create, or what completes it where [leftIncomplete]. */
     private fun made(spec: IndexSpec, related: SchemaItemInfo?, leftIncomplete: Boolean): List<DdlStatement> =
         if (leftIncomplete) store.ddl.completeIndex(spec, related?.catalogItem) else store.ddl.createIndex(spec, related?.catalogItem)
@@ -804,6 +814,36 @@ internal class SchemaProgram(
             return unbuilt(UnbuiltIndex(spec, stillBuilding = false, "$what failed to build: it is ${info.status}"), info, build)
         }
         return info
+    }
+
+    /** How [awaitIndexBuildUnderWay] ended: the build it waited for [Ended], and the index as then listed, or [StillBuilding] past the timeout. */
+    private sealed interface IndexWait {
+        class Ended(val info: SchemaItemInfo?) : IndexWait
+        class StillBuilding(val info: SchemaItemInfo?, val message: String) : IndexWait
+    }
+
+    /**
+     * [listed], the index [spec] is as listed, once no build of it under way is listed, on a store that builds an index in
+     * the statement that makes it, where another session's online build stands invalid under the name until it is done
+     * (Postgres's [org.drivine.cypher.store.ddl.PostgresDdl.BUILDING], recorded or not: its record is written once it is
+     * done). It is polled until it ends, for as long as [build] waits. A store that builds in the background is waited on
+     * after its create, as before ([awaitBuilt]).
+     */
+    private fun awaitIndexBuildUnderWay(spec: IndexSpec, listed: SchemaItemInfo?, build: Build): IndexWait {
+        if (store.indexOperationsAreAsync || store.awaitIndexStatement != null) return IndexWait.Ended(listed)
+        val deadline = io.clock() + build.timeoutMillis
+        var info = listed
+        while (if (info != null) info.buildInProgress && !store.isIncomplete(info) else isBeingBuilt(spec)) {
+            val left = deadline - io.clock()
+            if (left <= 0) {
+                return IndexWait.StillBuilding(
+                    info,
+                    "$engine ${spec.kind} on ${spec.label}${spec.properties} is still being built by another session, having waited ${javaDuration(build.timeoutMillis)}",
+                )
+            }
+            info = findIndex(spec, poll = minOf(POLL_MILLIS, left).coerceAtLeast(1))
+        }
+        return IndexWait.Ended(info)
     }
 
     /** The state Neo4j gives the index [name]; null where it gives none, or the read fails. */
@@ -898,15 +938,16 @@ internal class SchemaProgram(
         // Only one of this version's form: another item under the name is never dropped, and one of another form is kept as
         // it is, as an index's are. The constraint is found first: that reads the listing again where DDL cleared it, which
         // its form and an unrecorded index are told by.
-        val found = findConstraint(spec)
+        // A constraint still being built, by another process or an earlier run, may yet fail: its build is waited for, as
+        // one made here, recorded or not (Postgres's online build writes its record once it is done), and the constraint
+        // is read as it ended. One dropped meanwhile is made again below. One left invalid is no build under way, whose
+        // wait would run out: of this version's form it is dropped and built, and of another it is kept as it is.
+        val found = awaitBuildUnderWay(spec)
         val form = formOf(spec)
         val invalid = form !is ItemForm.Mismatch && form !is ItemForm.Stale && form !is ItemForm.Newer &&
             if (found != null) store.isIncomplete(found) else isLeftIncomplete(spec)
         if (invalid) ddl(store.ddl.droppedIncomplete(spec))
-        // A constraint still being built, by another process or an earlier run, may yet fail: its build is waited for, as
-        // one made here. One dropped meanwhile is made again below. One left invalid is no build under way, whose wait would
-        // run out: of another form, it is kept as it is.
-        val existing = if (invalid) null else found?.let { if (it.buildInProgress && !store.isIncomplete(it)) awaitBuild(spec, untilListed = false) else it }
+        val existing = if (invalid) null else found
         // Another item under the name Drivine gives this one's index: never taken as made, and never made over.
         if (form is ItemForm.Mismatch) return mismatched(spec, existing, form)
         if (existing != null && existing.buildFailed) {
@@ -974,13 +1015,18 @@ internal class SchemaProgram(
 
         if (store.constraintCreationIsAsync) return awaitAsyncCreation(spec, violationSampleSize)
 
-        val listed = findConstraint(spec)
-        // Listed invalid after the create, which passed over it (`IF NOT EXISTS`), or not listed at all: another session's
-        // online build, which held the table until it ended, the data refused or was cut short, and that session may have
-        // dropped it since (Postgres, #382). Never reported made: made here, once, as one found invalid is, so the data's
-        // refusal is this ensure's too.
-        if (again && store.ddl.buildsLeaveInvalidIndexes && (listed == null || store.isIncomplete(listed))) {
-            return ensureMadeConstraint(spec, violationSampleSize, replaceBlockingIndex, again = false)
+        // The create passes over an index under the name (`IF NOT EXISTS`): another session's online build, which may be
+        // under way still, is waited for (Postgres, #382).
+        val listed = if (store.ddl.buildsLeaveInvalidIndexes) awaitBuildUnderWay(spec) else findConstraint(spec)
+        // Listed invalid after that build ended, or not listed at all: the data refused it, or it was cut short, and that
+        // session may have dropped it since. Never reported made: made here, once, as one found invalid is, so the data's
+        // refusal is this ensure's too; and where it is again not made, thrown, as nothing holds the data unique.
+        if (store.ddl.buildsLeaveInvalidIndexes && (listed == null || store.isIncomplete(listed))) {
+            if (again) return ensureMadeConstraint(spec, violationSampleSize, replaceBlockingIndex, again = false)
+            throw OwnerFailure(
+                "$engine ${spec.kind} on ${spec.label}${spec.properties} was not made: another session's build of it under the same name " +
+                    "was cut short or dropped, twice, while this ensure made it. Nothing holds the data unique: ensure it again.",
+            )
         }
         val created = listed ?: SchemaItemInfo.fromSpec(spec)
         val completed = if (invalid) ": ${store.incompleteness(found ?: SchemaItemInfo.fromSpec(spec))}" else ""
@@ -1268,6 +1314,24 @@ internal class SchemaProgram(
         } catch (refused: RawFailure) {
             if (findConstraint(spec)?.buildFailed == true) throw refused
         }
+    }
+
+    /**
+     * The constraint [spec] is, as listed once no build of it is under way: a build another process, or an earlier run, has
+     * under way (FalkorDB's `UNDER CONSTRUCTION`, or Postgres's [org.drivine.cypher.store.ddl.PostgresDdl.BUILDING], recorded
+     * or not: its record is written once the build is done) is polled until it ends. Null where it is not listed then.
+     * One left invalid is no build under way ([StoreSchema.isIncomplete]): given as it is listed.
+     */
+    private fun awaitBuildUnderWay(spec: ConstraintSpec): SchemaItemInfo? {
+        val deadline = io.clock() + ASYNC_TIMEOUT_MILLIS
+        var poll: Long? = null
+        while (io.clock() + (poll ?: 0) < deadline) {
+            val info = findConstraint(spec, poll)
+            val building = if (info != null) info.buildInProgress && !store.isIncomplete(info) else isBeingBuilt(spec)
+            if (!building) return info
+            poll = POLL_MILLIS
+        }
+        throw OwnerFailure("Timed out after ${javaDuration(ASYNC_TIMEOUT_MILLIS)} waiting for constraint on ${spec.label}${spec.properties} to become operational")
     }
 
     /**

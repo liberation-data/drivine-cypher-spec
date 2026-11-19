@@ -199,6 +199,13 @@ interface StoreSchema {
     fun isLeftIncomplete(spec: SchemaItemSpec, rows: List<Any?>): Boolean = false
 
     /**
+     * Whether [rows], the listing [spec] is found in, show another session building [spec]'s index under its name with no
+     * record listing it yet: on Postgres, an online build under way ([org.drivine.cypher.store.ddl.PostgresDdl.BUILDING]),
+     * whose record is written once it is done. An ensure waits for it and reads how it ended, rather than pass over it as made (#382).
+     */
+    fun isBeingBuilt(spec: SchemaItemSpec, rows: List<Any?>): Boolean = false
+
+    /**
      * What [rows], the rows of the listing [spec] is found in ([StoreDdl.listIndexesQuery] of its kind, or
      * [StoreDdl.listConstraintsQuery]), say of the form of the item [spec] declares ([ItemForm]): on a SQL store, from its
      * record's `details.form` and what the store has under the names Drivine gives the item's objects, which the listing

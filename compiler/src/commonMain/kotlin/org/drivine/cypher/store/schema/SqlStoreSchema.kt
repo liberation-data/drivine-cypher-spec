@@ -408,9 +408,12 @@ data class StoreObject(
 @DrivineInternalApi
 class PostgresSchema(override val ddl: PostgresDdl) : SqlStoreSchema() {
 
-    /** An index left invalid by a build cut short is listed [PostgresDdl.INVALID]: see [isIncomplete]. */
+    /**
+     * An index left invalid by a build cut short is listed [PostgresDdl.INVALID] (see [isIncomplete]), and one another
+     * session is building online [PostgresDdl.BUILDING], which an ensure waits for ([SchemaItemInfo.buildInProgress]).
+     */
     override val statuses: Set<String>
-        get() = setOf(PostgresDdl.INVALID)
+        get() = setOf(PostgresDdl.INVALID, PostgresDdl.BUILDING)
 
     /**
      * Each item is one index, of the label's nodes. A vector's and a full-text index's expressions aren't compared, only
@@ -539,6 +542,12 @@ class PostgresSchema(override val ddl: PostgresDdl) : SqlStoreSchema() {
     override fun isLeftIncomplete(spec: SchemaItemSpec, rows: List<Any?>): Boolean {
         val objects = StoreObject.read(rows)
         return madeAs(spec).any { made -> objects[made.name]?.let { it.isIndex && it.status == PostgresDdl.INVALID } == true }
+    }
+
+    /** An index under the name [spec]'s is made under, of no record, listed [PostgresDdl.BUILDING] among the objects. */
+    override fun isBeingBuilt(spec: SchemaItemSpec, rows: List<Any?>): Boolean {
+        val objects = StoreObject.read(rows)
+        return madeAs(spec).any { made -> objects[made.name]?.let { it.isIndex && it.status == PostgresDdl.BUILDING } == true }
     }
 
     override fun incompleteness(existing: SchemaItemInfo): String =

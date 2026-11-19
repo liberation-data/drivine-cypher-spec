@@ -65,10 +65,13 @@ class OnlineIndexBuildTest {
         // One item as IndexManager makes it; more as an owner's enforce does.
         val request = items.singleOrNull()?.let { PlanRequest("default", Operation.Item(call, it)) }
             ?: PlanRequest("default", Operation.Enforce(), listOf(DeclaredCatalog(null, items = items.toList())))
-        var step = planner.start(request, 0)
+        // The store's clock, as each poll's wait moves it on.
+        var now = 0L
+        var step = planner.start(request, now)
         while (step is PlanStep.Run) {
             val outcomes = mutableListOf<PlanOutcome>()
             for (action in step.actions) {
+                if (action is PlanAction.Query) now += action.delayMillis
                 val outcome = when (action) {
                     is PlanAction.Query -> PlanOutcome.Rows(
                         when (action.purpose) {
@@ -92,12 +95,17 @@ class OnlineIndexBuildTest {
                 // A library stops a round at its first failure.
                 if (outcome is PlanOutcome.Failed) break
             }
-            step = planner.resume(step.state, outcomes, 0)
+            step = planner.resume(step.state, outcomes, now)
         }
         return ran to (step as PlanStep.Done).report
     }
 
-    private fun indexBuilds(ran: List<String>) = ran.filter { it.startsWith("CREATE INDEX") || it.startsWith("CREATE UNIQUE INDEX") || it.startsWith("DROP INDEX") }
+    private fun indexBuilds(ran: List<String>) =
+        ran.map(::shown).filter { it.startsWith("CREATE INDEX") || it.startsWith("CREATE UNIQUE INDEX") || it.startsWith("DROP INDEX") }
+
+    /** [text], a statement that ran, as [indexBuilds] gives it: Postgres's drop of an index left invalid ([PostgresDdl.droppedIncomplete]) as `DROP INDEX IF INVALID <name>`. */
+    private fun shown(text: String): String =
+        if (!text.startsWith("DO \$incomplete\$")) text else "DROP INDEX IF INVALID " + Regex("""DROP INDEX (\S+);""").find(text)!!.groupValues[1]
 
     @Test
     fun aPostgresIndexIsBuiltConcurrently() {
@@ -150,7 +158,7 @@ class OnlineIndexBuildTest {
         )
         val index = postgresDdl.objectName(PostgresDdl.RANGE, listOf("Person", "name"))
         // Only the invalid index is dropped, by its name, and then it is built again online.
-        assertEquals(listOf("DROP INDEX CONCURRENTLY IF EXISTS $index", "CREATE INDEX CONCURRENTLY IF NOT EXISTS $index"), indexBuilds(ran).map { it.substringBefore(" ON ") })
+        assertEquals(listOf("DROP INDEX IF INVALID $index", "CREATE INDEX CONCURRENTLY IF NOT EXISTS $index"), indexBuilds(ran).map { it.substringBefore(" ON ") })
         assertIs<EnsureResult.Created>(report.item!!.result)
         assertTrue(
             LogLine(
@@ -220,7 +228,7 @@ class OnlineIndexBuildTest {
     }
 
     @Test
-    fun aPostgresIndexLeftInvalidWhoseDropIsRefusedOnlineIsDroppedAndBuiltBlockingWrites() {
+    fun aPostgresIndexLeftInvalidInATransactionIsDroppedAndBuiltBlockingWrites() {
         val invalid = ListingRows.rows("postgres", listOf(SchemaItemInfo(SchemaItemKind.RANGE_INDEX, "Person", listOf("name"), "Person_name_range", status = PostgresDdl.INVALID)), constraints = false)
         var rebuilt = false
         val (ran, report) = drive(
@@ -229,9 +237,9 @@ class OnlineIndexBuildTest {
             execute = { if (" CONCURRENTLY " in it) inTransaction else { if (it.startsWith("CREATE INDEX")) rebuilt = true; null } },
         )
         val index = postgresDdl.objectName(PostgresDdl.RANGE, listOf("Person", "name"))
-        // The drop refused online and run blocking; the build after it with no try online.
+        // The drop, a block, runs in the transaction as it is; the build is refused online and run blocking.
         assertEquals(
-            listOf("DROP INDEX CONCURRENTLY IF EXISTS $index", "DROP INDEX IF EXISTS $index", "CREATE INDEX IF NOT EXISTS $index"),
+            listOf("DROP INDEX IF INVALID $index", "CREATE INDEX CONCURRENTLY IF NOT EXISTS $index", "CREATE INDEX IF NOT EXISTS $index"),
             indexBuilds(ran).map { it.substringBefore(" ON ") },
         )
         assertIs<EnsureResult.Created>(report.item!!.result)
@@ -244,12 +252,12 @@ class OnlineIndexBuildTest {
         val fullText = FullTextIndexSpec("Doc", listOf("body"))
         // The one invalid index dropped by its name, then the create as it is.
         assertEquals(
-            DdlStatement.Text("DROP INDEX CONCURRENTLY IF EXISTS ${postgresDdl.objectName(PostgresDdl.VECTOR, listOf("Doc", "embedding"))}"),
-            postgresDdl.completeIndex(vector, null).first(),
+            "DROP INDEX IF INVALID ${postgresDdl.objectName(PostgresDdl.VECTOR, listOf("Doc", "embedding"))}",
+            shown((postgresDdl.completeIndex(vector, null).first() as DdlStatement.Text).statement),
         )
         assertEquals(
-            DdlStatement.Text("DROP INDEX CONCURRENTLY IF EXISTS ${postgresDdl.objectName(PostgresDdl.FULLTEXT, listOf("Doc", "body"))}"),
-            postgresDdl.completeIndex(fullText, null).first(),
+            "DROP INDEX IF INVALID ${postgresDdl.objectName(PostgresDdl.FULLTEXT, listOf("Doc", "body"))}",
+            shown((postgresDdl.completeIndex(fullText, null).first() as DdlStatement.Text).statement),
         )
         assertEquals(postgresDdl.createIndex(vector), postgresDdl.completeIndex(vector, null).drop(1))
         assertEquals(postgresDdl.createIndex(fullText), postgresDdl.completeIndex(fullText, null).drop(1))
@@ -270,7 +278,7 @@ class OnlineIndexBuildTest {
             execute = { if (it.startsWith("CREATE INDEX")) rebuilt = true; null },
         )
         val index = postgresDdl.objectName(PostgresDdl.RANGE, listOf("Person", "name"))
-        assertEquals(listOf("DROP INDEX CONCURRENTLY IF EXISTS $index", "CREATE INDEX CONCURRENTLY IF NOT EXISTS $index"), indexBuilds(ran).map { it.substringBefore(" ON ") })
+        assertEquals(listOf("DROP INDEX IF INVALID $index", "CREATE INDEX CONCURRENTLY IF NOT EXISTS $index"), indexBuilds(ran).map { it.substringBefore(" ON ") })
         assertIs<EnsureResult.Created>(report.item!!.result)
         assertTrue(
             LogLine(
@@ -291,7 +299,7 @@ class OnlineIndexBuildTest {
             listed = { if (it == postgresDdl.listIndexesQuery(SchemaItemKind.RANGE_INDEX) && !remade) listOf(nameIndexObject(PostgresDdl.INVALID)) else emptyList() },
             execute = { if (it.startsWith("CREATE INDEX")) remade = true; null },
         )
-        assertEquals(listOf("DROP INDEX CONCURRENTLY IF EXISTS $index", "CREATE INDEX CONCURRENTLY IF NOT EXISTS $index"), indexBuilds(recreated).map { it.substringBefore(" ON ") })
+        assertEquals(listOf("DROP INDEX IF INVALID $index", "CREATE INDEX CONCURRENTLY IF NOT EXISTS $index"), indexBuilds(recreated).map { it.substringBefore(" ON ") })
         assertNull(recreate.failure)
     }
 
@@ -375,7 +383,7 @@ class OnlineIndexBuildTest {
         val (ran, report) = drive(postgres, email, sampled = sample, execute = { if (it.startsWith("CREATE UNIQUE INDEX")) repeated else null })
         // The build the data refused left its index invalid under the name: dropped, so the next ensure builds it again.
         assertEquals(
-            listOf("CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS $emailIndex", "DROP INDEX CONCURRENTLY IF EXISTS $emailIndex"),
+            listOf("CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS $emailIndex", "DROP INDEX IF INVALID $emailIndex"),
             indexBuilds(ran).map { it.substringBefore(" ON ") },
         )
         assertEquals(sample, assertIs<EnsureResult.Violation>(report.item!!.result).conflictingSample)
@@ -422,14 +430,14 @@ class OnlineIndexBuildTest {
             postgres, email, sampled = sample,
             listed = { if (it == postgresDdl.listConstraintsQuery() && creates > 0 && !dropped) recorded else emptyList() },
             execute = {
-                if (it.startsWith("DROP INDEX")) dropped = true
+                if (shown(it).startsWith("DROP INDEX")) dropped = true
                 if (it.startsWith("CREATE UNIQUE INDEX")) { dropped = false; if (++creates > 1) repeated else null } else null
             },
         )
         assertEquals(
             listOf(
-                "CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS $emailIndex", "DROP INDEX CONCURRENTLY IF EXISTS $emailIndex",
-                "CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS $emailIndex", "DROP INDEX CONCURRENTLY IF EXISTS $emailIndex",
+                "CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS $emailIndex", "DROP INDEX IF INVALID $emailIndex",
+                "CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS $emailIndex", "DROP INDEX IF INVALID $emailIndex",
             ),
             indexBuilds(ran).map { it.substringBefore(" ON ") },
         )
@@ -449,7 +457,7 @@ class OnlineIndexBuildTest {
                 execute = { if (it.startsWith("CREATE UNIQUE INDEX")) rebuilt = true; null },
             )
             assertEquals(
-                listOf("DROP INDEX CONCURRENTLY IF EXISTS $emailIndex", "CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS $emailIndex"),
+                listOf("DROP INDEX IF INVALID $emailIndex", "CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS $emailIndex"),
                 indexBuilds(ran).map { it.substringBefore(" ON ") }, "$invalid",
             )
             assertIs<EnsureResult.Created>(report.item!!.result, "$invalid")
@@ -461,9 +469,9 @@ class OnlineIndexBuildTest {
                 report.log.toString(),
             )
         }
-        // One still being built, by another process that hasn't recorded it yet, is not dropped.
+        // One valid, whose record the process that built it hasn't written yet, is not dropped.
         val (building, _) = drive(postgres, email, listed = { if (it == postgresDdl.listConstraintsQuery()) listOf(emailIndexObject(null)) else emptyList() })
-        assertTrue(building.none { it.startsWith("DROP INDEX") }, building.joinToString("\n"))
+        assertTrue(building.none { shown(it).startsWith("DROP INDEX") }, building.joinToString("\n"))
     }
 
     @Test
@@ -497,7 +505,7 @@ class OnlineIndexBuildTest {
         // The index ensured first runs DDL, which clears the listings: the constraint's are read again before its form is.
         val other = emailIndexObject(PostgresDdl.INVALID) + ("columns" to listOf("(props -> 'nickname'::text)"))
         val (mismatched, drift) = drive(postgres, name, email, listed = { if (it == postgresDdl.listConstraintsQuery()) listOf(other) else emptyList() })
-        assertTrue(mismatched.none { it.startsWith("CREATE UNIQUE INDEX") || it.startsWith("DROP INDEX") }, mismatched.joinToString("\n"))
+        assertTrue(mismatched.none { it.startsWith("CREATE UNIQUE INDEX") || shown(it).startsWith("DROP INDEX") }, mismatched.joinToString("\n"))
         assertIs<EnsureResult.Drift>(drift.owners.single().results.last().result)
         // And one left invalid before its record was written is dropped and built again.
         var rebuilt = false
@@ -507,7 +515,7 @@ class OnlineIndexBuildTest {
             execute = { if (it.startsWith("CREATE UNIQUE INDEX")) rebuilt = true; null },
         )
         assertEquals(
-            listOf("DROP INDEX CONCURRENTLY IF EXISTS $emailIndex", "CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS $emailIndex"),
+            listOf("DROP INDEX IF INVALID $emailIndex", "CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS $emailIndex"),
             indexBuilds(ran).filter { emailIndex in it }.map { it.substringBefore(" ON ") },
         )
         assertIs<EnsureResult.Created>(report.owners.single().results.last().result)
@@ -519,11 +527,11 @@ class OnlineIndexBuildTest {
             postgres, email, sampled = sample,
             execute = { if (" CONCURRENTLY " in it) inTransaction else if (it.startsWith("CREATE UNIQUE INDEX")) repeated else null },
         )
-        // Built blocking writes once refused online; the drop after the data refuses it blocks too, as each after it does.
+        // Built blocking writes once refused online; the drop after the data refuses it is a block, which runs in the transaction as it is.
         assertEquals(
             listOf(
                 "CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS $emailIndex", "CREATE UNIQUE INDEX IF NOT EXISTS $emailIndex",
-                "DROP INDEX IF EXISTS $emailIndex",
+                "DROP INDEX IF INVALID $emailIndex",
             ),
             indexBuilds(ran).map { it.substringBefore(" ON ") },
         )
@@ -585,7 +593,7 @@ class OnlineIndexBuildTest {
         )
         // Not dropped on its own, nor finished as a cut-off recreate: the new index is built beside it, and the swap drops it;
         // the constraint's create then finds it made.
-        assertTrue(ran.none { it.startsWith("DROP INDEX CONCURRENTLY") }, ran.joinToString("\n"))
+        assertTrue(ran.none { shown(it).startsWith("DROP INDEX IF INVALID") }, ran.joinToString("\n"))
         assertEquals(
             listOf(
                 "DROP INDEX IF EXISTS ${recreation.temporary}", "CREATE UNIQUE INDEX ${recreation.temporary}",
@@ -629,5 +637,139 @@ class OnlineIndexBuildTest {
         assertEquals(DdlStatement.Text(create.replace("CREATE UNIQUE INDEX CONCURRENTLY ", "CREATE UNIQUE INDEX ")), postgresDdl.blocking(DdlStatement.Text(create)))
         // A recreate's build blocks writes already: there is no other form of it.
         assertNull(postgresDdl.blocking(postgresDdl.recreation(email).build.single()))
+    }
+
+    /** The listing's record of the constraint on Person[email], with [status]. */
+    private fun emailRecord(status: String?) =
+        ListingRows.rows("postgres", listOf(SchemaItemInfo(SchemaItemKind.UNIQUENESS_CONSTRAINT, "Person", listOf("email"), "Person_email_unique", status = status)), constraints = true)
+
+    /** The listing's record of the range index on Person[name], with [status]. */
+    private fun nameRecord(status: String?) =
+        ListingRows.rows("postgres", listOf(SchemaItemInfo(SchemaItemKind.RANGE_INDEX, "Person", listOf("name"), "Person_name_range", status = status)), constraints = false)
+
+    @Test
+    fun theListingTellsABuildUnderWayFromAnIndexLeftInvalid() {
+        // Invalid while a build of it is under way: BUILDING, waited for; with none, INVALID, dropped and built again.
+        for (query in listOf(postgresDdl.listConstraintsQuery(), postgresDdl.listIndexesQuery(SchemaItemKind.RANGE_INDEX))) {
+            assertTrue("WHEN EXISTS (SELECT 1 FROM pg_stat_progress_create_index p WHERE p.index_relid = x.indexrelid" in query, query)
+            assertTrue("THEN 'BUILDING' ELSE 'INVALID' END" in query, query)
+            assertTrue("CASE WHEN i.indisvalid THEN NULL" in query, query)
+        }
+        assertEquals(setOf(PostgresDdl.INVALID, PostgresDdl.BUILDING), PostgresSchema(postgresDdl).parseConstraintRows(emailRecord(PostgresDdl.BUILDING) + emailRecord(PostgresDdl.INVALID)).map { it.status }.toSet())
+    }
+
+    @Test
+    fun theDropOfAnIndexLeftInvalidLeavesOneAnotherSessionBuiltValidMeanwhile() {
+        // Its table held first, which waits for a build under way, and only then is it dropped, where it is still invalid.
+        val drop = (postgresDdl.droppedIncomplete(email).single() as DdlStatement.Text).statement
+        val lock = drop.indexOf("LOCK TABLE")
+        val check = drop.indexOf("IF EXISTS (SELECT 1 FROM pg_index WHERE indexrelid = to_regclass('$emailIndex') AND NOT indisvalid)")
+        assertTrue(lock in 0 until check && check < drop.indexOf("DROP INDEX $emailIndex;"), drop)
+        assertTrue("CONCURRENTLY" !in drop, drop)
+        // A block, which a transaction runs as it is: nothing to run blocking writes in its place.
+        assertNull(postgresDdl.blocking(postgresDdl.droppedIncomplete(email).single()))
+    }
+
+    @Test
+    fun aConstraintAnotherSessionIsBuildingIsWaitedForAndTakenAsMadeOnceBuilt() {
+        // Recorded, or not yet: its record is written once the build is done.
+        for (building in listOf(emailRecord(PostgresDdl.BUILDING), listOf(emailIndexObject(PostgresDdl.BUILDING)))) {
+            var reads = 0
+            val (ran, report) = drive(
+                postgres, email,
+                listed = { if (it == postgresDdl.listConstraintsQuery()) (if (++reads <= 3) building else emailRecord(null)) else emptyList() },
+            )
+            assertEquals(emptyList(), indexBuilds(ran), "$building")
+            assertIs<EnsureResult.AlreadyMatching>(report.item!!.result, "$building")
+            assertEquals(4, reads, "$building")
+        }
+    }
+
+    @Test
+    fun aConstraintWhoseBuildInAnotherSessionTheDataRefusesIsDroppedAndMadeHere() {
+        // Two ensures at once over an index left invalid: the other session's rebuild is waited for, and the index its
+        // refused build leaves is dropped and built here, so the data's refusal is this ensure's too. Never AlreadyMatching
+        // over a build under way, nor Completed over one that then fails.
+        var reads = 0
+        var dropped = false
+        val (ran, report) = drive(
+            postgres, email, sampled = sample,
+            listed = {
+                if (it != postgresDdl.listConstraintsQuery() || dropped) emptyList()
+                else if (++reads <= 2) emailRecord(PostgresDdl.BUILDING) else emailRecord(PostgresDdl.INVALID)
+            },
+            execute = {
+                if (shown(it).startsWith("DROP INDEX IF INVALID")) dropped = true
+                if (it.startsWith("CREATE UNIQUE INDEX")) repeated else null
+            },
+        )
+        assertEquals(
+            listOf("DROP INDEX IF INVALID $emailIndex", "CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS $emailIndex", "DROP INDEX IF INVALID $emailIndex"),
+            indexBuilds(ran).map { it.substringBefore(" ON ") },
+        )
+        assertEquals(sample, assertIs<EnsureResult.Violation>(report.item!!.result).conflictingSample)
+        assertTrue(report.log.none { it.message.startsWith("Created") || it.message.startsWith("Completed") }, report.log.toString())
+    }
+
+    @Test
+    fun aCreateThatPassedOverAnotherSessionsBuildUnderWayWaitsForIt() {
+        // The create passes over the index (IF NOT EXISTS) while the other session's build is under way: waited for, and
+        // made only once it is built.
+        var creates = 0
+        var reads = 0
+        val (ran, report) = drive(
+            postgres, email,
+            listed = {
+                if (it != postgresDdl.listConstraintsQuery() || creates == 0) emptyList()
+                else if (++reads <= 2) listOf(emailIndexObject(PostgresDdl.BUILDING)) else emailRecord(null)
+            },
+            execute = { if (it.startsWith("CREATE UNIQUE INDEX")) creates++; null },
+        )
+        assertEquals(1, indexBuilds(ran).size, ran.joinToString("\n"))
+        assertIs<EnsureResult.Created>(report.item!!.result)
+        assertEquals(3, reads)
+    }
+
+    @Test
+    fun aConstraintNotMadeTwiceOverAnotherSessionsBuildsIsThrownNotReportedMade() {
+        val elsewhere = emailIndexObject(null) + ("object" to "drivine_elsewhere")
+        val (ran, report) = drive(postgres, email, listed = { if (it == postgresDdl.listConstraintsQuery()) listOf(elsewhere) else emptyList() })
+        assertEquals(2, indexBuilds(ran).count { it.startsWith("CREATE UNIQUE INDEX") }, ran.joinToString("\n"))
+        assertTrue(report.item?.result !is EnsureResult.Created, "${report.item}")
+        assertTrue("UNIQUENESS_CONSTRAINT on Person[email] was not made" in report.failure.orEmpty(), "$report")
+    }
+
+    @Test
+    fun aConstraintAnotherSessionIsStillBuildingPastTheWaitIsThrown() {
+        val (ran, report) = drive(postgres, email, listed = { if (it == postgresDdl.listConstraintsQuery()) emailRecord(PostgresDdl.BUILDING) else emptyList() })
+        assertEquals(emptyList(), indexBuilds(ran))
+        assertTrue("waiting for constraint on Person[email] to become operational" in report.failure.orEmpty(), "$report")
+    }
+
+    @Test
+    fun anIndexAnotherSessionIsBuildingIsWaitedForAndReadAsItEnded() {
+        val index = postgresDdl.objectName(PostgresDdl.RANGE, listOf("Person", "name"))
+        val listing = postgresDdl.listIndexesQuery(SchemaItemKind.RANGE_INDEX)
+        // Built: taken as made, nothing run.
+        for (building in listOf(nameRecord(PostgresDdl.BUILDING), listOf(nameIndexObject(PostgresDdl.BUILDING)))) {
+            var reads = 0
+            val (ran, report) = drive(postgres, name, listed = { if (it == listing) (if (++reads <= 3) building else nameRecord(null)) else emptyList() })
+            assertEquals(emptyList(), indexBuilds(ran), "$building")
+            assertIs<EnsureResult.AlreadyMatching>(report.item!!.result, "$building")
+        }
+        // Cut short, or refused: dropped and built here.
+        var reads = 0
+        var rebuilt = false
+        val (ran, report) = drive(
+            postgres, name,
+            listed = { if (it != listing || rebuilt) emptyList() else if (++reads <= 2) nameRecord(PostgresDdl.BUILDING) else nameRecord(PostgresDdl.INVALID) },
+            execute = { if (it.startsWith("CREATE INDEX")) rebuilt = true; null },
+        )
+        assertEquals(listOf("DROP INDEX IF INVALID $index", "CREATE INDEX CONCURRENTLY IF NOT EXISTS $index"), indexBuilds(ran).map { it.substringBefore(" ON ") })
+        assertIs<EnsureResult.Created>(report.item!!.result)
+        // Still building past the ensure's timeout: said so, as an index of its own still being built is.
+        val (still, late) = drive(postgres, name, listed = { if (it == listing) nameRecord(PostgresDdl.BUILDING) else emptyList() })
+        assertEquals(emptyList(), indexBuilds(still))
+        assertTrue("is still being built by another session" in late.failure.orEmpty(), "$late")
     }
 }

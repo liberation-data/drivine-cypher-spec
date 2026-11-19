@@ -1259,10 +1259,7 @@ catalog:
       indexes:
         VECTOR_INDEX: |-
           SELECT listed FROM (
-              SELECT 0 AS part, label, properties, jsonb_build_object('kind', kind, 'label', label, 'properties', properties::jsonb, 'name', name, 'details', details, 'status', CASE WHEN EXISTS (
-                  SELECT 1 FROM pg_index x
-                  WHERE x.indexrelid = to_regclass(c.object_name) AND NOT x.indisvalid AND NOT EXISTS (SELECT 1 FROM pg_stat_progress_create_index p WHERE p.index_relid = x.indexrelid OR (p.index_relid IS NULL AND p.datname = current_database()))
-              ) THEN 'INVALID' END) AS listed
+              SELECT 0 AS part, label, properties, jsonb_build_object('kind', kind, 'label', label, 'properties', properties::jsonb, 'name', name, 'details', details, 'status', (SELECT CASE WHEN x.indisvalid THEN NULL WHEN EXISTS (SELECT 1 FROM pg_stat_progress_create_index p WHERE p.index_relid = x.indexrelid OR (p.index_relid IS NULL AND p.datname = current_database())) THEN 'BUILDING' ELSE 'INVALID' END FROM pg_index x WHERE x.indexrelid = to_regclass(c.object_name))) AS listed
               FROM drivine_schema c
               WHERE kind IN ('VECTOR_INDEX')
                 AND (object_name IS NULL OR to_regclass(object_name) IS NOT NULL)
@@ -1272,7 +1269,7 @@ catalog:
                                         'columns', (SELECT jsonb_agg(pg_get_indexdef(i.indexrelid, k, true) ORDER BY k) FROM generate_series(1, i.indnatts) k),
                                         'where', pg_get_expr(i.indpred, i.indrelid, true),
                                         'opclasses', (SELECT jsonb_agg(oc.opcname ORDER BY k.n) FROM unnest(i.indclass::oid[]) WITH ORDINALITY AS k(oid, n) JOIN pg_opclass oc ON oc.oid = k.oid),
-                                        'status', CASE WHEN NOT i.indisvalid AND NOT EXISTS (SELECT 1 FROM pg_stat_progress_create_index p WHERE p.index_relid = i.indexrelid OR (p.index_relid IS NULL AND p.datname = current_database())) THEN 'INVALID' END)
+                                        'status', CASE WHEN i.indisvalid THEN NULL WHEN EXISTS (SELECT 1 FROM pg_stat_progress_create_index p WHERE p.index_relid = i.indexrelid OR (p.index_relid IS NULL AND p.datname = current_database())) THEN 'BUILDING' ELSE 'INVALID' END)
               FROM pg_class o
               LEFT JOIN pg_index i ON i.indexrelid = o.oid
               LEFT JOIN pg_class t ON t.oid = i.indrelid
@@ -1282,10 +1279,7 @@ catalog:
           ORDER BY part, label, properties
         RANGE_INDEX: |-
           SELECT listed FROM (
-              SELECT 0 AS part, label, properties, jsonb_build_object('kind', kind, 'label', label, 'properties', properties::jsonb, 'name', name, 'details', details, 'status', CASE WHEN EXISTS (
-                  SELECT 1 FROM pg_index x
-                  WHERE x.indexrelid = to_regclass(c.object_name) AND NOT x.indisvalid AND NOT EXISTS (SELECT 1 FROM pg_stat_progress_create_index p WHERE p.index_relid = x.indexrelid OR (p.index_relid IS NULL AND p.datname = current_database()))
-              ) THEN 'INVALID' END) AS listed
+              SELECT 0 AS part, label, properties, jsonb_build_object('kind', kind, 'label', label, 'properties', properties::jsonb, 'name', name, 'details', details, 'status', (SELECT CASE WHEN x.indisvalid THEN NULL WHEN EXISTS (SELECT 1 FROM pg_stat_progress_create_index p WHERE p.index_relid = x.indexrelid OR (p.index_relid IS NULL AND p.datname = current_database())) THEN 'BUILDING' ELSE 'INVALID' END FROM pg_index x WHERE x.indexrelid = to_regclass(c.object_name))) AS listed
               FROM drivine_schema c
               WHERE kind IN ('RANGE_INDEX')
                 AND (object_name IS NULL OR to_regclass(object_name) IS NOT NULL)
@@ -1295,7 +1289,7 @@ catalog:
                                         'columns', (SELECT jsonb_agg(pg_get_indexdef(i.indexrelid, k, true) ORDER BY k) FROM generate_series(1, i.indnatts) k),
                                         'where', pg_get_expr(i.indpred, i.indrelid, true),
                                         'opclasses', (SELECT jsonb_agg(oc.opcname ORDER BY k.n) FROM unnest(i.indclass::oid[]) WITH ORDINALITY AS k(oid, n) JOIN pg_opclass oc ON oc.oid = k.oid),
-                                        'status', CASE WHEN NOT i.indisvalid AND NOT EXISTS (SELECT 1 FROM pg_stat_progress_create_index p WHERE p.index_relid = i.indexrelid OR (p.index_relid IS NULL AND p.datname = current_database())) THEN 'INVALID' END)
+                                        'status', CASE WHEN i.indisvalid THEN NULL WHEN EXISTS (SELECT 1 FROM pg_stat_progress_create_index p WHERE p.index_relid = i.indexrelid OR (p.index_relid IS NULL AND p.datname = current_database())) THEN 'BUILDING' ELSE 'INVALID' END)
               FROM pg_class o
               LEFT JOIN pg_index i ON i.indexrelid = o.oid
               LEFT JOIN pg_class t ON t.oid = i.indrelid
@@ -1305,10 +1299,7 @@ catalog:
           ORDER BY part, label, properties
         FULLTEXT_INDEX: |-
           SELECT listed FROM (
-              SELECT 0 AS part, label, properties, jsonb_build_object('kind', kind, 'label', label, 'properties', properties::jsonb, 'name', name, 'details', details, 'status', CASE WHEN EXISTS (
-                  SELECT 1 FROM pg_index x
-                  WHERE x.indexrelid = to_regclass(c.object_name) AND NOT x.indisvalid AND NOT EXISTS (SELECT 1 FROM pg_stat_progress_create_index p WHERE p.index_relid = x.indexrelid OR (p.index_relid IS NULL AND p.datname = current_database()))
-              ) THEN 'INVALID' END) AS listed
+              SELECT 0 AS part, label, properties, jsonb_build_object('kind', kind, 'label', label, 'properties', properties::jsonb, 'name', name, 'details', details, 'status', (SELECT CASE WHEN x.indisvalid THEN NULL WHEN EXISTS (SELECT 1 FROM pg_stat_progress_create_index p WHERE p.index_relid = x.indexrelid OR (p.index_relid IS NULL AND p.datname = current_database())) THEN 'BUILDING' ELSE 'INVALID' END FROM pg_index x WHERE x.indexrelid = to_regclass(c.object_name))) AS listed
               FROM drivine_schema c
               WHERE kind IN ('FULLTEXT_INDEX')
                 AND (object_name IS NULL OR to_regclass(object_name) IS NOT NULL)
@@ -1318,7 +1309,7 @@ catalog:
                                         'columns', (SELECT jsonb_agg(pg_get_indexdef(i.indexrelid, k, true) ORDER BY k) FROM generate_series(1, i.indnatts) k),
                                         'where', pg_get_expr(i.indpred, i.indrelid, true),
                                         'opclasses', (SELECT jsonb_agg(oc.opcname ORDER BY k.n) FROM unnest(i.indclass::oid[]) WITH ORDINALITY AS k(oid, n) JOIN pg_opclass oc ON oc.oid = k.oid),
-                                        'status', CASE WHEN NOT i.indisvalid AND NOT EXISTS (SELECT 1 FROM pg_stat_progress_create_index p WHERE p.index_relid = i.indexrelid OR (p.index_relid IS NULL AND p.datname = current_database())) THEN 'INVALID' END)
+                                        'status', CASE WHEN i.indisvalid THEN NULL WHEN EXISTS (SELECT 1 FROM pg_stat_progress_create_index p WHERE p.index_relid = i.indexrelid OR (p.index_relid IS NULL AND p.datname = current_database())) THEN 'BUILDING' ELSE 'INVALID' END)
               FROM pg_class o
               LEFT JOIN pg_index i ON i.indexrelid = o.oid
               LEFT JOIN pg_class t ON t.oid = i.indrelid
@@ -1327,29 +1318,20 @@ catalog:
           ) l
           ORDER BY part, label, properties
         UNIQUENESS_CONSTRAINT: |-
-          SELECT jsonb_build_object('kind', kind, 'label', label, 'properties', properties::jsonb, 'name', name, 'details', details, 'status', CASE WHEN EXISTS (
-                  SELECT 1 FROM pg_index x
-                  WHERE x.indexrelid = to_regclass(c.object_name) AND NOT x.indisvalid AND NOT EXISTS (SELECT 1 FROM pg_stat_progress_create_index p WHERE p.index_relid = x.indexrelid OR (p.index_relid IS NULL AND p.datname = current_database()))
-              ) THEN 'INVALID' END)
+          SELECT jsonb_build_object('kind', kind, 'label', label, 'properties', properties::jsonb, 'name', name, 'details', details, 'status', (SELECT CASE WHEN x.indisvalid THEN NULL WHEN EXISTS (SELECT 1 FROM pg_stat_progress_create_index p WHERE p.index_relid = x.indexrelid OR (p.index_relid IS NULL AND p.datname = current_database())) THEN 'BUILDING' ELSE 'INVALID' END FROM pg_index x WHERE x.indexrelid = to_regclass(c.object_name)))
           FROM drivine_schema c
           WHERE kind IN ('UNIQUENESS_CONSTRAINT')
             AND (object_name IS NULL OR to_regclass(object_name) IS NOT NULL)
           ORDER BY label, properties
         TEXT_INDEX: |-
-          SELECT jsonb_build_object('kind', kind, 'label', label, 'properties', properties::jsonb, 'name', name, 'details', details, 'status', CASE WHEN EXISTS (
-                  SELECT 1 FROM pg_index x
-                  WHERE x.indexrelid = to_regclass(c.object_name) AND NOT x.indisvalid AND NOT EXISTS (SELECT 1 FROM pg_stat_progress_create_index p WHERE p.index_relid = x.indexrelid OR (p.index_relid IS NULL AND p.datname = current_database()))
-              ) THEN 'INVALID' END)
+          SELECT jsonb_build_object('kind', kind, 'label', label, 'properties', properties::jsonb, 'name', name, 'details', details, 'status', (SELECT CASE WHEN x.indisvalid THEN NULL WHEN EXISTS (SELECT 1 FROM pg_stat_progress_create_index p WHERE p.index_relid = x.indexrelid OR (p.index_relid IS NULL AND p.datname = current_database())) THEN 'BUILDING' ELSE 'INVALID' END FROM pg_index x WHERE x.indexrelid = to_regclass(c.object_name)))
           FROM drivine_schema c
           WHERE kind IN ('TEXT_INDEX')
             AND (object_name IS NULL OR to_regclass(object_name) IS NOT NULL)
           ORDER BY label, properties
       constraints: |-
         SELECT listed FROM (
-            SELECT 0 AS part, label, properties, jsonb_build_object('kind', kind, 'label', label, 'properties', properties::jsonb, 'name', name, 'details', details, 'status', CASE WHEN EXISTS (
-                SELECT 1 FROM pg_index x
-                WHERE x.indexrelid = to_regclass(c.object_name) AND NOT x.indisvalid AND NOT EXISTS (SELECT 1 FROM pg_stat_progress_create_index p WHERE p.index_relid = x.indexrelid OR (p.index_relid IS NULL AND p.datname = current_database()))
-            ) THEN 'INVALID' END) AS listed
+            SELECT 0 AS part, label, properties, jsonb_build_object('kind', kind, 'label', label, 'properties', properties::jsonb, 'name', name, 'details', details, 'status', (SELECT CASE WHEN x.indisvalid THEN NULL WHEN EXISTS (SELECT 1 FROM pg_stat_progress_create_index p WHERE p.index_relid = x.indexrelid OR (p.index_relid IS NULL AND p.datname = current_database())) THEN 'BUILDING' ELSE 'INVALID' END FROM pg_index x WHERE x.indexrelid = to_regclass(c.object_name))) AS listed
             FROM drivine_schema c
             WHERE kind IN ('UNIQUENESS_CONSTRAINT')
               AND (object_name IS NULL OR to_regclass(object_name) IS NOT NULL)
@@ -1359,7 +1341,7 @@ catalog:
                                       'columns', (SELECT jsonb_agg(pg_get_indexdef(i.indexrelid, k, true) ORDER BY k) FROM generate_series(1, i.indnatts) k),
                                       'where', pg_get_expr(i.indpred, i.indrelid, true),
                                       'opclasses', (SELECT jsonb_agg(oc.opcname ORDER BY k.n) FROM unnest(i.indclass::oid[]) WITH ORDINALITY AS k(oid, n) JOIN pg_opclass oc ON oc.oid = k.oid),
-                                      'status', CASE WHEN NOT i.indisvalid AND NOT EXISTS (SELECT 1 FROM pg_stat_progress_create_index p WHERE p.index_relid = i.indexrelid OR (p.index_relid IS NULL AND p.datname = current_database())) THEN 'INVALID' END)
+                                      'status', CASE WHEN i.indisvalid THEN NULL WHEN EXISTS (SELECT 1 FROM pg_stat_progress_create_index p WHERE p.index_relid = i.indexrelid OR (p.index_relid IS NULL AND p.datname = current_database())) THEN 'BUILDING' ELSE 'INVALID' END)
             FROM pg_class o
             LEFT JOIN pg_index i ON i.indexrelid = o.oid
             LEFT JOIN pg_class t ON t.oid = i.indrelid
