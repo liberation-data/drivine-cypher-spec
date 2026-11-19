@@ -24,7 +24,9 @@ import org.drivine.cypher.store.SqliteFunctions
  * int drivine_host_version(void);              // the host functions' version the compiler's SQL needs: see HostCheck
  * ```
  *
- * Each call is independent of every other, so a host may call it from several threads at once. A NULL request is read as
+ * Each call is independent of every other, so a host may call it from several threads at once: the parse caches every
+ * call shares are read one statement at a time (ParserCaches.parsing, #385), and the rest of a compile runs alongside
+ * the others. Before #385 two calls at once could corrupt those caches. A NULL request is read as
  * an empty one, which is answered with an error; the answer is NULL only where malloc fails, and is the host's to free
  * with drivine_free, as it is malloc's.
  */

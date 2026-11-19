@@ -40,6 +40,16 @@ internal object ParserCaches {
         fun states(): Int = lexer.sumOf { it.states.size } + parser.sumOf { it.states.size }
     }
 
+    /**
+     * Held while a statement is read through the caches (see [CypherReader]), on Kotlin/Native alone (#385). ANTLR adds
+     * to a prediction cache as it learns the grammar, a DFA's states and its prediction contexts, which every parse of
+     * the set shares. It guards those additions with `synchronized`, which locks on the JVM and does nothing on
+     * Kotlin/Native: two threads growing one map at once could corrupt it, failing that compile and every later one in
+     * the process ("Have object hashCodes changed?"). So on Kotlin/Native one statement is read at a time; a compile's
+     * other steps, and every host function, run beside it.
+     */
+    internal val parsing = ParseLock()
+
     private val current = AtomicReference<Set?>(null)
     private val renewed = AtomicInt(0)
 
@@ -85,3 +95,11 @@ internal object ParserCaches {
  * caches anew again and again, its median compile went from 135 to 167 µs, and its p99 from about 3 to 4 ms.
  */
 internal const val DEFAULT_CAP: Int = 5_000
+
+/**
+ * A lock held while a statement is read through [ParserCaches] (see [ParserCaches.parsing]): a mutex on Kotlin/Native,
+ * where ANTLR's own `synchronized` locks nothing; none on the JVM, where it does, nor on wasm, which runs one thread.
+ */
+internal expect class ParseLock() {
+    fun <T> locked(block: () -> T): T
+}
