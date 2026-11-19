@@ -882,6 +882,26 @@ class OnlineIndexBuildTest {
     }
 
     @Test
+    fun anOwnersIndexAnotherSessionIsStillBuildingPastTheWaitIsLeftToBeBuiltAsAnUnbuiltIndexIs() {
+        // An owner's enforce takes it as one of its own still being built: left, and waited for again on the next enforce;
+        // under FAIL_FAST the owner fails, its marker unwritten, and under WARN it is logged and the marker written.
+        val listing = postgresDdl.listIndexesQuery(SchemaItemKind.RANGE_INDEX)
+        for (building in listOf(nameRecord(PostgresDdl.BUILDING), listOf(nameIndexObject(PostgresDdl.BUILDING)))) {
+            val (failing, failed) = drive(postgres, name, policy = SchemaPolicy(), listed = { if (it == listing) building else emptyList() })
+            assertEquals(emptyList(), indexBuilds(failing), "$building")
+            val owner = failed.owners.single()
+            assertIs<EnsureResult.AlreadyMatching>(owner.results.single().result, "$building")
+            assertTrue(owner.unbuilt.single().stillBuilding, "$building")
+            assertTrue("STILL BUILDING: Postgres RANGE_INDEX on Person[name] is still being built by another session" in owner.failure.orEmpty(), "${owner.failure}")
+            assertNull(owner.marker, "$building")
+            val (warning, warned) = drive(postgres, name, policy = SchemaPolicy(SchemaMode.WARN), listed = { if (it == listing) building else emptyList() })
+            assertEquals(emptyList(), indexBuilds(warning), "$building")
+            assertNull(warned.owners.single().failure, "$building")
+            assertTrue(warned.owners.single().marker != null, "$building")
+        }
+    }
+
+    @Test
     fun anIndexOfAnotherShapeBeingBuiltUnderTheNameIsDriftNotWaitedFor() {
         // Not Drivine's index, built or not: drift at once, as one left invalid is, never waited for to the timeout and
         // then taken as still being built.

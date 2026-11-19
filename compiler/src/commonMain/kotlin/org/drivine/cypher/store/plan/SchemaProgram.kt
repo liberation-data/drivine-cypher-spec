@@ -1314,7 +1314,7 @@ internal class SchemaProgram(
      * where it doesn't.
      */
     private fun awaitAsyncCreation(spec: ConstraintSpec, violationSampleSize: Int): EnsureResult {
-        val info = awaitBuild(spec, untilListed = true)!!
+        val info = awaitBuild(spec)
         if (info.buildFailed) {
             dropFailedBuild(spec, info)
             val failed = "Constraint on ${spec.label}${spec.properties} failed to build on $engine, but no key it covers repeats in the data"
@@ -1351,16 +1351,15 @@ internal class SchemaProgram(
     }
 
     /**
-     * Polls the constraint [spec] is until its build has ended, and gives it as last listed. While it isn't listed,
-     * polling goes on where [untilListed] (one just made), and otherwise ends with null (one dropped meanwhile). drivine4j
-     * sleeps, then looks at its clock: the poll after a sleep that would end past the deadline isn't run.
+     * Polls the constraint [spec] is, just made, until it is listed and its build has ended, and gives it as last listed.
+     * drivine4j sleeps, then looks at its clock: the poll after a sleep that would end past the deadline isn't run. One
+     * found being built before a create is waited for by [awaitBuildUnderWay].
      */
-    private fun awaitBuild(spec: ConstraintSpec, untilListed: Boolean): SchemaItemInfo? {
+    private fun awaitBuild(spec: ConstraintSpec): SchemaItemInfo {
         val deadline = io.clock() + ASYNC_TIMEOUT_MILLIS
         var poll = 0L
         while (io.clock() + poll < deadline) {
             val info = findConstraint(spec, poll)
-            if (info == null && !untilListed) return null
             if (info != null && !info.buildInProgress) return info
             poll = POLL_MILLIS
         }
