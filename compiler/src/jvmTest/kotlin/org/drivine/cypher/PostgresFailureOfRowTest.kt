@@ -15,8 +15,8 @@ class PostgresFailureOfRowTest {
 
     private fun sql(cypher: String) = PostgresCypherCompiler("g").compile(cypher).sql
 
-    /** A failure of constants alone: a cast of a `concat` of texts written, with nothing read. */
-    private val constant = Regex("""CAST\(concat\('[^']*', '[^']*'\) AS integer\)""")
+    /** A failure of constants alone: a cast of a `concat` of texts written, or of the kind of a value written, with nothing read. */
+    private val constant = Regex("""CAST\(concat\('[^']*', ('[^']*'|jsonb_typeof\(CAST\('[^']*' AS jsonb\)\))\) AS integer\)""")
 
     @Test
     fun `a failure in a relationship's properties matched reads the value it fails for`() {
@@ -27,6 +27,8 @@ class PostgresFailureOfRowTest {
             "MATCH (n:A) MERGE (n)-[r:R {d: date(n.s)}]->(n) RETURN r.d",
             "MATCH (n:A) RETURN toString([n.l])",
             "MATCH (n:A) RETURN sum(n.x)",
+            "MATCH (n:A) MERGE (n)-[r:R {w: n.l[0]}]->(n) RETURN r.w",
+            "MATCH (n:A) OPTIONAL MATCH (n)-[r:R {w: round(n.x, -1)}]->(n) RETURN r.w",
         )) {
             val sql = sql(cypher)
             assertTrue(sql.contains("left(CAST("), "$cypher\n$sql")

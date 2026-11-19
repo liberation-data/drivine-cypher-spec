@@ -1257,9 +1257,10 @@ abstract class SqlCypherCompiler(
     protected open fun textFailure(message: String, text: String): String = failure(message, text)
 
     /**
-     * [textFailure] of a [text] written in the statement, in a `CASE` whose test reads [of], the value it fails for: a store
-     * whose planner may work out a failure of constants alone before any row, as Postgres's does of one in a comparison it
-     * estimates, makes it read [of] too, so it is worked out only for a row that takes it (drivine-cypher-spec#399).
+     * [textFailure] of a [text] that may be of constants alone (written in the statement, or the kind of a key written), in a
+     * `CASE` whose test reads [of], the value it fails for: a store whose planner may work out a failure of constants alone
+     * before any row, as Postgres's does of one in a comparison it estimates, makes it read [of] too, so it is worked out
+     * only for a row that takes it (drivine-cypher-spec#399).
      */
     protected open fun failureOf(message: String, text: String, of: String): String = textFailure(message, text)
 
@@ -4908,7 +4909,7 @@ abstract class SqlCypherCompiler(
                             // Of a subject whose kind is known, the key of the other kind fails with no test of its kind, but
                             // only where it is there: a node an OPTIONAL MATCH didn't find, or a list split from null, read by
                             // any key is null, as in Neo4j.
-                            fun unlessNull(message: String) = "CASE WHEN NOT ${isJsonNull(map)} THEN ${scalar(textFailure(message, typeOf(key)))} END"
+                            fun unlessNull(message: String) = "CASE WHEN NOT ${isJsonNull(map)} THEN ${scalar(failureOf(message, typeOf(key), map))} END"
                             val byNumber = when {
                                 !tested || subjectKind == Value.Known.LIST || untested -> element(map, key)
                                 subjectKind == Value.Known.MAP -> unlessNull(NUMBER_KEY_OF_MAP)
@@ -5211,12 +5212,12 @@ abstract class SqlCypherCompiler(
          * `$[0]` of an object is the object.
          */
         private fun listItem(list: String, index: String): String = shared(list) { (l) ->
-            "CASE WHEN ${typeOf(l)} = 'object' THEN ${scalar(textFailure(NUMBER_KEY_OF_MAP, typeOf(index)))} ELSE ${element(l, index)} END"
+            "CASE WHEN ${typeOf(l)} = 'object' THEN ${scalar(failureOf(NUMBER_KEY_OF_MAP, typeOf(index), l))} ELSE ${element(l, index)} END"
         }
 
         /** The entry of the JSON [map] at the text [key], failing the statement where [map] is a list, as Neo4j fails a text index of one (drivine4j#698). */
         private fun mapEntry(map: String, key: String): String = shared(map) { (m) ->
-            "CASE WHEN ${typeOf(m)} = 'array' THEN ${scalar(textFailure(TEXT_INDEX_OF_LIST, typeOf(key)))} ELSE ${keyed(m, key)} END"
+            "CASE WHEN ${typeOf(m)} = 'array' THEN ${scalar(failureOf(TEXT_INDEX_OF_LIST, typeOf(key), m))} ELSE ${keyed(m, key)} END"
         }
 
         /**
@@ -7974,7 +7975,7 @@ abstract class SqlCypherCompiler(
                 // Not `cut in 0..MAX_COUNT`, which NaN fails: Neo4j casts NaN to 0 places, as Java casts it to a long.
                 if (cut < 0 || cut > MAX_COUNT) {
                     val named = if (cut.isInfinite()) signed.toString() else CommonTime.exactWhole(cut)
-                    return outOfPlaces(comparable(json(value)), literal(named))
+                    return comparable(json(value)).let { x -> outOfPlaces(x, failureOf(PRECISION_OUT_OF_RANGE, literal(named), x)) }
                 }
                 val number = number(comparable(json(value)))
                 // Not `signed < 1`, which NaN fails.
@@ -7984,16 +7985,16 @@ abstract class SqlCypherCompiler(
             return shared(comparable(json(value)), "${temporalSql.trunc}(${number(comparable(json(precision)))})") { (x, t) ->
                 val toWhole = whole?.let { "WHEN $t = 0 THEN ${it(number(x))} " } ?: ""
                 // Out of range, places are not cast, which Postgres's integer would fail on beside a null value.
-                "CASE ${toWhole}WHEN $t NOT BETWEEN 0 AND $MAX_COUNT THEN ${outOfPlaces(x, t)} ELSE ${places(number(x), "CAST($t AS INTEGER)")} END"
+                "CASE ${toWhole}WHEN $t NOT BETWEEN 0 AND $MAX_COUNT THEN ${outOfPlaces(x, failure(PRECISION_OUT_OF_RANGE, t))} ELSE ${places(number(x), "CAST($t AS INTEGER)")} END"
             }
         }
 
         /**
-         * `round()` of the JSON value [x] to [precision] places out of range: it fails where [x] is a number, and is null
-         * where it is not, as a null rounds to null by any precision in Neo4j.
+         * `round()` of the JSON value [x] to places out of range, which [failing] fails by name: it fails where [x] is a number,
+         * and is null where it is not, as a null rounds to null by any precision in Neo4j. Places written in the statement
+         * fail by [failureOf], reading [x], so that Postgres doesn't work the failure out before any row (drivine-cypher-spec#399).
          */
-        private fun outOfPlaces(x: String, precision: String) =
-            "CASE WHEN ${typeOf(x)} = 'number' THEN ${failure(PRECISION_OUT_OF_RANGE, precision)} END"
+        private fun outOfPlaces(x: String, failing: String) = "CASE WHEN ${typeOf(x)} = 'number' THEN $failing END"
 
         /** The values [value] of a group, gathered as `collect` gathers them, as JSON. */
         private fun collected(value: Value) = collect(collectable(value), rowOrder)
