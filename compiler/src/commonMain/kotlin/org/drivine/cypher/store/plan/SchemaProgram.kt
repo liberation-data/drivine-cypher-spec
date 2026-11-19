@@ -957,6 +957,16 @@ internal class SchemaProgram(
         val existing = if (invalid) awaitBuildUnderWay(spec)?.takeUnless { store.isIncomplete(it) } else found
         // Another item under the name Drivine gives this one's index: never taken as made, and never made over.
         if (form is ItemForm.Mismatch) return mismatched(spec, existing, form)
+        if (existing != null && store.isIncomplete(existing) && (form is ItemForm.Stale || form is ItemForm.Newer)) {
+            // Of another version's form, and left invalid: nothing holds the data unique. Never made whole here, which would
+            // rewrite that version's item, nor taken as made: drift, which a recreate makes again in this version's form.
+            log(
+                LogLevel.WARN, CONSTRAINT_MANAGER,
+                "$engine ${spec.kind} on ${spec.label}${spec.properties}: its index was left invalid in another version's form, so nothing holds the data unique. " +
+                    "Call recreate() to make it again in this version's form (destructive).",
+            )
+            return EnsureResult.Drift(existing, spec)
+        }
         if (existing != null && existing.buildFailed) {
             // FalkorDB keeps listing a constraint whose build failed, though it enforces nothing: dropped, and built again,
             // which gives a violation where the data still repeats a key.

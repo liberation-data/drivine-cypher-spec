@@ -475,19 +475,35 @@ class OnlineIndexBuildTest {
     }
 
     @Test
-    fun aUniquenessConstraintLeftInvalidInAnotherFormIsKeptAsItIs() {
+    fun aUniquenessConstraintLeftInvalidInAnotherFormIsDriftAndKeptAsItIs() {
         @Suppress("UNCHECKED_CAST")
         val record = ListingRows.rows("postgres", listOf(SchemaItemInfo(SchemaItemKind.UNIQUENESS_CONSTRAINT, "Person", listOf("email"), "Person_email_unique", status = PostgresDdl.INVALID)), constraints = true)
             .single() as Map<String, Any?>
-        // An older version's, and a newer one's: made whole only in this version's form, which is never reported made.
+        // An older version's, and a newer one's: made whole only in this version's form, so never touched here; and as nothing
+        // holds the data unique, drift, never AlreadyMatching. Recorded, or still being built when listed and then left so.
         for (form in listOf(1L, 3L)) {
-            val (ran, report) = drive(
-                postgres, email,
-                listed = { if (it == postgresDdl.listConstraintsQuery()) listOf(record + ("details" to mapOf("form" to form))) else emptyList() },
-            )
-            assertEquals(emptyList(), indexBuilds(ran), "form $form")
-            assertIs<EnsureResult.AlreadyMatching>(report.item!!.result, "form $form")
-            assertTrue(report.log.none { "Completed" in it.message }, report.log.toString())
+            val invalid = record + ("details" to mapOf("form" to form))
+            for (building in listOf(false, true)) {
+                var reads = 0
+                val (ran, report) = drive(
+                    postgres, email,
+                    listed = {
+                        if (it != postgresDdl.listConstraintsQuery()) emptyList()
+                        else listOf(if (building && ++reads <= 2) invalid + ("status" to PostgresDdl.BUILDING) else invalid)
+                    },
+                )
+                assertEquals(emptyList(), indexBuilds(ran), "form $form")
+                assertIs<EnsureResult.Drift>(report.item!!.result, "form $form")
+                assertTrue(report.log.none { "Completed" in it.message }, report.log.toString())
+                assertTrue(
+                    LogLine(
+                        LogLevel.WARN, "ConstraintManager",
+                        "Postgres UNIQUENESS_CONSTRAINT on Person[email]: its index was left invalid in another version's form, so nothing holds the data unique. " +
+                            "Call recreate() to make it again in this version's form (destructive).",
+                    ) in report.log,
+                    report.log.toString(),
+                )
+            }
         }
     }
 
