@@ -1773,9 +1773,9 @@ cases:
         parameters: {m: {a: [1, "a"]}}
         error: true
       - note: "A temporal value is a property, alone and in a list of its kind, read out of a map worked out as it runs."
-        cypher: "UNWIND $rows AS row WITH {d: date(row.s)} AS m MATCH (n:CyWrite {id: 1}) SET n.d = m.d, n.l = [m.d, date('2026-01-06')] RETURN [n.d, n.l]"
+        cypher: "UNWIND $rows AS row WITH {d: date(row.s)} AS m MATCH (n:CyWrite {id: 1}) SET n.d = m.d, n.l = [m.d, date('2026-01-06')] RETURN [toString(n.d), [x IN n.l | toString(x)]]"
         parameters: {rows: [{s: "2026-01-05"}]}
-        rows: [[{$date: "2026-01-05"}, [{$date: "2026-01-05"}, {$date: "2026-01-06"}]]]
+        rows: [["2026-01-05", ["2026-01-05", "2026-01-06"]]]
       - note: "A row that is a property is written, and one a WHERE leaves out fails nothing."
         cypher: "UNWIND $rows AS row WITH row WHERE row.id = 1 MATCH (n:CyWrite {id: row.id}) SET n += row.props RETURN [n.p, n.f]"
         parameters: {rows: [{id: 1, props: {p: [1, 2], f: 1.5}}, {id: 2, props: {p: {a: 1}}}]}
