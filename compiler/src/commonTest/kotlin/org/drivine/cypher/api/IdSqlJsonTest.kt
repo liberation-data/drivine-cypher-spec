@@ -50,7 +50,7 @@ class IdSqlJsonTest {
 
     @Test
     fun aPlanKeyMarksATextIdApartFromAnIdOfAnotherKindThatReadsAlike() {
-        for ((name, store) in stores) for (key in listOf("id", "\$\$id", Stamps.PROPERTY)) {
+        for ((name, store) in stores) for (key in listOf("id", "\$\$id")) {
             val k = CypherJson.writeValueAsString(CypherJson.valueToTree(key))
             assertEquals(IdSql.planKey(store, "n", key), sql(name, "\"helper\": \"planKey\", \"alias\": \"n\", \"key\": $k"), "on $target, $name, $key")
         }
@@ -68,7 +68,15 @@ class IdSqlJsonTest {
             assertEquals("t:true", keyOf(name, "\"true\""), "on $target, $name")
             assertEquals("true", keyOf(name, "true"), "on $target, $name")
             assertEquals(IdSql.planKeyOf(store, "\"x\""), keyOf(name, "\"x\""), "on $target, $name")
+            // A text that begins with the mark is marked too, a duration's tag (no `s`) is its `v`, and a truth value its word.
+            assertEquals("t:t:1", keyOf(name, "\"t:1\""), "on $target, $name")
+            assertEquals("P1D", keyOf(name, "{\"\$t\":\"duration\",\"v\":\"P1D\"}"), "on $target, $name")
+            assertEquals("false", keyOf(name, "false"), "on $target, $name")
         }
+        // A number's scale and sign are kept as each store reads them back: numeric's on Postgres, Oracle's plain digits.
+        assertEquals(listOf("-1.50", "-12", "0"), listOf("-1.50", "-12", "0").map { keyOf("postgres", it) })
+        assertEquals(listOf("-1.5", "-12", "0", "100"), listOf("-1.50", "-12", "0.000", "1E+2").map { keyOf("oracle", it) })
+        assertEquals("-1.50", keyOf("sqlite", "-1.50"))
         // On Postgres a number is the text `jsonb` gives back for it, `numeric`'s; elsewhere its JSON as written.
         assertEquals("0.00000010", keyOf("postgres", "1.0E-7"))
         assertEquals("1.0E-7", keyOf("sqlite", "1.0E-7"))
@@ -104,7 +112,7 @@ class IdSqlJsonTest {
             val k = CypherJson.writeValueAsString(CypherJson.valueToTree(Stamps.PROPERTY))
             assertEquals("n.stamp", IdSql.keyText(store, "n", Stamps.PROPERTY), "on $target, $store")
             assertEquals("n.stamp", IdSql.property(store, "n", Stamps.PROPERTY), "on $target, $store")
-            for (helper in listOf("hasId", "hasIdIn")) {
+            for (helper in listOf("hasId", "hasIdIn", "planKey")) {
                 val error = answer("{\"idSql\": {\"store\": \"$name\", \"helper\": \"$helper\", \"alias\": \"n\", \"key\": $k, \"json\": \":id\", \"parameter\": \":ids\", \"nodes\": \"g_node\"}}")["error"]?.textValue()
                 assertTrue(error != null && error.startsWith("An id is a property of the node"), "on $target, $store, $helper: $error")
             }

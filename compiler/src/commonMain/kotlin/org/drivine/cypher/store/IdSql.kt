@@ -12,8 +12,8 @@ import org.drivine.cypher.json.CypherJson
  * date id twice as two nodes; TypeScript and Python ask for them through the JSON entry (`idSql`).
  *
  * Each takes [key] as the node holds it, [ValueLayout.escape]d where it begins with `$`. A [Stamps.PROPERTY] key is the stamp's
- * column, not a property, which [keyText], [property] and [hasProperty] read; [hasId] and [hasIdIn] refuse it, as no index
- * of an id is made over the stamp.
+ * column, not a property, which [keyText], [property] and [hasProperty] read; [hasId], [hasIdIn] and [planKey] refuse it,
+ * as no index of an id is made over the stamp.
  *
  * The SQL of a bound value ([hasId]'s `json`, [hasIdIn]'s `parameter`) is written in as given, in the host's own placeholder.
  * On Oracle and SQLite [hasId] writes `json` more than once, so a host binds it by name (`:id`, not `?`).
@@ -92,12 +92,16 @@ object IdSql {
      * `2026-01-05` and the text `'1'` from the number `1`; any other id as [keyText] reads it, a temporal value's tag as its
      * text `v` and a number or a truth value as the store reads it as text. No two ids of other kinds read alike: a temporal
      * kind's text has its own shape, and a number's is no date's or truth value's. The value side is [planKeyOf]'s.
-     * [keyText] is left as it is: the select shorthand and the full-text index expression read it.
+     * [keyText] is left as it is: the select shorthand and the full-text index expression read it. The stamp is refused, as
+     * by [hasId]: it is no id, and [planKeyOf] would key its text marked.
      */
-    fun planKey(store: Store, alias: String, key: String): String = if (key == Stamps.PROPERTY) keyText(store, alias, key) else when (store) {
-        Store.POSTGRES -> "CASE WHEN jsonb_typeof(${PostgresSql.value(alias, key)}) = 'string' THEN '$TEXT_MARK' || ${PostgresSql.property(alias, key)} ELSE ${keyText(store, alias, key)} END"
-        Store.SQLITE -> "CASE WHEN json_type($alias.props, ${SqliteSql.path(key)}) = 'text' THEN '$TEXT_MARK' || ${SqliteSql.property(alias, key)} ELSE ${keyText(store, alias, key)} END"
-        Store.ORACLE -> "CASE WHEN JSON_VALUE($alias.props, ${OracleSql.path(key, ".type()")}) = 'string' THEN '$TEXT_MARK' || JSON_VALUE($alias.props, ${OracleSql.path(key)}) ELSE ${keyText(store, alias, key)} END"
+    fun planKey(store: Store, alias: String, key: String): String {
+        requireId(key)
+        return when (store) {
+            Store.POSTGRES -> "CASE WHEN jsonb_typeof(${PostgresSql.value(alias, key)}) = 'string' THEN '$TEXT_MARK' || ${PostgresSql.property(alias, key)} ELSE ${keyText(store, alias, key)} END"
+            Store.SQLITE -> "CASE WHEN json_type($alias.props, ${SqliteSql.path(key)}) = 'text' THEN '$TEXT_MARK' || ${SqliteSql.property(alias, key)} ELSE ${keyText(store, alias, key)} END"
+            Store.ORACLE -> "CASE WHEN JSON_VALUE($alias.props, ${OracleSql.path(key, ".type()")}) = 'string' THEN '$TEXT_MARK' || JSON_VALUE($alias.props, ${OracleSql.path(key)}) ELSE ${keyText(store, alias, key)} END"
+        }
     }
 
     /**
