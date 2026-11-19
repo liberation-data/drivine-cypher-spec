@@ -49,6 +49,41 @@ class IdSqlJsonTest {
     }
 
     @Test
+    fun aPlanKeyMarksATextIdApartFromAnIdOfAnotherKindThatReadsAlike() {
+        for ((name, store) in stores) for (key in listOf("id", "\$\$id", Stamps.PROPERTY)) {
+            val k = CypherJson.writeValueAsString(CypherJson.valueToTree(key))
+            assertEquals(IdSql.planKey(store, "n", key), sql(name, "\"helper\": \"planKey\", \"alias\": \"n\", \"key\": $k"), "on $target, $name, $key")
+        }
+        fun keyOf(name: String, json: String): String? {
+            val j = CypherJson.writeValueAsString(CypherJson.valueToTree(json))
+            return answer("{\"idSql\": {\"store\": \"$name\", \"helper\": \"planKeyOf\", \"json\": $j}}")["key"]?.textValue()
+        }
+        val date = "{\"\$t\":\"date\",\"v\":\"2026-01-05\",\"s\":\"2026-01-05\"}"
+        for ((name, store) in stores) {
+            // The text and the date of one text, and the text and the number of one text, key apart (drivine-cypher-spec#391).
+            assertEquals("t:2026-01-05", keyOf(name, "\"2026-01-05\""), "on $target, $name")
+            assertEquals("2026-01-05", keyOf(name, date), "on $target, $name")
+            assertEquals("t:1", keyOf(name, "\"1\""), "on $target, $name")
+            assertEquals("1", keyOf(name, "1"), "on $target, $name")
+            assertEquals("t:true", keyOf(name, "\"true\""), "on $target, $name")
+            assertEquals("true", keyOf(name, "true"), "on $target, $name")
+            assertEquals(IdSql.planKeyOf(store, "\"x\""), keyOf(name, "\"x\""), "on $target, $name")
+        }
+        // On Postgres a number is the text `jsonb` gives back for it, `numeric`'s; elsewhere its JSON as written.
+        assertEquals("0.00000010", keyOf("postgres", "1.0E-7"))
+        assertEquals("1.0E-7", keyOf("sqlite", "1.0E-7"))
+        assertEquals(
+            listOf("0.00000010", "-0.00000000015", "0.00001230", "2.0", "12", "0.1", "0.0", "100", "\"1.0E-7\"", "[1]"),
+            listOf("1.0E-7", "-1.5E-10", "1.230e-5", "2.0", "12", "0.1", "-0.0", "1.0E+2", "\"1.0E-7\"", "[1]").map(IdSql::numericText),
+        )
+        // The stored side tells a text by its JSON type on each store, and reads any other id as keyText does.
+        for ((_, store) in stores) {
+            val planKey = IdSql.planKey(store, "n", "id")
+            assertTrue("'t:' ||" in planKey && IdSql.keyText(store, "n", "id") in planKey, "on $target, $store: $planKey")
+        }
+    }
+
+    @Test
     fun anIdIsComparedOverTheExpressionsItsIndexIsMadeOver() {
         for ((_, store) in stores) {
             val made = IdSql.hasId(store, "n", "id", "JSON(:id)")
