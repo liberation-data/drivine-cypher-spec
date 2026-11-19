@@ -580,7 +580,7 @@ A change to a host vector names the store cases it moves, and a change to a pair
 
 ## Values a graph engine holds as text
 
-A graph engine that has no type for a temporal value is sent it as text, and keeps the text: every temporal value on FalkorDB and Neptune, and on Memgraph a time with an offset, which it has no type for, and a duration of months, as its duration is microseconds alone. There the text is the value: the engine's `=`, its uniqueness constraint and its `ORDER BY` compare it byte for byte. So each library sends one exact text for one value, and a node one library wrote is found, kept unique and ordered alike by another (liberation-data/drivine-cypher-spec#395).
+A graph engine that has no type for a temporal value, or that Drivine sends none as one, is sent it as text, and keeps the text: every temporal value on FalkorDB and Neptune (drivine4j's Neptune connection sends each through the coercer its FalkorDB connection does), and on Memgraph a time with an offset, which it has no type for, and a duration of months, as its duration is microseconds alone. There the text is the value: the engine's `=`, its uniqueness constraint and its `ORDER BY` compare it byte for byte. So each library sends one exact text for one value, and a node one library wrote is found, kept unique and ordered alike by another (liberation-data/drivine-cypher-spec#395).
 
 | Kind | Text | Example |
 |---|---|---|
@@ -612,12 +612,18 @@ texts:
 
 | Key | What it is |
 |---|---|
-| `value` | The value, as a parameter is given (`{$temporal: <kind>, text: …}`, see the compiler's README), its text any ISO 8601 spelling of it. Its text may name a zone after its offset (`+02:00[Europe/Paris]`) and have an offset with seconds, where the module's parameters take neither. |
+| `value` | The value, as a parameter is given (`{$temporal: <kind>, text: …}`, see the compiler's README), its text any ISO 8601 spelling of it, a duration's as Cypher's `duration()` reads it (`P1.5D`, `P0.5M`, `P1Y-12M`). Its text may name a zone after its offset (`+02:00[Europe/Paris]`) and have an offset with seconds, where the module's parameters take neither. |
 | `text` | The text sent, compared exactly. |
-| `engines` | The engines that hold the value as `text`: `falkordb`, `neptune`, `memgraph`. On a graph engine not named, the value is the engine's own temporal value, not text. |
+| `engines` | The engines that hold the value as `text`: `falkordb` and `neptune` always, and `memgraph` for a `TIME`, and for a `DURATION` whose `text` has months or years (a `Y` or an `M` before any `T`): one with none left after carrying (`P1Y-12M`, `P0.5M`) is Memgraph's own. On a graph engine not named, the value is the engine's own temporal value, not text. |
 | `note` | Why the step is there. It is not read. |
 
-Each library's runner turns `value` into its language's value of the kind (a `ZonedDateTime`, an `OffsetTime`, a `Period`; a `datetime`; a `Date`), gives it to the code that sends it to each engine named, its coercer, with no store, and checks it sends `text`; and to the code of an engine not named, and checks it sends no text. A language with no value of a step's kind, range or precision (a `Date`, which has milliseconds and no offset; Python's `datetime`, which has microseconds and years 1 to 9999) skips that step, named in its own runner, as it does a whole number past 2^53.
+Each library's runner turns `value` into a value of the kind its library takes as a parameter (drivine4j's `java.time` values and the Neo4j driver's `IsoDuration`; Drivine for TypeScript's `Temporal` values and a `Date`; drivine-python's `datetime`, `date`, `time` and `timedelta`), gives it to the code that sends it to each engine named that the library has, its coercer, with no store, and checks it sends `text`; and to the code of each engine it has that is not named, and checks it sends no text. A step that no such value holds is skipped, as a whole number past 2^53 is. A runner skips by what a step needs, never by its name: it names the needs it can't meet, and skips every step that has one of them and no other step. Each is read from the step's `$temporal` and its `text`:
+
+- `kind`: the step's kind (TypeScript's `Temporal` has no time with an offset);
+- `digits`: more digits in the fraction of the second than the value keeps (a `Date` keeps three, Python's values six);
+- `offset`: an offset other than `Z` (a `Date`'s is always `Z`); `offsetSeconds`: an offset with seconds (a `Temporal` offset is to the minute);
+- `year`: a year outside the value's range (Python's 1 to 9999, `Temporal`'s and a `Date`'s -271821 to 275760);
+- `months`, `days`, `seconds`: a duration with that part in its `text`, months for a `Y` or an `M` before any `T` (a `timedelta`, which holds seconds alone, has neither months nor days).
 
 `cases` run on FalkorDB and Memgraph as the statement files' cases do, from an empty graph, with two things more: a parameter given as `{$temporal: …}` is sent as the library sends a value of that kind, through its coercer, so a case writes each kind in the pinned text and reads it back as that text; and a step may be `native`, a command of FalkorDB's driver in place of `cypher` (`GRAPH.CONSTRAINT`), where `{graphName}` stands for the graph, as in `store.yaml`. A FalkorDB constraint is made asynchronously: the runner waits until `CALL db.constraints()` lists it `OPERATIONAL` before the next step. Each kind is found by `=` through a value spelt otherwise, kept apart from the same instant at another offset, held unique by a constraint, and ordered as time within one offset; the order across offsets is pinned too, as the limit above.
 

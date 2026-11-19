@@ -353,7 +353,7 @@ cases:
         parameters: {at: {$temporal: "DATE_TIME", text: "2026-01-05T12:11:12Z"}}
         rows: []
       - only: [falkordb]
-        note: "Within one offset, the text sorts as time: …00Z before …00.000000001Z before …00.5Z."
+        note: "Within one offset, the text sorts as time: …12.000000000Z before …12.000000001Z before …12.500000000Z."
         cypher: "MATCH (n:CyGraphText) WHERE n.at ENDS WITH 'Z' RETURN n.id ORDER BY n.at"
         rows: ["a", "c", "b"]
       - only: [falkordb]
