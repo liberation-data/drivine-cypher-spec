@@ -1474,8 +1474,8 @@ class OracleCypherCompiler(
     override fun unstorableItem(json: String, entries: Boolean): String = unstorableItem(json, entries, nullItem = false)
 
     /**
-     * The value read once, as its text, `JSON_SERIALIZE … RETURNING CLOB`, as [nullItem] reads it: no part of it is read as
-     * JSON, as `type()` or a `JSON_TABLE` read of a text past 32 KB, on two rows or more, closes the session (ORA-03113,
+     * The value read once, as its extended JSON's text, `JSON_SERIALIZE … RETURNING CLOB EXTENDED`, as [nullItem] reads it
+     * as text: no part of it is read as JSON, as `type()` or a `JSON_TABLE` read of a text past 32 KB, on two rows or more, closes the session (ORA-03113,
      * drivine4j#531). The text is worked down to its shape: each tag to a letter of its kind (a `$t` is always a tag's, as
      * [ValueLayout] escapes a map's), each text to `t`, each number to `n`, each truth value to `b`, each null to `z`. A map is
      * then a `{` left, a list that holds a map or a list a `[` with one before its `]`, and a list of more than one kind one
@@ -1487,8 +1487,10 @@ class OracleCypherCompiler(
         val words = Temporal.entries.map { ValueLayout.word(it) }
         val letters = words.zip(listOf("P", "Q", "R", "S", "U", "V"))
         val tag = "\\{(\"(${ValueLayout.TEXT}|${ValueLayout.KEY})\":$string,)*\"\\${ValueLayout.KIND}\":\"(${words.joinToString("|")})\"(,\"(${ValueLayout.TEXT}|${ValueLayout.KEY})\":$string)*\\}"
-        // Each tag to its kind's word between @s, then the texts and the rest; the words, kept whole by their @s, to their letters.
-        var shape = "REGEXP_REPLACE(ni.t, '$tag', '@\\4@')"
+        // A float written as extended JSON's, as NaN and the infinities are (`{"$numberDouble":"Nan"}`, where plain JSON writes
+        // the text "Nan"), to a number first; then each tag to its kind's word between @s, the texts and the rest; the words,
+        // kept whole by their @s, to their letters.
+        var shape = "REGEXP_REPLACE(REGEXP_REPLACE(ni.t, '\\{\"\\\$number[A-Za-z]+\":\"[^\"]*\"\\}', '0'), '$tag', '@\\4@')"
         shape = "REGEXP_REPLACE($shape, '$string', 't')"
         shape = "REGEXP_REPLACE(REPLACE(REPLACE(REPLACE($shape, 'true', 'b'), 'false', 'b'), 'null', 'z'), '-?[0-9][0-9.eE+-]*', 'n')"
         letters.forEach { (word, letter) -> shape = "REPLACE($shape, '@$word@', '$letter')" }
@@ -1507,7 +1509,7 @@ class OracleCypherCompiler(
         // only as a tag's: the first case leaves a map to the shape's test, so it opens with `[` or `{`.
         val first = if (entries) cases.first() else "WHEN DBMS_LOB.SUBSTR(ns.t, 1, 1) NOT IN ('[', '{') THEN 0"
         return "(${predicateQuery("SELECT CASE ${(listOf(first) + cases.drop(1)).joinToString(" ")} ELSE 0 END FROM (SELECT ni.t, $shape AS c " +
-            "FROM (SELECT JSON_SERIALIZE($json RETURNING CLOB) AS t FROM DUAL) ni) ns")})"
+            "FROM (SELECT JSON_SERIALIZE($json RETURNING CLOB EXTENDED) AS t FROM DUAL) ni) ns")})"
     }
 
     /**
