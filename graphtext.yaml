@@ -318,3 +318,209 @@ texts:
         value: {$temporal: "DURATION", text: "P1Y2M3DT4H5M6.7S"}
         text: "P1Y2M3DT4H5M6.7S"
         engines: ["falkordb", "neptune", "memgraph"]
+
+cases:
+  - name: "Moments as their text"
+    description: "On FalkorDB a moment is held as its text: read back as that text, found by = through a value in another spelling, kept apart from the same instant at another offset, and ordered as time among values of one offset. Across offsets ORDER BY orders the text, not the instant: a graph engine has no sort key."
+    steps:
+      - only: [falkordb]
+        cypher: "CREATE (:CyGraphText {id: 'a', at: $at})"
+        parameters: {at: {$temporal: "DATE_TIME", text: "2026-01-05T10:11:12Z"}}
+      - only: [falkordb]
+        cypher: "CREATE (:CyGraphText {id: 'b', at: $at})"
+        parameters: {at: {$temporal: "DATE_TIME", text: "2026-01-05T10:11:12.5Z"}}
+      - only: [falkordb]
+        cypher: "CREATE (:CyGraphText {id: 'c', at: $at})"
+        parameters: {at: {$temporal: "DATE_TIME", text: "2026-01-05T10:11:12.000000001Z"}}
+      - only: [falkordb]
+        cypher: "CREATE (:CyGraphText {id: 'd', at: $at})"
+        parameters: {at: {$temporal: "DATE_TIME", text: "2026-01-05T10:11:12-02:00"}}
+      - only: [falkordb]
+        cypher: "MATCH (n:CyGraphText) RETURN n.id, n.at ORDER BY n.id"
+        rows: [["a", "2026-01-05T10:11:12.000000000Z"], ["b", "2026-01-05T10:11:12.500000000Z"], ["c", "2026-01-05T10:11:12.000000001Z"], ["d", "2026-01-05T10:11:12.000000000-02:00"]]
+      - only: [falkordb]
+        note: "The same value, spelt otherwise, is the same text."
+        cypher: "MATCH (n:CyGraphText {at: $at}) RETURN n.id"
+        parameters: {at: {$temporal: "DATE_TIME", text: "2026-01-05T10:11:12.000+00:00"}}
+        rows: ["a"]
+      - only: [falkordb]
+        cypher: "MATCH (n:CyGraphText) WHERE n.at = $at RETURN n.id"
+        parameters: {at: {$temporal: "DATE_TIME", text: "2026-01-05T10:11:12.500Z"}}
+        rows: ["b"]
+      - only: [falkordb]
+        note: "d's instant at Z is another value, as in Cypher."
+        cypher: "MATCH (n:CyGraphText {at: $at}) RETURN n.id"
+        parameters: {at: {$temporal: "DATE_TIME", text: "2026-01-05T12:11:12Z"}}
+        rows: []
+      - only: [falkordb]
+        note: "Within one offset, the text sorts as time: …00Z before …00.000000001Z before …00.5Z."
+        cypher: "MATCH (n:CyGraphText) WHERE n.at ENDS WITH 'Z' RETURN n.id ORDER BY n.at"
+        rows: ["a", "c", "b"]
+      - only: [falkordb]
+        note: "The limit: across offsets the text is ordered, not the instant. d is 12:11:12 UTC, the latest, and sorts first, as - sorts before Z."
+        cypher: "MATCH (n:CyGraphText) RETURN n.id ORDER BY n.at"
+        rows: ["d", "a", "c", "b"]
+
+  - name: "Local moments, local times and dates as their text"
+    description: "On FalkorDB a local moment, a local time and a date are held as their text: read back as it, found by = through a value in another spelling, and ordered as time, a whole minute before a fraction of the second after it."
+    steps:
+      - only: [falkordb]
+        cypher: "CREATE (:CyGraphText {id: 'a', l: $l, t: $t, d: $d})"
+        parameters: {l: {$temporal: "LOCAL_DATE_TIME", text: "2026-01-05T10:11"}, t: {$temporal: "LOCAL_TIME", text: "10:11"}, d: {$temporal: "DATE", text: "2026-01-05"}}
+      - only: [falkordb]
+        cypher: "CREATE (:CyGraphText {id: 'b', l: $l, t: $t, d: $d})"
+        parameters: {l: {$temporal: "LOCAL_DATE_TIME", text: "2026-01-05T10:11:00.5"}, t: {$temporal: "LOCAL_TIME", text: "10:11:00.5"}, d: {$temporal: "DATE", text: "2026-01-06"}}
+      - only: [falkordb]
+        cypher: "CREATE (:CyGraphText {id: 'c', l: $l, t: $t, d: $d})"
+        parameters: {l: {$temporal: "LOCAL_DATE_TIME", text: "2026-01-05T09:59:59.999999999"}, t: {$temporal: "LOCAL_TIME", text: "09:59:59.999999999"}, d: {$temporal: "DATE", text: "2025-12-31"}}
+      - only: [falkordb]
+        cypher: "MATCH (n:CyGraphText {id: 'a'}) RETURN n.l, n.t, n.d"
+        rows: [["2026-01-05T10:11:00.000000000", "10:11:00.000000000", "2026-01-05"]]
+      - only: [falkordb]
+        cypher: "MATCH (n:CyGraphText {l: $l, t: $t}) RETURN n.id"
+        parameters: {l: {$temporal: "LOCAL_DATE_TIME", text: "2026-01-05T10:11:00.500000"}, t: {$temporal: "LOCAL_TIME", text: "10:11:00.500"}}
+        rows: ["b"]
+      - only: [falkordb]
+        cypher: "MATCH (n:CyGraphText) WHERE n.d = $d RETURN n.id"
+        parameters: {d: {$temporal: "DATE", text: "2025-12-31"}}
+        rows: ["c"]
+      - only: [falkordb]
+        cypher: "MATCH (n:CyGraphText) RETURN n.id ORDER BY n.l"
+        rows: ["c", "a", "b"]
+      - only: [falkordb]
+        cypher: "MATCH (n:CyGraphText) RETURN n.id ORDER BY n.t"
+        rows: ["c", "a", "b"]
+      - only: [falkordb]
+        cypher: "MATCH (n:CyGraphText) RETURN n.id ORDER BY n.d"
+        rows: ["c", "a", "b"]
+
+  - name: "Times as their text"
+    description: "On FalkorDB and Memgraph a time is held as its text: read back as it, found by = through a value in another spelling, kept apart from the same instant at another offset, and ordered as time among values of one offset."
+    steps:
+      - only: [falkordb, memgraph]
+        cypher: "CREATE (:CyGraphText {id: 'a', t: $t})"
+        parameters: {t: {$temporal: "TIME", text: "10:11Z"}}
+      - only: [falkordb, memgraph]
+        cypher: "CREATE (:CyGraphText {id: 'b', t: $t})"
+        parameters: {t: {$temporal: "TIME", text: "10:11:00.5Z"}}
+      - only: [falkordb, memgraph]
+        cypher: "CREATE (:CyGraphText {id: 'c', t: $t})"
+        parameters: {t: {$temporal: "TIME", text: "09:00:00.123456789Z"}}
+      - only: [falkordb, memgraph]
+        cypher: "CREATE (:CyGraphText {id: 'd', t: $t})"
+        parameters: {t: {$temporal: "TIME", text: "12:11+02:00"}}
+      - only: [falkordb, memgraph]
+        cypher: "MATCH (n:CyGraphText) RETURN n.id, n.t ORDER BY n.id"
+        rows: [["a", "10:11:00.000000000Z"], ["b", "10:11:00.500000000Z"], ["c", "09:00:00.123456789Z"], ["d", "12:11:00.000000000+02:00"]]
+      - only: [falkordb, memgraph]
+        cypher: "MATCH (n:CyGraphText {t: $t}) RETURN n.id"
+        parameters: {t: {$temporal: "TIME", text: "10:11:00.000-00:00"}}
+        rows: ["a"]
+      - only: [falkordb, memgraph]
+        note: "d's instant at Z is another value."
+        cypher: "MATCH (n:CyGraphText) WHERE n.t = $t RETURN n.id"
+        parameters: {t: {$temporal: "TIME", text: "10:11Z"}}
+        rows: ["a"]
+      - only: [falkordb, memgraph]
+        cypher: "MATCH (n:CyGraphText) WHERE n.t ENDS WITH 'Z' RETURN n.id ORDER BY n.t"
+        rows: ["c", "a", "b"]
+
+  - name: "Durations as their text"
+    description: "On FalkorDB a duration, and on Memgraph a duration of months, is held as its text: read back as it, found by = through a value in another spelling, and kept apart from a duration of the same length in other parts. A duration has no order, so none is pinned."
+    steps:
+      - only: [falkordb, memgraph]
+        cypher: "CREATE (:CyGraphText {id: 'a', u: $u})"
+        parameters: {u: {$temporal: "DURATION", text: "P14M"}}
+      - only: [falkordb, memgraph]
+        cypher: "CREATE (:CyGraphText {id: 'b', u: $u})"
+        parameters: {u: {$temporal: "DURATION", text: "P1M-1D"}}
+      - only: [falkordb, memgraph]
+        cypher: "MATCH (n:CyGraphText) RETURN n.id, n.u ORDER BY n.id"
+        rows: [["a", "P1Y2M"], ["b", "P1M-1D"]]
+      - only: [falkordb, memgraph]
+        cypher: "MATCH (n:CyGraphText {u: $u}) RETURN n.id"
+        parameters: {u: {$temporal: "DURATION", text: "P1Y2M"}}
+        rows: ["a"]
+      - only: [falkordb]
+        cypher: "CREATE (:CyGraphText {id: 'c', u: $u}), (:CyGraphText {id: 'd', u: $v})"
+        parameters: {u: {$temporal: "DURATION", text: "P1D"}, v: {$temporal: "DURATION", text: "PT24H"}}
+      - only: [falkordb]
+        cypher: "MATCH (n:CyGraphText) WHERE n.id IN ['c', 'd'] RETURN n.id, n.u ORDER BY n.id"
+        rows: [["c", "P1D"], ["d", "PT24H"]]
+      - only: [falkordb]
+        note: "P1D is not PT24H, as in Cypher."
+        cypher: "MATCH (n:CyGraphText {u: $u}) RETURN n.id"
+        parameters: {u: {$temporal: "DURATION", text: "PT1440M"}}
+        rows: ["d"]
+
+  - name: "Unique over temporal text"
+    description: "A uniqueness constraint over a property held as text refuses a second node of the same value given in another spelling, and makes one of the same instant at another offset, a value apart: on FalkorDB over every kind, on Memgraph over a time and a duration of months."
+    steps:
+      - only: [falkordb]
+        note: "FalkorDB's constraint needs an exact-match index first, and is made asynchronously: a runner waits until db.constraints() lists it OPERATIONAL, as store.yaml's schema has it (constraintsRequireBackingIndex, constraintCreationIsAsync)."
+        cypher: "CREATE INDEX FOR (n:CyGraphText) ON (n.at)"
+      - only: [falkordb]
+        native: ["GRAPH.CONSTRAINT", "CREATE", "{graphName}", "UNIQUE", "NODE", "CyGraphText", "PROPERTIES", "1", "at"]
+      - only: [memgraph]
+        cypher: "CREATE CONSTRAINT ON (n:CyGraphText) ASSERT n.at IS UNIQUE"
+      - only: [falkordb]
+        cypher: "CREATE (:CyGraphText {at: $at})"
+        parameters: {at: {$temporal: "DATE_TIME", text: "2026-01-05T10:11:12+02:00"}}
+      - only: [falkordb]
+        cypher: "CREATE (:CyGraphText {at: $at})"
+        parameters: {at: {$temporal: "DATE_TIME", text: "2026-01-05T10:11:12.000000+02:00"}}
+        error: true
+      - only: [falkordb]
+        note: "The same instant at Z is another value, and is made."
+        cypher: "CREATE (:CyGraphText {at: $at})"
+        parameters: {at: {$temporal: "DATE_TIME", text: "2026-01-05T08:11:12Z"}}
+      - only: [falkordb]
+        cypher: "CREATE (:CyGraphText {at: $at})"
+        parameters: {at: {$temporal: "LOCAL_DATE_TIME", text: "2026-01-05T10:11"}}
+      - only: [falkordb]
+        cypher: "CREATE (:CyGraphText {at: $at})"
+        parameters: {at: {$temporal: "LOCAL_DATE_TIME", text: "2026-01-05T10:11:00"}}
+        error: true
+      - only: [falkordb]
+        cypher: "CREATE (:CyGraphText {at: $at})"
+        parameters: {at: {$temporal: "LOCAL_TIME", text: "10:11"}}
+      - only: [falkordb]
+        cypher: "CREATE (:CyGraphText {at: $at})"
+        parameters: {at: {$temporal: "LOCAL_TIME", text: "10:11:00.000"}}
+        error: true
+      - only: [falkordb]
+        cypher: "CREATE (:CyGraphText {at: $at})"
+        parameters: {at: {$temporal: "DATE", text: "2026-01-05"}}
+      - only: [falkordb]
+        cypher: "CREATE (:CyGraphText {at: $at})"
+        parameters: {at: {$temporal: "DATE", text: "2026-01-05"}}
+        error: true
+      - only: [falkordb, memgraph]
+        cypher: "CREATE (:CyGraphText {at: $at})"
+        parameters: {at: {$temporal: "TIME", text: "10:11+02:00"}}
+      - only: [falkordb, memgraph]
+        cypher: "CREATE (:CyGraphText {at: $at})"
+        parameters: {at: {$temporal: "TIME", text: "10:11:00.0+02:00"}}
+        error: true
+      - only: [falkordb, memgraph]
+        cypher: "CREATE (:CyGraphText {at: $at})"
+        parameters: {at: {$temporal: "TIME", text: "08:11Z"}}
+      - only: [falkordb, memgraph]
+        cypher: "CREATE (:CyGraphText {at: $at})"
+        parameters: {at: {$temporal: "DURATION", text: "P1Y2M"}}
+      - only: [falkordb, memgraph]
+        cypher: "CREATE (:CyGraphText {at: $at})"
+        parameters: {at: {$temporal: "DURATION", text: "P14M"}}
+        error: true
+      - only: [falkordb]
+        cypher: "MATCH (n:CyGraphText) RETURN count(n)"
+        rows: [8]
+      - only: [memgraph]
+        cypher: "MATCH (n:CyGraphText) RETURN count(n)"
+        rows: [3]
+      - only: [falkordb]
+        native: ["GRAPH.CONSTRAINT", "DROP", "{graphName}", "UNIQUE", "NODE", "CyGraphText", "PROPERTIES", "1", "at"]
+      - only: [falkordb]
+        cypher: "DROP INDEX FOR (n:CyGraphText) ON (n.at)"
+      - only: [memgraph]
+        cypher: "DROP CONSTRAINT ON (n:CyGraphText) ASSERT n.at IS UNIQUE"
