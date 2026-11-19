@@ -182,7 +182,8 @@ interface StoreSchema {
     /**
      * Whether [existing], an item the listing gave, lacks part of what its create makes, so that an ensure completes it
      * ([org.drivine.cypher.store.ddl.StoreDdl.completeIndex]): Oracle's range index listed `INCOMPLETE`, and Postgres's
-     * index left invalid ([org.drivine.cypher.store.ddl.PostgresDdl.INVALID]). Never, on a store whose items are made whole.
+     * index, or uniqueness constraint's index, left invalid ([org.drivine.cypher.store.ddl.PostgresDdl.INVALID]), which is
+     * dropped ([org.drivine.cypher.store.ddl.StoreDdl.droppedIncomplete]) and built again. Never, on a store whose items are made whole.
      */
     fun isIncomplete(existing: SchemaItemInfo): Boolean = false
 
@@ -191,11 +192,11 @@ interface StoreSchema {
 
     /**
      * Whether [rows], the listing [spec] is found in, show [spec]'s index standing incomplete under its name with no
-     * record listing it, which its create would pass over: on Postgres, an index whose online build was cut short before
-     * its record was written, left invalid ([org.drivine.cypher.store.ddl.PostgresDdl.INVALID]). Its create then completes
-     * it ([org.drivine.cypher.store.ddl.StoreDdl.completeIndex]).
+     * record listing it, which its create would pass over: on Postgres, an index, or a uniqueness constraint's index, whose
+     * online build was cut short or refused before its record was written, left invalid ([org.drivine.cypher.store.ddl.PostgresDdl.INVALID]).
+     * It is dropped and built again ([org.drivine.cypher.store.ddl.StoreDdl.completeIndex], [org.drivine.cypher.store.ddl.StoreDdl.droppedIncomplete]).
      */
-    fun isLeftIncomplete(spec: IndexSpec, rows: List<Any?>): Boolean = false
+    fun isLeftIncomplete(spec: SchemaItemSpec, rows: List<Any?>): Boolean = false
 
     /**
      * What [rows], the rows of the listing [spec] is found in ([StoreDdl.listIndexesQuery] of its kind, or

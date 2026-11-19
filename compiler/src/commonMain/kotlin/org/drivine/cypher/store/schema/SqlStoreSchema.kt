@@ -125,13 +125,14 @@ abstract class SqlStoreSchema internal constructor() : StoreSchema {
      * ([org.drivine.cypher.store.ddl.UniqueRecreation.finish]): no index under [name], and under [temporary] a unique index
      * of the constraint's shape, as [name]'s would be; and no index under [recorded], the name the record found names its
      * own index by where it lists the properties in another order than [spec] (whose index then still stands, the
-     * recreate cut off before its swap).
+     * recreate cut off before its swap). One left invalid ([PostgresDdl.INVALID]: an online build of it cut short, which this version's recreate, building it
+     * blocking, never leaves, but a `REINDEX CONCURRENTLY` or another version's can) holds nothing unique, so is no recreate cut off after its drop, but for [invalid], what a remove drops.
      */
-    fun cutOff(spec: SchemaItemSpec, rows: List<Any?>, name: String, temporary: String, recorded: String? = null): Boolean {
+    fun cutOff(spec: SchemaItemSpec, rows: List<Any?>, name: String, temporary: String, recorded: String? = null, invalid: Boolean = false): Boolean {
         val objects = StoreObject.read(rows)
         objects[name]?.let { standing -> if (standing.isIndex || !indexesNamedApart) return false }
         if (recorded != null && objects[recorded]?.isIndex == true) return false
-        val there = objects[temporary]?.takeIf { it.isIndex && it.unique == true } ?: return false
+        val there = objects[temporary]?.takeIf { it.isIndex && it.unique == true && (invalid || it.status != PostgresDdl.INVALID) } ?: return false
         val made = madeAs(spec).firstOrNull { it.name.equals(name, ignoreCase = true) } ?: return false
         return mismatchOf(made.copy(name = temporary), there, structureOnly = false) == null
     }
@@ -535,7 +536,7 @@ class PostgresSchema(override val ddl: PostgresDdl) : SqlStoreSchema() {
     override fun isIncomplete(existing: SchemaItemInfo): Boolean = existing.status == PostgresDdl.INVALID
 
     /** An index under the name [spec]'s is made under, of no record, listed [PostgresDdl.INVALID] among the objects. */
-    override fun isLeftIncomplete(spec: IndexSpec, rows: List<Any?>): Boolean {
+    override fun isLeftIncomplete(spec: SchemaItemSpec, rows: List<Any?>): Boolean {
         val objects = StoreObject.read(rows)
         return madeAs(spec).any { made -> objects[made.name]?.let { it.isIndex && it.status == PostgresDdl.INVALID } == true }
     }

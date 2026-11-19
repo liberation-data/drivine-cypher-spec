@@ -3182,6 +3182,9 @@ cases:
               - now: 1000000
                 actions:
                   - {query: {sample: {spec: "Uniqueness constraint", limit: 10}}, rows: [{properties: {email: "dup@example.com"}, count: 2, nodes: [{elementId: "4:a:1"}, {elementId: "4:a:2"}]}]}
+              - now: 1000000
+                actions:
+                  - {execute: {statement: "DROP INDEX CONCURRENTLY IF EXISTS drivine_uq2_Personemail_5482a751"}}
             done: 1000000
             report:
               owners:
@@ -3219,6 +3222,7 @@ cases:
                   - {query: {sample: {spec: "Uniqueness constraint", limit: 10}}, rows: [{properties: {email: "dup@example.com"}, count: 2, nodes: [{elementId: "4:a:1"}, {elementId: "4:a:2"}]}]}
               - now: 1000000
                 actions:
+                  - {execute: {statement: "DROP INDEX CONCURRENTLY IF EXISTS drivine_uq2_Personemail_5482a751"}}
                   - {query: {listing: "constraints"}, items: []}
               - now: 1000000
                 actions:

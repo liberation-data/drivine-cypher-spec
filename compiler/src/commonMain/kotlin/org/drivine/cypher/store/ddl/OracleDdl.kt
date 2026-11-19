@@ -368,7 +368,7 @@ ${made.entries.joinToString("\n") { (function, making) ->
     }
 
     override fun createIndex(spec: IndexSpec, existing: CatalogItem?): List<DdlStatement> = when (spec) {
-        is RangeIndexSpec -> statements(*rangeIndex(spec, online = true).toTypedArray())
+        is RangeIndexSpec -> statements(*rangeIndex(spec).toTypedArray())
         is VectorIndexSpec -> vectorIndex(spec)
         is FullTextIndexSpec -> statements(textIndex(spec))
         is TextIndexSpec -> throw unsupportedTextIndex(spec, engine)
@@ -388,25 +388,24 @@ ${made.entries.joinToString("\n") { (function, making) ->
     fun uniqueColumns(label: String, keys: List<String>): List<String> = keys.flatMap { OracleSql.uniqueIndex("n", label, keys, it) }
 
     /**
-     * The index over the property of every node, whatever the label: what a save and a load by id find a node by. With
-     * [online], it is built [ONLINE].
+     * The index over the property of every node, whatever the label: what a save and a load by id find a node by, built
+     * [ONLINE].
      */
-    private fun sharedIndex(spec: RangeIndexSpec, online: Boolean = false): Pair<String, String> {
+    private fun sharedIndex(spec: RangeIndexSpec): Pair<String, String> {
         val name = objectName(SHARED, spec.properties)
         val expressions = sharedColumns(spec.keys).joinToString(", ")
-        return name to busyWaiting("CREATE INDEX IF NOT EXISTS $name ON $nodes ($expressions)" + if (online) " $ONLINE" else "")
+        return name to busyWaiting("CREATE INDEX IF NOT EXISTS $name ON $nodes ($expressions) $ONLINE")
     }
 
     /**
      * A range index: the index over the property of every node, and the labelled index. It is
      * recorded with the name of its labelled index among its details, and a record already there
      * takes them: one made before there were labelled indexes is listed as incomplete (see
-     * [listed]), so `ensure` makes it again, and its labelled index with it. With [online], each
-     * is built [ONLINE], as an index's own create builds them; a uniqueness constraint's are built
-     * as they were.
+     * [listed]), so `ensure` makes it again, and its labelled index with it. Each is built
+     * [ONLINE], by an index's own create and a uniqueness constraint's alike (#382).
      */
-    private fun rangeIndex(spec: RangeIndexSpec, online: Boolean = false): List<String> {
-        val (name, shared) = sharedIndex(spec, online)
+    private fun rangeIndex(spec: RangeIndexSpec): List<String> {
+        val (name, shared) = sharedIndex(spec)
         val labelled = objectName(LABELLED, listOf(spec.label) + spec.properties)
         val scoped = labelledColumns(spec.label, spec.keys).joinToString(", ")
         // Not where a uniqueness constraint's index over the one property stands for it, as when the
@@ -423,7 +422,7 @@ ${made.entries.joinToString("\n") { (function, making) ->
             BEGIN
                 $standing;
                 IF v_unique = 0 THEN
-                    ${waitingOutBusy("CREATE INDEX IF NOT EXISTS $labelled ON $nodes n ($scoped)" + if (online) " $ONLINE" else "", 20)}
+                    ${waitingOutBusy("CREATE INDEX IF NOT EXISTS $labelled ON $nodes n ($scoped) $ONLINE", 20)}
                 END IF;
             END;
             """,
@@ -543,7 +542,8 @@ ${made.entries.joinToString("\n") { (function, making) ->
             val name = objectName(UNIQUE, listOf(spec.label) + spec.properties)
             // A node that lacks any of the properties is not constrained, as on the graph engines.
             val expressions = uniqueColumns(spec.label, spec.keys).joinToString(", ")
-            val unique = busyWaiting("CREATE UNIQUE INDEX IF NOT EXISTS $name ON $nodes n ($expressions)")
+            // Built online, as a range index's are (#382): writes go on while each is built.
+            val unique = busyWaiting("CREATE UNIQUE INDEX IF NOT EXISTS $name ON $nodes n ($expressions) $ONLINE")
             val range = RangeIndexSpec(spec.label, spec.properties)
             if (spec.properties.size > 1) {
                 statements(*rangeIndex(range).toTypedArray(), unique, recorded(spec, name))

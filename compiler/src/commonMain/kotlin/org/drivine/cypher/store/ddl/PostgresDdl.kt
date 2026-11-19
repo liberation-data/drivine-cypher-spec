@@ -396,8 +396,25 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
      * version's form, and one no record lists is found under that name ([org.drivine.cypher.store.schema.StoreSchema.isLeftIncomplete]).
      * `IF NOT EXISTS` would pass over the invalid index, which stands under the name.
      */
-    override fun completeIndex(spec: IndexSpec, existing: CatalogItem?): List<DdlStatement> =
-        listOf(DdlStatement.Text("DROP INDEX CONCURRENTLY IF EXISTS ${madeName(spec)}")) + createIndex(spec, existing)
+    override fun completeIndex(spec: IndexSpec, existing: CatalogItem?): List<DdlStatement> = droppedIncomplete(spec) + createIndex(spec, existing)
+
+    /** A `CONCURRENTLY` build the data refuses leaves its index invalid under its name. */
+    override val buildsLeaveInvalidIndexes: Boolean
+        get() = true
+
+    /**
+     * The index of [spec] an online build left invalid, dropped by the name this version makes it under, which is the
+     * invalid one's: as before [completeIndex] builds an index again, and as after a uniqueness constraint's online build
+     * the data refuses (#382), which leaves its unique index invalid under the name, where `IF NOT EXISTS` would pass over it.
+     */
+    override fun droppedIncomplete(spec: SchemaItemSpec): List<DdlStatement> =
+        listOf(DdlStatement.Text("DROP INDEX CONCURRENTLY IF EXISTS ${madeObjectName(spec)}"))
+
+    /** The name the index of [spec], an index or a uniqueness constraint, is made under. */
+    private fun madeObjectName(spec: SchemaItemSpec): String = when (spec) {
+        is IndexSpec -> madeName(spec)
+        is UniquenessConstraintSpec -> objectName(UNIQUE, listOf(spec.label) + spec.properties)
+    }
 
     /**
      * [statement] without `CONCURRENTLY`, which a transaction refuses: a build or a drop that blocks writes while it runs.
@@ -405,7 +422,7 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
      */
     override fun blocking(statement: DdlStatement): DdlStatement? {
         val text = (statement as? DdlStatement.Text)?.statement ?: return null
-        val verb = listOf("CREATE", "DROP").firstOrNull { text.startsWith("$it INDEX CONCURRENTLY ") } ?: return null
+        val verb = listOf("CREATE UNIQUE", "CREATE", "DROP").firstOrNull { text.startsWith("$it INDEX CONCURRENTLY ") } ?: return null
         return DdlStatement.Text("$verb INDEX " + text.removePrefix("$verb INDEX CONCURRENTLY "))
     }
 
@@ -414,7 +431,8 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
     override fun createConstraint(spec: ConstraintSpec): List<DdlStatement> = when (spec) {
         is UniquenessConstraintSpec -> {
             val name = objectName(UNIQUE, listOf(spec.label) + spec.properties)
-            statements("CREATE UNIQUE INDEX IF NOT EXISTS $name ON ${over(spec.label, spec.keys)}", recorded(spec, name))
+            // Online, as an index is (#382): a build the data refuses leaves it invalid, which the planner drops.
+            statements("CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS $name ON ${over(spec.label, spec.keys)}", recorded(spec, name))
         }
     }
 

@@ -710,10 +710,10 @@ internal class SchemaProgram(
 
     /**
      * Whether [spec]'s index stands incomplete under its name with no record listing it, as its listing last read shows
-     * ([StoreSchema.isLeftIncomplete]): a Postgres build cut short before its record was written.
+     * ([StoreSchema.isLeftIncomplete]): a Postgres build cut short, or refused, before its record was written.
      */
-    private fun isLeftIncomplete(spec: IndexSpec): Boolean =
-        listings[store.ddl.listIndexesQuery(spec.kind)]?.let { store.isLeftIncomplete(spec, it) } == true
+    private fun isLeftIncomplete(spec: SchemaItemSpec): Boolean =
+        listings[listingOf(spec)]?.let { store.isLeftIncomplete(spec, it) } == true
 
     /** What makes [spec], [related] as [org.drivine.cypher.store.ddl.StoreDdl.createIndex] takes it: its create, or what completes it where [leftIncomplete]. */
     private fun made(spec: IndexSpec, related: SchemaItemInfo?, leftIncomplete: Boolean): List<DdlStatement> =
@@ -891,11 +891,22 @@ internal class SchemaProgram(
         return ensureMadeConstraint(spec.made(), violationSampleSize, replaceBlockingIndex)
     }
 
-    private fun ensureMadeConstraint(spec: ConstraintSpec, violationSampleSize: Int, replaceBlockingIndex: Boolean): EnsureResult {
-        // A constraint still being built, by another process or an earlier run, may yet fail: its build is waited for, as
-        // one made here. One dropped meanwhile is made again below.
-        val existing = findConstraint(spec)?.let { if (it.buildInProgress) awaitBuild(spec, untilListed = false) else it }
+    /** `ConstraintManager.ensure` of [spec] as made; where not [again], one already made again for a create that passed over an invalid index. */
+    private fun ensureMadeConstraint(spec: ConstraintSpec, violationSampleSize: Int, replaceBlockingIndex: Boolean, again: Boolean = true): EnsureResult {
+        // A unique index an online build left invalid (Postgres, #382), recorded or not: no statement reads it, and its create
+        // would pass over it, so it is dropped and built below, as a range index is (#381).
+        // Only one of this version's form: another item under the name is never dropped, and one of another form is kept as
+        // it is, as an index's are. The constraint is found first: that reads the listing again where DDL cleared it, which
+        // its form and an unrecorded index are told by.
+        val found = findConstraint(spec)
         val form = formOf(spec)
+        val invalid = form !is ItemForm.Mismatch && form !is ItemForm.Stale && form !is ItemForm.Newer &&
+            if (found != null) store.isIncomplete(found) else isLeftIncomplete(spec)
+        if (invalid) ddl(store.ddl.droppedIncomplete(spec))
+        // A constraint still being built, by another process or an earlier run, may yet fail: its build is waited for, as
+        // one made here. One dropped meanwhile is made again below. One left invalid is no build under way, whose wait would
+        // run out: of another form, it is kept as it is.
+        val existing = if (invalid) null else found?.let { if (it.buildInProgress && !store.isIncomplete(it)) awaitBuild(spec, untilListed = false) else it }
         // Another item under the name Drivine gives this one's index: never taken as made, and never made over.
         if (form is ItemForm.Mismatch) return mismatched(spec, existing, form)
         if (existing != null && existing.buildFailed) {
@@ -939,7 +950,10 @@ internal class SchemaProgram(
             ddl(store.ddl.createConstraint(spec))
         } catch (refused: RawFailure) {
             if (store.isViolation(refused.error)) {
-                confirmedViolation(spec, violationSampleSize)?.let { return it }
+                // An online build the data refuses leaves its unique index invalid under the name (Postgres): dropped, so the
+                // next ensure builds it, rather than passing over it as made. Only once the sample bears the refusal out: a
+                // 23505 of another session's build under the name (pg_class) is no refusal of the data, and the index is its.
+                confirmedViolation(spec, violationSampleSize)?.let { ddl(store.ddl.droppedIncomplete(spec)); return it }
             }
             if (store.isBlockedByIndex(refused.error)) {
                 val index = blockingIndex(spec) ?: throw refused
@@ -960,8 +974,17 @@ internal class SchemaProgram(
 
         if (store.constraintCreationIsAsync) return awaitAsyncCreation(spec, violationSampleSize)
 
-        val created = findConstraint(spec) ?: SchemaItemInfo.fromSpec(spec)
-        log(LogLevel.INFO, CONSTRAINT_MANAGER, "Created $engine ${spec.kind} on ${spec.label}${spec.properties}")
+        val listed = findConstraint(spec)
+        // Listed invalid after the create, which passed over it (`IF NOT EXISTS`), or not listed at all: another session's
+        // online build, which held the table until it ended, the data refused or was cut short, and that session may have
+        // dropped it since (Postgres, #382). Never reported made: made here, once, as one found invalid is, so the data's
+        // refusal is this ensure's too.
+        if (again && store.ddl.buildsLeaveInvalidIndexes && (listed == null || store.isIncomplete(listed))) {
+            return ensureMadeConstraint(spec, violationSampleSize, replaceBlockingIndex, again = false)
+        }
+        val created = listed ?: SchemaItemInfo.fromSpec(spec)
+        val completed = if (invalid) ": ${store.incompleteness(found ?: SchemaItemInfo.fromSpec(spec))}" else ""
+        log(LogLevel.INFO, CONSTRAINT_MANAGER, "${if (invalid) "Completed" else "Created"} $engine ${spec.kind} on ${spec.label}${spec.properties}$completed")
         return EnsureResult.Created(created)
     }
 
@@ -1030,7 +1053,8 @@ internal class SchemaProgram(
         val schema = store as? SqlStoreSchema ?: return false
         val made = spec.made()
         val recreation = sql.recreation(made)
-        if (!schema.cutOff(made, listings[sql.listConstraintsQuery()].orEmpty(), recreation.name, recreation.temporary)) return false
+        // One left invalid too: it may go on refusing keys all the same.
+        if (!schema.cutOff(made, listings[sql.listConstraintsQuery()].orEmpty(), recreation.name, recreation.temporary, invalid = true)) return false
         ddl(recreation.leftover)
         ddl(sql.dropConstraint(CatalogItem(made.kind, made.label, made.properties, made.effectiveName)))
         log(
@@ -1299,12 +1323,13 @@ internal class SchemaProgram(
      * What the listing [spec] was last found in says of its form ([StoreSchema.formOf]): read from the rows a find has just
      * read, and never read again for it; [ItemForm.Current] where that read failed.
      */
-    private fun formOf(spec: SchemaItemSpec): ItemForm {
-        val statement = when (spec) {
-            is IndexSpec -> store.ddl.listIndexesQuery(spec.kind)
-            is ConstraintSpec -> store.ddl.listConstraintsQuery()
-        }
-        return listings[statement]?.let { store.formOf(spec, it) } ?: ItemForm.Current
+    private fun formOf(spec: SchemaItemSpec): ItemForm =
+        listings[listingOf(spec)]?.let { store.formOf(spec, it) } ?: ItemForm.Current
+
+    /** The listing [spec] is found in: its kind's indexes, or the constraints. */
+    private fun listingOf(spec: SchemaItemSpec): String = when (spec) {
+        is IndexSpec -> store.ddl.listIndexesQuery(spec.kind)
+        is ConstraintSpec -> store.ddl.listConstraintsQuery()
     }
 
     /**
