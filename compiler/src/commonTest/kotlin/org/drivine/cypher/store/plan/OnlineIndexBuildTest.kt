@@ -14,6 +14,8 @@ import org.drivine.schema.RangeIndexSpec
 import org.drivine.schema.SchemaItemInfo
 import org.drivine.schema.SchemaItemKind
 import org.drivine.schema.SchemaItemSpec
+import org.drivine.schema.SchemaMode
+import org.drivine.schema.SchemaPolicy
 import org.drivine.schema.UniquenessConstraintSpec
 import org.drivine.schema.VectorIndexSpec
 import kotlin.test.Test
@@ -49,6 +51,7 @@ class OnlineIndexBuildTest {
         sampled: List<Any?> = emptyList(),
         execute: (statement: String) -> StoreError? = { null },
         call: ItemCall = ItemCall.ENSURE,
+        policy: SchemaPolicy? = null,
     ): Pair<List<String>, DatabaseReport> {
         val ran = mutableListOf<String>()
         // On Postgres, each uniqueness constraint whose create ran, by its index's name, listed after it, as the store lists
@@ -62,9 +65,9 @@ class OnlineIndexBuildTest {
                 else if (shown(text).startsWith("DROP INDEX") && shown(text).trimEnd().endsWith(" $name")) made.remove(name)
             }
         }
-        // One item as IndexManager makes it; more as an owner's enforce does.
-        val request = items.singleOrNull()?.let { PlanRequest("default", Operation.Item(call, it)) }
-            ?: PlanRequest("default", Operation.Enforce(), listOf(DeclaredCatalog(null, items = items.toList())))
+        // One item as IndexManager makes it; more, or any under a [policy], as an owner's enforce does.
+        val request = items.singleOrNull()?.takeIf { policy == null }?.let { PlanRequest("default", Operation.Item(call, it)) }
+            ?: PlanRequest("default", Operation.Enforce(), listOf(DeclaredCatalog(null, items = items.toList())), policy = policy ?: SchemaPolicy())
         // The store's clock, as each poll's wait moves it on.
         var now = 0L
         var step = planner.start(request, now)
@@ -504,6 +507,52 @@ class OnlineIndexBuildTest {
                     report.log.toString(),
                 )
             }
+        }
+    }
+
+    @Test
+    fun anOwnersUniquenessConstraintLeftInvalidInAnotherFormIsDriftAsAnyOtherIsAndRecreatedInThisForm() {
+        val recreation = postgresDdl.recreation(email)
+        @Suppress("UNCHECKED_CAST")
+        val record = ListingRows.rows("postgres", listOf(SchemaItemInfo(SchemaItemKind.UNIQUENESS_CONSTRAINT, "Person", listOf("email"), "Person_email_unique", status = PostgresDdl.INVALID)), constraints = true)
+            .single() as Map<String, Any?>
+        for (form in listOf(1L, 3L)) {
+            val invalid = listOf(record + ("details" to mapOf("form" to form)), emailIndexObject(PostgresDdl.INVALID))
+            // Under FAIL_FAST the owner fails, naming it, and its marker is left as it was.
+            val (failing, failed) = drive(postgres, email, policy = SchemaPolicy(), listed = { if (it == postgresDdl.listConstraintsQuery()) invalid else emptyList() })
+            assertEquals(emptyList(), indexBuilds(failing), "form $form")
+            val owner = failed.owners.single()
+            assertIs<EnsureResult.Drift>(owner.results.single().result, "form $form")
+            assertTrue("DRIFT: UNIQUENESS_CONSTRAINT on Person[email]" in owner.failure.orEmpty(), "${owner.failure}")
+            assertNull(owner.marker, "form $form")
+            // Under WARN it is logged and the marker written, as other drift is.
+            val (warning, warned) = drive(postgres, email, policy = SchemaPolicy(SchemaMode.WARN), listed = { if (it == postgresDdl.listConstraintsQuery()) invalid else emptyList() })
+            assertEquals(emptyList(), indexBuilds(warning), "form $form")
+            assertNull(warned.owners.single().failure, "form $form")
+            assertTrue(warned.owners.single().marker != null, "form $form")
+            // recreateOnDrift makes it again in its place, in this version's form: built beside it, swapped in, its record remade.
+            var swapped = false
+            var remade = false
+            val (recreating, recreated) = drive(
+                postgres, email, policy = SchemaPolicy(SchemaMode.WARN, recreateOnDrift = true),
+                listed = { if (it == postgresDdl.listConstraintsQuery() && !swapped) invalid else emptyList() },
+                execute = {
+                    if (it in recreation.swap.map { s -> (s as DdlStatement.Text).statement }) swapped = true
+                    if (it == recreation.remade) remade = true
+                    null
+                },
+            )
+            assertEquals(
+                listOf(
+                    "DROP INDEX IF EXISTS ${recreation.temporary}", "CREATE UNIQUE INDEX ${recreation.temporary}",
+                    "CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS $emailIndex",
+                ),
+                indexBuilds(recreating).map { it.substringBefore(" ON ") }, "form $form",
+            )
+            assertTrue(swapped, recreating.joinToString("\n"))
+            assertTrue(recreating.none { shown(it).startsWith("DROP INDEX IF INVALID") }, recreating.joinToString("\n"))
+            assertIs<EnsureResult.Recreated>(recreated.owners.single().results.single().result, "form $form")
+            assertTrue(remade, "form $form: its record is not made this version's form")
         }
     }
 

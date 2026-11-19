@@ -940,13 +940,13 @@ internal class SchemaProgram(
     private fun ensureMadeConstraint(spec: ConstraintSpec, violationSampleSize: Int, replaceBlockingIndex: Boolean, again: Boolean = true): EnsureResult {
         // A unique index an online build left invalid (Postgres, #382), recorded or not: no statement reads it, and its create
         // would pass over it, so it is dropped and built below, as a range index is (#381).
-        // Only one of this version's form: another item under the name is never dropped, and one of another form is kept as
-        // it is, as an index's are. The constraint is found first: that reads the listing again where DDL cleared it, which
+        // Only one of this version's form: another item under the name is never dropped, and one of another form is never
+        // touched, but is drift (below), as it holds nothing unique. The constraint is found first: that reads the listing again where DDL cleared it, which
         // its form and an unrecorded index are told by.
         // A constraint still being built, by another process or an earlier run, may yet fail: its build is waited for, as
         // one made here, recorded or not (Postgres's online build writes its record once it is done), and the constraint
         // is read as it ended. One dropped meanwhile is made again below. One left invalid is no build under way, whose
-        // wait would run out: of this version's form it is dropped and built, and of another it is kept as it is.
+        // wait would run out: of this version's form it is dropped and built, and of another it is drift, and nothing is run on it.
         val found = awaitBuildUnderWay(spec)
         val form = formOf(spec)
         val invalid = form !is ItemForm.Mismatch && form !is ItemForm.Stale && form !is ItemForm.Newer &&
