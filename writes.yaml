@@ -1792,6 +1792,10 @@ cases:
       - cypher: "WITH $m AS m MATCH (n:CyWrite {id: 1}) SET n.p = m.a, n.e = m.e RETURN [n.p, n.e]"
         parameters: {m: {a: ["x", "y"], e: []}}
         rows: [[["x", "y"], []]]
+      - note: "On a node that is null, nothing is set, and nothing fails, as in Neo4j."
+        cypher: "UNWIND $rows AS row WITH row OPTIONAL MATCH (n:CyWrite {id: 9}) SET n.p = row.m RETURN count(*)"
+        parameters: {rows: [{m: {a: 1}}]}
+        rows: [1]
       - note: "Nothing the statements that failed would have written is kept."
         cypher: "MATCH (n:CyWrite) RETURN count(n)"
         rows: [1]
