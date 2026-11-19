@@ -839,4 +839,41 @@ class OnlineIndexBuildTest {
             assertEquals(1, reads, "$listing")
         }
     }
+
+    @Test
+    fun aBuildUnderWayBeforeItsRecordWasWrittenThatIsCutShortIsDroppedAndBuiltHere() {
+        // Another session's build with no record yet, which then ends invalid, its session gone: dropped and built here, the
+        // index as the constraint, never taken as made over the invalid one it left.
+        val index = postgresDdl.objectName(PostgresDdl.RANGE, listOf("Person", "name"))
+        val rangeListing = postgresDdl.listIndexesQuery(SchemaItemKind.RANGE_INDEX)
+        var reads = 0
+        var rebuilt = false
+        val (ran, report) = drive(
+            postgres, name,
+            listed = { if (it != rangeListing || rebuilt) emptyList() else listOf(nameIndexObject(if (++reads <= 2) PostgresDdl.BUILDING else PostgresDdl.INVALID)) },
+            execute = { if (it.startsWith("CREATE INDEX")) rebuilt = true; null },
+        )
+        assertEquals(listOf("DROP INDEX IF INVALID $index", "CREATE INDEX CONCURRENTLY IF NOT EXISTS $index"), indexBuilds(ran).map { it.substringBefore(" ON ") })
+        assertIs<EnsureResult.Created>(report.item!!.result)
+        assertEquals(3, reads)
+
+        reads = 0
+        var dropped = false
+        var built = false
+        val (constraint, made) = drive(
+            postgres, email,
+            listed = {
+                if (it != postgresDdl.listConstraintsQuery() || dropped) emptyList()
+                else listOf(emailIndexObject(if (++reads <= 2) PostgresDdl.BUILDING else PostgresDdl.INVALID))
+            },
+            execute = { if (shown(it).startsWith("DROP INDEX IF INVALID")) dropped = true; if (it.startsWith("CREATE UNIQUE INDEX")) built = true; null },
+        )
+        assertEquals(
+            listOf("DROP INDEX IF INVALID $emailIndex", "CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS $emailIndex"),
+            indexBuilds(constraint).map { it.substringBefore(" ON ") },
+        )
+        assertTrue(built)
+        assertIs<EnsureResult.Created>(made.item!!.result)
+        assertTrue(made.log.any { it.message.startsWith("Completed Postgres UNIQUENESS_CONSTRAINT on Person[email]") }, made.log.toString())
+    }
 }

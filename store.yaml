@@ -7079,12 +7079,17 @@ matching:
       stores: {neo4j: false, memgraph: false, falkordb: false, postgres: false, oracle: true, sqlite: false}
     - item: {kind: "RANGE_INDEX", label: "Person", properties: ["name"], status: "UNDER CONSTRUCTION"}
       stores: {neo4j: false, memgraph: false, falkordb: false, postgres: false, oracle: false, sqlite: false}
+    - item: {kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], status: "INVALID"}
+      stores: {neo4j: false, memgraph: false, falkordb: false, postgres: true, oracle: false, sqlite: false}
+    - item: {kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], status: "BUILDING"}
+      stores: {neo4j: false, memgraph: false, falkordb: false, postgres: false, oracle: false, sqlite: false}
   builds:
     - {status: null, buildFailed: false, buildInProgress: false}
     - {status: "OPERATIONAL", buildFailed: false, buildInProgress: false}
     - {status: "operational", buildFailed: false, buildInProgress: false}
     - {status: "UNDER CONSTRUCTION", buildFailed: false, buildInProgress: true}
     - {status: "[Indexing] 0/20000: UNDER CONSTRUCTION", buildFailed: false, buildInProgress: true}
+    - {status: "BUILDING", buildFailed: false, buildInProgress: true}
     - {status: "FAILED", buildFailed: true, buildInProgress: false}
     - {status: "[Indexing] FAILED: x", buildFailed: true, buildInProgress: false}
     - {status: "INCOMPLETE", buildFailed: false, buildInProgress: true}

@@ -330,7 +330,8 @@ abstract class SqlStoreSchema internal constructor() : StoreSchema {
  * the text of each of its [columns] in order, as the store writes them, its [predicate] (a partial index's), its [method]
  * and [opclasses] (Postgres's), its [indexType] (Oracle's), and the [statement] that made it (SQLite's); of a table, its
  * [tableColumns], each its name and type (Oracle's); of a trigger, the table it is on, as [table], and its [source]
- * (Oracle's); and the index's [status], Postgres's [PostgresDdl.INVALID] where it is left invalid.
+ * (Oracle's); and the index's [status], Postgres's [PostgresDdl.INVALID] where it is left invalid and
+ * [PostgresDdl.BUILDING] where a build of it is under way.
  */
 @DrivineInternalApi
 data class StoreObject(
