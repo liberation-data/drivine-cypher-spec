@@ -53,7 +53,8 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
 
     /**
      * As JSON, NaN and the infinities as the class writes them: as the store layout holds a value ([StoreValues.text], which a
-     * library's save writes too), where a statement that writes refuses NaN first.
+     * library's save writes too, but not widened: a list the statement stores is widened as it writes it, #377), where a
+     * statement that writes refuses NaN first.
      */
     override fun parameterText(value: Any?): String = StoreValues.sqlite(value, encoder)
 
@@ -235,6 +236,20 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
             if (entries) "(json_type($x) = 'object' AND EXISTS (SELECT 1 FROM json_each($x) AS ni WHERE ni.type = 'array' AND $held))"
             else "(json_type($x) = 'array' AND $held)"
         }
+
+    /**
+     * A list's numbers each a float, where they are all numbers and one is a float (`real`): a whole number made one by its text
+     * with `.0`, and each other item its text as it was, read by its path. A map of properties has each of its values so.
+     */
+    override fun widenedNumbers(json: String, entries: Boolean, keys: Set<String>): String {
+        fun list(x: String) = "CASE WHEN json_type($x) = 'array' AND NOT EXISTS (SELECT 1 FROM json_each($x) wn WHERE wn.type NOT IN ('integer', 'real')) " +
+            "AND EXISTS (SELECT 1 FROM json_each($x) wf WHERE wf.type = 'real') " +
+            "THEN (SELECT json_group_array(json(CASE wi.type WHEN 'integer' THEN wi.atom || '.0' ELSE $x -> wi.fullkey END)) " +
+            "FROM (SELECT * FROM json_each($x) ORDER BY key) wi) ELSE $x END"
+        return if (entries) "CASE WHEN json_type($json) = 'object' THEN (SELECT json_group_object(we.key, json(CASE WHEN we.type = 'array' " +
+            "THEN ${list("($json -> we.fullkey)")} ELSE $json -> we.fullkey END)) FROM json_each($json) we) ELSE $json END"
+        else list(json)
+    }
 
     override fun nullsEqual(x: String, y: String, equals: (String, String) -> String) = equals(x, y)
 

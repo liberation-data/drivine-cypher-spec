@@ -1286,6 +1286,44 @@ cases:
       - cypher: "MATCH (n:CyWrite) RETURN count(n)"
         rows: [1]
 
+  - name: "A list of whole and fractional numbers stored as a property"
+    description: "A list of numbers that holds a float and a whole number is stored with each of its numbers a float, as Neo4j 2026.10.1 stores it: [1, 2.5] is read back [1.0, 2.5], written, given as a parameter, as a row unwound or in a map of properties, by CREATE, MERGE, SET, SET = and SET += (#377). A list of whole numbers alone stays one, and a list not stored keeps its whole numbers, given to the same statement that stores it too. The SQL stores kept each number as it was given. A list worked out as the statement runs, as [1, n.x], is #380's."
+    steps:
+      - cypher: "CREATE (:CyWrite {id: 1, f: [1, 2.5], g: [2.5, 1], h: [1, 2], i: [1.0, 2]})"
+      - cypher: "MATCH (n:CyWrite {id: 1}) SET n.u = [3, 0.5]"
+      - cypher: "MATCH (n:CyWrite {id: 1}) SET n += {v: [4, 0.25]}"
+      - cypher: "MATCH (n:CyWrite {id: 1}) SET n.p = $l RETURN $l"
+        parameters: {l: [1, 2.5]}
+        rows: [[1, 2.5]]
+      - cypher: "MATCH (n:CyWrite {id: 1}) RETURN properties(n)"
+        rows: [{id: 1, f: [1.0, 2.5], g: [2.5, 1.0], h: [1, 2], i: [1.0, 2.0], u: [3.0, 0.5], v: [4.0, 0.25], p: [1.0, 2.5]}]
+      - cypher: "MATCH (n:CyWrite {id: 1}) RETURN [toString(n.f[0]), toString(n.g[1]), toString(n.h[0]), toString(n.p[0]), n.f[0] = 1]"
+        rows: [["1.0", "1.0", "1", "1.0", true]]
+      - cypher: "UNWIND $rows AS row CREATE (n:CyWrite {id: row.id, f: row.f}) RETURN row.f, n.f"
+        parameters: {rows: [{id: 2, f: [1, 2.5]}, {id: 3, f: [1, 2]}]}
+        rows: [[[1, 2.5], [1.0, 2.5]], [[1, 2], [1, 2]]]
+      - cypher: "CREATE (n:CyWrite $props) RETURN n.f"
+        parameters: {props: {id: 4, f: [2, 0.5], s: "x"}}
+        rows: [[2.0, 0.5]]
+      - cypher: "UNWIND $rows AS row MATCH (n:CyWrite {id: row.id}) SET n = row"
+        parameters: {rows: [{id: 2, f: [3, 0.5], k: [1, 2]}]}
+      - cypher: "UNWIND $rows AS row MATCH (n:CyWrite {id: row.id}) SET n += row"
+        parameters: {rows: [{id: 3, f: [0.5, 4]}]}
+      - cypher: "MERGE (n:CyWrite {id: 5, f: [1, 2.5]}) RETURN n.f"
+        rows: [[1.0, 2.5]]
+      - note: "A MERGE of the same list given as it was finds the node it made: 1 is equal to 1.0."
+        cypher: "MERGE (n:CyWrite {id: 5, f: [1, 2.5]}) WITH n MATCH (m:CyWrite {id: 5}) RETURN count(m)"
+        rows: [1]
+      - cypher: "MATCH (n:CyWrite) WHERE n.id > 1 RETURN n.id, n.f, n.k ORDER BY n.id"
+        rows: [[2, [3.0, 0.5], [1, 2]], [3, [0.5, 4.0], null], [4, [2.0, 0.5], null], [5, [1.0, 2.5], null]]
+      - cypher: "MATCH (n:CyWrite {id: 2}) CREATE (n)-[r:R {w: [1, 0.5]}]->(:CyWrite {id: 6}) RETURN r.w"
+        rows: [[1.0, 0.5]]
+      - cypher: "CREATE (n:CyWrite {id: 7, f: [-1, 2.5], g: [1, -0.5], h: [-1, 2], l: $l}) RETURN [n.f, n.g, n.h, n.l]"
+        parameters: {l: [-3, 0.5]}
+        rows: [[[-1.0, 2.5], [1.0, -0.5], [-1, 2], [-3.0, 0.5]]]
+      - cypher: "RETURN [1, 2.5], toString([1, 2.5][0])"
+        rows: [[[1, 2.5], "1"]]
+
   - name: "A float with no fraction"
     description: "A float that is a whole number, such as 2.0, is written and read back as a float, from a parameter nested or past 32 KB too, and toString() of it keeps its fraction."
     steps:

@@ -123,6 +123,18 @@ class LayoutMigrationTest {
     }
 
     @Test
+    fun aListOfWholeAndFractionalNumbersIsKeptAsItWasStored() {
+        // #377: a save widens [1, 2.5] to [1.0, 2.5]; a migration writes a row only for a change declared, so it keeps the list
+        // as it was, or it would be widened in a row it writes for another change, and not in one it leaves.
+        val declarations = listOf(LayoutMigration.Declaration("Person", "born", LayoutMigration.Kind.DATE))
+        for (store in Store.entries) {
+            val done = LayoutMigration.rewrite("{\"born\":\"2024-03-15\",\"l\":[1,2.5]}", store, listOf("Person"), declarations)
+            // Its whole number kept whole: on Oracle its NUMBER with a fraction is made a double, as any is.
+            assertTrue(done.changed && "\"l\":[1," in done.props, "on $target, ${store.id}: ${done.props}")
+        }
+    }
+
+    @Test
     fun declarationsThatGiveOnePropertyTwoKindsAreRefused() {
         for (case in spec["declarationRefusals"]!!) {
             assertEquals(case["refusal"]!!.textValue(), LayoutMigration.refusal(declarations(case)), "on $target: ${case["name"]!!.textValue()}")

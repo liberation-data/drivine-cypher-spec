@@ -40,7 +40,8 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
     override fun parameterJson(marker: String, text: String?) = "CAST($marker AS jsonb)"
 
     /**
-     * [value] as JSON text, as the store layout holds it ([StoreValues.text], which a library's save writes too): each float
+     * [value] as JSON text, as the store layout holds it ([StoreValues.text], which a library's save writes too, but not widened:
+     * a list the statement stores is widened as it writes it, #377): each float
      * in it that is a whole number written out in full with a fraction, `10000000.0`, which `jsonb` keeps a float. NaN and
      * the infinities are the numbers that stand for them (see the class), which a statement that writes refuses first.
      */
@@ -245,6 +246,18 @@ class PostgresCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypher
     override fun nullItem(json: String, entries: Boolean): String =
         if (entries) "EXISTS (SELECT 1 FROM jsonb_each(CASE WHEN jsonb_typeof($json) = 'object' THEN $json END) ni WHERE ${nullItem("ni.value", false)})"
         else shared(json) { (x) -> "(jsonb_typeof($x) = 'array' AND $x @> '[null]')" }
+
+    /**
+     * A list's numbers each a float, where they are all numbers and one is a float: `jsonb` keeps a number's text, so a float
+     * is one written with a fraction or an exponent (as [StoreValues.postgres] writes each), and a whole number is made one by
+     * its text with `.0`, as a float that is a whole number is held. A map of properties has each of its values so.
+     */
+    override fun widenedNumbers(json: String, entries: Boolean, keys: Set<String>): String =
+        if (entries) "CASE WHEN jsonb_typeof($json) = 'object' THEN (SELECT COALESCE(jsonb_object_agg(we.key, ${widenedNumbers("we.value", false, keys)}), '{}'::jsonb) FROM jsonb_each($json) we) ELSE $json END"
+        else "CASE WHEN jsonb_typeof($json) = 'array' AND NOT EXISTS (SELECT 1 FROM jsonb_array_elements($json) wn WHERE jsonb_typeof(wn) <> 'number') " +
+            "AND EXISTS (SELECT 1 FROM jsonb_array_elements($json) wf WHERE CAST(wf AS text) ~ '[.eE]') " +
+            "THEN (SELECT jsonb_agg(CASE WHEN CAST(wi.v AS text) ~ '[.eE]' THEN wi.v ELSE to_jsonb(CAST(CAST(wi.v AS text) || '.0' AS numeric)) END ORDER BY wi.n) " +
+            "FROM jsonb_array_elements($json) WITH ORDINALITY wi (v, n)) ELSE $json END"
 
     /**
      * The pairs of [x]'s and [y]'s items, and of their items', at any depth, walked together: a list's by place, a map's by key, where
