@@ -145,9 +145,9 @@ class NullItemWriteTest {
             assertTrue(checks.isNotEmpty(), "$cypher\n$sql")
             for (check in checks) {
                 val read = Regex("""cy_value\b""").findAll(check).count()
-                assertTrue(read == 1 && "JSON_SERIALIZE(cy_value RETURNING CLOB)" in check, "$cypher\n$check")
+                assertTrue(read == 1 && ("JSON_SERIALIZE(cy_value RETURNING CLOB)" in check || "JSON_SERIALIZE(cy_value RETURNING CLOB EXTENDED)" in check), "$cypher\n$check")
                 // A SET reads the id of the node it writes to as its UPDATE reads it, a number out of the row: not the value.
-                val tested = check.replace(Regex("""JSON_VALUE\(cy_row, '[^']*' RETURNING NUMBER\) IS NOT NULL AND """), "")
+                val tested = check.replace(Regex("""JSON_VALUE\(cy_row, '[^']*' RETURNING NUMBER\) IS NOT NULL (AND|THEN) """), "")
                 listOf("type()", "VARCHAR2", "JSON_QUERY", "JSON_VALUE").forEach { assertFalse(it in tested, "$it in $cypher\n$check") }
             }
         }

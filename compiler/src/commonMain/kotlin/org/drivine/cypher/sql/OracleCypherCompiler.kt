@@ -1471,6 +1471,47 @@ class OracleCypherCompiler(
         "EXISTS (${predicateQuery("SELECT 1 FROM (SELECT JSON_SERIALIZE($json RETURNING CLOB) AS t FROM DUAL) ni " +
             "WHERE DBMS_LOB.SUBSTR(ni.t, 1, 1) = '${if (entries) "{" else "["}' AND ${serializedNulls("ni.t", "[[,]null[],]")}")})"
 
+    override fun unstorableItem(json: String, entries: Boolean): String = unstorableItem(json, entries, nullItem = false)
+
+    /**
+     * The value read once, as its extended JSON's text, `JSON_SERIALIZE … RETURNING CLOB EXTENDED`, as [nullItem] reads it
+     * as text: no part of it is read as JSON, as `type()` or a `JSON_TABLE` read of a text past 32 KB, on two rows or more, closes the session (ORA-03113,
+     * drivine4j#531). The text is worked down to its shape: each tag to a letter of its kind (a `$t` is always a tag's, as
+     * [ValueLayout] escapes a map's), each text to `t`, each number to `n`, each truth value to `b`, each null to `z`. A map is
+     * then a `{` left, a list that holds a map or a list a `[` with one before its `]`, and a list of more than one kind one
+     * left once each list `[k(,k)*]` of one letter is taken out. [nullItem]'s test is the one it makes, on the text with each
+     * text left empty.
+     */
+    override fun unstorableItem(json: String, entries: Boolean, nullItem: Boolean): String {
+        val string = "\"([^\"\\\\]|\\\\.)*\""
+        val words = Temporal.entries.map { ValueLayout.word(it) }
+        val letters = words.zip(listOf("P", "Q", "R", "S", "U", "V"))
+        val tag = "\\{(\"(${ValueLayout.TEXT}|${ValueLayout.KEY})\":$string,)*\"\\${ValueLayout.KIND}\":\"(${words.joinToString("|")})\"(,\"(${ValueLayout.TEXT}|${ValueLayout.KEY})\":$string)*\\}"
+        // A value written as extended JSON's, a float (`{"$numberDouble":2}`, and NaN and the infinities `{"$numberDouble":"Nan"}`,
+        // where plain JSON writes the text "Nan") or another of Oracle's scalars, to a number first; then each tag to its kind's
+        // word between @s, the texts and the rest; the words, kept whole by their @s, to their letters.
+        var shape = "REGEXP_REPLACE(REGEXP_REPLACE(ni.t, '\\{\"\\\$(number|oracle)[A-Za-z]+\":(\"[^\"]*\"|[^{}\",]*)\\}', '0'), '$tag', '@\\4@')"
+        shape = "REGEXP_REPLACE($shape, '$string', 't')"
+        shape = "REGEXP_REPLACE(REPLACE(REPLACE(REPLACE($shape, 'true', 'b'), 'false', 'b'), 'null', 'z'), '-?[0-9][0-9.eE+-]*', 'n')"
+        letters.forEach { (word, letter) -> shape = "REPLACE($shape, '@$word@', '$letter')" }
+        val one = (listOf("n", "t", "b", "z") + letters.map { it.second }).joinToString("|") { "$it(,$it)*" }
+        val open = if (entries) "{" else "["
+        val cases = listOfNotNull(
+            "WHEN DBMS_LOB.SUBSTR(ns.t, 1, 1) <> '$open' THEN 0",
+            if (nullItem) "WHEN DBMS_LOB.SUBSTR(ns.t, 1, 1) = '$open' AND ${serializedNulls("ns.t", "[[,]null[],]")} THEN $UNSTORABLE_NULL" else null,
+            if (entries) null else "WHEN DBMS_LOB.SUBSTR(ns.c, 1, 1) = '{' THEN $UNSTORABLE_MAP",
+            "WHEN REGEXP_LIKE(ns.c, '\\[[^]]*[[{]') THEN $UNSTORABLE_NESTED",
+            if (entries) "WHEN REGEXP_LIKE(ns.c, ':\\{') THEN $UNSTORABLE_MAP" else null,
+            // Each list of one kind taken out: a list left is of more than one.
+            "WHEN REGEXP_LIKE(REGEXP_REPLACE(ns.c, '\\[($one)?\\]', 'n'), '\\[[^][{}]*\\]') THEN $UNSTORABLE_MIXED",
+        )
+        // Not entries: a value that is no list (its text opens with no `[`) is no map either where its text opens with `{`
+        // only as a tag's: the first case leaves a map to the shape's test, so it opens with `[` or `{`.
+        val first = if (entries) cases.first() else "WHEN DBMS_LOB.SUBSTR(ns.t, 1, 1) NOT IN ('[', '{') THEN 0"
+        return "(${predicateQuery("SELECT CASE ${(listOf(first) + cases.drop(1)).joinToString(" ")} ELSE 0 END FROM (SELECT ni.t, $shape AS c " +
+            "FROM (SELECT JSON_SERIALIZE($json RETURNING CLOB EXTENDED) AS t FROM DUAL) ni) ns")})"
+    }
+
     /**
      * A list's numbers each a float, where they are all numbers and one is a float (a `double`): each `number` made a binary
      * double, as a float is held. A map of properties has each of its values at [keys] so, set where it has one.
