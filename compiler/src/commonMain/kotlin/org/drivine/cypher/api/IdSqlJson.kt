@@ -59,7 +59,14 @@ internal object IdSqlJson {
             )
             "keyText" -> IdSql.keyText(store, text("alias"), text("key"))
             "planKey" -> IdSql.planKey(store, text("alias"), text("key"))
-            "planKeyOf" -> return "{\"key\":${CypherJson.writeValueAsString(CypherJson.valueToTree(IdSql.planKeyOf(store, text("json"))))}}"
+            "planKeyOf" -> {
+                val json = text("json")
+                // Named as the request's own fault: the parser's message, which differs from target to target, says only where.
+                val key = try { IdSql.planKeyOf(store, json) } catch (e: Exception) {
+                    throw IllegalArgumentException("$KIND's planKeyOf gives json as an id's JSON, not $json (${e.message}).")
+                }
+                return "{\"key\":${CypherJson.writeValueAsString(CypherJson.valueToTree(key))}}"
+            }
             "property" -> IdSql.property(store, text("alias"), text("key"))
             "hasProperty" -> IdSql.hasProperty(store, text("alias"), text("key"))
             "hasLabels" -> IdSql.hasLabels(

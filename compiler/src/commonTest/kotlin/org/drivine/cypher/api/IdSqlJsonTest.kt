@@ -200,6 +200,9 @@ class IdSqlJsonTest {
             "{\"idSql\": {\"store\": \"oracle\", \"helper\": \"hasLabels\", \"alias\": \"n\", \"labels\": [\"A\", 1]}}" to "idSql's hasLabels gives labels as a list of texts",
             "{\"idSql\": {\"store\": \"oracle\", \"helper\": \"hasLabels\", \"alias\": \"n\", \"labels\": [null]}}" to "idSql's hasLabels gives labels as a list of texts",
             "{\"idSql\": {\"store\": \"oracle\", \"helper\": \"hasLabels\", \"labels\": [\"A\"]}}" to "idSql's hasLabels gives alias as text",
+            "{\"idSql\": {\"store\": \"postgres\", \"helper\": \"planKeyOf\"}}" to "idSql's planKeyOf gives json as text",
+            "{\"idSql\": {\"store\": \"postgres\", \"helper\": \"planKeyOf\", \"json\": 1}}" to "idSql's planKeyOf gives json as text",
+            "{\"idSql\": {\"store\": \"oracle\", \"helper\": \"planKeyOf\", \"json\": \"{\\\"id\\\": \"}}" to "idSql's planKeyOf gives json as an id's JSON, not {\"id\": ",
             "{\"idSql\": {\"store\": \"oracle\", \"helper\": \"hasId\", \"alias\": \"n\", \"key\": \"id\", \"json\": \"x\"}, \"cypher\": \"RETURN 1\"}" to "A request gives one of",
         )) {
             val error = answer(request)["error"]?.textValue()

@@ -77,8 +77,8 @@ object IdSql {
         require(key != Stamps.PROPERTY) { "An id is a property of the node, not its stamp (${Stamps.PROPERTY})." }
 
     /**
-     * The id held under [key] of the node [alias] as the text a write plan keys it by: a temporal value's tag read as its text
-     * `v`, anything else as the store reads the property as text, as the module's Postgres write function reads a target's id.
+     * The id held under [key] of the node [alias] as text: a temporal value's tag read as its text `v`, anything else as the
+     * store reads the property as text. A write plan keys an id by [planKey], which reads an id of any kind but text as this.
      */
     fun keyText(store: Store, alias: String, key: String): String = when (store) {
         Store.POSTGRES -> PostgresSql.searchedProperty(alias, key)
@@ -99,7 +99,7 @@ object IdSql {
         requireId(key)
         return when (store) {
             Store.POSTGRES -> "CASE WHEN jsonb_typeof(${PostgresSql.value(alias, key)}) = 'string' THEN '$TEXT_MARK' || ${PostgresSql.property(alias, key)} ELSE ${keyText(store, alias, key)} END"
-            Store.SQLITE -> "CASE WHEN json_type($alias.props, ${SqliteSql.path(key)}) = 'text' THEN '$TEXT_MARK' || ${SqliteSql.property(alias, key)} ELSE ${keyText(store, alias, key)} END"
+            Store.SQLITE -> "CASE WHEN ${SqliteSql.type(alias, key)} = 'text' THEN '$TEXT_MARK' || ${SqliteSql.property(alias, key)} ELSE ${keyText(store, alias, key)} END"
             Store.ORACLE -> "CASE WHEN JSON_VALUE($alias.props, ${OracleSql.path(key, ".type()")}) = 'string' THEN '$TEXT_MARK' || JSON_VALUE($alias.props, ${OracleSql.path(key)}) ELSE ${keyText(store, alias, key)} END"
         }
     }
