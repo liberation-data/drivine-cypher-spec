@@ -443,6 +443,34 @@ class StoreDdlTest {
         }
     }
 
+    /**
+     * liberation-data/drivine#818: a function's compile that fails (`ORA-24344`, `ORA-04021`, `ORA-04031`) is tried again
+     * after 0.5 s, then 1 s, up to [OracleDdl.COMPILE_ATTEMPTS] tries, and then fails `ensuring` with
+     * [OracleDdl.COMPILE_FAILED], naming the function and, on `ORA-24344`, its `user_errors`. A user who may not make a
+     * function (`ORA-01031`) still has the store made. The reason is cut by bytes, not characters, so a server's message in
+     * a language of several bytes a character still fits its `VARCHAR2(2000)` and `RAISE_APPLICATION_ERROR`'s 2,048 bytes,
+     * where a cut by characters would raise `ORA-06502` and hide the compile's error.
+     */
+    @Test
+    fun oracleEnsuringCompilesEachFunctionAgainAfterAFailedCompileAndThenNamesIt() {
+        val ensuring = oracle.ensuring
+        val attempts = OracleDdl.COMPILE_ATTEMPTS
+        val compile = ensuring.substring(ensuring.indexOf("PROCEDURE compile(p_name VARCHAR2, p_ddl CLOB) IS"), ensuring.indexOf("\nBEGIN\n"))
+        listOf("-24344", "-4021", "-4031", "-1031").forEach { assertTrue(Regex("""PRAGMA EXCEPTION_INIT\(e_\w+, $it\);""").containsMatchIn(ensuring), it) }
+        assertTrue("FOR attempt IN 1 .. $attempts LOOP" in compile, compile)
+        assertTrue(Regex("""EXECUTE IMMEDIATE p_ddl;\s+RETURN;\s+EXCEPTION\s+WHEN e_denied THEN RETURN;\s+WHEN e_compiled OR e_pinned OR e_memory THEN""").containsMatchIn(compile), compile)
+        assertTrue(Regex("""IF attempt = $attempts THEN\s+IF SQLCODE = -24344 THEN\s+FOR e IN \(SELECT line, position, text FROM user_errors WHERE name = p_name AND type = 'FUNCTION' ORDER BY sequence\) LOOP""").containsMatchIn(compile), compile)
+        assertTrue("v_why := SUBSTRB(" in compile && "1, 1500);" in compile, "the reason is cut within bytes:\n$compile")
+        assertTrue("RAISE_APPLICATION_ERROR(${OracleDdl.COMPILE_FAILED}, 'Drivine could not compile ' || p_name || ' in $attempts tries: ' || NVL(v_why, SQLERRM), TRUE);" in compile, compile)
+        assertTrue(Regex("""END IF;\s+DBMS_SESSION\.SLEEP\(0\.5 \* POWER\(2, attempt - 1\)\);""").containsMatchIn(compile), "paused after each try but the last:\n$compile")
+        // Each function goes through compile under the name user_errors keeps it by, and nothing else runs one.
+        oracle.versions.keys.zip(oracle.functions).forEach { (name, function) ->
+            assertTrue("compile('${name.uppercase()}', ${org.drivine.cypher.store.OracleSql.clob(function)});" in ensuring, name)
+        }
+        assertEquals(oracle.functions.size, Regex("""\bcompile\('""").findAll(ensuring).count(), ensuring)
+        assertEquals(2, Regex("EXECUTE IMMEDIATE").findAll(ensuring).count(), "only make and compile run a statement:\n$ensuring")
+    }
+
     @Test
     fun catalogIsListedAndAliasedAsDrivine4jDid() {
         val catalog = store["catalog"]!!
