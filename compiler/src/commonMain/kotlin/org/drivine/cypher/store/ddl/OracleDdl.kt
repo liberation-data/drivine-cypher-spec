@@ -194,6 +194,10 @@ class OracleDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
      * Each of the [functions] is made where it is not there, not valid, or not of its version ([versions]), so a store an
      * earlier version made gains those it lacks, and those whose body has changed since. A user who may not make a function (`ORA-01031`: making one takes `CREATE PROCEDURE`, which the `RESOURCE` role
      * grants) still has the store made: a statement then calls none of those it lacks (see `GraphOptions.nullsEqualStored`).
+     * A function whose compile fails (`ORA-24344`, or `ORA-04021` and `ORA-04031`, a busy library cache or a short shared
+     * pool, as on a small server many first connections meet at once) is compiled again after a pause, up to
+     * [COMPILE_ATTEMPTS] tries, and then fails the block with [COMPILE_FAILED], naming the function and what the compiler
+     * said of it, read from `user_errors` (liberation-data/drivine#818).
      */
     val ensuring: String by lazy { """
         DECLARE
@@ -204,6 +208,12 @@ class OracleDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
             PRAGMA EXCEPTION_INIT(e_denied, -1031);
             e_busy EXCEPTION;
             PRAGMA EXCEPTION_INIT(e_busy, -54);
+            e_compiled EXCEPTION;
+            PRAGMA EXCEPTION_INIT(e_compiled, -24344);
+            e_pinned EXCEPTION;
+            PRAGMA EXCEPTION_INIT(e_pinned, -4021);
+            e_memory EXCEPTION;
+            PRAGMA EXCEPTION_INIT(e_memory, -4031);
             PROCEDURE make(p_ddl VARCHAR2) IS
             BEGIN
                 FOR attempt IN 1 .. $BUSY_ATTEMPTS LOOP
@@ -217,6 +227,30 @@ class OracleDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
                         WHEN e_busy THEN
                             IF attempt = $BUSY_ATTEMPTS THEN RAISE; END IF;
                             DBMS_SESSION.SLEEP(0.1);
+                    END;
+                END LOOP;
+            END;
+            -- A function, compiled again after a pause where its compile failed, which a compile that meets a busy library
+            -- cache or a short shared pool does, and named with what the compiler said where it fails each time.
+            PROCEDURE compile(p_name VARCHAR2, p_ddl CLOB) IS
+                v_why VARCHAR2(2000);
+            BEGIN
+                FOR attempt IN 1 .. $COMPILE_ATTEMPTS LOOP
+                    BEGIN
+                        EXECUTE IMMEDIATE p_ddl;
+                        RETURN;
+                    EXCEPTION
+                        WHEN e_denied THEN RETURN;
+                        WHEN e_compiled OR e_pinned OR e_memory THEN
+                            IF attempt = $COMPILE_ATTEMPTS THEN
+                                IF SQLCODE = -24344 THEN
+                                    FOR e IN (SELECT line, position, text FROM user_errors WHERE name = p_name AND type = 'FUNCTION' ORDER BY sequence) LOOP
+                                        v_why := SUBSTRB(v_why || CASE WHEN v_why IS NOT NULL THEN '; ' END || e.line || ':' || e.position || ' ' || REPLACE(e.text, CHR(10), ' '), 1, 1500);
+                                    END LOOP;
+                                END IF;
+                                RAISE_APPLICATION_ERROR($COMPILE_FAILED, 'Drivine could not compile ' || p_name || ' in $COMPILE_ATTEMPTS tries: ' || NVL(v_why, SQLERRM), TRUE);
+                            END IF;
+                            DBMS_SESSION.SLEEP(${COMPILE_PAUSE_SECONDS} * POWER(2, attempt - 1));
                     END;
                 END LOOP;
             END;
@@ -240,7 +274,7 @@ ${made.entries.joinToString("\n") { (function, making) ->
                     " AND EXISTS (SELECT 1 FROM user_source s WHERE s.name = o.object_name AND s.type = 'FUNCTION' AND s.line = 1" +
                     " AND INSTR(s.text, '$VERSION_MARK${versions.getValue(function)}') > 0);",
                 "IF v_made = 0 THEN",
-                "    BEGIN EXECUTE IMMEDIATE ${OracleSql.clob(making)}; EXCEPTION WHEN e_denied THEN NULL; END;",
+                "    compile('${function.uppercase()}', ${OracleSql.clob(making)});",
                 "END IF;",
             ).joinToString("\n") { "            $it" }
         }}
@@ -714,6 +748,18 @@ ${made.entries.joinToString("\n") { (function, making) ->
          * session's lock turns away: thirty seconds' worth.
          */
         const val BUSY_ATTEMPTS = 300
+
+        /**
+         * How many times [ensuring] compiles a function whose compile failed, a pause between each, twice as long as the
+         * one before, from [COMPILE_PAUSE_SECONDS] (liberation-data/drivine#818).
+         */
+        const val COMPILE_ATTEMPTS = 3
+
+        /** The first pause between a function's failed compile and its next, in seconds. */
+        const val COMPILE_PAUSE_SECONDS = 0.5
+
+        /** What [ensuring] fails with where a function's compile failed [COMPILE_ATTEMPTS] times, naming the function and why. */
+        const val COMPILE_FAILED = -20818
 
         /** An exception [waitingOutBusy] catches: another session made the index in the meantime (`ORA-00955`). */
         private const val EXISTS = "e_exists EXCEPTION; PRAGMA EXCEPTION_INIT(e_exists, -955);"

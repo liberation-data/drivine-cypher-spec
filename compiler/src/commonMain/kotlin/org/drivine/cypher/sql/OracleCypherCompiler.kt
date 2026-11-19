@@ -187,7 +187,8 @@ class OracleCypherCompiler(
      * statement that writes binds all its parameters as one text, and reads as extended JSON only those of them with such
      * a double in them: see [propertyOf], and [parametersText] for one where a parameter holds such a key. The floats are
      * written as the store layout holds them ([StoreValues.text], which a library's save writes too, and which refuses a
-     * value keyed as extended JSON's where this writes it as JSON).
+     * value keyed as extended JSON's where this writes it as JSON), but not widened: a list the statement stores is widened
+     * as it writes it (#377).
      */
     override fun parameterText(value: Any?): String {
         val tree = CypherJson.valueToTree(value, encoder)
@@ -1469,6 +1470,62 @@ class OracleCypherCompiler(
     override fun nullItem(json: String, entries: Boolean) =
         "EXISTS (${predicateQuery("SELECT 1 FROM (SELECT JSON_SERIALIZE($json RETURNING CLOB) AS t FROM DUAL) ni " +
             "WHERE DBMS_LOB.SUBSTR(ni.t, 1, 1) = '${if (entries) "{" else "["}' AND ${serializedNulls("ni.t", "[[,]null[],]")}")})"
+
+    override fun unstorableItem(json: String, entries: Boolean): String = unstorableItem(json, entries, nullItem = false)
+
+    /**
+     * The value read once, as its extended JSON's text, `JSON_SERIALIZE … RETURNING CLOB EXTENDED`, as [nullItem] reads it
+     * as text: no part of it is read as JSON, as `type()` or a `JSON_TABLE` read of a text past 32 KB, on two rows or more, closes the session (ORA-03113,
+     * drivine4j#531). The text is worked down to its shape: each tag to a letter of its kind (a `$t` is always a tag's, as
+     * [ValueLayout] escapes a map's), each text to `t`, each number to `n`, each truth value to `b`, each null to `z`. A map is
+     * then a `{` left, a list that holds a map or a list a `[` with one before its `]`, and a list of more than one kind one
+     * left once each list `[k(,k)*]` of one letter is taken out. [nullItem]'s test is the one it makes, on the text with each
+     * text left empty.
+     */
+    override fun unstorableItem(json: String, entries: Boolean, nullItem: Boolean): String {
+        val string = "\"([^\"\\\\]|\\\\.)*\""
+        val words = Temporal.entries.map { ValueLayout.word(it) }
+        val letters = words.zip(listOf("P", "Q", "R", "S", "U", "V"))
+        val tag = "\\{(\"(${ValueLayout.TEXT}|${ValueLayout.KEY})\":$string,)*\"\\${ValueLayout.KIND}\":\"(${words.joinToString("|")})\"(,\"(${ValueLayout.TEXT}|${ValueLayout.KEY})\":$string)*\\}"
+        // A value written as extended JSON's, a float (`{"$numberDouble":2}`, and NaN and the infinities `{"$numberDouble":"Nan"}`,
+        // where plain JSON writes the text "Nan") or another of Oracle's scalars, to a number first; then each tag to its kind's
+        // word between @s, the texts and the rest; the words, kept whole by their @s, to their letters.
+        var shape = "REGEXP_REPLACE(REGEXP_REPLACE(ni.t, '\\{\"\\\$(number|oracle)[A-Za-z]+\":(\"[^\"]*\"|[^{}\",]*)\\}', '0'), '$tag', '@\\4@')"
+        shape = "REGEXP_REPLACE($shape, '$string', 't')"
+        shape = "REGEXP_REPLACE(REPLACE(REPLACE(REPLACE($shape, 'true', 'b'), 'false', 'b'), 'null', 'z'), '-?[0-9][0-9.eE+-]*', 'n')"
+        letters.forEach { (word, letter) -> shape = "REPLACE($shape, '@$word@', '$letter')" }
+        val one = (listOf("n", "t", "b", "z") + letters.map { it.second }).joinToString("|") { "$it(,$it)*" }
+        val open = if (entries) "{" else "["
+        val cases = listOfNotNull(
+            "WHEN DBMS_LOB.SUBSTR(ns.t, 1, 1) <> '$open' THEN 0",
+            if (nullItem) "WHEN DBMS_LOB.SUBSTR(ns.t, 1, 1) = '$open' AND ${serializedNulls("ns.t", "[[,]null[],]")} THEN $UNSTORABLE_NULL" else null,
+            if (entries) null else "WHEN DBMS_LOB.SUBSTR(ns.c, 1, 1) = '{' THEN $UNSTORABLE_MAP",
+            "WHEN REGEXP_LIKE(ns.c, '\\[[^]]*[[{]') THEN $UNSTORABLE_NESTED",
+            if (entries) "WHEN REGEXP_LIKE(ns.c, ':\\{') THEN $UNSTORABLE_MAP" else null,
+            // Each list of one kind taken out: a list left is of more than one.
+            "WHEN REGEXP_LIKE(REGEXP_REPLACE(ns.c, '\\[($one)?\\]', 'n'), '\\[[^][{}]*\\]') THEN $UNSTORABLE_MIXED",
+        )
+        // Not entries: a value that is no list (its text opens with no `[`) is no map either where its text opens with `{`
+        // only as a tag's: the first case leaves a map to the shape's test, so it opens with `[` or `{`.
+        val first = if (entries) cases.first() else "WHEN DBMS_LOB.SUBSTR(ns.t, 1, 1) NOT IN ('[', '{') THEN 0"
+        return "(${predicateQuery("SELECT CASE ${(listOf(first) + cases.drop(1)).joinToString(" ")} ELSE 0 END FROM (SELECT ni.t, $shape AS c " +
+            "FROM (SELECT JSON_SERIALIZE($json RETURNING CLOB EXTENDED) AS t FROM DUAL) ni) ns")})"
+    }
+
+    /**
+     * A list's numbers each a float, where they are all numbers and one is a float (a `double`): each `number` made a binary
+     * double, as a float is held. A map of properties has each of its values at [keys] so, set where it has one.
+     */
+    override fun widenedNumbers(json: String, entries: Boolean, keys: Set<String>): String {
+        fun list(x: String) = "CASE WHEN JSON_VALUE($x, '\$.type()') = 'array' AND JSON_EXISTS($x, '\$[*]?(@.type() == \"double\" || @.type() == \"float\")') " +
+            "AND NOT JSON_EXISTS($x, '\$[*]?(@.type() != \"number\" && @.type() != \"double\" && @.type() != \"float\")') " +
+            "THEN (SELECT JSON_ARRAYAGG(CASE WHEN wi.t = 'number' THEN JSON_SCALAR(TO_BINARY_DOUBLE(wi.n)) ELSE wi.j END ORDER BY wi.o RETURNING JSON) " +
+            "FROM JSON_TABLE($x, '\$[*]' COLUMNS (o FOR ORDINALITY, t VARCHAR2(16) PATH '\$.type()', n NUMBER PATH '\$', j JSON PATH '\$')) wi) ELSE $x END"
+        return if (entries) "JSON_TRANSFORM($json, ${keys.joinToString(", ") { key ->
+            "SET ${OracleSql.path(key)} = ${list("JSON_QUERY($json, ${OracleSql.path(key)} RETURNING JSON)")} IGNORE ON MISSING"
+        }} RETURNING JSON)"
+        else list(json)
+    }
 
     /** Whether JSON's text of [json], its texts and keys taken out, matches [pattern]: see [holdsNull]. */
     private fun serializedHolds(json: String, pattern: String): String {

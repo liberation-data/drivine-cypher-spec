@@ -1,5 +1,6 @@
 package org.drivine.cypher.sql
 
+import org.drivine.cypher.store.ValueLayout
 import org.drivine.cypher.CompilerException
 import org.drivine.cypher.store.SqliteCypherValues
 import org.drivine.cypher.store.StoreValues
@@ -53,7 +54,8 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
 
     /**
      * As JSON, NaN and the infinities as the class writes them: as the store layout holds a value ([StoreValues.text], which a
-     * library's save writes too), where a statement that writes refuses NaN first.
+     * library's save writes too, but not widened: a list the statement stores is widened as it writes it, #377), where a
+     * statement that writes refuses NaN first.
      */
     override fun parameterText(value: Any?): String = StoreValues.sqlite(value, encoder)
 
@@ -235,6 +237,38 @@ class SqliteCypherCompiler(graph: String, encoder: CypherEncoder?) : SqlCypherCo
             if (entries) "(json_type($x) = 'object' AND EXISTS (SELECT 1 FROM json_each($x) AS ni WHERE ni.type = 'array' AND $held))"
             else "(json_type($x) = 'array' AND $held)"
         }
+
+    /**
+     * As Postgres's: a value's type read once, [json]'s own or, of a map of properties, each entry's as `json_each` gives it,
+     * so a text entry is never read as JSON.
+     */
+    override fun unstorableItem(json: String, entries: Boolean): String {
+        // NaN, held as a map ([isNaN]), is a number here, so the write fails for it, as [finite] fails it.
+        fun tag(x: String) = "COALESCE(json_extract($x, '\$.\"${ValueLayout.KIND}\"') IN ($tagWords) AND json_type($x, '\$.${ValueLayout.TEXT}') = 'text', 0)" +
+            if (nonFinite) " OR COALESCE(${isNaN(x)}, 0)" else ""
+        // An item's value is JSON only where it is a map or a list: a text item's is its text, which no JSON function reads.
+        fun item(type: String, x: String) = "CASE $type WHEN 'object' THEN CASE WHEN ${tag(x)} THEN 0 ELSE $UNSTORABLE_MAP END " +
+            "WHEN 'array' THEN (SELECT CASE WHEN MAX(CASE ui.type WHEN 'array' THEN 1 WHEN 'object' THEN NOT (${tag("ui.value")}) ELSE 0 END) THEN $UNSTORABLE_NESTED " +
+            "WHEN COUNT(DISTINCT CASE ui.type WHEN 'object' THEN CASE WHEN ${if (nonFinite) "COALESCE(${isNaN("ui.value")}, 0)" else "0"} THEN 'number' ELSE json_extract(ui.value, '\$.\"${ValueLayout.KIND}\"') END " +
+            "WHEN 'integer' THEN 'number' WHEN 'real' THEN 'number' WHEN 'true' THEN 'boolean' WHEN 'false' THEN 'boolean' WHEN 'null' THEN NULL ELSE ui.type END) > 1 THEN $UNSTORABLE_MIXED ELSE 0 END " +
+            "FROM json_each($x) ui) ELSE 0 END"
+        return if (!entries) item("json_type($json)", json)
+        else "CASE WHEN json_type($json) = 'object' THEN COALESCE((SELECT uc.c FROM (SELECT ${item("ue.type", "ue.value")} AS c FROM json_each($json) ue) uc WHERE uc.c > 0 LIMIT 1), 0) ELSE 0 END"
+    }
+
+    /**
+     * A list's numbers each a float, where they are all numbers and one is a float (`real`): a whole number made one by its text
+     * with `.0`, and each other item its text as it was, read by its path. A map of properties has each of its values so.
+     */
+    override fun widenedNumbers(json: String, entries: Boolean, keys: Set<String>): String {
+        fun list(x: String) = "CASE WHEN json_type($x) = 'array' AND NOT EXISTS (SELECT 1 FROM json_each($x) wn WHERE wn.type NOT IN ('integer', 'real')) " +
+            "AND EXISTS (SELECT 1 FROM json_each($x) wf WHERE wf.type = 'real') " +
+            "THEN (SELECT json_group_array(json(CASE wi.type WHEN 'integer' THEN wi.atom || '.0' ELSE $x -> wi.fullkey END)) " +
+            "FROM (SELECT * FROM json_each($x) ORDER BY key) wi) ELSE $x END"
+        return if (entries) "CASE WHEN json_type($json) = 'object' THEN (SELECT json_group_object(we.key, json(CASE WHEN we.type = 'array' " +
+            "THEN ${list("($json -> we.fullkey)")} ELSE $json -> we.fullkey END)) FROM json_each($json) we) ELSE $json END"
+        else list(json)
+    }
 
     override fun nullsEqual(x: String, y: String, equals: (String, String) -> String) = equals(x, y)
 

@@ -780,8 +780,8 @@ internal class VariableKinds(private val aggregates: (Expression) -> Boolean) {
      * bound as a node, a relationship or a path, or a list written that holds one, `[b]`; a map, written, projected
      * (`n {.id}`) or a variable bound to one written (`WITH {a: 1} AS m`); and a list written that holds a map or a list,
      * `[{a: 1}]`, `[[1, 2]]`, `[m]` (liberation-data/drivine4j#561). The store would hold each as a document. A map or a list
-     * the statement doesn't fix the kind of, as a parameter's, is left to the write, which fails as it writes one given that is
-     * no property (drivine4j#820).
+     * the statement doesn't fix the kind of, as a parameter's, is left to the write, which fails as it writes one, given or
+     * worked out as it runs, that is no property (drivine4j#820).
      */
     private fun stored(value: Expression, scope: Scope) {
         when (value) {

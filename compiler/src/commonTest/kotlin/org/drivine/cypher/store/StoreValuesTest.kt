@@ -71,8 +71,12 @@ class StoreValuesTest {
                 assertEquals(refusal, e.message, where)
                 refusals++
             } else {
-                // A null parameter is bound as SQL's null; its JSON is null.
-                assertEquals(bound(store, value) ?: "null", StoreValues.text(value, store), where)
+                // A null parameter is bound as SQL's null; its JSON is null. A list of whole and fractional numbers is stored
+                // with each a float (#377), as a statement binds it widened, and bound as it is where a statement reads it.
+                val widened = StoreValues.widened(org.drivine.cypher.json.CypherJson.valueToTree(value))
+                val stored = if (widened != org.drivine.cypher.json.CypherJson.valueToTree(value)) bound(store, widened) else bound(store, value)
+                assertEquals(stored ?: "null", StoreValues.text(value, store), where)
+                assertEquals(bound(store, value) ?: "null", StoreValues.text(value, store, widen = false), where)
                 held++
             }
         }
@@ -96,6 +100,26 @@ class StoreValuesTest {
             "A statement that writes is given NaN, which SQLite's JSON holds as no number: it would store another value in its place.",
             assertFailsWith<CompilerException> { StoreValues.text(listOf(Float.NaN), Store.SQLITE) }.message,
         )
+    }
+
+    @Test
+    fun aListOfWholeAndFractionalNumbersIsStoredWithEachAFloatAsNeo4jStoresIt() {
+        // #377: Neo4j stores [1, 2.5] as [1.0, 2.5], at any depth a save gives it; a list of whole numbers alone stays one.
+        assertEquals("[1.0,2.5]", StoreValues.text(listOf(1L, 2.5), Store.POSTGRES))
+        assertEquals("[1.0,2.5]", StoreValues.text(listOf(1L, 2.5), Store.SQLITE))
+        assertEquals("[{\"\$numberDouble\":\"1.0\"},{\"\$numberDouble\":\"2.5\"}]", StoreValues.text(listOf(1L, 2.5), Store.ORACLE))
+        assertEquals("{\"f\":[0.5,3.0],\"h\":[1,2],\"t\":[1,\"x\"],\"e\":[]}",
+            StoreValues.text(mapOf("f" to listOf(0.5, 3L), "h" to listOf(1L, 2L), "t" to listOf(1L, "x"), "e" to emptyList<Any>()), Store.SQLITE))
+        assertEquals("{\"rows\":[{\"f\":[1.0,2.5]}]}", StoreValues.text(mapOf("rows" to listOf(mapOf("f" to listOf(1L, 2.5)))), Store.SQLITE))
+        // A float given as a float stays one, a whole one too: [1.0, 2] is [1.0, 2.0].
+        assertEquals("[1.0,2.0]", StoreValues.text(listOf(1.0, 2L), Store.POSTGRES))
+        assertEquals("[2.5,1.0]", StoreValues.text(listOf(2.5f, 1L), Store.SQLITE))
+        assertEquals("[1,2.5]", StoreValues.text(listOf(1L, 2.5), Store.POSTGRES, widen = false))
+        // Where a statement reads it, it is bound as it is: RETURN [1, 2.5] gives [1, 2.5], as in Neo4j.
+        assertEquals("[1,2.5]", bound(Store.POSTGRES, listOf(1L, 2.5)))
+        val given = org.drivine.cypher.json.CypherJson.valueToTree(listOf(1L, 2.5))
+        StoreValues.text(given, Store.POSTGRES)
+        assertEquals(org.drivine.cypher.json.CypherJson.valueToTree(listOf(1L, 2.5)), given, "the tree given is left as it was")
     }
 
     @Test

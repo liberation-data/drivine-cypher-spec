@@ -8,7 +8,8 @@ file, through its C API:
 
 `compile` takes the request and gives the answer, as JSON text; their shape is the compiler's, described in its README
 ("The C API"). The library is loaded on the first compile, not on import, and once. A compile releases the GIL while it
-runs, and the library takes calls from several threads at once.
+runs, and the library takes calls from several threads at once: their parses run one at a time, the rest of each
+compile alongside (drivine-cypher-spec#385; before it, two calls at once could corrupt the parse caches).
 """
 
 from __future__ import annotations

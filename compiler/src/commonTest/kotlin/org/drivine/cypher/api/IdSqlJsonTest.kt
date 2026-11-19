@@ -49,6 +49,52 @@ class IdSqlJsonTest {
     }
 
     @Test
+    fun aPlanKeyMarksATextIdApartFromAnIdOfAnotherKindThatReadsAlike() {
+        for ((name, store) in stores) for (key in listOf("id", "\$\$id")) {
+            val k = CypherJson.writeValueAsString(CypherJson.valueToTree(key))
+            assertEquals(IdSql.planKey(store, "n", key), sql(name, "\"helper\": \"planKey\", \"alias\": \"n\", \"key\": $k"), "on $target, $name, $key")
+        }
+        fun keyOf(name: String, json: String): String? {
+            val j = CypherJson.writeValueAsString(CypherJson.valueToTree(json))
+            return answer("{\"idSql\": {\"store\": \"$name\", \"helper\": \"planKeyOf\", \"json\": $j}}")["key"]?.textValue()
+        }
+        val date = "{\"\$t\":\"date\",\"v\":\"2026-01-05\",\"s\":\"2026-01-05\"}"
+        for ((name, store) in stores) {
+            // The text and the date of one text, and the text and the number of one text, key apart (drivine-cypher-spec#391).
+            assertEquals("t:2026-01-05", keyOf(name, "\"2026-01-05\""), "on $target, $name")
+            assertEquals("2026-01-05", keyOf(name, date), "on $target, $name")
+            assertEquals("t:1", keyOf(name, "\"1\""), "on $target, $name")
+            assertEquals("1", keyOf(name, "1"), "on $target, $name")
+            assertEquals("t:true", keyOf(name, "\"true\""), "on $target, $name")
+            assertEquals("true", keyOf(name, "true"), "on $target, $name")
+            assertEquals(IdSql.planKeyOf(store, "\"x\""), keyOf(name, "\"x\""), "on $target, $name")
+            // A text that begins with the mark is marked too, a duration's tag (no `s`) is its `v`, and a truth value its word.
+            assertEquals("t:t:1", keyOf(name, "\"t:1\""), "on $target, $name")
+            assertEquals("P1D", keyOf(name, "{\"\$t\":\"duration\",\"v\":\"P1D\"}"), "on $target, $name")
+            assertEquals("false", keyOf(name, "false"), "on $target, $name")
+        }
+        // A number's scale and sign are kept as each store reads them back: numeric's on Postgres, Oracle's plain digits.
+        assertEquals(listOf("-1.50", "-12", "0"), listOf("-1.50", "-12", "0").map { keyOf("postgres", it) })
+        assertEquals(listOf("-1.5", "-12", "0", "100"), listOf("-1.50", "-12", "0.000", "1E+2").map { keyOf("oracle", it) })
+        assertEquals("-1.50", keyOf("sqlite", "-1.50"))
+        // On Postgres a number is the text `jsonb` gives back for it, `numeric`'s; elsewhere its JSON as written.
+        assertEquals("0.00000010", keyOf("postgres", "1.0E-7"))
+        assertEquals("1.0E-7", keyOf("sqlite", "1.0E-7"))
+        // On Oracle the plain digits JSON_VALUE reads, of a number and of a float held as extended JSON's double.
+        assertEquals(listOf("3", "3", "2.5", "42", "0.0000001", "100000000000000000000", "0"),
+            listOf("3.0", "{\"\$numberDouble\":\"3.0\"}", "{\"\$numberDouble\":\"2.5\"}", "42", "{\"\$numberDouble\":\"1.0E-7\"}", "{\"\$numberDouble\":\"1.0E20\"}", "-0.0").map { keyOf("oracle", it) })
+        assertEquals(
+            listOf("0.00000010", "-0.00000000015", "0.00001230", "2.0", "12", "0.1", "0.0", "100", "\"1.0E-7\"", "[1]"),
+            listOf("1.0E-7", "-1.5E-10", "1.230e-5", "2.0", "12", "0.1", "-0.0", "1.0E+2", "\"1.0E-7\"", "[1]").map(IdSql::numericText),
+        )
+        // The stored side tells a text by its JSON type on each store, and reads any other id as keyText does.
+        for ((_, store) in stores) {
+            val planKey = IdSql.planKey(store, "n", "id")
+            assertTrue("'t:' ||" in planKey && IdSql.keyText(store, "n", "id") in planKey, "on $target, $store: $planKey")
+        }
+    }
+
+    @Test
     fun anIdIsComparedOverTheExpressionsItsIndexIsMadeOver() {
         for ((_, store) in stores) {
             val made = IdSql.hasId(store, "n", "id", "JSON(:id)")
@@ -66,7 +112,7 @@ class IdSqlJsonTest {
             val k = CypherJson.writeValueAsString(CypherJson.valueToTree(Stamps.PROPERTY))
             assertEquals("n.stamp", IdSql.keyText(store, "n", Stamps.PROPERTY), "on $target, $store")
             assertEquals("n.stamp", IdSql.property(store, "n", Stamps.PROPERTY), "on $target, $store")
-            for (helper in listOf("hasId", "hasIdIn")) {
+            for (helper in listOf("hasId", "hasIdIn", "planKey")) {
                 val error = answer("{\"idSql\": {\"store\": \"$name\", \"helper\": \"$helper\", \"alias\": \"n\", \"key\": $k, \"json\": \":id\", \"parameter\": \":ids\", \"nodes\": \"g_node\"}}")["error"]?.textValue()
                 assertTrue(error != null && error.startsWith("An id is a property of the node"), "on $target, $store, $helper: $error")
             }
@@ -154,6 +200,9 @@ class IdSqlJsonTest {
             "{\"idSql\": {\"store\": \"oracle\", \"helper\": \"hasLabels\", \"alias\": \"n\", \"labels\": [\"A\", 1]}}" to "idSql's hasLabels gives labels as a list of texts",
             "{\"idSql\": {\"store\": \"oracle\", \"helper\": \"hasLabels\", \"alias\": \"n\", \"labels\": [null]}}" to "idSql's hasLabels gives labels as a list of texts",
             "{\"idSql\": {\"store\": \"oracle\", \"helper\": \"hasLabels\", \"labels\": [\"A\"]}}" to "idSql's hasLabels gives alias as text",
+            "{\"idSql\": {\"store\": \"postgres\", \"helper\": \"planKeyOf\"}}" to "idSql's planKeyOf gives json as text",
+            "{\"idSql\": {\"store\": \"postgres\", \"helper\": \"planKeyOf\", \"json\": 1}}" to "idSql's planKeyOf gives json as text",
+            "{\"idSql\": {\"store\": \"oracle\", \"helper\": \"planKeyOf\", \"json\": \"{\\\"id\\\": \"}}" to "idSql's planKeyOf gives json as an id's JSON, not {\"id\": ",
             "{\"idSql\": {\"store\": \"oracle\", \"helper\": \"hasId\", \"alias\": \"n\", \"key\": \"id\", \"json\": \"x\"}, \"cypher\": \"RETURN 1\"}" to "A request gives one of",
         )) {
             val error = answer(request)["error"]?.textValue()

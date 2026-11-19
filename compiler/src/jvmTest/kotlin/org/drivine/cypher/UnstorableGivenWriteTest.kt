@@ -12,8 +12,8 @@ import kotlin.test.assertTrue
 
 /**
  * A write of a property the statement gives as no property Neo4j stores, a map, a list that holds a map or a list, or a list of
- * more than one kind, fails as each row is written, as Neo4j fails it (drivine4j#820): known when the statement compiles, so
- * with no test as it runs. What each store gives is the spec's, in `writes.yaml`, "A value given that Neo4j stores as no property".
+ * more than one kind, fails as each row is written, as Neo4j fails it (drivine4j#820): a parameter's known when the statement
+ * compiles, so with no test as it runs, and a row unwound tested as it is written (see UnstorableRowWriteTest). What each store gives is the spec's, in `writes.yaml`, "A value given that Neo4j stores as no property".
  */
 class UnstorableGivenWriteTest {
 
@@ -74,8 +74,6 @@ class UnstorableGivenWriteTest {
             "UNWIND \$rows AS row CREATE (:A {p: [row.a, row.b]})" to mapOf("rows" to listOf(mapOf("a" to 1, "b" to 2), mapOf("a" to "x", "b" to "y"))),
             // A map given whose value is read by key is that value.
             "MATCH (n:A) SET n.p = \$m.a" to mapOf("m" to mapOf("a" to 1)),
-            // A list with an item worked out as it runs is left to the store.
-            "MATCH (n:A) SET n.p = [1, n.id]" to emptyMap(),
         )
         for (compiler in compilers()) for ((cypher, parameters) in stored) {
             val sql = sql(compiler, cypher, parameters)

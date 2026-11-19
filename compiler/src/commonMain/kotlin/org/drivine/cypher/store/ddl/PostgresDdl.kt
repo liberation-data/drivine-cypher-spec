@@ -569,9 +569,10 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
          * made again when it is ensured: 9 finds a node by its id's JSON (#245), and 10 keeps the function of temporal arithmetic
          * (drivine4j#418), whose body changes with the compiler's: a change of the DDL bumps it (`store.yaml`'s `generated`), as
          * 11 does, the function cutting a duration's quotients with `div` (drivine-cypher-spec#275), the `_held` function made beside it
-         * (drivine4j#421), and the `_list_key` function a sort calls (drivine-cypher-spec#284).
+         * (drivine4j#421), and the `_list_key` function a sort calls (drivine-cypher-spec#284); 12 keys an unlink's targets with a
+         * text id marked apart from a temporal value or a number that reads alike (drivine-cypher-spec#391).
          */
-        const val VERSION = "drivine:11"
+        const val VERSION = "drivine:12"
 
         /** The function the store of the graph [graph] keeps that works out a temporal value's sort key: see [temporalKey]. */
         fun temporalKeyName(graph: String) = "${graph}_temporal_key"
