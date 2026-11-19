@@ -46,6 +46,7 @@ class UnstorableRowWriteTest {
             // A WITH that works the value out is no row given passed on.
             "UNWIND \$rows AS row WITH {m: row.m} AS r CREATE (:X {p: r.m})" to mapOf("rows" to listOf(mapOf("m" to 1))),
             "MATCH (n:A) SET n.p = \$m.a" to mapOf("m" to mapOf("a" to mapOf("b" to 1))),
+            "MATCH (n:A) SET n.p = \$m[\$k]" to mapOf("m" to mapOf("b" to listOf(listOf(1))), "k" to "b"),
             "WITH [{a: 1}] AS l MATCH (n:A) SET n.p = l" to emptyMap(),
             "MATCH (n:A) WITH n, {p: {a: 1}} AS m SET n += m" to emptyMap(),
             // A list with an item worked out as it runs, as UnstorableGivenWriteTest's lists given are not.
@@ -98,6 +99,10 @@ class UnstorableRowWriteTest {
             "WITH [1, 2] AS l MATCH (n:A) SET n.p = l",
             "MATCH (n:A) SET n.p = \$m.a, n.q = \$m['b'], n.r = coalesce(n.x, \$m.a)" to mapOf("m" to mapOf("a" to listOf(1, 2), "b" to "x")),
             "MATCH (n:A) SET n.p = toString(n.q) + 'x', n.r = CASE WHEN n.q > 1 THEN 'a' ELSE toString(n.q) END",
+            // A CASE of values each known, and a key of a parameter read by a parameter's text.
+            "MATCH (n:A) SET n.p = CASE WHEN n.q > 1 THEN \$m.a ELSE n.q END, n.r = \$m[\$k]" to mapOf("m" to mapOf("a" to listOf(1, 2), "b" to "x"), "k" to "b"),
+            // Items of two lists unwound whose every item is of one kind, whichever rows are taken together.
+            "UNWIND \$a AS x UNWIND \$b AS y MATCH (n:A) SET n.p = [x, y]" to mapOf("a" to listOf(1, 2), "b" to listOf(3.5)),
         ).map { if (it is Pair<*, *>) @Suppress("UNCHECKED_CAST") (it as Pair<String, Map<String, Any?>>) else (it as String) to emptyMap() }
         for (compiler in compilers()) for ((cypher, parameters) in known) {
             val sql = sql(compiler, cypher, parameters)
