@@ -16,7 +16,10 @@ import org.drivine.cypher.store.IdSql
  * - `hasId`, with `alias`, `key` and `json`, the SQL of the id's JSON as the host binds it ([IdSql.hasId]);
  * - `hasIdIn`, with `alias`, `key` and `parameter`, the SQL of a JSON array of each id's JSON text (`["\"a\"", "1"]`), and on
  *   SQLite `nodes`, the node table, and `labels`, a list of the node's labels ([IdSql.hasIdIn]);
- * - `keyText`, `property` and `hasProperty`, with `alias` and `key` ([IdSql.keyText], [IdSql.property], [IdSql.hasProperty]);
+ * - `keyText`, `planKey`, `property` and `hasProperty`, with `alias` and `key` ([IdSql.keyText], [IdSql.planKey],
+ *   [IdSql.property], [IdSql.hasProperty]);
+ * - `planKeyOf`, with `json`, an id's JSON as the store's layout holds it: the key a write plan keys that id by, as `planKey`
+ *   reads it back ([IdSql.planKeyOf]), answered `{"key": "…"}`;
  * - `hasLabels`, with `alias` and `labels`, a list of the node's labels, the test a lookup by its id makes of each beside
  *   `hasId`: on Postgres and SQLite as the label's partial index is made, on Oracle by its text; `1 = 1` for none
  *   ([IdSql.hasLabels]).
@@ -31,7 +34,7 @@ internal object IdSqlJson {
 
     const val KIND = "idSql"
 
-    private val HELPERS = listOf("hasId", "hasIdIn", "keyText", "property", "hasProperty", "hasLabels")
+    private val HELPERS = listOf("hasId", "hasIdIn", "keyText", "planKey", "planKeyOf", "property", "hasProperty", "hasLabels")
 
     /** The answer to [tree], a request that gives [KIND]. */
     fun answer(tree: ObjectNode): String = try {
@@ -55,6 +58,15 @@ internal object IdSqlJson {
                 }.orEmpty(),
             )
             "keyText" -> IdSql.keyText(store, text("alias"), text("key"))
+            "planKey" -> IdSql.planKey(store, text("alias"), text("key"))
+            "planKeyOf" -> {
+                val json = text("json")
+                // Named as the request's own fault: the parser's message, which differs from target to target, says only where.
+                val key = try { IdSql.planKeyOf(store, json) } catch (e: Exception) {
+                    throw IllegalArgumentException("$KIND's planKeyOf gives json as an id's JSON, not $json (${e.message}).")
+                }
+                return "{\"key\":${CypherJson.writeValueAsString(CypherJson.valueToTree(key))}}"
+            }
             "property" -> IdSql.property(store, text("alias"), text("key"))
             "hasProperty" -> IdSql.hasProperty(store, text("alias"), text("key"))
             "hasLabels" -> IdSql.hasLabels(

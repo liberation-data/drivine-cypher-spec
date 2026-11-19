@@ -24,6 +24,7 @@ import org.drivine.schema.TextIndexSpec
 import org.drivine.schema.UniquenessConstraintSpec
 import org.drivine.schema.VectorIndexSpec
 import org.drivine.schema.made
+import org.drivine.cypher.store.IdSql
 import org.drivine.cypher.store.PostgresSql
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -546,9 +547,12 @@ class StoreDdlTest {
         assertTrue("'drivine_find_' || md5('${PostgresDdl.VERSION} $graph'" in ddl, "the find's prepared lookup is named for the version:\n$ddl")
         // A ref or patch step of a library that sends no id is refused, rather than finding no node and reading as absent.
         assertTrue("IF p_id IS NULL THEN\n        RAISE EXCEPTION" in ddl, "a step without an id is refused:\n$ddl")
-        // An unlink names its targets by their ids' texts: a temporal target's id is read as its tag's text, `v`, both ways.
+        // An unlink names its targets by their ids' keys, as IdSql.planKey reads them: a temporal target's id as its tag's
+        // text, `v`, and a text id marked `t:`, so it keys apart from a date or a number that reads alike (#391), both ways.
         val unlinkRead = "COALESCE(t.props -> (v_shape ->> 'key') ->> 'v', t.props ->> (v_shape ->> 'key'))"
         assertEquals(3, ddl.split(unlinkRead).size, "an unlink reads a temporal target's id as its v:\n$ddl")
+        val marked = "CASE WHEN jsonb_typeof(t.props -> (v_shape ->> 'key')) = 'string' THEN '${IdSql.TEXT_MARK}' || (t.props ->> (v_shape ->> 'key')) ELSE $unlinkRead END"
+        assertEquals(3, ddl.split(marked).size, "an unlink marks a text target's id:\n$ddl")
     }
 
     @Test

@@ -31,8 +31,8 @@ import org.drivine.cypher.store.LowerCopies
  *   are taken from; `returns` is what to give back (`STAMPS`, `EACH_STAMP` or `COUNT`); `patched_if`,
  *   when it is given, is the query a `patch` step asks whether to write to the node it found: it counts
  *   the node whose `nid` is its parameter `$1`, if the node meets a predicate.
- *   An `unlink` step names its targets by their ids' texts, `ids` and `held`: a temporal id by its tag's `v`,
- *   any other as `->>` reads it.
+ *   An `unlink` step names its targets by their ids' keys, `ids` and `held`, as [org.drivine.cypher.store.IdSql.planKey]
+ *   reads them: a text id marked `t:`, a temporal id by its tag's `v`, any other as `->>` reads it.
  *
  * A stale root (the node is gone, or carries another stamp, or is there when the save may only make it)
  * is raised as [STALE] and gives no row; a node a `ref` step needs that is not there is raised as
@@ -462,13 +462,13 @@ BEGIN
                 v_targets := '{}';
                 v_keys := '{}';
                 -- A relationship from the node to itself is read as leaving it, and so once when both directions are read.
-                -- A target's id is read as the text the plan's ids hold: a temporal id's tag as its text v (#245).
+                -- A target's id is read as the key the plan's ids hold (IdSql.planKey): a text id marked t:, a temporal id's tag as its text v (#245, #391).
                 FOR v_e IN
-                    SELECT e.eid, t.nid, COALESCE(t.props -> (v_shape ->> 'key') ->> 'v', t.props ->> (v_shape ->> 'key')) AS key
+                    SELECT e.eid, t.nid, CASE WHEN jsonb_typeof(t.props -> (v_shape ->> 'key')) = 'string' THEN 't:' || (t.props ->> (v_shape ->> 'key')) ELSE COALESCE(t.props -> (v_shape ->> 'key') ->> 'v', t.props ->> (v_shape ->> 'key')) END AS key
                     FROM $edges e JOIN $nodes t ON t.nid = e.dst
                     WHERE v_dir IN ('OUT', 'BOTH') AND e.src = v_from AND e.type = v_type AND t.labels @> (v_shape -> 'labels')
                     UNION ALL
-                    SELECT e.eid, t.nid, COALESCE(t.props -> (v_shape ->> 'key') ->> 'v', t.props ->> (v_shape ->> 'key'))
+                    SELECT e.eid, t.nid, CASE WHEN jsonb_typeof(t.props -> (v_shape ->> 'key')) = 'string' THEN 't:' || (t.props ->> (v_shape ->> 'key')) ELSE COALESCE(t.props -> (v_shape ->> 'key') ->> 'v', t.props ->> (v_shape ->> 'key')) END
                     FROM $edges e JOIN $nodes t ON t.nid = e.src
                     WHERE v_dir IN ('IN', 'BOTH') AND e.dst = v_from AND e.type = v_type AND t.labels @> (v_shape -> 'labels')
                       AND (v_dir = 'IN' OR e.src <> v_from)

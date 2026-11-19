@@ -583,8 +583,13 @@ JSON entry, so TypeScript and Python run what drivine4j runs from the Kotlin typ
   - `hasId` (`alias`, `key`, `json`, the SQL of the id's JSON as the host binds it);
   - `hasIdIn` (`alias`, `key`, `parameter`, the SQL of a JSON array of each id's JSON text, `["\"a\"", "1"]`, and on
     SQLite `nodes`, the node table, and `labels`);
-  - `keyText`, a temporal id's tag read as its text, as a write plan keys a node; `property`; and `hasProperty`, each with
-    `alias` and `key`;
+  - `keyText`, a temporal id's tag read as its text; `planKey`, the key a write plan keys a node by, a text id marked `t:` so it
+    keys apart from a temporal value or a number that reads alike (drivine-cypher-spec#391); `property`; and `hasProperty`,
+    each with `alias` and `key`;
+  - `planKeyOf` (`json`, an id's JSON as the store's layout holds it), the key a library sends for an id in a write plan's
+    `ids` and `held`, as `planKey` reads it back, answered `{"key": "…"}`: a text marked `t:`, a temporal tag its `v`, a truth
+    value its word, and a number on Postgres as `numeric`'s text, on Oracle as the plain digits `JSON_VALUE` reads (a float
+    held as extended JSON's double too), and on SQLite as its JSON as written; the stamp is no id, and `planKey` refuses it;
   - `hasLabels` (`alias`, `labels`, a list of the node's labels), the test a lookup by its id makes of each label beside
     `hasId`: on Postgres and SQLite each as the label's partial index is made, so the labelled index answers the lookup, and
     on Oracle each by its text, as its index over the id is no label's; `1 = 1` for no labels.
