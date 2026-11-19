@@ -55,6 +55,10 @@ class UnstorableRowWriteTest {
             "UNWIND \$rows AS row MATCH (n:A {id: row.id}) SET n += {q: row.m}" to rows,
             "UNWIND \$rows AS row MATCH (n:A {id: row.id}) SET n.q = [row.m]" to rows,
             "UNWIND \$rows AS row MATCH (n:A {id: row.id}) CREATE (n)-[:R {p: row.m}]->(:A)" to rows,
+            // A list of items given whose kinds the rows share, though a row's list is of two: [1, 'x'], then ['x', 1].
+            "UNWIND \$rows AS row MATCH (n:A) SET n.p = [row.a, row.b]" to mapOf("rows" to listOf(mapOf("a" to 1, "b" to "x"), mapOf("a" to "x", "b" to 1))),
+            // Items of two lists unwound, whose rows are taken together every way: x 1 with y 'x' is a list of two kinds.
+            "UNWIND \$a AS x UNWIND \$b AS y MATCH (n:A) SET n.p = [x, y]" to mapOf("a" to listOf(1, "x"), "b" to listOf(1, "x")),
         )
         for (compiler in compilers()) for ((cypher, parameters) in tested) {
             val sql = sql(compiler, cypher, parameters)

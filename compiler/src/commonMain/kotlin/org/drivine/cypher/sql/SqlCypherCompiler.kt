@@ -3676,6 +3676,28 @@ abstract class SqlCypherCompiler(
         }
 
         /**
+         * Whether [list], a list written, is known when compiling to be a property Neo4j stores in every row ([knownStorable]):
+         * each item given ([givenItems]) and no map or list, and each row's list of one kind. Items unwound from one list are
+         * read row by row, as `[row.a, row.b]` of rows `{a: 1, b: 2}` and `{a: 'x', b: 'y'}` is; items of two lists unwound,
+         * whose rows are taken together every way, only where every item over them all is of one kind. [unstorableGiven]
+         * refuses only a list of two kinds in every row, so `[row.a, row.b]` of `{a: 1, b: 'x'}` and `{a: 'x', b: 1}` is tested.
+         */
+        private fun givenListStorable(list: Expression.ListLiteral, scope: Map<String, Value>): Boolean {
+            val items = list.items.map { item -> item to (givenItems(item, scope) ?: return false) }
+            if (items.any { (_, rows) -> rows.any { it != null && it.isContainerNode && !ValueLayout.isTag(it) } }) return false
+            fun source(item: Expression): String? {
+                var subject = item
+                while (subject is Expression.Property) subject = subject.subject
+                return (subject as? Expression.Variable)?.let { (scope[it.name] as? Value.Json)?.sql }
+            }
+            val lists = items.mapNotNull { (item, _) -> item.takeUnless { it is Expression.Literal || it is Expression.Parameter }?.let(::source) }.distinct()
+            fun kinds(rows: List<JsonNode?>) = rows.mapNotNull { it?.let(::itemKind) }
+            if (lists.size > 1) return items.flatMap { (_, rows) -> kinds(rows) }.distinct().size <= 1
+            val count = items.maxOfOrNull { (_, rows) -> rows.size } ?: 0
+            return (0 until count).all { i -> kinds(items.map { (_, rows) -> rows.getOrNull(i) ?: rows.singleOrNull() }).distinct().size <= 1 }
+        }
+
+        /**
          * Whether the value [written] gives in [scope], a property's or with [entries] a map of properties, is known when
          * compiling to be one Neo4j stores, or to be seen as given ([unstorableGiven] refuses it where it is not), so that no row
          * needs [unstorableItem]'s test: a number, a text, a truth value or a temporal value, a property read from the store,
@@ -3685,7 +3707,7 @@ abstract class SqlCypherCompiler(
          */
         private fun knownStorable(written: Expression?, scope: Map<String, Value>, entries: Boolean): Boolean = when {
             written == null || written is Expression.Parameter -> true
-            !entries && written is Expression.ListLiteral && written.items.all { givenItems(it, scope) != null } -> true
+            !entries && written is Expression.ListLiteral -> givenListStorable(written, scope)
             givenRows(written, scope) != null -> true
             entries && written is Expression.MapLiteral -> written.entries.all { (_, value) -> knownStorable(value, scope, entries = false) }
             entries -> written is Expression.Variable && (scope[written.name] is Value.Node || scope[written.name] is Value.Relationship) ||
