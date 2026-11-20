@@ -1150,4 +1150,36 @@ class OnlineIndexBuildTest {
         // Off Postgres there is nothing to wait for: Oracle's builds of an index left incomplete read no such listing.
         assertNull(oracleDdl.onlineBuildsQuery)
     }
+
+    @Test
+    fun anIndexsEnsureDropsItsIndexLeftInvalidOnlyOnceNoBuildIsUnderWayOnTheTable() {
+        // Left invalid with its record written, and before it was: each ensure's drop, which holds the table, waits for
+        // another session's build of another index on it rather than queue behind it.
+        val builds = postgresDdl.onlineBuildsQuery
+        val listing = postgresDdl.listIndexesQuery(SchemaItemKind.RANGE_INDEX)
+        val index = postgresDdl.objectName(PostgresDdl.RANGE, listOf("Person", "name"))
+        for (invalid in listOf(nameRecord(PostgresDdl.INVALID), listOf(nameIndexObject(PostgresDdl.INVALID)))) {
+            var polls = 0
+            var pollsAtDrop = -1
+            var rebuilt = false
+            val (ran, report) = drive(
+                postgres, name,
+                listed = {
+                    when {
+                        it == builds -> if (++polls <= 2) listOf(mapOf("pid" to 70)) else emptyList()
+                        it == listing && !rebuilt -> invalid
+                        else -> emptyList()
+                    }
+                },
+                execute = {
+                    if (shown(it).startsWith("DROP INDEX IF INVALID")) pollsAtDrop = polls
+                    if (it.startsWith("CREATE INDEX")) rebuilt = true
+                    null
+                },
+            )
+            assertEquals(listOf("DROP INDEX IF INVALID $index", "CREATE INDEX CONCURRENTLY IF NOT EXISTS $index"), indexBuilds(ran).map { it.substringBefore(" ON ") }, "$invalid")
+            assertEquals(3, pollsAtDrop, "$invalid")
+            assertIs<EnsureResult.Created>(report.item!!.result)
+        }
+    }
 }
