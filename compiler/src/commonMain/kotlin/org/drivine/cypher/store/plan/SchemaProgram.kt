@@ -1121,7 +1121,7 @@ internal class SchemaProgram(
         while (io.clock() + poll < deadline) {
             val rows = (io.ask(PlanAction.Query(claim.take, purpose = Purpose.LISTING, delayMillis = poll)) as? PlanOutcome.Rows)?.rows ?: return null
             // A row of one column, when it was claimed, as text: as a library gives a row of one column, its value.
-            val at = rows.firstNotNullOfOrNull { (it as? List<*>)?.singleOrNull() as? String ?: it as? String }
+            val at = rows.firstNotNullOfOrNull(::value)
             if (at != null) return at
             poll = POLL_MILLIS
         }

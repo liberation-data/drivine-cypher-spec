@@ -186,6 +186,8 @@ class OnlineIndexBuildTest {
             ) in report.log,
             report.log.toString(),
         )
+        // Completed in its turn, as one made anew is (#382).
+        assertEquals(listOf("take 1", "release 'claim 0'"), turns)
     }
 
     @Test
@@ -1211,6 +1213,15 @@ class OnlineIndexBuildTest {
             assertEquals(listOf("take 1", "release 'claim 0'"), turns, "$item")
             assertEquals(1, indexBuilds(ran).size, ran.joinToString("\n"))
         }
+    }
+
+    @Test
+    fun aClaimGivenAsARowOfOneColumnIsReadAsItsValue() {
+        // A library that gives the take's row as its columns: the one column is when it was claimed.
+        val (ran, report) = drive(postgres, email, claimed = { listOf(listOf("claim $it")) })
+        assertIs<EnsureResult.Created>(report.item!!.result)
+        assertEquals(listOf("take 1", "release 'claim 0'"), turns)
+        assertEquals(1, indexBuilds(ran).size, ran.joinToString("\n"))
     }
 
     @Test
