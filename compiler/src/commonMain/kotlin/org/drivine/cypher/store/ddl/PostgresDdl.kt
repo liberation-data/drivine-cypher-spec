@@ -412,6 +412,24 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
             "OR (p.relid IS NULL AND p.datname = current_database())"
 
     /**
+     * A claim in the catalog, of the kind `CLAIM:` and the item's, which no listing reads; taken over where it is older
+     * than [CLAIM_STALE_SECONDS] and no online build is under way on the node table ([onlineBuildsQuery]), as a session
+     * that holds it is building, or between its statements.
+     */
+    override fun buildClaim(spec: SchemaItemSpec): BuildClaim {
+        val key = "kind = ${literal(CLAIM + spec.kind.name)} AND label = ${literal(spec.label)} AND properties = ${literal(json(spec.properties))}"
+        val take = """
+            INSERT INTO $catalog AS c (kind, label, properties, details)
+            VALUES (${literal(CLAIM + spec.kind.name)}, ${literal(spec.label)}, ${literal(json(spec.properties))}, jsonb_build_object('at', clock_timestamp()::text))
+            ON CONFLICT (kind, label, properties) DO UPDATE SET details = EXCLUDED.details
+            WHERE (c.details ->> 'at')::timestamptz < clock_timestamp() - interval '$CLAIM_STALE_SECONDS seconds'
+              AND NOT EXISTS ($onlineBuildsQuery)
+            RETURNING jsonb_build_object('at', c.details ->> 'at')
+        """.trimIndent()
+        return BuildClaim(take, "DELETE FROM $catalog WHERE $key AND details ->> 'at' = CAST(${'$'}at AS text)")
+    }
+
+    /**
      * The index of [spec] an online build left invalid, dropped by the name this version makes it under, which is the
      * invalid one's: as before [completeIndex] builds an index again, and as after a uniqueness constraint's online build
      * the data refuses (#382), which leaves its unique index invalid under the name, where `IF NOT EXISTS` would pass over it.
@@ -606,6 +624,12 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
          * online: invalid until the build is done, when it is valid, or [INVALID] where the data refuses it or it is cut
          * short. An ensure waits for the build and reads how it ended, rather than take it as made or drop it (#382).
          */
+        /** What a [buildClaim]'s kind begins with, before the item's: no item's kind does. */
+        const val CLAIM = "CLAIM:"
+
+        /** How old a [buildClaim] is taken over at: a build's default timeout (`PlanRequest.DEFAULT_BUILD_TIMEOUT_MILLIS`). */
+        const val CLAIM_STALE_SECONDS = 60
+
         const val BUILDING = "BUILDING"
 
         /**
