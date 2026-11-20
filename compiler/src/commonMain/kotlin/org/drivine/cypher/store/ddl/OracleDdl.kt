@@ -402,7 +402,7 @@ ${made.entries.joinToString("\n") { (function, making) ->
     }
 
     override fun createIndex(spec: IndexSpec, existing: CatalogItem?): List<DdlStatement> = when (spec) {
-        is RangeIndexSpec -> statements(*rangeIndex(spec).toTypedArray())
+        is RangeIndexSpec -> statements(*rangeIndex(spec, online = true).toTypedArray())
         is VectorIndexSpec -> vectorIndex(spec)
         is FullTextIndexSpec -> statements(textIndex(spec))
         is TextIndexSpec -> throw unsupportedTextIndex(spec, engine)
@@ -423,23 +423,25 @@ ${made.entries.joinToString("\n") { (function, making) ->
 
     /**
      * The index over the property of every node, whatever the label: what a save and a load by id find a node by, built
-     * [ONLINE].
+     * [ONLINE] with [online].
      */
-    private fun sharedIndex(spec: RangeIndexSpec): Pair<String, String> {
+    private fun sharedIndex(spec: RangeIndexSpec, online: Boolean = false): Pair<String, String> {
         val name = objectName(SHARED, spec.properties)
         val expressions = sharedColumns(spec.keys).joinToString(", ")
-        return name to busyWaiting("CREATE INDEX IF NOT EXISTS $name ON $nodes ($expressions) $ONLINE")
+        return name to busyWaiting("CREATE INDEX IF NOT EXISTS $name ON $nodes ($expressions)" + if (online) " $ONLINE" else "")
     }
 
     /**
      * A range index: the index over the property of every node, and the labelled index. It is
      * recorded with the name of its labelled index among its details, and a record already there
      * takes them: one made before there were labelled indexes is listed as incomplete (see
-     * [listed]), so `ensure` makes it again, and its labelled index with it. Each is built
-     * [ONLINE], by an index's own create and a uniqueness constraint's alike (#382).
+     * [listed]), so `ensure` makes it again, and its labelled index with it. With [online], each
+     * is built [ONLINE], as an index's own create builds them (#381). A uniqueness constraint's are built blocking writes,
+     * as its unique index is: sessions ensuring it at once then take turns on the table (ORA-00054, waited out), where
+     * online builds of them beside a blocking one deadlock in the library cache (ORA-04020, #382).
      */
-    private fun rangeIndex(spec: RangeIndexSpec): List<String> {
-        val (name, shared) = sharedIndex(spec)
+    private fun rangeIndex(spec: RangeIndexSpec, online: Boolean = false): List<String> {
+        val (name, shared) = sharedIndex(spec, online)
         val labelled = objectName(LABELLED, listOf(spec.label) + spec.properties)
         val scoped = labelledColumns(spec.label, spec.keys).joinToString(", ")
         // Not where a uniqueness constraint's index over the one property stands for it, as when the
@@ -456,7 +458,7 @@ ${made.entries.joinToString("\n") { (function, making) ->
             BEGIN
                 $standing;
                 IF v_unique = 0 THEN
-                    ${waitingOutBusy("CREATE INDEX IF NOT EXISTS $labelled ON $nodes n ($scoped) $ONLINE", 20)}
+                    ${waitingOutBusy("CREATE INDEX IF NOT EXISTS $labelled ON $nodes n ($scoped)" + if (online) " $ONLINE" else "", 20)}
                 END IF;
             END;
             """,
@@ -577,7 +579,7 @@ ${made.entries.joinToString("\n") { (function, making) ->
             // A node that lacks any of the properties is not constrained, as on the graph engines.
             val expressions = uniqueColumns(spec.label, spec.keys).joinToString(", ")
             // Built blocking writes, as before #382: Oracle's online build of this unique index over keys the data repeats is
-            // not refused as a blocking one is (ORA-01452). The range index under it is built online, as a range index is.
+            // not refused as a blocking one is (ORA-01452). The range index under it is built blocking too (see rangeIndex).
             val unique = busyWaiting("CREATE UNIQUE INDEX IF NOT EXISTS $name ON $nodes n ($expressions)")
             val range = RangeIndexSpec(spec.label, spec.properties)
             if (spec.properties.size > 1) {

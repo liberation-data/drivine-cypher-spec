@@ -72,6 +72,18 @@ data class UniqueRecreation(
 )
 
 /**
+ * The turn of an ensure to build an item ([StoreDdl.buildClaim]), a row of the catalog of its own kind, keyed as the item.
+ * - [take] claims it, giving a row (`at`, when it was claimed) where it is this ensure's turn, and none where another
+ *   session's ensure holds it. A claim older than a build's default timeout, with no online build under way on the node
+ *   table, is taken over: its session ended, or failed, without giving it up.
+ * - [release] gives up the claim taken at `$at`, its one parameter, and not one another session took over since: a
+ *   query, as [take] is, so it runs where the take ran, on the connection of a caller's transaction too, and so sees the
+ *   claim that transaction holds uncommitted.
+ */
+@DrivineInternalApi
+data class BuildClaim(val take: String, val release: String)
+
+/**
  * The statements that make, drop and list a store's indexes and constraints, for a graph and the schema specs: what the
  * three libraries' schema grammars each wrote, written once here so that a store one library makes is the store another
  * reads. Each is a pure function of its arguments. Running them, and deciding what to run, stays each library's.
@@ -119,6 +131,16 @@ interface StoreDdl {
      */
     val onlineBuildsQuery: String?
         get() = null
+
+    /**
+     * The turn an ensure takes before it builds or drops [spec]'s objects, where the store's online builds can deadlock and
+     * leave an index invalid: Postgres's. Sessions ensuring one item at once, as replicas booting together do, then build it
+     * one after another, and those after the first find it made, where each building it at once had deadlocked, and each
+     * then dropped and built again the index a cancelled build left invalid, together, until the tries ran out (#382). Null
+     * on a store whose ensures take turns on the table themselves (Oracle's blocking builds wait out each other's) or
+     * can't deadlock so.
+     */
+    fun buildClaim(spec: SchemaItemSpec): BuildClaim? = null
 
     /**
      * [statement] as a build that blocks writes while it runs, where [statement] builds or drops an index online
@@ -172,7 +194,9 @@ internal fun unsupportedTextIndex(spec: TextIndexSpec, engine: String): Compiler
  *   by the names the graph engines store them under) and its stamp;
  * - `<name>_edge`: a row for each relationship, keyed by `eid`, from the node `src` to the node `dst`, with its type and its
  *   properties, removed with either node;
- * - `<name>_schema`: the catalog, a row for each index or constraint made, keyed by its kind, label and properties.
+ * - `<name>_schema`: the catalog, a row for each index or constraint made, keyed by its kind, label and properties; on
+ *   Postgres, a row too for each ensure's turn to build an item, while it is held, of the kind `CLAIM:` and the item's
+ *   ([StoreDdl.buildClaim]).
  *
  * What a store makes beside the tables is named by [objectName], within the [maxObjectName] it allows.
  *

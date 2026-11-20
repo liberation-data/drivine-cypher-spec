@@ -52,8 +52,10 @@ class OnlineIndexBuildTest {
         execute: (statement: String) -> StoreError? = { null },
         call: ItemCall = ItemCall.ENSURE,
         policy: SchemaPolicy? = null,
+        claimed: (take: Int) -> List<Any?>? = { listOf("claim $it") },
     ): Pair<List<String>, DatabaseReport> {
         val ran = mutableListOf<String>()
+        turns.clear()
         // On Postgres, each uniqueness constraint whose create ran, by its index's name, listed after it, as the store lists
         // its record, until a statement drops it: where [listed] gives no rows.
         val made = linkedMapOf<String, UniquenessConstraintSpec>()
@@ -75,14 +77,24 @@ class OnlineIndexBuildTest {
             val outcomes = mutableListOf<PlanOutcome>()
             for (action in step.actions) {
                 if (action is PlanAction.Query) now += action.delayMillis
-                val outcome = when (action) {
+                val outcome = when {
+                    // A take of a turn to build ([PostgresDdl.buildClaim]): its row where [claimed] gives one, and failed where it gives null.
+                    action is PlanAction.Query && action.statement.startsWith("INSERT INTO drivine_schema AS c") ->
+                        claimed(turns.count { it.startsWith("take") }).also { turns += "take ${it?.size ?: "failed"}" }
+                            ?.let { PlanOutcome.Rows(it) } ?: PlanOutcome.Failed(StoreError(Cause("42501", 0, null, null, "permission denied for table drivine_schema")))
+                    // Its release, a query too: answered as [execute] answers a statement, failed where it gives an error.
+                    action is PlanAction.Query && action.statement.startsWith("DELETE FROM drivine_schema WHERE kind = 'CLAIM:") -> {
+                        turns += "release '${action.parameters["at"]}'"
+                        execute(action.statement)?.let { PlanOutcome.Failed(it) } ?: PlanOutcome.Rows(emptyList())
+                    }
+                    else -> when (action) {
                     is PlanAction.Query -> PlanOutcome.Rows(
-                        when (action.purpose) {
-                            Purpose.LISTING -> listed(action.statement).ifEmpty {
+                        when {
+                            action.purpose == Purpose.LISTING -> listed(action.statement).ifEmpty {
                                 if (action.statement != postgresDdl.listConstraintsQuery()) emptyList()
                                 else ListingRows.rows("postgres", made.values.map(SchemaItemInfo::fromSpec), constraints = true)
                             }
-                            Purpose.SAMPLE -> sampled
+                            action.purpose == Purpose.SAMPLE -> sampled
                             else -> emptyList()
                         },
                     )
@@ -93,6 +105,7 @@ class OnlineIndexBuildTest {
                     }
                     is PlanAction.ReadLowerCopies -> PlanOutcome.Rows(emptyList())
                     else -> PlanOutcome.Ran
+                    }
                 }
                 outcomes += outcome
                 // A library stops a round at its first failure.
@@ -102,6 +115,9 @@ class OnlineIndexBuildTest {
         }
         return ran to (step as PlanStep.Done).report
     }
+
+    /** The turns the last [drive] claimed, `take <rows>` for each take and `release '<at>'` for each release, in order. */
+    private val turns = mutableListOf<String>()
 
     private fun indexBuilds(ran: List<String>) =
         ran.map(::shown).filter { it.startsWith("CREATE INDEX") || it.startsWith("CREATE UNIQUE INDEX") || it.startsWith("DROP INDEX") }
@@ -170,6 +186,8 @@ class OnlineIndexBuildTest {
             ) in report.log,
             report.log.toString(),
         )
+        // Completed in its turn, as one made anew is (#382).
+        assertEquals(listOf("take 1", "release 'claim 0'"), turns)
     }
 
     @Test
@@ -677,28 +695,28 @@ class OnlineIndexBuildTest {
     }
 
     @Test
-    fun anOracleUniquenessConstraintsRangeIndexIsBuiltOnlineAndItsUniqueIndexBlockingWrites() {
-        val (online, built) = drive(oracle, email)
-        // The range index under the constraint online; its unique index blocking writes, as Oracle's online build of it over
-        // keys the data repeats is not refused as a blocking one is.
-        assertEquals(1, online.count { ") ONLINE'" in it }, online.joinToString("\n"))
-        assertTrue(online.any { "CREATE UNIQUE INDEX IF NOT EXISTS" in it && ") ONLINE'" !in it }, online.joinToString("\n"))
-        assertIs<EnsureResult.Created>(built.item!!.result)
-
-        val (ran, report) = drive(oracle, email, execute = { if (") ONLINE'" in it) noOnline else null })
-        assertEquals(1, ran.count { ") ONLINE'" in it })
+    fun anOracleUniquenessConstraintsIndexesAreAllBuiltBlockingWrites() {
+        // Its range index too, as before #382: sessions ensuring it at once take turns on the table (ORA-00054, waited out),
+        // where online builds of its range index beside the blocking build of its unique index deadlock in the library
+        // cache (ORA-04020). Its unique index blocks writes, as Oracle's online build of it over keys the data repeats is
+        // not refused as a blocking one is.
+        val (ran, report) = drive(oracle, email)
+        assertTrue(ran.none { "ONLINE" in it }, ran.joinToString("\n"))
+        assertTrue(ran.any { "CREATE UNIQUE INDEX IF NOT EXISTS" in it }, ran.joinToString("\n"))
         assertIs<EnsureResult.Created>(report.item!!.result)
-        assertEquals(1, report.log.count { it.level == LogLevel.WARN && "can't build an index online" in it.message }, report.log.toString())
+        assertEquals(emptyList(), report.log.filter { it.level == LogLevel.WARN })
     }
 
     @Test
-    fun anOracleUniquenessConstraintOverTwoPropertiesHasItsRangeIndexBuiltOnlineAndNotItsUniqueIndexNorItsRecreate() {
+    fun anOracleUniquenessConstraintOverTwoPropertiesBuildsItsRangeIndexBlockingWritesAndAnIndexOfItsOwnOnline() {
         val pair = UniquenessConstraintSpec("Person", listOf("first", "last")).made()
-        val (online, built) = drive(oracle, pair)
-        // The range index under the constraint, its index over every node's properties and its labelled one; not its unique index.
-        assertEquals(2, online.count { ") ONLINE'" in it }, online.joinToString("\n"))
-        assertTrue(online.none { "CREATE UNIQUE INDEX" in it && ") ONLINE'" in it }, online.joinToString("\n"))
+        val (constrained, built) = drive(oracle, pair)
+        // The range index under the constraint, its index over every node's properties and its labelled one, as its unique index.
+        assertTrue(constrained.none { "ONLINE" in it }, constrained.joinToString("\n"))
         assertIs<EnsureResult.Created>(built.item!!.result)
+        // The same range index ensured on its own is built online (#381).
+        val (own, _) = drive(oracle, RangeIndexSpec("Person", listOf("first", "last")))
+        assertEquals(2, own.count { ") ONLINE'" in it }, own.joinToString("\n"))
         // The unique index a recreate builds beside the old one blocks writes, so no other session ever sees it part built.
         val build = oracleDdl.recreation(pair).build.single() as DdlStatement.Text
         assertTrue("ONLINE" !in build.statement, build.statement)
@@ -943,7 +961,8 @@ class OnlineIndexBuildTest {
         )
         assertEquals(listOf("DROP INDEX IF INVALID $index", "CREATE INDEX CONCURRENTLY IF NOT EXISTS $index"), indexBuilds(ran).map { it.substringBefore(" ON ") })
         assertIs<EnsureResult.Created>(report.item!!.result)
-        assertEquals(3, reads)
+        // Twice building, once invalid before the drop, and again in the ensure's turn to build it (#382).
+        assertEquals(4, reads)
 
         reads = 0
         var dropped = false
@@ -1181,5 +1200,144 @@ class OnlineIndexBuildTest {
             assertEquals(3, pollsAtDrop, "$invalid")
             assertIs<EnsureResult.Created>(report.item!!.result)
         }
+    }
+
+    // ----- Turns to build (#382) -----
+
+    @Test
+    fun aPostgresEnsureThatBuildsTakesItsTurnAndGivesItUpOnceMade() {
+        for (item in listOf<SchemaItemSpec>(email, name)) {
+            val (ran, report) = drive(postgres, item)
+            assertIs<EnsureResult.Created>(report.item!!.result, "$item")
+            // Taken once it would build, then built, then given up, by when it was taken.
+            assertEquals(listOf("take 1", "release 'claim 0'"), turns, "$item")
+            assertEquals(1, indexBuilds(ran).size, ran.joinToString("\n"))
+        }
+    }
+
+    @Test
+    fun aClaimGivenAsARowOfOneColumnIsReadAsItsValue() {
+        // A library that gives the take's row as its columns: the one column is when it was claimed.
+        val (ran, report) = drive(postgres, email, claimed = { listOf(listOf("claim $it")) })
+        assertIs<EnsureResult.Created>(report.item!!.result)
+        assertEquals(listOf("take 1", "release 'claim 0'"), turns)
+        assertEquals(1, indexBuilds(ran).size, ran.joinToString("\n"))
+    }
+
+    @Test
+    fun aTurnAnotherSessionHoldsIsWaitedForAndTheItemItMadeIsTakenAsMade() {
+        // The turn is another session's for two takes; by the third it has made the constraint, which the ensure, in its
+        // turn, reads and builds nothing.
+        val (ran, report) = drive(
+            postgres, email,
+            claimed = { if (it < 2) emptyList() else listOf("claim $it") },
+            listed = { if (it == postgresDdl.listConstraintsQuery() && turns.size >= 3) emailRecord(null) else emptyList() },
+        )
+        assertEquals(emptyList(), indexBuilds(ran))
+        assertIs<EnsureResult.AlreadyMatching>(report.item!!.result)
+        assertEquals(listOf("take 0", "take 0", "take 1", "release 'claim 2'"), turns)
+    }
+
+    @Test
+    fun aTurnHeldElsewherePastTheWaitIsEnsuredWithoutItAndSaidSo() {
+        val (ran, report) = drive(postgres, email, claimed = { emptyList() })
+        assertIs<EnsureResult.Created>(report.item!!.result)
+        assertEquals(1, indexBuilds(ran).count { it.startsWith("CREATE UNIQUE INDEX") })
+        // Polled for the wait, nothing given up, as nothing was taken.
+        // Every 200 ms (the planner's poll) for the 60 s of a build's default timeout.
+        assertEquals(300, turns.size)
+        assertTrue(turns.none { it.startsWith("release") })
+        assertEquals(
+            listOf("Postgres UNIQUENESS_CONSTRAINT on Person[email]: another session's ensure of it held its turn to build it for PT1M: ensuring it without"),
+            report.log.filter { "its turn" in it.message }.map { it.message },
+        )
+    }
+
+    @Test
+    fun aBuildThatOutlastsTheWaitForItsTurnIsWaitedForNotBuiltAgain() {
+        // Another session holds the turn and builds the constraint for longer than the 60 s this ensure waits for its turn:
+        // ensured without it, the ensure finds that build under way, waits for it, and builds nothing of its own.
+        var reads = 0
+        val (ran, report) = drive(
+            postgres, email,
+            claimed = { emptyList() },
+            listed = {
+                when {
+                    it != postgresDdl.listConstraintsQuery() || turns.isEmpty() -> emptyList()
+                    ++reads <= 3 -> emailRecord(PostgresDdl.BUILDING)
+                    else -> emailRecord(null)
+                }
+            },
+        )
+        assertEquals(emptyList(), indexBuilds(ran))
+        assertIs<EnsureResult.AlreadyMatching>(report.item!!.result)
+        assertEquals(300, turns.count { it.startsWith("take") })
+        assertTrue(turns.none { it.startsWith("release") })
+    }
+
+    @Test
+    fun aTurnThatCantBeTakenIsEnsuredWithoutAtOnce() {
+        val (ran, report) = drive(postgres, email, claimed = { null })
+        assertIs<EnsureResult.Created>(report.item!!.result)
+        assertEquals(1, indexBuilds(ran).count { it.startsWith("CREATE UNIQUE INDEX") })
+        assertEquals(listOf("take failed"), turns)
+        assertNull(report.failure)
+    }
+
+    @Test
+    fun aTurnIsGivenUpWhereTheEnsureFails() {
+        // Not made twice over another session's builds: thrown, and the turn given up all the same.
+        val elsewhere = emailIndexObject(null) + ("object" to "drivine_elsewhere")
+        val (_, report) = drive(postgres, email, listed = { if (it == postgresDdl.listConstraintsQuery()) listOf(elsewhere) else emptyList() })
+        assertTrue("UNIQUENESS_CONSTRAINT on Person[email] was not made" in report.failure.orEmpty(), "$report")
+        assertEquals(listOf("take 1", "release 'claim 0'"), turns)
+    }
+
+    @Test
+    fun aReleaseTheStoreRefusesIsLetBe() {
+        // A claim left behind is taken over once it is old: the ensure is made all the same.
+        val refused = StoreError(Cause("08006", 0, null, null, "connection lost"))
+        val (_, report) = drive(postgres, email, execute = { if (it.startsWith("DELETE FROM drivine_schema WHERE kind = 'CLAIM:")) refused else null })
+        assertIs<EnsureResult.Created>(report.item!!.result)
+        assertNull(report.failure)
+        assertNull(report.rethrown)
+        assertEquals(listOf("take 1", "release 'claim 0'"), turns)
+    }
+
+    @Test
+    fun whatAnEnsureSaysBeforeItTakesItsTurnIsSaidOnce() {
+        // The ensure is run again in its turn: a pin the store can't make is said once all the same.
+        val vector = VectorIndexSpec("Doc", "embedding", 3, hnswM = 16)
+        val (_, report) = drive(postgres, vector)
+        assertIs<EnsureResult.Created>(report.item!!.result)
+        assertEquals(listOf("take 1", "release 'claim 0'"), turns)
+        assertEquals(1, report.log.count { it.level == LogLevel.WARN && "pins" in it.message }, report.log.toString())
+    }
+
+    @Test
+    fun anItemAlreadyMadeAndAStoreThatBuildsInTurnsOfItsOwnTakeNoTurn() {
+        val (_, made) = drive(postgres, email, listed = { if (it == postgresDdl.listConstraintsQuery()) emailRecord(null) else emptyList() })
+        assertIs<EnsureResult.AlreadyMatching>(made.item!!.result)
+        assertEquals(emptyList(), turns)
+        // Oracle's blocking builds wait out each other's; SQLite's lock the database.
+        for (planner in listOf(oracle, SchemaPlanner(org.drivine.cypher.store.schema.SqliteSchema(SqliteDdl("drivine"))))) {
+            val (_, report) = drive(planner, email)
+            assertIs<EnsureResult.Created>(report.item!!.result)
+            assertEquals(emptyList(), turns)
+        }
+        assertNull(OracleDdl("drivine").buildClaim(email))
+    }
+
+    @Test
+    fun aTurnIsClaimedByTheItemAndTakenOverOnlyOnceOldWithNoBuildUnderWay() {
+        val claim = postgresDdl.buildClaim(email)
+        assertTrue("VALUES ('CLAIM:UNIQUENESS_CONSTRAINT', 'Person', '[\"email\"]'" in claim.take, claim.take)
+        assertTrue("interval '60 seconds'" in claim.take && "NOT EXISTS (${postgresDdl.onlineBuildsQuery})" in claim.take, claim.take)
+        assertEquals(
+            "DELETE FROM drivine_schema WHERE kind = 'CLAIM:UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"email\"]' AND details ->> 'at' = CAST(\$at AS text) RETURNING kind",
+            claim.release,
+        )
+        // An index and a constraint over the same properties take turns of their own.
+        assertTrue("'CLAIM:RANGE_INDEX'" in postgresDdl.buildClaim(RangeIndexSpec("Person", "email")).take)
     }
 }

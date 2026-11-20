@@ -1,6 +1,7 @@
 package org.drivine.cypher.store.plan
 
 import org.drivine.cypher.CompilerException
+import org.drivine.cypher.store.ddl.BuildClaim
 import org.drivine.cypher.store.ddl.CatalogItem
 import org.drivine.cypher.store.ddl.DdlStatement
 import org.drivine.cypher.store.ddl.FalkorDbDdl
@@ -565,7 +566,7 @@ internal class SchemaProgram(
         // recorded or not: they may have gone out of step while it was gone.
         // One a uniqueness constraint serves is never listed, and is not made anew (#325).
         fillIn(spec) { findIndex(spec) == null && servingConstraint(spec.made()) == null }
-        return afterBuildDeadlocks(spec) { ensureMadeIndex(spec.made(), build) }
+        return inTurn(spec) { afterBuildDeadlocks(spec) { ensureMadeIndex(spec.made(), build) } }
     }
 
     private fun ensureMadeIndex(spec: IndexSpec, build: Build): EnsureResult {
@@ -585,6 +586,8 @@ internal class SchemaProgram(
             // A related item (of the kind and label, not the spec's) lets a store with an index a label (FalkorDB) make
             // only the properties missing.
             val related = items.firstOrNull { it.kind == spec.kind && it.label == spec.label }
+            // Before anything is said: the ensure is run again in its turn, which says it then.
+            awaitTurn(spec)
             warnUnsupportedTuning(spec)
             val leftIncomplete = isLeftIncomplete(spec)
             if (leftIncomplete) ddlOnAQuietTable(made(spec, related, true)) else ddl(made(spec, related, false))
@@ -601,6 +604,7 @@ internal class SchemaProgram(
                 keepForm(spec, form)
                 return EnsureResult.AlreadyMatching(existing)
             }
+            awaitTurn(spec)
             ddlOnAQuietTable(store.ddl.completeIndex(spec, existing.catalogItem))
             val completed = awaitBuilt(spec, findIndex(spec), build) ?: SchemaItemInfo.fromSpec(spec)
             log(LogLevel.INFO, INDEX_MANAGER, "Completed $engine ${spec.kind} on ${spec.label}${spec.properties}: ${store.incompleteness(existing)}")
@@ -933,7 +937,7 @@ internal class SchemaProgram(
         // A constraint that ignores case is over copies every node of its label has, so a node saved before there were
         // copies is held to it too. One made anew fills them in again, recorded or not.
         fillIn(spec) { findConstraint(spec) == null }
-        return afterBuildDeadlocks(spec) { ensureMadeConstraint(spec.made(), violationSampleSize, replaceBlockingIndex) }
+        return inTurn(spec) { afterBuildDeadlocks(spec) { ensureMadeConstraint(spec.made(), violationSampleSize, replaceBlockingIndex) } }
     }
 
     /** `ConstraintManager.ensure` of [spec] as made; where not [again], one already made again for a create that passed over an invalid index. */
@@ -951,7 +955,10 @@ internal class SchemaProgram(
         val form = formOf(spec)
         val invalid = form !is ItemForm.Mismatch && form !is ItemForm.Stale && form !is ItemForm.Newer &&
             if (found != null) store.isIncomplete(found) else isLeftIncomplete(spec)
-        if (invalid) ddlOnAQuietTable(store.ddl.droppedIncomplete(spec))
+        if (invalid) {
+            awaitTurn(spec)
+            ddlOnAQuietTable(store.ddl.droppedIncomplete(spec))
+        }
         // The drop leaves one another session began building since it was listed: waited for, as above, rather than built
         // over (a create would queue behind it), and taken as made where it ends valid.
         val existing = if (invalid) awaitBuildUnderWay(spec)?.takeUnless { store.isIncomplete(it) } else found
@@ -1004,6 +1011,7 @@ internal class SchemaProgram(
             ensureIndex(RangeIndexSpec(spec.label, spec.properties), Build(PlanRequest.DEFAULT_BUILD_TIMEOUT_MILLIS, null))
         }
 
+        awaitTurn(spec)
         try {
             ddl(store.ddl.createConstraint(spec))
         } catch (refused: RawFailure) {
@@ -1049,6 +1057,83 @@ internal class SchemaProgram(
         val completed = if (invalid) ": ${store.incompleteness(found ?: SchemaItemInfo.fromSpec(spec))}" else ""
         log(LogLevel.INFO, CONSTRAINT_MANAGER, "${if (invalid) "Completed" else "Created"} $engine ${spec.kind} on ${spec.label}${spec.properties}$completed")
         return EnsureResult.Created(created)
+    }
+
+    /**
+     * The claim of the item this ensure holds its turn to build, where it builds in turns ([inTurn]), or ensures without one
+     * once the wait for it ran out or it couldn't be taken; null before then, so [awaitTurn] throws.
+     */
+    private var turn: BuildClaim? = null
+
+    /** What an ensure throws where it would build an item before its turn ([awaitTurn]), for [inTurn] to take its turn and ensure it again. */
+    private class TurnAwaited : RuntimeException()
+
+    /**
+     * Before DDL that builds or drops [spec]'s objects, where the store builds an item in turns ([org.drivine.cypher.store.ddl.StoreDdl.buildClaim]):
+     * nothing where this ensure holds its turn, and where it doesn't, thrown to [inTurn], which waits for it.
+     */
+    private fun awaitTurn(spec: SchemaItemSpec) {
+        if (turn == null && store.ddl.buildClaim(spec) != null) throw TurnAwaited()
+    }
+
+    /**
+     * [ensure] of [spec], which reads the store as it is, and where it would build or drop [spec]'s objects ([awaitTurn]),
+     * ensured again in its turn (Postgres, #382): sessions ensuring one item at once build it one after another, and those
+     * after the first find it made. Its turn is claimed ([BuildClaim.take]), polled for while another session's ensure
+     * holds it, for [PlanRequest.DEFAULT_BUILD_TIMEOUT_MILLIS] at most; and given up once the ensure ends, made or not.
+     * Where the wait runs out, or the claim can't be written, it is ensured without its turn, as before turns.
+     */
+    private fun inTurn(spec: SchemaItemSpec, ensure: () -> EnsureResult): EnsureResult {
+        val claim = store.ddl.buildClaim(spec.made()) ?: return ensure()
+        try {
+            return ensure()
+        } catch (awaited: TurnAwaited) {
+            // Its turn, below.
+        }
+        val at = claimed(spec, claim)
+        turn = claim
+        // Read again in its turn: another session may have made it while this one waited.
+        listings.clear()
+        // Given up once the ensure ends, made or failed; not where the program suspends for the library to run an action
+        // (Suspend, no Exception), which is no end: run again from the start, it gets here again.
+        val result = try {
+            ensure()
+        } catch (failed: Exception) {
+            turn = null
+            if (at != null) release(claim, at)
+            throw failed
+        }
+        turn = null
+        if (at != null) release(claim, at)
+        return result
+    }
+
+    /**
+     * Gives up the claim taken [at], a query on a schema connection, as its take is: where a caller's transaction holds that
+     * connection, the claim it holds uncommitted is seen and given up there. One that fails is let be: a claim left behind
+     * is taken over once it is old.
+     */
+    private fun release(claim: BuildClaim, at: String) {
+        io.ask(PlanAction.Query(claim.release, mapOf("at" to at), Purpose.LISTING))
+    }
+
+    /** When [claim] was taken, once it is this ensure's turn; null where it ensures without one ([inTurn]). */
+    private fun claimed(spec: SchemaItemSpec, claim: BuildClaim): String? {
+        val deadline = io.clock() + PlanRequest.DEFAULT_BUILD_TIMEOUT_MILLIS
+        var poll = 0L
+        while (io.clock() + poll < deadline) {
+            val rows = (io.ask(PlanAction.Query(claim.take, purpose = Purpose.LISTING, delayMillis = poll)) as? PlanOutcome.Rows)?.rows ?: return null
+            // A row of one column, when it was claimed, as text: as a library gives a row of one column, its value.
+            val at = rows.firstNotNullOfOrNull(::value)
+            if (at != null) return at
+            poll = POLL_MILLIS
+        }
+        log(
+            LogLevel.INFO, if (spec is ConstraintSpec) CONSTRAINT_MANAGER else INDEX_MANAGER,
+            "$engine ${spec.kind} on ${spec.label}${spec.properties}: another session's ensure of it held its turn to build it for " +
+                "${javaDuration(PlanRequest.DEFAULT_BUILD_TIMEOUT_MILLIS)}: ensuring it without",
+        )
+        return null
     }
 
     /**

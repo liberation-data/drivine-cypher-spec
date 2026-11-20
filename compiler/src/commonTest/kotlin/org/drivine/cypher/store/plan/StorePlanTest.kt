@@ -227,7 +227,16 @@ class StorePlanTest {
             return PlanAction.Query(pinned["stores"]!![id]!!.textValue()!!, purpose = Purpose.SAMPLE, delayMillis = delay)
         }
         query["statement"]?.let { return PlanAction.Query(it.textValue()!!, purpose = Purpose.LISTING, delayMillis = delay) }
+        // An ensure's take of its turn to build an item (Postgres, #382), as its case pins it.
+        query["claim"]?.let { return PlanAction.Query(storeCase(it.textValue()!!)["stores"]!![id]!!["claim"]!!.textValue()!!, purpose = Purpose.LISTING, delayMillis = delay) }
+        // Its release of the turn taken `at`, a query on a schema connection as the take is.
+        query["release"]?.let {
+            val release = storeCase(it.textValue()!!)["stores"]!![id]!!["release"]!!.textValue()!!
+            return PlanAction.Query(release, mapOf("at" to query["at"]!!.textValue()), Purpose.LISTING, delay)
+        }
         return when (val name = query["marker"]!!.textValue()) {
+            "claim" -> PlanAction.Query(markerStore(id)["claim"]!!.textValue()!!, purpose = Purpose.LISTING, delayMillis = delay)
+            "release" -> PlanAction.Query(markerStore(id)["release"]!!.textValue()!!, mapOf("at" to query["at"]!!.textValue()), Purpose.LISTING, delay)
             "read.version", "read.items" -> PlanAction.Query(
                 markerStore(id)["read"]!![name.removePrefix("read.")]!!.textValue()!!, mapOf("scope" to query["scope"]!!.textValue()), Purpose.MARKER, delay,
             )
