@@ -131,9 +131,15 @@ object SqliteSql {
         "${SqliteFunctions.SIMILARITY}(${value(alias, key)}, $vector, ${literal(similarity.name)})"
 
     /** The texts of the JSON array bound as [parameter], as rows of one column, each as a property is read as text ([propertyText]). */
-    fun textValues(parameter: String): String =
-        "SELECT (CASE v.type WHEN 'text' THEN v.value WHEN 'null' THEN NULL WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' " +
-            "WHEN 'integer' THEN json_quote(v.value) WHEN 'real' THEN json_quote(v.value) ELSE v.value END) FROM json_each($parameter) v"
+    fun textValues(parameter: String): String = "SELECT $ITEM_TEXT FROM json_each($parameter) v"
+
+    /** [textValues], each as `id` beside its place in the array, `pos`, counted from 0. */
+    fun placedTextValues(parameter: String): String = "SELECT $ITEM_TEXT AS id, v.key AS pos FROM json_each($parameter) v"
+
+    /** An item `v` of `json_each` as text, as a property is read as text ([propertyText]). */
+    private const val ITEM_TEXT =
+        "(CASE v.type WHEN 'text' THEN v.value WHEN 'null' THEN NULL WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' " +
+            "WHEN 'integer' THEN json_quote(v.value) WHEN 'real' THEN json_quote(v.value) ELSE v.value END)"
 
     /** A JSON object of [entries] whose values are put in as the SQL values they are, a text as a string, each laid out under its key. */
     fun plainObject(entries: List<Pair<String, String>>): String =

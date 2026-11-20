@@ -30,6 +30,14 @@ internal class OnceReached(private val grouped: String, private val once: String
     override fun reading(readers: List<String>): String = "(\n    ${grouped.under()}\n) $once\nJOIN $nodes $row ON $row.nid = $once.nid"
 }
 
+/**
+ * The rows of the table [table] as [row], each joined to the row [given] gives, named [alias], that meets [on]: how a search
+ * among ids for the neighbours after each root reads each root with its place in the ids as given.
+ */
+internal class Placed(private val table: String, private val row: String, private val given: String, private val alias: String, private val on: String) : RowSource {
+    override fun reading(readers: List<String>): String = "$table $row\nJOIN (\n    ${given.under()}\n) $alias ON $on"
+}
+
 /** The rows of [name] as [first], each joined to the rows of [name] as [alias] that meet [on]: every pair. drivine4j's `Paired`. */
 internal class Paired(private val name: String, private val first: String, private val alias: String, private val on: String) : RowSource {
     override fun reading(readers: List<String>): String = "$name $first\nJOIN $name $alias ON $on"
