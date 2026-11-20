@@ -587,7 +587,7 @@ internal class SchemaProgram(
             val related = items.firstOrNull { it.kind == spec.kind && it.label == spec.label }
             warnUnsupportedTuning(spec)
             val leftIncomplete = isLeftIncomplete(spec)
-            ddl(made(spec, related, leftIncomplete))
+            if (leftIncomplete) ddlOnAQuietTable(made(spec, related, true)) else ddl(made(spec, related, false))
             val created = awaitBuilt(spec, findIndex(spec), build) ?: SchemaItemInfo.fromSpec(spec)
             val completed = if (leftIncomplete) ": ${store.incompleteness(SchemaItemInfo.fromSpec(spec))}" else ""
             log(LogLevel.INFO, INDEX_MANAGER, "${if (leftIncomplete) "Completed" else "Created"} $engine ${spec.kind} on ${spec.label}${spec.properties}$completed")
@@ -601,7 +601,7 @@ internal class SchemaProgram(
                 keepForm(spec, form)
                 return EnsureResult.AlreadyMatching(existing)
             }
-            ddl(store.ddl.completeIndex(spec, existing.catalogItem))
+            ddlOnAQuietTable(store.ddl.completeIndex(spec, existing.catalogItem))
             val completed = awaitBuilt(spec, findIndex(spec), build) ?: SchemaItemInfo.fromSpec(spec)
             log(LogLevel.INFO, INDEX_MANAGER, "Completed $engine ${spec.kind} on ${spec.label}${spec.properties}: ${store.incompleteness(existing)}")
             return EnsureResult.Created(completed)
@@ -951,7 +951,7 @@ internal class SchemaProgram(
         val form = formOf(spec)
         val invalid = form !is ItemForm.Mismatch && form !is ItemForm.Stale && form !is ItemForm.Newer &&
             if (found != null) store.isIncomplete(found) else isLeftIncomplete(spec)
-        if (invalid) ddl(store.ddl.droppedIncomplete(spec))
+        if (invalid) ddlOnAQuietTable(store.ddl.droppedIncomplete(spec))
         // The drop leaves one another session began building since it was listed: waited for, as above, rather than built
         // over (a create would queue behind it), and taken as made where it ends valid.
         val existing = if (invalid) awaitBuildUnderWay(spec)?.takeUnless { store.isIncomplete(it) } else found
@@ -1011,7 +1011,7 @@ internal class SchemaProgram(
                 // An online build the data refuses leaves its unique index invalid under the name (Postgres): dropped, so the
                 // next ensure builds it, rather than passing over it as made. Only once the sample bears the refusal out: a
                 // 23505 of another session's build under the name (pg_class) is no refusal of the data, and the index is its.
-                confirmedViolation(spec, violationSampleSize)?.let { ddl(store.ddl.droppedIncomplete(spec)); return it }
+                confirmedViolation(spec, violationSampleSize)?.let { ddlOnAQuietTable(store.ddl.droppedIncomplete(spec)); return it }
             }
             if (store.isBlockedByIndex(refused.error)) {
                 val index = blockingIndex(spec) ?: throw refused
@@ -1081,10 +1081,22 @@ internal class SchemaProgram(
     }
 
     /**
+     * [statements], which drop an index left invalid ([org.drivine.cypher.store.ddl.StoreDdl.droppedIncomplete]), run once
+     * no online build is under way on the graph's node table ([awaitNoOnlineBuild]): the drop holds the table, and a lock
+     * queued behind another session's build, of any index on it, would hold up every read and write of the graph's nodes
+     * until that build ended.
+     */
+    private fun ddlOnAQuietTable(statements: List<DdlStatement>) {
+        if (statements.isEmpty()) return
+        awaitNoOnlineBuild()
+        ddl(statements)
+    }
+
+    /**
      * Polls until no online build is under way on the graph's node table ([org.drivine.cypher.store.ddl.StoreDdl.onlineBuildsQuery]),
-     * for as long as an index's build is waited for at most: whichever index the other session is building, an ensure run
-     * again after then never starts its own build while that one runs, which would deadlock with it again. Where the wait
-     * runs out, or the store has no such listing, it returns, and the ensure is run again as it is.
+     * for [PlanRequest.DEFAULT_BUILD_TIMEOUT_MILLIS] at most: whichever index the other session is building, an ensure run
+     * again after then never starts its own build while that one runs, which would deadlock with it again, and a drop of an
+     * index left invalid never queues behind it. Where the wait runs out, or the store has no such listing, it returns.
      */
     private fun awaitNoOnlineBuild() {
         val query = store.ddl.onlineBuildsQuery ?: return

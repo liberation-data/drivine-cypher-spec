@@ -576,8 +576,9 @@ ${made.entries.joinToString("\n") { (function, making) ->
             val name = objectName(UNIQUE, listOf(spec.label) + spec.properties)
             // A node that lacks any of the properties is not constrained, as on the graph engines.
             val expressions = uniqueColumns(spec.label, spec.keys).joinToString(", ")
-            // Built online, as a range index's are (#382): writes go on while each is built.
-            val unique = busyWaiting("CREATE UNIQUE INDEX IF NOT EXISTS $name ON $nodes n ($expressions) $ONLINE")
+            // Built blocking writes, as before #382: Oracle's online build of this unique index over keys the data repeats is
+            // not refused as a blocking one is (ORA-01452). The range index under it is built online, as a range index is.
+            val unique = busyWaiting("CREATE UNIQUE INDEX IF NOT EXISTS $name ON $nodes n ($expressions)")
             val range = RangeIndexSpec(spec.label, spec.properties)
             if (spec.properties.size > 1) {
                 statements(*rangeIndex(range).toTypedArray(), unique, recorded(spec, name))

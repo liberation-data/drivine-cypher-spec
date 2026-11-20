@@ -677,10 +677,12 @@ class OnlineIndexBuildTest {
     }
 
     @Test
-    fun anOracleUniquenessConstraintIsBuiltOnlineAndOneTheEditionRefusesIsBuiltBlockingWrites() {
+    fun anOracleUniquenessConstraintsRangeIndexIsBuiltOnlineAndItsUniqueIndexBlockingWrites() {
         val (online, built) = drive(oracle, email)
-        // The range index under the constraint and its unique index.
-        assertEquals(2, online.count { ") ONLINE'" in it }, online.joinToString("\n"))
+        // The range index under the constraint online; its unique index blocking writes, as Oracle's online build of it over
+        // keys the data repeats is not refused as a blocking one is.
+        assertEquals(1, online.count { ") ONLINE'" in it }, online.joinToString("\n"))
+        assertTrue(online.any { "CREATE UNIQUE INDEX IF NOT EXISTS" in it && ") ONLINE'" !in it }, online.joinToString("\n"))
         assertIs<EnsureResult.Created>(built.item!!.result)
 
         val (ran, report) = drive(oracle, email, execute = { if (") ONLINE'" in it) noOnline else null })
@@ -690,11 +692,12 @@ class OnlineIndexBuildTest {
     }
 
     @Test
-    fun anOracleUniquenessConstraintOverTwoPropertiesIsBuiltOnlineAndItsRecreateIsNot() {
+    fun anOracleUniquenessConstraintOverTwoPropertiesHasItsRangeIndexBuiltOnlineAndNotItsUniqueIndexNorItsRecreate() {
         val pair = UniquenessConstraintSpec("Person", listOf("first", "last")).made()
         val (online, built) = drive(oracle, pair)
-        // The range index under the constraint, its index over every node's properties and its labelled one, and its unique index.
-        assertEquals(3, online.count { ") ONLINE'" in it }, online.joinToString("\n"))
+        // The range index under the constraint, its index over every node's properties and its labelled one; not its unique index.
+        assertEquals(2, online.count { ") ONLINE'" in it }, online.joinToString("\n"))
+        assertTrue(online.none { "CREATE UNIQUE INDEX" in it && ") ONLINE'" in it }, online.joinToString("\n"))
         assertIs<EnsureResult.Created>(built.item!!.result)
         // The unique index a recreate builds beside the old one blocks writes, so no other session ever sees it part built.
         val build = oracleDdl.recreation(pair).build.single() as DdlStatement.Text
@@ -1092,5 +1095,35 @@ class OnlineIndexBuildTest {
             indexBuilds(constraint).map { it.substringBefore(" ON ") },
         )
         assertIs<EnsureResult.Created>(made.item!!.result)
+    }
+
+    @Test
+    fun theDropOfAnIndexLeftInvalidWaitsUntilNoBuildIsUnderWayOnTheTable() {
+        // Another session builds another index on the table: the drop, which holds the table, waits for it rather than
+        // queue behind it, which would hold up every read and write of the graph's nodes until it ended.
+        val builds = postgresDdl.onlineBuildsQuery
+        var polls = 0
+        var pollsAtDrop = -1
+        var rebuilt = false
+        val (ran, report) = drive(
+            postgres, email,
+            listed = {
+                when {
+                    it == builds -> if (++polls <= 2) listOf(mapOf("pid" to 70)) else emptyList()
+                    it == postgresDdl.listConstraintsQuery() && !rebuilt -> emailRecord(PostgresDdl.INVALID)
+                    else -> emptyList()
+                }
+            },
+            execute = {
+                if (shown(it).startsWith("DROP INDEX IF INVALID")) pollsAtDrop = polls
+                if (it.startsWith("CREATE UNIQUE INDEX")) rebuilt = true
+                null
+            },
+        )
+        assertEquals(listOf("DROP INDEX IF INVALID $emailIndex", "CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS $emailIndex"), indexBuilds(ran).map { it.substringBefore(" ON ") })
+        assertEquals(3, pollsAtDrop)
+        assertIs<EnsureResult.Created>(report.item!!.result)
+        // Off Postgres there is nothing to wait for: Oracle's builds of an index left incomplete read no such listing.
+        assertNull(oracleDdl.onlineBuildsQuery)
     }
 }
