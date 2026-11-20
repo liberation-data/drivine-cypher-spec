@@ -194,7 +194,9 @@ internal fun unsupportedTextIndex(spec: TextIndexSpec, engine: String): Compiler
  *   by the names the graph engines store them under) and its stamp;
  * - `<name>_edge`: a row for each relationship, keyed by `eid`, from the node `src` to the node `dst`, with its type and its
  *   properties, removed with either node;
- * - `<name>_schema`: the catalog, a row for each index or constraint made, keyed by its kind, label and properties.
+ * - `<name>_schema`: the catalog, a row for each index or constraint made, keyed by its kind, label and properties; on
+ *   Postgres, a row too for each ensure's turn to build an item, while it is held, of the kind `CLAIM:` and the item's
+ *   ([StoreDdl.buildClaim]).
  *
  * What a store makes beside the tables is named by [objectName], within the [maxObjectName] it allows.
  *

@@ -1059,7 +1059,10 @@ internal class SchemaProgram(
         return EnsureResult.Created(created)
     }
 
-    /** The claim of the item this ensure holds its turn to build, where it builds in turns ([inTurn]); null before it is its turn. */
+    /**
+     * The claim of the item this ensure holds its turn to build, where it builds in turns ([inTurn]), or ensures without one
+     * once the wait for it ran out or it couldn't be taken; null before then, so [awaitTurn] throws.
+     */
     private var turn: BuildClaim? = null
 
     /** What an ensure throws where it would build an item before its turn ([awaitTurn]), for [inTurn] to take its turn and ensure it again. */
