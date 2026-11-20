@@ -1123,6 +1123,30 @@ class OnlineIndexBuildTest {
         assertEquals(listOf("DROP INDEX IF INVALID $emailIndex", "CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS $emailIndex"), indexBuilds(ran).map { it.substringBefore(" ON ") })
         assertEquals(3, pollsAtDrop)
         assertIs<EnsureResult.Created>(report.item!!.result)
+
+        // So does a recreate's, of an index left invalid before its record was written.
+        polls = 0
+        pollsAtDrop = -1
+        rebuilt = false
+        val index = postgresDdl.objectName(PostgresDdl.RANGE, listOf("Person", "name"))
+        val (recreated, recreate) = drive(
+            postgres, name, call = ItemCall.RECREATE,
+            listed = {
+                when {
+                    it == builds -> if (++polls <= 2) listOf(mapOf("pid" to 70)) else emptyList()
+                    it == postgresDdl.listIndexesQuery(SchemaItemKind.RANGE_INDEX) && !rebuilt -> listOf(nameIndexObject(PostgresDdl.INVALID))
+                    else -> emptyList()
+                }
+            },
+            execute = {
+                if (shown(it).startsWith("DROP INDEX IF INVALID")) pollsAtDrop = polls
+                if (it.startsWith("CREATE INDEX")) rebuilt = true
+                null
+            },
+        )
+        assertEquals(listOf("DROP INDEX IF INVALID $index", "CREATE INDEX CONCURRENTLY IF NOT EXISTS $index"), indexBuilds(recreated).map { it.substringBefore(" ON ") })
+        assertEquals(3, pollsAtDrop)
+        assertNull(recreate.failure)
         // Off Postgres there is nothing to wait for: Oracle's builds of an index left incomplete read no such listing.
         assertNull(oracleDdl.onlineBuildsQuery)
     }

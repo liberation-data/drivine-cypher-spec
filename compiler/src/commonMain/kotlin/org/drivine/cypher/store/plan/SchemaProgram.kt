@@ -702,7 +702,7 @@ internal class SchemaProgram(
         // properties, which the create takes into account.
         val related = indexes(spec.kind).firstOrNull { it.kind == spec.kind && it.label == spec.label }
         warnUnsupportedTuning(spec)
-        ddl(made(spec, related, isLeftIncomplete(spec)))
+        if (isLeftIncomplete(spec)) ddlOnAQuietTable(made(spec, related, true)) else ddl(made(spec, related, false))
         val created = awaitBuilt(spec, findIndex(spec), build) ?: SchemaItemInfo.fromSpec(spec)
         if (aliases.isNotEmpty()) alias(created, aliases)
         logEffectiveVectorConfig(spec, created)
