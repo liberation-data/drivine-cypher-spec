@@ -257,9 +257,12 @@ object VectorSearch {
     private fun measuresEveryPair(request: VectorRequest, among: VectorAmong): Boolean =
         among.neighbours == AmongNeighbours.After && request.searchK == null
 
-    /** What a search among ids warns of: one for each pair once that goes through an index, as `searchK` is given. */
+    /**
+     * What a search among ids warns of: one for each pair once that goes through an index, as `searchK` is given. SQLite
+     * makes no vector index, so it measures every pair whatever dimensions a request gives.
+     */
     private fun amongWarnings(store: SearchStore, request: VectorRequest, among: VectorAmong): List<String> {
-        val throughIndex = store.graphEngine || request.index.dimensions != null
+        val throughIndex = store.graphEngine || (store != SearchStore.SQLITE && request.index.dimensions != null)
         return if (among.neighbours != AmongNeighbours.After || request.searchK == null || !throughIndex) emptyList()
         else listOf(
             "A search among ids for the neighbours after each root goes through the vector index, as searchK is given: a pair " +

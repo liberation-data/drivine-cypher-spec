@@ -274,9 +274,10 @@ order (numbers by value, text by code point, temporals by time), and every store
   where one is made, and keeps those after it. A pair the index doesn't give to the first of its roots is missed, and the
   plan warns so.
 - **`All` is unchanged.** It goes through an index wherever one is made, as it went before `After` (making it exact by
-  default too is #408). On a SQL store the embedding, and an among search's
-`idProperty`, are read at the key store layout 2 holds the property under, `$$e` for a name `$e` that begins with `$`
-(`ValueLayout.escape`), as the DDL's index reads it.
+  default too is #408).
+
+On a SQL store the embedding, and an among search's `idProperty`, are read at the key store layout 2 holds the property
+under, `$$e` for a name `$e` that begins with `$` (`ValueLayout.escape`), as the DDL's index reads it.
 
 `plan` gives a `VectorPlan`, or a `Refusal` of a graph name the store can't take:
 

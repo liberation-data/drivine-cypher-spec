@@ -278,6 +278,18 @@ class VectorAmongAfterTest {
             assertEquals(emptyList(), measured.warnings, "${store.id} with no index made")
         }
         assertEquals(emptyList(), plan(SearchStore.SQLITE, request(searchK = 20)).warnings, "SQLite has no index")
+        assertEquals(emptyList(), plan(SearchStore.SQLITE, request(searchK = 20, dimensions = 3)).warnings, "SQLite has no index, whatever dimensions are given")
+    }
+
+    @Test
+    fun withoutAThresholdAGraphEngineKeepsEachRootsBestTopK() {
+        for (store in listOf(SearchStore.NEO4J, SearchStore.MEMGRAPH, SearchStore.FALKORDB)) {
+            val planned = plan(store, request(threshold = null))
+            val cypher = planned.cypher!!
+            assertTrue("_score >=" !in cypher, "${store.id}:\n$cypher")
+            assertTrue(" AS _score\n  ORDER BY _score DESC, _next\n  LIMIT \$_cy_vec2\n" in cypher, "${store.id}:\n$cypher")
+            assertEquals(setOf("_cy_vec1", "_cy_vec2"), planned.parameters.keys, store.id)
+        }
     }
 
     @Test
