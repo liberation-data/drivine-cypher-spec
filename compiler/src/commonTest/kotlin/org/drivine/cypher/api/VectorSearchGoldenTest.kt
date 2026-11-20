@@ -100,11 +100,24 @@ class VectorSearchGoldenTest {
                     answer, store, vectorRequest(request["vector"] as ObjectNode), got["sql"]?.textValue(), got["cypher"]?.textValue(),
                     got["labelCheck"]?.textValue(), got["vector"]?.textValue(),
                 ) ?: unlikeParameters(answer["parameters"]!!, TypedJson.value(got["parameters"]!!) as Map<*, *>)
-                    ?: if (got["warnings"] is ArrayNode && got["warnings"]!!.size() == 0) null else "warnings ${got["warnings"]}"
+                    ?: unlikeWarnings(store, request, got["warnings"])
             }
             if (problem != null) wrong += "${CypherJson.writeValueAsString(request)}: $problem"
         }
         assertTrue(wrong.isEmpty(), "${wrong.size} unlike drivine4j's, such as:\n" + wrong.take(5).joinToString("\n\n"))
+    }
+
+    /**
+     * What of the warnings the JSON answer gives ([given]) is unlike what it should: drivine4j's statements warn of nothing, and
+     * the module warns once of a search among ids that goes through an index, as its answer is approximate (#408): on a graph
+     * engine, or on Postgres or Oracle where an index is made. Null where they are alike.
+     */
+    private fun unlikeWarnings(store: SearchStore, request: ObjectNode, given: JsonNode?): String? {
+        val vector = request["vector"] as ObjectNode
+        val throughIndex = vector.has("among") && vector.has("searchK") && (store.graphEngine || (store != SearchStore.SQLITE && vector.has("index")))
+        val texts = (given as? ArrayNode)?.map { it.textValue() } ?: return "warnings $given"
+        val alike = if (throughIndex) texts.size == 1 && "can be incomplete" in texts.single()!! else texts.isEmpty()
+        return if (alike) null else "warnings $texts"
     }
 
     /** What of the module's answer is unlike drivine4j's [answer], its parameters aside; null where none is. */

@@ -24,8 +24,8 @@ import org.drivine.schema.SimilarityFunction
  *
  * @param dimensions on Postgres and Oracle, the size of the embeddings the index on the property was made for, as the catalog
  *   records it for the label searched ([VectorRequest.partitionLabel], or the root's first); null where none is made. A nearest search goes through the index only where it is the query vector's
- *   size, and measures every node otherwise; a search among ids goes through any index made, but for each pair once
- *   ([AmongNeighbours.After]) without `searchK`, which measures every pair.
+ *   size, and measures every node otherwise; a search among ids with a `searchK` goes through any index made, and one
+ *   without measures every pair.
  * @param name on a graph engine, the index's name where it isn't `<label>_<property>_vector`; a blank one is none.
  */
 @DrivineInternalApi
@@ -56,7 +56,14 @@ data class VectorAmong(
 @DrivineInternalApi
 sealed interface AmongNeighbours {
 
-    /** Every other root: a pair can come back twice, once under each of its roots. The search is as it was before [After]. */
+    /**
+     * Every other root: a pair can come back twice, once under each of its roots.
+     *
+     * With [VectorRequest.searchK] left out, every pair of the roots is measured, through no index: exact, its cost growing
+     * with the square of the number of roots. With it, each root asks the vector index for its `searchK` nearest, where one
+     * is made, and keeps those among the roots: a root's neighbours the index doesn't give it are missed, and the plan warns
+     * so (liberation-data/drivine-cypher-spec#408).
+     */
     data object All : AmongNeighbours
 
     /**
@@ -82,9 +89,9 @@ sealed interface AmongNeighbours {
  *   asked for where [searchK] is null; among ids, how many neighbours each root keeps.
  * @param searchK how many the index is asked for, where it is more than [topK]: the nearest `searchK` are measured, and of
  *   what is left of them after the library's filters `topK` come back. On Neo4j a nearest search with it scores what the index
- *   found exactly, as the index's own score doesn't order quite as the exact one does. Among ids, where it is null, the index
- *   is asked for `topK + 1` for each root, as drivine4j's `loadNearestAmong` asks: it finds the root itself first; for each
- *   pair once ([AmongNeighbours.After]) no index is asked, and every pair of the roots is measured.
+ *   found exactly, as the index's own score doesn't order quite as the exact one does. Among ids, each root asks the index
+ *   for its `searchK` nearest, where one is made; where it is null no index is asked, and every pair of the roots is
+ *   measured.
  * @param size the query vector's size, on a nearest search on a SQL store: only embeddings of that size are measured.
  * @param partitionLabel the label whose index is searched, in place of the root's first: one index for each partition, of the
  *   same property. The root's own labels are still checked. A search among ids takes none.
@@ -131,8 +138,8 @@ sealed interface VectorResult
  * @param labelCheck on a graph engine, whether a hit has every one of the root's labels, as a predicate on the node: the index
  *   is on one label, so a hit with that label alone is no root. Null where the root's one label is the index's. The library
  *   tests it before the threshold and its filters.
- * @param indexK how many the index is asked for: [VectorRequest.searchK], or where that is null `topK` on a nearest search and
- *   `topK + 1` among ids; 0 on a search among ids that measures every pair of the roots, asking no index.
+ * @param indexK how many the index is asked for: [VectorRequest.searchK], or where that is null `topK` on a nearest search;
+ *   0 on a search among ids that measures every pair of the roots, asking no index.
  * @param warnings what the module warns of, for the library to log.
  * @param timeoutMillis on FalkorDB, the timeout the library runs the statement under, in milliseconds (`GRAPH.QUERY`'s
  *   `TIMEOUT`); null to run it as it runs any statement.
@@ -165,8 +172,8 @@ object VectorSearch {
     const val PREFIX: String = "_cy_vec"
 
     /**
-     * The timeout, in milliseconds, FalkorDB runs a search among ids under where it measures every pair of the roots
-     * ([AmongNeighbours.After] without `searchK`). It is a ceiling, not a target: FalkorDB's image sets the legacy `TIMEOUT` to
+     * The timeout, in milliseconds, FalkorDB runs a search among ids under where it measures every pair of the roots, as
+     * without `searchK`. It is a ceiling, not a target: FalkorDB's image sets the legacy `TIMEOUT` to
      * 1 s, which would end a search of a few hundred roots that runs longer. Were it ever to be tuned, it would be given on the
      * request; there is no setting for it.
      */
@@ -188,7 +195,7 @@ object VectorSearch {
             if (store.graphEngine) {
                 when {
                     among == null -> graphNearest(store, request, scope)
-                    measuresEveryPair(request, among) -> graphAmongEveryPair(store, request, among, scope)
+                    measuresEveryPair(request) -> graphAmongEveryPair(store, request, among, scope)
                     else -> graphAmong(store, request, among, scope)
                 }
             } else if (among != null) {
@@ -199,7 +206,7 @@ object VectorSearch {
                 }
                 VectorPlan(
                     sql = sql, cypher = null, parameters = scope.bindings(), vector = null, labelCheck = null,
-                    indexK = if (measuresEveryPair(request, among)) 0 else amongK(request), warnings = amongWarnings(store, request, among),
+                    indexK = if (measuresEveryPair(request)) 0 else amongK(request), warnings = amongWarnings(store, request, among),
                 )
             } else {
                 val vector = scope.reserved()
@@ -245,31 +252,34 @@ object VectorSearch {
     /** The label the index a search goes through is on: its partition's, or the root's first. */
     private fun indexLabel(request: VectorRequest): String = request.partitionLabel ?: request.labels.first()
 
-    /**
-     * How many a search among ids asks the index for, for each root: `searchK`, or one more than it keeps, as drivine4j's
-     * `GraphObjectManager.loadNearestAmong` asks, since the index finds the root itself first.
-     */
-    private fun amongK(request: VectorRequest): Int = request.searchK ?: (request.topK + 1)
+    /** How many a search among ids that goes through the index asks it for, for each root: `searchK`, which it is given. */
+    private fun amongK(request: VectorRequest): Int = requireNotNull(request.searchK) { "A search among ids without searchK asks no index." }
 
     /**
-     * Whether a search among ids measures every pair of the roots, through no index made: one for each pair once
-     * ([AmongNeighbours.After]) without `searchK`. A search for every neighbour ([AmongNeighbours.All]) goes as it went,
-     * through an index wherever one is made (liberation-data/drivine-cypher-spec#408).
+     * Whether a search among ids measures every pair of the roots, through no index made: one without `searchK`, whichever
+     * neighbours it keeps (liberation-data/drivine-cypher-spec#408).
      */
-    private fun measuresEveryPair(request: VectorRequest, among: VectorAmong): Boolean =
-        among.neighbours == AmongNeighbours.After && request.searchK == null
+    private fun measuresEveryPair(request: VectorRequest): Boolean = request.searchK == null
 
     /**
-     * What a search among ids warns of: one for each pair once that goes through an index, as `searchK` is given. SQLite
-     * makes no vector index, so it measures every pair whatever dimensions a request gives.
+     * What a search among ids warns of: one that goes through an index, as `searchK` is given, that its answer is the
+     * index's, approximate. SQLite makes no vector index, so it measures every pair whatever dimensions a request gives.
      */
     private fun amongWarnings(store: SearchStore, request: VectorRequest, among: VectorAmong): List<String> {
         val throughIndex = store.graphEngine || (store != SearchStore.SQLITE && request.index.dimensions != null)
-        return if (among.neighbours != AmongNeighbours.After || request.searchK == null || !throughIndex) emptyList()
+        val searchK = request.searchK
+        return if (searchK == null || !throughIndex) emptyList()
         else listOf(
-            "A search among ids for the neighbours after each root goes through the vector index, as searchK is given: a pair " +
-                "is found only where the index gives the later root among the earlier one's nearest ${request.searchK}, so pairs " +
-                "can be missed. Leave searchK out to measure every pair of the ids exactly.",
+            when (among.neighbours) {
+                AmongNeighbours.After ->
+                    "A search among ids for the neighbours after each root goes through the vector index, as searchK is given: a pair " +
+                        "is found only where the index gives the later root among the earlier one's nearest $searchK, so pairs " +
+                        "can be missed. Leave searchK out to measure every pair of the ids exactly."
+                AmongNeighbours.All ->
+                    "A search among ids goes through the vector index, as searchK is given: a root's neighbours are only those the " +
+                        "index gives among its nearest $searchK, approximately, so they can be incomplete. Leave searchK out to " +
+                        "measure every pair of the ids exactly."
+            },
         )
     }
 
@@ -344,16 +354,16 @@ object VectorSearch {
     }
 
     /**
-     * Without an index made, each root measures only the other roots whose embeddings are of its size: exact. With one, each
-     * root asks the index over the embeddings of the root's first label for its `searchK` nearest, and keeps those among the
-     * roots: approximate, as the index is. For each pair once ([AmongNeighbours.After]) each root keeps only the roots placed
-     * after it in the ids, and without `searchK` is measured as where no index is made.
+     * Without `searchK`, or without an index made, each root measures only the other roots whose embeddings are of its size:
+     * exact. With both, each root asks the index over the embeddings of the root's first label for its `searchK` nearest, and
+     * keeps those among the roots: approximate, as the index is. For each pair once ([AmongNeighbours.After]) each root keeps
+     * only the roots placed after it in the ids.
      */
     private fun postgresAmong(ddl: PostgresDdl, request: VectorRequest, among: VectorAmong, scope: SearchParameters): String {
         val key = stored(request.property)
         val id = PostgresSql.property("c", stored(among.idProperty))
         val after = among.neighbours == AmongNeighbours.After
-        val dimensions = request.index.dimensions.takeUnless { measuresEveryPair(request, among) }
+        val dimensions = request.index.dimensions.takeUnless { measuresEveryPair(request) }
         val embedded = dimensions?.let { PostgresSql.holdsEmbedding("c", key, it) } ?: "jsonb_typeof(${PostgresSql.value("c", key)}) = 'array'"
         val ids = scope.bound(among.ids)
         val has = listOf(PostgresSql.hasLabels("c", request.labels), embedded) + listOfNotNull(postgresAnyLength(request, "c", key))
@@ -426,17 +436,17 @@ object VectorSearch {
     }
 
     /**
-     * Without an index made, every pair of roots whose embeddings are of one size is measured: exact. With one, each root asks
-     * the index over the side table for its `searchK` nearest, and keeps those among the roots: approximate. Only the roots
-     * the side table holds are searched from, as it holds only embeddings of the index's size. For each pair once
-     * ([AmongNeighbours.After]) each root keeps only the roots placed after it in the ids, and without `searchK` is measured
-     * as where no index is made. Either way each root's neighbours are numbered best first, and the first `topK` kept.
+     * Without `searchK`, or without an index made, every pair of roots whose embeddings are of one size is measured: exact.
+     * With both, each root asks the index over the side table for its `searchK` nearest, and keeps those among the roots:
+     * approximate. Only the roots the side table holds are searched from, as it holds only embeddings of the index's size.
+     * For each pair once ([AmongNeighbours.After]) each root keeps only the roots placed after it in the ids. Either way each
+     * root's neighbours are numbered best first, and the first `topK` kept.
      */
     private fun oracleAmong(ddl: OracleDdl, request: VectorRequest, among: VectorAmong, scope: SearchParameters): String {
         val key = stored(request.property)
         val id = OracleSql.property("c", stored(among.idProperty))
         val after = among.neighbours == AmongNeighbours.After
-        val embeddings = request.index.dimensions?.takeUnless { measuresEveryPair(request, among) }?.let { ddl.vectors(request.labels.first(), request.property) }
+        val embeddings = request.index.dimensions?.takeUnless { measuresEveryPair(request) }?.let { ddl.vectors(request.labels.first(), request.property) }
         val ids = scope.bound(among.ids)
         val selected = "c.nid, $id AS id, ${OracleSql.embedding("c", key)} AS embedding"
         val has = listOfNotNull(
@@ -536,8 +546,8 @@ object VectorSearch {
     }
 
     /**
-     * A search among ids on a graph engine: each id unwound to its root, and the index asked for each root's nearest by the
-     * root's own embedding, so the engine answers every root in one statement. What the index yields is narrowed to the
+     * A search among ids with `searchK` on a graph engine: each id unwound to its root, and the index asked for each root's
+     * `searchK` nearest by the root's own embedding, so the engine answers every root in one statement. What the index yields is narrowed to the
      * roots, less the root itself (for each pair once, to the roots after it) and what scores under the threshold, and the best `topK` of what is left are kept. On Neo4j
      * the score is measured afresh, as the narrowing trims what the index found.
      */
@@ -573,10 +583,10 @@ object VectorSearch {
     }
 
     /**
-     * A search among ids for each pair once, without `searchK`, on a graph engine: every pair of the roots measured by the
-     * engine's own function of two embeddings, through no index, so the answer is exact. Each root, unwound with its place among
-     * the ids, measures in a subquery of its own only the roots whose places come after its own, and keeps its best `topK`:
-     * no two ids are compared, and a statement holds a root's `topK` at a time, never every pair. A pair whose embeddings
+     * A search among ids without `searchK` on a graph engine: every pair of the roots measured by the engine's own function of
+     * two embeddings, through no index, so the answer is exact. Each root, unwound with its place among the ids, measures in a
+     * subquery of its own the roots at every other place ([AmongNeighbours.All]), or only those whose places come after its own
+     * ([AmongNeighbours.After]), and keeps its best `topK`: no two ids are compared, and a statement holds a root's `topK` at a time, never every pair. A pair whose embeddings
      * differ in size has no score, and an embedding of no length none by cosine, as on the SQL stores; FalkorDB can't tell
      * either of a stored vector, so it refuses a pair of two sizes, as its index does, and measures one of no length.
      */
@@ -592,13 +602,17 @@ object VectorSearch {
         val threshold = among.threshold?.let { "\n  WHERE $SCORE >= ${scope.bound(it)}\n  WITH $NODE, $NEXT, $SCORE" } ?: ""
         val topK = scope.bound(request.topK)
         val open = if (store == SearchStore.NEO4J) "CALL ($SEED, $POS) {" else "CALL {\n  WITH $SEED, $POS"
+        val others = when (among.neighbours) {
+            AmongNeighbours.After -> "range($POS + 1, size($ids) - 1)"
+            AmongNeighbours.All -> "[_at IN range(0, size($ids) - 1) WHERE _at <> $POS]"
+        }
         val cypher = """
             |UNWIND range(0, size($ids) - 1) AS $POS
             |WITH $POS, $ids[$POS] AS $SEED_ID
             |MATCH ($SEED:$labels)
             |WHERE ${seedHas.joinToString(" AND ")}
             |$open
-            |  UNWIND range($POS + 1, size($ids) - 1) AS $NEXT
+            |  UNWIND $others AS $NEXT
             |  WITH $SEED, $NEXT, $ids[$NEXT] AS $NEXT_ID
             |  MATCH ($NODE:$labels)
             |  WHERE ${nodeHas.joinToString(" AND ")}

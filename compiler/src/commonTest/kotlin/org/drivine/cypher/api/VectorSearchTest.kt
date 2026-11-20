@@ -88,8 +88,8 @@ class VectorSearchTest {
             val sql = plan(SearchStore.ORACLE, request(similarity, labels = listOf(label))).sql!!
             assertTrue(sql.contains("FROM $table s ") && sql.contains("ORDER BY distance FETCH APPROX FIRST"), "the search reads $table:\n$sql")
             assertTrue(sql.contains("TO_VECTOR(\$_cy_vec1), $metric)"), "the search measures by $metric:\n$sql")
-            val among = plan(SearchStore.ORACLE, request(similarity, labels = listOf(label)).copy(among = VectorAmong(listOf("a"), "id"))).sql!!
-            assertTrue(among.contains("FROM $table e"), "a search among ids reads $table:\n$among")
+            val among = plan(SearchStore.ORACLE, request(similarity, labels = listOf(label)).copy(searchK = 20, among = VectorAmong(listOf("a"), "id"))).sql!!
+            assertTrue(among.contains("FROM $table e"), "a search among ids with searchK reads $table:\n$among")
         }
     }
 
@@ -109,6 +109,7 @@ class VectorSearchTest {
         val label = "`it's``\\x`"
         val among = VectorAmong(listOf("a"), "id")
         for (store in listOf(SearchStore.NEO4J, SearchStore.MEMGRAPH, SearchStore.FALKORDB)) {
+            // A search among ids asks the index, and writes its names into the CALL, where it is given a searchK.
             val byName = request(labels = listOf("Doc")).copy(index = VectorIndex(name = odd))
             val byLabel = request(labels = listOf(odd, odd), property = odd)
             val calls = when (store) {
@@ -120,7 +121,7 @@ class VectorSearchTest {
                 SearchStore.FALKORDB -> listOf("$string, $string, " to byLabel, "'Doc', 'embedding', " to byName)
                 else -> listOf("$string, " to byName, "'it\\'s`\\\\x_it\\'s`\\\\x_vector', " to byLabel)
             }
-            for ((arguments, request) in expected) for (asked in listOf(request, request.copy(among = among))) {
+            for ((arguments, request) in expected) for (asked in listOf(request, request.copy(searchK = 20, among = among))) {
                 val cypher = plan(store, asked).cypher!!
                 assertTrue("$calls$arguments" in cypher, "${store.id}: $cypher")
             }
@@ -134,7 +135,7 @@ class VectorSearchTest {
             assertEquals(bound, partitioned.parameters["_cy_vec1"], store.id)
             assertTrue(partitioned.cypher!!.startsWith("$calls\$_cy_vec1, " + if (store == SearchStore.FALKORDB) "$string, " else ""), "${store.id}: ${partitioned.cypher}")
             // A plain name is written as it always was: bare in the MATCH, between plain quotes in the CALL.
-            val plain = plan(store, request(labels = listOf("Doc", "Chunk")).copy(among = among)).cypher!!
+            val plain = plan(store, request(labels = listOf("Doc", "Chunk")).copy(searchK = 20, among = among)).cypher!!
             assertTrue("\nMATCH (seed:Doc:Chunk)\n" in plain, "${store.id}: $plain")
             val plainArguments = if (store == SearchStore.FALKORDB) "'Doc', 'embedding', " else "'Doc_embedding_vector', "
             assertTrue("$calls$plainArguments" in plain, "${store.id}: $plain")
@@ -184,17 +185,16 @@ class VectorSearchTest {
     }
 
     @Test
-    fun amongIdsWithoutSearchKTheIndexIsAskedForOneMoreThanTopK() {
-        // drivine4j's loadNearestAmong asks for searchK ?: topK + 1: the index finds the root itself first.
+    fun amongIdsWithoutSearchKNoIndexIsAsked() {
+        // Every pair of the roots is measured, whatever index is made (liberation-data/drivine-cypher-spec#408); with searchK
+        // the index is asked for it, where one is made.
         val among = request().copy(among = VectorAmong(listOf("a", "b"), "id"))
         for (store in listOf(SearchStore.POSTGRES, SearchStore.ORACLE, SearchStore.NEO4J, SearchStore.MEMGRAPH, SearchStore.FALKORDB)) {
             val indexed = among.copy(index = VectorIndex(dimensions = 3))
-            val plan = plan(store, indexed)
-            assertEquals(11, plan.indexK, store.id)
-            assertTrue(11 in plan.parameters.values && 10 in plan.parameters.values, "${store.id}: ${plan.parameters}")
+            assertEquals(0, plan(store, indexed).indexK, store.id)
             assertEquals(40, plan(store, indexed.copy(searchK = 40)).indexK, store.id)
         }
-        assertEquals(11, plan(SearchStore.SQLITE, among).indexK)
+        assertEquals(0, plan(SearchStore.SQLITE, among).indexK)
     }
 
     @Test

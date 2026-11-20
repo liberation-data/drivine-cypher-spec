@@ -13,11 +13,11 @@
 # A runner empties the graph, makes each of `indexes`, as the schema API ensures a spec (store.yaml's DDL), writes `graph`,
 # and waits for the indexes to hold it (CALL db.awaitIndexes() on Neo4j), before each case.
 #
-# The answer is exact: every pair of the set measured. A search with `neighbours: after` and no searchK measures every
-# pair on every store, and so does any search on SQLite, and on Postgres and Oracle with no index made; one with a
-# searchK goes through the index where one is made, and is approximate. On a graph this small an index finds every node,
-# so a step with a searchK of 10 or more gives the exact rows on every store. Where a step's search goes through an index
-# with `neighbours: after`, the module warns that pairs can be missed: `warned` lists the stores it warns on.
+# The answer is exact: every pair of the set measured. A search with no searchK measures every pair on every store,
+# whichever neighbours it keeps, and so does any search on SQLite, and on Postgres and Oracle with no index made; one with
+# a searchK goes through the index where one is made, and is approximate. On a graph this small an index finds every node,
+# so a step with a searchK of 10 or more gives the exact rows on every store. Where a step's search goes through an index,
+# the module warns that its answer can be incomplete: `warned` lists the stores it warns on.
 #
 # Scores, as vector.yaml's: on a cosine index (1 + cos) / 2, on a euclidean one 1 / (1 + d²). Each is compared within
 # 1e-6, as Neo4j's and FalkorDB's are float32s. No step rests on the order of two neighbours that score alike. On a cosine
@@ -62,6 +62,27 @@ cases:
           - {seed: "e", near: [{id: "f", score: 0.8}]}
           - {seed: "f", near: []}
 
+  - name: "Every neighbour, exact"
+    description: >-
+      With neighbours: all, the default, a node keeps its nearest among every other node of the ids, so a pair can come
+      back twice, once under each of its nodes. Without a searchK every pair is measured, through no index, whatever index
+      is made, and nothing is warned: x lies nearest a of all, but is not among the ids, so it never comes back.
+    steps:
+      - among: {label: "Doc", property: "embedding", ids: ["a", "b", "c", "e", "f"], topK: 2, neighbours: "all"}
+        rows:
+          - {seed: "a", near: [{id: "b", score: 0.9}, {id: "c", score: 0.8}]}
+          - {seed: "b", near: [{id: "c", score: 0.98}, {id: "a", score: 0.9}]}
+          - {seed: "c", near: [{id: "b", score: 0.98}, {id: "a", score: 0.8}]}
+          - {seed: "e", near: [{id: "f", score: 0.8}, {id: "c", score: 0.64}]}
+          - {seed: "f", near: [{id: "e", score: 0.8}, {id: "c", score: 0.2}]}
+      - among: {label: "Doc", property: "embedding", ids: ["f", "c", "a", "e", "b", "c"], topK: 2, threshold: 0.85}
+        rows:
+          - {seed: "a", near: [{id: "b", score: 0.9}]}
+          - {seed: "b", near: [{id: "c", score: 0.98}, {id: "a", score: 0.9}]}
+          - {seed: "c", near: [{id: "b", score: 0.98}]}
+          - {seed: "e", near: []}
+          - {seed: "f", near: []}
+
   - name: "A node's nearest all before it"
     description: >-
       The direction is kept before each node's topK are cut, so no pair is lost to the cut. With topK 1, c's nearest of all
@@ -77,6 +98,7 @@ cases:
           - {seed: "e", near: [{id: "f", score: 0.8}]}
           - {seed: "f", near: []}
       - among: {label: "Doc", property: "embedding", ids: ["a", "b", "c", "d", "e", "f"], topK: 1, searchK: 10, neighbours: "all"}
+        warned: ["neo4j", "memgraph", "falkordb", "postgres", "oracle"]
         rows:
           - {seed: "a", near: [{id: "b", score: 0.9}]}
           - {seed: "b", near: [{id: "c", score: 0.98}]}
@@ -115,7 +137,8 @@ cases:
     description: >-
       Given a searchK, each node asks the index for its searchK nearest, where one is made, and keeps those after it: on a
       larger graph a pair the index doesn't give its first node is missed, and the module warns so. Here the index finds
-      every node, and the rows are the exact ones. SQLite has no index, and measures every pair.
+      every node, and the rows are the exact ones. With neighbours: all, a node's neighbours the index doesn't give it are
+      missed, and the module warns so too. SQLite has no index, and measures every pair.
     steps:
       - among: {label: "Doc", property: "embedding", ids: ["a", "b", "c", "d", "e", "f"], topK: 2, searchK: 10, neighbours: "after"}
         warned: ["neo4j", "memgraph", "falkordb", "postgres", "oracle"]
@@ -126,6 +149,14 @@ cases:
           - {seed: "d", near: [{id: "e", score: 0.9}, {id: "f", score: 0.5}]}
           - {seed: "e", near: [{id: "f", score: 0.8}]}
           - {seed: "f", near: []}
+      - among: {label: "Doc", property: "embedding", ids: ["a", "b", "c", "e", "f"], topK: 2, searchK: 10, neighbours: "all"}
+        warned: ["neo4j", "memgraph", "falkordb", "postgres", "oracle"]
+        rows:
+          - {seed: "a", near: [{id: "b", score: 0.9}, {id: "c", score: 0.8}]}
+          - {seed: "b", near: [{id: "c", score: 0.98}, {id: "a", score: 0.9}]}
+          - {seed: "c", near: [{id: "b", score: 0.98}, {id: "a", score: 0.8}]}
+          - {seed: "e", near: [{id: "f", score: 0.8}, {id: "c", score: 0.64}]}
+          - {seed: "f", near: [{id: "e", score: 0.8}, {id: "c", score: 0.2}]}
 
   - name: "Ids without an embedding"
     description: >-
@@ -148,9 +179,20 @@ cases:
           - {seed: "c", near: []}
       - among: {label: "Doc", property: "embedding", ids: [], topK: 2, neighbours: "after"}
         rows: []
+      - among: {label: "Doc", property: "embedding", ids: ["a", "b", "bare", "nothing", "z"], topK: 2, neighbours: "all"}
+        rows:
+          - {seed: "a", near: [{id: "b", score: 0.9}]}
+          - {seed: "b", near: [{id: "a", score: 0.9}]}
+        today:
+          - stores: ["falkordb"]
+            rows:
+              - {seed: "a", near: [{id: "b", score: 0.9}, {id: "z", score: 0.5}]}
+              - {seed: "b", near: [{id: "a", score: 0.9}, {id: "z", score: 0.5}]}
+              - {seed: "z", near: [{id: "a", score: 0.5}, {id: "b", score: 0.5}]}
+            issue: "liberation-data/drivine-cypher-spec#409"
 
   - name: "Euclidean"
-    description: "On a euclidean index each pair scores 1 / (1 + d²), and an embedding of zeros is a point like any other."
+    description: "On a euclidean index each pair scores 1 / (1 + d²), and an embedding of zeros is a point like any other, for each pair once or every neighbour."
     steps:
       - among: {label: "Place", property: "embedding", ids: ["p1", "p2", "p3", "p4"], topK: 2, neighbours: "after"}
         rows:
@@ -158,3 +200,9 @@ cases:
           - {seed: "p2", near: [{id: "p4", score: 0.2}, {id: "p3", score: 0.1666667}]}
           - {seed: "p3", near: [{id: "p4", score: 0.0714286}]}
           - {seed: "p4", near: []}
+      - among: {label: "Place", property: "embedding", ids: ["p1", "p2", "p3", "p4"], topK: 2, neighbours: "all"}
+        rows:
+          - {seed: "p1", near: [{id: "p2", score: 0.5}, {id: "p3", score: 0.2}]}
+          - {seed: "p2", near: [{id: "p1", score: 0.5}, {id: "p4", score: 0.2}]}
+          - {seed: "p3", near: [{id: "p1", score: 0.2}, {id: "p2", score: 0.1666667}]}
+          - {seed: "p4", near: [{id: "p2", score: 0.2}, {id: "p1", score: 0.1}]}
