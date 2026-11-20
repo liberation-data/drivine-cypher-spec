@@ -403,6 +403,15 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
         get() = true
 
     /**
+     * Each online build under way on the node table, by `pg_stat_progress_create_index`; and as Postgres hides which table
+     * another role's build is on (its `relid` reads null), any build in this database whose table is hidden, as
+     * [statusOf] takes one.
+     */
+    override val onlineBuildsQuery: String
+        get() = "SELECT p.pid FROM pg_stat_progress_create_index p WHERE p.relid = to_regclass(${literal(nodes)}) " +
+            "OR (p.relid IS NULL AND p.datname = current_database())"
+
+    /**
      * The index of [spec] an online build left invalid, dropped by the name this version makes it under, which is the
      * invalid one's: as before [completeIndex] builds an index again, and as after a uniqueness constraint's online build
      * the data refuses (#382), which leaves its unique index invalid under the name, where `IF NOT EXISTS` would pass over it.

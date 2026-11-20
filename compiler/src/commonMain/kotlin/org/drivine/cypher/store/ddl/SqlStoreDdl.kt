@@ -112,6 +112,15 @@ interface StoreDdl {
         get() = false
 
     /**
+     * A listing of the online index builds under way on the graph's node table, a row for each, and none where there is
+     * none: Postgres's, as two online builds on one table can deadlock ([org.drivine.cypher.store.schema.StoreSchema.isBuildDeadlock]),
+     * and an ensure the store cancelled so waits for the other session's to end before it is run again. Null on a store
+     * whose builds can't deadlock so.
+     */
+    val onlineBuildsQuery: String?
+        get() = null
+
+    /**
      * [statement] as a build that blocks writes while it runs, where [statement] builds or drops an index online
      * (Postgres's `CONCURRENTLY`, Oracle's `ONLINE`) and the store refused that
      * ([org.drivine.cypher.store.schema.StoreSchema.isOnlineRefused]); null for a statement that does neither.

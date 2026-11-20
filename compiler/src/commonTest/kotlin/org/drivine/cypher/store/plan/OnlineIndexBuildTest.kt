@@ -961,4 +961,107 @@ class OnlineIndexBuildTest {
         assertIs<EnsureResult.Created>(made.item!!.result)
         assertTrue(made.log.any { it.message.startsWith("Completed Postgres UNIQUENESS_CONSTRAINT on Person[email]") }, made.log.toString())
     }
+
+    /** Postgres's cancel of a statement deadlocked with another session's online build on the same table. */
+    private val deadlocked = StoreError(Cause("40P01", 0, null, null, "deadlock detected"))
+
+    @Test
+    fun aConstraintsBuildCancelledAsADeadlockIsEnsuredAgainAndWaitsForTheOtherSessionsBuild() {
+        // Two ensures at once: the other session's build goes on, and this one's, cancelled, is ensured again once no build
+        // is under way on the table, which finds the other's built.
+        val builds = postgresDdl.onlineBuildsQuery
+        var creates = 0
+        var polls = 0
+        val (ran, report) = drive(
+            postgres, email,
+            listed = {
+                when {
+                    it == builds -> if (++polls <= 2) listOf(mapOf("pid" to 70)) else emptyList()
+                    it == postgresDdl.listConstraintsQuery() && polls > 2 -> emailRecord(null)
+                    else -> emptyList()
+                }
+            },
+            execute = { if (it.startsWith("CREATE UNIQUE INDEX") && ++creates == 1) deadlocked else null },
+        )
+        assertEquals(1, indexBuilds(ran).size, ran.joinToString("\n"))
+        assertEquals(3, polls)
+        assertIs<EnsureResult.AlreadyMatching>(report.item!!.result)
+        assertTrue(
+            LogLine(
+                LogLevel.INFO, "ConstraintManager",
+                "Postgres cancelled a statement of the ensure of UNIQUENESS_CONSTRAINT on Person[email], deadlocked with another session's online build " +
+                    "on the same table: ensuring it again once no build is under way there",
+            ) in report.log,
+            report.log.toString(),
+        )
+    }
+
+    @Test
+    fun anIndexsBuildCancelledAsADeadlockWithAnotherIndexsIsBuiltOnceThatBuildHasEnded() {
+        // The other session builds another index on the table: this one's is not under way, so it is built again only once
+        // no build is, where building it at once would deadlock again.
+        val builds = postgresDdl.onlineBuildsQuery
+        var creates = 0
+        var polls = 0
+        var pollsAtSecondCreate = -1
+        val (ran, report) = drive(
+            postgres, name,
+            listed = { if (it == builds) (if (++polls <= 3) listOf(mapOf("pid" to 70)) else emptyList()) else emptyList() },
+            execute = {
+                if (it.startsWith("CREATE INDEX") && ++creates == 2) pollsAtSecondCreate = polls
+                if (it.startsWith("CREATE INDEX") && creates == 1) deadlocked else null
+            },
+        )
+        assertEquals(2, indexBuilds(ran).count { it.startsWith("CREATE INDEX CONCURRENTLY") }, ran.joinToString("\n"))
+        assertEquals(4, pollsAtSecondCreate)
+        assertIs<EnsureResult.Created>(report.item!!.result)
+    }
+
+    @Test
+    fun anEnsureCancelledAsADeadlockEveryTimeIsThrownAfterItsTries() {
+        val (ran, report) = drive(postgres, name, execute = { if (it.startsWith("CREATE INDEX")) deadlocked else null })
+        // Three tries in all.
+        assertEquals(3, indexBuilds(ran).size, ran.joinToString("\n"))
+        // Said as what it is, never the store's bare deadlock.
+        assertNull(report.rethrown, "$report")
+        assertTrue(
+            "Postgres cancelled the ensure of RANGE_INDEX on Person[name] 3 times, deadlocked each time with another session's online build on the same table " +
+                "(deadlock detected). Nothing was made: ensure it again once those builds have ended." in report.failure.orEmpty(),
+            "$report",
+        )
+        // Only a deadlock is ensured again: another refusal is thrown at once.
+        val refused = StoreError(Cause("42501", 0, null, null, "permission denied for table drivine_node"))
+        val (once, _) = drive(postgres, name, execute = { if (it.startsWith("CREATE INDEX")) refused else null })
+        assertEquals(1, indexBuilds(once).size)
+    }
+
+    @Test
+    fun onlyPostgresListsTheOnlineBuildsOnItsNodeTable() {
+        assertTrue("pg_stat_progress_create_index p WHERE p.relid = to_regclass('drivine_node')" in postgresDdl.onlineBuildsQuery, postgresDdl.onlineBuildsQuery)
+        assertNull(oracleDdl.onlineBuildsQuery)
+        assertNull(SqliteDdl("drivine").onlineBuildsQuery)
+    }
+
+    @Test
+    fun anEnsureCancelledAsADeadlockIsRunAgainWhereTheWaitForTheTablesBuildsRunsOut() {
+        // A build on the table that outlasts the wait, as another role's hidden one may: the ensure is run again anyway,
+        // and made where the store lets it, or said as cancelled where it deadlocks each time.
+        val builds = postgresDdl.onlineBuildsQuery
+        var creates = 0
+        val (ran, report) = drive(
+            postgres, name,
+            listed = { if (it == builds) listOf(mapOf("pid" to 70)) else emptyList() },
+            execute = { if (it.startsWith("CREATE INDEX") && ++creates == 1) deadlocked else null },
+        )
+        assertEquals(2, indexBuilds(ran).size, ran.joinToString("\n"))
+        assertIs<EnsureResult.Created>(report.item!!.result)
+        val (always, cancelled) = drive(
+            postgres, name,
+            listed = { if (it == builds) listOf(mapOf("pid" to 70)) else emptyList() },
+            execute = { if (it.startsWith("CREATE INDEX")) deadlocked else null },
+        )
+        assertEquals(3, indexBuilds(always).size)
+        assertNull(cancelled.rethrown, "$cancelled")
+        assertTrue("deadlocked each time with another session's online build" in cancelled.failure.orEmpty(), "$cancelled")
+    }
 }

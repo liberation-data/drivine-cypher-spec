@@ -532,6 +532,9 @@ class PostgresSchema(override val ddl: PostgresDdl) : SqlStoreSchema() {
     /** `25001`: `CONCURRENTLY` in a transaction, which Postgres refuses, as on a connection a Spring transaction holds. */
     override fun isOnlineRefused(error: StoreError): Boolean = error.causes.any { it.isSqlError && it.sqlState == "25001" }
 
+    /** `40P01`: a deadlock, as two online builds on one table give, of which Postgres cancels one. */
+    override fun isBuildDeadlock(error: StoreError): Boolean = error.causes.any { it.isSqlError && it.sqlState == "40P01" }
+
     /**
      * An index whose online build was cut short, or failed, which Postgres leaves invalid under its name and no statement
      * reads: the listing gives it [PostgresDdl.INVALID], and an ensure drops it and builds it again

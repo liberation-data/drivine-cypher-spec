@@ -565,7 +565,7 @@ internal class SchemaProgram(
         // recorded or not: they may have gone out of step while it was gone.
         // One a uniqueness constraint serves is never listed, and is not made anew (#325).
         fillIn(spec) { findIndex(spec) == null && servingConstraint(spec.made()) == null }
-        return ensureMadeIndex(spec.made(), build)
+        return afterBuildDeadlocks(spec) { ensureMadeIndex(spec.made(), build) }
     }
 
     private fun ensureMadeIndex(spec: IndexSpec, build: Build): EnsureResult {
@@ -933,7 +933,7 @@ internal class SchemaProgram(
         // A constraint that ignores case is over copies every node of its label has, so a node saved before there were
         // copies is held to it too. One made anew fills them in again, recorded or not.
         fillIn(spec) { findConstraint(spec) == null }
-        return ensureMadeConstraint(spec.made(), violationSampleSize, replaceBlockingIndex)
+        return afterBuildDeadlocks(spec) { ensureMadeConstraint(spec.made(), violationSampleSize, replaceBlockingIndex) }
     }
 
     /** `ConstraintManager.ensure` of [spec] as made; where not [again], one already made again for a create that passed over an invalid index. */
@@ -1049,6 +1049,52 @@ internal class SchemaProgram(
         val completed = if (invalid) ": ${store.incompleteness(found ?: SchemaItemInfo.fromSpec(spec))}" else ""
         log(LogLevel.INFO, CONSTRAINT_MANAGER, "${if (invalid) "Completed" else "Created"} $engine ${spec.kind} on ${spec.label}${spec.properties}$completed")
         return EnsureResult.Created(created)
+    }
+
+    /**
+     * What [ensure] gives for [spec], run again where the store cancels one of its statements as a deadlock with another
+     * session's online build on the same table ([StoreSchema.isBuildDeadlock]): that session's build goes on, and the
+     * ensure run again finds it under way, and waits for it, or ended, as another session's. Said at INFO; after
+     * [BUILD_DEADLOCK_TRIES] tries, a failure that says so, never the store's bare deadlock.
+     */
+    private fun afterBuildDeadlocks(spec: SchemaItemSpec, ensure: () -> EnsureResult): EnsureResult {
+        var tries = 0
+        while (true) {
+            try {
+                return ensure()
+            } catch (refused: RawFailure) {
+                if (!store.isBuildDeadlock(refused.error)) throw refused
+                if (++tries >= BUILD_DEADLOCK_TRIES) {
+                    throw OwnerFailure(
+                        "$engine cancelled the ensure of ${spec.kind} on ${spec.label}${spec.properties} $BUILD_DEADLOCK_TRIES times, deadlocked each time with " +
+                            "another session's online build on the same table (${messageOf(refused.error, "null")}). Nothing was made: ensure it again once those builds have ended.",
+                    )
+                }
+                log(
+                    LogLevel.INFO, if (spec is ConstraintSpec) CONSTRAINT_MANAGER else INDEX_MANAGER,
+                    "$engine cancelled a statement of the ensure of ${spec.kind} on ${spec.label}${spec.properties}, deadlocked with another session's online build " +
+                        "on the same table: ensuring it again once no build is under way there",
+                )
+                awaitNoOnlineBuild()
+            }
+        }
+    }
+
+    /**
+     * Polls until no online build is under way on the graph's node table ([org.drivine.cypher.store.ddl.StoreDdl.onlineBuildsQuery]),
+     * for as long as an index's build is waited for at most: whichever index the other session is building, an ensure run
+     * again after then never starts its own build while that one runs, which would deadlock with it again. Where the wait
+     * runs out, or the store has no such listing, it returns, and the ensure is run again as it is.
+     */
+    private fun awaitNoOnlineBuild() {
+        val query = store.ddl.onlineBuildsQuery ?: return
+        val deadline = io.clock() + PlanRequest.DEFAULT_BUILD_TIMEOUT_MILLIS
+        var poll = 0L
+        while (io.clock() + poll < deadline) {
+            val outcome = io.ask(PlanAction.Query(query, purpose = Purpose.LISTING, delayMillis = poll))
+            if ((outcome as? PlanOutcome.Rows)?.rows.isNullOrEmpty()) return
+            poll = POLL_MILLIS
+        }
     }
 
     /** FalkorDB refuses a constraint over a property whose name isn't plain, before anything is read. */
@@ -1556,6 +1602,9 @@ internal class SchemaProgram(
 
         /** How long a drop, or a constraint's build, in the background is waited for, as drivine4j waits. */
         const val ASYNC_TIMEOUT_MILLIS = 30_000L
+
+        /** How many times an ensure is run in all where the store cancels it as a deadlock with another session's online build. */
+        const val BUILD_DEADLOCK_TRIES = 3
 
         /** The sample size drivine4j's marker constraint is made with: `ConstraintManager.DEFAULT_VIOLATION_SAMPLE_SIZE`. */
         const val DEFAULT_VIOLATION_SAMPLE_SIZE = 10
