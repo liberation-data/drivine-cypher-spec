@@ -324,6 +324,7 @@ class VectorAmongAfterTest {
             assertEquals(everyPair.getValue(store), (after["sql"] ?: after["cypher"])!!.textValue(), store.id)
             assertEquals(if (store == SearchStore.FALKORDB) VectorSearch.FALKORDB_AMONG_TIMEOUT_MILLIS else null, after["timeoutMillis"]?.longValue(), store.id)
             assertEquals(raw(store, "{\"ids\": [\"a\"], \"idProperty\": \"id\"}"), raw(store, "{\"ids\": [\"a\"], \"idProperty\": \"id\", \"neighbours\": \"all\"}"), "${store.id}: all is the default")
+            assertEquals(raw(store, "{\"ids\": [\"a\"], \"idProperty\": \"id\"}"), raw(store, "{\"ids\": [\"a\"], \"idProperty\": \"id\", \"neighbours\": null}"), "${store.id}: null is all")
             val all = answer(store, "{\"ids\": [\"a\"], \"idProperty\": \"id\", \"neighbours\": \"all\"}")
             assertTrue(!all.has("timeoutMillis") && (all["warnings"] as ArrayNode).size() == 0, store.id)
         }

@@ -346,7 +346,8 @@ object VectorSearch {
     /**
      * Without an index made, each root measures only the other roots whose embeddings are of its size: exact. With one, each
      * root asks the index over the embeddings of the root's first label for its `searchK` nearest, and keeps those among the
-     * roots: approximate, as the index is.
+     * roots: approximate, as the index is. For each pair once ([AmongNeighbours.After]) each root keeps only the roots placed
+     * after it in the ids, and without `searchK` is measured as where no index is made.
      */
     private fun postgresAmong(ddl: PostgresDdl, request: VectorRequest, among: VectorAmong, scope: SearchParameters): String {
         val key = stored(request.property)
@@ -427,8 +428,9 @@ object VectorSearch {
     /**
      * Without an index made, every pair of roots whose embeddings are of one size is measured: exact. With one, each root asks
      * the index over the side table for its `searchK` nearest, and keeps those among the roots: approximate. Only the roots
-     * the side table holds are searched from, as it holds only embeddings of the index's size. Either way each root's
-     * neighbours are numbered best first, and the first `topK` kept.
+     * the side table holds are searched from, as it holds only embeddings of the index's size. For each pair once
+     * ([AmongNeighbours.After]) each root keeps only the roots placed after it in the ids, and without `searchK` is measured
+     * as where no index is made. Either way each root's neighbours are numbered best first, and the first `topK` kept.
      */
     private fun oracleAmong(ddl: OracleDdl, request: VectorRequest, among: VectorAmong, scope: SearchParameters): String {
         val key = stored(request.property)
