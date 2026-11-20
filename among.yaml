@@ -1,0 +1,160 @@
+# A search among ids: for each of a set of nodes, named by id, its nearest among the others of the set, as a library's
+# loadNearestAmong(ids, topK, threshold, searchK, neighbours) gives it. See README.md.
+#
+# A step names the label, the embedding's property and its index, the ids as a caller gives them, topK, and where it gives
+# them a threshold, a searchK and `neighbours`: `all`, every other node of the set, or `after`, only those after the node in
+# the ids, so each pair comes back once. A library gives the ids to the module in its id type's own order, here text by
+# code point, so a step gives them in any order, and a repeat once. Its `rows` are, for each id of a node that holds an
+# embedding the search can measure, in that order, the node's neighbours, best first, each its id and score, as the
+# module's statement gives them (VectorSearch, `{seed, near}`); an id of no node, or of a node without such an embedding,
+# has no row.
+#
+# The stores are neo4j, memgraph, falkordb, postgres, oracle and sqlite; `graph` names the first three and `sql` the rest.
+# A runner empties the graph, makes each of `indexes`, as the schema API ensures a spec (store.yaml's DDL), writes `graph`,
+# and waits for the indexes to hold it (CALL db.awaitIndexes() on Neo4j), before each case.
+#
+# The answer is exact: every pair of the set measured. A search with `neighbours: after` and no searchK measures every
+# pair on every store, and so does any search on SQLite, and on Postgres and Oracle with no index made; one with a
+# searchK goes through the index where one is made, and is approximate. On a graph this small an index finds every node,
+# so a step with a searchK of 10 or more gives the exact rows on every store. Where a step's search goes through an index
+# with `neighbours: after`, the module warns that pairs can be missed: `warned` lists the stores it warns on.
+#
+# Scores, as vector.yaml's: on a cosine index (1 + cos) / 2, on a euclidean one 1 / (1 + d²). Each is compared within
+# 1e-6, as Neo4j's and FalkorDB's are float32s. No step rests on the order of two neighbours that score alike. On a cosine
+# index an embedding of no length, all zeros, has no direction, and is measured against no other: it is neither a seed nor
+# a neighbour. A pair whose embeddings differ in size has no score, and is left out; no step holds one, as Memgraph
+# refuses to write one to a label with an index, and FalkorDB refuses to measure one.
+#
+# Where a store gives something else today, `today` says what, and the issue, as in search.yaml; a library holds such a
+# step in its own HELD list until the issue's fix lands. `today` is not read.
+
+graph: |
+  CREATE (:Doc {id: 'a', embedding: [1.0, 0.0, 0.0]}),
+         (:Doc {id: 'b', embedding: [0.8, 0.6, 0.0]}),
+         (:Doc {id: 'c', embedding: [0.6, 0.8, 0.0]}),
+         (:Doc {id: 'd', embedding: [0.0, 1.0, 0.0]}),
+         (:Doc {id: 'e', embedding: [-0.6, 0.8, 0.0]}),
+         (:Doc {id: 'f', embedding: [-1.0, 0.0, 0.0]}),
+         (:Doc {id: 'x', embedding: [0.96, 0.28, 0.0]}),
+         (:Doc {id: 'z', embedding: [0.0, 0.0, 0.0]}),
+         (:Doc {id: 'bare'}),
+         (:Place {id: 'p1', embedding: [0.0, 0.0, 0.0]}),
+         (:Place {id: 'p2', embedding: [1.0, 0.0, 0.0]}),
+         (:Place {id: 'p3', embedding: [0.0, 2.0, 0.0]}),
+         (:Place {id: 'p4', embedding: [3.0, 0.0, 0.0]})
+
+indexes:
+  - {kind: "VECTOR_INDEX", label: "Doc", properties: ["embedding"], options: {dimensions: 3, similarity: "COSINE"}}
+  - {kind: "VECTOR_INDEX", label: "Place", properties: ["embedding"], options: {dimensions: 3, similarity: "EUCLIDEAN"}}
+
+cases:
+  - name: "Each pair once"
+    description: >-
+      With neighbours: after, a node keeps only the nodes after it in the ids, so each pair comes back once, under the node
+      given first, and the last node keeps none. x lies nearest a of all, but is not among the ids, so it never comes back.
+    steps:
+      - among: {label: "Doc", property: "embedding", ids: ["a", "b", "c", "d", "e", "f"], topK: 2, neighbours: "after"}
+        rows:
+          - {seed: "a", near: [{id: "b", score: 0.9}, {id: "c", score: 0.8}]}
+          - {seed: "b", near: [{id: "c", score: 0.98}, {id: "d", score: 0.8}]}
+          - {seed: "c", near: [{id: "d", score: 0.9}, {id: "e", score: 0.64}]}
+          - {seed: "d", near: [{id: "e", score: 0.9}, {id: "f", score: 0.5}]}
+          - {seed: "e", near: [{id: "f", score: 0.8}]}
+          - {seed: "f", near: []}
+
+  - name: "A node's nearest all before it"
+    description: >-
+      The direction is kept before each node's topK are cut, so no pair is lost to the cut. With topK 1, c's nearest of all
+      is b, before it: every neighbour of c, d and e, and the pairs c–d, d–e and e–f, would be lost were each node's one
+      nearest taken first and those before it dropped after, as the search for every neighbour's rows show.
+    steps:
+      - among: {label: "Doc", property: "embedding", ids: ["a", "b", "c", "d", "e", "f"], topK: 1, neighbours: "after"}
+        rows:
+          - {seed: "a", near: [{id: "b", score: 0.9}]}
+          - {seed: "b", near: [{id: "c", score: 0.98}]}
+          - {seed: "c", near: [{id: "d", score: 0.9}]}
+          - {seed: "d", near: [{id: "e", score: 0.9}]}
+          - {seed: "e", near: [{id: "f", score: 0.8}]}
+          - {seed: "f", near: []}
+      - among: {label: "Doc", property: "embedding", ids: ["a", "b", "c", "d", "e", "f"], topK: 1, searchK: 10, neighbours: "all"}
+        rows:
+          - {seed: "a", near: [{id: "b", score: 0.9}]}
+          - {seed: "b", near: [{id: "c", score: 0.98}]}
+          - {seed: "c", near: [{id: "b", score: 0.98}]}
+          - {seed: "d", near: [{id: "c", score: 0.9}]}
+          - {seed: "e", near: [{id: "d", score: 0.9}]}
+          - {seed: "f", near: [{id: "e", score: 0.8}]}
+
+  - name: "The ids' order is their own"
+    description: >-
+      The library puts the ids in their type's order before the search, so the order a caller gives them in changes
+      nothing, and a repeat is searched once.
+    steps:
+      - among: {label: "Doc", property: "embedding", ids: ["f", "c", "a", "e", "b", "d", "c"], topK: 2, neighbours: "after"}
+        rows:
+          - {seed: "a", near: [{id: "b", score: 0.9}, {id: "c", score: 0.8}]}
+          - {seed: "b", near: [{id: "c", score: 0.98}, {id: "d", score: 0.8}]}
+          - {seed: "c", near: [{id: "d", score: 0.9}, {id: "e", score: 0.64}]}
+          - {seed: "d", near: [{id: "e", score: 0.9}, {id: "f", score: 0.5}]}
+          - {seed: "e", near: [{id: "f", score: 0.8}]}
+          - {seed: "f", near: []}
+
+  - name: "A threshold"
+    description: "A neighbour that scores under the threshold is left out, after the direction and before topK."
+    steps:
+      - among: {label: "Doc", property: "embedding", ids: ["a", "b", "c", "d", "e", "f"], topK: 2, threshold: 0.85, neighbours: "after"}
+        rows:
+          - {seed: "a", near: [{id: "b", score: 0.9}]}
+          - {seed: "b", near: [{id: "c", score: 0.98}]}
+          - {seed: "c", near: [{id: "d", score: 0.9}]}
+          - {seed: "d", near: [{id: "e", score: 0.9}]}
+          - {seed: "e", near: []}
+          - {seed: "f", near: []}
+
+  - name: "Through the index"
+    description: >-
+      Given a searchK, each node asks the index for its searchK nearest, where one is made, and keeps those after it: on a
+      larger graph a pair the index doesn't give its first node is missed, and the module warns so. Here the index finds
+      every node, and the rows are the exact ones. SQLite has no index, and measures every pair.
+    steps:
+      - among: {label: "Doc", property: "embedding", ids: ["a", "b", "c", "d", "e", "f"], topK: 2, searchK: 10, neighbours: "after"}
+        warned: ["neo4j", "memgraph", "falkordb", "postgres", "oracle"]
+        rows:
+          - {seed: "a", near: [{id: "b", score: 0.9}, {id: "c", score: 0.8}]}
+          - {seed: "b", near: [{id: "c", score: 0.98}, {id: "d", score: 0.8}]}
+          - {seed: "c", near: [{id: "d", score: 0.9}, {id: "e", score: 0.64}]}
+          - {seed: "d", near: [{id: "e", score: 0.9}, {id: "f", score: 0.5}]}
+          - {seed: "e", near: [{id: "f", score: 0.8}]}
+          - {seed: "f", near: []}
+
+  - name: "Ids without an embedding"
+    description: >-
+      An id of no node, or of a node without an embedding, or by cosine of one of no length, has no row, and is no
+      neighbour. A set of one node gives its row, with no neighbours; a set of none gives no rows.
+    steps:
+      - among: {label: "Doc", property: "embedding", ids: ["a", "b", "bare", "nothing", "z"], topK: 2, neighbours: "after"}
+        rows:
+          - {seed: "a", near: [{id: "b", score: 0.9}]}
+          - {seed: "b", near: []}
+        today:
+          - stores: ["falkordb"]
+            rows:
+              - {seed: "a", near: [{id: "b", score: 0.9}, {id: "z", score: 0.5}]}
+              - {seed: "b", near: [{id: "z", score: 0.5}]}
+              - {seed: "z", near: []}
+            issue: "liberation-data/drivine-cypher-spec#409"
+      - among: {label: "Doc", property: "embedding", ids: ["c"], topK: 2, neighbours: "after"}
+        rows:
+          - {seed: "c", near: []}
+      - among: {label: "Doc", property: "embedding", ids: [], topK: 2, neighbours: "after"}
+        rows: []
+
+  - name: "Euclidean"
+    description: "On a euclidean index each pair scores 1 / (1 + d²), and an embedding of zeros is a point like any other."
+    steps:
+      - among: {label: "Place", property: "embedding", ids: ["p1", "p2", "p3", "p4"], topK: 2, neighbours: "after"}
+        rows:
+          - {seed: "p1", near: [{id: "p2", score: 0.5}, {id: "p3", score: 0.2}]}
+          - {seed: "p2", near: [{id: "p4", score: 0.2}, {id: "p3", score: 0.1666667}]}
+          - {seed: "p3", near: [{id: "p4", score: 0.0714286}]}
+          - {seed: "p4", near: []}

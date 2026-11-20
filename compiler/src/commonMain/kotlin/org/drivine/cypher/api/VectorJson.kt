@@ -19,11 +19,12 @@ import org.drivine.schema.SimilarityFunction
  * `vector` is [VectorRequest]: `labels` (or one `label`, not both), `property`, `similarity` (`COSINE` or `EUCLIDEAN`), `topK`,
  * and where they apply `searchK`, `size` (the query vector's, on a nearest search on a SQL store), `partitionLabel`, `index`
  * (`{"dimensions": …}` on Postgres and Oracle, `{"name": …}` on a graph engine, left out where there's none), `among`
- * (`{"ids": […], "idProperty": …, "threshold": …}`), and on a graph engine `alias` and `scoreAlias` where they aren't `n` and
- * `_score`. The answer is `{"sql": …, "parameters": {…}, "vector": …, "labelCheck": …, "indexK": …, "warnings": […]}`, on a
- * graph engine `cypher` in place of `sql`, or `{"refusal": …}`, or `{"error": …}` where the request is no request. `vector`
- * is the parameter the library binds its query vector as, null among ids; `labelCheck` is null but on a graph engine's
- * nearest search of a root the index's label alone doesn't make.
+ * (`{"ids": […], "idProperty": …, "threshold": …, "neighbours": …}`, `neighbours` `"all"`, as when it's left out, or
+ * `"after"`: [AmongNeighbours]), and on a graph engine `alias` and `scoreAlias` where they aren't `n` and `_score`. The answer
+ * is `{"sql": …, "parameters": {…}, "vector": …, "labelCheck": …, "indexK": …, "warnings": […]}`, on a graph engine `cypher`
+ * in place of `sql`, and `"timeoutMillis": …` after the warnings where the plan gives one; or `{"refusal": …}`, or
+ * `{"error": …}` where the request is no request. `vector` is the parameter the library binds its query vector as, null among
+ * ids; `labelCheck` is null but on a graph engine's nearest search of a root the index's label alone doesn't make.
  */
 @OptIn(org.drivine.DrivineInternalApi::class)
 internal object VectorJson {
@@ -50,6 +51,7 @@ internal object VectorJson {
                 append(",\"labelCheck\":"); TypedJson.write(result.labelCheck, this)
                 append(",\"indexK\":").append(result.indexK)
                 append(",\"warnings\":"); TypedJson.write(result.warnings, this)
+                result.timeoutMillis?.let { append(",\"timeoutMillis\":").append(it) }
                 append('}')
             }.toString()
         }
@@ -70,6 +72,11 @@ internal object VectorJson {
                 idProperty = text(among, "idProperty") ?: throw IllegalArgumentException("A request's among names its idProperty."),
                 threshold = among["threshold"]?.takeUnless { it.isNull }?.let {
                     (TypedJson.value(it) as? Number)?.toDouble() ?: throw IllegalArgumentException("A request's among gives its threshold as a number.")
+                },
+                neighbours = when (val given = among["neighbours"]?.takeUnless { it.isNull }?.let { it.textValue() ?: it.toString() }) {
+                    null, "all" -> AmongNeighbours.All
+                    "after" -> AmongNeighbours.After
+                    else -> throw IllegalArgumentException("A request's among gives its neighbours as \"all\" or \"after\", not $given.")
                 },
             )
         }

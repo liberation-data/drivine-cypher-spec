@@ -306,6 +306,10 @@ object OracleSql {
     /** The texts of the JSON array bound as [parameter], as rows of one column, `v`. */
     fun textValues(parameter: String): String = "SELECT v FROM JSON_TABLE($parameter, '$[*]' COLUMNS (v VARCHAR2(4000) PATH '$'))"
 
+    /** [textValues], each as `id` beside its place in the array, `pos`, counted from 1. */
+    fun placedTextValues(parameter: String): String =
+        "SELECT v.id, v.pos FROM JSON_TABLE($parameter, '$[*]' COLUMNS (pos FOR ORDINALITY, id VARCHAR2(4000) PATH '$')) v"
+
     /** A JSON object of [entries], each a key and the expression for its value, laid out under the key. */
     fun jsonObject(entries: List<Pair<String, String>>): String =
         entries.joinToString(",\n    ", "JSON_OBJECT(\n    ", "\n    RETURNING JSON)") { (key, value) -> "${literal(key)} VALUE ${value.replace("\n", "\n    ")}" }
