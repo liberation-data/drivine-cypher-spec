@@ -76,7 +76,9 @@ data class UniqueRecreation(
  * - [take] claims it, giving a row (`at`, when it was claimed) where it is this ensure's turn, and none where another
  *   session's ensure holds it. A claim older than a build's default timeout, with no online build under way on the node
  *   table, is taken over: its session ended, or failed, without giving it up.
- * - [release] gives up the claim taken at `$at`, its one parameter, and not one another session took over since.
+ * - [release] gives up the claim taken at `$at`, its one parameter, and not one another session took over since: a
+ *   query, as [take] is, so it runs where the take ran, on the connection of a caller's transaction too, and so sees the
+ *   claim that transaction holds uncommitted.
  */
 @DrivineInternalApi
 data class BuildClaim(val take: String, val release: String)

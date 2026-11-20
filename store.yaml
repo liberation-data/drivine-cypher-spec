@@ -2063,8 +2063,8 @@ cases:
           ON CONFLICT (kind, label, properties) DO UPDATE SET details = EXCLUDED.details
           WHERE (c.details ->> 'at')::timestamptz < clock_timestamp() - interval '60 seconds'
             AND NOT EXISTS (SELECT p.pid FROM pg_stat_progress_create_index p WHERE p.relid = to_regclass('drivine_node') OR (p.relid IS NULL AND p.datname = current_database()))
-          RETURNING jsonb_build_object('at', c.details ->> 'at')
-        release: "DELETE FROM drivine_schema WHERE kind = 'CLAIM:RANGE_INDEX' AND label = 'Person' AND properties = '[\"name\"]' AND details ->> 'at' = CAST($at AS text)"
+          RETURNING c.details ->> 'at'
+        release: "DELETE FROM drivine_schema WHERE kind = 'CLAIM:RANGE_INDEX' AND label = 'Person' AND properties = '[\"name\"]' AND details ->> 'at' = CAST($at AS text) RETURNING kind"
         drop:
           - |-
             DO $forget$
@@ -2239,8 +2239,8 @@ cases:
           ON CONFLICT (kind, label, properties) DO UPDATE SET details = EXCLUDED.details
           WHERE (c.details ->> 'at')::timestamptz < clock_timestamp() - interval '60 seconds'
             AND NOT EXISTS (SELECT p.pid FROM pg_stat_progress_create_index p WHERE p.relid = to_regclass('drivine_node') OR (p.relid IS NULL AND p.datname = current_database()))
-          RETURNING jsonb_build_object('at', c.details ->> 'at')
-        release: "DELETE FROM drivine_schema WHERE kind = 'CLAIM:RANGE_INDEX' AND label = 'Person' AND properties = '[\"name\",\"born\"]' AND details ->> 'at' = CAST($at AS text)"
+          RETURNING c.details ->> 'at'
+        release: "DELETE FROM drivine_schema WHERE kind = 'CLAIM:RANGE_INDEX' AND label = 'Person' AND properties = '[\"name\",\"born\"]' AND details ->> 'at' = CAST($at AS text) RETURNING kind"
         drop:
           - |-
             DO $forget$
@@ -2393,8 +2393,8 @@ cases:
           ON CONFLICT (kind, label, properties) DO UPDATE SET details = EXCLUDED.details
           WHERE (c.details ->> 'at')::timestamptz < clock_timestamp() - interval '60 seconds'
             AND NOT EXISTS (SELECT p.pid FROM pg_stat_progress_create_index p WHERE p.relid = to_regclass('drivine_node') OR (p.relid IS NULL AND p.datname = current_database()))
-          RETURNING jsonb_build_object('at', c.details ->> 'at')
-        release: "DELETE FROM drivine_schema WHERE kind = 'CLAIM:RANGE_INDEX' AND label = 'Person' AND properties = '[\"name\",\"born\"]' AND details ->> 'at' = CAST($at AS text)"
+          RETURNING c.details ->> 'at'
+        release: "DELETE FROM drivine_schema WHERE kind = 'CLAIM:RANGE_INDEX' AND label = 'Person' AND properties = '[\"name\",\"born\"]' AND details ->> 'at' = CAST($at AS text) RETURNING kind"
         drop:
           - |-
             DO $forget$
@@ -2525,8 +2525,8 @@ cases:
           ON CONFLICT (kind, label, properties) DO UPDATE SET details = EXCLUDED.details
           WHERE (c.details ->> 'at')::timestamptz < clock_timestamp() - interval '60 seconds'
             AND NOT EXISTS (SELECT p.pid FROM pg_stat_progress_create_index p WHERE p.relid = to_regclass('drivine_node') OR (p.relid IS NULL AND p.datname = current_database()))
-          RETURNING jsonb_build_object('at', c.details ->> 'at')
-        release: "DELETE FROM drivine_schema WHERE kind = 'CLAIM:RANGE_INDEX' AND label = 'Person' AND properties = '[\"name\",\"born\"]' AND details ->> 'at' = CAST($at AS text)"
+          RETURNING c.details ->> 'at'
+        release: "DELETE FROM drivine_schema WHERE kind = 'CLAIM:RANGE_INDEX' AND label = 'Person' AND properties = '[\"name\",\"born\"]' AND details ->> 'at' = CAST($at AS text) RETURNING kind"
         drop:
           - |-
             DO $forget$
@@ -2664,8 +2664,8 @@ cases:
           ON CONFLICT (kind, label, properties) DO UPDATE SET details = EXCLUDED.details
           WHERE (c.details ->> 'at')::timestamptz < clock_timestamp() - interval '60 seconds'
             AND NOT EXISTS (SELECT p.pid FROM pg_stat_progress_create_index p WHERE p.relid = to_regclass('drivine_node') OR (p.relid IS NULL AND p.datname = current_database()))
-          RETURNING jsonb_build_object('at', c.details ->> 'at')
-        release: "DELETE FROM drivine_schema WHERE kind = 'CLAIM:RANGE_INDEX' AND label = 'Person' AND properties = '[\"name\"]' AND details ->> 'at' = CAST($at AS text)"
+          RETURNING c.details ->> 'at'
+        release: "DELETE FROM drivine_schema WHERE kind = 'CLAIM:RANGE_INDEX' AND label = 'Person' AND properties = '[\"name\"]' AND details ->> 'at' = CAST($at AS text) RETURNING kind"
         drop:
           - |-
             DO $forget$
@@ -2793,8 +2793,8 @@ cases:
           ON CONFLICT (kind, label, properties) DO UPDATE SET details = EXCLUDED.details
           WHERE (c.details ->> 'at')::timestamptz < clock_timestamp() - interval '60 seconds'
             AND NOT EXISTS (SELECT p.pid FROM pg_stat_progress_create_index p WHERE p.relid = to_regclass('drivine_node') OR (p.relid IS NULL AND p.datname = current_database()))
-          RETURNING jsonb_build_object('at', c.details ->> 'at')
-        release: "DELETE FROM drivine_schema WHERE kind = 'CLAIM:RANGE_INDEX' AND label = 'Person' AND properties = '[\"__drivine.lower.email\"]' AND details ->> 'at' = CAST($at AS text)"
+          RETURNING c.details ->> 'at'
+        release: "DELETE FROM drivine_schema WHERE kind = 'CLAIM:RANGE_INDEX' AND label = 'Person' AND properties = '[\"__drivine.lower.email\"]' AND details ->> 'at' = CAST($at AS text) RETURNING kind"
         drop:
           - |-
             DO $forget$
@@ -2943,8 +2943,8 @@ cases:
           ON CONFLICT (kind, label, properties) DO UPDATE SET details = EXCLUDED.details
           WHERE (c.details ->> 'at')::timestamptz < clock_timestamp() - interval '60 seconds'
             AND NOT EXISTS (SELECT p.pid FROM pg_stat_progress_create_index p WHERE p.relid = to_regclass('drivine_node') OR (p.relid IS NULL AND p.datname = current_database()))
-          RETURNING jsonb_build_object('at', c.details ->> 'at')
-        release: "DELETE FROM drivine_schema WHERE kind = 'CLAIM:UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"email\"]' AND details ->> 'at' = CAST($at AS text)"
+          RETURNING c.details ->> 'at'
+        release: "DELETE FROM drivine_schema WHERE kind = 'CLAIM:UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"email\"]' AND details ->> 'at' = CAST($at AS text) RETURNING kind"
         drop:
           - |-
             DO $forget$
@@ -3180,8 +3180,8 @@ cases:
           ON CONFLICT (kind, label, properties) DO UPDATE SET details = EXCLUDED.details
           WHERE (c.details ->> 'at')::timestamptz < clock_timestamp() - interval '60 seconds'
             AND NOT EXISTS (SELECT p.pid FROM pg_stat_progress_create_index p WHERE p.relid = to_regclass('drivine_node') OR (p.relid IS NULL AND p.datname = current_database()))
-          RETURNING jsonb_build_object('at', c.details ->> 'at')
-        release: "DELETE FROM drivine_schema WHERE kind = 'CLAIM:UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"first\",\"last\"]' AND details ->> 'at' = CAST($at AS text)"
+          RETURNING c.details ->> 'at'
+        release: "DELETE FROM drivine_schema WHERE kind = 'CLAIM:UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"first\",\"last\"]' AND details ->> 'at' = CAST($at AS text) RETURNING kind"
         drop:
           - |-
             DO $forget$
@@ -3445,8 +3445,8 @@ cases:
           ON CONFLICT (kind, label, properties) DO UPDATE SET details = EXCLUDED.details
           WHERE (c.details ->> 'at')::timestamptz < clock_timestamp() - interval '60 seconds'
             AND NOT EXISTS (SELECT p.pid FROM pg_stat_progress_create_index p WHERE p.relid = to_regclass('drivine_node') OR (p.relid IS NULL AND p.datname = current_database()))
-          RETURNING jsonb_build_object('at', c.details ->> 'at')
-        release: "DELETE FROM drivine_schema WHERE kind = 'CLAIM:UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"last\",\"first\"]' AND details ->> 'at' = CAST($at AS text)"
+          RETURNING c.details ->> 'at'
+        release: "DELETE FROM drivine_schema WHERE kind = 'CLAIM:UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"last\",\"first\"]' AND details ->> 'at' = CAST($at AS text) RETURNING kind"
         drop:
           - |-
             DO $forget$
@@ -3688,8 +3688,8 @@ cases:
           ON CONFLICT (kind, label, properties) DO UPDATE SET details = EXCLUDED.details
           WHERE (c.details ->> 'at')::timestamptz < clock_timestamp() - interval '60 seconds'
             AND NOT EXISTS (SELECT p.pid FROM pg_stat_progress_create_index p WHERE p.relid = to_regclass('drivine_node') OR (p.relid IS NULL AND p.datname = current_database()))
-          RETURNING jsonb_build_object('at', c.details ->> 'at')
-        release: "DELETE FROM drivine_schema WHERE kind = 'CLAIM:UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"__drivine.lower.email\"]' AND details ->> 'at' = CAST($at AS text)"
+          RETURNING c.details ->> 'at'
+        release: "DELETE FROM drivine_schema WHERE kind = 'CLAIM:UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"__drivine.lower.email\"]' AND details ->> 'at' = CAST($at AS text) RETURNING kind"
         drop:
           - |-
             DO $forget$
@@ -3926,8 +3926,8 @@ cases:
           ON CONFLICT (kind, label, properties) DO UPDATE SET details = EXCLUDED.details
           WHERE (c.details ->> 'at')::timestamptz < clock_timestamp() - interval '60 seconds'
             AND NOT EXISTS (SELECT p.pid FROM pg_stat_progress_create_index p WHERE p.relid = to_regclass('drivine_node') OR (p.relid IS NULL AND p.datname = current_database()))
-          RETURNING jsonb_build_object('at', c.details ->> 'at')
-        release: "DELETE FROM drivine_schema WHERE kind = 'CLAIM:VECTOR_INDEX' AND label = 'Chunk' AND properties = '[\"embedding\"]' AND details ->> 'at' = CAST($at AS text)"
+          RETURNING c.details ->> 'at'
+        release: "DELETE FROM drivine_schema WHERE kind = 'CLAIM:VECTOR_INDEX' AND label = 'Chunk' AND properties = '[\"embedding\"]' AND details ->> 'at' = CAST($at AS text) RETURNING kind"
         drop:
           - |-
             DO $forget$
@@ -4054,8 +4054,8 @@ cases:
           ON CONFLICT (kind, label, properties) DO UPDATE SET details = EXCLUDED.details
           WHERE (c.details ->> 'at')::timestamptz < clock_timestamp() - interval '60 seconds'
             AND NOT EXISTS (SELECT p.pid FROM pg_stat_progress_create_index p WHERE p.relid = to_regclass('drivine_node') OR (p.relid IS NULL AND p.datname = current_database()))
-          RETURNING jsonb_build_object('at', c.details ->> 'at')
-        release: "DELETE FROM drivine_schema WHERE kind = 'CLAIM:VECTOR_INDEX' AND label = 'Chunk' AND properties = '[\"vec\"]' AND details ->> 'at' = CAST($at AS text)"
+          RETURNING c.details ->> 'at'
+        release: "DELETE FROM drivine_schema WHERE kind = 'CLAIM:VECTOR_INDEX' AND label = 'Chunk' AND properties = '[\"vec\"]' AND details ->> 'at' = CAST($at AS text) RETURNING kind"
         drop:
           - |-
             DO $forget$
@@ -4189,8 +4189,8 @@ cases:
           ON CONFLICT (kind, label, properties) DO UPDATE SET details = EXCLUDED.details
           WHERE (c.details ->> 'at')::timestamptz < clock_timestamp() - interval '60 seconds'
             AND NOT EXISTS (SELECT p.pid FROM pg_stat_progress_create_index p WHERE p.relid = to_regclass('drivine_node') OR (p.relid IS NULL AND p.datname = current_database()))
-          RETURNING jsonb_build_object('at', c.details ->> 'at')
-        release: "DELETE FROM drivine_schema WHERE kind = 'CLAIM:VECTOR_INDEX' AND label = 'Chunk' AND properties = '[\"tuned\"]' AND details ->> 'at' = CAST($at AS text)"
+          RETURNING c.details ->> 'at'
+        release: "DELETE FROM drivine_schema WHERE kind = 'CLAIM:VECTOR_INDEX' AND label = 'Chunk' AND properties = '[\"tuned\"]' AND details ->> 'at' = CAST($at AS text) RETURNING kind"
         drop:
           - |-
             DO $forget$
@@ -4314,8 +4314,8 @@ cases:
           ON CONFLICT (kind, label, properties) DO UPDATE SET details = EXCLUDED.details
           WHERE (c.details ->> 'at')::timestamptz < clock_timestamp() - interval '60 seconds'
             AND NOT EXISTS (SELECT p.pid FROM pg_stat_progress_create_index p WHERE p.relid = to_regclass('drivine_node') OR (p.relid IS NULL AND p.datname = current_database()))
-          RETURNING jsonb_build_object('at', c.details ->> 'at')
-        release: "DELETE FROM drivine_schema WHERE kind = 'CLAIM:FULLTEXT_INDEX' AND label = 'Doc' AND properties = '[\"title\",\"body\"]' AND details ->> 'at' = CAST($at AS text)"
+          RETURNING c.details ->> 'at'
+        release: "DELETE FROM drivine_schema WHERE kind = 'CLAIM:FULLTEXT_INDEX' AND label = 'Doc' AND properties = '[\"title\",\"body\"]' AND details ->> 'at' = CAST($at AS text) RETURNING kind"
         drop:
           - |-
             DO $forget$
@@ -4452,8 +4452,8 @@ cases:
           ON CONFLICT (kind, label, properties) DO UPDATE SET details = EXCLUDED.details
           WHERE (c.details ->> 'at')::timestamptz < clock_timestamp() - interval '60 seconds'
             AND NOT EXISTS (SELECT p.pid FROM pg_stat_progress_create_index p WHERE p.relid = to_regclass('drivine_node') OR (p.relid IS NULL AND p.datname = current_database()))
-          RETURNING jsonb_build_object('at', c.details ->> 'at')
-        release: "DELETE FROM drivine_schema WHERE kind = 'CLAIM:FULLTEXT_INDEX' AND label = 'Doc' AND properties = '[\"title\",\"body\"]' AND details ->> 'at' = CAST($at AS text)"
+          RETURNING c.details ->> 'at'
+        release: "DELETE FROM drivine_schema WHERE kind = 'CLAIM:FULLTEXT_INDEX' AND label = 'Doc' AND properties = '[\"title\",\"body\"]' AND details ->> 'at' = CAST($at AS text) RETURNING kind"
         drop:
           - |-
             DO $forget$
@@ -4593,8 +4593,8 @@ cases:
           ON CONFLICT (kind, label, properties) DO UPDATE SET details = EXCLUDED.details
           WHERE (c.details ->> 'at')::timestamptz < clock_timestamp() - interval '60 seconds'
             AND NOT EXISTS (SELECT p.pid FROM pg_stat_progress_create_index p WHERE p.relid = to_regclass('drivine_node') OR (p.relid IS NULL AND p.datname = current_database()))
-          RETURNING jsonb_build_object('at', c.details ->> 'at')
-        release: "DELETE FROM drivine_schema WHERE kind = 'CLAIM:FULLTEXT_INDEX' AND label = 'Doc' AND properties = '[\"title\"]' AND details ->> 'at' = CAST($at AS text)"
+          RETURNING c.details ->> 'at'
+        release: "DELETE FROM drivine_schema WHERE kind = 'CLAIM:FULLTEXT_INDEX' AND label = 'Doc' AND properties = '[\"title\"]' AND details ->> 'at' = CAST($at AS text) RETURNING kind"
         drop:
           - |-
             DO $forget$
@@ -4789,8 +4789,8 @@ cases:
           ON CONFLICT (kind, label, properties) DO UPDATE SET details = EXCLUDED.details
           WHERE (c.details ->> 'at')::timestamptz < clock_timestamp() - interval '60 seconds'
             AND NOT EXISTS (SELECT p.pid FROM pg_stat_progress_create_index p WHERE p.relid = to_regclass('drivine_node') OR (p.relid IS NULL AND p.datname = current_database()))
-          RETURNING jsonb_build_object('at', c.details ->> 'at')
-        release: "DELETE FROM drivine_schema WHERE kind = 'CLAIM:RANGE_INDEX' AND label = 'Per\"son' AND properties = '[\"name\"]' AND details ->> 'at' = CAST($at AS text)"
+          RETURNING c.details ->> 'at'
+        release: "DELETE FROM drivine_schema WHERE kind = 'CLAIM:RANGE_INDEX' AND label = 'Per\"son' AND properties = '[\"name\"]' AND details ->> 'at' = CAST($at AS text) RETURNING kind"
         drop:
           - |-
             DO $forget$
@@ -4936,8 +4936,8 @@ cases:
           ON CONFLICT (kind, label, properties) DO UPDATE SET details = EXCLUDED.details
           WHERE (c.details ->> 'at')::timestamptz < clock_timestamp() - interval '60 seconds'
             AND NOT EXISTS (SELECT p.pid FROM pg_stat_progress_create_index p WHERE p.relid = to_regclass('drivine_node') OR (p.relid IS NULL AND p.datname = current_database()))
-          RETURNING jsonb_build_object('at', c.details ->> 'at')
-        release: "DELETE FROM drivine_schema WHERE kind = 'CLAIM:RANGE_INDEX' AND label = 'a b' AND properties = '[\"name\"]' AND details ->> 'at' = CAST($at AS text)"
+          RETURNING c.details ->> 'at'
+        release: "DELETE FROM drivine_schema WHERE kind = 'CLAIM:RANGE_INDEX' AND label = 'a b' AND properties = '[\"name\"]' AND details ->> 'at' = CAST($at AS text) RETURNING kind"
         drop:
           - |-
             DO $forget$
@@ -5080,8 +5080,8 @@ cases:
           ON CONFLICT (kind, label, properties) DO UPDATE SET details = EXCLUDED.details
           WHERE (c.details ->> 'at')::timestamptz < clock_timestamp() - interval '60 seconds'
             AND NOT EXISTS (SELECT p.pid FROM pg_stat_progress_create_index p WHERE p.relid = to_regclass('drivine_node') OR (p.relid IS NULL AND p.datname = current_database()))
-          RETURNING jsonb_build_object('at', c.details ->> 'at')
-        release: "DELETE FROM drivine_schema WHERE kind = 'CLAIM:UNIQUENESS_CONSTRAINT' AND label = 'Per\"son' AND properties = '[\"name\"]' AND details ->> 'at' = CAST($at AS text)"
+          RETURNING c.details ->> 'at'
+        release: "DELETE FROM drivine_schema WHERE kind = 'CLAIM:UNIQUENESS_CONSTRAINT' AND label = 'Per\"son' AND properties = '[\"name\"]' AND details ->> 'at' = CAST($at AS text) RETURNING kind"
         drop:
           - |-
             DO $forget$
@@ -5326,8 +5326,8 @@ cases:
           ON CONFLICT (kind, label, properties) DO UPDATE SET details = EXCLUDED.details
           WHERE (c.details ->> 'at')::timestamptz < clock_timestamp() - interval '60 seconds'
             AND NOT EXISTS (SELECT p.pid FROM pg_stat_progress_create_index p WHERE p.relid = to_regclass('drivine_node') OR (p.relid IS NULL AND p.datname = current_database()))
-          RETURNING jsonb_build_object('at', c.details ->> 'at')
-        release: "DELETE FROM drivine_schema WHERE kind = 'CLAIM:RANGE_INDEX' AND label = 'Person' AND properties = '[\"address.city\"]' AND details ->> 'at' = CAST($at AS text)"
+          RETURNING c.details ->> 'at'
+        release: "DELETE FROM drivine_schema WHERE kind = 'CLAIM:RANGE_INDEX' AND label = 'Person' AND properties = '[\"address.city\"]' AND details ->> 'at' = CAST($at AS text) RETURNING kind"
         drop:
           - |-
             DO $forget$
@@ -5473,8 +5473,8 @@ cases:
           ON CONFLICT (kind, label, properties) DO UPDATE SET details = EXCLUDED.details
           WHERE (c.details ->> 'at')::timestamptz < clock_timestamp() - interval '60 seconds'
             AND NOT EXISTS (SELECT p.pid FROM pg_stat_progress_create_index p WHERE p.relid = to_regclass('drivine_node') OR (p.relid IS NULL AND p.datname = current_database()))
-          RETURNING jsonb_build_object('at', c.details ->> 'at')
-        release: "DELETE FROM drivine_schema WHERE kind = 'CLAIM:RANGE_INDEX' AND label = 'Person' AND properties = '[\"o''name\"]' AND details ->> 'at' = CAST($at AS text)"
+          RETURNING c.details ->> 'at'
+        release: "DELETE FROM drivine_schema WHERE kind = 'CLAIM:RANGE_INDEX' AND label = 'Person' AND properties = '[\"o''name\"]' AND details ->> 'at' = CAST($at AS text) RETURNING kind"
         drop:
           - |-
             DO $forget$
@@ -5620,8 +5620,8 @@ cases:
           ON CONFLICT (kind, label, properties) DO UPDATE SET details = EXCLUDED.details
           WHERE (c.details ->> 'at')::timestamptz < clock_timestamp() - interval '60 seconds'
             AND NOT EXISTS (SELECT p.pid FROM pg_stat_progress_create_index p WHERE p.relid = to_regclass('drivine_node') OR (p.relid IS NULL AND p.datname = current_database()))
-          RETURNING jsonb_build_object('at', c.details ->> 'at')
-        release: "DELETE FROM drivine_schema WHERE kind = 'CLAIM:UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"say\\\"hi\"]' AND details ->> 'at' = CAST($at AS text)"
+          RETURNING c.details ->> 'at'
+        release: "DELETE FROM drivine_schema WHERE kind = 'CLAIM:UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"say\\\"hi\"]' AND details ->> 'at' = CAST($at AS text) RETURNING kind"
         drop:
           - |-
             DO $forget$

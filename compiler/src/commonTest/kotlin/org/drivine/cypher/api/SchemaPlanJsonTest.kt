@@ -96,7 +96,7 @@ class SchemaPlanJsonTest {
             action is PlanAction.Execute && action.purpose == Purpose.DDL && !"${action.statement}".contains("DROP INDEX") -> PlanOutcome.Failed(StoreError(Cause(sqlState = "23505", vendorCode = 0, message = "could not create unique index")))
             action is PlanAction.Query && action.purpose == Purpose.SAMPLE -> PlanOutcome.Rows(listOf(row))
             // The ensure's turn to build it (#382), its claim taken.
-            action is PlanAction.Query && action.statement.startsWith("INSERT INTO g_schema AS c") -> PlanOutcome.Rows(listOf(mapOf("at" to "t1")))
+            action is PlanAction.Query && action.statement.startsWith("INSERT INTO g_schema AS c") -> PlanOutcome.Rows(listOf("t1"))
             action is PlanAction.Query || action is PlanAction.ReadLowerCopies -> PlanOutcome.Rows(emptyList())
             else -> PlanOutcome.Ran
         }

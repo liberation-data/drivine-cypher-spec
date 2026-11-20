@@ -424,9 +424,9 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
             ON CONFLICT (kind, label, properties) DO UPDATE SET details = EXCLUDED.details
             WHERE (c.details ->> 'at')::timestamptz < clock_timestamp() - interval '$CLAIM_STALE_SECONDS seconds'
               AND NOT EXISTS ($onlineBuildsQuery)
-            RETURNING jsonb_build_object('at', c.details ->> 'at')
+            RETURNING c.details ->> 'at'
         """.trimIndent()
-        return BuildClaim(take, "DELETE FROM $catalog WHERE $key AND details ->> 'at' = CAST(${'$'}at AS text)")
+        return BuildClaim(take, "DELETE FROM $catalog WHERE $key AND details ->> 'at' = CAST(${'$'}at AS text) RETURNING kind")
     }
 
     /**
@@ -619,17 +619,17 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
          */
         const val INVALID = "INVALID"
 
-        /**
-         * The `status` the listing gives a record, or an index among the objects, whose index another session is building
-         * online: invalid until the build is done, when it is valid, or [INVALID] where the data refuses it or it is cut
-         * short. An ensure waits for the build and reads how it ended, rather than take it as made or drop it (#382).
-         */
         /** What a [buildClaim]'s kind begins with, before the item's: no item's kind does. */
         const val CLAIM = "CLAIM:"
 
         /** How old a [buildClaim] is taken over at: a build's default timeout (`PlanRequest.DEFAULT_BUILD_TIMEOUT_MILLIS`). */
         const val CLAIM_STALE_SECONDS = 60
 
+        /**
+         * The `status` the listing gives a record, or an index among the objects, whose index another session is building
+         * online: invalid until the build is done, when it is valid, or [INVALID] where the data refuses it or it is cut
+         * short. An ensure waits for the build and reads how it ended, rather than take it as made or drop it (#382).
+         */
         const val BUILDING = "BUILDING"
 
         /**

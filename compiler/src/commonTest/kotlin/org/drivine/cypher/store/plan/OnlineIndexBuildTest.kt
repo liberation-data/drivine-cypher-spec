@@ -52,7 +52,7 @@ class OnlineIndexBuildTest {
         execute: (statement: String) -> StoreError? = { null },
         call: ItemCall = ItemCall.ENSURE,
         policy: SchemaPolicy? = null,
-        claimed: (take: Int) -> List<Any?>? = { listOf(mapOf("at" to "claim $it")) },
+        claimed: (take: Int) -> List<Any?>? = { listOf("claim $it") },
     ): Pair<List<String>, DatabaseReport> {
         val ran = mutableListOf<String>()
         turns.clear()
@@ -82,6 +82,11 @@ class OnlineIndexBuildTest {
                     action is PlanAction.Query && action.statement.startsWith("INSERT INTO drivine_schema AS c") ->
                         claimed(turns.count { it.startsWith("take") }).also { turns += "take ${it?.size ?: "failed"}" }
                             ?.let { PlanOutcome.Rows(it) } ?: PlanOutcome.Failed(StoreError(Cause("42501", 0, null, null, "permission denied for table drivine_schema")))
+                    // Its release, a query too: answered as [execute] answers a statement, failed where it gives an error.
+                    action is PlanAction.Query && action.statement.startsWith("DELETE FROM drivine_schema WHERE kind = 'CLAIM:") -> {
+                        turns += "release '${action.parameters["at"]}'"
+                        execute(action.statement)?.let { PlanOutcome.Failed(it) } ?: PlanOutcome.Rows(emptyList())
+                    }
                     else -> when (action) {
                     is PlanAction.Query -> PlanOutcome.Rows(
                         when {
@@ -96,7 +101,6 @@ class OnlineIndexBuildTest {
                     is PlanAction.Execute -> {
                         val text = (action.statement as DdlStatement.Text).statement
                         if (action.purpose == Purpose.DDL) ran += text
-                        if (text.startsWith("DELETE FROM drivine_schema WHERE kind = 'CLAIM:")) turns += "release '${action.parameters["at"]}'"
                         execute(text)?.let { PlanOutcome.Failed(it) } ?: PlanOutcome.Ran.also { madeBy(text) }
                     }
                     is PlanAction.ReadLowerCopies -> PlanOutcome.Rows(emptyList())
@@ -1215,7 +1219,7 @@ class OnlineIndexBuildTest {
         // turn, reads and builds nothing.
         val (ran, report) = drive(
             postgres, email,
-            claimed = { if (it < 2) emptyList() else listOf(mapOf("at" to "claim $it")) },
+            claimed = { if (it < 2) emptyList() else listOf("claim $it") },
             listed = { if (it == postgresDdl.listConstraintsQuery() && turns.size >= 3) emailRecord(null) else emptyList() },
         )
         assertEquals(emptyList(), indexBuilds(ran))
@@ -1239,6 +1243,28 @@ class OnlineIndexBuildTest {
     }
 
     @Test
+    fun aBuildThatOutlastsTheWaitForItsTurnIsWaitedForNotBuiltAgain() {
+        // Another session holds the turn and builds the constraint for longer than the 60 s this ensure waits for its turn:
+        // ensured without it, the ensure finds that build under way, waits for it, and builds nothing of its own.
+        var reads = 0
+        val (ran, report) = drive(
+            postgres, email,
+            claimed = { emptyList() },
+            listed = {
+                when {
+                    it != postgresDdl.listConstraintsQuery() || turns.isEmpty() -> emptyList()
+                    ++reads <= 3 -> emailRecord(PostgresDdl.BUILDING)
+                    else -> emailRecord(null)
+                }
+            },
+        )
+        assertEquals(emptyList(), indexBuilds(ran))
+        assertIs<EnsureResult.AlreadyMatching>(report.item!!.result)
+        assertEquals(300, turns.count { it.startsWith("take") })
+        assertTrue(turns.none { it.startsWith("release") })
+    }
+
+    @Test
     fun aTurnThatCantBeTakenIsEnsuredWithoutAtOnce() {
         val (ran, report) = drive(postgres, email, claimed = { null })
         assertIs<EnsureResult.Created>(report.item!!.result)
@@ -1254,6 +1280,27 @@ class OnlineIndexBuildTest {
         val (_, report) = drive(postgres, email, listed = { if (it == postgresDdl.listConstraintsQuery()) listOf(elsewhere) else emptyList() })
         assertTrue("UNIQUENESS_CONSTRAINT on Person[email] was not made" in report.failure.orEmpty(), "$report")
         assertEquals(listOf("take 1", "release 'claim 0'"), turns)
+    }
+
+    @Test
+    fun aReleaseTheStoreRefusesIsLetBe() {
+        // A claim left behind is taken over once it is old: the ensure is made all the same.
+        val refused = StoreError(Cause("08006", 0, null, null, "connection lost"))
+        val (_, report) = drive(postgres, email, execute = { if (it.startsWith("DELETE FROM drivine_schema WHERE kind = 'CLAIM:")) refused else null })
+        assertIs<EnsureResult.Created>(report.item!!.result)
+        assertNull(report.failure)
+        assertNull(report.rethrown)
+        assertEquals(listOf("take 1", "release 'claim 0'"), turns)
+    }
+
+    @Test
+    fun whatAnEnsureSaysBeforeItTakesItsTurnIsSaidOnce() {
+        // The ensure is run again in its turn: a pin the store can't make is said once all the same.
+        val vector = VectorIndexSpec("Doc", "embedding", 3, hnswM = 16)
+        val (_, report) = drive(postgres, vector)
+        assertIs<EnsureResult.Created>(report.item!!.result)
+        assertEquals(listOf("take 1", "release 'claim 0'"), turns)
+        assertEquals(1, report.log.count { it.level == LogLevel.WARN && "pins" in it.message }, report.log.toString())
     }
 
     @Test
@@ -1276,7 +1323,7 @@ class OnlineIndexBuildTest {
         assertTrue("VALUES ('CLAIM:UNIQUENESS_CONSTRAINT', 'Person', '[\"email\"]'" in claim.take, claim.take)
         assertTrue("interval '60 seconds'" in claim.take && "NOT EXISTS (${postgresDdl.onlineBuildsQuery})" in claim.take, claim.take)
         assertEquals(
-            "DELETE FROM drivine_schema WHERE kind = 'CLAIM:UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"email\"]' AND details ->> 'at' = CAST(\$at AS text)",
+            "DELETE FROM drivine_schema WHERE kind = 'CLAIM:UNIQUENESS_CONSTRAINT' AND label = 'Person' AND properties = '[\"email\"]' AND details ->> 'at' = CAST(\$at AS text) RETURNING kind",
             claim.release,
         )
         // An index and a constraint over the same properties take turns of their own.

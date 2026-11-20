@@ -69,7 +69,7 @@ cases:
               - now: 1000000
                 actions:
                   - {execute: {marker: "deleteAllButNewest", scope: "schema"}}
-                  - {query: {marker: "claim"}, rows: [{at: "t1"}]}
+                  - {query: {marker: "claim"}, rows: ["t1"]}
               - now: 1000000
                 actions:
                   - {query: {listing: "constraints"}, items: []}
@@ -79,13 +79,13 @@ cases:
                   - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "_DrivineSchema", properties: ["scope"], name: "_DrivineSchema_scope_unique"}]}
               - now: 1000000
                 actions:
-                  - {execute: {marker: "release", at: "t1"}}
+                  - {query: {marker: "release", at: "t1"}, rows: []}
               - now: 1000000
                 actions:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
               - now: 1000000
                 actions:
-                  - {query: {claim: "Range index"}, rows: [{at: "t2"}]}
+                  - {query: {claim: "Range index"}, rows: ["t2"]}
               - now: 1000000
                 actions:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
@@ -98,13 +98,13 @@ cases:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
               - now: 1000000
                 actions:
-                  - {execute: {release: "Range index", at: "t2"}}
+                  - {query: {release: "Range index", at: "t2"}, rows: []}
               - now: 1000000
                 actions:
                   - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "_DrivineSchema", properties: ["scope"], name: "_DrivineSchema_scope_unique"}]}
               - now: 1000000
                 actions:
-                  - {query: {claim: "Uniqueness constraint"}, rows: [{at: "t3"}]}
+                  - {query: {claim: "Uniqueness constraint"}, rows: ["t3"]}
               - now: 1000000
                 actions:
                   - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "_DrivineSchema", properties: ["scope"], name: "_DrivineSchema_scope_unique"}]}
@@ -114,7 +114,7 @@ cases:
                   - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "_DrivineSchema", properties: ["scope"], name: "_DrivineSchema_scope_unique"}, {kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], name: "Person_email_unique"}]}
               - now: 1000000
                 actions:
-                  - {execute: {release: "Uniqueness constraint", at: "t3"}}
+                  - {query: {release: "Uniqueness constraint", at: "t3"}, rows: []}
               - now: 1000000
                 actions:
                   - {writeMarker: {scope: "schema", version: "v1", items: "RANGE_INDEX:Person:name:Person_name_range\nUNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
@@ -305,7 +305,7 @@ cases:
                   - {query: {listing: "constraints"}, items: []}
               - now: 1000000
                 actions:
-                  - {query: {claim: "Range index"}, rows: [{at: "t1"}]}
+                  - {query: {claim: "Range index"}, rows: ["t1"]}
               - now: 1000000
                 actions:
                   - {query: {listing: "indexes.RANGE_INDEX"}, failed: [{message: "There is no procedure with the name `vector_search.show_index_info` registered"}]}
@@ -318,7 +318,7 @@ cases:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
               - now: 1000000
                 actions:
-                  - {execute: {release: "Range index", at: "t1"}}
+                  - {query: {release: "Range index", at: "t1"}, rows: []}
               - now: 1000000
                 actions:
                   - {writeMarker: {scope: "schema", version: null, items: "RANGE_INDEX:Person:name:Person_name_range"}}
@@ -863,7 +863,7 @@ cases:
                   - {query: {listing: "indexes.VECTOR_INDEX"}, items: []}
               - now: 1000000
                 actions:
-                  - {query: {claim: "Vector index by cosine"}, rows: [{at: "t1"}]}
+                  - {query: {claim: "Vector index by cosine"}, rows: ["t1"]}
               - now: 1000000
                 actions:
                   - {query: {listing: "indexes.VECTOR_INDEX"}, items: []}
@@ -873,7 +873,7 @@ cases:
                   - {query: {listing: "indexes.VECTOR_INDEX"}, items: [{kind: "VECTOR_INDEX", label: "Chunk", properties: ["embedding"], name: "Chunk_embedding_vector", dimensions: 384, similarity: "COSINE"}]}
               - now: 1000000
                 actions:
-                  - {execute: {release: "Vector index by cosine", at: "t1"}}
+                  - {query: {release: "Vector index by cosine", at: "t1"}, rows: []}
               - now: 1000000
                 actions:
                   - {writeMarker: {scope: "schema", version: null, items: "RANGE_INDEX:Person:name:Person_name_range\nruntime:VECTOR_INDEX:Chunk:embedding:Chunk_embedding_vector"}}
@@ -1555,7 +1555,7 @@ cases:
               - now: 1000000
                 actions:
                   - {execute: {marker: "deleteAllButNewest", scope: "schema"}}
-                  - {query: {claim: "Full-text index"}, rows: [{at: "t1"}]}
+                  - {query: {claim: "Full-text index"}, rows: ["t1"]}
               - now: 1000000
                 actions:
                   - {query: {listing: "indexes.FULLTEXT_INDEX"}, items: []}
@@ -1565,7 +1565,7 @@ cases:
                   - {query: {listing: "indexes.FULLTEXT_INDEX"}, items: [{kind: "FULLTEXT_INDEX", label: "Doc", properties: ["title", "body"], name: "Doc_title_body_fulltext"}]}
               - now: 1000000
                 actions:
-                  - {execute: {release: "Full-text index", at: "t1"}}
+                  - {query: {release: "Full-text index", at: "t1"}, rows: []}
               - now: 1000000
                 actions:
                   - {writeMarker: {scope: "schema", version: "v1", items: "RANGE_INDEX:Person:name:Person_name_range\nruntime-stale:VECTOR_INDEX:Chunk:embedding:Chunk_embedding_vector\nruntime:FULLTEXT_INDEX:Doc:title,body:Doc_title_body_fulltext"}}
@@ -2151,7 +2151,7 @@ cases:
                   - {query: {listing: "constraints"}, items: []}
               - now: 1000000
                 actions:
-                  - {query: {claim: "Range index"}, rows: [{at: "t1"}]}
+                  - {query: {claim: "Range index"}, rows: ["t1"]}
               - now: 1000000
                 actions:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
@@ -2164,7 +2164,7 @@ cases:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
               - now: 1000000
                 actions:
-                  - {execute: {release: "Range index", at: "t1"}}
+                  - {query: {release: "Range index", at: "t1"}, rows: []}
               - now: 1000000
                 actions:
                   - {writeMarker: {scope: "schema", version: null, items: "RANGE_INDEX:Person:name:Person_name_range"}}
@@ -2174,7 +2174,7 @@ cases:
                   - {query: {listing: "constraints"}, items: []}
               - now: 1000000
                 actions:
-                  - {query: {claim: "Uniqueness constraint"}, rows: [{at: "t2"}]}
+                  - {query: {claim: "Uniqueness constraint"}, rows: ["t2"]}
               - now: 1000000
                 actions:
                   - {query: {listing: "constraints"}, items: []}
@@ -2184,7 +2184,7 @@ cases:
                   - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], name: "Person_email_unique"}]}
               - now: 1000000
                 actions:
-                  - {execute: {release: "Uniqueness constraint", at: "t2"}}
+                  - {query: {release: "Uniqueness constraint", at: "t2"}, rows: []}
               - now: 1000000
                 actions:
                   - {writeMarker: {scope: "schema", version: null, items: "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
@@ -2396,7 +2396,7 @@ cases:
               - now: 1000000
                 actions:
                   - {execute: {marker: "deleteAllButNewest", scope: "schema"}}
-                  - {query: {marker: "claim"}, rows: [{at: "t1"}]}
+                  - {query: {marker: "claim"}, rows: ["t1"]}
               - now: 1000000
                 actions:
                   - {query: {listing: "constraints"}, items: []}
@@ -2406,13 +2406,13 @@ cases:
                   - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "_DrivineSchema", properties: ["scope"], name: "_DrivineSchema_scope_unique"}]}
               - now: 1000000
                 actions:
-                  - {execute: {marker: "release", at: "t1"}}
+                  - {query: {marker: "release", at: "t1"}, rows: []}
               - now: 1000000
                 actions:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
               - now: 1000000
                 actions:
-                  - {query: {claim: "Range index"}, rows: [{at: "t2"}]}
+                  - {query: {claim: "Range index"}, rows: ["t2"]}
               - now: 1000000
                 actions:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
@@ -2425,7 +2425,7 @@ cases:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
               - now: 1000000
                 actions:
-                  - {execute: {release: "Range index", at: "t2"}}
+                  - {query: {release: "Range index", at: "t2"}, rows: []}
               - now: 1000000
                 actions:
                   - {writeMarker: {scope: "schema", version: "v1", items: "RANGE_INDEX:Person:name:Person_name_range"}}
@@ -2684,7 +2684,7 @@ cases:
                   - {query: {marker: "read.items", scope: "schema"}, rows: []}
               - now: 1000000
                 actions:
-                  - {query: {claim: "Uniqueness constraint"}, rows: [{at: "t1"}]}
+                  - {query: {claim: "Uniqueness constraint"}, rows: ["t1"]}
               - now: 1000000
                 actions:
                   - {query: {listing: "constraints"}, items: []}
@@ -2694,7 +2694,7 @@ cases:
                   - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], name: "Person_email_unique"}]}
               - now: 1000000
                 actions:
-                  - {execute: {release: "Uniqueness constraint", at: "t1"}}
+                  - {query: {release: "Uniqueness constraint", at: "t1"}, rows: []}
               - now: 1000000
                 actions:
                   - {writeMarker: {scope: "schema", version: null, items: "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
@@ -2821,7 +2821,7 @@ cases:
                   - {query: {listing: "constraints"}, items: []}
               - now: 1000000
                 actions:
-                  - {query: {claim: "Range index"}, rows: [{at: "t1"}]}
+                  - {query: {claim: "Range index"}, rows: ["t1"]}
               - now: 1000000
                 actions:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
@@ -2834,7 +2834,7 @@ cases:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
               - now: 1000000
                 actions:
-                  - {execute: {release: "Range index", at: "t1"}}
+                  - {query: {release: "Range index", at: "t1"}, rows: []}
             done: 1000000
             report:
               owners:
@@ -2944,7 +2944,7 @@ cases:
                   - {query: {listing: "constraints"}, items: []}
               - now: 1000000
                 actions:
-                  - {query: {claim: "Range index"}, rows: [{at: "t1"}]}
+                  - {query: {claim: "Range index"}, rows: ["t1"]}
               - now: 1000000
                 actions:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
@@ -2957,7 +2957,7 @@ cases:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
               - now: 1000000
                 actions:
-                  - {execute: {release: "Range index", at: "t1"}}
+                  - {query: {release: "Range index", at: "t1"}, rows: []}
               - now: 1000000
                 actions:
                   - {writeMarker: {scope: "schema", version: null, items: "VECTOR_INDEX:Chunk:embedding:Chunk_embedding_vector\nRANGE_INDEX:Person:name:Person_name_range"}}
@@ -3095,7 +3095,7 @@ cases:
                   - {query: {listing: "constraints"}, items: []}
               - now: 1000000
                 actions:
-                  - {query: {claim: "Range index"}, rows: [{at: "t1"}]}
+                  - {query: {claim: "Range index"}, rows: ["t1"]}
               - now: 1000000
                 actions:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
@@ -3108,7 +3108,7 @@ cases:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
               - now: 1000000
                 actions:
-                  - {execute: {release: "Range index", at: "t1"}}
+                  - {query: {release: "Range index", at: "t1"}, rows: []}
               - now: 1000000
                 actions:
                   - {writeMarker: {scope: "schema", version: null, items: "VECTOR_INDEX:Chunk:embedding:Chunk_embedding_vector\nRANGE_INDEX:Person:name:Person_name_range"}}
@@ -3663,7 +3663,7 @@ cases:
                   - {query: {listing: "constraints"}, items: []}
               - now: 1000000
                 actions:
-                  - {query: {claim: "Uniqueness constraint"}, rows: [{at: "t1"}]}
+                  - {query: {claim: "Uniqueness constraint"}, rows: ["t1"]}
               - now: 1000000
                 actions:
                   - {query: {listing: "constraints"}, items: []}
@@ -3680,7 +3680,7 @@ cases:
               - now: 1000000
                 actions:
                   - {execute: {statement: "DO $incomplete$\nDECLARE\n    v_table regclass;\nBEGIN\n    SELECT x.indrelid::regclass INTO v_table FROM pg_index x WHERE x.indexrelid = to_regclass('drivine_uq2_Personemail_5482a751') AND CASE WHEN x.indisvalid THEN NULL WHEN EXISTS (SELECT 1 FROM pg_stat_progress_create_index p WHERE p.index_relid = x.indexrelid OR (p.index_relid IS NULL AND p.datname = current_database())) THEN 'BUILDING' ELSE 'INVALID' END = 'INVALID';\n    IF v_table IS NOT NULL THEN\n        EXECUTE 'LOCK TABLE ' || v_table || ' IN ACCESS EXCLUSIVE MODE';\n        IF EXISTS (SELECT 1 FROM pg_index WHERE indexrelid = to_regclass('drivine_uq2_Personemail_5482a751') AND NOT indisvalid) THEN\n            DROP INDEX drivine_uq2_Personemail_5482a751;\n        END IF;\n    END IF;\nEND\n$incomplete$"}}
-                  - {execute: {release: "Uniqueness constraint", at: "t1"}}
+                  - {query: {release: "Uniqueness constraint", at: "t1"}, rows: []}
             done: 1000000
             report:
               owners:
@@ -3711,7 +3711,7 @@ cases:
                   - {query: {listing: "constraints"}, items: []}
               - now: 1000000
                 actions:
-                  - {query: {claim: "Uniqueness constraint"}, rows: [{at: "t1"}]}
+                  - {query: {claim: "Uniqueness constraint"}, rows: ["t1"]}
               - now: 1000000
                 actions:
                   - {query: {listing: "constraints"}, items: []}
@@ -3728,13 +3728,13 @@ cases:
               - now: 1000000
                 actions:
                   - {execute: {statement: "DO $incomplete$\nDECLARE\n    v_table regclass;\nBEGIN\n    SELECT x.indrelid::regclass INTO v_table FROM pg_index x WHERE x.indexrelid = to_regclass('drivine_uq2_Personemail_5482a751') AND CASE WHEN x.indisvalid THEN NULL WHEN EXISTS (SELECT 1 FROM pg_stat_progress_create_index p WHERE p.index_relid = x.indexrelid OR (p.index_relid IS NULL AND p.datname = current_database())) THEN 'BUILDING' ELSE 'INVALID' END = 'INVALID';\n    IF v_table IS NOT NULL THEN\n        EXECUTE 'LOCK TABLE ' || v_table || ' IN ACCESS EXCLUSIVE MODE';\n        IF EXISTS (SELECT 1 FROM pg_index WHERE indexrelid = to_regclass('drivine_uq2_Personemail_5482a751') AND NOT indisvalid) THEN\n            DROP INDEX drivine_uq2_Personemail_5482a751;\n        END IF;\n    END IF;\nEND\n$incomplete$"}}
-                  - {execute: {release: "Uniqueness constraint", at: "t1"}}
+                  - {query: {release: "Uniqueness constraint", at: "t1"}, rows: []}
               - now: 1000000
                 actions:
                   - {query: {listing: "constraints"}, items: []}
               - now: 1000000
                 actions:
-                  - {query: {claim: "Uniqueness constraint"}, rows: [{at: "t2"}]}
+                  - {query: {claim: "Uniqueness constraint"}, rows: ["t2"]}
               - now: 1000000
                 actions:
                   - {query: {listing: "constraints"}, items: []}
@@ -3744,7 +3744,7 @@ cases:
                   - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], name: "Person_email_unique"}]}
               - now: 1000000
                 actions:
-                  - {execute: {release: "Uniqueness constraint", at: "t2"}}
+                  - {query: {release: "Uniqueness constraint", at: "t2"}, rows: []}
               - now: 1000000
                 actions:
                   - {writeMarker: {scope: "b", version: null, items: "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
@@ -3952,7 +3952,7 @@ cases:
                   - {query: {listing: "constraints"}, items: []}
               - now: 1000000
                 actions:
-                  - {query: {claim: "Range index"}, rows: [{at: "t1"}]}
+                  - {query: {claim: "Range index"}, rows: ["t1"]}
               - now: 1000000
                 actions:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
@@ -3965,7 +3965,7 @@ cases:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
               - now: 1000000
                 actions:
-                  - {execute: {release: "Range index", at: "t1"}}
+                  - {query: {release: "Range index", at: "t1"}, rows: []}
               - now: 1000000
                 actions:
                   - {writeMarker: {scope: "schema", version: null, items: "RANGE_INDEX:Person:name:Person_name_range"}}
@@ -3973,7 +3973,7 @@ cases:
                   - {query: {listing: "constraints"}, items: []}
               - now: 1000000
                 actions:
-                  - {query: {marker: "claim"}, rows: [{at: "t2"}]}
+                  - {query: {marker: "claim"}, rows: ["t2"]}
               - now: 1000000
                 actions:
                   - {query: {listing: "constraints"}, items: []}
@@ -3983,13 +3983,13 @@ cases:
                   - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "_DrivineSchema", properties: ["scope"], name: "_DrivineSchema_scope_unique"}]}
               - now: 1000000
                 actions:
-                  - {execute: {marker: "release", at: "t2"}}
+                  - {query: {marker: "release", at: "t2"}, rows: []}
               - now: 1000000
                 actions:
                   - {query: {listing: "indexes.FULLTEXT_INDEX"}, items: []}
               - now: 1000000
                 actions:
-                  - {query: {claim: "Full-text index"}, rows: [{at: "t3"}]}
+                  - {query: {claim: "Full-text index"}, rows: ["t3"]}
               - now: 1000000
                 actions:
                   - {query: {listing: "indexes.FULLTEXT_INDEX"}, items: []}
@@ -3999,7 +3999,7 @@ cases:
                   - {query: {listing: "indexes.FULLTEXT_INDEX"}, items: [{kind: "FULLTEXT_INDEX", label: "Doc", properties: ["title", "body"], name: "Doc_title_body_fulltext"}]}
               - now: 1000000
                 actions:
-                  - {execute: {release: "Full-text index", at: "t3"}}
+                  - {query: {release: "Full-text index", at: "t3"}, rows: []}
               - now: 1000000
                 actions:
                   - {writeMarker: {scope: "rag", version: "v1", items: "FULLTEXT_INDEX:Doc:title,body:Doc_title_body_fulltext"}}
@@ -4169,7 +4169,7 @@ cases:
                   - {query: {marker: "claim"}}
               - now: 1000000
                 actions:
-                  - {query: {claim: "Full-text index"}, rows: [{at: "t2"}]}
+                  - {query: {claim: "Full-text index"}, rows: ["t2"]}
               - now: 1000000
                 actions:
                   - {query: {listing: "indexes.FULLTEXT_INDEX"}, items: []}
@@ -4179,7 +4179,7 @@ cases:
                   - {query: {listing: "indexes.FULLTEXT_INDEX"}, items: [{kind: "FULLTEXT_INDEX", label: "Doc", properties: ["title", "body"], name: "Doc_title_body_fulltext"}]}
               - now: 1000000
                 actions:
-                  - {execute: {release: "Full-text index", at: "t2"}}
+                  - {query: {release: "Full-text index", at: "t2"}, rows: []}
               - now: 1000000
                 actions:
                   - {writeMarker: {scope: "rag", version: null, items: "FULLTEXT_INDEX:Doc:title,body:Doc_title_body_fulltext"}}
@@ -4356,7 +4356,7 @@ cases:
                   - {query: {claim: "Full-text index"}}
               - now: 1000000
                 actions:
-                  - {query: {claim: "Full-text index"}, rows: [{at: "t3"}]}
+                  - {query: {claim: "Full-text index"}, rows: ["t3"]}
               - now: 1000000
                 actions:
                   - {query: {listing: "indexes.FULLTEXT_INDEX"}, items: []}
@@ -4366,7 +4366,7 @@ cases:
                   - {query: {listing: "indexes.FULLTEXT_INDEX"}, items: [{kind: "FULLTEXT_INDEX", label: "Doc", properties: ["title", "body"], name: "Doc_title_body_fulltext"}]}
               - now: 1000000
                 actions:
-                  - {execute: {release: "Full-text index", at: "t3"}}
+                  - {query: {release: "Full-text index", at: "t3"}, rows: []}
               - now: 1000000
                 actions:
                   - {writeMarker: {scope: "rag", version: null, items: "FULLTEXT_INDEX:Doc:title,body:Doc_title_body_fulltext"}}
@@ -4432,7 +4432,7 @@ cases:
               - now: 1000000
                 actions:
                   - {execute: {marker: "deleteAllButNewest", scope: "schema"}}
-                  - {query: {claim: "Vector index by cosine"}, rows: [{at: "t1"}]}
+                  - {query: {claim: "Vector index by cosine"}, rows: ["t1"]}
               - now: 1000000
                 actions:
                   - {query: {listing: "indexes.VECTOR_INDEX"}, items: []}
@@ -4442,7 +4442,7 @@ cases:
                   - {query: {listing: "indexes.VECTOR_INDEX"}, items: [{kind: "VECTOR_INDEX", label: "Chunk", properties: ["embedding"], name: "Chunk_embedding_vector", dimensions: 384, similarity: "COSINE"}]}
               - now: 1000000
                 actions:
-                  - {execute: {release: "Vector index by cosine", at: "t1"}}
+                  - {query: {release: "Vector index by cosine", at: "t1"}, rows: []}
               - now: 1000000
                 actions:
                   - {writeMarker: {scope: "schema", version: "v3", items: "RANGE_INDEX:Person:name:Person_name_range\nruntime:VECTOR_INDEX:Chunk:embedding:Chunk_embedding_vector"}}
@@ -4562,7 +4562,7 @@ cases:
                   - {query: {listing: "indexes.VECTOR_INDEX"}, items: []}
               - now: 1000000
                 actions:
-                  - {query: {claim: "Range index over two properties"}, rows: [{at: "t1"}]}
+                  - {query: {claim: "Range index over two properties"}, rows: ["t1"]}
               - now: 1000000
                 actions:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
@@ -4572,13 +4572,13 @@ cases:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name", "born"], name: "Person_name_born_range"}]}
               - now: 1000000
                 actions:
-                  - {execute: {release: "Range index over two properties", at: "t1"}}
+                  - {query: {release: "Range index over two properties", at: "t1"}, rows: []}
               - now: 1000000
                 actions:
                   - {query: {listing: "indexes.VECTOR_INDEX"}, items: []}
               - now: 1000000
                 actions:
-                  - {query: {claim: "Vector index by cosine"}, rows: [{at: "t2"}]}
+                  - {query: {claim: "Vector index by cosine"}, rows: ["t2"]}
               - now: 1000000
                 actions:
                   - {query: {listing: "indexes.VECTOR_INDEX"}, items: []}
@@ -4588,7 +4588,7 @@ cases:
                   - {query: {listing: "indexes.VECTOR_INDEX"}, items: [{kind: "VECTOR_INDEX", label: "Chunk", properties: ["embedding"], name: "Chunk_embedding_vector", dimensions: 384, similarity: "COSINE"}]}
               - now: 1000000
                 actions:
-                  - {execute: {release: "Vector index by cosine", at: "t2"}}
+                  - {query: {release: "Vector index by cosine", at: "t2"}, rows: []}
               - now: 1000000
                 actions:
                   - {writeMarker: {scope: "schema", version: null, items: "runtime:RANGE_INDEX:Person:name,born:Person_name_born_range\nruntime:VECTOR_INDEX:Chunk:embedding:Chunk_embedding_vector"}}
@@ -5137,7 +5137,7 @@ cases:
                   - {query: {listing: "indexes.FULLTEXT_INDEX"}, items: []}
               - now: 1000000
                 actions:
-                  - {query: {claim: "Range index"}, rows: [{at: "t1"}]}
+                  - {query: {claim: "Range index"}, rows: ["t1"]}
               - now: 1000000
                 actions:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
@@ -5150,7 +5150,7 @@ cases:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
               - now: 1000000
                 actions:
-                  - {execute: {release: "Range index", at: "t1"}}
+                  - {query: {release: "Range index", at: "t1"}, rows: []}
               - now: 1000000
                 actions:
                   - {query: {listing: "constraints"}, items: []}
@@ -5163,7 +5163,7 @@ cases:
                   - {query: {listing: "indexes.FULLTEXT_INDEX"}, items: []}
               - now: 1000000
                 actions:
-                  - {query: {claim: "Full-text index"}, rows: [{at: "t3"}]}
+                  - {query: {claim: "Full-text index"}, rows: ["t3"]}
               - now: 1000000
                 actions:
                   - {query: {listing: "indexes.FULLTEXT_INDEX"}, items: []}
@@ -5173,7 +5173,7 @@ cases:
                   - {query: {listing: "indexes.FULLTEXT_INDEX"}, items: [{kind: "FULLTEXT_INDEX", label: "Doc", properties: ["title", "body"], name: "Doc_title_body_fulltext"}]}
               - now: 1000000
                 actions:
-                  - {execute: {release: "Full-text index", at: "t3"}}
+                  - {query: {release: "Full-text index", at: "t3"}, rows: []}
               - now: 1000000
                 actions:
                   - {writeMarker: {scope: "b", version: null, items: "FULLTEXT_INDEX:Doc:title,body:Doc_title_body_fulltext"}}
@@ -5254,7 +5254,7 @@ cases:
                   - {query: {claim: "Range index that ignores case"}}
               - now: 1000000
                 actions:
-                  - {query: {claim: "Full-text index"}, rows: [{at: "t2"}]}
+                  - {query: {claim: "Full-text index"}, rows: ["t2"]}
               - now: 1000000
                 actions:
                   - {query: {listing: "indexes.FULLTEXT_INDEX"}, items: []}
@@ -5264,7 +5264,7 @@ cases:
                   - {query: {listing: "indexes.FULLTEXT_INDEX"}, items: [{kind: "FULLTEXT_INDEX", label: "Doc", properties: ["title", "body"], name: "Doc_title_body_fulltext"}]}
               - now: 1000000
                 actions:
-                  - {execute: {release: "Full-text index", at: "t2"}}
+                  - {query: {release: "Full-text index", at: "t2"}, rows: []}
               - now: 1000000
                 actions:
                   - {writeMarker: {scope: "b", version: null, items: "FULLTEXT_INDEX:Doc:title,body:Doc_title_body_fulltext"}}
@@ -5321,7 +5321,7 @@ cases:
                   - {query: {listing: "constraints"}, items: []}
               - now: 1000000
                 actions:
-                  - {query: {claim: "Range index"}, rows: [{at: "t1"}]}
+                  - {query: {claim: "Range index"}, rows: ["t1"]}
               - now: 1000000
                 actions:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
@@ -5334,7 +5334,7 @@ cases:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
               - now: 1000000
                 actions:
-                  - {execute: {release: "Range index", at: "t1"}}
+                  - {query: {release: "Range index", at: "t1"}, rows: []}
             done: 1000000
             report:
               owners:
@@ -5468,7 +5468,7 @@ cases:
               - now: 1000000
                 actions:
                   - {fillLowerCopies: {label: "Person", properties: ["email"]}}
-                  - {query: {claim: "Range index that ignores case"}, rows: [{at: "t1"}]}
+                  - {query: {claim: "Range index that ignores case"}, rows: ["t1"]}
               - now: 1000000
                 actions:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
@@ -5481,14 +5481,14 @@ cases:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["__drivine.lower.email"], name: "Person_email_ci_range"}]}
               - now: 1000000
                 actions:
-                  - {execute: {release: "Range index that ignores case", at: "t1"}}
+                  - {query: {release: "Range index that ignores case", at: "t1"}, rows: []}
               - now: 1000000
                 actions:
                   - {query: {listing: "constraints"}, items: []}
               - now: 1000000
                 actions:
                   - {fillLowerCopies: {label: "Person", properties: ["email"]}}
-                  - {query: {claim: "Uniqueness constraint that ignores case"}, rows: [{at: "t2"}]}
+                  - {query: {claim: "Uniqueness constraint that ignores case"}, rows: ["t2"]}
               - now: 1000000
                 actions:
                   - {query: {listing: "constraints"}, items: []}
@@ -5498,7 +5498,7 @@ cases:
                   - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["__drivine.lower.email"], name: "Person_email_ci_unique"}]}
               - now: 1000000
                 actions:
-                  - {execute: {release: "Uniqueness constraint that ignores case", at: "t2"}}
+                  - {query: {release: "Uniqueness constraint that ignores case", at: "t2"}, rows: []}
               - now: 1000000
                 actions:
                   - {writeMarker: {scope: "schema", version: null, items: "RANGE_INDEX:Person:__drivine.lower.email:Person_email_ci_range\nUNIQUENESS_CONSTRAINT:Person:__drivine.lower.email:Person_email_ci_unique"}}
@@ -9052,7 +9052,7 @@ cases:
                   - {query: {listing: "constraints"}, items: []}
               - now: 1000000
                 actions:
-                  - {query: {claim: "Uniqueness constraint"}, rows: [{at: "t1"}]}
+                  - {query: {claim: "Uniqueness constraint"}, rows: ["t1"]}
               - now: 1000000
                 actions:
                   - {query: {listing: "constraints"}, items: []}
@@ -9062,7 +9062,7 @@ cases:
                   - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], name: "Person_email_unique"}]}
               - now: 1000000
                 actions:
-                  - {execute: {release: "Uniqueness constraint", at: "t1"}}
+                  - {query: {release: "Uniqueness constraint", at: "t1"}, rows: []}
             done: 1000000
             report:
               item: {result: {created: {kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], name: "Person_email_unique"}}, dropped: null}
@@ -9378,7 +9378,7 @@ cases:
                   - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], name: "Person_email_unique"}, {kind: "UNIQUENESS_CONSTRAINT", label: "Company", properties: ["name"], name: "Company_name_unique"}]}
               - now: 1000000
                 actions:
-                  - {query: {claim: "Range index"}, rows: [{at: "t1"}]}
+                  - {query: {claim: "Range index"}, rows: ["t1"]}
               - now: 1000000
                 actions:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
@@ -9391,7 +9391,7 @@ cases:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
               - now: 1000000
                 actions:
-                  - {execute: {release: "Range index", at: "t1"}}
+                  - {query: {release: "Range index", at: "t1"}, rows: []}
             done: 1000000
             report:
               item: {result: {created: {kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}}, dropped: null}

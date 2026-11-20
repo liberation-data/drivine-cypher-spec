@@ -586,9 +586,10 @@ internal class SchemaProgram(
             // A related item (of the kind and label, not the spec's) lets a store with an index a label (FalkorDB) make
             // only the properties missing.
             val related = items.firstOrNull { it.kind == spec.kind && it.label == spec.label }
+            // Before anything is said: the ensure is run again in its turn, which says it then.
+            awaitTurn(spec)
             warnUnsupportedTuning(spec)
             val leftIncomplete = isLeftIncomplete(spec)
-            awaitTurn(spec)
             if (leftIncomplete) ddlOnAQuietTable(made(spec, related, true)) else ddl(made(spec, related, false))
             val created = awaitBuilt(spec, findIndex(spec), build) ?: SchemaItemInfo.fromSpec(spec)
             val completed = if (leftIncomplete) ": ${store.incompleteness(SchemaItemInfo.fromSpec(spec))}" else ""
@@ -1105,11 +1106,12 @@ internal class SchemaProgram(
     }
 
     /**
-     * Gives up the claim taken [at], a row's delete on the auto-commit manager, as the marker's are. One that fails is let be:
-     * a claim left behind is taken over once it is old.
+     * Gives up the claim taken [at], a query on a schema connection, as its take is: where a caller's transaction holds that
+     * connection, the claim it holds uncommitted is seen and given up there. One that fails is let be: a claim left behind
+     * is taken over once it is old.
      */
     private fun release(claim: BuildClaim, at: String) {
-        io.ask(PlanAction.Execute(DdlStatement.Text(claim.release), mapOf("at" to at), Purpose.MARKER))
+        io.ask(PlanAction.Query(claim.release, mapOf("at" to at), Purpose.LISTING))
     }
 
     /** When [claim] was taken, once it is this ensure's turn; null where it ensures without one ([inTurn]). */
@@ -1118,7 +1120,8 @@ internal class SchemaProgram(
         var poll = 0L
         while (io.clock() + poll < deadline) {
             val rows = (io.ask(PlanAction.Query(claim.take, purpose = Purpose.LISTING, delayMillis = poll)) as? PlanOutcome.Rows)?.rows ?: return null
-            val at = rows.firstNotNullOfOrNull { (it as? Map<*, *>)?.get("at")?.toString() }
+            // A row of one column, when it was claimed, as text: as a library gives a row of one column, its value.
+            val at = rows.firstNotNullOfOrNull { (it as? List<*>)?.singleOrNull() as? String ?: it as? String }
             if (at != null) return at
             poll = POLL_MILLIS
         }
