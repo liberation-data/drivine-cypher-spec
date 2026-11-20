@@ -16,6 +16,7 @@ These files say what a statement in Drivine's flavour of Cypher gives on each st
 - `plans.yaml`: the schema plan: what a schema manager runs on each store, round by round, for an enforce, a recreate, an ensure or a remove, what the store answers, and what the manager reports, its log lines among it. Read with no store. See [The schema plan](#the-schema-plan).
 - `host.yaml`: what each library's own code does with the values compiled SQL hands it: the functions it registers on SQLite, and how it reads a column of a statement's rows. Read with no store. See [Host functions and readers](#host-functions-and-readers).
 - `search.yaml`: full-text search: the nodes a search finds on each store, over the graph the file's `graph` writes, and how closely each other store ranks a corpus, `search/docs-corpus.json`, as Neo4j's full-text index ranks it. See [Full-text search](#full-text-search).
+- `among.yaml`: a search among ids, a library's `loadNearestAmong`: for each of a set of nodes, its nearest among the others, each pair once or both ways, on each store, over the graph the file's `graph` writes, with each neighbour's score. See [A search among ids](#a-search-among-ids).
 - `vector.yaml`: vector search in Cypher: the nodes `db.index.vector.queryNodes()` and Cypher 25's `SEARCH` find on each store, with their scores, over the graph the file's `graph` writes, and what `vector.similarity.cosine()` and `vector.similarity.euclidean()` give. See [Vector search](#vector-search).
 - `fragments.yaml`: the parts of a statement a library writes itself, its object manager's filters and orders, as the compiler's module gives them on each SQL store, and the rows Neo4j keeps or orders for each. See [Fragments](#fragments).
 - `results.yaml`: a statement's columns, and its values with their kinds kept, a node with its labels and a relationship with its type, as each library's call that gives them reads them (drivine4j#741), over the graph the file's `graph` writes. See [Columns and typed values](#columns-and-typed-values).
@@ -663,6 +664,24 @@ cases:
 **What Neo4j gives.** A cosine index scores a node (1 + cos) / 2, from 1.0 for the same direction to 0.0 for the opposite; a euclidean index 1 / (1 + d²). A node is in an index if it has the index's label and its property is a list of numbers of the index's size, and on a cosine index not a list of zeros. A filter on what a search finds, a `WHERE` after its `YIELD`, or before or after `SEARCH`, is applied after the k nearest are found, so it may leave fewer than k. What a search finds is read on as any node is: matched out from, optionally, in `EXISTS { }`, and aggregated. The cases were recorded on Neo4j 2026.10.1 community, in Cypher 25, its default.
 
 **Refused.** Of Neo4j's vector search, a SQL store refuses by name what it has no counterpart of (see `refusals.yaml`): `db.index.vector.queryRelationships()`, as it makes no vector index on relationships; Neo4j's `VECTOR` type and its functions, `vector()`, `vector_distance()`, `vector_norm()` and `vector_dimension_count()`, as an embedding there is a list of numbers; `db.create.setNodeVectorProperty()`, for a `SET` of the list; and a `k` written as a float, `1.5` or `2.0`, as Neo4j refuses it. A search by `db.index.vector.queryNodes()` is compiled, and refuses before it runs what Neo4j fails: a `k` that is no whole number from 1 to 2147483647, an index the graph has not made, and a vector written or given that is null, of another size than the index's, or of no length on a cosine index.
+
+## A search among ids
+
+A search among ids (a library's `loadNearestAmong(ids, topK, threshold, searchK, neighbours)`) finds, for each of a set of nodes named by id, its `topK` nearest among the others of the set, each with its score, as `vector.yaml` scores it. It is the shared module's `VectorSearch` with an `among` (see the compiler's README). `among.yaml` pins what each store gives.
+
+```yaml
+- among: {label: "Doc", property: "embedding", ids: ["a", "b", "c", "d", "e", "f"], topK: 1, neighbours: "after"}
+  rows:
+    - {seed: "a", near: [{id: "b", score: 0.9}]}
+    - {seed: "b", near: [{id: "c", score: 0.98}]}
+    ...
+```
+
+**Each pair once.** With `neighbours: "after"`, each node keeps only the nodes after it in the ids, so each pair comes back once, under the node given first. The direction is kept before each node's `topK` are cut. So a node whose nearest all come before it still keeps its best after it, and no pair is lost to the cut, as it would be were each node's nearest taken first and the earlier ones dropped after: the file's case "A node's nearest all before it" is that trap. The library puts the ids in its id type's own order first, so the order a caller gives them in changes nothing. The module compares no two ids: it keeps a node's neighbours by their places among the ids alone, so every store agrees.
+
+**Exact, or through the index.** With `neighbours: "after"` and no `searchK`, every pair of the set is measured, through no index, so the answer is exact on every store, and its cost grows with the square of the set's size. With a `searchK`, each node asks the vector index for its `searchK` nearest, where one is made, and keeps those after it. On a selective set, a few nodes among many, that misses most pairs, and the module warns that it can. A step's `warned` lists the stores it warns on. With `neighbours: "all"`, the search goes through an index wherever one is made, as it went before; making it exact too is liberation-data/drivine-cypher-spec#408.
+
+**A case.** For each store, a runner empties the graph, makes each of `indexes`, as `store.yaml`'s DDL makes them, writes `graph`, and waits for the indexes to hold it. It then runs each step through its library's `loadNearestAmong`, or the module's `VectorSearch` given the same request, and compares the rows: for each id of a node with an embedding the search can measure, its neighbours, best first, each score within 1e-6. An id of no node, or of a node with no embedding, or by cosine one of no length, has no row. `today`, as in `search.yaml`, says what a store gives where it differs, and the issue; it is not read. FalkorDB can't tell that a stored vector has no length, and measures one by cosine (liberation-data/drivine-cypher-spec#409).
 
 ## Values a write makes
 
