@@ -1064,4 +1064,33 @@ class OnlineIndexBuildTest {
         assertNull(cancelled.rethrown, "$cancelled")
         assertTrue("deadlocked each time with another session's online build" in cancelled.failure.orEmpty(), "$cancelled")
     }
+
+    @Test
+    fun aBuildCancelledAsADeadlockMidBuildLeavesItsIndexInvalidWhichTheEnsureRunAgainDropsAndBuilds() {
+        // The cancelled build is this session's, under way: Postgres leaves its index invalid under the name, unrecorded,
+        // which the ensure run again drops and builds, as one cut short, rather than pass over it (IF NOT EXISTS).
+        val index = postgresDdl.objectName(PostgresDdl.RANGE, listOf("Person", "name"))
+        var creates = 0
+        val (ran, report) = drive(
+            postgres, name,
+            listed = { if (it == postgresDdl.listIndexesQuery(SchemaItemKind.RANGE_INDEX) && creates == 1) listOf(nameIndexObject(PostgresDdl.INVALID)) else emptyList() },
+            execute = { if (it.startsWith("CREATE INDEX") && ++creates == 1) deadlocked else null },
+        )
+        assertEquals(
+            listOf("CREATE INDEX CONCURRENTLY IF NOT EXISTS $index", "DROP INDEX IF INVALID $index", "CREATE INDEX CONCURRENTLY IF NOT EXISTS $index"),
+            indexBuilds(ran).map { it.substringBefore(" ON ") },
+        )
+        assertIs<EnsureResult.Created>(report.item!!.result)
+        var uniqueCreates = 0
+        val (constraint, made) = drive(
+            postgres, email,
+            listed = { if (it == postgresDdl.listConstraintsQuery() && uniqueCreates == 1) listOf(emailIndexObject(PostgresDdl.INVALID)) else emptyList() },
+            execute = { if (it.startsWith("CREATE UNIQUE INDEX") && ++uniqueCreates == 1) deadlocked else null },
+        )
+        assertEquals(
+            listOf("CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS $emailIndex", "DROP INDEX IF INVALID $emailIndex", "CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS $emailIndex"),
+            indexBuilds(constraint).map { it.substringBefore(" ON ") },
+        )
+        assertIs<EnsureResult.Created>(made.item!!.result)
+    }
 }
