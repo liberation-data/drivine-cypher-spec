@@ -24,7 +24,8 @@ import org.drivine.schema.SimilarityFunction
  *
  * @param dimensions on Postgres and Oracle, the size of the embeddings the index on the property was made for, as the catalog
  *   records it for the label searched ([VectorRequest.partitionLabel], or the root's first); null where none is made. A nearest search goes through the index only where it is the query vector's
- *   size, and measures every node otherwise; a search among ids goes through any index made.
+ *   size, and measures every node otherwise; a search among ids goes through any index made, but for each pair once
+ *   ([AmongNeighbours.After]) without `searchK`, which measures every pair.
  * @param name on a graph engine, the index's name where it isn't `<label>_<property>_vector`; a blank one is none.
  */
 @DrivineInternalApi
@@ -82,7 +83,8 @@ sealed interface AmongNeighbours {
  * @param searchK how many the index is asked for, where it is more than [topK]: the nearest `searchK` are measured, and of
  *   what is left of them after the library's filters `topK` come back. On Neo4j a nearest search with it scores what the index
  *   found exactly, as the index's own score doesn't order quite as the exact one does. Among ids, where it is null, the index
- *   is asked for `topK + 1` for each root, as drivine4j's `loadNearestAmong` asks: it finds the root itself first.
+ *   is asked for `topK + 1` for each root, as drivine4j's `loadNearestAmong` asks: it finds the root itself first; for each
+ *   pair once ([AmongNeighbours.After]) no index is asked, and every pair of the roots is measured.
  * @param size the query vector's size, on a nearest search on a SQL store: only embeddings of that size are measured.
  * @param partitionLabel the label whose index is searched, in place of the root's first: one index for each partition, of the
  *   same property. The root's own labels are still checked. A search among ids takes none.
@@ -534,7 +536,7 @@ object VectorSearch {
     /**
      * A search among ids on a graph engine: each id unwound to its root, and the index asked for each root's nearest by the
      * root's own embedding, so the engine answers every root in one statement. What the index yields is narrowed to the
-     * roots, less the root itself and what scores under the threshold, and the best `topK` of what is left are kept. On Neo4j
+     * roots, less the root itself (for each pair once, to the roots after it) and what scores under the threshold, and the best `topK` of what is left are kept. On Neo4j
      * the score is measured afresh, as the narrowing trims what the index found.
      */
     private fun graphAmong(store: SearchStore, request: VectorRequest, among: VectorAmong, scope: SearchParameters): VectorPlan {

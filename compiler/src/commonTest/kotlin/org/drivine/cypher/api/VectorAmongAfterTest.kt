@@ -249,6 +249,17 @@ class VectorAmongAfterTest {
     }
 
     @Test
+    fun aRepeatedIdIsSearchedOnceAtItsFirstPlace() {
+        // Places are read from the ids as bound: a repeat kept would place a root after itself, and pair it with itself.
+        for (store in SearchStore.entries) for (searchK in listOf(null, 20)) {
+            val repeated = request(searchK = searchK).let { it.copy(among = it.among!!.copy(ids = listOf("a", "b", "a", "c", "b"))) }
+            val planned = plan(store, repeated)
+            assertEquals(plan(store, request(searchK = searchK)), planned, "${store.id} $searchK")
+            assertEquals(listOf("a", "b", "c"), planned.parameters["_cy_vec1"], "${store.id} $searchK")
+        }
+    }
+
+    @Test
     fun onlyFalkorDbIsGivenATimeoutAndOnlyToMeasureEveryPair() {
         for (store in SearchStore.entries) for (searchK in listOf(null, 20)) {
             val expected = if (store == SearchStore.FALKORDB && searchK == null) VectorSearch.FALKORDB_AMONG_TIMEOUT_MILLIS else null
