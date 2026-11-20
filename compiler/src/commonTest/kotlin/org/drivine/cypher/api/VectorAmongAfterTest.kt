@@ -6,7 +6,6 @@ import org.drivine.cypher.json.ObjectNode
 import org.drivine.schema.SimilarityFunction
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -260,11 +259,11 @@ class VectorAmongAfterTest {
     }
 
     @Test
-    fun onlyFalkorDbIsGivenATimeoutAndOnlyToMeasureEveryPair() {
+    fun onlyFalkorDbIsGivenATimeoutAndOnlyToMeasureEveryPairWhicheverNeighboursItKeeps() {
         for (store in SearchStore.entries) for (searchK in listOf(null, 20)) {
             val expected = if (store == SearchStore.FALKORDB && searchK == null) VectorSearch.FALKORDB_AMONG_TIMEOUT_MILLIS else null
             assertEquals(expected, plan(store, request(searchK = searchK)).timeoutMillis, "${store.id} $searchK")
-            assertNull(plan(store, request(searchK = searchK, neighbours = AmongNeighbours.All)).timeoutMillis, "${store.id} all")
+            assertEquals(expected, plan(store, request(searchK = searchK, neighbours = AmongNeighbours.All)).timeoutMillis, "${store.id} $searchK all")
         }
     }
 
@@ -304,17 +303,6 @@ class VectorAmongAfterTest {
     }
 
     @Test
-    fun theSearchForEveryNeighbourTakesNoPlaces() {
-        // All is as it was before After: the golden pins its statements, and none reads a place.
-        for (store in SearchStore.entries) for (searchK in listOf(null, 20)) for (dimensions in listOf(null, 3)) {
-            val planned = plan(store, request(searchK = searchK, dimensions = dimensions, neighbours = AmongNeighbours.All))
-            val text = statement(planned)
-            assertTrue("_pos" !in text && "pos >" !in text && "ORDINALITY" !in text, "${store.id}:\n$text")
-            assertEquals(emptyList(), planned.warnings, store.id)
-        }
-    }
-
-    @Test
     fun theJsonRequestGivesTheNeighboursAndTheAnswerItsTimeout() {
         val base = "\"labels\": [\"Doc\"], \"property\": \"embedding\", \"similarity\": \"COSINE\", \"topK\": 5"
         fun raw(store: SearchStore, among: String) = CompileJson.compile("{\"store\": \"${store.id}\", \"graph\": {\"name\": \"g\"}, \"vector\": {$base, \"among\": $among}}")
@@ -326,7 +314,9 @@ class VectorAmongAfterTest {
             assertEquals(raw(store, "{\"ids\": [\"a\"], \"idProperty\": \"id\"}"), raw(store, "{\"ids\": [\"a\"], \"idProperty\": \"id\", \"neighbours\": \"all\"}"), "${store.id}: all is the default")
             assertEquals(raw(store, "{\"ids\": [\"a\"], \"idProperty\": \"id\"}"), raw(store, "{\"ids\": [\"a\"], \"idProperty\": \"id\", \"neighbours\": null}"), "${store.id}: null is all")
             val all = answer(store, "{\"ids\": [\"a\"], \"idProperty\": \"id\", \"neighbours\": \"all\"}")
-            assertTrue(!all.has("timeoutMillis") && (all["warnings"] as ArrayNode).size() == 0, store.id)
+            // A search for every neighbour without searchK measures every pair too, under FalkorDB's timeout (#408).
+            assertEquals(after["timeoutMillis"]?.longValue(), all["timeoutMillis"]?.longValue(), store.id)
+            assertEquals(0, (all["warnings"] as ArrayNode).size(), store.id)
         }
         for (given in listOf("\"sideways\"", "1", "true")) {
             val refused = answer(SearchStore.POSTGRES, "{\"ids\": [\"a\"], \"idProperty\": \"id\", \"neighbours\": $given}")

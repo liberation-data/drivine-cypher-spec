@@ -247,7 +247,8 @@ gives the query vector's `size`, as only embeddings of that size are measured. `
 index in its catalog, the index of the label searched (`partitionLabel`'s, or the root's first): on Postgres and Oracle
 the `dimensions` it was made for, null where none is made, and on a graph
 engine its `name` where it isn't `<label>_<property>_vector`. A nearest search goes through the index only where it was
-made for the vector's size; a search among ids for every neighbour goes through any index made. `among` is
+made for the vector's size; a search among ids with `searchK` goes through any index made, and one without measures
+every pair. `among` is
 `{ids, idProperty, threshold, neighbours}`, each id searched once however often it is given, as drivine4j's
 `loadNearestAmong` searches them.
 
@@ -257,24 +258,24 @@ each root's `topK` are cut, so no pair is lost to the cut when a root's nearest 
 two ids: it keeps a root's neighbours by their places among the ids, so the library gives the ids in its id type's own
 order (numbers by value, text by code point, temporals by time), and every store agrees.
 
-- **Exact without `searchK`.** With `After` and no `searchK`, every pair of the roots is measured, through no index, even
-  where one is made. The answer is exact, and its cost grows with the square of the number of ids.
-  - On a SQL store, each root's place comes from the bound ids' own order (`WITH ORDINALITY`, `FOR ORDINALITY`,
-    `json_each`'s key), and a pair is kept where the neighbour's place is after the root's.
-  - On a graph engine, each root is unwound with its place. In a subquery of its own, it measures only the roots whose
-    places come after its own, and keeps its best `topK`. So a statement holds a root's `topK` rows at a time, never every
-    pair.
+- **Exact without `searchK`.** With no `searchK`, `All` or `After`, every pair of the roots is measured, through no index,
+  even where one is made (#408). The answer is exact, and its cost grows with the square of the number of ids.
+  - On a SQL store, `All` keeps every other root; for `After` each root's place comes from the bound ids' own order
+    (`WITH ORDINALITY`, `FOR ORDINALITY`, `json_each`'s key), and a pair is kept where the neighbour's place is after the
+    root's.
+  - On a graph engine, each root is unwound with its place. In a subquery of its own, it measures the roots at every other
+    place (`All`), or only those whose places come after its own (`After`), and keeps its best `topK`. So a statement holds
+    a root's `topK` rows at a time, never every pair.
   - The graph engines' scores come from each engine's own function of two embeddings: Neo4j's `vector.similarity.cosine`
     and `vector.similarity.euclidean`; Memgraph's `vector_search.cosine_similarity`, and by Euclidean a sum in Cypher, as
     Memgraph has no function for it; FalkorDB's `vec.cosineDistance` and `vec.euclideanDistance`.
   - As on the SQL stores, a pair of two sizes has no score, and by cosine an embedding of no length is no seed and no
     neighbour. FalkorDB can't tell either of a stored vector, so it refuses a pair of two sizes, as its index does, and by
     cosine measures one of no length (#409).
-- **Through the index with `searchK`.** With `After` and `searchK`, each root asks the index for its `searchK` nearest,
-  where one is made, and keeps those after it. A pair the index doesn't give to the first of its roots is missed, and the
-  plan warns so.
-- **`All` is unchanged.** It goes through an index wherever one is made, as it went before `After` (making it exact by
-  default too is #408).
+- **Through the index with `searchK`.** With `searchK`, each root asks the index for its `searchK` nearest, where one is
+  made, and keeps those among the roots (for `After`, those after it). A neighbour the index doesn't give a root is
+  missed, and the plan warns so: for `All` that a root's neighbours can be incomplete, for `After` that pairs can be
+  missed. SQLite makes no index, and measures every pair either way.
 
 On a SQL store the embedding, and an among search's `idProperty`, are read at the key store layout 2 holds the property
 under, `$$e` for a name `$e` that begins with `$` (`ValueLayout.escape`), as the DDL's index reads it.
@@ -304,9 +305,8 @@ under, `$$e` for a name `$e` that begins with `$` (`ValueLayout.escape`), as the
   By cosine, on a SQL store, a root whose embedding has no length is left out, as a seed and as a neighbour (#160).
 - `parameters` are named `_cy_vec1`, `_cy_vec2`, …, with the compiler's reserved prefix. The query vector is not among
   them: `vector` names the parameter the library binds it as, as it binds a list, so a long vector doesn't pass through
-  the module. `indexK` is how many the index is asked for: `searchK`, or where it is left out `topK`, and among ids
-  `topK + 1`, as the index finds the root itself first (drivine4j's `loadNearestAmong`); 0 on a search among ids that
-  measures every pair, which asks no index.
+  the module. `indexK` is how many the index is asked for: `searchK`, or where it is left out `topK` on a nearest search;
+  0 on a search among ids that measures every pair, which asks no index.
 - `timeoutMillis`, on FalkorDB, is the timeout the library runs the statement under, as `GRAPH.QUERY`'s `TIMEOUT`.
   `VectorSearch.FALKORDB_AMONG_TIMEOUT_MILLIS`, 300 000, is given to a search among ids that measures every pair. It is a
   ceiling, not a target: FalkorDB's image sets its legacy `TIMEOUT` to 1 s, which would end a search of a few hundred ids
