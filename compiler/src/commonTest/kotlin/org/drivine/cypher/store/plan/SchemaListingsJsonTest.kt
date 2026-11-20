@@ -75,6 +75,8 @@ class SchemaListingsJsonTest {
             val got = ask(id, "\"listings\": {}")
             val pinned = store["catalog"]!!["stores"]!![id]!!
             assertEquals(pinned["constraints"]!!.textValue(), got["constraints"]!!.textValue(), "on $target, $id: the constraint listing")
+            // The online builds under way on the node table, which a plan reads before it drops an index left invalid (#382).
+            assertEquals(pinned["onlineBuilds"]?.textValue(), ddl.onlineBuildsQuery, "on $target, $id: the online builds listing")
             val kinds = (got["indexes"] as ObjectNode).properties().map { (kind, _) -> kind }
             val expected = listOfNotNull("VECTOR_INDEX", "RANGE_INDEX", "FULLTEXT_INDEX", "TEXT_INDEX".takeIf { schema.supportsTextIndex })
             assertEquals(expected, kinds, "on $target, $id: a listing for each kind of index the store has")

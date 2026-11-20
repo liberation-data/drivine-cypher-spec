@@ -43,7 +43,7 @@ abstract class SqlStoreSchema internal constructor() : StoreSchema {
 
     /**
      * The `status`es of a record that are read: Oracle's [OracleDdl.INCOMPLETE], of a range index that lacks part of what
-     * is made for it, and Postgres's [PostgresDdl.INVALID], of an index left invalid; SQLite lists none.
+     * is made for it, and Postgres's [PostgresDdl.INVALID], of an index left invalid, and [PostgresDdl.BUILDING], of one another session is building; SQLite lists none.
      */
     protected open val statuses: Set<String>
         get() = emptySet()
@@ -125,13 +125,14 @@ abstract class SqlStoreSchema internal constructor() : StoreSchema {
      * ([org.drivine.cypher.store.ddl.UniqueRecreation.finish]): no index under [name], and under [temporary] a unique index
      * of the constraint's shape, as [name]'s would be; and no index under [recorded], the name the record found names its
      * own index by where it lists the properties in another order than [spec] (whose index then still stands, the
-     * recreate cut off before its swap).
+     * recreate cut off before its swap). One left invalid ([PostgresDdl.INVALID]: an online build of it cut short, which this version's recreate, building it
+     * blocking, never leaves, but a `REINDEX CONCURRENTLY` or another version's can), or still being built online ([PostgresDdl.BUILDING]), holds nothing unique, so is no recreate cut off after its drop, but for [invalid], what a remove drops.
      */
-    fun cutOff(spec: SchemaItemSpec, rows: List<Any?>, name: String, temporary: String, recorded: String? = null): Boolean {
+    fun cutOff(spec: SchemaItemSpec, rows: List<Any?>, name: String, temporary: String, recorded: String? = null, invalid: Boolean = false): Boolean {
         val objects = StoreObject.read(rows)
         objects[name]?.let { standing -> if (standing.isIndex || !indexesNamedApart) return false }
         if (recorded != null && objects[recorded]?.isIndex == true) return false
-        val there = objects[temporary]?.takeIf { it.isIndex && it.unique == true } ?: return false
+        val there = objects[temporary]?.takeIf { it.isIndex && it.unique == true && (invalid || it.status == null) } ?: return false
         val made = madeAs(spec).firstOrNull { it.name.equals(name, ignoreCase = true) } ?: return false
         return mismatchOf(made.copy(name = temporary), there, structureOnly = false) == null
     }
@@ -329,7 +330,8 @@ abstract class SqlStoreSchema internal constructor() : StoreSchema {
  * the text of each of its [columns] in order, as the store writes them, its [predicate] (a partial index's), its [method]
  * and [opclasses] (Postgres's), its [indexType] (Oracle's), and the [statement] that made it (SQLite's); of a table, its
  * [tableColumns], each its name and type (Oracle's); of a trigger, the table it is on, as [table], and its [source]
- * (Oracle's); and the index's [status], Postgres's [PostgresDdl.INVALID] where it is left invalid.
+ * (Oracle's); and the index's [status], Postgres's [PostgresDdl.INVALID] where it is left invalid and
+ * [PostgresDdl.BUILDING] where a build of it is under way.
  */
 @DrivineInternalApi
 data class StoreObject(
@@ -407,9 +409,12 @@ data class StoreObject(
 @DrivineInternalApi
 class PostgresSchema(override val ddl: PostgresDdl) : SqlStoreSchema() {
 
-    /** An index left invalid by a build cut short is listed [PostgresDdl.INVALID]: see [isIncomplete]. */
+    /**
+     * An index left invalid by a build cut short is listed [PostgresDdl.INVALID] (see [isIncomplete]), and one another
+     * session is building online [PostgresDdl.BUILDING], which an ensure waits for ([SchemaItemInfo.buildInProgress]).
+     */
     override val statuses: Set<String>
-        get() = setOf(PostgresDdl.INVALID)
+        get() = setOf(PostgresDdl.INVALID, PostgresDdl.BUILDING)
 
     /**
      * Each item is one index, of the label's nodes. A vector's and a full-text index's expressions aren't compared, only
@@ -527,6 +532,9 @@ class PostgresSchema(override val ddl: PostgresDdl) : SqlStoreSchema() {
     /** `25001`: `CONCURRENTLY` in a transaction, which Postgres refuses, as on a connection a Spring transaction holds. */
     override fun isOnlineRefused(error: StoreError): Boolean = error.causes.any { it.isSqlError && it.sqlState == "25001" }
 
+    /** `40P01`: a deadlock, as two online builds on one table give, of which Postgres cancels one. */
+    override fun isBuildDeadlock(error: StoreError): Boolean = error.causes.any { it.isSqlError && it.sqlState == "40P01" }
+
     /**
      * An index whose online build was cut short, or failed, which Postgres leaves invalid under its name and no statement
      * reads: the listing gives it [PostgresDdl.INVALID], and an ensure drops it and builds it again
@@ -535,9 +543,15 @@ class PostgresSchema(override val ddl: PostgresDdl) : SqlStoreSchema() {
     override fun isIncomplete(existing: SchemaItemInfo): Boolean = existing.status == PostgresDdl.INVALID
 
     /** An index under the name [spec]'s is made under, of no record, listed [PostgresDdl.INVALID] among the objects. */
-    override fun isLeftIncomplete(spec: IndexSpec, rows: List<Any?>): Boolean {
+    override fun isLeftIncomplete(spec: SchemaItemSpec, rows: List<Any?>): Boolean {
         val objects = StoreObject.read(rows)
         return madeAs(spec).any { made -> objects[made.name]?.let { it.isIndex && it.status == PostgresDdl.INVALID } == true }
+    }
+
+    /** An index under the name [spec]'s is made under, of no record, listed [PostgresDdl.BUILDING] among the objects. */
+    override fun isBeingBuilt(spec: SchemaItemSpec, rows: List<Any?>): Boolean {
+        val objects = StoreObject.read(rows)
+        return madeAs(spec).any { made -> objects[made.name]?.let { it.isIndex && it.status == PostgresDdl.BUILDING } == true }
     }
 
     override fun incompleteness(existing: SchemaItemInfo): String =

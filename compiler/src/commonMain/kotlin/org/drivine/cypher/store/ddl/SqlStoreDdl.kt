@@ -101,6 +101,26 @@ interface StoreDdl {
     fun completeIndex(spec: IndexSpec, existing: CatalogItem?): List<DdlStatement> = createIndex(spec, existing)
 
     /**
+     * What drops the index of [spec], an index or a uniqueness constraint, that an online build left invalid under its
+     * name, which no statement reads and `IF NOT EXISTS` would pass over (Postgres): before it is built again, and after a
+     * build the data refuses. Nothing on a store whose builds leave nothing so.
+     */
+    fun droppedIncomplete(spec: SchemaItemSpec): List<DdlStatement> = emptyList()
+
+    /** Whether a build the data refuses can leave its index behind, invalid ([droppedIncomplete]): Postgres's online builds. */
+    val buildsLeaveInvalidIndexes: Boolean
+        get() = false
+
+    /**
+     * A listing of the online index builds under way on the graph's node table, a row for each, and none where there is
+     * none: Postgres's, as two online builds on one table can deadlock ([org.drivine.cypher.store.schema.StoreSchema.isBuildDeadlock]),
+     * and an ensure the store cancelled so waits for the other session's to end before it is run again. Null on a store
+     * whose builds can't deadlock so.
+     */
+    val onlineBuildsQuery: String?
+        get() = null
+
+    /**
      * [statement] as a build that blocks writes while it runs, where [statement] builds or drops an index online
      * (Postgres's `CONCURRENTLY`, Oracle's `ONLINE`) and the store refused that
      * ([org.drivine.cypher.store.schema.StoreSchema.isOnlineRefused]); null for a statement that does neither.

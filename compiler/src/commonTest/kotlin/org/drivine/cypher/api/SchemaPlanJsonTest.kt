@@ -92,7 +92,8 @@ class SchemaPlanJsonTest {
         )
         val request = PlanRequest("default", Operation.Enforce(), listOf(DeclaredCatalog(null, items = listOf(spec))), policy = SchemaPolicy(SchemaMode.WARN))
         fun outcome(action: PlanAction): PlanOutcome = when {
-            action is PlanAction.Execute && action.purpose == Purpose.DDL -> PlanOutcome.Failed(StoreError(Cause(sqlState = "23505", vendorCode = 0, message = "could not create unique index")))
+            // The create is refused; dropping the invalid index it leaves runs.
+            action is PlanAction.Execute && action.purpose == Purpose.DDL && !"${action.statement}".contains("DROP INDEX") -> PlanOutcome.Failed(StoreError(Cause(sqlState = "23505", vendorCode = 0, message = "could not create unique index")))
             action is PlanAction.Query && action.purpose == Purpose.SAMPLE -> PlanOutcome.Rows(listOf(row))
             action is PlanAction.Query || action is PlanAction.ReadLowerCopies -> PlanOutcome.Rows(emptyList())
             else -> PlanOutcome.Ran

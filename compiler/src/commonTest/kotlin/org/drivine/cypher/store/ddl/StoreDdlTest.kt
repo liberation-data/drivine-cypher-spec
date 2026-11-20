@@ -269,19 +269,21 @@ class StoreDdlTest {
                 expected ?: fail("$name on $id: its recreate isn't pinned")
                 val recreation = ddl.recreation(made)
                 fun texts(statements: List<DdlStatement>) = statements.map { (it as DdlStatement.Text).statement }
+                // As a create's: how an index is built, online or not, is no part of what it makes (#382).
+                fun blocking(statements: List<DdlStatement>) = texts(statements.map { ddl.blocking(it) ?: it })
                 assertEquals(texts(expected["leftover"]!!), texts(recreation.leftover), "$name on $id: leftover")
                 assertEquals(texts(expected["build"]!!), texts(recreation.build), "$name on $id: build")
                 assertEquals(texts(expected["swap"]!!), texts(recreation.swap), "$name on $id: swap")
                 assertEquals(texts(expected["finish"]!!), texts(recreation.finish), "$name on $id: finish")
                 assertEquals(expected["remade"]!!.textValue(), recreation.remade, "$name on $id: remade")
                 assertEquals(SqlStoreDdl.CURRENT_FORM.toLong(), expected["form"]?.longValue(), "$name on $id: the form its record says")
-                val statements = texts(recreation.leftover + recreation.build + recreation.swap + recreation.finish) + recreation.remade
+                val statements = blocking(recreation.leftover + recreation.build + recreation.swap + recreation.finish) + recreation.remade
                 assertEquals(expected["digest"]?.textValue(), digest(statements), "$name on $id: its recreate is not the form ${SqlStoreDdl.CURRENT_FORM} it is pinned to")
 
                 // What it leaves is what the create makes.
-                val create = texts(ddl.createConstraint(made))
+                val create = blocking(ddl.createConstraint(made))
                 val unique = create.single { "CREATE UNIQUE INDEX IF NOT EXISTS ${recreation.name} " in it }
-                assertEquals(unique.replace("IF NOT EXISTS ${recreation.name} ", "${recreation.temporary} "), texts(recreation.build).single(), "$name on $id: the build is the create's index")
+                assertEquals(unique.replace("IF NOT EXISTS ${recreation.name} ", "${recreation.temporary} "), blocking(recreation.build).single(), "$name on $id: the build is the create's index")
                 assertEquals(recreation.name + SqlStoreDdl.TEMPORARY, recreation.temporary, "$name on $id: the name built under first")
                 if (ddl is SqliteDdl) {
                     assertEquals(unique.replace("IF NOT EXISTS ", ""), texts(recreation.swap)[1], "$name on $id: the index made again under its name")
@@ -309,9 +311,10 @@ class StoreDdlTest {
         val made = UniquenessConstraintSpec("Person", listOf("${'$'}x", "y")).made()
         for (ddl in listOf(postgres, oracle, sqlite)) {
             val recreation = ddl.recreation(made)
-            val create = ddl.createConstraint(made).map { (it as DdlStatement.Text).statement }
+            fun blocking(statement: DdlStatement) = ((ddl.blocking(statement) ?: statement) as DdlStatement.Text).statement
+            val create = ddl.createConstraint(made).map(::blocking)
             val unique = create.single { "CREATE UNIQUE INDEX IF NOT EXISTS ${recreation.name} " in it }
-            assertEquals(unique.replace("IF NOT EXISTS ${recreation.name} ", "${recreation.temporary} "), (recreation.build.single() as DdlStatement.Text).statement, ddl.engine)
+            assertEquals(unique.replace("IF NOT EXISTS ${recreation.name} ", "${recreation.temporary} "), blocking(recreation.build.single()), ddl.engine)
         }
     }
 

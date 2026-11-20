@@ -59,7 +59,7 @@ data class SchemaItemInfo(
         get() = status?.uppercase()?.contains("FAILED") == true
 
     /**
-     * Whether the engine reports that this item is still being built (FalkorDB's `UNDER CONSTRUCTION`): it has
+     * Whether the engine reports that this item is still being built (FalkorDB's `UNDER CONSTRUCTION`, Postgres's `BUILDING`): it has
      * a status, and that status is neither `OPERATIONAL` nor failed. Such a constraint may yet fail, and such an
      * index answers from what it holds so far, so either is waited on before it is taken as made.
      */

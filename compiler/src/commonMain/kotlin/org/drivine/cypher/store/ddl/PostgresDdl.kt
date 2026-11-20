@@ -396,8 +396,65 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
      * version's form, and one no record lists is found under that name ([org.drivine.cypher.store.schema.StoreSchema.isLeftIncomplete]).
      * `IF NOT EXISTS` would pass over the invalid index, which stands under the name.
      */
-    override fun completeIndex(spec: IndexSpec, existing: CatalogItem?): List<DdlStatement> =
-        listOf(DdlStatement.Text("DROP INDEX CONCURRENTLY IF EXISTS ${madeName(spec)}")) + createIndex(spec, existing)
+    override fun completeIndex(spec: IndexSpec, existing: CatalogItem?): List<DdlStatement> = droppedIncomplete(spec) + createIndex(spec, existing)
+
+    /** A `CONCURRENTLY` build the data refuses leaves its index invalid under its name. */
+    override val buildsLeaveInvalidIndexes: Boolean
+        get() = true
+
+    /**
+     * Each online build under way on the node table, by `pg_stat_progress_create_index`; and as Postgres hides which table
+     * another role's build is on (its `relid` reads null), any build in this database whose table is hidden, as
+     * [statusOf] takes one.
+     */
+    override val onlineBuildsQuery: String
+        get() = "SELECT p.pid FROM pg_stat_progress_create_index p WHERE p.relid = to_regclass(${literal(nodes)}) " +
+            "OR (p.relid IS NULL AND p.datname = current_database())"
+
+    /**
+     * The index of [spec] an online build left invalid, dropped by the name this version makes it under, which is the
+     * invalid one's: as before [completeIndex] builds an index again, and as after a uniqueness constraint's online build
+     * the data refuses (#382), which leaves its unique index invalid under the name, where `IF NOT EXISTS` would pass over it.
+     *
+     * Dropped only where it is invalid with no build of it under way, as the listing gives it [INVALID] ([statusOf]), and
+     * still invalid once its table is held: another session may have dropped it since it was listed, and built it again
+     * online, which is invalid too until it is done. One being built is left, and the ensure waits for that build in the
+     * listing: a lock queued behind the build would hold up every read and write of the graph's nodes until it ended, and
+     * the block's snapshot would hold up the build's last phase, which waits for older snapshots, a deadlock. A
+     * `DROP INDEX CONCURRENTLY` would wait for that build and then drop a valid index that holds the data unique. The cost
+     * is that reads and writes of the graph's nodes wait while the block holds the table, which is only for the drop of an
+     * invalid index, or for no time where there is none.
+     */
+    override fun droppedIncomplete(spec: SchemaItemSpec): List<DdlStatement> {
+        val name = madeObjectName(spec)
+        return listOf(
+            DdlStatement.Text(
+                statement(
+                    """
+                    DO ${'$'}incomplete${'$'}
+                    DECLARE
+                        v_table regclass;
+                    BEGIN
+                        SELECT x.indrelid::regclass INTO v_table FROM pg_index x WHERE x.indexrelid = to_regclass(${literal(name)}) AND ${statusOf("x")} = ${literal(INVALID)};
+                        IF v_table IS NOT NULL THEN
+                            EXECUTE 'LOCK TABLE ' || v_table || ' IN ACCESS EXCLUSIVE MODE';
+                            IF EXISTS (SELECT 1 FROM pg_index WHERE indexrelid = to_regclass(${literal(name)}) AND NOT indisvalid) THEN
+                                DROP INDEX $name;
+                            END IF;
+                        END IF;
+                    END
+                    ${'$'}incomplete${'$'}
+                    """
+                )
+            )
+        )
+    }
+
+    /** The name the index of [spec], an index or a uniqueness constraint, is made under. */
+    private fun madeObjectName(spec: SchemaItemSpec): String = when (spec) {
+        is IndexSpec -> madeName(spec)
+        is UniquenessConstraintSpec -> objectName(UNIQUE, listOf(spec.label) + spec.properties)
+    }
 
     /**
      * [statement] without `CONCURRENTLY`, which a transaction refuses: a build or a drop that blocks writes while it runs.
@@ -405,7 +462,7 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
      */
     override fun blocking(statement: DdlStatement): DdlStatement? {
         val text = (statement as? DdlStatement.Text)?.statement ?: return null
-        val verb = listOf("CREATE", "DROP").firstOrNull { text.startsWith("$it INDEX CONCURRENTLY ") } ?: return null
+        val verb = listOf("CREATE UNIQUE", "CREATE", "DROP").firstOrNull { text.startsWith("$it INDEX CONCURRENTLY ") } ?: return null
         return DdlStatement.Text("$verb INDEX " + text.removePrefix("$verb INDEX CONCURRENTLY "))
     }
 
@@ -414,7 +471,8 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
     override fun createConstraint(spec: ConstraintSpec): List<DdlStatement> = when (spec) {
         is UniquenessConstraintSpec -> {
             val name = objectName(UNIQUE, listOf(spec.label) + spec.properties)
-            statements("CREATE UNIQUE INDEX IF NOT EXISTS $name ON ${over(spec.label, spec.keys)}", recorded(spec, name))
+            // Online, as an index is (#382): a build the data refuses leaves it invalid, which the planner drops.
+            statements("CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS $name ON ${over(spec.label, spec.keys)}", recorded(spec, name))
         }
     }
 
@@ -462,18 +520,19 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
      * object of [objects], recorded or not, with what it is: its `type` (`relkind`), and of an index its `table`, whether
      * it is `unique`, its access `method`, the text of each of its `columns`, its predicate (`where`), as Postgres
      * writes them, and its operator classes (`opclasses`), which `store.schema` reads to tell another item under the name ([org.drivine.cypher.store.schema.ItemForm]).
-     * A record whose index is invalid, and not being built, has the `status` [INVALID] ([invalidStatus]), and so has such an
-     * index among the objects, recorded or not: a build cut short before its record was written leaves none.
+     * A record whose index is invalid has a `status` ([recordStatus]): [BUILDING] while a build of it is under way, and
+     * [INVALID] where none is. So has such an index among the objects, recorded or not: a build under way, or cut short,
+     * before its record was written leaves none.
      */
     private fun listed(kinds: String, objects: List<String>): String = if (objects.isEmpty()) """
-        SELECT jsonb_build_object('kind', kind, 'label', label, 'properties', properties::jsonb, 'name', name, 'details', details, 'status', $invalidStatus)
+        SELECT jsonb_build_object('kind', kind, 'label', label, 'properties', properties::jsonb, 'name', name, 'details', details, 'status', $recordStatus)
         FROM $catalog c
         WHERE kind IN ($kinds)
           AND (object_name IS NULL OR to_regclass(object_name) IS NOT NULL)
         ORDER BY label, properties
     """.trimIndent() else """
         SELECT listed FROM (
-            SELECT 0 AS part, label, properties, jsonb_build_object('kind', kind, 'label', label, 'properties', properties::jsonb, 'name', name, 'details', details, 'status', $invalidStatus) AS listed
+            SELECT 0 AS part, label, properties, jsonb_build_object('kind', kind, 'label', label, 'properties', properties::jsonb, 'name', name, 'details', details, 'status', $recordStatus) AS listed
             FROM $catalog c
             WHERE kind IN ($kinds)
               AND (object_name IS NULL OR to_regclass(object_name) IS NOT NULL)
@@ -483,7 +542,7 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
                                       'columns', (SELECT jsonb_agg(pg_get_indexdef(i.indexrelid, k, true) ORDER BY k) FROM generate_series(1, i.indnatts) k),
                                       'where', pg_get_expr(i.indpred, i.indrelid, true),
                                       'opclasses', (SELECT jsonb_agg(oc.opcname ORDER BY k.n) FROM unnest(i.indclass::oid[]) WITH ORDINALITY AS k(oid, n) JOIN pg_opclass oc ON oc.oid = k.oid),
-                                      'status', CASE WHEN ${leftInvalid("i")} THEN ${literal(INVALID)} END)
+                                      'status', ${statusOf("i")})
             FROM pg_class o
             LEFT JOIN pg_index i ON i.indexrelid = o.oid
             LEFT JOIN pg_class t ON t.oid = i.indrelid
@@ -493,24 +552,20 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
         ORDER BY part, label, properties
     """.trimIndent()
 
-    /**
-     * [INVALID] where the record's index is invalid and no build of it is under way, null otherwise: an online build cut
-     * short, or failed, leaves it so ([leftInvalid]).
-     */
-    private val invalidStatus = """CASE WHEN EXISTS (
-                SELECT 1 FROM pg_index x
-                WHERE x.indexrelid = to_regclass(c.object_name) AND ${leftInvalid("x")}
-            ) THEN ${literal(INVALID)} END"""
+    /** The `status` of the record's index, as [statusOf] gives it: null where it is valid, or the record names none. */
+    private val recordStatus = """(SELECT ${statusOf("x")} FROM pg_index x WHERE x.indexrelid = to_regclass(c.object_name))"""
 
     /**
-     * Whether the index of [index], a `pg_index` row, is invalid and no build of it is under way. One being built online is
-     * invalid too until it is done, and another process's ensure must not drop it, so a build under way
-     * (`pg_stat_progress_create_index`) is passed over; and as Postgres hides which index another role's build is of
-     * (its `index_relid` reads null), any build in this database whose index is hidden is taken as maybe this one's.
+     * The `status` of the index of [index], a `pg_index` row: null where it is valid; [BUILDING] where it is invalid and a
+     * build of it is under way, an online build that isn't done; and [INVALID] where it is invalid and none is, a build cut
+     * short, or failed. Postgres hides which index another role's build is of (its `index_relid` reads null), so any build
+     * in this database whose index is hidden is taken as maybe this one's: an ensure that waits on it waits for that build.
      */
-    private fun leftInvalid(index: String): String =
-        "NOT $index.indisvalid AND NOT EXISTS (SELECT 1 FROM pg_stat_progress_create_index p WHERE p.index_relid = $index.indexrelid " +
-            "OR (p.index_relid IS NULL AND p.datname = current_database()))"
+    private fun statusOf(index: String): String =
+        "CASE WHEN $index.indisvalid THEN NULL " +
+            "WHEN EXISTS (SELECT 1 FROM pg_stat_progress_create_index p WHERE p.index_relid = $index.indexrelid " +
+            "OR (p.index_relid IS NULL AND p.datname = current_database())) THEN ${literal(BUILDING)} " +
+            "ELSE ${literal(INVALID)} END"
 
     override fun listIndexesQuery(kind: SchemaItemKind): String = listed(literal(kind.name), objectKinds(kind))
 
@@ -545,6 +600,13 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
          * short, or failed, and no statement reads it.
          */
         const val INVALID = "INVALID"
+
+        /**
+         * The `status` the listing gives a record, or an index among the objects, whose index another session is building
+         * online: invalid until the build is done, when it is valid, or [INVALID] where the data refuses it or it is cut
+         * short. An ensure waits for the build and reads how it ended, rather than take it as made or drop it (#382).
+         */
+        const val BUILDING = "BUILDING"
 
         /**
          * What the node table's comment says of a store this version made. A store an earlier version made has its functions

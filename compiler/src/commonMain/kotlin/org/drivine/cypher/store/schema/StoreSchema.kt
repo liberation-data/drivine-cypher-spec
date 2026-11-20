@@ -182,7 +182,8 @@ interface StoreSchema {
     /**
      * Whether [existing], an item the listing gave, lacks part of what its create makes, so that an ensure completes it
      * ([org.drivine.cypher.store.ddl.StoreDdl.completeIndex]): Oracle's range index listed `INCOMPLETE`, and Postgres's
-     * index left invalid ([org.drivine.cypher.store.ddl.PostgresDdl.INVALID]). Never, on a store whose items are made whole.
+     * index, or uniqueness constraint's index, left invalid ([org.drivine.cypher.store.ddl.PostgresDdl.INVALID]), which is
+     * dropped ([org.drivine.cypher.store.ddl.StoreDdl.droppedIncomplete]) and built again. Never, on a store whose items are made whole.
      */
     fun isIncomplete(existing: SchemaItemInfo): Boolean = false
 
@@ -191,11 +192,18 @@ interface StoreSchema {
 
     /**
      * Whether [rows], the listing [spec] is found in, show [spec]'s index standing incomplete under its name with no
-     * record listing it, which its create would pass over: on Postgres, an index whose online build was cut short before
-     * its record was written, left invalid ([org.drivine.cypher.store.ddl.PostgresDdl.INVALID]). Its create then completes
-     * it ([org.drivine.cypher.store.ddl.StoreDdl.completeIndex]).
+     * record listing it, which its create would pass over: on Postgres, an index, or a uniqueness constraint's index, whose
+     * online build was cut short or refused before its record was written, left invalid ([org.drivine.cypher.store.ddl.PostgresDdl.INVALID]).
+     * It is dropped and built again ([org.drivine.cypher.store.ddl.StoreDdl.completeIndex], [org.drivine.cypher.store.ddl.StoreDdl.droppedIncomplete]).
      */
-    fun isLeftIncomplete(spec: IndexSpec, rows: List<Any?>): Boolean = false
+    fun isLeftIncomplete(spec: SchemaItemSpec, rows: List<Any?>): Boolean = false
+
+    /**
+     * Whether [rows], the listing [spec] is found in, show another session building [spec]'s index under its name with no
+     * record listing it yet: on Postgres, an online build under way ([org.drivine.cypher.store.ddl.PostgresDdl.BUILDING]),
+     * whose record is written once it is done. An ensure waits for it and reads how it ended, rather than pass over it as made (#382).
+     */
+    fun isBeingBuilt(spec: SchemaItemSpec, rows: List<Any?>): Boolean = false
 
     /**
      * What [rows], the rows of the listing [spec] is found in ([StoreDdl.listIndexesQuery] of its kind, or
@@ -280,6 +288,15 @@ interface StoreSchema {
      * edition without it (`ORA-00439`). Never, on a store that builds no index online.
      */
     fun isOnlineRefused(error: StoreError): Boolean = false
+
+    /**
+     * Whether [error], from an ensure's statements, says the store cancelled one of them as a deadlock with another
+     * session's online build on the same table: on Postgres (`40P01`), two `CREATE INDEX CONCURRENTLY` on one table wait
+     * for each other where the index is over an expression, or partial, as Drivine's are, and the store cancels one. The
+     * ensure is run again ([org.drivine.cypher.store.plan.SchemaProgram]), and then finds that session's build under way,
+     * or ended, as another session's. Never, on a store that builds no index online.
+     */
+    fun isBuildDeadlock(error: StoreError): Boolean = false
 
     companion object {
 

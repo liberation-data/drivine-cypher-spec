@@ -206,7 +206,10 @@ class StorePlanTest {
         query["listing"]?.let { listing ->
             val catalog = store["catalog"]!!["stores"]!![id]!!
             val name = listing.textValue()!!
-            val statement = if (name == "constraints") catalog["constraints"]!! else catalog["indexes"]!![name.removePrefix("indexes.")]!!
+            val statement = when (name) {
+                "constraints", "onlineBuilds" -> catalog[name]!!
+                else -> catalog["indexes"]!![name.removePrefix("indexes.")]!!
+            }
             return PlanAction.Query(statement.textValue()!!, purpose = Purpose.LISTING, delayMillis = delay)
         }
         query["indexState"]?.let {

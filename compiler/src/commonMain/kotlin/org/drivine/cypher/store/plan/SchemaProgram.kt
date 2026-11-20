@@ -565,12 +565,18 @@ internal class SchemaProgram(
         // recorded or not: they may have gone out of step while it was gone.
         // One a uniqueness constraint serves is never listed, and is not made anew (#325).
         fillIn(spec) { findIndex(spec) == null && servingConstraint(spec.made()) == null }
-        return ensureMadeIndex(spec.made(), build)
+        return afterBuildDeadlocks(spec) { ensureMadeIndex(spec.made(), build) }
     }
 
     private fun ensureMadeIndex(spec: IndexSpec, build: Build): EnsureResult {
         val items = indexes(spec.kind)
-        val existing = items.firstOrNull { store.matchesIdentity(it, spec) }
+        // Another session's online build of it under way (Postgres, #382), recorded or not: waited for, and read as it ended,
+        // so one the data refuses, or cut short, is built here rather than taken as made.
+        val waited = awaitIndexBuildUnderWay(spec, items.firstOrNull { store.matchesIdentity(it, spec) }, build)
+        if (waited is IndexWait.StillBuilding) {
+            return EnsureResult.AlreadyMatching(unbuilt(UnbuiltIndex(spec, stillBuilding = true, waited.message), waited.info, build) ?: SchemaItemInfo.fromSpec(spec))
+        }
+        val existing = (waited as IndexWait.Ended).info
         val form = formOf(spec)
         // Another item under a name Drivine gives this one's objects: never taken as made, and never made over.
         if (form is ItemForm.Mismatch) return mismatched(spec, existing, form)
@@ -581,7 +587,7 @@ internal class SchemaProgram(
             val related = items.firstOrNull { it.kind == spec.kind && it.label == spec.label }
             warnUnsupportedTuning(spec)
             val leftIncomplete = isLeftIncomplete(spec)
-            ddl(made(spec, related, leftIncomplete))
+            if (leftIncomplete) ddlOnAQuietTable(made(spec, related, true)) else ddl(made(spec, related, false))
             val created = awaitBuilt(spec, findIndex(spec), build) ?: SchemaItemInfo.fromSpec(spec)
             val completed = if (leftIncomplete) ": ${store.incompleteness(SchemaItemInfo.fromSpec(spec))}" else ""
             log(LogLevel.INFO, INDEX_MANAGER, "${if (leftIncomplete) "Completed" else "Created"} $engine ${spec.kind} on ${spec.label}${spec.properties}$completed")
@@ -595,7 +601,7 @@ internal class SchemaProgram(
                 keepForm(spec, form)
                 return EnsureResult.AlreadyMatching(existing)
             }
-            ddl(store.ddl.completeIndex(spec, existing.catalogItem))
+            ddlOnAQuietTable(store.ddl.completeIndex(spec, existing.catalogItem))
             val completed = awaitBuilt(spec, findIndex(spec), build) ?: SchemaItemInfo.fromSpec(spec)
             log(LogLevel.INFO, INDEX_MANAGER, "Completed $engine ${spec.kind} on ${spec.label}${spec.properties}: ${store.incompleteness(existing)}")
             return EnsureResult.Created(completed)
@@ -696,7 +702,7 @@ internal class SchemaProgram(
         // properties, which the create takes into account.
         val related = indexes(spec.kind).firstOrNull { it.kind == spec.kind && it.label == spec.label }
         warnUnsupportedTuning(spec)
-        ddl(made(spec, related, isLeftIncomplete(spec)))
+        if (isLeftIncomplete(spec)) ddlOnAQuietTable(made(spec, related, true)) else ddl(made(spec, related, false))
         val created = awaitBuilt(spec, findIndex(spec), build) ?: SchemaItemInfo.fromSpec(spec)
         if (aliases.isNotEmpty()) alias(created, aliases)
         logEffectiveVectorConfig(spec, created)
@@ -710,10 +716,19 @@ internal class SchemaProgram(
 
     /**
      * Whether [spec]'s index stands incomplete under its name with no record listing it, as its listing last read shows
-     * ([StoreSchema.isLeftIncomplete]): a Postgres build cut short before its record was written.
+     * ([StoreSchema.isLeftIncomplete]): a Postgres build cut short, or refused, before its record was written.
      */
-    private fun isLeftIncomplete(spec: IndexSpec): Boolean =
-        listings[store.ddl.listIndexesQuery(spec.kind)]?.let { store.isLeftIncomplete(spec, it) } == true
+    private fun isLeftIncomplete(spec: SchemaItemSpec): Boolean =
+        listings[listingOf(spec)]?.let { store.isLeftIncomplete(spec, it) } == true
+
+    /**
+     * Whether [info], [spec] as last listed, is another session's build of it under way: one listed still being built, and
+     * not left invalid ([StoreSchema.isIncomplete]), or, of no record, an index under its name being built
+     * ([StoreSchema.isBeingBuilt]). Another item under the name ([ItemForm.Mismatch]) is none, built or not: it is drift.
+     */
+    private fun buildUnderWay(spec: SchemaItemSpec, info: SchemaItemInfo?): Boolean =
+        formOf(spec) !is ItemForm.Mismatch &&
+            if (info != null) info.buildInProgress && !store.isIncomplete(info) else listings[listingOf(spec)]?.let { store.isBeingBuilt(spec, it) } == true
 
     /** What makes [spec], [related] as [org.drivine.cypher.store.ddl.StoreDdl.createIndex] takes it: its create, or what completes it where [leftIncomplete]. */
     private fun made(spec: IndexSpec, related: SchemaItemInfo?, leftIncomplete: Boolean): List<DdlStatement> =
@@ -806,6 +821,36 @@ internal class SchemaProgram(
         return info
     }
 
+    /** How [awaitIndexBuildUnderWay] ended: the build it waited for [Ended], and the index as then listed, or [StillBuilding] past the timeout. */
+    private sealed interface IndexWait {
+        class Ended(val info: SchemaItemInfo?) : IndexWait
+        class StillBuilding(val info: SchemaItemInfo?, val message: String) : IndexWait
+    }
+
+    /**
+     * [listed], the index [spec] is as listed, once no build of it under way is listed, on a store that builds an index in
+     * the statement that makes it, where another session's online build stands invalid under the name until it is done
+     * (Postgres's [org.drivine.cypher.store.ddl.PostgresDdl.BUILDING], recorded or not: its record is written once it is
+     * done). It is polled until it ends, for as long as [build] waits. A store that builds in the background is waited on
+     * after its create, as before ([awaitBuilt]).
+     */
+    private fun awaitIndexBuildUnderWay(spec: IndexSpec, listed: SchemaItemInfo?, build: Build): IndexWait {
+        if (store.indexOperationsAreAsync || store.awaitIndexStatement != null) return IndexWait.Ended(listed)
+        val deadline = io.clock() + build.timeoutMillis
+        var info = listed
+        while (buildUnderWay(spec, info)) {
+            val left = deadline - io.clock()
+            if (left <= 0) {
+                return IndexWait.StillBuilding(
+                    info,
+                    "$engine ${spec.kind} on ${spec.label}${spec.properties} is still being built by another session, having waited ${javaDuration(build.timeoutMillis)}",
+                )
+            }
+            info = findIndex(spec, poll = minOf(POLL_MILLIS, left).coerceAtLeast(1))
+        }
+        return IndexWait.Ended(info)
+    }
+
     /** The state Neo4j gives the index [name]; null where it gives none, or the read fails. */
     private fun indexState(name: String): String? {
         val statement = store.indexStateStatement ?: return null
@@ -888,16 +933,40 @@ internal class SchemaProgram(
         // A constraint that ignores case is over copies every node of its label has, so a node saved before there were
         // copies is held to it too. One made anew fills them in again, recorded or not.
         fillIn(spec) { findConstraint(spec) == null }
-        return ensureMadeConstraint(spec.made(), violationSampleSize, replaceBlockingIndex)
+        return afterBuildDeadlocks(spec) { ensureMadeConstraint(spec.made(), violationSampleSize, replaceBlockingIndex) }
     }
 
-    private fun ensureMadeConstraint(spec: ConstraintSpec, violationSampleSize: Int, replaceBlockingIndex: Boolean): EnsureResult {
+    /** `ConstraintManager.ensure` of [spec] as made; where not [again], one already made again for a create that passed over an invalid index. */
+    private fun ensureMadeConstraint(spec: ConstraintSpec, violationSampleSize: Int, replaceBlockingIndex: Boolean, again: Boolean = true): EnsureResult {
+        // A unique index an online build left invalid (Postgres, #382), recorded or not: no statement reads it, and its create
+        // would pass over it, so it is dropped and built below, as a range index is (#381).
+        // Only one of this version's form: another item under the name is never dropped, and one of another form is never
+        // touched, but is drift (below), as it holds nothing unique. The constraint is found first: that reads the listing again where DDL cleared it, which
+        // its form and an unrecorded index are told by.
         // A constraint still being built, by another process or an earlier run, may yet fail: its build is waited for, as
-        // one made here. One dropped meanwhile is made again below.
-        val existing = findConstraint(spec)?.let { if (it.buildInProgress) awaitBuild(spec, untilListed = false) else it }
+        // one made here, recorded or not (Postgres's online build writes its record once it is done), and the constraint
+        // is read as it ended. One dropped meanwhile is made again below. One left invalid is no build under way, whose
+        // wait would run out: of this version's form it is dropped and built, and of another it is drift, and nothing is run on it.
+        val found = awaitBuildUnderWay(spec)
         val form = formOf(spec)
+        val invalid = form !is ItemForm.Mismatch && form !is ItemForm.Stale && form !is ItemForm.Newer &&
+            if (found != null) store.isIncomplete(found) else isLeftIncomplete(spec)
+        if (invalid) ddlOnAQuietTable(store.ddl.droppedIncomplete(spec))
+        // The drop leaves one another session began building since it was listed: waited for, as above, rather than built
+        // over (a create would queue behind it), and taken as made where it ends valid.
+        val existing = if (invalid) awaitBuildUnderWay(spec)?.takeUnless { store.isIncomplete(it) } else found
         // Another item under the name Drivine gives this one's index: never taken as made, and never made over.
         if (form is ItemForm.Mismatch) return mismatched(spec, existing, form)
+        if (existing != null && store.isIncomplete(existing) && (form is ItemForm.Stale || form is ItemForm.Newer)) {
+            // Of another version's form, and left invalid: nothing holds the data unique. Never made whole here, which would
+            // rewrite that version's item, nor taken as made: drift, which a recreate makes again in this version's form.
+            log(
+                LogLevel.WARN, CONSTRAINT_MANAGER,
+                "$engine ${spec.kind} on ${spec.label}${spec.properties}: its index was left invalid in another version's form, so nothing holds the data unique. " +
+                    "Call recreate() to make it again in this version's form (destructive).",
+            )
+            return EnsureResult.Drift(existing, spec)
+        }
         if (existing != null && existing.buildFailed) {
             // FalkorDB keeps listing a constraint whose build failed, though it enforces nothing: dropped, and built again,
             // which gives a violation where the data still repeats a key.
@@ -939,7 +1008,10 @@ internal class SchemaProgram(
             ddl(store.ddl.createConstraint(spec))
         } catch (refused: RawFailure) {
             if (store.isViolation(refused.error)) {
-                confirmedViolation(spec, violationSampleSize)?.let { return it }
+                // An online build the data refuses leaves its unique index invalid under the name (Postgres): dropped, so the
+                // next ensure builds it, rather than passing over it as made. Only once the sample bears the refusal out: a
+                // 23505 of another session's build under the name (pg_class) is no refusal of the data, and the index is its.
+                confirmedViolation(spec, violationSampleSize)?.let { ddlOnAQuietTable(store.ddl.droppedIncomplete(spec)); return it }
             }
             if (store.isBlockedByIndex(refused.error)) {
                 val index = blockingIndex(spec) ?: throw refused
@@ -960,9 +1032,81 @@ internal class SchemaProgram(
 
         if (store.constraintCreationIsAsync) return awaitAsyncCreation(spec, violationSampleSize)
 
-        val created = findConstraint(spec) ?: SchemaItemInfo.fromSpec(spec)
-        log(LogLevel.INFO, CONSTRAINT_MANAGER, "Created $engine ${spec.kind} on ${spec.label}${spec.properties}")
+        // The create passes over an index under the name (`IF NOT EXISTS`): another session's online build, which may be
+        // under way still, is waited for (Postgres, #382).
+        val listed = if (store.ddl.buildsLeaveInvalidIndexes) awaitBuildUnderWay(spec) else findConstraint(spec)
+        // Listed invalid after that build ended, or not listed at all: the data refused it, or it was cut short, and that
+        // session may have dropped it since. Never reported made: made here, once, as one found invalid is, so the data's
+        // refusal is this ensure's too; and where it is again not made, thrown, as nothing holds the data unique.
+        if (store.ddl.buildsLeaveInvalidIndexes && (listed == null || store.isIncomplete(listed))) {
+            if (again) return ensureMadeConstraint(spec, violationSampleSize, replaceBlockingIndex, again = false)
+            throw OwnerFailure(
+                "$engine ${spec.kind} on ${spec.label}${spec.properties} was not made: another session's build of it under the same name " +
+                    "was cut short or dropped, twice, while this ensure made it. Nothing holds the data unique: ensure it again.",
+            )
+        }
+        val created = listed ?: SchemaItemInfo.fromSpec(spec)
+        val completed = if (invalid) ": ${store.incompleteness(found ?: SchemaItemInfo.fromSpec(spec))}" else ""
+        log(LogLevel.INFO, CONSTRAINT_MANAGER, "${if (invalid) "Completed" else "Created"} $engine ${spec.kind} on ${spec.label}${spec.properties}$completed")
         return EnsureResult.Created(created)
+    }
+
+    /**
+     * What [ensure] gives for [spec], run again where the store cancels one of its statements as a deadlock with another
+     * session's online build on the same table ([StoreSchema.isBuildDeadlock]): that session's build goes on, and the
+     * ensure run again finds it under way, and waits for it, or ended, as another session's. Said at INFO; after
+     * [BUILD_DEADLOCK_TRIES] tries, a failure that says so, never the store's bare deadlock.
+     */
+    private fun afterBuildDeadlocks(spec: SchemaItemSpec, ensure: () -> EnsureResult): EnsureResult {
+        var tries = 0
+        while (true) {
+            try {
+                return ensure()
+            } catch (refused: RawFailure) {
+                if (!store.isBuildDeadlock(refused.error)) throw refused
+                if (++tries >= BUILD_DEADLOCK_TRIES) {
+                    throw OwnerFailure(
+                        "$engine cancelled the ensure of ${spec.kind} on ${spec.label}${spec.properties} $BUILD_DEADLOCK_TRIES times, deadlocked each time with " +
+                            "another session's online build on the same table (${messageOf(refused.error, "null")}). Nothing was made: ensure it again once those builds have ended.",
+                    )
+                }
+                log(
+                    LogLevel.INFO, if (spec is ConstraintSpec) CONSTRAINT_MANAGER else INDEX_MANAGER,
+                    "$engine cancelled a statement of the ensure of ${spec.kind} on ${spec.label}${spec.properties}, deadlocked with another session's online build " +
+                        "on the same table: ensuring it again once no build is under way there",
+                )
+                awaitNoOnlineBuild()
+            }
+        }
+    }
+
+    /**
+     * [statements], which drop an index left invalid ([org.drivine.cypher.store.ddl.StoreDdl.droppedIncomplete]), run once
+     * no online build is under way on the graph's node table ([awaitNoOnlineBuild]): the drop holds the table, and a lock
+     * queued behind another session's build, of any index on it, would hold up every read and write of the graph's nodes
+     * until that build ended.
+     */
+    private fun ddlOnAQuietTable(statements: List<DdlStatement>) {
+        if (statements.isEmpty()) return
+        awaitNoOnlineBuild()
+        ddl(statements)
+    }
+
+    /**
+     * Polls until no online build is under way on the graph's node table ([org.drivine.cypher.store.ddl.StoreDdl.onlineBuildsQuery]),
+     * for [PlanRequest.DEFAULT_BUILD_TIMEOUT_MILLIS] at most: whichever index the other session is building, an ensure run
+     * again after then never starts its own build while that one runs, which would deadlock with it again, and a drop of an
+     * index left invalid never queues behind it. Where the wait runs out, or the store has no such listing, it returns.
+     */
+    private fun awaitNoOnlineBuild() {
+        val query = store.ddl.onlineBuildsQuery ?: return
+        val deadline = io.clock() + PlanRequest.DEFAULT_BUILD_TIMEOUT_MILLIS
+        var poll = 0L
+        while (io.clock() + poll < deadline) {
+            val outcome = io.ask(PlanAction.Query(query, purpose = Purpose.LISTING, delayMillis = poll))
+            if ((outcome as? PlanOutcome.Rows)?.rows.isNullOrEmpty()) return
+            poll = POLL_MILLIS
+        }
     }
 
     /** FalkorDB refuses a constraint over a property whose name isn't plain, before anything is read. */
@@ -1030,7 +1174,8 @@ internal class SchemaProgram(
         val schema = store as? SqlStoreSchema ?: return false
         val made = spec.made()
         val recreation = sql.recreation(made)
-        if (!schema.cutOff(made, listings[sql.listConstraintsQuery()].orEmpty(), recreation.name, recreation.temporary)) return false
+        // One left invalid too: it may go on refusing keys all the same.
+        if (!schema.cutOff(made, listings[sql.listConstraintsQuery()].orEmpty(), recreation.name, recreation.temporary, invalid = true)) return false
         ddl(recreation.leftover)
         ddl(sql.dropConstraint(CatalogItem(made.kind, made.label, made.properties, made.effectiveName)))
         log(
@@ -1227,7 +1372,7 @@ internal class SchemaProgram(
      * where it doesn't.
      */
     private fun awaitAsyncCreation(spec: ConstraintSpec, violationSampleSize: Int): EnsureResult {
-        val info = awaitBuild(spec, untilListed = true)!!
+        val info = awaitBuild(spec)
         if (info.buildFailed) {
             dropFailedBuild(spec, info)
             val failed = "Constraint on ${spec.label}${spec.properties} failed to build on $engine, but no key it covers repeats in the data"
@@ -1247,16 +1392,32 @@ internal class SchemaProgram(
     }
 
     /**
-     * Polls the constraint [spec] is until its build has ended, and gives it as last listed. While it isn't listed,
-     * polling goes on where [untilListed] (one just made), and otherwise ends with null (one dropped meanwhile). drivine4j
-     * sleeps, then looks at its clock: the poll after a sleep that would end past the deadline isn't run.
+     * The constraint [spec] is, as listed once no build of it is under way: a build another process, or an earlier run, has
+     * under way (FalkorDB's `UNDER CONSTRUCTION`, or Postgres's [org.drivine.cypher.store.ddl.PostgresDdl.BUILDING], recorded
+     * or not: its record is written once the build is done) is polled until it ends. Null where it is not listed then.
+     * One left invalid is no build under way ([StoreSchema.isIncomplete]): given as it is listed.
      */
-    private fun awaitBuild(spec: ConstraintSpec, untilListed: Boolean): SchemaItemInfo? {
+    private fun awaitBuildUnderWay(spec: ConstraintSpec): SchemaItemInfo? {
+        val deadline = io.clock() + ASYNC_TIMEOUT_MILLIS
+        var poll: Long? = null
+        while (io.clock() + (poll ?: 0) < deadline) {
+            val info = findConstraint(spec, poll)
+            if (!buildUnderWay(spec, info)) return info
+            poll = POLL_MILLIS
+        }
+        throw OwnerFailure("Timed out after ${javaDuration(ASYNC_TIMEOUT_MILLIS)} waiting for constraint on ${spec.label}${spec.properties} to become operational")
+    }
+
+    /**
+     * Polls the constraint [spec] is, just made, until it is listed and its build has ended, and gives it as last listed.
+     * drivine4j sleeps, then looks at its clock: the poll after a sleep that would end past the deadline isn't run. One
+     * found being built before a create is waited for by [awaitBuildUnderWay].
+     */
+    private fun awaitBuild(spec: ConstraintSpec): SchemaItemInfo {
         val deadline = io.clock() + ASYNC_TIMEOUT_MILLIS
         var poll = 0L
         while (io.clock() + poll < deadline) {
             val info = findConstraint(spec, poll)
-            if (info == null && !untilListed) return null
             if (info != null && !info.buildInProgress) return info
             poll = POLL_MILLIS
         }
@@ -1299,12 +1460,13 @@ internal class SchemaProgram(
      * What the listing [spec] was last found in says of its form ([StoreSchema.formOf]): read from the rows a find has just
      * read, and never read again for it; [ItemForm.Current] where that read failed.
      */
-    private fun formOf(spec: SchemaItemSpec): ItemForm {
-        val statement = when (spec) {
-            is IndexSpec -> store.ddl.listIndexesQuery(spec.kind)
-            is ConstraintSpec -> store.ddl.listConstraintsQuery()
-        }
-        return listings[statement]?.let { store.formOf(spec, it) } ?: ItemForm.Current
+    private fun formOf(spec: SchemaItemSpec): ItemForm =
+        listings[listingOf(spec)]?.let { store.formOf(spec, it) } ?: ItemForm.Current
+
+    /** The listing [spec] is found in: its kind's indexes, or the constraints. */
+    private fun listingOf(spec: SchemaItemSpec): String = when (spec) {
+        is IndexSpec -> store.ddl.listIndexesQuery(spec.kind)
+        is ConstraintSpec -> store.ddl.listConstraintsQuery()
     }
 
     /**
@@ -1452,6 +1614,9 @@ internal class SchemaProgram(
 
         /** How long a drop, or a constraint's build, in the background is waited for, as drivine4j waits. */
         const val ASYNC_TIMEOUT_MILLIS = 30_000L
+
+        /** How many times an ensure is run in all where the store cancels it as a deadlock with another session's online build. */
+        const val BUILD_DEADLOCK_TRIES = 3
 
         /** The sample size drivine4j's marker constraint is made with: `ConstraintManager.DEFAULT_VIOLATION_SAMPLE_SIZE`. */
         const val DEFAULT_VIOLATION_SAMPLE_SIZE = 10
