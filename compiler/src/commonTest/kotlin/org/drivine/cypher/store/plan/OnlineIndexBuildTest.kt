@@ -1335,6 +1335,24 @@ class OnlineIndexBuildTest {
         assertNull(SqliteDdl("drivine").buildClaim(email))
     }
 
+    @Test
+    fun anOracleItemAlreadyMadeTakesNoTurn() {
+        // Nothing to build: no claim counted, taken or given up.
+        val record = ListingRows.rows("oracle", listOf(SchemaItemInfo(SchemaItemKind.UNIQUENESS_CONSTRAINT, "Person", listOf("email"), "Person_email_unique")), constraints = true)
+        var counted = 0
+        val (ran, report) = drive(oracle, email, listed = {
+            when (it) {
+                oracleDdl.listConstraintsQuery() -> record
+                oracleHeld(email) -> emptyList<Any?>().also { counted++ }
+                else -> emptyList()
+            }
+        })
+        assertIs<EnsureResult.AlreadyMatching>(report.item!!.result, "$report")
+        assertEquals(emptyList(), turns)
+        assertEquals(0, counted)
+        assertEquals(emptyList(), ran)
+    }
+
     /** Oracle's count of the claims of [spec] another session holds, as [drive]'s listing gives it. */
     private fun oracleHeld(spec: SchemaItemSpec) = oracleDdl.buildClaim(spec).held!!
 

@@ -84,8 +84,9 @@ data class UniqueRecreation(
  *   mark of its claim, as a query on a schema connection that gives no rows, which runs where it is this ensure's turn
  *   and fails as a key the catalog has already (`ORA-00001`) where another session holds it. [release] gives up the
  *   claim marked `$at`. Each commits only the claim, in a transaction of its own, whatever transaction the connection is
- *   in. [held] is a query of one row, how many claims of the item another session holds that aren't old enough to take
- *   over, polled while it is more than none, before each take.
+ *   in. [held] is a query of one row, how many claims of the item another session holds that can't be taken over yet
+ *   (not old enough, or with an online build under way on the node table), polled while it is more than none, before
+ *   each take.
  */
 @DrivineInternalApi
 data class BuildClaim(val take: String, val release: String, val taken: Taken = Taken.ROW, val held: String? = null) {

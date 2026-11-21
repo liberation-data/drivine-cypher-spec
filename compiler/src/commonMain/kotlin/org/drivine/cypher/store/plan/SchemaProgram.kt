@@ -1118,7 +1118,7 @@ internal class SchemaProgram(
         io.ask(PlanAction.Query(claim.release, mapOf("at" to at), Purpose.LISTING))
     }
 
-    /** When [claim] was taken, once it is this ensure's turn; null where it ensures without one ([inTurn]). */
+    /** When [claim] was taken (on Oracle, the ensure's own mark of it), once it is this ensure's turn; null where it ensures without one ([inTurn]). */
     private fun claimed(spec: SchemaItemSpec, claim: BuildClaim): String? {
         val deadline = io.clock() + PlanRequest.DEFAULT_BUILD_TIMEOUT_MILLIS
         var poll = 0L
