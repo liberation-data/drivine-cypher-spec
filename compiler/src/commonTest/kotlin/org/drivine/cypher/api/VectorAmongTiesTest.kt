@@ -6,8 +6,9 @@ import kotlin.test.assertTrue
 
 /**
  * Of two neighbours that score alike in a search among ids, the one placed first among the ids comes first, on every store
- * and every way the search goes (liberation-data/drivine-cypher-spec#412): the library gives the ids in its id type's own
- * order, so the tie goes by that order, not by which node a store wrote first. `among.yaml`'s case "A tie" pins it.
+ * and every way the search goes but FalkorDB through the index, where the index's own order decides
+ * (liberation-data/drivine-cypher-spec#412, #416): the library gives the ids in its id type's own order, so the tie goes by
+ * that order, not by which node a store wrote first. `among.yaml`'s case "A tie" pins it.
  */
 @OptIn(org.drivine.DrivineInternalApi::class)
 class VectorAmongTiesTest {
