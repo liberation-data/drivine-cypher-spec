@@ -1,5 +1,5 @@
 {
-  "source" : "drivine4j 8be5e760, written by its own code (VectorGoldenWriter, not committed): only parameter names are normalized, the SQL stores' $_pN to $_cy_vec<N+1>, and the graph engines' $_vector…, $_among… names to $_cy_vec<n> in the order the statement first names them. The query vector's own binding, [0.1, 0.2, 0.3], is left out of parameters and named by \"vector\". The graph engines' 84 answers that write an index name, a label or a property with a quote or a backslash into the CALL between single quotes, or a root label that is no plain identifier into the among MATCH, were then edited by a script to write it escaped, as a Cypher string or a backtick-quoted label (liberation-data/drivine-cypher-spec#217). On store layout 2 (#161), Oracle's vector table is named as layout 2 names its objects, `<graph>_v2_…` for `<graph>_v_…`: that name alone was changed in its answers. The 168 SQL answers of a nearest search by cosine were then edited by a script to leave out a stored embedding of no length, as Neo4j's cosine index does, and the 40 of a search among ids by cosine to leave out such a root (liberation-data/drivine-cypher-spec#160). The 70 SQL answers of a search among ids were then edited by a script to read each root's place among the ids, as the search for each pair once reads it, and to break a tie of two neighbours' scores by their places, then their node ids; and the graph engines' 48 answers of one, to bind each id's place as a map, `_cy_vec2`, the later parameters numbered on, read each hit's place by it, keep a hit by its place in place of its id, and break a tie of two scores by place (liberation-data/drivine-cypher-spec#412).",
+  "source" : "drivine4j 8be5e760, written by its own code (VectorGoldenWriter, not committed): only parameter names are normalized, the SQL stores' $_pN to $_cy_vec<N+1>, and the graph engines' $_vector…, $_among… names to $_cy_vec<n> in the order the statement first names them. The query vector's own binding, [0.1, 0.2, 0.3], is left out of parameters and named by \"vector\". The graph engines' 84 answers that write an index name, a label or a property with a quote or a backslash into the CALL between single quotes, or a root label that is no plain identifier into the among MATCH, were then edited by a script to write it escaped, as a Cypher string or a backtick-quoted label (liberation-data/drivine-cypher-spec#217). On store layout 2 (#161), Oracle's vector table is named as layout 2 names its objects, `<graph>_v2_…` for `<graph>_v_…`: that name alone was changed in its answers. The 168 SQL answers of a nearest search by cosine were then edited by a script to leave out a stored embedding of no length, as Neo4j's cosine index does, and the 40 of a search among ids by cosine to leave out such a root (liberation-data/drivine-cypher-spec#160). The 70 SQL answers of a search among ids were then edited by a script to read each root's place among the ids, as the search for each pair once reads it, and to break a tie of two neighbours' scores by their places, then their node ids; and the graph engines' 48 answers of one, to bind each id's place as a map, `_cy_vec2`, the later parameters numbered on, read each hit's place by it, where the hit's id is text, keep a hit by its place in place of its id, and break a tie of two scores by place (liberation-data/drivine-cypher-spec#412).",
   "entries" : [ {
     "request" : {
       "store" : "postgres",
@@ -1920,7 +1920,7 @@
       }
     },
     "answer" : {
-      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:Doc)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL db.index.vector.queryNodes('Doc_embedding_vector', $_cy_vec3, seed.embedding)\nYIELD node\nWITH _places, _pos, _seedId, node AS n, vector.similarity.cosine(node.embedding, seed.embedding) AS _score\nWITH _places, _pos, _seedId, n, _score, _places[n.id] AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.id, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos | {id: m.id, score: m.score}][0..$_cy_vec4]} AS row",
+      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:Doc)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL db.index.vector.queryNodes('Doc_embedding_vector', $_cy_vec3, seed.embedding)\nYIELD node\nWITH _places, _pos, _seedId, node AS n, vector.similarity.cosine(node.embedding, seed.embedding) AS _score\nWITH _places, _pos, _seedId, n, _score, CASE WHEN toString(n.id) = n.id THEN _places[n.id] END AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.id, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos | {id: m.id, score: m.score}][0..$_cy_vec4]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : {
@@ -1948,7 +1948,7 @@
       }
     },
     "answer" : {
-      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:Doc)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL vector_search.search('Doc_embedding_vector', $_cy_vec3, seed.embedding)\nYIELD node, distance\nWITH _places, _pos, _seedId, node AS n, 1.0 - distance / 2.0 AS _score\nWITH _places, _pos, _seedId, n, _score, _places[n.id] AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.id, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos | {id: m.id, score: m.score}][0..$_cy_vec4]} AS row",
+      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:Doc)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL vector_search.search('Doc_embedding_vector', $_cy_vec3, seed.embedding)\nYIELD node, distance\nWITH _places, _pos, _seedId, node AS n, 1.0 - distance / 2.0 AS _score\nWITH _places, _pos, _seedId, n, _score, CASE WHEN toString(n.id) = n.id THEN _places[n.id] END AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.id, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos | {id: m.id, score: m.score}][0..$_cy_vec4]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : {
@@ -1976,7 +1976,7 @@
       }
     },
     "answer" : {
-      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:Doc)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL db.idx.vector.queryNodes('Doc', 'embedding', $_cy_vec3, seed.embedding)\nYIELD node, score\nWITH _places, _pos, _seedId, node AS n, 1.0 - score / 2.0 AS _score\nWITH _places, _pos, _seedId, n, _score, _places[n.id] AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.id, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos | {id: m.id, score: m.score}][0..$_cy_vec4]} AS row",
+      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:Doc)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL db.idx.vector.queryNodes('Doc', 'embedding', $_cy_vec3, seed.embedding)\nYIELD node, score\nWITH _places, _pos, _seedId, node AS n, 1.0 - score / 2.0 AS _score\nWITH _places, _pos, _seedId, n, _score, CASE WHEN toString(n.id) = n.id THEN _places[n.id] END AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.id, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos | {id: m.id, score: m.score}][0..$_cy_vec4]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : {
@@ -2148,7 +2148,7 @@
       }
     },
     "answer" : {
-      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:Doc)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL db.index.vector.queryNodes('Doc_embedding_vector', $_cy_vec3, seed.embedding)\nYIELD node\nWITH _places, _pos, _seedId, node AS n, vector.similarity.cosine(node.embedding, seed.embedding) AS _score\nWITH _places, _pos, _seedId, n, _score, _places[n.id] AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.id, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos AND m.score >= $_cy_vec4 | {id: m.id, score: m.score}][0..$_cy_vec5]} AS row",
+      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:Doc)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL db.index.vector.queryNodes('Doc_embedding_vector', $_cy_vec3, seed.embedding)\nYIELD node\nWITH _places, _pos, _seedId, node AS n, vector.similarity.cosine(node.embedding, seed.embedding) AS _score\nWITH _places, _pos, _seedId, n, _score, CASE WHEN toString(n.id) = n.id THEN _places[n.id] END AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.id, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos AND m.score >= $_cy_vec4 | {id: m.id, score: m.score}][0..$_cy_vec5]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : {
@@ -2178,7 +2178,7 @@
       }
     },
     "answer" : {
-      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:Doc)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL vector_search.search('Doc_embedding_vector', $_cy_vec3, seed.embedding)\nYIELD node, distance\nWITH _places, _pos, _seedId, node AS n, 1.0 - distance / 2.0 AS _score\nWITH _places, _pos, _seedId, n, _score, _places[n.id] AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.id, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos AND m.score >= $_cy_vec4 | {id: m.id, score: m.score}][0..$_cy_vec5]} AS row",
+      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:Doc)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL vector_search.search('Doc_embedding_vector', $_cy_vec3, seed.embedding)\nYIELD node, distance\nWITH _places, _pos, _seedId, node AS n, 1.0 - distance / 2.0 AS _score\nWITH _places, _pos, _seedId, n, _score, CASE WHEN toString(n.id) = n.id THEN _places[n.id] END AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.id, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos AND m.score >= $_cy_vec4 | {id: m.id, score: m.score}][0..$_cy_vec5]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : {
@@ -2208,7 +2208,7 @@
       }
     },
     "answer" : {
-      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:Doc)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL db.idx.vector.queryNodes('Doc', 'embedding', $_cy_vec3, seed.embedding)\nYIELD node, score\nWITH _places, _pos, _seedId, node AS n, 1.0 - score / 2.0 AS _score\nWITH _places, _pos, _seedId, n, _score, _places[n.id] AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.id, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos AND m.score >= $_cy_vec4 | {id: m.id, score: m.score}][0..$_cy_vec5]} AS row",
+      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:Doc)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL db.idx.vector.queryNodes('Doc', 'embedding', $_cy_vec3, seed.embedding)\nYIELD node, score\nWITH _places, _pos, _seedId, node AS n, 1.0 - score / 2.0 AS _score\nWITH _places, _pos, _seedId, n, _score, CASE WHEN toString(n.id) = n.id THEN _places[n.id] END AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.id, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos AND m.score >= $_cy_vec4 | {id: m.id, score: m.score}][0..$_cy_vec5]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : {
@@ -4141,7 +4141,7 @@
       }
     },
     "answer" : {
-      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:Doc)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL db.index.vector.queryNodes('Doc_embedding_vector', $_cy_vec3, seed.embedding)\nYIELD node\nWITH _places, _pos, _seedId, node AS n, vector.similarity.euclidean(node.embedding, seed.embedding) AS _score\nWITH _places, _pos, _seedId, n, _score, _places[n.id] AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.id, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos | {id: m.id, score: m.score}][0..$_cy_vec4]} AS row",
+      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:Doc)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL db.index.vector.queryNodes('Doc_embedding_vector', $_cy_vec3, seed.embedding)\nYIELD node\nWITH _places, _pos, _seedId, node AS n, vector.similarity.euclidean(node.embedding, seed.embedding) AS _score\nWITH _places, _pos, _seedId, n, _score, CASE WHEN toString(n.id) = n.id THEN _places[n.id] END AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.id, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos | {id: m.id, score: m.score}][0..$_cy_vec4]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : {
@@ -4169,7 +4169,7 @@
       }
     },
     "answer" : {
-      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:Doc)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL vector_search.search('Doc_embedding_vector', $_cy_vec3, seed.embedding)\nYIELD node, distance\nWITH _places, _pos, _seedId, node AS n, 1.0 / (1.0 + distance) AS _score\nWITH _places, _pos, _seedId, n, _score, _places[n.id] AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.id, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos | {id: m.id, score: m.score}][0..$_cy_vec4]} AS row",
+      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:Doc)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL vector_search.search('Doc_embedding_vector', $_cy_vec3, seed.embedding)\nYIELD node, distance\nWITH _places, _pos, _seedId, node AS n, 1.0 / (1.0 + distance) AS _score\nWITH _places, _pos, _seedId, n, _score, CASE WHEN toString(n.id) = n.id THEN _places[n.id] END AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.id, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos | {id: m.id, score: m.score}][0..$_cy_vec4]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : {
@@ -4197,7 +4197,7 @@
       }
     },
     "answer" : {
-      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:Doc)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL db.idx.vector.queryNodes('Doc', 'embedding', $_cy_vec3, seed.embedding)\nYIELD node, score\nWITH _places, _pos, _seedId, node AS n, 1.0 / (1.0 + score * score) AS _score\nWITH _places, _pos, _seedId, n, _score, _places[n.id] AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.id, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos | {id: m.id, score: m.score}][0..$_cy_vec4]} AS row",
+      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:Doc)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL db.idx.vector.queryNodes('Doc', 'embedding', $_cy_vec3, seed.embedding)\nYIELD node, score\nWITH _places, _pos, _seedId, node AS n, 1.0 / (1.0 + score * score) AS _score\nWITH _places, _pos, _seedId, n, _score, CASE WHEN toString(n.id) = n.id THEN _places[n.id] END AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.id, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos | {id: m.id, score: m.score}][0..$_cy_vec4]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : {
@@ -4369,7 +4369,7 @@
       }
     },
     "answer" : {
-      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:Doc)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL db.index.vector.queryNodes('Doc_embedding_vector', $_cy_vec3, seed.embedding)\nYIELD node\nWITH _places, _pos, _seedId, node AS n, vector.similarity.euclidean(node.embedding, seed.embedding) AS _score\nWITH _places, _pos, _seedId, n, _score, _places[n.id] AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.id, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos AND m.score >= $_cy_vec4 | {id: m.id, score: m.score}][0..$_cy_vec5]} AS row",
+      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:Doc)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL db.index.vector.queryNodes('Doc_embedding_vector', $_cy_vec3, seed.embedding)\nYIELD node\nWITH _places, _pos, _seedId, node AS n, vector.similarity.euclidean(node.embedding, seed.embedding) AS _score\nWITH _places, _pos, _seedId, n, _score, CASE WHEN toString(n.id) = n.id THEN _places[n.id] END AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.id, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos AND m.score >= $_cy_vec4 | {id: m.id, score: m.score}][0..$_cy_vec5]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : {
@@ -4399,7 +4399,7 @@
       }
     },
     "answer" : {
-      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:Doc)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL vector_search.search('Doc_embedding_vector', $_cy_vec3, seed.embedding)\nYIELD node, distance\nWITH _places, _pos, _seedId, node AS n, 1.0 / (1.0 + distance) AS _score\nWITH _places, _pos, _seedId, n, _score, _places[n.id] AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.id, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos AND m.score >= $_cy_vec4 | {id: m.id, score: m.score}][0..$_cy_vec5]} AS row",
+      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:Doc)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL vector_search.search('Doc_embedding_vector', $_cy_vec3, seed.embedding)\nYIELD node, distance\nWITH _places, _pos, _seedId, node AS n, 1.0 / (1.0 + distance) AS _score\nWITH _places, _pos, _seedId, n, _score, CASE WHEN toString(n.id) = n.id THEN _places[n.id] END AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.id, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos AND m.score >= $_cy_vec4 | {id: m.id, score: m.score}][0..$_cy_vec5]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : {
@@ -4429,7 +4429,7 @@
       }
     },
     "answer" : {
-      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:Doc)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL db.idx.vector.queryNodes('Doc', 'embedding', $_cy_vec3, seed.embedding)\nYIELD node, score\nWITH _places, _pos, _seedId, node AS n, 1.0 / (1.0 + score * score) AS _score\nWITH _places, _pos, _seedId, n, _score, _places[n.id] AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.id, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos AND m.score >= $_cy_vec4 | {id: m.id, score: m.score}][0..$_cy_vec5]} AS row",
+      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:Doc)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL db.idx.vector.queryNodes('Doc', 'embedding', $_cy_vec3, seed.embedding)\nYIELD node, score\nWITH _places, _pos, _seedId, node AS n, 1.0 / (1.0 + score * score) AS _score\nWITH _places, _pos, _seedId, n, _score, CASE WHEN toString(n.id) = n.id THEN _places[n.id] END AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.id, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos AND m.score >= $_cy_vec4 | {id: m.id, score: m.score}][0..$_cy_vec5]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : {
@@ -6362,7 +6362,7 @@
       }
     },
     "answer" : {
-      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:Doc:Chunk)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL db.index.vector.queryNodes('Doc_embedding_vector', $_cy_vec3, seed.embedding)\nYIELD node\nWITH _places, _pos, _seedId, node AS n, vector.similarity.cosine(node.embedding, seed.embedding) AS _score\nWHERE n:`Doc`:`Chunk`\nWITH _places, _pos, _seedId, n, _score, _places[n.id] AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.id, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos | {id: m.id, score: m.score}][0..$_cy_vec4]} AS row",
+      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:Doc:Chunk)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL db.index.vector.queryNodes('Doc_embedding_vector', $_cy_vec3, seed.embedding)\nYIELD node\nWITH _places, _pos, _seedId, node AS n, vector.similarity.cosine(node.embedding, seed.embedding) AS _score\nWHERE n:`Doc`:`Chunk`\nWITH _places, _pos, _seedId, n, _score, CASE WHEN toString(n.id) = n.id THEN _places[n.id] END AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.id, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos | {id: m.id, score: m.score}][0..$_cy_vec4]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : {
@@ -6390,7 +6390,7 @@
       }
     },
     "answer" : {
-      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:Doc:Chunk)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL vector_search.search('Doc_embedding_vector', $_cy_vec3, seed.embedding)\nYIELD node, distance\nWITH _places, _pos, _seedId, node AS n, 1.0 - distance / 2.0 AS _score\nWHERE n:`Doc`:`Chunk`\nWITH _places, _pos, _seedId, n, _score, _places[n.id] AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.id, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos | {id: m.id, score: m.score}][0..$_cy_vec4]} AS row",
+      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:Doc:Chunk)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL vector_search.search('Doc_embedding_vector', $_cy_vec3, seed.embedding)\nYIELD node, distance\nWITH _places, _pos, _seedId, node AS n, 1.0 - distance / 2.0 AS _score\nWHERE n:`Doc`:`Chunk`\nWITH _places, _pos, _seedId, n, _score, CASE WHEN toString(n.id) = n.id THEN _places[n.id] END AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.id, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos | {id: m.id, score: m.score}][0..$_cy_vec4]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : {
@@ -6418,7 +6418,7 @@
       }
     },
     "answer" : {
-      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:Doc:Chunk)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL db.idx.vector.queryNodes('Doc', 'embedding', $_cy_vec3, seed.embedding)\nYIELD node, score\nWITH _places, _pos, _seedId, node AS n, 1.0 - score / 2.0 AS _score\nWHERE n:`Doc`:`Chunk`\nWITH _places, _pos, _seedId, n, _score, _places[n.id] AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.id, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos | {id: m.id, score: m.score}][0..$_cy_vec4]} AS row",
+      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:Doc:Chunk)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL db.idx.vector.queryNodes('Doc', 'embedding', $_cy_vec3, seed.embedding)\nYIELD node, score\nWITH _places, _pos, _seedId, node AS n, 1.0 - score / 2.0 AS _score\nWHERE n:`Doc`:`Chunk`\nWITH _places, _pos, _seedId, n, _score, CASE WHEN toString(n.id) = n.id THEN _places[n.id] END AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.id, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos | {id: m.id, score: m.score}][0..$_cy_vec4]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : {
@@ -6590,7 +6590,7 @@
       }
     },
     "answer" : {
-      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:Doc:Chunk)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL db.index.vector.queryNodes('Doc_embedding_vector', $_cy_vec3, seed.embedding)\nYIELD node\nWITH _places, _pos, _seedId, node AS n, vector.similarity.cosine(node.embedding, seed.embedding) AS _score\nWHERE n:`Doc`:`Chunk`\nWITH _places, _pos, _seedId, n, _score, _places[n.id] AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.id, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos AND m.score >= $_cy_vec4 | {id: m.id, score: m.score}][0..$_cy_vec5]} AS row",
+      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:Doc:Chunk)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL db.index.vector.queryNodes('Doc_embedding_vector', $_cy_vec3, seed.embedding)\nYIELD node\nWITH _places, _pos, _seedId, node AS n, vector.similarity.cosine(node.embedding, seed.embedding) AS _score\nWHERE n:`Doc`:`Chunk`\nWITH _places, _pos, _seedId, n, _score, CASE WHEN toString(n.id) = n.id THEN _places[n.id] END AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.id, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos AND m.score >= $_cy_vec4 | {id: m.id, score: m.score}][0..$_cy_vec5]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : {
@@ -6620,7 +6620,7 @@
       }
     },
     "answer" : {
-      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:Doc:Chunk)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL vector_search.search('Doc_embedding_vector', $_cy_vec3, seed.embedding)\nYIELD node, distance\nWITH _places, _pos, _seedId, node AS n, 1.0 - distance / 2.0 AS _score\nWHERE n:`Doc`:`Chunk`\nWITH _places, _pos, _seedId, n, _score, _places[n.id] AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.id, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos AND m.score >= $_cy_vec4 | {id: m.id, score: m.score}][0..$_cy_vec5]} AS row",
+      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:Doc:Chunk)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL vector_search.search('Doc_embedding_vector', $_cy_vec3, seed.embedding)\nYIELD node, distance\nWITH _places, _pos, _seedId, node AS n, 1.0 - distance / 2.0 AS _score\nWHERE n:`Doc`:`Chunk`\nWITH _places, _pos, _seedId, n, _score, CASE WHEN toString(n.id) = n.id THEN _places[n.id] END AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.id, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos AND m.score >= $_cy_vec4 | {id: m.id, score: m.score}][0..$_cy_vec5]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : {
@@ -6650,7 +6650,7 @@
       }
     },
     "answer" : {
-      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:Doc:Chunk)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL db.idx.vector.queryNodes('Doc', 'embedding', $_cy_vec3, seed.embedding)\nYIELD node, score\nWITH _places, _pos, _seedId, node AS n, 1.0 - score / 2.0 AS _score\nWHERE n:`Doc`:`Chunk`\nWITH _places, _pos, _seedId, n, _score, _places[n.id] AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.id, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos AND m.score >= $_cy_vec4 | {id: m.id, score: m.score}][0..$_cy_vec5]} AS row",
+      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:Doc:Chunk)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL db.idx.vector.queryNodes('Doc', 'embedding', $_cy_vec3, seed.embedding)\nYIELD node, score\nWITH _places, _pos, _seedId, node AS n, 1.0 - score / 2.0 AS _score\nWHERE n:`Doc`:`Chunk`\nWITH _places, _pos, _seedId, n, _score, CASE WHEN toString(n.id) = n.id THEN _places[n.id] END AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.id, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos AND m.score >= $_cy_vec4 | {id: m.id, score: m.score}][0..$_cy_vec5]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : {
@@ -8583,7 +8583,7 @@
       }
     },
     "answer" : {
-      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:Doc:Chunk)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL db.index.vector.queryNodes('Doc_embedding_vector', $_cy_vec3, seed.embedding)\nYIELD node\nWITH _places, _pos, _seedId, node AS n, vector.similarity.euclidean(node.embedding, seed.embedding) AS _score\nWHERE n:`Doc`:`Chunk`\nWITH _places, _pos, _seedId, n, _score, _places[n.id] AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.id, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos | {id: m.id, score: m.score}][0..$_cy_vec4]} AS row",
+      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:Doc:Chunk)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL db.index.vector.queryNodes('Doc_embedding_vector', $_cy_vec3, seed.embedding)\nYIELD node\nWITH _places, _pos, _seedId, node AS n, vector.similarity.euclidean(node.embedding, seed.embedding) AS _score\nWHERE n:`Doc`:`Chunk`\nWITH _places, _pos, _seedId, n, _score, CASE WHEN toString(n.id) = n.id THEN _places[n.id] END AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.id, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos | {id: m.id, score: m.score}][0..$_cy_vec4]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : {
@@ -8611,7 +8611,7 @@
       }
     },
     "answer" : {
-      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:Doc:Chunk)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL vector_search.search('Doc_embedding_vector', $_cy_vec3, seed.embedding)\nYIELD node, distance\nWITH _places, _pos, _seedId, node AS n, 1.0 / (1.0 + distance) AS _score\nWHERE n:`Doc`:`Chunk`\nWITH _places, _pos, _seedId, n, _score, _places[n.id] AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.id, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos | {id: m.id, score: m.score}][0..$_cy_vec4]} AS row",
+      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:Doc:Chunk)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL vector_search.search('Doc_embedding_vector', $_cy_vec3, seed.embedding)\nYIELD node, distance\nWITH _places, _pos, _seedId, node AS n, 1.0 / (1.0 + distance) AS _score\nWHERE n:`Doc`:`Chunk`\nWITH _places, _pos, _seedId, n, _score, CASE WHEN toString(n.id) = n.id THEN _places[n.id] END AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.id, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos | {id: m.id, score: m.score}][0..$_cy_vec4]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : {
@@ -8639,7 +8639,7 @@
       }
     },
     "answer" : {
-      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:Doc:Chunk)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL db.idx.vector.queryNodes('Doc', 'embedding', $_cy_vec3, seed.embedding)\nYIELD node, score\nWITH _places, _pos, _seedId, node AS n, 1.0 / (1.0 + score * score) AS _score\nWHERE n:`Doc`:`Chunk`\nWITH _places, _pos, _seedId, n, _score, _places[n.id] AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.id, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos | {id: m.id, score: m.score}][0..$_cy_vec4]} AS row",
+      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:Doc:Chunk)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL db.idx.vector.queryNodes('Doc', 'embedding', $_cy_vec3, seed.embedding)\nYIELD node, score\nWITH _places, _pos, _seedId, node AS n, 1.0 / (1.0 + score * score) AS _score\nWHERE n:`Doc`:`Chunk`\nWITH _places, _pos, _seedId, n, _score, CASE WHEN toString(n.id) = n.id THEN _places[n.id] END AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.id, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos | {id: m.id, score: m.score}][0..$_cy_vec4]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : {
@@ -8811,7 +8811,7 @@
       }
     },
     "answer" : {
-      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:Doc:Chunk)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL db.index.vector.queryNodes('Doc_embedding_vector', $_cy_vec3, seed.embedding)\nYIELD node\nWITH _places, _pos, _seedId, node AS n, vector.similarity.euclidean(node.embedding, seed.embedding) AS _score\nWHERE n:`Doc`:`Chunk`\nWITH _places, _pos, _seedId, n, _score, _places[n.id] AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.id, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos AND m.score >= $_cy_vec4 | {id: m.id, score: m.score}][0..$_cy_vec5]} AS row",
+      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:Doc:Chunk)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL db.index.vector.queryNodes('Doc_embedding_vector', $_cy_vec3, seed.embedding)\nYIELD node\nWITH _places, _pos, _seedId, node AS n, vector.similarity.euclidean(node.embedding, seed.embedding) AS _score\nWHERE n:`Doc`:`Chunk`\nWITH _places, _pos, _seedId, n, _score, CASE WHEN toString(n.id) = n.id THEN _places[n.id] END AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.id, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos AND m.score >= $_cy_vec4 | {id: m.id, score: m.score}][0..$_cy_vec5]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : {
@@ -8841,7 +8841,7 @@
       }
     },
     "answer" : {
-      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:Doc:Chunk)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL vector_search.search('Doc_embedding_vector', $_cy_vec3, seed.embedding)\nYIELD node, distance\nWITH _places, _pos, _seedId, node AS n, 1.0 / (1.0 + distance) AS _score\nWHERE n:`Doc`:`Chunk`\nWITH _places, _pos, _seedId, n, _score, _places[n.id] AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.id, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos AND m.score >= $_cy_vec4 | {id: m.id, score: m.score}][0..$_cy_vec5]} AS row",
+      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:Doc:Chunk)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL vector_search.search('Doc_embedding_vector', $_cy_vec3, seed.embedding)\nYIELD node, distance\nWITH _places, _pos, _seedId, node AS n, 1.0 / (1.0 + distance) AS _score\nWHERE n:`Doc`:`Chunk`\nWITH _places, _pos, _seedId, n, _score, CASE WHEN toString(n.id) = n.id THEN _places[n.id] END AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.id, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos AND m.score >= $_cy_vec4 | {id: m.id, score: m.score}][0..$_cy_vec5]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : {
@@ -8871,7 +8871,7 @@
       }
     },
     "answer" : {
-      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:Doc:Chunk)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL db.idx.vector.queryNodes('Doc', 'embedding', $_cy_vec3, seed.embedding)\nYIELD node, score\nWITH _places, _pos, _seedId, node AS n, 1.0 / (1.0 + score * score) AS _score\nWHERE n:`Doc`:`Chunk`\nWITH _places, _pos, _seedId, n, _score, _places[n.id] AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.id, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos AND m.score >= $_cy_vec4 | {id: m.id, score: m.score}][0..$_cy_vec5]} AS row",
+      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:Doc:Chunk)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL db.idx.vector.queryNodes('Doc', 'embedding', $_cy_vec3, seed.embedding)\nYIELD node, score\nWITH _places, _pos, _seedId, node AS n, 1.0 / (1.0 + score * score) AS _score\nWHERE n:`Doc`:`Chunk`\nWITH _places, _pos, _seedId, n, _score, CASE WHEN toString(n.id) = n.id THEN _places[n.id] END AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.id, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos AND m.score >= $_cy_vec4 | {id: m.id, score: m.score}][0..$_cy_vec5]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : {
@@ -10804,7 +10804,7 @@
       }
     },
     "answer" : {
-      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:`Do'c\\x`)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL db.index.vector.queryNodes('Do\\'c\\\\x_emb\\'e\\\\d \"x\"_vector', $_cy_vec3, seed.`emb'e\\d \"x\"`)\nYIELD node\nWITH _places, _pos, _seedId, node AS n, vector.similarity.cosine(node.`emb'e\\d \"x\"`, seed.`emb'e\\d \"x\"`) AS _score\nWITH _places, _pos, _seedId, n, _score, _places[n.`i'd\\`] AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.`i'd\\`, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos | {id: m.id, score: m.score}][0..$_cy_vec4]} AS row",
+      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:`Do'c\\x`)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL db.index.vector.queryNodes('Do\\'c\\\\x_emb\\'e\\\\d \"x\"_vector', $_cy_vec3, seed.`emb'e\\d \"x\"`)\nYIELD node\nWITH _places, _pos, _seedId, node AS n, vector.similarity.cosine(node.`emb'e\\d \"x\"`, seed.`emb'e\\d \"x\"`) AS _score\nWITH _places, _pos, _seedId, n, _score, CASE WHEN toString(n.`i'd\\`) = n.`i'd\\` THEN _places[n.`i'd\\`] END AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.`i'd\\`, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos | {id: m.id, score: m.score}][0..$_cy_vec4]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : {
@@ -10832,7 +10832,7 @@
       }
     },
     "answer" : {
-      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:`Do'c\\x`)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL vector_search.search('Do\\'c\\\\x_emb\\'e\\\\d \"x\"_vector', $_cy_vec3, seed.`emb'e\\d \"x\"`)\nYIELD node, distance\nWITH _places, _pos, _seedId, node AS n, 1.0 - distance / 2.0 AS _score\nWITH _places, _pos, _seedId, n, _score, _places[n.`i'd\\`] AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.`i'd\\`, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos | {id: m.id, score: m.score}][0..$_cy_vec4]} AS row",
+      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:`Do'c\\x`)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL vector_search.search('Do\\'c\\\\x_emb\\'e\\\\d \"x\"_vector', $_cy_vec3, seed.`emb'e\\d \"x\"`)\nYIELD node, distance\nWITH _places, _pos, _seedId, node AS n, 1.0 - distance / 2.0 AS _score\nWITH _places, _pos, _seedId, n, _score, CASE WHEN toString(n.`i'd\\`) = n.`i'd\\` THEN _places[n.`i'd\\`] END AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.`i'd\\`, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos | {id: m.id, score: m.score}][0..$_cy_vec4]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : {
@@ -10860,7 +10860,7 @@
       }
     },
     "answer" : {
-      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:`Do'c\\x`)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL db.idx.vector.queryNodes('Do\\'c\\\\x', 'emb\\'e\\\\d \"x\"', $_cy_vec3, seed.`emb'e\\d \"x\"`)\nYIELD node, score\nWITH _places, _pos, _seedId, node AS n, 1.0 - score / 2.0 AS _score\nWITH _places, _pos, _seedId, n, _score, _places[n.`i'd\\`] AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.`i'd\\`, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos | {id: m.id, score: m.score}][0..$_cy_vec4]} AS row",
+      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:`Do'c\\x`)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL db.idx.vector.queryNodes('Do\\'c\\\\x', 'emb\\'e\\\\d \"x\"', $_cy_vec3, seed.`emb'e\\d \"x\"`)\nYIELD node, score\nWITH _places, _pos, _seedId, node AS n, 1.0 - score / 2.0 AS _score\nWITH _places, _pos, _seedId, n, _score, CASE WHEN toString(n.`i'd\\`) = n.`i'd\\` THEN _places[n.`i'd\\`] END AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.`i'd\\`, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos | {id: m.id, score: m.score}][0..$_cy_vec4]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : {
@@ -11032,7 +11032,7 @@
       }
     },
     "answer" : {
-      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:`Do'c\\x`)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL db.index.vector.queryNodes('Do\\'c\\\\x_emb\\'e\\\\d \"x\"_vector', $_cy_vec3, seed.`emb'e\\d \"x\"`)\nYIELD node\nWITH _places, _pos, _seedId, node AS n, vector.similarity.cosine(node.`emb'e\\d \"x\"`, seed.`emb'e\\d \"x\"`) AS _score\nWITH _places, _pos, _seedId, n, _score, _places[n.`i'd\\`] AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.`i'd\\`, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos AND m.score >= $_cy_vec4 | {id: m.id, score: m.score}][0..$_cy_vec5]} AS row",
+      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:`Do'c\\x`)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL db.index.vector.queryNodes('Do\\'c\\\\x_emb\\'e\\\\d \"x\"_vector', $_cy_vec3, seed.`emb'e\\d \"x\"`)\nYIELD node\nWITH _places, _pos, _seedId, node AS n, vector.similarity.cosine(node.`emb'e\\d \"x\"`, seed.`emb'e\\d \"x\"`) AS _score\nWITH _places, _pos, _seedId, n, _score, CASE WHEN toString(n.`i'd\\`) = n.`i'd\\` THEN _places[n.`i'd\\`] END AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.`i'd\\`, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos AND m.score >= $_cy_vec4 | {id: m.id, score: m.score}][0..$_cy_vec5]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : {
@@ -11062,7 +11062,7 @@
       }
     },
     "answer" : {
-      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:`Do'c\\x`)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL vector_search.search('Do\\'c\\\\x_emb\\'e\\\\d \"x\"_vector', $_cy_vec3, seed.`emb'e\\d \"x\"`)\nYIELD node, distance\nWITH _places, _pos, _seedId, node AS n, 1.0 - distance / 2.0 AS _score\nWITH _places, _pos, _seedId, n, _score, _places[n.`i'd\\`] AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.`i'd\\`, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos AND m.score >= $_cy_vec4 | {id: m.id, score: m.score}][0..$_cy_vec5]} AS row",
+      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:`Do'c\\x`)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL vector_search.search('Do\\'c\\\\x_emb\\'e\\\\d \"x\"_vector', $_cy_vec3, seed.`emb'e\\d \"x\"`)\nYIELD node, distance\nWITH _places, _pos, _seedId, node AS n, 1.0 - distance / 2.0 AS _score\nWITH _places, _pos, _seedId, n, _score, CASE WHEN toString(n.`i'd\\`) = n.`i'd\\` THEN _places[n.`i'd\\`] END AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.`i'd\\`, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos AND m.score >= $_cy_vec4 | {id: m.id, score: m.score}][0..$_cy_vec5]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : {
@@ -11092,7 +11092,7 @@
       }
     },
     "answer" : {
-      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:`Do'c\\x`)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL db.idx.vector.queryNodes('Do\\'c\\\\x', 'emb\\'e\\\\d \"x\"', $_cy_vec3, seed.`emb'e\\d \"x\"`)\nYIELD node, score\nWITH _places, _pos, _seedId, node AS n, 1.0 - score / 2.0 AS _score\nWITH _places, _pos, _seedId, n, _score, _places[n.`i'd\\`] AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.`i'd\\`, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos AND m.score >= $_cy_vec4 | {id: m.id, score: m.score}][0..$_cy_vec5]} AS row",
+      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:`Do'c\\x`)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL db.idx.vector.queryNodes('Do\\'c\\\\x', 'emb\\'e\\\\d \"x\"', $_cy_vec3, seed.`emb'e\\d \"x\"`)\nYIELD node, score\nWITH _places, _pos, _seedId, node AS n, 1.0 - score / 2.0 AS _score\nWITH _places, _pos, _seedId, n, _score, CASE WHEN toString(n.`i'd\\`) = n.`i'd\\` THEN _places[n.`i'd\\`] END AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.`i'd\\`, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos AND m.score >= $_cy_vec4 | {id: m.id, score: m.score}][0..$_cy_vec5]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : {
@@ -13025,7 +13025,7 @@
       }
     },
     "answer" : {
-      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:`Do'c\\x`:`Ch\"un``k`)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL db.index.vector.queryNodes('Do\\'c\\\\x_emb\\'e\\\\d \"x\"_vector', $_cy_vec3, seed.`emb'e\\d \"x\"`)\nYIELD node\nWITH _places, _pos, _seedId, node AS n, vector.similarity.cosine(node.`emb'e\\d \"x\"`, seed.`emb'e\\d \"x\"`) AS _score\nWHERE n:`Do'c\\x`:`Ch\"un``k`\nWITH _places, _pos, _seedId, n, _score, _places[n.`i'd\\`] AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.`i'd\\`, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos | {id: m.id, score: m.score}][0..$_cy_vec4]} AS row",
+      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:`Do'c\\x`:`Ch\"un``k`)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL db.index.vector.queryNodes('Do\\'c\\\\x_emb\\'e\\\\d \"x\"_vector', $_cy_vec3, seed.`emb'e\\d \"x\"`)\nYIELD node\nWITH _places, _pos, _seedId, node AS n, vector.similarity.cosine(node.`emb'e\\d \"x\"`, seed.`emb'e\\d \"x\"`) AS _score\nWHERE n:`Do'c\\x`:`Ch\"un``k`\nWITH _places, _pos, _seedId, n, _score, CASE WHEN toString(n.`i'd\\`) = n.`i'd\\` THEN _places[n.`i'd\\`] END AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.`i'd\\`, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos | {id: m.id, score: m.score}][0..$_cy_vec4]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : {
@@ -13053,7 +13053,7 @@
       }
     },
     "answer" : {
-      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:`Do'c\\x`:`Ch\"un``k`)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL vector_search.search('Do\\'c\\\\x_emb\\'e\\\\d \"x\"_vector', $_cy_vec3, seed.`emb'e\\d \"x\"`)\nYIELD node, distance\nWITH _places, _pos, _seedId, node AS n, 1.0 - distance / 2.0 AS _score\nWHERE n:`Do'c\\x`:`Ch\"un``k`\nWITH _places, _pos, _seedId, n, _score, _places[n.`i'd\\`] AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.`i'd\\`, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos | {id: m.id, score: m.score}][0..$_cy_vec4]} AS row",
+      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:`Do'c\\x`:`Ch\"un``k`)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL vector_search.search('Do\\'c\\\\x_emb\\'e\\\\d \"x\"_vector', $_cy_vec3, seed.`emb'e\\d \"x\"`)\nYIELD node, distance\nWITH _places, _pos, _seedId, node AS n, 1.0 - distance / 2.0 AS _score\nWHERE n:`Do'c\\x`:`Ch\"un``k`\nWITH _places, _pos, _seedId, n, _score, CASE WHEN toString(n.`i'd\\`) = n.`i'd\\` THEN _places[n.`i'd\\`] END AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.`i'd\\`, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos | {id: m.id, score: m.score}][0..$_cy_vec4]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : {
@@ -13081,7 +13081,7 @@
       }
     },
     "answer" : {
-      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:`Do'c\\x`:`Ch\"un``k`)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL db.idx.vector.queryNodes('Do\\'c\\\\x', 'emb\\'e\\\\d \"x\"', $_cy_vec3, seed.`emb'e\\d \"x\"`)\nYIELD node, score\nWITH _places, _pos, _seedId, node AS n, 1.0 - score / 2.0 AS _score\nWHERE n:`Do'c\\x`:`Ch\"un``k`\nWITH _places, _pos, _seedId, n, _score, _places[n.`i'd\\`] AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.`i'd\\`, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos | {id: m.id, score: m.score}][0..$_cy_vec4]} AS row",
+      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:`Do'c\\x`:`Ch\"un``k`)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL db.idx.vector.queryNodes('Do\\'c\\\\x', 'emb\\'e\\\\d \"x\"', $_cy_vec3, seed.`emb'e\\d \"x\"`)\nYIELD node, score\nWITH _places, _pos, _seedId, node AS n, 1.0 - score / 2.0 AS _score\nWHERE n:`Do'c\\x`:`Ch\"un``k`\nWITH _places, _pos, _seedId, n, _score, CASE WHEN toString(n.`i'd\\`) = n.`i'd\\` THEN _places[n.`i'd\\`] END AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.`i'd\\`, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos | {id: m.id, score: m.score}][0..$_cy_vec4]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : {
@@ -13253,7 +13253,7 @@
       }
     },
     "answer" : {
-      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:`Do'c\\x`:`Ch\"un``k`)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL db.index.vector.queryNodes('Do\\'c\\\\x_emb\\'e\\\\d \"x\"_vector', $_cy_vec3, seed.`emb'e\\d \"x\"`)\nYIELD node\nWITH _places, _pos, _seedId, node AS n, vector.similarity.cosine(node.`emb'e\\d \"x\"`, seed.`emb'e\\d \"x\"`) AS _score\nWHERE n:`Do'c\\x`:`Ch\"un``k`\nWITH _places, _pos, _seedId, n, _score, _places[n.`i'd\\`] AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.`i'd\\`, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos AND m.score >= $_cy_vec4 | {id: m.id, score: m.score}][0..$_cy_vec5]} AS row",
+      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:`Do'c\\x`:`Ch\"un``k`)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL db.index.vector.queryNodes('Do\\'c\\\\x_emb\\'e\\\\d \"x\"_vector', $_cy_vec3, seed.`emb'e\\d \"x\"`)\nYIELD node\nWITH _places, _pos, _seedId, node AS n, vector.similarity.cosine(node.`emb'e\\d \"x\"`, seed.`emb'e\\d \"x\"`) AS _score\nWHERE n:`Do'c\\x`:`Ch\"un``k`\nWITH _places, _pos, _seedId, n, _score, CASE WHEN toString(n.`i'd\\`) = n.`i'd\\` THEN _places[n.`i'd\\`] END AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.`i'd\\`, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos AND m.score >= $_cy_vec4 | {id: m.id, score: m.score}][0..$_cy_vec5]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : {
@@ -13283,7 +13283,7 @@
       }
     },
     "answer" : {
-      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:`Do'c\\x`:`Ch\"un``k`)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL vector_search.search('Do\\'c\\\\x_emb\\'e\\\\d \"x\"_vector', $_cy_vec3, seed.`emb'e\\d \"x\"`)\nYIELD node, distance\nWITH _places, _pos, _seedId, node AS n, 1.0 - distance / 2.0 AS _score\nWHERE n:`Do'c\\x`:`Ch\"un``k`\nWITH _places, _pos, _seedId, n, _score, _places[n.`i'd\\`] AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.`i'd\\`, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos AND m.score >= $_cy_vec4 | {id: m.id, score: m.score}][0..$_cy_vec5]} AS row",
+      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:`Do'c\\x`:`Ch\"un``k`)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL vector_search.search('Do\\'c\\\\x_emb\\'e\\\\d \"x\"_vector', $_cy_vec3, seed.`emb'e\\d \"x\"`)\nYIELD node, distance\nWITH _places, _pos, _seedId, node AS n, 1.0 - distance / 2.0 AS _score\nWHERE n:`Do'c\\x`:`Ch\"un``k`\nWITH _places, _pos, _seedId, n, _score, CASE WHEN toString(n.`i'd\\`) = n.`i'd\\` THEN _places[n.`i'd\\`] END AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.`i'd\\`, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos AND m.score >= $_cy_vec4 | {id: m.id, score: m.score}][0..$_cy_vec5]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : {
@@ -13313,7 +13313,7 @@
       }
     },
     "answer" : {
-      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:`Do'c\\x`:`Ch\"un``k`)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL db.idx.vector.queryNodes('Do\\'c\\\\x', 'emb\\'e\\\\d \"x\"', $_cy_vec3, seed.`emb'e\\d \"x\"`)\nYIELD node, score\nWITH _places, _pos, _seedId, node AS n, 1.0 - score / 2.0 AS _score\nWHERE n:`Do'c\\x`:`Ch\"un``k`\nWITH _places, _pos, _seedId, n, _score, _places[n.`i'd\\`] AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.`i'd\\`, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos AND m.score >= $_cy_vec4 | {id: m.id, score: m.score}][0..$_cy_vec5]} AS row",
+      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:`Do'c\\x`:`Ch\"un``k`)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL db.idx.vector.queryNodes('Do\\'c\\\\x', 'emb\\'e\\\\d \"x\"', $_cy_vec3, seed.`emb'e\\d \"x\"`)\nYIELD node, score\nWITH _places, _pos, _seedId, node AS n, 1.0 - score / 2.0 AS _score\nWHERE n:`Do'c\\x`:`Ch\"un``k`\nWITH _places, _pos, _seedId, n, _score, CASE WHEN toString(n.`i'd\\`) = n.`i'd\\` THEN _places[n.`i'd\\`] END AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.`i'd\\`, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos AND m.score >= $_cy_vec4 | {id: m.id, score: m.score}][0..$_cy_vec5]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : {
@@ -15246,7 +15246,7 @@
       }
     },
     "answer" : {
-      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:`Do'c\\x`:`Ch\"un``k`)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL db.index.vector.queryNodes('Do\\'c\\\\x_emb\\'e\\\\d \"x\"_vector', $_cy_vec3, seed.`emb'e\\d \"x\"`)\nYIELD node\nWITH _places, _pos, _seedId, node AS n, vector.similarity.euclidean(node.`emb'e\\d \"x\"`, seed.`emb'e\\d \"x\"`) AS _score\nWHERE n:`Do'c\\x`:`Ch\"un``k`\nWITH _places, _pos, _seedId, n, _score, _places[n.`i'd\\`] AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.`i'd\\`, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos | {id: m.id, score: m.score}][0..$_cy_vec4]} AS row",
+      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:`Do'c\\x`:`Ch\"un``k`)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL db.index.vector.queryNodes('Do\\'c\\\\x_emb\\'e\\\\d \"x\"_vector', $_cy_vec3, seed.`emb'e\\d \"x\"`)\nYIELD node\nWITH _places, _pos, _seedId, node AS n, vector.similarity.euclidean(node.`emb'e\\d \"x\"`, seed.`emb'e\\d \"x\"`) AS _score\nWHERE n:`Do'c\\x`:`Ch\"un``k`\nWITH _places, _pos, _seedId, n, _score, CASE WHEN toString(n.`i'd\\`) = n.`i'd\\` THEN _places[n.`i'd\\`] END AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.`i'd\\`, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos | {id: m.id, score: m.score}][0..$_cy_vec4]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : {
@@ -15274,7 +15274,7 @@
       }
     },
     "answer" : {
-      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:`Do'c\\x`:`Ch\"un``k`)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL vector_search.search('Do\\'c\\\\x_emb\\'e\\\\d \"x\"_vector', $_cy_vec3, seed.`emb'e\\d \"x\"`)\nYIELD node, distance\nWITH _places, _pos, _seedId, node AS n, 1.0 / (1.0 + distance) AS _score\nWHERE n:`Do'c\\x`:`Ch\"un``k`\nWITH _places, _pos, _seedId, n, _score, _places[n.`i'd\\`] AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.`i'd\\`, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos | {id: m.id, score: m.score}][0..$_cy_vec4]} AS row",
+      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:`Do'c\\x`:`Ch\"un``k`)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL vector_search.search('Do\\'c\\\\x_emb\\'e\\\\d \"x\"_vector', $_cy_vec3, seed.`emb'e\\d \"x\"`)\nYIELD node, distance\nWITH _places, _pos, _seedId, node AS n, 1.0 / (1.0 + distance) AS _score\nWHERE n:`Do'c\\x`:`Ch\"un``k`\nWITH _places, _pos, _seedId, n, _score, CASE WHEN toString(n.`i'd\\`) = n.`i'd\\` THEN _places[n.`i'd\\`] END AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.`i'd\\`, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos | {id: m.id, score: m.score}][0..$_cy_vec4]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : {
@@ -15302,7 +15302,7 @@
       }
     },
     "answer" : {
-      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:`Do'c\\x`:`Ch\"un``k`)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL db.idx.vector.queryNodes('Do\\'c\\\\x', 'emb\\'e\\\\d \"x\"', $_cy_vec3, seed.`emb'e\\d \"x\"`)\nYIELD node, score\nWITH _places, _pos, _seedId, node AS n, 1.0 / (1.0 + score * score) AS _score\nWHERE n:`Do'c\\x`:`Ch\"un``k`\nWITH _places, _pos, _seedId, n, _score, _places[n.`i'd\\`] AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.`i'd\\`, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos | {id: m.id, score: m.score}][0..$_cy_vec4]} AS row",
+      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:`Do'c\\x`:`Ch\"un``k`)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL db.idx.vector.queryNodes('Do\\'c\\\\x', 'emb\\'e\\\\d \"x\"', $_cy_vec3, seed.`emb'e\\d \"x\"`)\nYIELD node, score\nWITH _places, _pos, _seedId, node AS n, 1.0 / (1.0 + score * score) AS _score\nWHERE n:`Do'c\\x`:`Ch\"un``k`\nWITH _places, _pos, _seedId, n, _score, CASE WHEN toString(n.`i'd\\`) = n.`i'd\\` THEN _places[n.`i'd\\`] END AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.`i'd\\`, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos | {id: m.id, score: m.score}][0..$_cy_vec4]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : {
@@ -15474,7 +15474,7 @@
       }
     },
     "answer" : {
-      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:`Do'c\\x`:`Ch\"un``k`)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL db.index.vector.queryNodes('Do\\'c\\\\x_emb\\'e\\\\d \"x\"_vector', $_cy_vec3, seed.`emb'e\\d \"x\"`)\nYIELD node\nWITH _places, _pos, _seedId, node AS n, vector.similarity.euclidean(node.`emb'e\\d \"x\"`, seed.`emb'e\\d \"x\"`) AS _score\nWHERE n:`Do'c\\x`:`Ch\"un``k`\nWITH _places, _pos, _seedId, n, _score, _places[n.`i'd\\`] AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.`i'd\\`, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos AND m.score >= $_cy_vec4 | {id: m.id, score: m.score}][0..$_cy_vec5]} AS row",
+      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:`Do'c\\x`:`Ch\"un``k`)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL db.index.vector.queryNodes('Do\\'c\\\\x_emb\\'e\\\\d \"x\"_vector', $_cy_vec3, seed.`emb'e\\d \"x\"`)\nYIELD node\nWITH _places, _pos, _seedId, node AS n, vector.similarity.euclidean(node.`emb'e\\d \"x\"`, seed.`emb'e\\d \"x\"`) AS _score\nWHERE n:`Do'c\\x`:`Ch\"un``k`\nWITH _places, _pos, _seedId, n, _score, CASE WHEN toString(n.`i'd\\`) = n.`i'd\\` THEN _places[n.`i'd\\`] END AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.`i'd\\`, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos AND m.score >= $_cy_vec4 | {id: m.id, score: m.score}][0..$_cy_vec5]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : {
@@ -15504,7 +15504,7 @@
       }
     },
     "answer" : {
-      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:`Do'c\\x`:`Ch\"un``k`)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL vector_search.search('Do\\'c\\\\x_emb\\'e\\\\d \"x\"_vector', $_cy_vec3, seed.`emb'e\\d \"x\"`)\nYIELD node, distance\nWITH _places, _pos, _seedId, node AS n, 1.0 / (1.0 + distance) AS _score\nWHERE n:`Do'c\\x`:`Ch\"un``k`\nWITH _places, _pos, _seedId, n, _score, _places[n.`i'd\\`] AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.`i'd\\`, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos AND m.score >= $_cy_vec4 | {id: m.id, score: m.score}][0..$_cy_vec5]} AS row",
+      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:`Do'c\\x`:`Ch\"un``k`)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL vector_search.search('Do\\'c\\\\x_emb\\'e\\\\d \"x\"_vector', $_cy_vec3, seed.`emb'e\\d \"x\"`)\nYIELD node, distance\nWITH _places, _pos, _seedId, node AS n, 1.0 / (1.0 + distance) AS _score\nWHERE n:`Do'c\\x`:`Ch\"un``k`\nWITH _places, _pos, _seedId, n, _score, CASE WHEN toString(n.`i'd\\`) = n.`i'd\\` THEN _places[n.`i'd\\`] END AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.`i'd\\`, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos AND m.score >= $_cy_vec4 | {id: m.id, score: m.score}][0..$_cy_vec5]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : {
@@ -15534,7 +15534,7 @@
       }
     },
     "answer" : {
-      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:`Do'c\\x`:`Ch\"un``k`)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL db.idx.vector.queryNodes('Do\\'c\\\\x', 'emb\\'e\\\\d \"x\"', $_cy_vec3, seed.`emb'e\\d \"x\"`)\nYIELD node, score\nWITH _places, _pos, _seedId, node AS n, 1.0 / (1.0 + score * score) AS _score\nWHERE n:`Do'c\\x`:`Ch\"un``k`\nWITH _places, _pos, _seedId, n, _score, _places[n.`i'd\\`] AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.`i'd\\`, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos AND m.score >= $_cy_vec4 | {id: m.id, score: m.score}][0..$_cy_vec5]} AS row",
+      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:`Do'c\\x`:`Ch\"un``k`)\nWHERE seed.`i'd\\` = _seedId AND seed.`emb'e\\d \"x\"` IS NOT NULL\nCALL db.idx.vector.queryNodes('Do\\'c\\\\x', 'emb\\'e\\\\d \"x\"', $_cy_vec3, seed.`emb'e\\d \"x\"`)\nYIELD node, score\nWITH _places, _pos, _seedId, node AS n, 1.0 / (1.0 + score * score) AS _score\nWHERE n:`Do'c\\x`:`Ch\"un``k`\nWITH _places, _pos, _seedId, n, _score, CASE WHEN toString(n.`i'd\\`) = n.`i'd\\` THEN _places[n.`i'd\\`] END AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.`i'd\\`, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos AND m.score >= $_cy_vec4 | {id: m.id, score: m.score}][0..$_cy_vec5]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : {
@@ -15702,7 +15702,7 @@
       }
     },
     "answer" : {
-      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:Doc)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL db.index.vector.queryNodes('doc_vectors', $_cy_vec3, seed.embedding)\nYIELD node\nWITH _places, _pos, _seedId, node AS n, vector.similarity.cosine(node.embedding, seed.embedding) AS _score\nWITH _places, _pos, _seedId, n, _score, _places[n.id] AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.id, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos AND m.score >= $_cy_vec4 | {id: m.id, score: m.score}][0..$_cy_vec5]} AS row",
+      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:Doc)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL db.index.vector.queryNodes('doc_vectors', $_cy_vec3, seed.embedding)\nYIELD node\nWITH _places, _pos, _seedId, node AS n, vector.similarity.cosine(node.embedding, seed.embedding) AS _score\nWITH _places, _pos, _seedId, n, _score, CASE WHEN toString(n.id) = n.id THEN _places[n.id] END AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.id, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos AND m.score >= $_cy_vec4 | {id: m.id, score: m.score}][0..$_cy_vec5]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : {
@@ -15735,7 +15735,7 @@
       }
     },
     "answer" : {
-      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:Doc)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL vector_search.search('doc_vectors', $_cy_vec3, seed.embedding)\nYIELD node, distance\nWITH _places, _pos, _seedId, node AS n, 1.0 - distance / 2.0 AS _score\nWITH _places, _pos, _seedId, n, _score, _places[n.id] AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.id, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos AND m.score >= $_cy_vec4 | {id: m.id, score: m.score}][0..$_cy_vec5]} AS row",
+      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:Doc)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL vector_search.search('doc_vectors', $_cy_vec3, seed.embedding)\nYIELD node, distance\nWITH _places, _pos, _seedId, node AS n, 1.0 - distance / 2.0 AS _score\nWITH _places, _pos, _seedId, n, _score, CASE WHEN toString(n.id) = n.id THEN _places[n.id] END AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.id, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos AND m.score >= $_cy_vec4 | {id: m.id, score: m.score}][0..$_cy_vec5]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : {
@@ -15768,7 +15768,7 @@
       }
     },
     "answer" : {
-      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:Doc)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL db.idx.vector.queryNodes('Doc', 'embedding', $_cy_vec3, seed.embedding)\nYIELD node, score\nWITH _places, _pos, _seedId, node AS n, 1.0 - score / 2.0 AS _score\nWITH _places, _pos, _seedId, n, _score, _places[n.id] AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.id, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos AND m.score >= $_cy_vec4 | {id: m.id, score: m.score}][0..$_cy_vec5]} AS row",
+      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:Doc)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL db.idx.vector.queryNodes('Doc', 'embedding', $_cy_vec3, seed.embedding)\nYIELD node, score\nWITH _places, _pos, _seedId, node AS n, 1.0 - score / 2.0 AS _score\nWITH _places, _pos, _seedId, n, _score, CASE WHEN toString(n.id) = n.id THEN _places[n.id] END AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.id, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos AND m.score >= $_cy_vec4 | {id: m.id, score: m.score}][0..$_cy_vec5]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : {
@@ -15936,7 +15936,7 @@
       }
     },
     "answer" : {
-      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:Doc:Chunk)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL db.index.vector.queryNodes('my\\'ind\\\\ex', $_cy_vec3, seed.embedding)\nYIELD node\nWITH _places, _pos, _seedId, node AS n, vector.similarity.euclidean(node.embedding, seed.embedding) AS _score\nWHERE n:`Doc`:`Chunk`\nWITH _places, _pos, _seedId, n, _score, _places[n.id] AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.id, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos AND m.score >= $_cy_vec4 | {id: m.id, score: m.score}][0..$_cy_vec5]} AS row",
+      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:Doc:Chunk)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL db.index.vector.queryNodes('my\\'ind\\\\ex', $_cy_vec3, seed.embedding)\nYIELD node\nWITH _places, _pos, _seedId, node AS n, vector.similarity.euclidean(node.embedding, seed.embedding) AS _score\nWHERE n:`Doc`:`Chunk`\nWITH _places, _pos, _seedId, n, _score, CASE WHEN toString(n.id) = n.id THEN _places[n.id] END AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.id, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos AND m.score >= $_cy_vec4 | {id: m.id, score: m.score}][0..$_cy_vec5]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : {
@@ -15969,7 +15969,7 @@
       }
     },
     "answer" : {
-      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:Doc:Chunk)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL vector_search.search('my\\'ind\\\\ex', $_cy_vec3, seed.embedding)\nYIELD node, distance\nWITH _places, _pos, _seedId, node AS n, 1.0 / (1.0 + distance) AS _score\nWHERE n:`Doc`:`Chunk`\nWITH _places, _pos, _seedId, n, _score, _places[n.id] AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.id, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos AND m.score >= $_cy_vec4 | {id: m.id, score: m.score}][0..$_cy_vec5]} AS row",
+      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:Doc:Chunk)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL vector_search.search('my\\'ind\\\\ex', $_cy_vec3, seed.embedding)\nYIELD node, distance\nWITH _places, _pos, _seedId, node AS n, 1.0 / (1.0 + distance) AS _score\nWHERE n:`Doc`:`Chunk`\nWITH _places, _pos, _seedId, n, _score, CASE WHEN toString(n.id) = n.id THEN _places[n.id] END AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.id, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos AND m.score >= $_cy_vec4 | {id: m.id, score: m.score}][0..$_cy_vec5]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : {
@@ -16002,7 +16002,7 @@
       }
     },
     "answer" : {
-      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:Doc:Chunk)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL db.idx.vector.queryNodes('Doc', 'embedding', $_cy_vec3, seed.embedding)\nYIELD node, score\nWITH _places, _pos, _seedId, node AS n, 1.0 / (1.0 + score * score) AS _score\nWHERE n:`Doc`:`Chunk`\nWITH _places, _pos, _seedId, n, _score, _places[n.id] AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.id, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos AND m.score >= $_cy_vec4 | {id: m.id, score: m.score}][0..$_cy_vec5]} AS row",
+      "cypher" : "WITH $_cy_vec2 AS _places\nUNWIND range(0, size($_cy_vec1) - 1) AS _pos\nWITH _places, _pos, $_cy_vec1[_pos] AS _seedId\nMATCH (seed:Doc:Chunk)\nWHERE seed.id = _seedId AND seed.embedding IS NOT NULL\nCALL db.idx.vector.queryNodes('Doc', 'embedding', $_cy_vec3, seed.embedding)\nYIELD node, score\nWITH _places, _pos, _seedId, node AS n, 1.0 / (1.0 + score * score) AS _score\nWHERE n:`Doc`:`Chunk`\nWITH _places, _pos, _seedId, n, _score, CASE WHEN toString(n.id) = n.id THEN _places[n.id] END AS _place\nORDER BY _score DESC, _place\nWITH _seedId, _pos, collect({id: n.id, score: _score, place: _place}) AS _found\nRETURN {seed: _seedId, near: [m IN _found WHERE m.place IS NOT NULL AND m.place <> _pos AND m.score >= $_cy_vec4 | {id: m.id, score: m.score}][0..$_cy_vec5]} AS row",
       "parameters" : {
         "_cy_vec1" : [ "a", "b'c", "7" ],
         "_cy_vec2" : {

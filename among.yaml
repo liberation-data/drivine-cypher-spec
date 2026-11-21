@@ -48,7 +48,8 @@ graph: |
          (:Place {id: 'p4', embedding: [3.0, 0.0, 0.0]}),
          (:Tie {id: 'n', embedding: [-0.6, 0.0, 0.8]}),
          (:Tie {id: 'm', embedding: [0.6, 0.0, 0.8]}),
-         (:Tie {id: 'k', embedding: [0.0, 0.0, 1.0]})
+         (:Tie {id: 'k', embedding: [0.0, 0.0, 1.0]}),
+         (:Tie {id: 7, embedding: [0.0, 0.0, -1.0]})
 
 indexes:
   - {kind: "VECTOR_INDEX", label: "Doc", properties: ["embedding"], options: {dimensions: 3, similarity: "COSINE"}}
@@ -119,7 +120,8 @@ cases:
     description: >-
       m and n mirror each other about k, so each scores 0.9 against k, exactly, on every store. Of two neighbours that
       score alike, the one placed first among the ids comes first, whatever order the caller gives them in and whichever
-      the store wrote first: m, before n, though n is written first. So it is through the index too.
+      the store wrote first: m, before n, though n is written first. So it is through the index too. The node whose id is
+      the integer 7, not text, is no root, and the index's finding it changes nothing.
     steps:
       - among: {label: "Tie", property: "embedding", ids: ["n", "m", "k"], topK: 1, neighbours: "all"}
         rows:

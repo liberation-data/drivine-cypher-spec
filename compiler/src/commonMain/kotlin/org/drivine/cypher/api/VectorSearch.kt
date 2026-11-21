@@ -554,6 +554,8 @@ object VectorSearch {
         // Each id's place among the ids, bound as a map of its text, so each hit's place is read at once: what is no root has
         // none, and a tie of two scores goes by place (#412). It is read through a variable, bound once: Memgraph copies a
         // parameter each time a row reads it, and a map of 2000 ids read so 80 000 times took 36 s, through a variable 31 ms.
+        // A hit whose id is no text, as of a node of the label stored under another id type, is no root, and has no place:
+        // a map read by a key that is no text is an error on Neo4j.
         val places = scope.bound(among.ids.withIndex().associate { (place, text) -> text to place })
         val after = among.neighbours == AmongNeighbours.After
         val carried = "$PLACES, $POS, $SEED_ID"
@@ -570,7 +572,7 @@ object VectorSearch {
             |MATCH ($SEED:${request.labels.joinToString(":") { CypherNames.identifier(it) }})
             |WHERE $SEED.$id = $SEED_ID AND $embedding IS NOT NULL
             |${head.text}$labelled
-            |WITH $carried, $NODE, $SCORE, $PLACES[$NODE.$id] AS _place
+            |WITH $carried, $NODE, $SCORE, CASE WHEN toString($NODE.$id) = $NODE.$id THEN $PLACES[$NODE.$id] END AS _place
             |ORDER BY $SCORE DESC, _place
             |WITH $SEED_ID, $POS, collect({id: $NODE.$id, score: $SCORE, place: _place}) AS _found
             |RETURN {seed: $SEED_ID, near: [m IN _found WHERE ${kept.joinToString(" AND ")} | {id: m.id, score: m.score}][0..$topK]} AS row
