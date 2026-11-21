@@ -101,6 +101,10 @@ class OnlineIndexBuildTest {
                     is PlanAction.Execute -> {
                         val text = (action.statement as DdlStatement.Text).statement
                         if (action.purpose == Purpose.DDL) ran += text
+                        // Oracle's take and release of a turn, each a block of its own transaction, marked `at`.
+                        if (action.purpose == Purpose.MARKER && "'CLAIM:" in text) {
+                            turns += (if ("INSERT INTO" in text) "take '" else "release '") + action.parameters["at"] + "'"
+                        }
                         execute(text)?.let { PlanOutcome.Failed(it) } ?: PlanOutcome.Ran.also { madeBy(text) }
                     }
                     is PlanAction.ReadLowerCopies -> PlanOutcome.Rows(emptyList())
@@ -1319,13 +1323,67 @@ class OnlineIndexBuildTest {
         val (_, made) = drive(postgres, email, listed = { if (it == postgresDdl.listConstraintsQuery()) emailRecord(null) else emptyList() })
         assertIs<EnsureResult.AlreadyMatching>(made.item!!.result)
         assertEquals(emptyList(), turns)
-        // Oracle's blocking builds wait out each other's; SQLite's lock the database.
-        for (planner in listOf(oracle, SchemaPlanner(org.drivine.cypher.store.schema.SqliteSchema(SqliteDdl("drivine"))))) {
-            val (_, report) = drive(planner, email)
-            assertIs<EnsureResult.Created>(report.item!!.result)
-            assertEquals(emptyList(), turns)
+        // SQLite's builds lock the database.
+        val (_, report) = drive(SchemaPlanner(org.drivine.cypher.store.schema.SqliteSchema(SqliteDdl("drivine"))), email)
+        assertIs<EnsureResult.Created>(report.item!!.result)
+        assertEquals(emptyList(), turns)
+        assertNull(SqliteDdl("drivine").buildClaim(email))
+    }
+
+    /** Oracle's count of the claims of [spec] another session holds, as [drive]'s listing gives it. */
+    private fun oracleHeld(spec: SchemaItemSpec) = oracleDdl.buildClaim(spec).held!!
+
+    @Test
+    fun anOracleEnsureThatBuildsTakesItsTurnMarkedByItsClockAndGivesItUpOnceMade() {
+        // Sessions issuing the same CREATE INDEX at once on one Oracle table deadlock in the library cache (drivine4j#777).
+        for (item in listOf<SchemaItemSpec>(email, name)) {
+            val (ran, report) = drive(oracle, item)
+            assertIs<EnsureResult.Created>(report.item!!.result, "$item")
+            assertEquals(listOf("take '0'", "release '0'"), turns, "$item")
+            assertTrue(ran.isNotEmpty())
         }
-        assertNull(OracleDdl("drivine").buildClaim(email))
+    }
+
+    @Test
+    fun aTurnAnotherOracleSessionHoldsIsPolledForThenTaken() {
+        var polls = 0
+        val (_, report) = drive(oracle, email, listed = { if (it == oracleHeld(email)) listOf(if (++polls <= 2) 1L else 0L) else emptyList() })
+        assertIs<EnsureResult.Created>(report.item!!.result)
+        assertEquals(3, polls)
+        // Taken once none is held, after two polls: marked with the clock then.
+        assertEquals(listOf("take '400'", "release '400'"), turns)
+    }
+
+    @Test
+    fun anOracleTakeRefusedAsAKeyTheCatalogHasIsPolledForAgain() {
+        // Another session took it between the count and the take.
+        var takes = 0
+        val taken = StoreError(Cause("23000", 1, null, null, "ORA-00001: unique constraint violated"))
+        val (_, report) = drive(oracle, email, execute = { if ("'CLAIM:" in it && "INSERT INTO" in it && ++takes == 1) taken else null })
+        assertIs<EnsureResult.Created>(report.item!!.result)
+        assertEquals(listOf("take '0'", "take '200'", "release '200'"), turns)
+    }
+
+    @Test
+    fun anOracleTakeThatFailsOtherwiseIsEnsuredWithoutItsTurnAtOnce() {
+        val refused = StoreError(Cause("42000", 1031, null, null, "ORA-01031: insufficient privileges"))
+        val (_, report) = drive(oracle, email, execute = { if ("'CLAIM:" in it && "INSERT INTO" in it) refused else null })
+        assertIs<EnsureResult.Created>(report.item!!.result)
+        assertEquals(listOf("take '0'"), turns)
+        assertNull(report.failure)
+    }
+
+    @Test
+    fun anOracleClaimCommitsOnlyItselfAndIsTakenOverOnceOld() {
+        val claim = oracleDdl.buildClaim(email)
+        assertEquals(org.drivine.cypher.store.ddl.BuildClaim.Taken.RAN, claim.taken)
+        for (statement in listOf(claim.take, claim.release)) {
+            assertTrue(statement.startsWith("DECLARE\n    PRAGMA AUTONOMOUS_TRANSACTION;"), statement)
+            assertTrue("COMMIT;" in statement, statement)
+        }
+        assertTrue("JSON_OBJECT('at' VALUE \$at, 'since' VALUE v_now)" in claim.take, claim.take)
+        assertTrue("< v_now - 60;" in claim.take && ">= (CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400 - 60" in claim.held!!, claim.take)
+        assertTrue("JSON_VALUE(details, '\$.at') = \$at" in claim.release, claim.release)
     }
 
     @Test

@@ -567,6 +567,44 @@ ${made.entries.joinToString("\n") { (function, making) ->
     }
 
     /**
+     * A claim in the catalog, of the kind `CLAIM:` and the item's, which no listing reads, marked `$at` by the ensure that
+     * takes it and stamped with when it was taken, in seconds of the store's own clock (UTC). Taken, and given up, each in
+     * a transaction of its own (`AUTONOMOUS_TRANSACTION`), so it commits nothing of the transaction the connection is in;
+     * one older than [CLAIM_STALE_SECONDS] is taken over. Oracle has no view of a build under way a session can read
+     * without a grant, and builds a constraint's indexes blocking writes, so a build that outlasts it is waited out on the
+     * table (`ORA-00054`) by the session that takes the claim over.
+     */
+    override fun buildClaim(spec: SchemaItemSpec): BuildClaim {
+        val key = "kind = ${literal(CLAIM + spec.kind.name)} AND label = ${literal(spec.label)} AND properties = ${literal(json(spec.properties))}"
+        val take = """
+            DECLARE
+                PRAGMA AUTONOMOUS_TRANSACTION;
+                v_now NUMBER := (CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400;
+            BEGIN
+                DELETE FROM $catalog WHERE $key AND JSON_VALUE(details, '${'$'}.since' RETURNING NUMBER) < v_now - $CLAIM_STALE_SECONDS;
+                INSERT INTO $catalog (kind, label, properties, details)
+                VALUES (${literal(CLAIM + spec.kind.name)}, ${literal(spec.label)}, ${literal(json(spec.properties))}, JSON_OBJECT('at' VALUE ${'$'}at, 'since' VALUE v_now));
+                COMMIT;
+            EXCEPTION
+                WHEN OTHERS THEN
+                    ROLLBACK;
+                    RAISE;
+            END;
+        """.trimIndent()
+        val release = """
+            DECLARE
+                PRAGMA AUTONOMOUS_TRANSACTION;
+            BEGIN
+                DELETE FROM $catalog WHERE $key AND JSON_VALUE(details, '${'$'}.at') = ${'$'}at;
+                COMMIT;
+            END;
+        """.trimIndent()
+        val held = "SELECT COUNT(*) FROM $catalog WHERE $key AND JSON_VALUE(details, '${'$'}.since' RETURNING NUMBER) >= " +
+            "(CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400 - $CLAIM_STALE_SECONDS"
+        return BuildClaim(take, release, BuildClaim.Taken.RAN, held)
+    }
+
+    /**
      * A uniqueness constraint, with the range index a node is found by. Over several properties the
      * range index is made whole. Over one, the unique index stands for its labelled index: the range
      * index is recorded as served by it, and a labelled index made for it before is dropped, once the
@@ -780,6 +818,12 @@ ${made.entries.joinToString("\n") { (function, making) ->
         const val SHARED = "ix"
         const val LABELLED = "lx"
         const val UNIQUE = "uq"
+
+        /** What a [buildClaim]'s kind begins with, before the item's: no item's kind does. */
+        const val CLAIM = "CLAIM:"
+
+        /** How old a [buildClaim] is taken over at: a build's default timeout (`PlanRequest.DEFAULT_BUILD_TIMEOUT_MILLIS`). */
+        const val CLAIM_STALE_SECONDS = 60
 
         /** What the names of a vector index's and a full-text index's tables beside the nodes say they are, and their triggers' and indexes' after them. */
         const val VECTORS = "v"

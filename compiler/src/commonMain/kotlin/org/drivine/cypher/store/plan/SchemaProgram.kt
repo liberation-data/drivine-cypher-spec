@@ -1109,12 +1109,16 @@ internal class SchemaProgram(
     }
 
     /**
-     * Gives up the claim taken [at], a query on a schema connection, as its take is: where a caller's transaction holds that
-     * connection, the claim it holds uncommitted is seen and given up there. One that fails is let be: a claim left behind
-     * is taken over once it is old.
+     * Gives up the claim taken [at]: on Postgres a query on a schema connection, as its take is, so where a caller's
+     * transaction holds that connection, the claim it holds uncommitted is seen and given up there; on Oracle a block of
+     * its own transaction. One that fails is let be: a claim left behind is taken over once it is old.
      */
     private fun release(claim: BuildClaim, at: String) {
-        io.ask(PlanAction.Query(claim.release, mapOf("at" to at), Purpose.LISTING))
+        when (claim.taken) {
+            BuildClaim.Taken.ROW -> io.ask(PlanAction.Query(claim.release, mapOf("at" to at), Purpose.LISTING))
+            // A block of its own transaction, run as the marker's statements are, binding the ensure's mark (Oracle).
+            BuildClaim.Taken.RAN -> io.ask(PlanAction.Execute(DdlStatement.Text(claim.release), mapOf("at" to at), Purpose.MARKER))
+        }
     }
 
     /** When [claim] was taken, once it is this ensure's turn; null where it ensures without one ([inTurn]). */
@@ -1122,6 +1126,18 @@ internal class SchemaProgram(
         val deadline = io.clock() + PlanRequest.DEFAULT_BUILD_TIMEOUT_MILLIS
         var poll = 0L
         while (io.clock() + poll < deadline) {
+            if (claim.taken == BuildClaim.Taken.RAN) {
+                // Polled while another session holds it, then taken, marked with this ensure's clock, which its replay
+                // reads again as it was: run, it is this ensure's; refused as a key the catalog has, another's took it first.
+                val held = (io.ask(PlanAction.Query(claim.held!!, purpose = Purpose.LISTING, delayMillis = poll)) as? PlanOutcome.Rows)?.rows ?: return null
+                poll = POLL_MILLIS
+                if (held.firstNotNullOfOrNull(::value)?.toLongOrNull()?.let { it > 0 } == true) continue
+                val at = io.clock().toString()
+                when (val outcome = io.ask(PlanAction.Execute(DdlStatement.Text(claim.take), mapOf("at" to at), Purpose.MARKER))) {
+                    is PlanOutcome.Failed -> if (store.isViolation(outcome.error)) continue else return null
+                    else -> return at
+                }
+            }
             val rows = (io.ask(PlanAction.Query(claim.take, purpose = Purpose.LISTING, delayMillis = poll)) as? PlanOutcome.Rows)?.rows ?: return null
             // A row of one column, when it was claimed, as text: as a library gives a row of one column, its value.
             val at = rows.firstNotNullOfOrNull(::value)
