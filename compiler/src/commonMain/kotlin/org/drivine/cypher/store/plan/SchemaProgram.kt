@@ -1296,8 +1296,8 @@ internal class SchemaProgram(
         val recreation = sql.recreation(made)
         // One left invalid too: it may go on refusing keys all the same.
         if (!schema.cutOff(made, listings[sql.listConstraintsQuery()].orEmpty(), recreation.name, recreation.temporary, invalid = true)) return false
-        ddl(recreation.leftover)
-        ddl(sql.dropConstraint(CatalogItem(made.kind, made.label, made.properties, made.effectiveName)))
+        throughBuildDeadlocks(spec, DROP, { ddl(recreation.leftover) })
+        throughBuildDeadlocks(spec, DROP, { ddl(sql.dropConstraint(CatalogItem(made.kind, made.label, made.properties, made.effectiveName))) })
         log(
             LogLevel.INFO, CONSTRAINT_MANAGER,
             "Dropped $engine ${spec.kind} on ${spec.label}${spec.properties}, held by ${recreation.temporary}, the index a recreate of it that was cut off built first",
@@ -1737,7 +1737,7 @@ internal class SchemaProgram(
         /** How long a drop, or a constraint's build, in the background is waited for, as drivine4j waits. */
         const val ASYNC_TIMEOUT_MILLIS = 30_000L
 
-        /** How many times an ensure is run in all where the store cancels it as a deadlock with another session's online build. */
+        /** How many times an ensure, or a recreate's or a drop's step, is run in all where the store cancels it as a deadlock with another session's online build. */
         const val BUILD_DEADLOCK_TRIES = 3
 
         /** What [throughBuildDeadlocks] runs again, as its lines name it. */
