@@ -130,13 +130,13 @@ object SqliteSql {
     fun score(alias: String, key: String, similarity: SimilarityFunction, vector: String): String =
         "${SqliteFunctions.SIMILARITY}(${value(alias, key)}, $vector, ${literal(similarity.name)})"
 
-    /** The texts of the JSON array bound as [parameter], as rows, each as a property is read as text ([propertyText]), and as `id` beside its place in the array, `pos`, counted from 0. */
-    fun placedTextValues(parameter: String): String = "SELECT $ITEM_TEXT AS id, v.key AS pos FROM json_each($parameter) v"
-
-    /** An item `v` of `json_each` as text, as a property is read as text ([propertyText]). */
-    private const val ITEM_TEXT =
-        "(CASE v.type WHEN 'text' THEN v.value WHEN 'null' THEN NULL WHEN 'true' THEN 'true' WHEN 'false' THEN 'false' " +
-            "WHEN 'integer' THEN json_quote(v.value) WHEN 'real' THEN json_quote(v.value) ELSE v.value END)"
+    /**
+     * The ids bound as [parameter], a JSON array of each id's JSON text, as rows: each id's class and key, `id_class` and `id_key`,
+     * as [IdSql.hasIdIn] reads them, so the index over a node's id ([IndexKey.column]) answers a join on them, beside its place
+     * in the array, `pos`, counted from 0.
+     */
+    fun placedIds(parameter: String): String =
+        "SELECT ${valueClass("v.value")} AS id_class, ${valueKey("v.value")} AS id_key, v.key AS pos FROM json_each($parameter) v"
 
     /** A JSON object of [entries] whose values are put in as the SQL values they are, a text as a string, each laid out under its key. */
     fun plainObject(entries: List<Pair<String, String>>): String =
