@@ -137,6 +137,8 @@ sealed interface VectorResult
  *   score as [VectorRequest.scoreAlias], to which the library adds [labelCheck], its threshold, filters, projection and
  *   `LIMIT`. A search among ids is the whole statement, one row a root, `row`, `{seed, near}`.
  * @param parameters the values the statement binds, each named `_cy_vec<n>`: all but the query vector.
+ *   Through the index on a graph engine, a search among ids binds a map too, each id's text to its place among the ids,
+ *   counted from 0 (#412): its keys are the ids, any text, so the library binds it as a map of those keys as given.
  * @param vector the parameter the library binds the query vector as, a list of floats as it binds a list; null among ids,
  *   where each root's own embedding is the vector.
  * @param labelCheck on a graph engine, whether a hit has every one of the root's labels, as a predicate on the node: the index

@@ -312,7 +312,10 @@ under, `$$e` for a name `$e` that begins with `$` (`ValueLayout.escape`), as the
   By cosine, on a SQL store, a root whose embedding has no length is left out, as a seed and as a neighbour (#160).
 - `parameters` are named `_cy_vec1`, `_cy_vec2`, …, with the compiler's reserved prefix. The query vector is not among
   them: `vector` names the parameter the library binds it as, as it binds a list, so a long vector doesn't pass through
-  the module. `indexK` is how many the index is asked for: `searchK`, or where it is left out `topK` on a nearest search;
+  the module. Through the index on a graph engine, a search among ids also binds a map of each id's text to its place
+  among the ids, counted from 0, which orders a tie and keeps each hit by its place (#412): its keys are the ids, any text,
+  so the library binds it as a map of those keys as given, and over JSON one whose key starts with `$` comes back as
+  `{"$map": {…}}`, as any map does. `indexK` is how many the index is asked for: `searchK`, or where it is left out `topK` on a nearest search;
   0 on a search among ids that measures every pair, which asks no index.
 - `timeoutMillis`, on FalkorDB, is the timeout the library runs the statement under, as `GRAPH.QUERY`'s `TIMEOUT`.
   `VectorSearch.FALKORDB_AMONG_TIMEOUT_MILLIS`, 300 000, is given to a search among ids that measures every pair. It is a

@@ -71,4 +71,15 @@ class VectorAmongTiesTest {
             assertEquals(plan(store, request(neighbours, searchK = 20)), repeated, store.id)
         }
     }
+
+    @Test
+    fun overJsonThePlacesComeBackAsAMapTaggedWhereAnIdStartsWithADollar() {
+        for (store in listOf(SearchStore.NEO4J, SearchStore.MEMGRAPH, SearchStore.FALKORDB)) {
+            val raw = CompileJson.compile(
+                "{\"store\": \"${store.id}\", \"vector\": {\"labels\": [\"Doc\"], \"property\": \"embedding\", \"similarity\": \"COSINE\", " +
+                    "\"topK\": 5, \"searchK\": 20, \"among\": {\"ids\": [\"a\", \"${'$'}b\"], \"idProperty\": \"id\"}}}",
+            )
+            assertTrue("\"_cy_vec2\":{\"${'$'}map\":{\"a\":0,\"${'$'}b\":1}}" in raw, "${store.id}:\n$raw")
+        }
+    }
 }
