@@ -228,18 +228,29 @@ cases:
     description: >-
       Where the @NodeId is an integer, each id is found as a lookup by id finds it: 2 is the node whose id is the integer 2,
       not the one whose id is the text '2', and the ids are placed as integers, 2 before 10, not as text. The text '2' is no
-      root, and no neighbour, of a search by integer ids.
+      root, and no neighbour, of a search by integer ids. A graph engine is given the ids as text today, so it finds the text
+      '2' in their place (liberation-data/drivine-cypher-spec#422).
     steps:
       - among: {label: "Counted", property: "embedding", ids: ["10", "2", "1"], idType: "integer", topK: 2, neighbours: "all"}
         rows:
           - {seed: "1", near: [{id: "2", score: 0.9}, {id: "10", score: 0.5}]}
           - {seed: "2", near: [{id: "1", score: 0.9}, {id: "10", score: 0.8}]}
           - {seed: "10", near: [{id: "2", score: 0.8}, {id: "1", score: 0.5}]}
+        today:
+          - stores: ["graph"]
+            rows:
+              - {seed: "2", near: []}
+            issue: "liberation-data/drivine-cypher-spec#422"
       - among: {label: "Counted", property: "embedding", ids: ["10", "2", "1"], idType: "integer", topK: 2, neighbours: "after"}
         rows:
           - {seed: "1", near: [{id: "2", score: 0.9}, {id: "10", score: 0.5}]}
           - {seed: "2", near: [{id: "10", score: 0.8}]}
           - {seed: "10", near: []}
+        today:
+          - stores: ["graph"]
+            rows:
+              - {seed: "2", near: []}
+            issue: "liberation-data/drivine-cypher-spec#422"
 
   - name: "The ids' order is their own"
     description: >-
