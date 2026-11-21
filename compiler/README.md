@@ -267,8 +267,8 @@ order (numbers by value, text by code point, temporals by time), and every store
     place (`All`), or only those whose places come after its own (`After`), and keeps its best `topK`. So a statement holds
     a root's `topK` rows at a time, never every pair.
   - The ids are read through a variable bound once, `_ids`, never from the parameter at each pair: Memgraph copies a
-    parameter at each row that reads it, and a search of 1000 ids for each pair once took 9.8 s so, 2.3 s through the
-    variable (#415). Neo4j and FalkorDB take either alike.
+    parameter at each row that reads it: a search of 1000 ids for each pair once took 9.8 s reading the parameter, and
+    2.3 s reading the variable (#415). Neo4j and FalkorDB take either alike.
   - The graph engines' scores come from each engine's own function of two embeddings: Neo4j's `vector.similarity.cosine`
     and `vector.similarity.euclidean`; Memgraph's `vector_search.cosine_similarity`, and by Euclidean a sum in Cypher, as
     Memgraph has no function for it; FalkorDB's `vec.cosineDistance` and `vec.euclideanDistance`.
