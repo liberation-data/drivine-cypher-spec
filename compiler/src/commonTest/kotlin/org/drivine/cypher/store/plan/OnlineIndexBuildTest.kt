@@ -1585,6 +1585,18 @@ class OnlineIndexBuildTest {
                 "(deadlock detected). Nothing more was run: recreate it again once those builds have ended." in report.failure.orEmpty(),
             "$report",
         )
+        // A drop too, named as a drop.
+        val (dropping, dropReport) = drive(
+            postgres, name, call = ItemCall.DROP, listed = nameRecordUntil { false },
+            execute = deadlocking(99, { "DO \$forget\$" in it }),
+        )
+        assertEquals(3, dropping.count { "DO \$forget\$" in it }, dropping.joinToString("\n"))
+        assertNull(dropReport.rethrown, "$dropReport")
+        assertTrue(
+            "Postgres cancelled the drop of RANGE_INDEX on Person[name] 3 times, deadlocked each time with another session's online build on the same table " +
+                "(deadlock detected). Nothing more was run: drop it again once those builds have ended." in dropReport.failure.orEmpty(),
+            "$dropReport",
+        )
     }
 
     @Test
