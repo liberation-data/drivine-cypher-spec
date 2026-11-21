@@ -20,7 +20,11 @@
 # the module warns that its answer can be incomplete: `warned` lists the stores it warns on.
 #
 # Scores, as vector.yaml's: on a cosine index (1 + cos) / 2, on a euclidean one 1 / (1 + d²). Each is compared within
-# 1e-6, as Neo4j's and FalkorDB's are float32s. No step rests on the order of two neighbours that score alike. On a cosine
+# 1e-6, as Neo4j's and FalkorDB's are float32s. Of two neighbours that score alike, the one placed first among the ids
+# comes first: its id first in its type's order (liberation-data/drivine-cypher-spec#412). That decides only scores that
+# are exactly equal, and Neo4j and FalkorDB score in float32, so two pairs equal in exact arithmetic can differ in their
+# last bit on one store and not on another: a step rests on a tie only where it is exact in floats too, as of two
+# embeddings that mirror each other about a third. On a cosine
 # index an embedding of no length, all zeros, has no direction, and is measured against no other: it is neither a seed nor
 # a neighbour. A pair whose embeddings differ in size has no score, and is left out; no step holds one, as Memgraph
 # refuses to write one to a label with an index, and FalkorDB refuses to measure one.
@@ -41,11 +45,15 @@ graph: |
          (:Place {id: 'p1', embedding: [0.0, 0.0, 0.0]}),
          (:Place {id: 'p2', embedding: [1.0, 0.0, 0.0]}),
          (:Place {id: 'p3', embedding: [0.0, 2.0, 0.0]}),
-         (:Place {id: 'p4', embedding: [3.0, 0.0, 0.0]})
+         (:Place {id: 'p4', embedding: [3.0, 0.0, 0.0]}),
+         (:Tie {id: 'k', embedding: [0.0, 0.0, 1.0]}),
+         (:Tie {id: 'm', embedding: [0.6, 0.0, 0.8]}),
+         (:Tie {id: 'n', embedding: [-0.6, 0.0, 0.8]})
 
 indexes:
   - {kind: "VECTOR_INDEX", label: "Doc", properties: ["embedding"], options: {dimensions: 3, similarity: "COSINE"}}
   - {kind: "VECTOR_INDEX", label: "Place", properties: ["embedding"], options: {dimensions: 3, similarity: "EUCLIDEAN"}}
+  - {kind: "VECTOR_INDEX", label: "Tie", properties: ["embedding"], options: {dimensions: 3, similarity: "COSINE"}}
 
 cases:
   - name: "Each pair once"
@@ -106,6 +114,28 @@ cases:
           - {seed: "d", near: [{id: "c", score: 0.9}]}
           - {seed: "e", near: [{id: "d", score: 0.9}]}
           - {seed: "f", near: [{id: "e", score: 0.8}]}
+
+  - name: "A tie"
+    description: >-
+      m and n mirror each other about k, so each scores 0.9 against k, exactly, on every store. Of two neighbours that
+      score alike, the one placed first among the ids comes first, whatever order the caller gives them in and whichever
+      the store wrote first: m, before n.
+    steps:
+      - among: {label: "Tie", property: "embedding", ids: ["n", "m", "k"], topK: 1, neighbours: "all"}
+        rows:
+          - {seed: "k", near: [{id: "m", score: 0.9}]}
+          - {seed: "m", near: [{id: "k", score: 0.9}]}
+          - {seed: "n", near: [{id: "k", score: 0.9}]}
+      - among: {label: "Tie", property: "embedding", ids: ["n", "m", "k"], topK: 2, neighbours: "all"}
+        rows:
+          - {seed: "k", near: [{id: "m", score: 0.9}, {id: "n", score: 0.9}]}
+          - {seed: "m", near: [{id: "k", score: 0.9}, {id: "n", score: 0.64}]}
+          - {seed: "n", near: [{id: "k", score: 0.9}, {id: "m", score: 0.64}]}
+      - among: {label: "Tie", property: "embedding", ids: ["n", "m", "k"], topK: 1, neighbours: "after"}
+        rows:
+          - {seed: "k", near: [{id: "m", score: 0.9}]}
+          - {seed: "m", near: [{id: "n", score: 0.64}]}
+          - {seed: "n", near: []}
 
   - name: "The ids' order is their own"
     description: >-
