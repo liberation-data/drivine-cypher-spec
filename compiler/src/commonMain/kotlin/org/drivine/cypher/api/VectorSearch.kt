@@ -37,8 +37,8 @@ data class VectorIndex(val dimensions: Int? = null, val name: String? = null)
  *
  * @param ids the roots' ids, as the text each is found by; a repeat is dropped, as drivine4j's `loadNearestAmong` drops it.
  *   The library gives them in its id type's own order, as their places decide which neighbours a root keeps for each pair
- *   once ([AmongNeighbours.After]), and, of two neighbours that score exactly alike, which comes first, on every store
- *   (liberation-data/drivine-cypher-spec#412). Neo4j and FalkorDB score in float32, so two pairs that score alike in exact
+ *   once ([AmongNeighbours.After]), and, of two neighbours that score exactly alike, which comes first, on every store but
+ *   FalkorDB through the index, where the index's own order decides (liberation-data/drivine-cypher-spec#412, #416). Neo4j and FalkorDB score in float32, so two pairs that score alike in exact
  *   arithmetic can differ in their last bit on one store and not another: only an exact tie is decided so.
  * @param idProperty the property the root's id is stored under.
  * @param threshold the least score a neighbour is kept with, or null to keep any.
@@ -137,7 +137,7 @@ sealed interface VectorResult
  *   score as [VectorRequest.scoreAlias], to which the library adds [labelCheck], its threshold, filters, projection and
  *   `LIMIT`. A search among ids is the whole statement, one row a root, `row`, `{seed, near}`.
  * @param parameters the values the statement binds, each named `_cy_vec<n>`: all but the query vector.
- *   Through the index on a graph engine, a search among ids binds a map too, each id's text to its place among the ids,
+ *   Through the index on Neo4j and Memgraph, a search among ids binds a map too, each id's text to its place among the ids,
  *   counted from 0 (#412): its keys are the ids, any text, so the library binds it as a map of those keys as given.
  * @param vector the parameter the library binds the query vector as, a list of floats as it binds a list; null among ids,
  *   where each root's own embedding is the vector.
@@ -542,13 +542,14 @@ object VectorSearch {
     }
 
     /**
-     * A search among ids with `searchK` on a graph engine: each id unwound to its root, with its place among the ids, and the
-     * index asked for each root's `searchK` nearest by the root's own embedding, so the engine answers every root in one
+     * A search among ids with `searchK` on Neo4j and Memgraph (FalkorDB's is [falkorDbAmong]): each id unwound to its root,
+     * with its place among the ids, and the index asked for each root's `searchK` nearest by the root's own embedding, so the engine answers every root in one
      * statement. What the index yields is narrowed by each hit's place to the roots, less the root itself (for each pair
      * once, to the roots after it), and what scores under the threshold, and the best `topK` of what is left are kept, a tie
      * of two scores by place. On Neo4j the score is measured afresh, as the narrowing trims what the index found.
      */
     private fun graphAmong(store: SearchStore, request: VectorRequest, among: VectorAmong, scope: SearchParameters): VectorPlan {
+        if (store == SearchStore.FALKORDB) return falkorDbAmong(store, request, among, scope)
         val label = request.labels.first()
         val id = CypherNames.identifier(among.idProperty)
         val embedding = "seed.${CypherNames.identifier(request.property)}"
@@ -557,7 +558,7 @@ object VectorSearch {
         // none, and a tie of two scores goes by place (#412). It is read through a variable, bound once: Memgraph copies a
         // parameter each time a row reads it, and a map of 2000 ids read so 80 000 times took 36 s, through a variable 31 ms.
         // A hit whose id is no text, as of a node of the label stored under another id type, is no root, and has no place:
-        // a map read by a key that is no text is an error on Neo4j.
+        // a map read by a key that is no text is an error on every graph engine. FalkorDB takes no such map: see falkorDbAmong.
         val places = scope.bound(among.ids.withIndex().associate { (place, text) -> text to place })
         val after = among.neighbours == AmongNeighbours.After
         val carried = "$PLACES, $POS, $SEED_ID"
@@ -578,6 +579,44 @@ object VectorSearch {
             |ORDER BY $SCORE DESC, _place
             |WITH $SEED_ID, $POS, collect({id: $NODE.$id, score: $SCORE, place: _place}) AS _found
             |RETURN {seed: $SEED_ID, near: [m IN _found WHERE ${kept.joinToString(" AND ")} | {id: m.id, score: m.score}][0..$topK]} AS row
+        """.trimMargin()
+        return VectorPlan(
+            sql = null, cypher = cypher, parameters = scope.bindings(), vector = null, labelCheck = null, indexK = amongK(request),
+            warnings = amongWarnings(store, request, among),
+        )
+    }
+
+    /**
+     * A search among ids with `searchK` on FalkorDB: [graphAmong] less the places. A FalkorDB client writes each parameter
+     * into the statement as text, and each library refuses some map keys (TypeScript's any that is no plain name), so a map
+     * keyed by the ids can't be bound (liberation-data/drivine-cypher-spec#416). What the index yields is narrowed by id to
+     * the roots, less the root itself (for each pair once, to the ids after it), and ordered by score alone: a tie of two
+     * scores goes by the index's own order, which this path, approximate and warned of, leaves as it is.
+     */
+    private fun falkorDbAmong(store: SearchStore, request: VectorRequest, among: VectorAmong, scope: SearchParameters): VectorPlan {
+        val label = request.labels.first()
+        val id = CypherNames.identifier(among.idProperty)
+        val embedding = "seed.${CypherNames.identifier(request.property)}"
+        val ids = scope.bound(among.ids)
+        // For each pair once, each root is unwound with its place among the ids, and keeps what the index finds of the ids
+        // after it: the later ids alone, so the root itself among them, and no two ids are compared.
+        val after = among.neighbours == AmongNeighbours.After
+        val carried = if (after) "$POS, $SEED_ID" else SEED_ID
+        val head = head(store, request, label, named = null, k = scope.bound(amongK(request)), vector = embedding, scope = scope, rescored = true, alias = NODE, scoreAlias = SCORE, carried = carried)
+        val others = if (after) listOf("m.id IN $ids[($POS + 1)..]") else listOf("m.id IN $ids", "m.id <> $SEED_ID")
+        val kept = others + listOfNotNull(among.threshold?.let { "m.score >= ${scope.bound(it)}" })
+        val labelled = labelCheck(NODE, request.labels, label)?.let { "\nWHERE $it" } ?: ""
+        val topK = scope.bound(request.topK)
+        val unwound = if (after) "UNWIND range(0, size($ids) - 1) AS $POS\nWITH $POS, $ids[$POS] AS $SEED_ID" else "UNWIND $ids AS $SEED_ID"
+        val cypher = """
+            |$unwound
+            |MATCH ($SEED:${request.labels.joinToString(":") { CypherNames.identifier(it) }})
+            |WHERE $SEED.$id = $SEED_ID AND $embedding IS NOT NULL
+            |${head.text}$labelled
+            |WITH $carried, $NODE, $SCORE
+            |ORDER BY $SCORE DESC
+            |WITH $carried, collect({id: $NODE.$id, score: $SCORE}) AS _found
+            |RETURN {seed: $SEED_ID, near: [m IN _found WHERE ${kept.joinToString(" AND ")}][0..$topK]} AS row
         """.trimMargin()
         return VectorPlan(
             sql = null, cypher = cypher, parameters = scope.bindings(), vector = null, labelCheck = null, indexK = amongK(request),

@@ -272,9 +272,15 @@ class VectorAmongAfterTest {
         for (store in listOf(SearchStore.NEO4J, SearchStore.MEMGRAPH, SearchStore.FALKORDB)) {
             val planned = plan(store, request(searchK = 20))
             val cypher = planned.cypher!!
-            assertTrue(cypher.startsWith("WITH \$_cy_vec2 AS _places\nUNWIND range(0, size(\$_cy_vec1) - 1) AS _pos\nWITH _places, _pos, \$_cy_vec1[_pos] AS _seedId\n"), cypher)
-            assertTrue("[m IN _found WHERE m.place > _pos AND m.score >= \$_cy_vec4 | {id: m.id, score: m.score}][0..\$_cy_vec5]" in cypher, cypher)
-            assertEquals(mapOf("a" to 0, "b" to 1, "c" to 2), planned.parameters["_cy_vec2"], store.id)
+            if (store == SearchStore.FALKORDB) {
+                // FalkorDB binds no places (liberation-data/drivine-cypher-spec#416): it keeps the ids after the root by id.
+                assertTrue(cypher.startsWith("UNWIND range(0, size(\$_cy_vec1) - 1) AS _pos\nWITH _pos, \$_cy_vec1[_pos] AS _seedId\n"), cypher)
+                assertTrue("[m IN _found WHERE m.id IN \$_cy_vec1[(_pos + 1)..] AND m.score >= \$_cy_vec3][0..\$_cy_vec4]" in cypher, cypher)
+            } else {
+                assertTrue(cypher.startsWith("WITH \$_cy_vec2 AS _places\nUNWIND range(0, size(\$_cy_vec1) - 1) AS _pos\nWITH _places, _pos, \$_cy_vec1[_pos] AS _seedId\n"), cypher)
+                assertTrue("[m IN _found WHERE m.place > _pos AND m.score >= \$_cy_vec4 | {id: m.id, score: m.score}][0..\$_cy_vec5]" in cypher, cypher)
+                assertEquals(mapOf("a" to 0, "b" to 1, "c" to 2), planned.parameters["_cy_vec2"], store.id)
+            }
             assertEquals(20, planned.indexK, store.id)
             assertEquals(1, planned.warnings.size, store.id)
             assertTrue("pairs can be missed" in planned.warnings.single() && "nearest 20" in planned.warnings.single(), planned.warnings.single())

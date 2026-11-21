@@ -25,8 +25,8 @@ import org.drivine.schema.SimilarityFunction
  * in place of `sql`, and `"timeoutMillis": …` after the warnings where the plan gives one; or `{"refusal": …}`, or
  * `{"error": …}` where the request is no request. `vector` is the parameter the library binds its query vector as, null among
  * ids; `labelCheck` is null but on a graph engine's nearest search of a root the index's label alone doesn't make. The
- * `parameters` are tagged as a compiled statement's are: the map of each id's place a graph engine's search among ids binds
- * through the index is `{"$map": {…}}` where an id starts with `$`.
+ * `parameters` are tagged as a compiled statement's are: the map of each id's place a search among ids binds through the
+ * index on Neo4j and Memgraph is `{"$map": {…}}` where an id starts with `$`.
  */
 @OptIn(org.drivine.DrivineInternalApi::class)
 internal object VectorJson {

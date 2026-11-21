@@ -42,6 +42,7 @@ class VectorAmongTiesTest {
         for (store in listOf(SearchStore.NEO4J, SearchStore.MEMGRAPH, SearchStore.FALKORDB)) for (neighbours in listOf(AmongNeighbours.All, AmongNeighbours.After)) {
             val exact = plan(store, request(neighbours)).cypher!!
             assertTrue("  ORDER BY _score DESC, _next\n" in exact, "${store.id} $neighbours:\n$exact")
+            if (store == SearchStore.FALKORDB) continue
             val indexed = plan(store, request(neighbours, searchK = 20))
             val cypher = indexed.cypher!!
             assertTrue("\nORDER BY _score DESC, _place\n" in cypher, "${store.id} $neighbours:\n$cypher")
@@ -53,7 +54,7 @@ class VectorAmongTiesTest {
 
     @Test
     fun throughTheIndexAHitWhoseIdIsNoTextHasNoPlaceAndIsNoRoot() {
-        for (store in listOf(SearchStore.NEO4J, SearchStore.MEMGRAPH, SearchStore.FALKORDB)) for (neighbours in listOf(AmongNeighbours.All, AmongNeighbours.After)) {
+        for (store in listOf(SearchStore.NEO4J, SearchStore.MEMGRAPH)) for (neighbours in listOf(AmongNeighbours.All, AmongNeighbours.After)) {
             val given = request(neighbours, searchK = 20)
             val cypher = plan(store, given.copy(among = given.among!!.copy(idProperty = "the id"))).cypher!!
             // A map read by a key that is no text is an error on every engine, so a hit whose id is a number has no place.
@@ -61,6 +62,20 @@ class VectorAmongTiesTest {
             assertTrue("collect({id: n.`the id`, score: _score, place: _place}) AS _found" in cypher, cypher)
             val kept = if (neighbours == AmongNeighbours.After) "m.place > _pos" else "m.place IS NOT NULL AND m.place <> _pos"
             assertTrue("[m IN _found WHERE $kept | {id: m.id, score: m.score}][0..\$_cy_vec4]" in cypher, "${store.id} $neighbours:\n$cypher")
+        }
+    }
+
+    @Test
+    fun throughTheIndexFalkorDbBindsNoPlacesAndLeavesATieToTheIndex() {
+        // A FalkorDB client writes a map parameter's keys into the statement, and each library refuses some, so a map keyed by
+        // the ids can't be bound there (liberation-data/drivine-cypher-spec#416): the plan is as it was, ordered by score alone.
+        for (neighbours in listOf(AmongNeighbours.All, AmongNeighbours.After)) {
+            val indexed = plan(SearchStore.FALKORDB, request(neighbours, searchK = 20))
+            val cypher = indexed.cypher!!
+            assertTrue("_places" !in cypher && "\nORDER BY _score DESC\n" in cypher, "$neighbours:\n$cypher")
+            assertTrue(indexed.parameters.values.none { it is Map<*, *> }, "${indexed.parameters}")
+            val kept = if (neighbours == AmongNeighbours.After) "m.id IN \$_cy_vec1[(_pos + 1)..]" else "m.id IN \$_cy_vec1 AND m.id <> _seedId"
+            assertTrue("[m IN _found WHERE $kept][0..\$_cy_vec3]" in cypher, "$neighbours:\n$cypher")
         }
     }
 
@@ -74,7 +89,7 @@ class VectorAmongTiesTest {
 
     @Test
     fun overJsonThePlacesComeBackAsAMapTaggedWhereAnIdStartsWithADollar() {
-        for (store in listOf(SearchStore.NEO4J, SearchStore.MEMGRAPH, SearchStore.FALKORDB)) {
+        for (store in listOf(SearchStore.NEO4J, SearchStore.MEMGRAPH)) {
             val raw = CompileJson.compile(
                 "{\"store\": \"${store.id}\", \"vector\": {\"labels\": [\"Doc\"], \"property\": \"embedding\", \"similarity\": \"COSINE\", " +
                     "\"topK\": 5, \"searchK\": 20, \"among\": {\"ids\": [\"a\", \"${'$'}b\"], \"idProperty\": \"id\"}}}",
