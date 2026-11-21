@@ -1081,7 +1081,8 @@ internal class SchemaProgram(
      * ensured again in its turn (Postgres, #382; Oracle, drivine4j#777): sessions ensuring one item at once build it one after another, and those
      * after the first find it made. Its turn is claimed ([BuildClaim.take]), polled for while another session's ensure
      * holds it, for [PlanRequest.DEFAULT_BUILD_TIMEOUT_MILLIS] at most; and given up once the ensure ends, made or not.
-     * Where the wait runs out, or the claim can't be written, it is ensured without its turn, as before turns.
+     * Where the wait runs out, or the claim can't be written (on Oracle, nor its count of claims held read), it is ensured
+     * without its turn, as before turns.
      */
     private fun inTurn(spec: SchemaItemSpec, ensure: () -> EnsureResult): EnsureResult {
         val claim = store.ddl.buildClaim(spec.made()) ?: return ensure()

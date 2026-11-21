@@ -437,8 +437,8 @@ ${made.entries.joinToString("\n") { (function, making) ->
      * takes them: one made before there were labelled indexes is listed as incomplete (see
      * [listed]), so `ensure` makes it again, and its labelled index with it. With [online], each
      * is built [ONLINE], as an index's own create builds them (#381). A uniqueness constraint's are built blocking writes,
-     * as its unique index is: sessions ensuring it at once then take turns on the table (ORA-00054, waited out), where
-     * online builds of them beside a blocking one deadlock in the library cache (ORA-04020, #382).
+     * as its unique index is, where online builds of them beside a blocking one deadlocked in the library cache (ORA-04020,
+     * #382); sessions ensuring it at once build it in their turns ([buildClaim], drivine4j#777).
      */
     private fun rangeIndex(spec: RangeIndexSpec, online: Boolean = false): List<String> {
         val (name, shared) = sharedIndex(spec, online)

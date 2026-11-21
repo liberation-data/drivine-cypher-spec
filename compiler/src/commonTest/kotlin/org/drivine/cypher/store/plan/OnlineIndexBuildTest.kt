@@ -88,6 +88,9 @@ class OnlineIndexBuildTest {
                         turns += (if ("INSERT INTO" in action.statement) "take '" else "release '") + action.parameters["at"] + "'"
                         execute(action.statement)?.let { PlanOutcome.Failed(it) } ?: PlanOutcome.Rows(emptyList())
                     }
+                    // Oracle's count of the claims held: as [listed] gives it, failed where [execute] gives an error.
+                    action is PlanAction.Query && action.statement.startsWith("SELECT COUNT(*) FROM drivine_schema WHERE kind = 'CLAIM:") ->
+                        execute(action.statement)?.let { PlanOutcome.Failed(it) } ?: PlanOutcome.Rows(listed(action.statement))
                     // Its release, a query too: answered as [execute] answers a statement, failed where it gives an error.
                     action is PlanAction.Query && action.statement.startsWith("DELETE FROM drivine_schema WHERE kind = 'CLAIM:") -> {
                         turns += "release '${action.parameters["at"]}'"
@@ -1376,6 +1379,18 @@ class OnlineIndexBuildTest {
     }
 
     @Test
+    fun anOracleCountOfClaimsTheStoreRefusesIsEnsuredWithoutItsTurnAtOnce() {
+        val refused = StoreError(Cause("42000", 942, null, null, "ORA-00942: table or view does not exist"))
+        val (ran, report) = drive(oracle, email, execute = { if (it == oracleHeld(email)) refused else null })
+        assertIs<EnsureResult.Created>(report.item!!.result)
+        assertTrue(ran.isNotEmpty())
+        // Never taken, so nothing given up, and not waited for.
+        assertEquals(emptyList(), turns)
+        assertNull(report.failure)
+        assertEquals(emptyList(), report.log.filter { "its turn" in it.message })
+    }
+
+    @Test
     fun anOracleTurnHeldElsewherePastTheWaitIsEnsuredWithoutItAndSaidSo() {
         val (ran, report) = drive(oracle, email, listed = { if (it == oracleHeld(email)) listOf(1L) else emptyList() })
         assertIs<EnsureResult.Created>(report.item!!.result)
@@ -1399,7 +1414,7 @@ class OnlineIndexBuildTest {
     @Test
     fun anOracleReleaseTheStoreRefusesIsLetBe() {
         val lost = StoreError(Cause("08006", 17410, null, null, "No more data to read from socket"))
-        val (_, report) = drive(oracle, email, execute = { if ("'CLAIM:" in it && "INSERT INTO" !in it) lost else null })
+        val (_, report) = drive(oracle, email, execute = { if (it.startsWith("DECLARE") && "'CLAIM:" in it && "INSERT INTO" !in it) lost else null })
         assertIs<EnsureResult.Created>(report.item!!.result)
         assertNull(report.failure)
         assertNull(report.rethrown)
