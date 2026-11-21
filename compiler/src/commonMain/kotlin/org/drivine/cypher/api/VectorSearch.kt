@@ -385,7 +385,9 @@ object VectorSearch {
         val dimensions = request.index.dimensions.takeUnless { measuresEveryPair(request) }
         val embedded = dimensions?.let { PostgresSql.holdsEmbedding("c", key, it) } ?: "jsonb_typeof(${PostgresSql.value("c", key)}) = 'array'"
         val ids = scope.bound(among.ids)
-        val has = listOf(PostgresSql.hasLabels("c", request.labels), embedded) + listOfNotNull(postgresAnyLength(request, "c", key))
+        // The roots are found through the index over the id, as a lookup by id finds them, and each joined to its place.
+        val has = listOf(PostgresSql.hasLabels("c", request.labels), embedded, IdSql.hasIdIn(Store.POSTGRES, "c", idKey, ids)) +
+            listOfNotNull(postgresAnyLength(request, "c", key))
         val members = Query("c.nid, $id AS id, c.props, g.pos", Placed(ddl.nodes, "c", PostgresSql.placedIds(ids), "g", "${IndexKey.column(Store.POSTGRES, "c", idKey).single()} = g.json"), has)
         val other = if (after) "o.pos > s.pos" else "o.nid <> s.nid"
         val nearest = if (dimensions == null) {
@@ -466,7 +468,7 @@ object VectorSearch {
         val ids = scope.bound(among.ids)
         val selected = "c.nid, $id AS id, ${OracleSql.embedding("c", key)} AS embedding"
         val has = listOfNotNull(
-            OracleSql.hasLabels("c", request.labels), OracleSql.hasProperty("c", key),
+            OracleSql.hasLabels("c", request.labels), OracleSql.hasProperty("c", key), IdSql.hasIdIn(Store.ORACLE, "c", idKey, ids),
             embeddings?.let { "c.nid IN (${OracleSql.uncoalesced("SELECT e.nid FROM $it e")})" },
             oracleLength(request, OracleSql.embedding("c", key)),
         )
@@ -520,7 +522,10 @@ object VectorSearch {
         val id = IdSql.keyText(Store.SQLITE, "c", idKey)
         val after = among.neighbours == AmongNeighbours.After
         val ids = scope.bound(among.ids)
-        val has = listOf(SqliteSql.hasLabels("c", request.labels), "${SqliteSql.type("c", key)} = 'array'") + listOfNotNull(sqliteLength(request, "c", key))
+        val has = listOf(
+            SqliteSql.hasLabels("c", request.labels), "${SqliteSql.type("c", key)} = 'array'",
+            IdSql.hasIdIn(Store.SQLITE, "c", idKey, ids, ddl.nodes, request.labels),
+        ) + listOfNotNull(sqliteLength(request, "c", key))
         val members = Query("c.nid, $id AS id, c.props, g.pos", Placed(ddl.nodes, "c", SqliteSql.placedIds(ids), "g", placedOn(Store.SQLITE, idKey)), has)
         val scored = Query(
             "s.nid AS seed, o.nid, o.id, o.pos, ${SqliteSql.score("o", key, request.similarity, SqliteSql.value("s", key))} AS score",
