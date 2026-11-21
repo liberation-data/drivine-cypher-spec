@@ -279,7 +279,8 @@ order (numbers by value, text by code point, temporals by time), and every store
 
 Of two neighbours that score exactly alike, the one placed first among the ids comes first, every way on every store
 (#412): on a SQL store by each root's place, then its `nid`; on a graph engine by `_next` where every pair is measured, and
-through the index by each hit's place, read from a map of each id's place bound as a parameter. The map is read through a
+through the index by each hit's place, read from a map of each id's place bound as a parameter: a hit whose id is no
+text, which a map can't be read by on any engine, has no place, and is no root. The map is read through a
 variable bound once, as Memgraph copies a parameter at each row that reads it. Neo4j and FalkorDB score in float32, so
 two pairs that tie in exact arithmetic need not tie on every store: only an exact tie is decided so.
 

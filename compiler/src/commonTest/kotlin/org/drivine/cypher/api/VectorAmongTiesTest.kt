@@ -52,6 +52,19 @@ class VectorAmongTiesTest {
     }
 
     @Test
+    fun throughTheIndexAHitWhoseIdIsNoTextHasNoPlaceAndIsNoRoot() {
+        for (store in listOf(SearchStore.NEO4J, SearchStore.MEMGRAPH, SearchStore.FALKORDB)) for (neighbours in listOf(AmongNeighbours.All, AmongNeighbours.After)) {
+            val given = request(neighbours, searchK = 20)
+            val cypher = plan(store, given.copy(among = given.among!!.copy(idProperty = "the id"))).cypher!!
+            // A map read by a key that is no text is an error on every engine, so a hit whose id is a number has no place.
+            assertTrue(", CASE WHEN toString(n.`the id`) = n.`the id` THEN _places[n.`the id`] END AS _place\n" in cypher, "${store.id}:\n$cypher")
+            assertTrue("collect({id: n.`the id`, score: _score, place: _place}) AS _found" in cypher, cypher)
+            val kept = if (neighbours == AmongNeighbours.After) "m.place > _pos" else "m.place IS NOT NULL AND m.place <> _pos"
+            assertTrue("[m IN _found WHERE $kept | {id: m.id, score: m.score}][0..\$_cy_vec4]" in cypher, "${store.id} $neighbours:\n$cypher")
+        }
+    }
+
+    @Test
     fun aRepeatedIdIsPlacedOnceAtItsFirstPlace() {
         for (store in listOf(SearchStore.NEO4J, SearchStore.MEMGRAPH, SearchStore.FALKORDB)) for (neighbours in listOf(AmongNeighbours.All, AmongNeighbours.After)) {
             val repeated = plan(store, request(neighbours, searchK = 20, ids = listOf("a", "b", "a", "c", "b")))
