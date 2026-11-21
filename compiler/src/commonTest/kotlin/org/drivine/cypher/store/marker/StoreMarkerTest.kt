@@ -117,11 +117,14 @@ class StoreMarkerTest {
             assertEquals(expected["delete"]!!.textValue(), statements.delete, "$id: delete")
             assertEquals(expected["scopes"]!!.textValue(), statements.scopes, "$id: scopes")
             assertEquals(constraint(id, ddl, SchemaMarker.CONSTRAINT), statements(expected["constraint"]!!), "$id: the marker's constraint")
-            // The turn an ensure of the marker's constraint takes to build it, where the store builds in turns (Postgres, #382).
+            // The turn an ensure of the marker's constraint takes to build it, where the store builds in turns (Postgres, #382; Oracle, drivine4j#777).
             val claim = ddl.buildClaim(SchemaMarker.CONSTRAINT.made())
             assertEquals(expected["claim"]?.textValue(), claim?.take, "$id: the marker's constraint's claim")
             assertEquals(expected["release"]?.textValue(), claim?.release, "$id: the marker's constraint's release")
             if (claim != null) assertEquals(listOf("at"), texts(expected["releaseParameters"]!!), "$id: a release binds when it was claimed alone")
+            assertEquals(expected["held"]?.textValue(), claim?.held, "$id: the marker's constraint's claims held")
+            // A take that marks its claim (Oracle) binds the mark alone.
+            assertEquals(if (claim?.taken == org.drivine.cypher.store.ddl.BuildClaim.Taken.RAN) listOf("at") else null, expected["claimParameters"]?.let(::texts), "$id: what a claim binds")
 
             val mark = expected["itemsMark"]!!.textValue()!!
             val bound = statements.mergeParameters("owner", "v1", "a\nb", 1_762_000_000_123L)

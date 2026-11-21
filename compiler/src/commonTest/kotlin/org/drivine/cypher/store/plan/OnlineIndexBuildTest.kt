@@ -82,6 +82,15 @@ class OnlineIndexBuildTest {
                     action is PlanAction.Query && action.statement.startsWith("INSERT INTO drivine_schema AS c") ->
                         claimed(turns.count { it.startsWith("take") }).also { turns += "take ${it?.size ?: "failed"}" }
                             ?.let { PlanOutcome.Rows(it) } ?: PlanOutcome.Failed(StoreError(Cause("42501", 0, null, null, "permission denied for table drivine_schema")))
+                    // Oracle's take and release of a turn, each a block of its own transaction marked `at`, run as a query that
+                    // gives no rows: answered as [execute] answers a statement, failed where it gives an error.
+                    action is PlanAction.Query && action.statement.startsWith("DECLARE") && "'CLAIM:" in action.statement -> {
+                        turns += (if ("INSERT INTO" in action.statement) "take '" else "release '") + action.parameters["at"] + "'"
+                        execute(action.statement)?.let { PlanOutcome.Failed(it) } ?: PlanOutcome.Rows(emptyList())
+                    }
+                    // Oracle's count of the claims held: as [listed] gives it, failed where [execute] gives an error.
+                    action is PlanAction.Query && action.statement.startsWith("SELECT COUNT(*) FROM drivine_schema WHERE kind = 'CLAIM:") ->
+                        execute(action.statement)?.let { PlanOutcome.Failed(it) } ?: PlanOutcome.Rows(listed(action.statement))
                     // Its release, a query too: answered as [execute] answers a statement, failed where it gives an error.
                     action is PlanAction.Query && action.statement.startsWith("DELETE FROM drivine_schema WHERE kind = 'CLAIM:") -> {
                         turns += "release '${action.parameters["at"]}'"
@@ -696,9 +705,9 @@ class OnlineIndexBuildTest {
 
     @Test
     fun anOracleUniquenessConstraintsIndexesAreAllBuiltBlockingWrites() {
-        // Its range index too, as before #382: sessions ensuring it at once take turns on the table (ORA-00054, waited out),
-        // where online builds of its range index beside the blocking build of its unique index deadlock in the library
-        // cache (ORA-04020). Its unique index blocks writes, as Oracle's online build of it over keys the data repeats is
+        // Its range index too, as before #382, where online builds of its range index beside the blocking build of its
+        // unique index deadlocked in the library cache (ORA-04020); sessions ensuring it at once build it in their turns
+        // (drivine4j#777). Its unique index blocks writes, as Oracle's online build of it over keys the data repeats is
         // not refused as a blocking one is.
         val (ran, report) = drive(oracle, email)
         assertTrue(ran.none { "ONLINE" in it }, ran.joinToString("\n"))
@@ -1319,13 +1328,148 @@ class OnlineIndexBuildTest {
         val (_, made) = drive(postgres, email, listed = { if (it == postgresDdl.listConstraintsQuery()) emailRecord(null) else emptyList() })
         assertIs<EnsureResult.AlreadyMatching>(made.item!!.result)
         assertEquals(emptyList(), turns)
-        // Oracle's blocking builds wait out each other's; SQLite's lock the database.
-        for (planner in listOf(oracle, SchemaPlanner(org.drivine.cypher.store.schema.SqliteSchema(SqliteDdl("drivine"))))) {
-            val (_, report) = drive(planner, email)
-            assertIs<EnsureResult.Created>(report.item!!.result)
-            assertEquals(emptyList(), turns)
+        // SQLite's builds lock the database.
+        val (_, report) = drive(SchemaPlanner(org.drivine.cypher.store.schema.SqliteSchema(SqliteDdl("drivine"))), email)
+        assertIs<EnsureResult.Created>(report.item!!.result)
+        assertEquals(emptyList(), turns)
+        assertNull(SqliteDdl("drivine").buildClaim(email))
+    }
+
+    @Test
+    fun anOracleItemAlreadyMadeTakesNoTurn() {
+        // Nothing to build: no claim counted, taken or given up.
+        val record = ListingRows.rows("oracle", listOf(SchemaItemInfo(SchemaItemKind.UNIQUENESS_CONSTRAINT, "Person", listOf("email"), "Person_email_unique")), constraints = true)
+        var counted = 0
+        val (ran, report) = drive(oracle, email, listed = {
+            when (it) {
+                oracleDdl.listConstraintsQuery() -> record
+                oracleHeld(email) -> emptyList<Any?>().also { counted++ }
+                else -> emptyList()
+            }
+        })
+        assertIs<EnsureResult.AlreadyMatching>(report.item!!.result, "$report")
+        assertEquals(emptyList(), turns)
+        assertEquals(0, counted)
+        assertEquals(emptyList(), ran)
+    }
+
+    @Test
+    fun anOracleRangeIndexLeftIncompleteIsCompletedInItsTurn() {
+        // Made before there were labelled indexes: its labelled index is built over the node table, as one made anew is.
+        val incomplete = ListingRows.rows("oracle", listOf(SchemaItemInfo(SchemaItemKind.RANGE_INDEX, "Person", listOf("name"), "Person_name_range", status = OracleDdl.INCOMPLETE)), constraints = false)
+        var completed = false
+        val (ran, report) = drive(
+            oracle, name,
+            listed = { if (it == oracleDdl.listIndexesQuery(SchemaItemKind.RANGE_INDEX) && !completed) incomplete else emptyList() },
+            execute = { if ("CREATE INDEX" in it) completed = true; null },
+        )
+        assertIs<EnsureResult.Created>(report.item!!.result, "$report")
+        assertTrue(ran.isNotEmpty())
+        assertTrue(report.log.any { it.message.startsWith("Completed Oracle RANGE_INDEX on Person[name]") }, report.log.toString())
+        assertEquals(listOf("take '0'", "release '0'"), turns)
+    }
+
+    /** Oracle's count of the claims of [spec] another session holds, as [drive]'s listing gives it. */
+    private fun oracleHeld(spec: SchemaItemSpec) = oracleDdl.buildClaim(spec).held!!
+
+    @Test
+    fun anOracleEnsureThatBuildsTakesItsTurnMarkedByItsClockAndGivesItUpOnceMade() {
+        // Sessions issuing the same CREATE INDEX at once on one Oracle table deadlock in the library cache (drivine4j#777).
+        for (item in listOf<SchemaItemSpec>(email, name)) {
+            val (ran, report) = drive(oracle, item)
+            assertIs<EnsureResult.Created>(report.item!!.result, "$item")
+            assertEquals(listOf("take '0'", "release '0'"), turns, "$item")
+            assertTrue(ran.isNotEmpty())
         }
-        assertNull(OracleDdl("drivine").buildClaim(email))
+    }
+
+    @Test
+    fun aTurnAnotherOracleSessionHoldsIsPolledForThenTaken() {
+        var polls = 0
+        val (_, report) = drive(oracle, email, listed = { if (it == oracleHeld(email)) listOf(if (++polls <= 2) 1L else 0L) else emptyList() })
+        assertIs<EnsureResult.Created>(report.item!!.result)
+        assertEquals(3, polls)
+        // Taken once none is held, after two polls: marked with the clock then.
+        assertEquals(listOf("take '400'", "release '400'"), turns)
+    }
+
+    @Test
+    fun anOracleTakeRefusedAsAKeyTheCatalogHasIsPolledForAgain() {
+        // Another session took it between the count and the take.
+        var takes = 0
+        val taken = StoreError(Cause("23000", 1, null, null, "ORA-00001: unique constraint violated"))
+        val (_, report) = drive(oracle, email, execute = { if ("'CLAIM:" in it && "INSERT INTO" in it && ++takes == 1) taken else null })
+        assertIs<EnsureResult.Created>(report.item!!.result)
+        assertEquals(listOf("take '0'", "take '200'", "release '200'"), turns)
+    }
+
+    @Test
+    fun anOracleTakeThatFailsOtherwiseIsEnsuredWithoutItsTurnAtOnce() {
+        val refused = StoreError(Cause("42000", 1031, null, null, "ORA-01031: insufficient privileges"))
+        val (_, report) = drive(oracle, email, execute = { if ("'CLAIM:" in it && "INSERT INTO" in it) refused else null })
+        assertIs<EnsureResult.Created>(report.item!!.result)
+        assertEquals(listOf("take '0'"), turns)
+        assertNull(report.failure)
+    }
+
+    @Test
+    fun anOracleCountOfClaimsTheStoreRefusesIsEnsuredWithoutItsTurnAtOnce() {
+        val refused = StoreError(Cause("42000", 942, null, null, "ORA-00942: table or view does not exist"))
+        val (ran, report) = drive(oracle, email, execute = { if (it == oracleHeld(email)) refused else null })
+        assertIs<EnsureResult.Created>(report.item!!.result)
+        assertTrue(ran.isNotEmpty())
+        // Never taken, so nothing given up, and not waited for.
+        assertEquals(emptyList(), turns)
+        assertNull(report.failure)
+        assertEquals(emptyList(), report.log.filter { "its turn" in it.message })
+    }
+
+    @Test
+    fun anOracleTurnHeldElsewherePastTheWaitIsEnsuredWithoutItAndSaidSo() {
+        val (ran, report) = drive(oracle, email, listed = { if (it == oracleHeld(email)) listOf(1L) else emptyList() })
+        assertIs<EnsureResult.Created>(report.item!!.result)
+        assertTrue(ran.isNotEmpty())
+        // Counted every 200 ms for the 60 s of a build's default timeout, never taken, so nothing given up.
+        assertEquals(emptyList(), turns)
+        assertEquals(
+            listOf("Oracle UNIQUENESS_CONSTRAINT on Person[email]: another session's ensure of it held its turn to build it for PT1M: ensuring it without"),
+            report.log.filter { "its turn" in it.message }.map { it.message },
+        )
+    }
+
+    @Test
+    fun anOracleTurnIsGivenUpWhereTheEnsureFails() {
+        val full = StoreError(Cause("72000", 1652, null, null, "ORA-01652: unable to extend temp segment"))
+        val (_, report) = drive(oracle, email, execute = { if ("'CLAIM:" !in it && "CREATE" in it) full else null })
+        assertTrue(report.failure != null || report.rethrown != null, "$report")
+        assertEquals(listOf("take '0'", "release '0'"), turns)
+    }
+
+    @Test
+    fun anOracleReleaseTheStoreRefusesIsLetBe() {
+        val lost = StoreError(Cause("08006", 17410, null, null, "No more data to read from socket"))
+        val (_, report) = drive(oracle, email, execute = { if (it.startsWith("DECLARE") && "'CLAIM:" in it && "INSERT INTO" !in it) lost else null })
+        assertIs<EnsureResult.Created>(report.item!!.result)
+        assertNull(report.failure)
+        assertNull(report.rethrown)
+        assertEquals(listOf("take '0'", "release '0'"), turns)
+    }
+
+    @Test
+    fun anOracleClaimCommitsOnlyItselfAndIsTakenOverOnceOld() {
+        val claim = oracleDdl.buildClaim(email)
+        assertEquals(org.drivine.cypher.store.ddl.BuildClaim.Taken.RAN, claim.taken)
+        for (statement in listOf(claim.take, claim.release)) {
+            assertTrue(statement.startsWith("DECLARE\n    PRAGMA AUTONOMOUS_TRANSACTION;"), statement)
+            assertTrue("COMMIT;" in statement, statement)
+        }
+        assertTrue("JSON_OBJECT('at' VALUE \$at, 'since' VALUE v_now)" in claim.take, claim.take)
+        assertTrue("< v_now - 60 AND NOT EXISTS (" in claim.take && ">= (CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400 - 60 OR EXISTS (" in claim.held!!, claim.take)
+        // Taken over only where no online build is under way on the node table, as on Postgres: an ONLINE build's journal.
+        for (statement in listOf(claim.take, claim.held!!)) {
+            assertTrue("'SYS_JOURNAL_' || x.object_id" in statement && "i.table_name = UPPER('drivine_node')" in statement, statement)
+        }
+        assertTrue("JSON_VALUE(details, '\$.at') = \$at" in claim.release, claim.release)
     }
 
     @Test

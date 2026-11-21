@@ -73,15 +73,26 @@ data class UniqueRecreation(
 
 /**
  * The turn of an ensure to build an item ([StoreDdl.buildClaim]), a row of the catalog of its own kind, keyed as the item.
- * - [take] claims it, giving a row (`at`, when it was claimed) where it is this ensure's turn, and none where another
- *   session's ensure holds it. A claim older than a build's default timeout, with no online build under way on the node
- *   table, is taken over: its session ended, or failed, without giving it up.
- * - [release] gives up the claim taken at `$at`, its one parameter, and not one another session took over since: a
- *   query, as [take] is, so it runs where the take ran, on the connection of a caller's transaction too, and so sees the
- *   claim that transaction holds uncommitted.
+ * A claim older than a build's default timeout (with no online build under way on the node table, where the store has
+ * online builds) is taken over: its session ended, or failed, without giving it up. How a take says it is this
+ * ensure's turn is [taken]'s:
+ * - [Taken.ROW] (Postgres): [take] is a query that gives a row, `at`, when it was claimed, where it is this ensure's
+ *   turn, and none where another session holds it. [release] gives up the claim taken at `$at`, its one parameter: a
+ *   query too, so it runs where the take ran, on the connection of a caller's transaction too, and so sees the claim
+ *   that transaction holds uncommitted.
+ * - [Taken.RAN] (Oracle, which gives no rows of DML in a query): [take] is a block run with `$at`, the ensure's own
+ *   mark of its claim, as a query on a schema connection that gives no rows, which runs where it is this ensure's turn
+ *   and fails as a key the catalog has already (`ORA-00001`) where another session holds it. [release] gives up the
+ *   claim marked `$at`. Each commits only the claim, in a transaction of its own, whatever transaction the connection is
+ *   in. [held] is a query of one row, how many claims of the item another session holds that can't be taken over yet
+ *   (not old enough, or with an online build under way on the node table), polled while it is more than none, before
+ *   each take.
  */
 @DrivineInternalApi
-data class BuildClaim(val take: String, val release: String)
+data class BuildClaim(val take: String, val release: String, val taken: Taken = Taken.ROW, val held: String? = null) {
+    /** How a [BuildClaim]'s take says it is the ensure's turn. */
+    enum class Taken { ROW, RAN }
+}
 
 /**
  * The statements that make, drop and list a store's indexes and constraints, for a graph and the schema specs: what the
@@ -136,9 +147,10 @@ interface StoreDdl {
      * The turn an ensure takes before it builds or drops [spec]'s objects, where the store's online builds can deadlock and
      * leave an index invalid: Postgres's. Sessions ensuring one item at once, as replicas booting together do, then build it
      * one after another, and those after the first find it made, where each building it at once had deadlocked, and each
-     * then dropped and built again the index a cancelled build left invalid, together, until the tries ran out (#382). Null
-     * on a store whose ensures take turns on the table themselves (Oracle's blocking builds wait out each other's) or
-     * can't deadlock so.
+     * then dropped and built again the index a cancelled build left invalid, together, until the tries ran out (#382). On
+     * Oracle, sessions issuing the same `CREATE INDEX` at once on one table deadlock in the library cache, each held up
+     * about nine seconds or refused (`ORA-04020`), which a turn spares them (drivine4j#777). Null on a store whose
+     * ensures can't deadlock so (SQLite locks the database).
      */
     fun buildClaim(spec: SchemaItemSpec): BuildClaim? = null
 
@@ -195,7 +207,7 @@ internal fun unsupportedTextIndex(spec: TextIndexSpec, engine: String): Compiler
  * - `<name>_edge`: a row for each relationship, keyed by `eid`, from the node `src` to the node `dst`, with its type and its
  *   properties, removed with either node;
  * - `<name>_schema`: the catalog, a row for each index or constraint made, keyed by its kind, label and properties; on
- *   Postgres, a row too for each ensure's turn to build an item, while it is held, of the kind `CLAIM:` and the item's
+ *   Postgres and Oracle, a row too for each ensure's turn to build an item, while it is held, of the kind `CLAIM:` and the item's
  *   ([StoreDdl.buildClaim]).
  *
  * What a store makes beside the tables is named by [objectName], within the [maxObjectName] it allows.
