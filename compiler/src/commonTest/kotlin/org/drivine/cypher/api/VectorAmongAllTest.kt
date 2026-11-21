@@ -40,13 +40,14 @@ class VectorAmongAllTest {
     @Test
     fun withoutSearchKAGraphEngineMeasuresEachRootAgainstEveryOtherPlace() {
         val neo4j = """
-            |UNWIND range(0, size(${'$'}_cy_vec1) - 1) AS _pos
-            |WITH _pos, ${'$'}_cy_vec1[_pos] AS _seedId
+            |WITH ${'$'}_cy_vec1 AS _ids
+            |UNWIND range(0, size(_ids) - 1) AS _pos
+            |WITH _ids, _pos, _ids[_pos] AS _seedId
             |MATCH (seed:Doc)
             |WHERE seed.id = _seedId AND seed.embedding IS NOT NULL AND any(_x IN seed.embedding WHERE _x <> 0)
-            |CALL (seed, _pos) {
-            |  UNWIND [_at IN range(0, size(${'$'}_cy_vec1) - 1) WHERE _at <> _pos] AS _next
-            |  WITH seed, _next, ${'$'}_cy_vec1[_next] AS _nextId
+            |CALL (seed, _pos, _ids) {
+            |  UNWIND [_at IN range(0, size(_ids) - 1) WHERE _at <> _pos] AS _next
+            |  WITH seed, _next, _ids[_next] AS _nextId
             |  MATCH (n:Doc)
             |  WHERE n.id = _nextId AND n.embedding IS NOT NULL AND any(_x IN n.embedding WHERE _x <> 0) AND size(n.embedding) = size(seed.embedding)
             |  WITH n, _next, vector.similarity.cosine(seed.embedding, n.embedding) AS _score
@@ -65,8 +66,8 @@ class VectorAmongAllTest {
             val every = plan(store, request())
             // The statement for each pair once, its neighbours every other place in place of the places after the root's.
             val after = plan(store, request().let { it.copy(among = it.among!!.copy(neighbours = AmongNeighbours.After)) })
-            val others = "[_at IN range(0, size(\$_cy_vec1) - 1) WHERE _at <> _pos]"
-            assertEquals(after.cypher!!.replace("range(_pos + 1, size(\$_cy_vec1) - 1)", others), every.cypher, store.id)
+            val others = "[_at IN range(0, size(_ids) - 1) WHERE _at <> _pos]"
+            assertEquals(after.cypher!!.replace("range(_pos + 1, size(_ids) - 1)", others), every.cypher, store.id)
             assertTrue("CALL db.index" !in every.cypher!! && "vector_search.search" !in every.cypher!! && "db.idx" !in every.cypher!!, "${store.id}: no index is asked")
             assertEquals(0, every.indexK, store.id)
             assertEquals(emptyList(), every.warnings, store.id)

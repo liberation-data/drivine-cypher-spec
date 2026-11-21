@@ -601,19 +601,23 @@ object VectorSearch {
         val nodeHas = listOfNotNull("$NODE.$id = $NEXT_ID", "$node IS NOT NULL", hasLength(store, request, node), sameSize(store, seed, node))
         val threshold = among.threshold?.let { "\n  WHERE $SCORE >= ${scope.bound(it)}\n  WITH $NODE, $NEXT, $SCORE" } ?: ""
         val topK = scope.bound(request.topK)
-        val open = if (store == SearchStore.NEO4J) "CALL ($SEED, $POS) {" else "CALL {\n  WITH $SEED, $POS"
+        // The ids are read through a variable bound once, not from the parameter at each pair: Memgraph copies a parameter at
+        // each row that reads it, and so a search of 1000 ids, for each pair once, took 9.8 s, through the variable 2.3 s
+        // (liberation-data/drivine-cypher-spec#415). Neo4j and FalkorDB take either alike.
+        val open = if (store == SearchStore.NEO4J) "CALL ($SEED, $POS, $IDS) {" else "CALL {\n  WITH $SEED, $POS, $IDS"
         val others = when (among.neighbours) {
-            AmongNeighbours.After -> "range($POS + 1, size($ids) - 1)"
-            AmongNeighbours.All -> "[_at IN range(0, size($ids) - 1) WHERE _at <> $POS]"
+            AmongNeighbours.After -> "range($POS + 1, size($IDS) - 1)"
+            AmongNeighbours.All -> "[_at IN range(0, size($IDS) - 1) WHERE _at <> $POS]"
         }
         val cypher = """
-            |UNWIND range(0, size($ids) - 1) AS $POS
-            |WITH $POS, $ids[$POS] AS $SEED_ID
+            |WITH $ids AS $IDS
+            |UNWIND range(0, size($IDS) - 1) AS $POS
+            |WITH $IDS, $POS, $IDS[$POS] AS $SEED_ID
             |MATCH ($SEED:$labels)
             |WHERE ${seedHas.joinToString(" AND ")}
             |$open
             |  UNWIND $others AS $NEXT
-            |  WITH $SEED, $NEXT, $ids[$NEXT] AS $NEXT_ID
+            |  WITH $SEED, $NEXT, $IDS[$NEXT] AS $NEXT_ID
             |  MATCH ($NODE:$labels)
             |  WHERE ${nodeHas.joinToString(" AND ")}
             |  WITH $NODE, $NEXT, ${pairScore(store, request.similarity, seed, node)} AS $SCORE$threshold
@@ -737,6 +741,7 @@ object VectorSearch {
     private const val SEED = "seed"
     private const val SEED_ID = "_seedId"
     private const val POS = "_pos"
+    private const val IDS = "_ids"
     private const val NEXT = "_next"
     private const val NEXT_ID = "_nextId"
     private const val NODE = "n"
