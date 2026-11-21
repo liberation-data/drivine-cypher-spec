@@ -260,8 +260,8 @@ order (numbers by value, text by code point, temporals by time), and every store
 
 - **Exact without `searchK`.** With no `searchK`, `All` or `After`, every pair of the roots is measured, through no index,
   even where one is made (#408). The answer is exact, and its cost grows with the square of the number of ids.
-  - On a SQL store, `All` keeps every other root; for `After` each root's place comes from the bound ids' own order
-    (`WITH ORDINALITY`, `FOR ORDINALITY`, `json_each`'s key), and a pair is kept where the neighbour's place is after the
+  - On a SQL store each root's place comes from the bound ids' own order (`WITH ORDINALITY`, `FOR ORDINALITY`,
+    `json_each`'s key). `All` keeps every other root; for `After` a pair is kept where the neighbour's place is after the
     root's.
   - On a graph engine, each root is unwound with its place. In a subquery of its own, it measures the roots at every other
     place (`All`), or only those whose places come after its own (`After`), and keeps its best `topK`. So a statement holds
@@ -356,7 +356,9 @@ escaped (#217): 84 of the golden's entries were edited for it by a script. On Or
 layout 2 names its objects, `<graph>_v2_…` for drivine4j's `<graph>_v_…`, edited in each entry that names it. And the 168
 SQL entries of a nearest search by cosine were edited by a script to leave out a stored embedding of no length, as
 Neo4j's cosine index does, and the 40 of a search among ids by cosine to leave out a root with one (#160), which drivine4j
-at that commit does not. No other edit was made. `VectorSearchGoldenTest` checks
+at that commit does not. The 70 SQL entries of a search among ids were edited by a script to read each root's place
+among the ids and break a tie of two scores by place, then `nid`, and the graph engines' 48 to bind each id's place as a
+map, `_cy_vec2`, the later parameters numbered on, and keep and order each hit by its place (#412). No other edit was made. `VectorSearchGoldenTest` checks
 `plan`, and the JSON request, against each on every target, putting back on Oracle the document drivine4j selects beside
 each candidate's row before it compares.
 

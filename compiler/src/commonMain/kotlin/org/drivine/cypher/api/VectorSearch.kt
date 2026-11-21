@@ -495,8 +495,8 @@ object VectorSearch {
 
     /**
      * Only the roots are measured, so the answer is exact; a pair whose embeddings differ in size has no score, and is left
-     * out. SQLite has no `LATERAL`, so every pair is scored once, numbered within its root best first, and a root keeps the
-     * first `topK`.
+     * out. SQLite has no `LATERAL`, so every pair is scored once, numbered within its root best first, a tie of two scores by place
+     * among the ids, and a root keeps the first `topK`.
      */
     private fun sqliteAmong(ddl: SqliteDdl, request: VectorRequest, among: VectorAmong, scope: SearchParameters): String {
         val key = stored(request.property)
