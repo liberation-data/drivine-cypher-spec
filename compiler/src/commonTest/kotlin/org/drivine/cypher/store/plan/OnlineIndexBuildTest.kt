@@ -1415,7 +1415,11 @@ class OnlineIndexBuildTest {
             assertTrue("COMMIT;" in statement, statement)
         }
         assertTrue("JSON_OBJECT('at' VALUE \$at, 'since' VALUE v_now)" in claim.take, claim.take)
-        assertTrue("< v_now - 60;" in claim.take && ">= (CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400 - 60" in claim.held!!, claim.take)
+        assertTrue("< v_now - 60 AND NOT EXISTS (" in claim.take && ">= (CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400 - 60 OR EXISTS (" in claim.held!!, claim.take)
+        // Taken over only where no online build is under way on the node table, as on Postgres: an ONLINE build's journal.
+        for (statement in listOf(claim.take, claim.held!!)) {
+            assertTrue("'SYS_JOURNAL_' || x.object_id" in statement && "i.table_name = UPPER('drivine_node')" in statement, statement)
+        }
         assertTrue("JSON_VALUE(details, '\$.at') = \$at" in claim.release, claim.release)
     }
 

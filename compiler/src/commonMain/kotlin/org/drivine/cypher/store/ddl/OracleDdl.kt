@@ -570,18 +570,24 @@ ${made.entries.joinToString("\n") { (function, making) ->
      * A claim in the catalog, of the kind `CLAIM:` and the item's, which no listing reads, marked `$at` by the ensure that
      * takes it and stamped with when it was taken, in seconds of the store's own clock (UTC). Taken, and given up, each in
      * a transaction of its own (`AUTONOMOUS_TRANSACTION`), so it commits nothing of the transaction the connection is in;
-     * one older than [CLAIM_STALE_SECONDS] is taken over. Oracle has no view of a build under way a session can read
-     * without a grant, and builds a constraint's indexes blocking writes, so a build that outlasts it is waited out on the
-     * table (`ORA-00054`) by the session that takes the claim over.
+     * one older than [CLAIM_STALE_SECONDS] is taken over where no online build is under way on the node table, as on
+     * Postgres: an `ONLINE` build keeps a journal, `SYS_JOURNAL_<the index's object id>`, which a session sees in
+     * `user_objects` without a grant, so a range index's build that outlasts it is never raced. A constraint's indexes are
+     * built blocking writes, and keep none: one that outlasts it is waited out on the table (`ORA-00054`) by the session
+     * that takes the claim over.
      */
     override fun buildClaim(spec: SchemaItemSpec): BuildClaim {
         val key = "kind = ${literal(CLAIM + spec.kind.name)} AND label = ${literal(spec.label)} AND properties = ${literal(json(spec.properties))}"
+        // An online build under way of an index on the node table: its journal, SYS_JOURNAL_<the index's object id>, in the
+        // index's owner's schema, which a session reads without a grant.
+        val building = "EXISTS (SELECT 1 FROM user_objects j JOIN user_objects x ON j.object_name = 'SYS_JOURNAL_' || x.object_id " +
+            "JOIN user_indexes i ON i.index_name = x.object_name WHERE x.object_type = 'INDEX' AND i.table_name = UPPER(${literal(nodes)}))"
         val take = """
             DECLARE
                 PRAGMA AUTONOMOUS_TRANSACTION;
                 v_now NUMBER := (CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400;
             BEGIN
-                DELETE FROM $catalog WHERE $key AND JSON_VALUE(details, '${'$'}.since' RETURNING NUMBER) < v_now - $CLAIM_STALE_SECONDS;
+                DELETE FROM $catalog WHERE $key AND JSON_VALUE(details, '${'$'}.since' RETURNING NUMBER) < v_now - $CLAIM_STALE_SECONDS AND NOT $building;
                 INSERT INTO $catalog (kind, label, properties, details)
                 VALUES (${literal(CLAIM + spec.kind.name)}, ${literal(spec.label)}, ${literal(json(spec.properties))}, JSON_OBJECT('at' VALUE ${'$'}at, 'since' VALUE v_now));
                 COMMIT;
@@ -599,8 +605,8 @@ ${made.entries.joinToString("\n") { (function, making) ->
                 COMMIT;
             END;
         """.trimIndent()
-        val held = "SELECT COUNT(*) FROM $catalog WHERE $key AND JSON_VALUE(details, '${'$'}.since' RETURNING NUMBER) >= " +
-            "(CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400 - $CLAIM_STALE_SECONDS"
+        val held = "SELECT COUNT(*) FROM $catalog WHERE $key AND (JSON_VALUE(details, '${'$'}.since' RETURNING NUMBER) >= " +
+            "(CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400 - $CLAIM_STALE_SECONDS OR $building)"
         return BuildClaim(take, release, BuildClaim.Taken.RAN, held)
     }
 
