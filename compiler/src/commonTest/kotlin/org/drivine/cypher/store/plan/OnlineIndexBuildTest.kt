@@ -1353,6 +1353,22 @@ class OnlineIndexBuildTest {
         assertEquals(emptyList(), ran)
     }
 
+    @Test
+    fun anOracleRangeIndexLeftIncompleteIsCompletedInItsTurn() {
+        // Made before there were labelled indexes: its labelled index is built over the node table, as one made anew is.
+        val incomplete = ListingRows.rows("oracle", listOf(SchemaItemInfo(SchemaItemKind.RANGE_INDEX, "Person", listOf("name"), "Person_name_range", status = OracleDdl.INCOMPLETE)), constraints = false)
+        var completed = false
+        val (ran, report) = drive(
+            oracle, name,
+            listed = { if (it == oracleDdl.listIndexesQuery(SchemaItemKind.RANGE_INDEX) && !completed) incomplete else emptyList() },
+            execute = { if ("CREATE INDEX" in it) completed = true; null },
+        )
+        assertIs<EnsureResult.Created>(report.item!!.result, "$report")
+        assertTrue(ran.isNotEmpty())
+        assertTrue(report.log.any { it.message.startsWith("Completed Oracle RANGE_INDEX on Person[name]") }, report.log.toString())
+        assertEquals(listOf("take '0'", "release '0'"), turns)
+    }
+
     /** Oracle's count of the claims of [spec] another session holds, as [drive]'s listing gives it. */
     private fun oracleHeld(spec: SchemaItemSpec) = oracleDdl.buildClaim(spec).held!!
 
