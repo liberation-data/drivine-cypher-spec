@@ -705,9 +705,9 @@ class OnlineIndexBuildTest {
 
     @Test
     fun anOracleUniquenessConstraintsIndexesAreAllBuiltBlockingWrites() {
-        // Its range index too, as before #382: sessions ensuring it at once take turns on the table (ORA-00054, waited out),
-        // where online builds of its range index beside the blocking build of its unique index deadlock in the library
-        // cache (ORA-04020). Its unique index blocks writes, as Oracle's online build of it over keys the data repeats is
+        // Its range index too, as before #382, where online builds of its range index beside the blocking build of its
+        // unique index deadlocked in the library cache (ORA-04020); sessions ensuring it at once build it in their turns
+        // (drivine4j#777). Its unique index blocks writes, as Oracle's online build of it over keys the data repeats is
         // not refused as a blocking one is.
         val (ran, report) = drive(oracle, email)
         assertTrue(ran.none { "ONLINE" in it }, ran.joinToString("\n"))

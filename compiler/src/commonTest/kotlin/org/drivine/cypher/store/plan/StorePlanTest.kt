@@ -227,7 +227,7 @@ class StorePlanTest {
             return PlanAction.Query(pinned["stores"]!![id]!!.textValue()!!, purpose = Purpose.SAMPLE, delayMillis = delay)
         }
         query["statement"]?.let { return PlanAction.Query(it.textValue()!!, purpose = Purpose.LISTING, delayMillis = delay) }
-        // An ensure's take of its turn to build an item (Postgres, #382), as its case pins it.
+        // An ensure's take of its turn to build an item (Postgres, #382; Oracle, drivine4j#777), as its case pins it.
         // Oracle's take binds the ensure's mark, `at`; Postgres's binds nothing.
         val marked = query["at"]?.let { mapOf("at" to it.textValue()) }.orEmpty()
         query["claim"]?.let { return PlanAction.Query(storeCase(it.textValue()!!)["stores"]!![id]!!["claim"]!!.textValue()!!, marked, Purpose.LISTING, delay) }

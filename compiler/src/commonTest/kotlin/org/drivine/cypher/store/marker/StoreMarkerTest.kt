@@ -117,7 +117,7 @@ class StoreMarkerTest {
             assertEquals(expected["delete"]!!.textValue(), statements.delete, "$id: delete")
             assertEquals(expected["scopes"]!!.textValue(), statements.scopes, "$id: scopes")
             assertEquals(constraint(id, ddl, SchemaMarker.CONSTRAINT), statements(expected["constraint"]!!), "$id: the marker's constraint")
-            // The turn an ensure of the marker's constraint takes to build it, where the store builds in turns (Postgres, #382).
+            // The turn an ensure of the marker's constraint takes to build it, where the store builds in turns (Postgres, #382; Oracle, drivine4j#777).
             val claim = ddl.buildClaim(SchemaMarker.CONSTRAINT.made())
             assertEquals(expected["claim"]?.textValue(), claim?.take, "$id: the marker's constraint's claim")
             assertEquals(expected["release"]?.textValue(), claim?.release, "$id: the marker's constraint's release")

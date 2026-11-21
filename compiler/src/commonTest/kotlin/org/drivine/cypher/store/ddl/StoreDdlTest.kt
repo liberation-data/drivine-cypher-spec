@@ -202,7 +202,7 @@ class StoreDdlTest {
                 )
                 assertEquals(expectedOf(expected["drop"]!!), attempt { ddl.drop(named) }, "$name: drop on $id")
                 assertEquals(expectedOf(expected["dropUnnamed"] ?: expected["drop"]!!), attempt { ddl.drop(unnamed) }, "$name: drop unnamed on $id")
-                // The turn an ensure takes to build it, where the store builds in turns (Postgres, #382).
+                // The turn an ensure takes to build it, where the store builds in turns (Postgres, #382; Oracle, drivine4j#777).
                 val claim = ddl.buildClaim(made).takeIf { create.isArray }
                 assertEquals(expected["claim"]?.textValue(), claim?.take, "$name: claim on $id")
                 assertEquals(expected["release"]?.textValue(), claim?.release, "$name: release on $id")
