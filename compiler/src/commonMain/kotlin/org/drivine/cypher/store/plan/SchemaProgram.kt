@@ -1078,7 +1078,7 @@ internal class SchemaProgram(
 
     /**
      * [ensure] of [spec], which reads the store as it is, and where it would build or drop [spec]'s objects ([awaitTurn]),
-     * ensured again in its turn (Postgres, #382): sessions ensuring one item at once build it one after another, and those
+     * ensured again in its turn (Postgres, #382; Oracle, drivine4j#777): sessions ensuring one item at once build it one after another, and those
      * after the first find it made. Its turn is claimed ([BuildClaim.take]), polled for while another session's ensure
      * holds it, for [PlanRequest.DEFAULT_BUILD_TIMEOUT_MILLIS] at most; and given up once the ensure ends, made or not.
      * Where the wait runs out, or the claim can't be written, it is ensured without its turn, as before turns.
@@ -1109,16 +1109,12 @@ internal class SchemaProgram(
     }
 
     /**
-     * Gives up the claim taken [at]: on Postgres a query on a schema connection, as its take is, so where a caller's
+     * Gives up the claim taken [at], a query on a schema connection, as its take is: on Postgres, where a caller's
      * transaction holds that connection, the claim it holds uncommitted is seen and given up there; on Oracle a block of
      * its own transaction. One that fails is let be: a claim left behind is taken over once it is old.
      */
     private fun release(claim: BuildClaim, at: String) {
-        when (claim.taken) {
-            BuildClaim.Taken.ROW -> io.ask(PlanAction.Query(claim.release, mapOf("at" to at), Purpose.LISTING))
-            // A block of its own transaction, run as the marker's statements are, binding the ensure's mark (Oracle).
-            BuildClaim.Taken.RAN -> io.ask(PlanAction.Execute(DdlStatement.Text(claim.release), mapOf("at" to at), Purpose.MARKER))
-        }
+        io.ask(PlanAction.Query(claim.release, mapOf("at" to at), Purpose.LISTING))
     }
 
     /** When [claim] was taken, once it is this ensure's turn; null where it ensures without one ([inTurn]). */
@@ -1133,7 +1129,9 @@ internal class SchemaProgram(
                 poll = POLL_MILLIS
                 if (held.firstNotNullOfOrNull(::value)?.toLongOrNull()?.let { it > 0 } == true) continue
                 val at = io.clock().toString()
-                when (val outcome = io.ask(PlanAction.Execute(DdlStatement.Text(claim.take), mapOf("at" to at), Purpose.MARKER))) {
+                // A query on a schema connection, as every plan has one: an IndexManager's or ConstraintManager's call is
+                // given no auto-commit manager, which runs a marker's statements.
+                when (val outcome = io.ask(PlanAction.Query(claim.take, mapOf("at" to at), Purpose.LISTING))) {
                     is PlanOutcome.Failed -> if (store.isViolation(outcome.error)) continue else return null
                     else -> return at
                 }

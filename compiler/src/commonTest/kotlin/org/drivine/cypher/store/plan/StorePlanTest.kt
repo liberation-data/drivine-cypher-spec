@@ -187,13 +187,6 @@ class StorePlanTest {
             return listOf(PlanAction.Execute(DdlStatement.Text(statement.textValue()!!), purpose = purpose))
         }
         execute["native"]?.let { return ddl(listOf(DdlStatement.Native(texts(it)))) }
-        // An ensure's take and release of its turn marked `at` (Oracle), each a block of its own transaction, run as a marker's.
-        for (step in listOf("claim", "release")) {
-            execute[step]?.let {
-                val statement = storeCase(it.textValue()!!)["stores"]!![id]!![step]!!.textValue()!!
-                return listOf(PlanAction.Execute(DdlStatement.Text(statement), mapOf("at" to execute["at"]!!.textValue()), Purpose.MARKER))
-            }
-        }
         return when (val name = execute["marker"]!!.textValue()) {
             "prepare" -> {
                 val prepare = markerStore(id)["prepare"]!!.textValue()!!
@@ -205,7 +198,6 @@ class StorePlanTest {
                 PlanAction.Execute(DdlStatement.Text(markerStore(id)["deleteAllButNewest"]!!.textValue()!!), mapOf("scope" to execute["scope"]!!.textValue()), Purpose.MARKER),
             )
             "constraint" -> ddl(prefix(id) + markerStore(id)["constraint"]!!.map(::statement))
-            "claim", "release" -> listOf(PlanAction.Execute(DdlStatement.Text(markerStore(id)[name]!!.textValue()!!), mapOf("at" to execute["at"]!!.textValue()), Purpose.MARKER))
             else -> fail("no marker statement $name")
         }
     }
@@ -236,7 +228,9 @@ class StorePlanTest {
         }
         query["statement"]?.let { return PlanAction.Query(it.textValue()!!, purpose = Purpose.LISTING, delayMillis = delay) }
         // An ensure's take of its turn to build an item (Postgres, #382), as its case pins it.
-        query["claim"]?.let { return PlanAction.Query(storeCase(it.textValue()!!)["stores"]!![id]!!["claim"]!!.textValue()!!, purpose = Purpose.LISTING, delayMillis = delay) }
+        // Oracle's take binds the ensure's mark, `at`; Postgres's binds nothing.
+        val marked = query["at"]?.let { mapOf("at" to it.textValue()) }.orEmpty()
+        query["claim"]?.let { return PlanAction.Query(storeCase(it.textValue()!!)["stores"]!![id]!!["claim"]!!.textValue()!!, marked, Purpose.LISTING, delay) }
         // How many claims of an item another session holds (Oracle), polled before a take.
         query["held"]?.let { return PlanAction.Query(storeCase(it.textValue()!!)["stores"]!![id]!!["held"]!!.textValue()!!, purpose = Purpose.LISTING, delayMillis = delay) }
         // Its release of the turn taken `at`, a query on a schema connection as the take is.
@@ -245,7 +239,7 @@ class StorePlanTest {
             return PlanAction.Query(release, mapOf("at" to query["at"]!!.textValue()), Purpose.LISTING, delay)
         }
         return when (val name = query["marker"]!!.textValue()) {
-            "claim" -> PlanAction.Query(markerStore(id)["claim"]!!.textValue()!!, purpose = Purpose.LISTING, delayMillis = delay)
+            "claim" -> PlanAction.Query(markerStore(id)["claim"]!!.textValue()!!, marked, Purpose.LISTING, delay)
             "held" -> PlanAction.Query(markerStore(id)["held"]!!.textValue()!!, purpose = Purpose.LISTING, delayMillis = delay)
             "release" -> PlanAction.Query(markerStore(id)["release"]!!.textValue()!!, mapOf("at" to query["at"]!!.textValue()), Purpose.LISTING, delay)
             "read.version", "read.items" -> PlanAction.Query(

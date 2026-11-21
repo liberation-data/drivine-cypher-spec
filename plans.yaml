@@ -72,7 +72,7 @@ cases:
                   - {query: {marker: "held"}, rows: [0]}
               - now: 1000000
                 actions:
-                  - {execute: {marker: "claim", at: "1000000"}}
+                  - {query: {marker: "claim", at: "1000000"}, rows: []}
               - now: 1000000
                 actions:
                   - {query: {listing: "constraints"}, items: []}
@@ -82,7 +82,7 @@ cases:
                   - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "_DrivineSchema", properties: ["scope"], name: "_DrivineSchema_scope_unique"}]}
               - now: 1000000
                 actions:
-                  - {execute: {marker: "release", at: "1000000"}}
+                  - {query: {marker: "release", at: "1000000"}, rows: []}
               - now: 1000000
                 actions:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
@@ -91,7 +91,7 @@ cases:
                   - {query: {held: "Range index"}, rows: [0]}
               - now: 1000000
                 actions:
-                  - {execute: {claim: "Range index", at: "1000000"}}
+                  - {query: {claim: "Range index", at: "1000000"}, rows: []}
               - now: 1000000
                 actions:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
@@ -101,7 +101,7 @@ cases:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
               - now: 1000000
                 actions:
-                  - {execute: {release: "Range index", at: "1000000"}}
+                  - {query: {release: "Range index", at: "1000000"}, rows: []}
               - now: 1000000
                 actions:
                   - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "_DrivineSchema", properties: ["scope"], name: "_DrivineSchema_scope_unique"}]}
@@ -110,7 +110,7 @@ cases:
                   - {query: {held: "Uniqueness constraint"}, rows: [0]}
               - now: 1000000
                 actions:
-                  - {execute: {claim: "Uniqueness constraint", at: "1000000"}}
+                  - {query: {claim: "Uniqueness constraint", at: "1000000"}, rows: []}
               - now: 1000000
                 actions:
                   - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "_DrivineSchema", properties: ["scope"], name: "_DrivineSchema_scope_unique"}]}
@@ -120,7 +120,7 @@ cases:
                   - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "_DrivineSchema", properties: ["scope"], name: "_DrivineSchema_scope_unique"}, {kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], name: "Person_email_unique"}]}
               - now: 1000000
                 actions:
-                  - {execute: {release: "Uniqueness constraint", at: "1000000"}}
+                  - {query: {release: "Uniqueness constraint", at: "1000000"}, rows: []}
               - now: 1000000
                 actions:
                   - {writeMarker: {scope: "schema", version: "v1", items: "RANGE_INDEX:Person:name:Person_name_range\nUNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
@@ -419,7 +419,7 @@ cases:
                   - {query: {held: "Range index"}, rows: [0]}
               - now: 1000000
                 actions:
-                  - {execute: {claim: "Range index", at: "1000000"}}
+                  - {query: {claim: "Range index", at: "1000000"}, rows: []}
               - now: 1000000
                 actions:
                   - {query: {listing: "indexes.RANGE_INDEX"}, failed: [{message: "There is no procedure with the name `vector_search.show_index_info` registered"}]}
@@ -429,7 +429,7 @@ cases:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
               - now: 1000000
                 actions:
-                  - {execute: {release: "Range index", at: "1000000"}}
+                  - {query: {release: "Range index", at: "1000000"}, rows: []}
               - now: 1000000
                 actions:
                   - {writeMarker: {scope: "schema", version: null, items: "RANGE_INDEX:Person:name:Person_name_range"}}
@@ -988,7 +988,7 @@ cases:
                   - {query: {held: "Vector index by cosine"}, rows: [0]}
               - now: 1000000
                 actions:
-                  - {execute: {claim: "Vector index by cosine", at: "1000000"}}
+                  - {query: {claim: "Vector index by cosine", at: "1000000"}, rows: []}
               - now: 1000000
                 actions:
                   - {query: {listing: "indexes.VECTOR_INDEX"}, items: []}
@@ -998,7 +998,7 @@ cases:
                   - {query: {listing: "indexes.VECTOR_INDEX"}, items: [{kind: "VECTOR_INDEX", label: "Chunk", properties: ["embedding"], name: "Chunk_embedding_vector", dimensions: 384, similarity: "COSINE"}]}
               - now: 1000000
                 actions:
-                  - {execute: {release: "Vector index by cosine", at: "1000000"}}
+                  - {query: {release: "Vector index by cosine", at: "1000000"}, rows: []}
               - now: 1000000
                 actions:
                   - {writeMarker: {scope: "schema", version: null, items: "RANGE_INDEX:Person:name:Person_name_range\nruntime:VECTOR_INDEX:Chunk:embedding:Chunk_embedding_vector"}}
@@ -1693,7 +1693,7 @@ cases:
                   - {query: {held: "Full-text index"}, rows: [0]}
               - now: 1000000
                 actions:
-                  - {execute: {claim: "Full-text index", at: "1000000"}}
+                  - {query: {claim: "Full-text index", at: "1000000"}, rows: []}
               - now: 1000000
                 actions:
                   - {query: {listing: "indexes.FULLTEXT_INDEX"}, items: []}
@@ -1703,7 +1703,7 @@ cases:
                   - {query: {listing: "indexes.FULLTEXT_INDEX"}, items: [{kind: "FULLTEXT_INDEX", label: "Doc", properties: ["title", "body"], name: "Doc_title_body_fulltext"}]}
               - now: 1000000
                 actions:
-                  - {execute: {release: "Full-text index", at: "1000000"}}
+                  - {query: {release: "Full-text index", at: "1000000"}, rows: []}
               - now: 1000000
                 actions:
                   - {writeMarker: {scope: "schema", version: "v1", items: "RANGE_INDEX:Person:name:Person_name_range\nruntime-stale:VECTOR_INDEX:Chunk:embedding:Chunk_embedding_vector\nruntime:FULLTEXT_INDEX:Doc:title,body:Doc_title_body_fulltext"}}
@@ -2327,7 +2327,7 @@ cases:
                   - {query: {held: "Range index"}, rows: [0]}
               - now: 1000000
                 actions:
-                  - {execute: {claim: "Range index", at: "1000000"}}
+                  - {query: {claim: "Range index", at: "1000000"}, rows: []}
               - now: 1000000
                 actions:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
@@ -2337,7 +2337,7 @@ cases:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
               - now: 1000000
                 actions:
-                  - {execute: {release: "Range index", at: "1000000"}}
+                  - {query: {release: "Range index", at: "1000000"}, rows: []}
               - now: 1000000
                 actions:
                   - {writeMarker: {scope: "schema", version: null, items: "RANGE_INDEX:Person:name:Person_name_range"}}
@@ -2350,7 +2350,7 @@ cases:
                   - {query: {held: "Uniqueness constraint"}, rows: [0]}
               - now: 1000000
                 actions:
-                  - {execute: {claim: "Uniqueness constraint", at: "1000000"}}
+                  - {query: {claim: "Uniqueness constraint", at: "1000000"}, rows: []}
               - now: 1000000
                 actions:
                   - {query: {listing: "constraints"}, items: []}
@@ -2360,7 +2360,7 @@ cases:
                   - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], name: "Person_email_unique"}]}
               - now: 1000000
                 actions:
-                  - {execute: {release: "Uniqueness constraint", at: "1000000"}}
+                  - {query: {release: "Uniqueness constraint", at: "1000000"}, rows: []}
               - now: 1000000
                 actions:
                   - {writeMarker: {scope: "schema", version: null, items: "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
@@ -2614,7 +2614,7 @@ cases:
                   - {query: {marker: "held"}, rows: [0]}
               - now: 1000000
                 actions:
-                  - {execute: {marker: "claim", at: "1000000"}}
+                  - {query: {marker: "claim", at: "1000000"}, rows: []}
               - now: 1000000
                 actions:
                   - {query: {listing: "constraints"}, items: []}
@@ -2624,7 +2624,7 @@ cases:
                   - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "_DrivineSchema", properties: ["scope"], name: "_DrivineSchema_scope_unique"}]}
               - now: 1000000
                 actions:
-                  - {execute: {marker: "release", at: "1000000"}}
+                  - {query: {marker: "release", at: "1000000"}, rows: []}
               - now: 1000000
                 actions:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
@@ -2633,7 +2633,7 @@ cases:
                   - {query: {held: "Range index"}, rows: [0]}
               - now: 1000000
                 actions:
-                  - {execute: {claim: "Range index", at: "1000000"}}
+                  - {query: {claim: "Range index", at: "1000000"}, rows: []}
               - now: 1000000
                 actions:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
@@ -2643,7 +2643,7 @@ cases:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
               - now: 1000000
                 actions:
-                  - {execute: {release: "Range index", at: "1000000"}}
+                  - {query: {release: "Range index", at: "1000000"}, rows: []}
               - now: 1000000
                 actions:
                   - {writeMarker: {scope: "schema", version: "v1", items: "RANGE_INDEX:Person:name:Person_name_range"}}
@@ -2848,7 +2848,7 @@ cases:
                   - {query: {held: "Uniqueness constraint"}, rows: [0]}
               - now: 1000000
                 actions:
-                  - {execute: {claim: "Uniqueness constraint", at: "1000000"}}
+                  - {query: {claim: "Uniqueness constraint", at: "1000000"}, rows: []}
               - now: 1000000
                 actions:
                   - {query: {listing: "constraints"}, items: []}
@@ -2858,7 +2858,7 @@ cases:
                   - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["email"], name: "Person_email_unique"}]}
               - now: 1000000
                 actions:
-                  - {execute: {release: "Uniqueness constraint", at: "1000000"}}
+                  - {query: {release: "Uniqueness constraint", at: "1000000"}, rows: []}
               - now: 1000000
                 actions:
                   - {writeMarker: {scope: "schema", version: null, items: "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}
@@ -3065,7 +3065,7 @@ cases:
                   - {query: {held: "Range index"}, rows: [0]}
               - now: 1000000
                 actions:
-                  - {execute: {claim: "Range index", at: "1000000"}}
+                  - {query: {claim: "Range index", at: "1000000"}, rows: []}
               - now: 1000000
                 actions:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
@@ -3075,7 +3075,7 @@ cases:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
               - now: 1000000
                 actions:
-                  - {execute: {release: "Range index", at: "1000000"}}
+                  - {query: {release: "Range index", at: "1000000"}, rows: []}
             done: 1000000
             report:
               owners:
@@ -3202,7 +3202,7 @@ cases:
                   - {query: {held: "Range index"}, rows: [0]}
               - now: 1000000
                 actions:
-                  - {execute: {claim: "Range index", at: "1000000"}}
+                  - {query: {claim: "Range index", at: "1000000"}, rows: []}
               - now: 1000000
                 actions:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
@@ -3212,7 +3212,7 @@ cases:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
               - now: 1000000
                 actions:
-                  - {execute: {release: "Range index", at: "1000000"}}
+                  - {query: {release: "Range index", at: "1000000"}, rows: []}
               - now: 1000000
                 actions:
                   - {writeMarker: {scope: "schema", version: null, items: "VECTOR_INDEX:Chunk:embedding:Chunk_embedding_vector\nRANGE_INDEX:Person:name:Person_name_range"}}
@@ -3378,7 +3378,7 @@ cases:
                   - {query: {held: "Range index"}, rows: [0]}
               - now: 1000000
                 actions:
-                  - {execute: {claim: "Range index", at: "1000000"}}
+                  - {query: {claim: "Range index", at: "1000000"}, rows: []}
               - now: 1000000
                 actions:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
@@ -3388,7 +3388,7 @@ cases:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
               - now: 1000000
                 actions:
-                  - {execute: {release: "Range index", at: "1000000"}}
+                  - {query: {release: "Range index", at: "1000000"}, rows: []}
               - now: 1000000
                 actions:
                   - {writeMarker: {scope: "schema", version: null, items: "VECTOR_INDEX:Chunk:embedding:Chunk_embedding_vector\nRANGE_INDEX:Person:name:Person_name_range"}}
@@ -3519,7 +3519,7 @@ cases:
                   - {query: {held: "Range index"}, rows: [0]}
               - now: 1000000
                 actions:
-                  - {execute: {claim: "Range index", at: "1000000"}}
+                  - {query: {claim: "Range index", at: "1000000"}, rows: []}
               - now: 1000000
                 actions:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range", status: "INCOMPLETE"}]}
@@ -3529,7 +3529,7 @@ cases:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
               - now: 1000000
                 actions:
-                  - {execute: {release: "Range index", at: "1000000"}}
+                  - {query: {release: "Range index", at: "1000000"}, rows: []}
               - now: 1000000
                 actions:
                   - {writeMarker: {scope: "schema", version: null, items: "RANGE_INDEX:Person:name:Person_name_range"}}
@@ -3583,7 +3583,7 @@ cases:
                   - {query: {held: "Range index"}, rows: [0]}
               - now: 1000000
                 actions:
-                  - {execute: {claim: "Range index", at: "1000000"}}
+                  - {query: {claim: "Range index", at: "1000000"}, rows: []}
               - now: 1000000
                 actions:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
@@ -3593,7 +3593,7 @@ cases:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
               - now: 1000000
                 actions:
-                  - {execute: {release: "Range index", at: "1000000"}}
+                  - {query: {release: "Range index", at: "1000000"}, rows: []}
             done: 1000000
             report:
               item: {result: {created: {kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}}, dropped: null}
@@ -4221,7 +4221,7 @@ cases:
                   - {query: {held: "Range index"}, rows: [0]}
               - now: 1000000
                 actions:
-                  - {execute: {claim: "Range index", at: "1000000"}}
+                  - {query: {claim: "Range index", at: "1000000"}, rows: []}
               - now: 1000000
                 actions:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
@@ -4231,7 +4231,7 @@ cases:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
               - now: 1000000
                 actions:
-                  - {execute: {release: "Range index", at: "1000000"}}
+                  - {query: {release: "Range index", at: "1000000"}, rows: []}
               - now: 1000000
                 actions:
                   - {writeMarker: {scope: "schema", version: null, items: "RANGE_INDEX:Person:name:Person_name_range"}}
@@ -4242,7 +4242,7 @@ cases:
                   - {query: {marker: "held"}, rows: [0]}
               - now: 1000000
                 actions:
-                  - {execute: {marker: "claim", at: "1000000"}}
+                  - {query: {marker: "claim", at: "1000000"}, rows: []}
               - now: 1000000
                 actions:
                   - {query: {listing: "constraints"}, items: []}
@@ -4252,7 +4252,7 @@ cases:
                   - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "_DrivineSchema", properties: ["scope"], name: "_DrivineSchema_scope_unique"}]}
               - now: 1000000
                 actions:
-                  - {execute: {marker: "release", at: "1000000"}}
+                  - {query: {marker: "release", at: "1000000"}, rows: []}
               - now: 1000000
                 actions:
                   - {query: {listing: "indexes.FULLTEXT_INDEX"}, items: []}
@@ -4261,7 +4261,7 @@ cases:
                   - {query: {held: "Full-text index"}, rows: [0]}
               - now: 1000000
                 actions:
-                  - {execute: {claim: "Full-text index", at: "1000000"}}
+                  - {query: {claim: "Full-text index", at: "1000000"}, rows: []}
               - now: 1000000
                 actions:
                   - {query: {listing: "indexes.FULLTEXT_INDEX"}, items: []}
@@ -4271,7 +4271,7 @@ cases:
                   - {query: {listing: "indexes.FULLTEXT_INDEX"}, items: [{kind: "FULLTEXT_INDEX", label: "Doc", properties: ["title", "body"], name: "Doc_title_body_fulltext"}]}
               - now: 1000000
                 actions:
-                  - {execute: {release: "Full-text index", at: "1000000"}}
+                  - {query: {release: "Full-text index", at: "1000000"}, rows: []}
               - now: 1000000
                 actions:
                   - {writeMarker: {scope: "rag", version: "v1", items: "FULLTEXT_INDEX:Doc:title,body:Doc_title_body_fulltext"}}
@@ -4521,7 +4521,7 @@ cases:
                   - {query: {held: "Full-text index"}, rows: [0]}
               - now: 1000000
                 actions:
-                  - {execute: {claim: "Full-text index", at: "1000000"}}
+                  - {query: {claim: "Full-text index", at: "1000000"}, rows: []}
               - now: 1000000
                 actions:
                   - {query: {listing: "indexes.FULLTEXT_INDEX"}, items: []}
@@ -4531,7 +4531,7 @@ cases:
                   - {query: {listing: "indexes.FULLTEXT_INDEX"}, items: [{kind: "FULLTEXT_INDEX", label: "Doc", properties: ["title", "body"], name: "Doc_title_body_fulltext"}]}
               - now: 1000000
                 actions:
-                  - {execute: {release: "Full-text index", at: "1000000"}}
+                  - {query: {release: "Full-text index", at: "1000000"}, rows: []}
               - now: 1000000
                 actions:
                   - {writeMarker: {scope: "rag", version: null, items: "FULLTEXT_INDEX:Doc:title,body:Doc_title_body_fulltext"}}
@@ -4753,7 +4753,7 @@ cases:
                   - {query: {held: "Full-text index"}, rows: [0]}
               - now: 1000000
                 actions:
-                  - {execute: {claim: "Full-text index", at: "1000000"}}
+                  - {query: {claim: "Full-text index", at: "1000000"}, rows: []}
               - now: 1000000
                 actions:
                   - {query: {listing: "indexes.FULLTEXT_INDEX"}, items: []}
@@ -4763,7 +4763,7 @@ cases:
                   - {query: {listing: "indexes.FULLTEXT_INDEX"}, items: [{kind: "FULLTEXT_INDEX", label: "Doc", properties: ["title", "body"], name: "Doc_title_body_fulltext"}]}
               - now: 1000000
                 actions:
-                  - {execute: {release: "Full-text index", at: "1000000"}}
+                  - {query: {release: "Full-text index", at: "1000000"}, rows: []}
               - now: 1000000
                 actions:
                   - {writeMarker: {scope: "rag", version: null, items: "FULLTEXT_INDEX:Doc:title,body:Doc_title_body_fulltext"}}
@@ -4913,7 +4913,7 @@ cases:
                   - {query: {held: "Vector index by cosine"}, rows: [0]}
               - now: 1000000
                 actions:
-                  - {execute: {claim: "Vector index by cosine", at: "1000000"}}
+                  - {query: {claim: "Vector index by cosine", at: "1000000"}, rows: []}
               - now: 1000000
                 actions:
                   - {query: {listing: "indexes.VECTOR_INDEX"}, items: []}
@@ -4923,7 +4923,7 @@ cases:
                   - {query: {listing: "indexes.VECTOR_INDEX"}, items: [{kind: "VECTOR_INDEX", label: "Chunk", properties: ["embedding"], name: "Chunk_embedding_vector", dimensions: 384, similarity: "COSINE"}]}
               - now: 1000000
                 actions:
-                  - {execute: {release: "Vector index by cosine", at: "1000000"}}
+                  - {query: {release: "Vector index by cosine", at: "1000000"}, rows: []}
               - now: 1000000
                 actions:
                   - {writeMarker: {scope: "schema", version: "v3", items: "RANGE_INDEX:Person:name:Person_name_range\nruntime:VECTOR_INDEX:Chunk:embedding:Chunk_embedding_vector"}}
@@ -5020,7 +5020,7 @@ cases:
                   - {query: {held: "Range index over two properties"}, rows: [0]}
               - now: 1000000
                 actions:
-                  - {execute: {claim: "Range index over two properties", at: "1000000"}}
+                  - {query: {claim: "Range index over two properties", at: "1000000"}, rows: []}
               - now: 1000000
                 actions:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
@@ -5030,7 +5030,7 @@ cases:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name", "born"], name: "Person_name_born_range"}]}
               - now: 1000000
                 actions:
-                  - {execute: {release: "Range index over two properties", at: "1000000"}}
+                  - {query: {release: "Range index over two properties", at: "1000000"}, rows: []}
               - now: 1000000
                 actions:
                   - {query: {listing: "indexes.VECTOR_INDEX"}, items: []}
@@ -5039,7 +5039,7 @@ cases:
                   - {query: {held: "Vector index by cosine"}, rows: [0]}
               - now: 1000000
                 actions:
-                  - {execute: {claim: "Vector index by cosine", at: "1000000"}}
+                  - {query: {claim: "Vector index by cosine", at: "1000000"}, rows: []}
               - now: 1000000
                 actions:
                   - {query: {listing: "indexes.VECTOR_INDEX"}, items: []}
@@ -5049,7 +5049,7 @@ cases:
                   - {query: {listing: "indexes.VECTOR_INDEX"}, items: [{kind: "VECTOR_INDEX", label: "Chunk", properties: ["embedding"], name: "Chunk_embedding_vector", dimensions: 384, similarity: "COSINE"}]}
               - now: 1000000
                 actions:
-                  - {execute: {release: "Vector index by cosine", at: "1000000"}}
+                  - {query: {release: "Vector index by cosine", at: "1000000"}, rows: []}
               - now: 1000000
                 actions:
                   - {writeMarker: {scope: "schema", version: null, items: "runtime:RANGE_INDEX:Person:name,born:Person_name_born_range\nruntime:VECTOR_INDEX:Chunk:embedding:Chunk_embedding_vector"}}
@@ -5836,7 +5836,7 @@ cases:
                   - {query: {held: "Range index"}, rows: [0]}
               - now: 1000000
                 actions:
-                  - {execute: {claim: "Range index", at: "1000000"}}
+                  - {query: {claim: "Range index", at: "1000000"}, rows: []}
               - now: 1000000
                 actions:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
@@ -5846,7 +5846,7 @@ cases:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["name"], name: "Person_name_range"}]}
               - now: 1000000
                 actions:
-                  - {execute: {release: "Range index", at: "1000000"}}
+                  - {query: {release: "Range index", at: "1000000"}, rows: []}
             done: 1000000
             report:
               owners:
@@ -6070,7 +6070,7 @@ cases:
                   - {query: {held: "Range index that ignores case"}, rows: [0]}
               - now: 1000000
                 actions:
-                  - {execute: {claim: "Range index that ignores case", at: "1000000"}}
+                  - {query: {claim: "Range index that ignores case", at: "1000000"}, rows: []}
               - now: 1000000
                 actions:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: []}
@@ -6080,7 +6080,7 @@ cases:
                   - {query: {listing: "indexes.RANGE_INDEX"}, items: [{kind: "RANGE_INDEX", label: "Person", properties: ["__drivine.lower.email"], name: "Person_email_ci_range"}]}
               - now: 1000000
                 actions:
-                  - {execute: {release: "Range index that ignores case", at: "1000000"}}
+                  - {query: {release: "Range index that ignores case", at: "1000000"}, rows: []}
               - now: 1000000
                 actions:
                   - {query: {listing: "constraints"}, items: []}
@@ -6090,7 +6090,7 @@ cases:
                   - {query: {held: "Uniqueness constraint that ignores case"}, rows: [0]}
               - now: 1000000
                 actions:
-                  - {execute: {claim: "Uniqueness constraint that ignores case", at: "1000000"}}
+                  - {query: {claim: "Uniqueness constraint that ignores case", at: "1000000"}, rows: []}
               - now: 1000000
                 actions:
                   - {query: {listing: "constraints"}, items: []}
@@ -6100,7 +6100,7 @@ cases:
                   - {query: {listing: "constraints"}, items: [{kind: "UNIQUENESS_CONSTRAINT", label: "Person", properties: ["__drivine.lower.email"], name: "Person_email_ci_unique"}]}
               - now: 1000000
                 actions:
-                  - {execute: {release: "Uniqueness constraint that ignores case", at: "1000000"}}
+                  - {query: {release: "Uniqueness constraint that ignores case", at: "1000000"}, rows: []}
               - now: 1000000
                 actions:
                   - {writeMarker: {scope: "schema", version: null, items: "RANGE_INDEX:Person:__drivine.lower.email:Person_email_ci_range\nUNIQUENESS_CONSTRAINT:Person:__drivine.lower.email:Person_email_ci_unique"}}
@@ -6825,7 +6825,7 @@ cases:
                   - {query: {held: "Uniqueness constraint"}, rows: [0]}
               - now: 1000000
                 actions:
-                  - {execute: {claim: "Uniqueness constraint", at: "1000000"}}
+                  - {query: {claim: "Uniqueness constraint", at: "1000000"}, rows: []}
               - now: 1000000
                 actions:
                   - {query: {listing: "constraints"}, rows: [{"object": "DRIVINE_UQ2_PERSONEMAIL_5482A751", "type": "TABLE", "table": null, "uniqueness": null, "indexType": null, "columns": null, "tableColumns": ["X NUMBER"], "source": null}]}
@@ -6835,7 +6835,7 @@ cases:
                   - {query: {listing: "constraints"}, rows: [{"kind": "UNIQUENESS_CONSTRAINT", "label": "Person", "properties": ["email"], "name": "Person_email_unique", "details": {"form": 2}, "status": null}, {"object": "DRIVINE_IX2_EMAIL_5C24B9C", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "NONUNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["CASE  WHEN CASE JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email.type()' RETURNING VARCHAR2(16) NULL ON ERROR TYPE(LAX) ) WHEN 'object' THEN COALESCE(JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email.s' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) ),JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email.v' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )) WHEN 'number' THEN TO_CHAR(JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING NUMBER NULL ON ERROR TYPE(LAX) ),'TM9') WHEN 'double' THEN CASE  WHEN (JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING BINARY_DOUBLE NULL ON ERROR TYPE(LAX) )=FLOOR(JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING BINARY_DOUBLE NULL ON ERROR TYPE(LAX) )) AND JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING BINARY_DOUBLE NULL ON ERROR TYPE(LAX) )>=(-9.2233720368547758E+018D) AND JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING BINARY_DOUBLE NULL ON ERROR TYPE(LAX) )<9.2233720368547758E+018D) THEN TO_CHAR(CAST(FLOOR(JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING BINARY_DOUBLE NULL ON ERROR TYPE(LAX) )/4.294967296E+009D) AS NUMBER)*4294967296+CAST(JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING BINARY_DOUBLE NULL ON ERROR TYPE(LAX) )-FLOOR(JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING BINARY_DOUBLE NULL ON ERROR TYPE(LAX) )/4.294967296E+009D)*4.294967296E+009D AS NUMBER),'TM9') ELSE 'd'||TO_CHAR(JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING BINARY_DOUBLE NULL ON ERROR TYPE(LAX) )) END  ELSE JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) ) END  IS NOT NULL THEN CASE JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email.type()' RETURNING VARCHAR2(16) NULL ON ERROR TYPE(LAX) ) WHEN 'object' THEN JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email.\"$t\"' RETURNING VARCHAR2(16) NULL ON ERROR TYPE(LAX) ) WHEN 'double' THEN 'number' ELSE JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email.type()' RETURNING VARCHAR2(16) NULL ON ERROR TYPE(LAX) ) END  END ", "CASE JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email.type()' RETURNING VARCHAR2(16) NULL ON ERROR TYPE(LAX) ) WHEN 'object' THEN COALESCE(JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email.s' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) ),JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email.v' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )) WHEN 'number' THEN TO_CHAR(JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING NUMBER NULL ON ERROR TYPE(LAX) ),'TM9') WHEN 'double' THEN CASE  WHEN (JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING BINARY_DOUBLE NULL ON ERROR TYPE(LAX) )=FLOOR(JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING BINARY_DOUBLE NULL ON ERROR TYPE(LAX) )) AND JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING BINARY_DOUBLE NULL ON ERROR TYPE(LAX) )>=(-9.2233720368547758E+018D) AND JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING BINARY_DOUBLE NULL ON ERROR TYPE(LAX) )<9.2233720368547758E+018D) THEN TO_CHAR(CAST(FLOOR(JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING BINARY_DOUBLE NULL ON ERROR TYPE(LAX) )/4.294967296E+009D) AS NUMBER)*4294967296+CAST(JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING BINARY_DOUBLE NULL ON ERROR TYPE(LAX) )-FLOOR(JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING BINARY_DOUBLE NULL ON ERROR TYPE(LAX) )/4.294967296E+009D)*4.294967296E+009D AS NUMBER),'TM9') ELSE 'd'||TO_CHAR(JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING BINARY_DOUBLE NULL ON ERROR TYPE(LAX) )) END  ELSE JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) ) END "], "tableColumns": null, "source": null}, {"object": "DRIVINE_UQ2_PERSONEMAIL_5482A751", "type": "INDEX", "table": "DRIVINE_NODE", "uniqueness": "UNIQUE", "indexType": "FUNCTION-BASED NORMAL", "columns": ["CASE  WHEN (JSON_EXISTS2(\"LABELS\" FORMAT OSON , '$[*]?(@ == \"Person\")' /* json_path_str  $[*]?(@.string() == \"Person\")  */  FALSE ON ERROR TYPE(LAX) )=1 AND JSON_EXISTS2(\"PROPS\" FORMAT OSON , '$.email' FALSE ON ERROR TYPE(LAX) )=1) THEN CASE  WHEN CASE JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email.type()' RETURNING VARCHAR2(16) NULL ON ERROR TYPE(LAX) ) WHEN 'object' THEN COALESCE(JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email.s' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) ),JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email.v' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )) WHEN 'number' THEN TO_CHAR(JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING NUMBER NULL ON ERROR TYPE(LAX) ),'TM9') WHEN 'double' THEN CASE  WHEN (JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING BINARY_DOUBLE NULL ON ERROR TYPE(LAX) )=FLOOR(JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING BINARY_DOUBLE NULL ON ERROR TYPE(LAX) )) AND JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING BINARY_DOUBLE NULL ON ERROR TYPE(LAX) )>=(-9.2233720368547758E+018D) AND JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING BINARY_DOUBLE NULL ON ERROR TYPE(LAX) )<9.2233720368547758E+018D) THEN TO_CHAR(CAST(FLOOR(JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING BINARY_DOUBLE NULL ON ERROR TYPE(LAX) )/4.294967296E+009D) AS NUMBER)*4294967296+CAST(JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING BINARY_DOUBLE NULL ON ERROR TYPE(LAX) )-FLOOR(JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING BINARY_DOUBLE NULL ON ERROR TYPE(LAX) )/4.294967296E+009D)*4.294967296E+009D AS NUMBER),'TM9') ELSE 'd'||TO_CHAR(JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING BINARY_DOUBLE NULL ON ERROR TYPE(LAX) )) END  ELSE JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) ) END  IS NOT NULL THEN CASE JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email.type()' RETURNING VARCHAR2(16) NULL ON ERROR TYPE(LAX) ) WHEN 'object' THEN JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email.\"$t\"' RETURNING VARCHAR2(16) NULL ON ERROR TYPE(LAX) ) WHEN 'double' THEN 'number' ELSE JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email.type()' RETURNING VARCHAR2(16) NULL ON ERROR TYPE(LAX) ) END  END  END ", "CASE  WHEN (JSON_EXISTS2(\"LABELS\" FORMAT OSON , '$[*]?(@ == \"Person\")' /* json_path_str  $[*]?(@.string() == \"Person\")  */  FALSE ON ERROR TYPE(LAX) )=1 AND JSON_EXISTS2(\"PROPS\" FORMAT OSON , '$.email' FALSE ON ERROR TYPE(LAX) )=1) THEN CASE JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email.type()' RETURNING VARCHAR2(16) NULL ON ERROR TYPE(LAX) ) WHEN 'object' THEN COALESCE(JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email.s' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) ),JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email.v' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) )) WHEN 'number' THEN TO_CHAR(JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING NUMBER NULL ON ERROR TYPE(LAX) ),'TM9') WHEN 'double' THEN CASE  WHEN (JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING BINARY_DOUBLE NULL ON ERROR TYPE(LAX) )=FLOOR(JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING BINARY_DOUBLE NULL ON ERROR TYPE(LAX) )) AND JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING BINARY_DOUBLE NULL ON ERROR TYPE(LAX) )>=(-9.2233720368547758E+018D) AND JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING BINARY_DOUBLE NULL ON ERROR TYPE(LAX) )<9.2233720368547758E+018D) THEN TO_CHAR(CAST(FLOOR(JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING BINARY_DOUBLE NULL ON ERROR TYPE(LAX) )/4.294967296E+009D) AS NUMBER)*4294967296+CAST(JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING BINARY_DOUBLE NULL ON ERROR TYPE(LAX) )-FLOOR(JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING BINARY_DOUBLE NULL ON ERROR TYPE(LAX) )/4.294967296E+009D)*4.294967296E+009D AS NUMBER),'TM9') ELSE 'd'||TO_CHAR(JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING BINARY_DOUBLE NULL ON ERROR TYPE(LAX) )) END  ELSE JSON_VALUE(\"PROPS\" FORMAT OSON , '$.email' RETURNING VARCHAR2(4000) NULL ON ERROR TYPE(LAX) ) END  END "], "tableColumns": null, "source": null}, {"object": "DRIVINE_UQ2_PERSONEMAIL_5482A751", "type": "TABLE", "table": null, "uniqueness": null, "indexType": null, "columns": null, "tableColumns": ["X NUMBER"], "source": null}]}
               - now: 1000000
                 actions:
-                  - {execute: {release: "Uniqueness constraint", at: "1000000"}}
+                  - {query: {release: "Uniqueness constraint", at: "1000000"}, rows: []}
               - now: 1000000
                 actions:
                   - {writeMarker: {scope: "schema", version: null, items: "UNIQUENESS_CONSTRAINT:Person:email:Person_email_unique"}}

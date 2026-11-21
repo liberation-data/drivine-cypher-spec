@@ -82,6 +82,12 @@ class OnlineIndexBuildTest {
                     action is PlanAction.Query && action.statement.startsWith("INSERT INTO drivine_schema AS c") ->
                         claimed(turns.count { it.startsWith("take") }).also { turns += "take ${it?.size ?: "failed"}" }
                             ?.let { PlanOutcome.Rows(it) } ?: PlanOutcome.Failed(StoreError(Cause("42501", 0, null, null, "permission denied for table drivine_schema")))
+                    // Oracle's take and release of a turn, each a block of its own transaction marked `at`, run as a query that
+                    // gives no rows: answered as [execute] answers a statement, failed where it gives an error.
+                    action is PlanAction.Query && action.statement.startsWith("DECLARE") && "'CLAIM:" in action.statement -> {
+                        turns += (if ("INSERT INTO" in action.statement) "take '" else "release '") + action.parameters["at"] + "'"
+                        execute(action.statement)?.let { PlanOutcome.Failed(it) } ?: PlanOutcome.Rows(emptyList())
+                    }
                     // Its release, a query too: answered as [execute] answers a statement, failed where it gives an error.
                     action is PlanAction.Query && action.statement.startsWith("DELETE FROM drivine_schema WHERE kind = 'CLAIM:") -> {
                         turns += "release '${action.parameters["at"]}'"
@@ -101,10 +107,6 @@ class OnlineIndexBuildTest {
                     is PlanAction.Execute -> {
                         val text = (action.statement as DdlStatement.Text).statement
                         if (action.purpose == Purpose.DDL) ran += text
-                        // Oracle's take and release of a turn, each a block of its own transaction, marked `at`.
-                        if (action.purpose == Purpose.MARKER && "'CLAIM:" in text) {
-                            turns += (if ("INSERT INTO" in text) "take '" else "release '") + action.parameters["at"] + "'"
-                        }
                         execute(text)?.let { PlanOutcome.Failed(it) } ?: PlanOutcome.Ran.also { madeBy(text) }
                     }
                     is PlanAction.ReadLowerCopies -> PlanOutcome.Rows(emptyList())
@@ -1371,6 +1373,37 @@ class OnlineIndexBuildTest {
         assertIs<EnsureResult.Created>(report.item!!.result)
         assertEquals(listOf("take '0'"), turns)
         assertNull(report.failure)
+    }
+
+    @Test
+    fun anOracleTurnHeldElsewherePastTheWaitIsEnsuredWithoutItAndSaidSo() {
+        val (ran, report) = drive(oracle, email, listed = { if (it == oracleHeld(email)) listOf(1L) else emptyList() })
+        assertIs<EnsureResult.Created>(report.item!!.result)
+        assertTrue(ran.isNotEmpty())
+        // Counted every 200 ms for the 60 s of a build's default timeout, never taken, so nothing given up.
+        assertEquals(emptyList(), turns)
+        assertEquals(
+            listOf("Oracle UNIQUENESS_CONSTRAINT on Person[email]: another session's ensure of it held its turn to build it for PT1M: ensuring it without"),
+            report.log.filter { "its turn" in it.message }.map { it.message },
+        )
+    }
+
+    @Test
+    fun anOracleTurnIsGivenUpWhereTheEnsureFails() {
+        val full = StoreError(Cause("72000", 1652, null, null, "ORA-01652: unable to extend temp segment"))
+        val (_, report) = drive(oracle, email, execute = { if ("'CLAIM:" !in it && "CREATE" in it) full else null })
+        assertTrue(report.failure != null || report.rethrown != null, "$report")
+        assertEquals(listOf("take '0'", "release '0'"), turns)
+    }
+
+    @Test
+    fun anOracleReleaseTheStoreRefusesIsLetBe() {
+        val lost = StoreError(Cause("08006", 17410, null, null, "No more data to read from socket"))
+        val (_, report) = drive(oracle, email, execute = { if ("'CLAIM:" in it && "INSERT INTO" !in it) lost else null })
+        assertIs<EnsureResult.Created>(report.item!!.result)
+        assertNull(report.failure)
+        assertNull(report.rethrown)
+        assertEquals(listOf("take '0'", "release '0'"), turns)
     }
 
     @Test
