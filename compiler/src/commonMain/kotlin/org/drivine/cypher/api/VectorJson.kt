@@ -20,7 +20,8 @@ import org.drivine.schema.SimilarityFunction
  * and where they apply `searchK`, `size` (the query vector's, on a nearest search on a SQL store), `partitionLabel`, `index`
  * (`{"dimensions": …}` on Postgres and Oracle, `{"name": …}` on a graph engine, left out where there's none), `among`
  * (`{"ids": […], "idProperty": …, "threshold": …, "neighbours": …}`, `neighbours` `"all"`, as when it's left out, or
- * `"after"`: [AmongNeighbours]), and on a graph engine `alias` and `scoreAlias` where they aren't `n` and `_score`. The answer
+ * `"after"`: [AmongNeighbours]; each of `ids` a text, on a SQL store the id's JSON as the node holds it, on a graph engine the
+ * id's text: [VectorAmong.ids]), and on a graph engine `alias` and `scoreAlias` where they aren't `n` and `_score`. The answer
  * is `{"sql": …, "parameters": {…}, "vector": …, "labelCheck": …, "indexK": …, "warnings": […]}`, on a graph engine `cypher`
  * in place of `sql`, and `"timeoutMillis": …` after the warnings where the plan gives one; or `{"refusal": …}`, or
  * `{"error": …}` where the request is no request. `vector` is the parameter the library binds its query vector as, null among

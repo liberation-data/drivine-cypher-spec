@@ -303,9 +303,14 @@ object OracleSql {
     /** The words before a derived table's or a lateral query's opening bracket: see [readsTable]. */
     private val SOURCE_WORDS = setOf("FROM", "JOIN", "LATERAL", "APPLY")
 
-    /** The texts of the JSON array bound as [parameter], as rows, each as `id` beside its place in the array, `pos`, counted from 1. */
-    fun placedTextValues(parameter: String): String =
-        "SELECT v.id, v.pos FROM JSON_TABLE($parameter, '$[*]' COLUMNS (pos FOR ORDINALITY, id VARCHAR2(4000) PATH '$')) v"
+    /**
+     * The ids bound as [parameter], a JSON array of each id's JSON text, as rows: each id's class and key, `id_class` and `id_key`,
+     * as [IdSql.hasIdIn] reads them, so the index over a node's id ([IndexKey.column]) answers a join on them, beside its place
+     * in the array, `pos`, counted from 1.
+     */
+    fun placedIds(parameter: String): String =
+        "SELECT ${valueClass("JSON(v.json)")} AS id_class, ${valueKey("JSON(v.json)")} AS id_key, v.pos " +
+            "FROM JSON_TABLE($parameter, '$[*]' COLUMNS (pos FOR ORDINALITY, json VARCHAR2(4000) PATH '$')) v"
 
     /** A JSON object of [entries], each a key and the expression for its value, laid out under the key. */
     fun jsonObject(entries: List<Pair<String, String>>): String =

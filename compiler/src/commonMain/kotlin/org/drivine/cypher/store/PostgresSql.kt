@@ -131,9 +131,13 @@ object PostgresSql {
         return labels.joinToString(" AND ") { hasLabel(alias, it) }
     }
 
-    /** The texts of the JSON array bound as [parameter], as rows, a string as itself and anything else as its JSON, each as `id` beside its place in the array, `pos`, counted from 1. */
-    fun placedTextValues(parameter: String): String =
-        "SELECT v.value #>> '{}' AS id, v.pos FROM jsonb_array_elements(CAST($parameter AS jsonb)) WITH ORDINALITY v(value, pos)"
+    /**
+     * The ids bound as [parameter], a JSON array of each id's JSON text, as rows: each id's JSON as `json`, as [IdSql.hasIdIn]
+     * reads it, so the index over a node's id ([IndexKey.column]) answers a join on it, beside its place in the array, `pos`,
+     * counted from 1.
+     */
+    fun placedIds(parameter: String): String =
+        "SELECT CAST(v.value #>> '{}' AS jsonb) AS json, v.pos FROM jsonb_array_elements(CAST($parameter AS jsonb)) WITH ORDINALITY v(value, pos)"
 
     /** A JSON object of [entries], each a key and the expression for its value, laid out under the key. */
     fun jsonObject(entries: List<Pair<String, String>>): String =

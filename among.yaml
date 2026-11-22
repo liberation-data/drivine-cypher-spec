@@ -2,9 +2,12 @@
 # loadNearestAmong(ids, topK, threshold, searchK, neighbours) gives it. See README.md.
 #
 # A step names the label, the embedding's property and its index, the ids as a caller gives them, topK, and where it gives
-# them a threshold, a searchK and `neighbours`: `all`, every other node of the set, or `after`, only those after the node in
+# them a threshold, a searchK, `idType`, the type of the label's @NodeId (`text`, as where it's left out, or `integer`),
+# and `neighbours`: `all`, every other node of the set, or `after`, only those after the node in
 # the ids, so each pair comes back once. A library gives the ids to the module in its id type's own order, here text by
-# code point, so a step gives them in any order, and a repeat once. Its `rows` are, for each id of a node that holds an
+# code point and an integer by value, so a step gives them in any order, and a repeat once. On a SQL store the library gives each id as its JSON,
+# as a lookup by id reads it (an integer as its digits, a text quoted), and a root is found as that lookup finds it, through
+# the index over the id (drivine4j#868). Its `rows` are, for each id of a node that holds an
 # embedding the search can measure, in that order, the node's neighbours, best first, each its id and score, as the
 # module's statement gives them (VectorSearch, `{seed, near}`); an id of no node, or of a node without such an embedding,
 # has no row.
@@ -56,13 +59,18 @@ graph: |
          (:Named {id: 'it\'s', embedding: [0.342, 0.9397, 0.0]}),
          (:Named {id: '7', embedding: [-0.1736, 0.9848, 0.0]}),
          (:Named {id: 'a`b', embedding: [-0.866, 0.5, 0.0]}),
-         (:Named {id: '$x', embedding: [-1.0, 0.0, 0.0]})
+         (:Named {id: '$x', embedding: [-1.0, 0.0, 0.0]}),
+         (:Counted {id: 1, embedding: [1.0, 0.0, 0.0]}),
+         (:Counted {id: 2, embedding: [0.8, 0.6, 0.0]}),
+         (:Counted {id: 10, embedding: [0.0, 1.0, 0.0]}),
+         (:Counted {id: '2', embedding: [0.6, 0.8, 0.0]})
 
 indexes:
   - {kind: "VECTOR_INDEX", label: "Doc", properties: ["embedding"], options: {dimensions: 3, similarity: "COSINE"}}
   - {kind: "VECTOR_INDEX", label: "Place", properties: ["embedding"], options: {dimensions: 3, similarity: "EUCLIDEAN"}}
   - {kind: "VECTOR_INDEX", label: "Tie", properties: ["embedding"], options: {dimensions: 3, similarity: "COSINE"}}
   - {kind: "VECTOR_INDEX", label: "Named", properties: ["embedding"], options: {dimensions: 3, similarity: "COSINE"}}
+  - {kind: "VECTOR_INDEX", label: "Counted", properties: ["embedding"], options: {dimensions: 3, similarity: "COSINE"}}
 
 cases:
   - name: "Each pair once"
@@ -215,6 +223,34 @@ cases:
           - {seed: "doc 2", near: [{id: "doc-1", score: 0.9330095}, {id: "it's", score: 0.8830194}]}
           - {seed: "doc-1", near: [{id: "it's", score: 0.671}]}
           - {seed: "it's", near: []}
+
+  - name: "Ids of another type"
+    description: >-
+      Where the @NodeId is an integer, each id is found as a lookup by id finds it: 2 is the node whose id is the integer 2,
+      not the one whose id is the text '2', and the ids are placed as integers, 2 before 10, not as text. The text '2' is no
+      root, and no neighbour, of a search by integer ids. A graph engine is given the ids as text today, so it finds the text
+      '2' in their place (liberation-data/drivine-cypher-spec#422).
+    steps:
+      - among: {label: "Counted", property: "embedding", ids: ["10", "2", "1"], idType: "integer", topK: 2, neighbours: "all"}
+        rows:
+          - {seed: "1", near: [{id: "2", score: 0.9}, {id: "10", score: 0.5}]}
+          - {seed: "2", near: [{id: "1", score: 0.9}, {id: "10", score: 0.8}]}
+          - {seed: "10", near: [{id: "2", score: 0.8}, {id: "1", score: 0.5}]}
+        today:
+          - stores: ["graph"]
+            rows:
+              - {seed: "2", near: []}
+            issue: "liberation-data/drivine-cypher-spec#422"
+      - among: {label: "Counted", property: "embedding", ids: ["10", "2", "1"], idType: "integer", topK: 2, neighbours: "after"}
+        rows:
+          - {seed: "1", near: [{id: "2", score: 0.9}, {id: "10", score: 0.5}]}
+          - {seed: "2", near: [{id: "10", score: 0.8}]}
+          - {seed: "10", near: []}
+        today:
+          - stores: ["graph"]
+            rows:
+              - {seed: "2", near: []}
+            issue: "liberation-data/drivine-cypher-spec#422"
 
   - name: "The ids' order is their own"
     description: >-

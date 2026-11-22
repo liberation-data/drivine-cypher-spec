@@ -9,6 +9,8 @@ import org.drivine.cypher.search.Placed
 import org.drivine.cypher.search.Query
 import org.drivine.cypher.search.SearchParameters
 import org.drivine.cypher.search.Table
+import org.drivine.cypher.store.IdSql
+import org.drivine.cypher.store.IndexKey
 import org.drivine.cypher.store.OracleSql
 import org.drivine.cypher.store.PostgresSql
 import org.drivine.cypher.store.SqliteSql
@@ -35,8 +37,11 @@ data class VectorIndex(val dimensions: Int? = null, val name: String? = null)
  * A search among ids: for each root among [ids] that holds the embedding, its nearest among the others. By cosine, on a SQL
  * store, a root whose embedding has no length, all zeros, is left out, as a seed and as a neighbour.
  *
- * @param ids the roots' ids, as the text each is found by; a repeat is dropped, as drivine4j's `loadNearestAmong` drops it.
- *   The library gives them in its id type's own order, as their places decide which neighbours a root keeps for each pair
+ * @param ids the roots' ids; a repeat is dropped, as drivine4j's `loadNearestAmong` drops it. On a SQL store each is the id's
+ *   JSON as the node holds it (`StoreValues.text`), as a lookup by id is given it, and a root is found as that lookup finds it,
+ *   through the index over the id ([org.drivine.cypher.store.IdSql.hasIdIn]), and its id read back as
+ *   [org.drivine.cypher.store.IdSql.keyText] reads it, a temporal id as its tag's text (drivine4j#868). On a graph engine each is the
+ *   id's text, so only a text id is found there (liberation-data/drivine-cypher-spec#422). The library gives them in its id type's own order, as their places decide which neighbours a root keeps for each pair
  *   once ([AmongNeighbours.After]), and, of two neighbours that score exactly alike, which comes first, on every store but
  *   FalkorDB through the index, where the index's own order decides (liberation-data/drivine-cypher-spec#412, #416). Neo4j and FalkorDB score in float32, so two pairs that score alike in exact
  *   arithmetic can differ in their last bit on one store and not another: only an exact tie is decided so.
@@ -255,6 +260,17 @@ object VectorSearch {
      */
     private fun stored(property: String): String = ValueLayout.escape(property)
 
+    /**
+     * The join of a root, the node `c`, to its place among the ids: the node's id held under [key], as the index over it is
+     * made ([IndexKey.column]), equal to the given id's JSON on Postgres, and its class and key on Oracle and SQLite, as
+     * `placedIds` reads them once for each id. So a root is found as a library's lookup by its id finds it, a temporal id by
+     * its tag, through the index.
+     */
+    private fun placedOn(store: Store, key: String): String {
+        val column = IndexKey.column(store, "c", key)
+        return if (store == Store.POSTGRES) "${column.single()} = g.json" else "${column[0]} = g.id_class AND ${column[1]} = g.id_key"
+    }
+
     /** The label the index a search goes through is on: its partition's, or the root's first. */
     private fun indexLabel(request: VectorRequest): String = request.partitionLabel ?: request.labels.first()
 
@@ -367,13 +383,16 @@ object VectorSearch {
      */
     private fun postgresAmong(ddl: PostgresDdl, request: VectorRequest, among: VectorAmong, scope: SearchParameters): String {
         val key = stored(request.property)
-        val id = PostgresSql.property("c", stored(among.idProperty))
+        val idKey = stored(among.idProperty)
+        val id = IdSql.keyText(Store.POSTGRES, "c", idKey)
         val after = among.neighbours == AmongNeighbours.After
         val dimensions = request.index.dimensions.takeUnless { measuresEveryPair(request) }
         val embedded = dimensions?.let { PostgresSql.holdsEmbedding("c", key, it) } ?: "jsonb_typeof(${PostgresSql.value("c", key)}) = 'array'"
         val ids = scope.bound(among.ids)
-        val has = listOf(PostgresSql.hasLabels("c", request.labels), embedded) + listOfNotNull(postgresAnyLength(request, "c", key))
-        val members = Query("c.nid, $id AS id, c.props, g.pos", Placed(ddl.nodes, "c", PostgresSql.placedTextValues(ids), "g", "g.id = $id"), has)
+        // The roots are found through the index over the id, as a lookup by id finds them, and each joined to its place.
+        val has = listOf(PostgresSql.hasLabels("c", request.labels), embedded, IdSql.hasIdIn(Store.POSTGRES, "c", idKey, ids)) +
+            listOfNotNull(postgresAnyLength(request, "c", key))
+        val members = Query("c.nid, $id AS id, c.props, g.pos", Placed(ddl.nodes, "c", PostgresSql.placedIds(ids), "g", placedOn(Store.POSTGRES, idKey)), has)
         val other = if (after) "o.pos > s.pos" else "o.nid <> s.nid"
         val nearest = if (dimensions == null) {
             val distance = "${PostgresSql.embedding("o", key)} ${PostgresSql.distance(request.similarity)} ${PostgresSql.embedding("s", key)}"
@@ -446,17 +465,18 @@ object VectorSearch {
      */
     private fun oracleAmong(ddl: OracleDdl, request: VectorRequest, among: VectorAmong, scope: SearchParameters): String {
         val key = stored(request.property)
-        val id = OracleSql.property("c", stored(among.idProperty))
+        val idKey = stored(among.idProperty)
+        val id = IdSql.keyText(Store.ORACLE, "c", idKey)
         val after = among.neighbours == AmongNeighbours.After
         val embeddings = request.index.dimensions?.takeUnless { measuresEveryPair(request) }?.let { ddl.vectors(request.labels.first(), request.property) }
         val ids = scope.bound(among.ids)
         val selected = "c.nid, $id AS id, ${OracleSql.embedding("c", key)} AS embedding"
         val has = listOfNotNull(
-            OracleSql.hasLabels("c", request.labels), OracleSql.hasProperty("c", key),
+            OracleSql.hasLabels("c", request.labels), OracleSql.hasProperty("c", key), IdSql.hasIdIn(Store.ORACLE, "c", idKey, ids, uncoalesced = true),
             embeddings?.let { "c.nid IN (${OracleSql.uncoalesced("SELECT e.nid FROM $it e")})" },
             oracleLength(request, OracleSql.embedding("c", key)),
         )
-        val members = Query("$selected, g.pos", Placed(ddl.nodes, "c", OracleSql.placedTextValues(ids), "g", "g.id = $id"), has)
+        val members = Query("$selected, g.pos", Placed(ddl.nodes, "c", OracleSql.placedIds(ids), "g", placedOn(Store.ORACLE, idKey)), has)
         val other = if (after) "o.pos > s.pos" else "o.nid <> s.nid"
         val metric = OracleSql.metric(request.similarity)
         val pairs = if (embeddings == null) {
@@ -502,11 +522,15 @@ object VectorSearch {
      */
     private fun sqliteAmong(ddl: SqliteDdl, request: VectorRequest, among: VectorAmong, scope: SearchParameters): String {
         val key = stored(request.property)
-        val id = SqliteSql.property("c", stored(among.idProperty))
+        val idKey = stored(among.idProperty)
+        val id = IdSql.keyText(Store.SQLITE, "c", idKey)
         val after = among.neighbours == AmongNeighbours.After
         val ids = scope.bound(among.ids)
-        val has = listOf(SqliteSql.hasLabels("c", request.labels), "${SqliteSql.type("c", key)} = 'array'") + listOfNotNull(sqliteLength(request, "c", key))
-        val members = Query("c.nid, $id AS id, c.props, g.pos", Placed(ddl.nodes, "c", SqliteSql.placedTextValues(ids), "g", "g.id = $id"), has)
+        val has = listOf(
+            SqliteSql.hasLabels("c", request.labels), "${SqliteSql.type("c", key)} = 'array'",
+            IdSql.hasIdIn(Store.SQLITE, "c", idKey, ids, ddl.nodes, request.labels),
+        ) + listOfNotNull(sqliteLength(request, "c", key))
+        val members = Query("c.nid, $id AS id, c.props, g.pos", Placed(ddl.nodes, "c", SqliteSql.placedIds(ids), "g", placedOn(Store.SQLITE, idKey)), has)
         val scored = Query(
             "s.nid AS seed, o.nid, o.id, o.pos, ${SqliteSql.score("o", key, request.similarity, SqliteSql.value("s", key))} AS score",
             Paired(MEMBERS, "s", "o", if (after) "o.pos > s.pos" else "o.nid <> s.nid"),

@@ -250,7 +250,10 @@ engine its `name` where it isn't `<label>_<property>_vector`. A nearest search g
 made for the vector's size; a search among ids with `searchK` goes through any index made, and one without measures
 every pair. `among` is
 `{ids, idProperty, threshold, neighbours}`, each id searched once however often it is given, as drivine4j's
-`loadNearestAmong` searches them.
+`loadNearestAmong` searches them. On a SQL store each id is its JSON as the node holds it, as a lookup by id is given it:
+the roots are found as that lookup finds them, through the index over the id (`IdSql.hasIdIn`), each joined to its place
+by the index's own expressions, and each id is read back as `IdSql.keyText` reads it, a temporal id as its tag's text
+(drivine4j#868). On a graph engine each id is its text, so only a text id is found there (#422).
 
 `neighbours` is `AmongNeighbours.All`, every other root (as when it's left out), or `AmongNeighbours.After`, only the roots
 after each root in the ids, so each pair comes back once, under the root given first (#406). The direction is kept before
@@ -368,7 +371,10 @@ SQL entries of a nearest search by cosine were edited by a script to leave out a
 Neo4j's cosine index does, and the 40 of a search among ids by cosine to leave out a root with one (#160), which drivine4j
 at that commit does not. The 70 SQL entries of a search among ids were edited by a script to read each root's place
 among the ids and break a tie of two scores by place, then `nid`, and Neo4j's and Memgraph's 32 to bind each id's place as a
-map, `_cy_vec2`, the later parameters numbered on, and keep and order each hit by its place, where its id is text (#412). No other edit was made. `VectorSearchGoldenTest` checks
+map, `_cy_vec2`, the later parameters numbered on, and keep and order each hit by its place, where its id is text (#412). The 70 SQL entries of a search among ids were then edited by a script to find each root
+through the index over its id (`IdSql.hasIdIn`, on Oracle hinted `NO_COALESCE_SQ`), join it to its place by the index's
+own expressions, the ids read as each id's JSON, and read each id back as `IdSql.keyText` reads it (drivine4j#868). No
+other edit was made. `VectorSearchGoldenTest` checks
 `plan`, and the JSON request, against each on every target, putting back on Oracle the document drivine4j selects beside
 each candidate's row before it compares.
 
