@@ -1078,10 +1078,11 @@ internal class SchemaProgram(
 
     /**
      * [ensure] of [spec], which reads the store as it is, and where it would build or drop [spec]'s objects ([awaitTurn]),
-     * ensured again in its turn (Postgres, #382): sessions ensuring one item at once build it one after another, and those
+     * ensured again in its turn (Postgres, #382; Oracle, drivine4j#777): sessions ensuring one item at once build it one after another, and those
      * after the first find it made. Its turn is claimed ([BuildClaim.take]), polled for while another session's ensure
      * holds it, for [PlanRequest.DEFAULT_BUILD_TIMEOUT_MILLIS] at most; and given up once the ensure ends, made or not.
-     * Where the wait runs out, or the claim can't be written, it is ensured without its turn, as before turns.
+     * Where the wait runs out, or the claim can't be written (on Oracle, nor its count of claims held read), it is ensured
+     * without its turn, as before turns.
      */
     private fun inTurn(spec: SchemaItemSpec, ensure: () -> EnsureResult): EnsureResult {
         val claim = store.ddl.buildClaim(spec.made()) ?: return ensure()
@@ -1109,19 +1110,33 @@ internal class SchemaProgram(
     }
 
     /**
-     * Gives up the claim taken [at], a query on a schema connection, as its take is: where a caller's transaction holds that
-     * connection, the claim it holds uncommitted is seen and given up there. One that fails is let be: a claim left behind
-     * is taken over once it is old.
+     * Gives up the claim taken [at], a query on a schema connection, as its take is: on Postgres, where a caller's
+     * transaction holds that connection, the claim it holds uncommitted is seen and given up there; on Oracle a block of
+     * its own transaction. One that fails is let be: a claim left behind is taken over once it is old.
      */
     private fun release(claim: BuildClaim, at: String) {
         io.ask(PlanAction.Query(claim.release, mapOf("at" to at), Purpose.LISTING))
     }
 
-    /** When [claim] was taken, once it is this ensure's turn; null where it ensures without one ([inTurn]). */
+    /** When [claim] was taken (on Oracle, the ensure's own mark of it), once it is this ensure's turn; null where it ensures without one ([inTurn]). */
     private fun claimed(spec: SchemaItemSpec, claim: BuildClaim): String? {
         val deadline = io.clock() + PlanRequest.DEFAULT_BUILD_TIMEOUT_MILLIS
         var poll = 0L
         while (io.clock() + poll < deadline) {
+            if (claim.taken == BuildClaim.Taken.RAN) {
+                // Polled while another session holds it, then taken, marked with this ensure's clock, which its replay
+                // reads again as it was: run, it is this ensure's; refused as a key the catalog has, another's took it first.
+                val held = (io.ask(PlanAction.Query(claim.held!!, purpose = Purpose.LISTING, delayMillis = poll)) as? PlanOutcome.Rows)?.rows ?: return null
+                poll = POLL_MILLIS
+                if (held.firstNotNullOfOrNull(::value)?.toLongOrNull()?.let { it > 0 } == true) continue
+                val at = io.clock().toString()
+                // A query on a schema connection, as every plan has one: an IndexManager's or ConstraintManager's call is
+                // given no auto-commit manager, which runs a marker's statements.
+                when (val outcome = io.ask(PlanAction.Query(claim.take, mapOf("at" to at), Purpose.LISTING))) {
+                    is PlanOutcome.Failed -> if (store.isViolation(outcome.error)) continue else return null
+                    else -> return at
+                }
+            }
             val rows = (io.ask(PlanAction.Query(claim.take, purpose = Purpose.LISTING, delayMillis = poll)) as? PlanOutcome.Rows)?.rows ?: return null
             // A row of one column, when it was claimed, as text: as a library gives a row of one column, its value.
             val at = rows.firstNotNullOfOrNull(::value)
