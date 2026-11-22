@@ -37,9 +37,18 @@ data class PlanRequest(
         require(buildTimeoutMillis >= 0) { "buildTimeoutMillis must not be negative: $buildTimeoutMillis" }
     }
 
+    /**
+     * This request as JSON, as the module's JSON entry reads it (`schemaPlan`'s `start`), and as TypeScript and Python
+     * write theirs: what `declarations.yaml` pins a library's declarations to give (drivine-cypher-spec#135).
+     */
+    fun toJson(): String = PlanJson.writePlain(PlanJson.requestTree(this))
+
     companion object {
         /** drivine4j's `IndexManager.DEFAULT_BUILD_TIMEOUT`: what an index made outside a schema manager's own wait is waited for, too. */
         const val DEFAULT_BUILD_TIMEOUT_MILLIS: Long = 60_000
+
+        /** The request [text], as [toJson] writes it, or a library sends it. */
+        fun fromJson(text: String): PlanRequest = PlanJson.requestOf(org.drivine.cypher.json.CypherJson.readTree(text))
     }
 }
 
