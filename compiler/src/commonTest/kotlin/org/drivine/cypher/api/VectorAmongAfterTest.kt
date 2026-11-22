@@ -123,13 +123,14 @@ class VectorAmongAfterTest {
             |FROM members s
         """.trimMargin(),
         SearchStore.NEO4J to """
-            |UNWIND range(0, size(${'$'}_cy_vec1) - 1) AS _pos
-            |WITH _pos, ${'$'}_cy_vec1[_pos] AS _seedId
+            |WITH ${'$'}_cy_vec1 AS _ids
+            |UNWIND range(0, size(_ids) - 1) AS _pos
+            |WITH _ids, _pos, _ids[_pos] AS _seedId
             |MATCH (seed:Doc)
             |WHERE seed.id = _seedId AND seed.embedding IS NOT NULL AND any(_x IN seed.embedding WHERE _x <> 0)
-            |CALL (seed, _pos) {
-            |  UNWIND range(_pos + 1, size(${'$'}_cy_vec1) - 1) AS _next
-            |  WITH seed, _next, ${'$'}_cy_vec1[_next] AS _nextId
+            |CALL (seed, _pos, _ids) {
+            |  UNWIND range(_pos + 1, size(_ids) - 1) AS _next
+            |  WITH seed, _next, _ids[_next] AS _nextId
             |  MATCH (n:Doc)
             |  WHERE n.id = _nextId AND n.embedding IS NOT NULL AND any(_x IN n.embedding WHERE _x <> 0) AND size(n.embedding) = size(seed.embedding)
             |  WITH n, _next, vector.similarity.cosine(seed.embedding, n.embedding) AS _score
@@ -142,14 +143,15 @@ class VectorAmongAfterTest {
             |RETURN {seed: _seedId, near: near} AS row
         """.trimMargin(),
         SearchStore.MEMGRAPH to """
-            |UNWIND range(0, size(${'$'}_cy_vec1) - 1) AS _pos
-            |WITH _pos, ${'$'}_cy_vec1[_pos] AS _seedId
+            |WITH ${'$'}_cy_vec1 AS _ids
+            |UNWIND range(0, size(_ids) - 1) AS _pos
+            |WITH _ids, _pos, _ids[_pos] AS _seedId
             |MATCH (seed:Doc)
             |WHERE seed.id = _seedId AND seed.embedding IS NOT NULL AND any(_x IN seed.embedding WHERE _x <> 0)
             |CALL {
-            |  WITH seed, _pos
-            |  UNWIND range(_pos + 1, size(${'$'}_cy_vec1) - 1) AS _next
-            |  WITH seed, _next, ${'$'}_cy_vec1[_next] AS _nextId
+            |  WITH seed, _pos, _ids
+            |  UNWIND range(_pos + 1, size(_ids) - 1) AS _next
+            |  WITH seed, _next, _ids[_next] AS _nextId
             |  MATCH (n:Doc)
             |  WHERE n.id = _nextId AND n.embedding IS NOT NULL AND any(_x IN n.embedding WHERE _x <> 0) AND size(n.embedding) = size(seed.embedding)
             |  WITH n, _next, (1.0 + vector_search.cosine_similarity(seed.embedding, n.embedding)) / 2.0 AS _score
@@ -162,14 +164,15 @@ class VectorAmongAfterTest {
             |RETURN {seed: _seedId, near: near} AS row
         """.trimMargin(),
         SearchStore.FALKORDB to """
-            |UNWIND range(0, size(${'$'}_cy_vec1) - 1) AS _pos
-            |WITH _pos, ${'$'}_cy_vec1[_pos] AS _seedId
+            |WITH ${'$'}_cy_vec1 AS _ids
+            |UNWIND range(0, size(_ids) - 1) AS _pos
+            |WITH _ids, _pos, _ids[_pos] AS _seedId
             |MATCH (seed:Doc)
             |WHERE seed.id = _seedId AND seed.embedding IS NOT NULL
             |CALL {
-            |  WITH seed, _pos
-            |  UNWIND range(_pos + 1, size(${'$'}_cy_vec1) - 1) AS _next
-            |  WITH seed, _next, ${'$'}_cy_vec1[_next] AS _nextId
+            |  WITH seed, _pos, _ids
+            |  UNWIND range(_pos + 1, size(_ids) - 1) AS _next
+            |  WITH seed, _next, _ids[_next] AS _nextId
             |  MATCH (n:Doc)
             |  WHERE n.id = _nextId AND n.embedding IS NOT NULL
             |  WITH n, _next, 1.0 - vec.cosineDistance(seed.embedding, n.embedding) / 2.0 AS _score
@@ -225,6 +228,18 @@ class VectorAmongAfterTest {
     }
 
     @Test
+    fun aGraphEngineReadsTheIdsParameterOnceThroughAVariable() {
+        // Memgraph copies a parameter at each row that reads it: at each pair, a search of 1000 ids for each pair once took 9.8 s,
+        // through a variable bound once 2.3 s (liberation-data/drivine-cypher-spec#415).
+        for (store in listOf(SearchStore.NEO4J, SearchStore.MEMGRAPH, SearchStore.FALKORDB)) for (neighbours in listOf(AmongNeighbours.After, AmongNeighbours.All)) {
+            val cypher = plan(store, request(neighbours = neighbours)).cypher!!
+            assertTrue(cypher.startsWith("WITH \$_cy_vec1 AS _ids\n") && cypher.split("\$_cy_vec1").size == 2, "${store.id} $neighbours:\n$cypher")
+            val imports = if (store == SearchStore.NEO4J) "CALL (seed, _pos, _ids) {" else "CALL {\n  WITH seed, _pos, _ids\n"
+            assertTrue(imports in cypher && "  WITH seed, _next, _ids[_next] AS _nextId\n" in cypher, "${store.id} $neighbours:\n$cypher")
+        }
+    }
+
+    @Test
     fun aGraphEngineFindsARootOfEveryLabelAndItsNeighboursToo() {
         for (store in listOf(SearchStore.NEO4J, SearchStore.MEMGRAPH, SearchStore.FALKORDB)) {
             val cypher = plan(store, request(labels = listOf("Doc", "Chunk"))).cypher!!
@@ -237,7 +252,7 @@ class VectorAmongAfterTest {
         // The later roots alone are measured, so a root whose nearest all come before it still keeps its topK after it.
         for (store in listOf(SearchStore.NEO4J, SearchStore.MEMGRAPH, SearchStore.FALKORDB)) {
             val cypher = plan(store, request()).cypher!!
-            assertTrue(cypher.indexOf("UNWIND range(_pos + 1, size(\$_cy_vec1) - 1) AS _next") in 0 until cypher.indexOf("LIMIT \$_cy_vec3"), cypher)
+            assertTrue(cypher.indexOf("UNWIND range(_pos + 1, size(_ids) - 1) AS _next") in 0 until cypher.indexOf("LIMIT \$_cy_vec3"), cypher)
         }
         // On Postgres each root's own LIMIT cuts it; on Oracle and SQLite each pair is numbered within its root, and cut by place.
         for (store in listOf(SearchStore.POSTGRES, SearchStore.ORACLE, SearchStore.SQLITE)) {
