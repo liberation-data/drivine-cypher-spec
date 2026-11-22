@@ -252,7 +252,7 @@ every pair. `among` is
 `{ids, idProperty, threshold, neighbours}`, each id searched once however often it is given, as drivine4j's
 `loadNearestAmong` searches them. On a SQL store each id is its JSON as the node holds it, as a lookup by id is given it:
 the roots are found as that lookup finds them, through the index over the id (`IdSql.hasIdIn`), each joined to its place
-by the index's own expressions, and each id is read back as `IdSql.keyText` reads it, a temporal id by its tag
+by the index's own expressions, and each id is read back as `IdSql.keyText` reads it, a temporal id as its tag's text
 (drivine4j#868). On a graph engine each id is its text, so only a text id is found there (#422).
 
 `neighbours` is `AmongNeighbours.All`, every other root (as when it's left out), or `AmongNeighbours.After`, only the roots

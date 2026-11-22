@@ -40,7 +40,7 @@ data class VectorIndex(val dimensions: Int? = null, val name: String? = null)
  * @param ids the roots' ids; a repeat is dropped, as drivine4j's `loadNearestAmong` drops it. On a SQL store each is the id's
  *   JSON as the node holds it (`StoreValues.text`), as a lookup by id is given it, and a root is found as that lookup finds it,
  *   through the index over the id ([org.drivine.cypher.store.IdSql.hasIdIn]), and its id read back as
- *   [org.drivine.cypher.store.IdSql.keyText] reads it, a temporal id by its tag (drivine4j#868). On a graph engine each is the
+ *   [org.drivine.cypher.store.IdSql.keyText] reads it, a temporal id as its tag's text (drivine4j#868). On a graph engine each is the
  *   id's text, so only a text id is found there (liberation-data/drivine-cypher-spec#422). The library gives them in its id type's own order, as their places decide which neighbours a root keeps for each pair
  *   once ([AmongNeighbours.After]), and, of two neighbours that score exactly alike, which comes first, on every store but
  *   FalkorDB through the index, where the index's own order decides (liberation-data/drivine-cypher-spec#412, #416). Neo4j and FalkorDB score in float32, so two pairs that score alike in exact
