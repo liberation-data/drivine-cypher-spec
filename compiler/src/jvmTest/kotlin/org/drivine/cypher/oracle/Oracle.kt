@@ -27,6 +27,8 @@ import java.time.format.DateTimeFormatter
  *   other targets have no YAML reader. See `StoreDdlTest`.
  * - `marker.json`: the spec's `marker.yaml`, the schema marker and the stamps, as JSON likewise. See `StoreMarkerTest`.
  * - `plans.json`: the spec's `plans.yaml`, the schema plan's cases, as JSON likewise. See `StorePlanTest`.
+ * - `declarations.json`: the spec's `declarations.yaml`, what each library's schema declarations give the planner, as
+ *   JSON likewise. See `DeclarationsTest`.
  * - `migrate.json`: the spec's `migrate.yaml`, a layout-1 row's rewrites to layout 2, as JSON likewise. See `LayoutMigrationTest`.
  * - `fragments.json`: the spec's `fragments.yaml`, the fragments a library writes itself, as JSON likewise. See `FragmentsTest`.
  * - `writevalues.json`: the spec's `writevalues.yaml`, the values a write makes by position and form, as JSON likewise. See
@@ -86,6 +88,7 @@ object Oracle {
         File(out, "migrate.json").writeText(json.writeValueAsString(yaml.readTree(File(spec, "migrate.yaml"))))
         // The schema plan's cases, for each target's StorePlanTest.
         File(out, "plans.json").writeText(json.writeValueAsString(yaml.readTree(File(spec, "plans.yaml"))))
+        File(out, "declarations.json").writeText(json.writeValueAsString(yaml.readTree(File(spec, "declarations.yaml"))))
         // The host's functions and readers, for each target's HostSpecTest and ValueLayoutTest.
         HostSpecJson.write(spec, out)
         // Java's answers for the regular expressions SQLite's host functions see, for each target's RegexOracleTest (#108).
