@@ -260,8 +260,8 @@ order (numbers by value, text by code point, temporals by time), and every store
 
 - **Exact without `searchK`.** With no `searchK`, `All` or `After`, every pair of the roots is measured, through no index,
   even where one is made (#408). The answer is exact, and its cost grows with the square of the number of ids.
-  - On a SQL store, `All` keeps every other root; for `After` each root's place comes from the bound ids' own order
-    (`WITH ORDINALITY`, `FOR ORDINALITY`, `json_each`'s key), and a pair is kept where the neighbour's place is after the
+  - On a SQL store each root's place comes from the bound ids' own order (`WITH ORDINALITY`, `FOR ORDINALITY`,
+    `json_each`'s key). `All` keeps every other root; for `After` a pair is kept where the neighbour's place is after the
     root's.
   - On a graph engine, each root is unwound with its place. In a subquery of its own, it measures the roots at every other
     place (`All`), or only those whose places come after its own (`After`), and keeps its best `topK`. So a statement holds
@@ -276,6 +276,16 @@ order (numbers by value, text by code point, temporals by time), and every store
   made, and keeps those among the roots (for `After`, those after it). A neighbour the index doesn't give a root is
   missed, and the plan warns so: for `All` that a root's neighbours can be incomplete, for `After` that pairs can be
   missed. SQLite makes no index, and measures every pair either way.
+
+Of two neighbours that score exactly alike, the one placed first among the ids comes first (#412): on a SQL store by each
+root's place, then its `nid`; on a graph engine by `_next` where every pair is measured; and through the index on Neo4j
+and Memgraph by each hit's place, read from a map of each id's place bound as a parameter: a hit whose id is no text,
+which a map can't be read by on any engine, has no place, and is no root. The map is read through a variable bound once,
+as Memgraph copies a parameter at each row that reads it. FalkorDB through the index binds no such map: a FalkorDB client
+writes a map parameter's keys into the statement, and each library refuses some (TypeScript's any that is no plain name),
+so it keeps the roots by id and orders by score alone, a tie as its index gives it (#416). That path is approximate,
+and warned of, anyway. Neo4j and FalkorDB score in float32, so
+two pairs that tie in exact arithmetic need not tie on every store: only an exact tie is decided so.
 
 On a SQL store the embedding, and an among search's `idProperty`, are read at the key store layout 2 holds the property
 under, `$$e` for a name `$e` that begins with `$` (`ValueLayout.escape`), as the DDL's index reads it.
@@ -305,7 +315,10 @@ under, `$$e` for a name `$e` that begins with `$` (`ValueLayout.escape`), as the
   By cosine, on a SQL store, a root whose embedding has no length is left out, as a seed and as a neighbour (#160).
 - `parameters` are named `_cy_vec1`, `_cy_vec2`, …, with the compiler's reserved prefix. The query vector is not among
   them: `vector` names the parameter the library binds it as, as it binds a list, so a long vector doesn't pass through
-  the module. `indexK` is how many the index is asked for: `searchK`, or where it is left out `topK` on a nearest search;
+  the module. Through the index on Neo4j and Memgraph, a search among ids also binds a map of each id's text to its place
+  among the ids, counted from 0, which orders a tie and keeps each hit by its place (#412): its keys are the ids, any text,
+  so the library binds it as a map of those keys as given, and over JSON one whose key starts with `$` comes back as
+  `{"$map": {…}}`, as any map does. `indexK` is how many the index is asked for: `searchK`, or where it is left out `topK` on a nearest search;
   0 on a search among ids that measures every pair, which asks no index.
 - `timeoutMillis`, on FalkorDB, is the timeout the library runs the statement under, as `GRAPH.QUERY`'s `TIMEOUT`.
   `VectorSearch.FALKORDB_AMONG_TIMEOUT_MILLIS`, 300 000, is given to a search among ids that measures every pair. It is a
@@ -350,7 +363,9 @@ escaped (#217): 84 of the golden's entries were edited for it by a script. On Or
 layout 2 names its objects, `<graph>_v2_…` for drivine4j's `<graph>_v_…`, edited in each entry that names it. And the 168
 SQL entries of a nearest search by cosine were edited by a script to leave out a stored embedding of no length, as
 Neo4j's cosine index does, and the 40 of a search among ids by cosine to leave out a root with one (#160), which drivine4j
-at that commit does not. No other edit was made. `VectorSearchGoldenTest` checks
+at that commit does not. The 70 SQL entries of a search among ids were edited by a script to read each root's place
+among the ids and break a tie of two scores by place, then `nid`, and Neo4j's and Memgraph's 32 to bind each id's place as a
+map, `_cy_vec2`, the later parameters numbered on, and keep and order each hit by its place, where its id is text (#412). No other edit was made. `VectorSearchGoldenTest` checks
 `plan`, and the JSON request, against each on every target, putting back on Oracle the document drivine4j selects beside
 each candidate's row before it compares.
 

@@ -48,13 +48,13 @@ class VectorAmongAfterTest {
             |    'near', COALESCE((
             |        SELECT jsonb_agg(jsonb_build_object(
             |            'id', r.id,
-            |            'score', r.score) ORDER BY r.score DESC, r.nid)
+            |            'score', r.score) ORDER BY r.score DESC, r.pos, r.nid)
             |        FROM (
-            |            SELECT o.nid, o.id, (2 - (CAST(CAST((o.props -> 'embedding') AS text) AS vector) <=> CAST(CAST((s.props -> 'embedding') AS text) AS vector))) / 2 AS score
+            |            SELECT o.nid, o.id, o.pos, (2 - (CAST(CAST((o.props -> 'embedding') AS text) AS vector) <=> CAST(CAST((s.props -> 'embedding') AS text) AS vector))) / 2 AS score
             |            FROM members o
             |            WHERE o.pos > s.pos
             |              AND jsonb_array_length((o.props -> 'embedding')) = jsonb_array_length((s.props -> 'embedding'))
-            |            ORDER BY score DESC, o.nid
+            |            ORDER BY score DESC, o.pos, o.nid
             |            LIMIT ${'$'}_cy_vec2
             |        ) r
             |        WHERE r.score >= ${'$'}_cy_vec3), '[]'::jsonb)) AS result
@@ -71,9 +71,9 @@ class VectorAmongAfterTest {
             |      AND JSON_EXISTS(c.props, '${'$'}.embedding')
             |      AND VECTOR_NORM(TO_VECTOR(JSON_QUERY(c.props, '${'$'}.embedding' RETURNING CLOB))) > 0),
             |ranked AS (
-            |    SELECT p.seed, p.nid, p.id, p.score, ROW_NUMBER() OVER (PARTITION BY p.seed ORDER BY p.score DESC, p.nid) AS place
+            |    SELECT p.seed, p.nid, p.id, p.pos, p.score, ROW_NUMBER() OVER (PARTITION BY p.seed ORDER BY p.score DESC, p.pos, p.nid) AS place
             |    FROM (
-            |        SELECT s.nid AS seed, o.nid, o.id, (2 - VECTOR_DISTANCE(o.embedding, s.embedding, COSINE)) / 2 AS score
+            |        SELECT s.nid AS seed, o.nid, o.id, o.pos, (2 - VECTOR_DISTANCE(o.embedding, s.embedding, COSINE)) / 2 AS score
             |        FROM members s
             |        JOIN members o ON o.pos > s.pos AND VECTOR_DIMENSION_COUNT(o.embedding) = VECTOR_DIMENSION_COUNT(s.embedding)
             |    ) p)
@@ -83,7 +83,7 @@ class VectorAmongAfterTest {
             |        SELECT JSON_ARRAYAGG(JSON_OBJECT(
             |            'id' VALUE r.id,
             |            'score' VALUE r.score
-            |            RETURNING JSON) ORDER BY r.score DESC, r.nid RETURNING JSON)
+            |            RETURNING JSON) ORDER BY r.score DESC, r.pos, r.nid RETURNING JSON)
             |        FROM ranked r
             |        WHERE r.seed = s.nid
             |          AND r.place <= ${'$'}_cy_vec2
@@ -103,9 +103,9 @@ class VectorAmongAfterTest {
             |      AND json_type(c.props, '${'$'}."embedding"') = 'array'
             |      AND EXISTS (SELECT 1 FROM json_each(c.props, '${'$'}."embedding"') e WHERE e.value <> 0)),
             |ranked AS (
-            |    SELECT p.seed, p.nid, p.id, p.score, ROW_NUMBER() OVER (PARTITION BY p.seed ORDER BY p.score DESC, p.nid) AS place
+            |    SELECT p.seed, p.nid, p.id, p.pos, p.score, ROW_NUMBER() OVER (PARTITION BY p.seed ORDER BY p.score DESC, p.pos, p.nid) AS place
             |    FROM (
-            |        SELECT s.nid AS seed, o.nid, o.id, drivine_similarity((o.props -> '${'$'}."embedding"'), (s.props -> '${'$'}."embedding"'), 'COSINE') AS score
+            |        SELECT s.nid AS seed, o.nid, o.id, o.pos, drivine_similarity((o.props -> '${'$'}."embedding"'), (s.props -> '${'$'}."embedding"'), 'COSINE') AS score
             |        FROM members s
             |        JOIN members o ON o.pos > s.pos
             |    ) p
@@ -115,7 +115,7 @@ class VectorAmongAfterTest {
             |    'near', json((
             |        SELECT json_group_array(json_object(
             |            'id', r.id,
-            |            'score', r.score) ORDER BY r.score DESC, r.nid)
+            |            'score', r.score) ORDER BY r.score DESC, r.pos, r.nid)
             |        FROM ranked r
             |        WHERE r.seed = s.nid
             |          AND r.place <= ${'$'}_cy_vec2
@@ -272,8 +272,15 @@ class VectorAmongAfterTest {
         for (store in listOf(SearchStore.NEO4J, SearchStore.MEMGRAPH, SearchStore.FALKORDB)) {
             val planned = plan(store, request(searchK = 20))
             val cypher = planned.cypher!!
-            assertTrue(cypher.startsWith("UNWIND range(0, size(\$_cy_vec1) - 1) AS _pos\nWITH _pos, \$_cy_vec1[_pos] AS _seedId\n"), cypher)
-            assertTrue("[m IN _found WHERE m.id IN \$_cy_vec1[(_pos + 1)..] AND m.score >= \$_cy_vec3][0..\$_cy_vec4]" in cypher, cypher)
+            if (store == SearchStore.FALKORDB) {
+                // FalkorDB binds no places (liberation-data/drivine-cypher-spec#416): it keeps the ids after the root by id.
+                assertTrue(cypher.startsWith("UNWIND range(0, size(\$_cy_vec1) - 1) AS _pos\nWITH _pos, \$_cy_vec1[_pos] AS _seedId\n"), cypher)
+                assertTrue("[m IN _found WHERE m.id IN \$_cy_vec1[(_pos + 1)..] AND m.score >= \$_cy_vec3][0..\$_cy_vec4]" in cypher, cypher)
+            } else {
+                assertTrue(cypher.startsWith("WITH \$_cy_vec2 AS _places\nUNWIND range(0, size(\$_cy_vec1) - 1) AS _pos\nWITH _places, _pos, \$_cy_vec1[_pos] AS _seedId\n"), cypher)
+                assertTrue("[m IN _found WHERE m.place > _pos AND m.score >= \$_cy_vec4 | {id: m.id, score: m.score}][0..\$_cy_vec5]" in cypher, cypher)
+                assertEquals(mapOf("a" to 0, "b" to 1, "c" to 2), planned.parameters["_cy_vec2"], store.id)
+            }
             assertEquals(20, planned.indexK, store.id)
             assertEquals(1, planned.warnings.size, store.id)
             assertTrue("pairs can be missed" in planned.warnings.single() && "nearest 20" in planned.warnings.single(), planned.warnings.single())

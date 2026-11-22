@@ -303,10 +303,7 @@ object OracleSql {
     /** The words before a derived table's or a lateral query's opening bracket: see [readsTable]. */
     private val SOURCE_WORDS = setOf("FROM", "JOIN", "LATERAL", "APPLY")
 
-    /** The texts of the JSON array bound as [parameter], as rows of one column, `v`. */
-    fun textValues(parameter: String): String = "SELECT v FROM JSON_TABLE($parameter, '$[*]' COLUMNS (v VARCHAR2(4000) PATH '$'))"
-
-    /** [textValues], each as `id` beside its place in the array, `pos`, counted from 1. */
+    /** The texts of the JSON array bound as [parameter], as rows, each as `id` beside its place in the array, `pos`, counted from 1. */
     fun placedTextValues(parameter: String): String =
         "SELECT v.id, v.pos FROM JSON_TABLE($parameter, '$[*]' COLUMNS (pos FOR ORDINALITY, id VARCHAR2(4000) PATH '$')) v"
 
