@@ -39,17 +39,24 @@ object IdSql {
     /**
      * Whether the property [key] of the node [alias] is one of the ids bound as [parameter], a JSON array of each id's JSON
      * text, as [hasId] compares one, so the index answers each. On SQLite, which reads no index for a pair of expressions `IN`
-     * a list, each id finds its node of the table [nodes] of [labels] through the index before the node is joined.
+     * a list, each id finds its node of the table [nodes] of [labels] through the index before the node is joined. On Oracle,
+     * [uncoalesced] hints the ids' subquery against being merged with another of the same condition ([OracleSql.uncoalesced]),
+     * as each subquery a condition of the module's own statements reads is (liberation-data/drivine-cypher-spec#252).
      */
-    fun hasIdIn(store: Store, alias: String, key: String, parameter: String, nodes: String? = null, labels: Collection<String> = emptyList()): String {
+    fun hasIdIn(
+        store: Store, alias: String, key: String, parameter: String, nodes: String? = null, labels: Collection<String> = emptyList(),
+        uncoalesced: Boolean = false,
+    ): String {
         requireId(key)
         val column = IndexKey.column(store, alias, key)
         return when (store) {
             Store.POSTGRES ->
                 "${column.single()} = ANY(ARRAY(SELECT CAST(v.value #>> '{}' AS jsonb) FROM jsonb_array_elements(CAST($parameter AS jsonb)) v))"
-            Store.ORACLE -> "(${column[0]}, ${column[1]}) IN " +
-                "(SELECT ${OracleSql.valueClass("JSON(i.v)")}, ${OracleSql.valueKey("JSON(i.v)")} FROM " +
-                "(SELECT v FROM JSON_TABLE($parameter, '$[*]' COLUMNS (v VARCHAR2(4000) PATH '$'))) i)"
+            Store.ORACLE -> {
+                val ids = "SELECT ${OracleSql.valueClass("JSON(i.v)")}, ${OracleSql.valueKey("JSON(i.v)")} FROM " +
+                    "(SELECT v FROM JSON_TABLE($parameter, '$[*]' COLUMNS (v VARCHAR2(4000) PATH '$'))) i"
+                "(${column[0]}, ${column[1]}) IN (${if (uncoalesced) OracleSql.uncoalesced(ids) else ids})"
+            }
             Store.SQLITE -> {
                 requireNotNull(nodes) { "An id in a list on SQLite is found through the node table, which it names." }
                 "$alias.nid IN (SELECT f.nid FROM json_each($parameter) v CROSS JOIN $nodes f WHERE " +

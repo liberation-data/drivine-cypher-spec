@@ -4,6 +4,7 @@ import org.drivine.cypher.store.IdSql
 import org.drivine.cypher.store.IndexKey
 import org.drivine.schema.SimilarityFunction
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
@@ -30,13 +31,22 @@ class VectorAmongTypedIdsTest {
                 val what = "${search.id} $idProperty $neighbours $searchK:\n$sql"
                 assertTrue("${IdSql.keyText(store, "c", key)} AS id" in sql, what)
                 val nodes = if (store == Store.SQLITE) "g_node" else null
-                assertTrue(IdSql.hasIdIn(store, "c", key, "\$_cy_vec1", nodes, listOf("Doc")) in sql, what)
+                assertTrue(IdSql.hasIdIn(store, "c", key, "\$_cy_vec1", nodes, listOf("Doc"), uncoalesced = store == Store.ORACLE) in sql, what)
                 val columns = IndexKey.column(store, "c", key)
                 val on = if (store == Store.POSTGRES) "${columns.single()} = g.json" else "${columns[0]} = g.id_class AND ${columns[1]} = g.id_key"
                 assertTrue(") g ON $on\n" in sql, what)
                 // No id is compared as text any more: a temporal id's tag, or an integer, would not be equal to it.
                 assertTrue("g.id =" !in sql, what)
             }
+        }
+    }
+
+    @Test
+    fun theStampIsNoIdOfASearchAmongIdsOnASqlStore() {
+        // No index of an id is made over the stamp, so a lookup by id refuses it, and a search among ids is refused so (IdSql.hasIdIn).
+        for (store in listOf(SearchStore.POSTGRES, SearchStore.ORACLE, SearchStore.SQLITE)) {
+            val result = VectorSearch.plan(store, GraphOptions("g"), request(AmongNeighbours.All, null, null, org.drivine.cypher.store.Stamps.PROPERTY))
+            assertEquals(Refusal("An id is a property of the node, not its stamp (${org.drivine.cypher.store.Stamps.PROPERTY})."), result, store.id)
         }
     }
 }

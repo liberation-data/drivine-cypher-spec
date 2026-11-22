@@ -261,13 +261,14 @@ object VectorSearch {
     private fun stored(property: String): String = ValueLayout.escape(property)
 
     /**
-     * The join of a root, the node `c`, to its place among the ids on Oracle or SQLite: the node's id held under [key], as the
-     * index over it is made ([IndexKey.column]), equal to the given id's class and key, as `placedIds` reads them once for each
-     * id. So a root is found as a library's lookup by its id finds it, a temporal id by its tag, through the index.
+     * The join of a root, the node `c`, to its place among the ids: the node's id held under [key], as the index over it is
+     * made ([IndexKey.column]), equal to the given id's JSON on Postgres, and its class and key on Oracle and SQLite, as
+     * `placedIds` reads them once for each id. So a root is found as a library's lookup by its id finds it, a temporal id by
+     * its tag, through the index.
      */
     private fun placedOn(store: Store, key: String): String {
-        val (idClass, idKey) = IndexKey.column(store, "c", key)
-        return "$idClass = g.id_class AND $idKey = g.id_key"
+        val column = IndexKey.column(store, "c", key)
+        return if (store == Store.POSTGRES) "${column.single()} = g.json" else "${column[0]} = g.id_class AND ${column[1]} = g.id_key"
     }
 
     /** The label the index a search goes through is on: its partition's, or the root's first. */
@@ -391,7 +392,7 @@ object VectorSearch {
         // The roots are found through the index over the id, as a lookup by id finds them, and each joined to its place.
         val has = listOf(PostgresSql.hasLabels("c", request.labels), embedded, IdSql.hasIdIn(Store.POSTGRES, "c", idKey, ids)) +
             listOfNotNull(postgresAnyLength(request, "c", key))
-        val members = Query("c.nid, $id AS id, c.props, g.pos", Placed(ddl.nodes, "c", PostgresSql.placedIds(ids), "g", "${IndexKey.column(Store.POSTGRES, "c", idKey).single()} = g.json"), has)
+        val members = Query("c.nid, $id AS id, c.props, g.pos", Placed(ddl.nodes, "c", PostgresSql.placedIds(ids), "g", placedOn(Store.POSTGRES, idKey)), has)
         val other = if (after) "o.pos > s.pos" else "o.nid <> s.nid"
         val nearest = if (dimensions == null) {
             val distance = "${PostgresSql.embedding("o", key)} ${PostgresSql.distance(request.similarity)} ${PostgresSql.embedding("s", key)}"
@@ -471,7 +472,7 @@ object VectorSearch {
         val ids = scope.bound(among.ids)
         val selected = "c.nid, $id AS id, ${OracleSql.embedding("c", key)} AS embedding"
         val has = listOfNotNull(
-            OracleSql.hasLabels("c", request.labels), OracleSql.hasProperty("c", key), IdSql.hasIdIn(Store.ORACLE, "c", idKey, ids),
+            OracleSql.hasLabels("c", request.labels), OracleSql.hasProperty("c", key), IdSql.hasIdIn(Store.ORACLE, "c", idKey, ids, uncoalesced = true),
             embeddings?.let { "c.nid IN (${OracleSql.uncoalesced("SELECT e.nid FROM $it e")})" },
             oracleLength(request, OracleSql.embedding("c", key)),
         )

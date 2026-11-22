@@ -5,7 +5,7 @@
 # them a threshold, a searchK, `idType`, the type of the label's @NodeId (`text`, as where it's left out, or `integer`),
 # and `neighbours`: `all`, every other node of the set, or `after`, only those after the node in
 # the ids, so each pair comes back once. A library gives the ids to the module in its id type's own order, here text by
-# code point, so a step gives them in any order, and a repeat once. On a SQL store the library gives each id as its JSON,
+# code point and an integer by value, so a step gives them in any order, and a repeat once. On a SQL store the library gives each id as its JSON,
 # as a lookup by id reads it (an integer as its digits, a text quoted), and a root is found as that lookup finds it, through
 # the index over the id (drivine4j#868). Its `rows` are, for each id of a node that holds an
 # embedding the search can measure, in that order, the node's neighbours, best first, each its id and score, as the
