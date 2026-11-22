@@ -1,6 +1,7 @@
 package org.drivine.cypher.store.plan
 
 import org.drivine.DrivineInternalApi
+import org.drivine.cypher.json.CypherJson
 import org.drivine.schema.SchemaItemSpec
 import org.drivine.schema.SchemaPolicy
 
@@ -39,7 +40,8 @@ data class PlanRequest(
 
     /**
      * This request as JSON, as the module's JSON entry reads it (`schemaPlan`'s `start`), and as TypeScript and Python
-     * write theirs: what `declarations.yaml` pins a library's declarations to give (drivine-cypher-spec#135).
+     * write theirs: what `declarations.yaml` pins a library's declarations to give (drivine-cypher-spec#135). Every field
+     * is written, a default one too, and [fromJson] reads it back to an equal request.
      */
     fun toJson(): String = PlanJson.writePlain(PlanJson.requestTree(this))
 
@@ -47,8 +49,11 @@ data class PlanRequest(
         /** drivine4j's `IndexManager.DEFAULT_BUILD_TIMEOUT`: what an index made outside a schema manager's own wait is waited for, too. */
         const val DEFAULT_BUILD_TIMEOUT_MILLIS: Long = 60_000
 
-        /** The request [text], as [toJson] writes it, or a library sends it. */
-        fun fromJson(text: String): PlanRequest = PlanJson.requestOf(org.drivine.cypher.json.CypherJson.readTree(text))
+        /**
+         * The request [text], as [toJson] writes it, or a library sends it. A field that may be null reads as null where it
+         * is left out, and a schema item's `ignoreCase` as false; every other field must be given.
+         */
+        fun fromJson(text: String): PlanRequest = PlanJson.requestOf(CypherJson.readTree(text))
     }
 }
 

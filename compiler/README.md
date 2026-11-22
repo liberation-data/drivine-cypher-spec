@@ -1151,6 +1151,8 @@ The JVM is the oracle. `./gradlew jvmOracle` writes, into `build/oracle`:
   built from.
 - `plans.json`: the spec's `plans.yaml` as JSON, which `StorePlanTest` reads on every target: each case's rounds that
   `org.drivine.cypher.store.plan`'s planner must give on each store, the answers it is given back, and its report.
+- `declarations.json`: the spec's `declarations.yaml` as JSON, which `DeclarationsTest` reads on every target: each
+  case's catalogs and runtime items, which `PlanRequest.fromJson` must read and `PlanRequest.toJson` write back as pinned.
 - `migrate.json`: the spec's `migrate.yaml` as JSON, which `LayoutMigrationTest` reads on every target: each layout-1
   row that `LayoutMigration.rewrite`, and the JSON request `rewrite`, must give as layout 2 holds it on each store, with
   its changes and its invalid values, and the declarations `LayoutMigration.refusal` refuses.

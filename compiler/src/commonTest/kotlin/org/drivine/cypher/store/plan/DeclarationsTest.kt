@@ -3,8 +3,19 @@ package org.drivine.cypher.store.plan
 import org.drivine.cypher.json.CypherJson
 import org.drivine.cypher.json.ObjectNode
 import org.drivine.cypher.number.oracleFile
+import org.drivine.cypher.store.ddl.PostgresDdl
+import org.drivine.cypher.store.schema.StoreSchema
+import org.drivine.schema.FalkorDbVectorOptions
+import org.drivine.schema.Neo4jVectorOptions
+import org.drivine.schema.RangeIndexSpec
+import org.drivine.schema.SchemaMode
+import org.drivine.schema.SchemaPolicy
+import org.drivine.schema.SimilarityFunction
+import org.drivine.schema.UniquenessConstraintSpec
+import org.drivine.schema.VectorIndexSpec
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -36,9 +47,33 @@ class DeclarationsTest {
                     }
                 },
             )
-            val written = CypherJson.readTree(PlanRequest.fromJson(given).toJson())
+            val request = PlanRequest.fromJson(given)
+            // What a library's declarations give is a request the planner takes, not one it refuses.
+            assertNull(SchemaPlanner(StoreSchema.of(PostgresDdl("g"))).validate(request), "$name: the planner refuses it")
+            val written = CypherJson.readTree(request.toJson())
             assertEquals(CypherJson.writeValueAsString(case["catalogs"]!!), CypherJson.writeValueAsString(written["catalogs"]!!), "$name: catalogs")
             assertEquals(CypherJson.writeValueAsString(case["runtime"]!!), CypherJson.writeValueAsString(written["runtime"]!!), "$name: runtime")
+        }
+    }
+
+    @Test
+    fun aWholeRequestIsReadBackAsWritten() {
+        val vector = VectorIndexSpec(
+            "Chunk", "embedding", 384, SimilarityFunction.EUCLIDEAN, "chunk_vec", 16, 200,
+            listOf(Neo4jVectorOptions(false, 8, 100), FalkorDbVectorOptions(4, 50, 10)),
+        )
+        val unique = UniquenessConstraintSpec("Person", listOf("email", "tenant"), "person_key", "id", ignoreCase = true)
+        val catalogs = listOf(DeclaredCatalog(null, "v1", listOf(vector, unique)), DeclaredCatalog("rag", null, emptyList()))
+        val runtime = listOf(DeclaredCatalog("dice", null, listOf(RangeIndexSpec("Tenant", listOf("code"), null, true))))
+        val policy = SchemaPolicy(SchemaMode.WARN, recreateOnDrift = true, recreateOnStartup = true, violationSampleSize = 3, replaceBlockingIndex = true)
+        val operations = listOf(
+            Operation.Enforce(), Operation.Enforce(Owners.One(null)), Operation.RecreateAll(Owners.One("rag")),
+            Operation.Ensure("dice", listOf(vector)), Operation.Remove(null, listOf(unique)), Operation.Item(ItemCall.RECREATE, unique),
+        )
+        for (operation in operations) {
+            val request = PlanRequest("neo4j", operation, catalogs, runtime, policy, 5_000)
+            assertEquals(request, PlanRequest.fromJson(request.toJson()), "$operation")
+            assertEquals(request.toJson(), PlanRequest.fromJson(request.toJson()).toJson(), "$operation: written again")
         }
     }
 }
