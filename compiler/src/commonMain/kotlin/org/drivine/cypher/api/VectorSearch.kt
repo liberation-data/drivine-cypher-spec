@@ -36,6 +36,10 @@ data class VectorIndex(val dimensions: Int? = null, val name: String? = null)
  * store, a root whose embedding has no length, all zeros, is left out, as a seed and as a neighbour.
  *
  * @param ids the roots' ids, as the text each is found by; a repeat is dropped, as drivine4j's `loadNearestAmong` drops it.
+ *   The library gives them in its id type's own order, as their places decide which neighbours a root keeps for each pair
+ *   once ([AmongNeighbours.After]), and, of two neighbours that score exactly alike, which comes first, on every store but
+ *   FalkorDB through the index, where the index's own order decides (liberation-data/drivine-cypher-spec#412, #416). Neo4j and FalkorDB score in float32, so two pairs that score alike in exact
+ *   arithmetic can differ in their last bit on one store and not another: only an exact tie is decided so.
  * @param idProperty the property the root's id is stored under.
  * @param threshold the least score a neighbour is kept with, or null to keep any.
  * @param neighbours which of the other roots each root keeps: every one ([AmongNeighbours.All]), or those after it in [ids]
@@ -128,11 +132,13 @@ sealed interface VectorResult
  *   node table (on Oracle that join loses a filter on it: see `ROW`), and adds its threshold (`score >= threshold`), its
  *   predicates, the view's required relationships, `ORDER BY score DESC, nid` and, where `searchK` was given, its `LIMIT topK`.
  *   A search among ids is the whole statement: one row a root, `result`, the document `{seed, near}`, `near` its neighbours
- *   as `{id, score}`, best first.
+ *   as `{id, score}`, best first, and of two that score alike the one placed first among [VectorAmong.ids].
  * @param cypher on a graph engine, a nearest search's head: the index's `CALL`, and each hit as [VectorRequest.alias] and its
  *   score as [VectorRequest.scoreAlias], to which the library adds [labelCheck], its threshold, filters, projection and
  *   `LIMIT`. A search among ids is the whole statement, one row a root, `row`, `{seed, near}`.
  * @param parameters the values the statement binds, each named `_cy_vec<n>`: all but the query vector.
+ *   Through the index on Neo4j and Memgraph, a search among ids binds a map too, each id's text to its place among the ids,
+ *   counted from 0 (#412): its keys are the ids, any text, so the library binds it as a map of those keys as given.
  * @param vector the parameter the library binds the query vector as, a list of floats as it binds a list; null among ids,
  *   where each root's own embedding is the vector.
  * @param labelCheck on a graph engine, whether a hit has every one of the root's labels, as a predicate on the node: the index
@@ -367,18 +373,14 @@ object VectorSearch {
         val embedded = dimensions?.let { PostgresSql.holdsEmbedding("c", key, it) } ?: "jsonb_typeof(${PostgresSql.value("c", key)}) = 'array'"
         val ids = scope.bound(among.ids)
         val has = listOf(PostgresSql.hasLabels("c", request.labels), embedded) + listOfNotNull(postgresAnyLength(request, "c", key))
-        val members = if (after) {
-            Query("c.nid, $id AS id, c.props, g.pos", Placed(ddl.nodes, "c", PostgresSql.placedTextValues(ids), "g", "g.id = $id"), has)
-        } else {
-            Query("c.nid, $id AS id, c.props", Table(ddl.nodes, "c"), has.take(2) + "$id IN (${PostgresSql.textValues(ids)})" + has.drop(2))
-        }
+        val members = Query("c.nid, $id AS id, c.props, g.pos", Placed(ddl.nodes, "c", PostgresSql.placedTextValues(ids), "g", "g.id = $id"), has)
         val other = if (after) "o.pos > s.pos" else "o.nid <> s.nid"
         val nearest = if (dimensions == null) {
             val distance = "${PostgresSql.embedding("o", key)} ${PostgresSql.distance(request.similarity)} ${PostgresSql.embedding("s", key)}"
             Query(
-                "o.nid, o.id, ${PostgresSql.score(request.similarity, distance)} AS score", Table(MEMBERS, "o"),
+                "o.nid, o.id, o.pos, ${PostgresSql.score(request.similarity, distance)} AS score", Table(MEMBERS, "o"),
                 listOf(other, "jsonb_array_length(${PostgresSql.value("o", key)}) = jsonb_array_length(${PostgresSql.value("s", key)})"),
-                listOf("ORDER BY score DESC, o.nid", "LIMIT ${scope.bound(request.topK)}"),
+                listOf("ORDER BY score DESC, o.pos, o.nid", "LIMIT ${scope.bound(request.topK)}"),
             )
         } else {
             val distance = "${PostgresSql.embedding("x", key, dimensions)} ${PostgresSql.distance(request.similarity)} ${PostgresSql.embedding("s", key, dimensions)}"
@@ -388,12 +390,12 @@ object VectorSearch {
                 listOf("ORDER BY distance", "LIMIT ${scope.bound(amongK(request))}"),
             )
             Query(
-                "o.nid, o.id, ${PostgresSql.score(request.similarity, "k.distance")} AS score", OnceReached(indexed.text(), "k", MEMBERS, "o"),
-                listOf(other), listOf("ORDER BY score DESC, o.nid", "LIMIT ${scope.bound(request.topK)}"),
+                "o.nid, o.id, o.pos, ${PostgresSql.score(request.similarity, "k.distance")} AS score", OnceReached(indexed.text(), "k", MEMBERS, "o"),
+                listOf(other), listOf("ORDER BY score DESC, o.pos, o.nid", "LIMIT ${scope.bound(request.topK)}"),
             )
         }
         val near = Query(
-            PostgresSql.arrayOf(PostgresSql.jsonObject(listOf("id" to "r.id", "score" to "r.score")), "r.score DESC, r.nid"),
+            PostgresSql.arrayOf(PostgresSql.jsonObject(listOf("id" to "r.id", "score" to "r.score")), "r.score DESC, r.pos, r.nid"),
             Derived(nearest.text(), "r"), listOfNotNull(among.threshold?.let { "r.score >= ${scope.bound(it)}" }),
         )
         val result = PostgresSql.jsonObject(listOf("seed" to "s.id", "near" to "COALESCE(${near.nested()}, ${PostgresSql.EMPTY_ARRAY})"))
@@ -440,7 +442,7 @@ object VectorSearch {
      * With both, each root asks the index over the side table for its `searchK` nearest, and keeps those among the roots:
      * approximate. Only the roots the side table holds are searched from, as it holds only embeddings of the index's size.
      * For each pair once ([AmongNeighbours.After]) each root keeps only the roots placed after it in the ids. Either way each
-     * root's neighbours are numbered best first, and the first `topK` kept.
+     * root's neighbours are numbered best first, a tie of two scores by place among the ids, and the first `topK` kept.
      */
     private fun oracleAmong(ddl: OracleDdl, request: VectorRequest, among: VectorAmong, scope: SearchParameters): String {
         val key = stored(request.property)
@@ -451,27 +453,25 @@ object VectorSearch {
         val selected = "c.nid, $id AS id, ${OracleSql.embedding("c", key)} AS embedding"
         val has = listOfNotNull(
             OracleSql.hasLabels("c", request.labels), OracleSql.hasProperty("c", key),
-            if (after) null else "$id IN (${OracleSql.uncoalesced(OracleSql.textValues(ids))})",
             embeddings?.let { "c.nid IN (${OracleSql.uncoalesced("SELECT e.nid FROM $it e")})" },
             oracleLength(request, OracleSql.embedding("c", key)),
         )
-        val members = if (after) Query("$selected, g.pos", Placed(ddl.nodes, "c", OracleSql.placedTextValues(ids), "g", "g.id = $id"), has)
-        else Query(selected, Table(ddl.nodes, "c"), has)
+        val members = Query("$selected, g.pos", Placed(ddl.nodes, "c", OracleSql.placedTextValues(ids), "g", "g.id = $id"), has)
         val other = if (after) "o.pos > s.pos" else "o.nid <> s.nid"
         val metric = OracleSql.metric(request.similarity)
         val pairs = if (embeddings == null) {
-            "SELECT s.nid AS seed, o.nid, o.id, ${OracleSql.score(request.similarity, "VECTOR_DISTANCE(o.embedding, s.embedding, $metric)")} AS score\n" +
+            "SELECT s.nid AS seed, o.nid, o.id, o.pos, ${OracleSql.score(request.similarity, "VECTOR_DISTANCE(o.embedding, s.embedding, $metric)")} AS score\n" +
                 "FROM $MEMBERS s\nJOIN $MEMBERS o ON $other AND VECTOR_DIMENSION_COUNT(o.embedding) = VECTOR_DIMENSION_COUNT(s.embedding)"
         } else {
-            "SELECT s.nid AS seed, o.nid, o.id, ${OracleSql.score(request.similarity, "k.distance")} AS score\n" +
+            "SELECT s.nid AS seed, o.nid, o.id, o.pos, ${OracleSql.score(request.similarity, "k.distance")} AS score\n" +
                 "FROM $MEMBERS s\nCROSS APPLY (\n" +
                 "    SELECT e.nid, VECTOR_DISTANCE(e.embedding, s.embedding, $metric) AS distance FROM $embeddings e\n" +
                 "    ORDER BY distance FETCH APPROX FIRST ${scope.bound(amongK(request))} ROWS ONLY) k\n" +
                 "JOIN $MEMBERS o ON o.nid = k.nid AND $other"
         }
-        val ranked = Query("p.seed, p.nid, p.id, p.score, ROW_NUMBER() OVER (PARTITION BY p.seed ORDER BY p.score DESC, p.nid) AS place", Derived(pairs, "p"))
+        val ranked = Query("p.seed, p.nid, p.id, p.pos, p.score, ROW_NUMBER() OVER (PARTITION BY p.seed ORDER BY p.score DESC, p.pos, p.nid) AS place", Derived(pairs, "p"))
         val near = Query(
-            OracleSql.arrayOf(OracleSql.jsonObject(listOf("id" to "r.id", "score" to "r.score")), "r.score DESC, r.nid"),
+            OracleSql.arrayOf(OracleSql.jsonObject(listOf("id" to "r.id", "score" to "r.score")), "r.score DESC, r.pos, r.nid"),
             Table(RANKED, "r"),
             listOfNotNull("r.seed = s.nid", "r.place <= ${scope.bound(request.topK)}", among.threshold?.let { "r.score >= ${scope.bound(it)}" }),
         )
@@ -497,8 +497,8 @@ object VectorSearch {
 
     /**
      * Only the roots are measured, so the answer is exact; a pair whose embeddings differ in size has no score, and is left
-     * out. SQLite has no `LATERAL`, so every pair is scored once, numbered within its root best first, and a root keeps the
-     * first `topK`.
+     * out. SQLite has no `LATERAL`, so every pair is scored once, numbered within its root best first, a tie of two scores by place
+     * among the ids, and a root keeps the first `topK`.
      */
     private fun sqliteAmong(ddl: SqliteDdl, request: VectorRequest, among: VectorAmong, scope: SearchParameters): String {
         val key = stored(request.property)
@@ -506,21 +506,17 @@ object VectorSearch {
         val after = among.neighbours == AmongNeighbours.After
         val ids = scope.bound(among.ids)
         val has = listOf(SqliteSql.hasLabels("c", request.labels), "${SqliteSql.type("c", key)} = 'array'") + listOfNotNull(sqliteLength(request, "c", key))
-        val members = if (after) {
-            Query("c.nid, $id AS id, c.props, g.pos", Placed(ddl.nodes, "c", SqliteSql.placedTextValues(ids), "g", "g.id = $id"), has)
-        } else {
-            Query("c.nid, $id AS id, c.props", Table(ddl.nodes, "c"), has.take(2) + "$id IN (${SqliteSql.textValues(ids)})" + has.drop(2))
-        }
+        val members = Query("c.nid, $id AS id, c.props, g.pos", Placed(ddl.nodes, "c", SqliteSql.placedTextValues(ids), "g", "g.id = $id"), has)
         val scored = Query(
-            "s.nid AS seed, o.nid, o.id, ${SqliteSql.score("o", key, request.similarity, SqliteSql.value("s", key))} AS score",
+            "s.nid AS seed, o.nid, o.id, o.pos, ${SqliteSql.score("o", key, request.similarity, SqliteSql.value("s", key))} AS score",
             Paired(MEMBERS, "s", "o", if (after) "o.pos > s.pos" else "o.nid <> s.nid"),
         )
         val ranked = Query(
-            "p.seed, p.nid, p.id, p.score, ROW_NUMBER() OVER (PARTITION BY p.seed ORDER BY p.score DESC, p.nid) AS place",
+            "p.seed, p.nid, p.id, p.pos, p.score, ROW_NUMBER() OVER (PARTITION BY p.seed ORDER BY p.score DESC, p.pos, p.nid) AS place",
             Derived(scored.text(), "p"), listOf("p.score IS NOT NULL"),
         )
         val near = Query(
-            SqliteSql.arrayOf(SqliteSql.plainObject(listOf("id" to "r.id", "score" to "r.score")), "r.score DESC, r.nid"),
+            SqliteSql.arrayOf(SqliteSql.plainObject(listOf("id" to "r.id", "score" to "r.score")), "r.score DESC, r.pos, r.nid"),
             Table(RANKED, "r"),
             listOfNotNull("r.seed = s.nid", "r.place <= ${scope.bound(request.topK)}", among.threshold?.let { "r.score >= ${scope.bound(it)}" }),
         )
@@ -546,12 +542,58 @@ object VectorSearch {
     }
 
     /**
-     * A search among ids with `searchK` on a graph engine: each id unwound to its root, and the index asked for each root's
-     * `searchK` nearest by the root's own embedding, so the engine answers every root in one statement. What the index yields is narrowed to the
-     * roots, less the root itself (for each pair once, to the roots after it) and what scores under the threshold, and the best `topK` of what is left are kept. On Neo4j
-     * the score is measured afresh, as the narrowing trims what the index found.
+     * A search among ids with `searchK` on Neo4j and Memgraph (FalkorDB's is [falkorDbAmong]): each id unwound to its root,
+     * with its place among the ids, and the index asked for each root's `searchK` nearest by the root's own embedding, so the engine answers every root in one
+     * statement. What the index yields is narrowed by each hit's place to the roots, less the root itself (for each pair
+     * once, to the roots after it), and what scores under the threshold, and the best `topK` of what is left are kept, a tie
+     * of two scores by place. On Neo4j the score is measured afresh, as the narrowing trims what the index found.
      */
     private fun graphAmong(store: SearchStore, request: VectorRequest, among: VectorAmong, scope: SearchParameters): VectorPlan {
+        if (store == SearchStore.FALKORDB) return falkorDbAmong(store, request, among, scope)
+        val label = request.labels.first()
+        val id = CypherNames.identifier(among.idProperty)
+        val embedding = "seed.${CypherNames.identifier(request.property)}"
+        val ids = scope.bound(among.ids)
+        // Each id's place among the ids, bound as a map of its text, so each hit's place is read at once: what is no root has
+        // none, and a tie of two scores goes by place (#412). It is read through a variable, bound once: Memgraph copies a
+        // parameter each time a row reads it, and a map of 2000 ids read so 80 000 times took 36 s, through a variable 31 ms.
+        // A hit whose id is no text, as of a node of the label stored under another id type, is no root, and has no place:
+        // a map read by a key that is no text is an error on every graph engine. FalkorDB takes no such map: see falkorDbAmong.
+        val places = scope.bound(among.ids.withIndex().associate { (place, text) -> text to place })
+        val after = among.neighbours == AmongNeighbours.After
+        val carried = "$PLACES, $POS, $SEED_ID"
+        val head = head(store, request, label, named = null, k = scope.bound(amongK(request)), vector = embedding, scope = scope, rescored = true, alias = NODE, scoreAlias = SCORE, carried = carried)
+        // For each pair once, each root keeps what the index finds of the ids after it; for every neighbour, of every other id.
+        val others = if (after) listOf("m.place > $POS") else listOf("m.place IS NOT NULL", "m.place <> $POS")
+        val kept = others + listOfNotNull(among.threshold?.let { "m.score >= ${scope.bound(it)}" })
+        val labelled = labelCheck(NODE, request.labels, label)?.let { "\nWHERE $it" } ?: ""
+        val topK = scope.bound(request.topK)
+        val cypher = """
+            |WITH $places AS $PLACES
+            |UNWIND range(0, size($ids) - 1) AS $POS
+            |WITH $PLACES, $POS, $ids[$POS] AS $SEED_ID
+            |MATCH ($SEED:${request.labels.joinToString(":") { CypherNames.identifier(it) }})
+            |WHERE $SEED.$id = $SEED_ID AND $embedding IS NOT NULL
+            |${head.text}$labelled
+            |WITH $carried, $NODE, $SCORE, CASE WHEN toString($NODE.$id) = $NODE.$id THEN $PLACES[$NODE.$id] END AS _place
+            |ORDER BY $SCORE DESC, _place
+            |WITH $SEED_ID, $POS, collect({id: $NODE.$id, score: $SCORE, place: _place}) AS _found
+            |RETURN {seed: $SEED_ID, near: [m IN _found WHERE ${kept.joinToString(" AND ")} | {id: m.id, score: m.score}][0..$topK]} AS row
+        """.trimMargin()
+        return VectorPlan(
+            sql = null, cypher = cypher, parameters = scope.bindings(), vector = null, labelCheck = null, indexK = amongK(request),
+            warnings = amongWarnings(store, request, among),
+        )
+    }
+
+    /**
+     * A search among ids with `searchK` on FalkorDB: [graphAmong] less the places. A FalkorDB client writes each parameter
+     * into the statement as text, and each library refuses some map keys (TypeScript's any that is no plain name), so a map
+     * keyed by the ids can't be bound (liberation-data/drivine-cypher-spec#416). What the index yields is narrowed by id to
+     * the roots, less the root itself (for each pair once, to the ids after it), and ordered by score alone: a tie of two
+     * scores goes by the index's own order, which this path, approximate and warned of, leaves as it is.
+     */
+    private fun falkorDbAmong(store: SearchStore, request: VectorRequest, among: VectorAmong, scope: SearchParameters): VectorPlan {
         val label = request.labels.first()
         val id = CypherNames.identifier(among.idProperty)
         val embedding = "seed.${CypherNames.identifier(request.property)}"
@@ -742,6 +784,7 @@ object VectorSearch {
     private const val SEED_ID = "_seedId"
     private const val POS = "_pos"
     private const val IDS = "_ids"
+    private const val PLACES = "_places"
     private const val NEXT = "_next"
     private const val NEXT_ID = "_nextId"
     private const val NODE = "n"
