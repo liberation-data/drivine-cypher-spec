@@ -32,7 +32,7 @@ internal class OnceReached(private val grouped: String, private val once: String
 
 /**
  * The rows of the table [table] as [row], each joined to the row [given] gives, named [alias], that meets [on]: how a search
- * among ids for the neighbours after each root reads each root with its place in the ids as given.
+ * among ids reads each root with its place in the ids as given.
  */
 internal class Placed(private val table: String, private val row: String, private val given: String, private val alias: String, private val on: String) : RowSource {
     override fun reading(readers: List<String>): String = "$table $row\nJOIN (\n    ${given.under()}\n) $alias ON $on"

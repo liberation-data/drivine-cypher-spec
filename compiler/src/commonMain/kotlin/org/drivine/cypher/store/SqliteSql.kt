@@ -130,10 +130,7 @@ object SqliteSql {
     fun score(alias: String, key: String, similarity: SimilarityFunction, vector: String): String =
         "${SqliteFunctions.SIMILARITY}(${value(alias, key)}, $vector, ${literal(similarity.name)})"
 
-    /** The texts of the JSON array bound as [parameter], as rows of one column, each as a property is read as text ([propertyText]). */
-    fun textValues(parameter: String): String = "SELECT $ITEM_TEXT FROM json_each($parameter) v"
-
-    /** [textValues], each as `id` beside its place in the array, `pos`, counted from 0. */
+    /** The texts of the JSON array bound as [parameter], as rows, each as a property is read as text ([propertyText]), and as `id` beside its place in the array, `pos`, counted from 0. */
     fun placedTextValues(parameter: String): String = "SELECT $ITEM_TEXT AS id, v.key AS pos FROM json_each($parameter) v"
 
     /** An item `v` of `json_each` as text, as a property is read as text ([propertyText]). */

@@ -161,8 +161,12 @@ class VectorSearchGoldenTest {
         return if (wanted == given) null else "parameters expected $wanted but were $given"
     }
 
-    /** A whole number as a Long, as JSON reads it back, so an Int bound and the golden's number compare. */
-    private fun whole(value: Any?): Any? = if (value is Int) value.toLong() else value
+    /** A whole number as a Long, as JSON reads it back, so an Int bound and the golden's number compare, in a map too. */
+    private fun whole(value: Any?): Any? = when (value) {
+        is Int -> value.toLong()
+        is Map<*, *> -> value.entries.associate { (k, v) -> k to whole(v) }
+        else -> value
+    }
 
     private fun texts(node: JsonNode): List<String> = (node as ArrayNode).map { it.textValue()!! }
 

@@ -79,8 +79,8 @@ class VectorAmongAllTest {
         for (store in SearchStore.entries) for (dimensions in listOf(null, 3)) {
             val planned = plan(store, request(searchK = 20, dimensions = dimensions))
             val text = planned.sql ?: planned.cypher!!
-            // As it went before #408: no place is read, and the golden pins its statements.
-            assertTrue("_pos" !in text && "pos >" !in text && "ORDINALITY" !in text, "${store.id}:\n$text")
+            // Every other root is kept, none for its place: the golden pins its statements.
+            assertTrue("pos >" !in text && "_pos + 1" !in text, "${store.id}:\n$text")
             val throughIndex = store.graphEngine || (store != SearchStore.SQLITE && dimensions != null)
             if (throughIndex) {
                 assertEquals(1, planned.warnings.size, "${store.id} $dimensions")
