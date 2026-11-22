@@ -368,7 +368,10 @@ SQL entries of a nearest search by cosine were edited by a script to leave out a
 Neo4j's cosine index does, and the 40 of a search among ids by cosine to leave out a root with one (#160), which drivine4j
 at that commit does not. The 70 SQL entries of a search among ids were edited by a script to read each root's place
 among the ids and break a tie of two scores by place, then `nid`, and Neo4j's and Memgraph's 32 to bind each id's place as a
-map, `_cy_vec2`, the later parameters numbered on, and keep and order each hit by its place, where its id is text (#412). No other edit was made. `VectorSearchGoldenTest` checks
+map, `_cy_vec2`, the later parameters numbered on, and keep and order each hit by its place, where its id is text (#412). The 70 SQL entries of a search among ids were then edited by a script to find each root
+through the index over its id (`IdSql.hasIdIn`, on Oracle hinted `NO_COALESCE_SQ`), join it to its place by the index's
+own expressions, the ids read as each id's JSON, and read each id back as `IdSql.keyText` reads it (drivine4j#868). No
+other edit was made. `VectorSearchGoldenTest` checks
 `plan`, and the JSON request, against each on every target, putting back on Oracle the document drivine4j selects beside
 each candidate's row before it compares.
 
