@@ -1484,4 +1484,177 @@ class OnlineIndexBuildTest {
         // An index and a constraint over the same properties take turns of their own.
         assertTrue("'CLAIM:RANGE_INDEX'" in postgresDdl.buildClaim(RangeIndexSpec("Person", "email")).take)
     }
+
+    // ----- A recreate's or a drop's step cancelled as a deadlock (#410) -----
+
+    /** A record of the range index on Person[name], listed until [dropped] says its record was forgotten. */
+    private fun nameRecordUntil(dropped: () -> Boolean): (String) -> List<Any?> = {
+        if (it == postgresDdl.listIndexesQuery(SchemaItemKind.RANGE_INDEX) && !dropped()) nameRecord(null) else emptyList()
+    }
+
+    /** What the store gives each statement: [deadlocks] times a deadlock for the first statements [cancels], then nothing. */
+    private fun deadlocking(deadlocks: Int, cancels: (String) -> Boolean, also: (String) -> Unit = {}): (String) -> StoreError? {
+        var left = deadlocks
+        return { text -> also(text); if (cancels(text) && left > 0) { left--; deadlocked } else null }
+    }
+
+    private fun ranAgain(report: DatabaseReport, what: String, kind: String, on: String) =
+        report.log.count { it.level == LogLevel.INFO && it.message == "Postgres cancelled a statement of the $what of $kind on $on, deadlocked with another session's online build on the same table: running it again once no build is under way there" }
+
+    @Test
+    fun aRecreatedIndexsBuildCancelledAsADeadlockIsBuiltAgainAsAnIndexLeftInvalidIs() {
+        var dropped = false
+        val index = postgresDdl.objectName(PostgresDdl.RANGE, listOf("Person", "name"))
+        val (ran, report) = drive(
+            postgres, name, call = ItemCall.RECREATE, listed = nameRecordUntil { dropped },
+            execute = deadlocking(1, { it.startsWith("CREATE INDEX CONCURRENTLY") }, { if ("DO \$forget\$" in it) dropped = true }),
+        )
+        // Cancelled mid-build, it may have left its index invalid under the name, which a create would pass over: made whole,
+        // the invalid one dropped first, on a quiet table.
+        assertEquals(
+            listOf("CREATE INDEX CONCURRENTLY IF NOT EXISTS $index", "DROP INDEX IF INVALID $index", "CREATE INDEX CONCURRENTLY IF NOT EXISTS $index"),
+            indexBuilds(ran).map { it.substringBefore(" ON ") },
+        )
+        assertIs<EnsureResult.Recreated>(report.item!!.result)
+        assertNull(report.failure)
+        assertEquals(1, ranAgain(report, "recreate", "RANGE_INDEX", "Person[name]"), report.log.toString())
+    }
+
+    @Test
+    fun aRecreatedIndexsDropCancelledAsADeadlockIsRunAgain() {
+        var dropped = false
+        val (ran, report) = drive(
+            postgres, name, call = ItemCall.RECREATE, listed = nameRecordUntil { dropped },
+            execute = deadlocking(1, { "DO \$forget\$" in it }, { if ("DO \$forget\$" in it) dropped = true }),
+        )
+        assertEquals(2, ran.count { "DO \$forget\$" in it }, ran.joinToString("\n"))
+        assertIs<EnsureResult.Recreated>(report.item!!.result)
+        assertEquals(1, ranAgain(report, "recreate", "RANGE_INDEX", "Person[name]"), report.log.toString())
+    }
+
+    @Test
+    fun aDropCancelledAsADeadlockIsRunAgain() {
+        var dropped = false
+        val (ran, report) = drive(
+            postgres, name, call = ItemCall.DROP, listed = nameRecordUntil { dropped },
+            execute = deadlocking(1, { "DO \$forget\$" in it }, { if ("DO \$forget\$" in it) dropped = true }),
+        )
+        assertEquals(2, ran.count { "DO \$forget\$" in it }, ran.joinToString("\n"))
+        assertEquals(true, report.item!!.dropped)
+        assertEquals(1, ranAgain(report, "drop", "RANGE_INDEX", "Person[name]"), report.log.toString())
+        // A constraint's drop too.
+        val record = ListingRows.rows("postgres", listOf(SchemaItemInfo(SchemaItemKind.UNIQUENESS_CONSTRAINT, "Person", listOf("email"), "Person_email_unique")), constraints = true)
+        val (constraint, dropReport) = drive(
+            postgres, email, call = ItemCall.DROP, listed = { if (it == postgresDdl.listConstraintsQuery()) record else emptyList() },
+            execute = deadlocking(1, { "DO \$forget\$" in it }),
+        )
+        assertEquals(2, constraint.count { "DO \$forget\$" in it }, constraint.joinToString("\n"))
+        assertEquals(true, dropReport.item!!.dropped)
+        assertEquals(1, ranAgain(dropReport, "drop", "UNIQUENESS_CONSTRAINT", "Person[email]"), dropReport.log.toString())
+    }
+
+    @Test
+    fun aConstraintRecreatesBuildBesideAndItsCreateAfterTheSwapCancelledAsADeadlockAreRunAgain() {
+        val recreation = postgresDdl.recreation(email)
+        val record = ListingRows.rows("postgres", listOf(SchemaItemInfo(SchemaItemKind.UNIQUENESS_CONSTRAINT, "Person", listOf("email"), "Person_email_unique")), constraints = true)
+        val listed: (String) -> List<Any?> = { if (it == postgresDdl.listConstraintsQuery()) record + listOf(emailIndexObject(null)) else emptyList() }
+        // The blocking build beside it builds nothing where it is cancelled: run again as it was.
+        val (built, report) = drive(postgres, email, call = ItemCall.RECREATE, listed = listed, execute = deadlocking(1, { it.startsWith("CREATE UNIQUE INDEX ${recreation.temporary} ") }))
+        assertEquals(2, indexBuilds(built).count { it.startsWith("CREATE UNIQUE INDEX ${recreation.temporary} ") }, built.joinToString("\n"))
+        assertIs<EnsureResult.Recreated>(report.item!!.result)
+        assertEquals(1, ranAgain(report, "recreate", "UNIQUENESS_CONSTRAINT", "Person[email]"), report.log.toString())
+        // The constraint's create after the swap, cancelled at its table's lock, changed nothing: run again as it was.
+        val (created, after) = drive(postgres, email, call = ItemCall.RECREATE, listed = listed, execute = deadlocking(1, { it.startsWith("CREATE UNIQUE INDEX CONCURRENTLY") }))
+        assertEquals(2, indexBuilds(created).count { it.startsWith("CREATE UNIQUE INDEX CONCURRENTLY") }, created.joinToString("\n"))
+        assertEquals(1, created.count { it.startsWith("DO \$swap\$") }, created.joinToString("\n"))
+        assertIs<EnsureResult.Recreated>(after.item!!.result)
+        assertEquals(1, ranAgain(after, "recreate", "UNIQUENESS_CONSTRAINT", "Person[email]"), after.log.toString())
+    }
+
+    @Test
+    fun aRecreateCancelledAsADeadlockEveryTimeIsThrownAfterItsTries() {
+        var dropped = false
+        val (ran, report) = drive(
+            postgres, name, call = ItemCall.RECREATE, listed = nameRecordUntil { dropped },
+            execute = deadlocking(99, { it.startsWith("CREATE INDEX CONCURRENTLY") }, { if ("DO \$forget\$" in it) dropped = true }),
+        )
+        assertEquals(3, indexBuilds(ran).count { it.startsWith("CREATE INDEX CONCURRENTLY") }, ran.joinToString("\n"))
+        assertNull(report.rethrown, "$report")
+        assertTrue(
+            "Postgres cancelled the recreate of RANGE_INDEX on Person[name] 3 times, deadlocked each time with another session's online build on the same table " +
+                "(deadlock detected). Nothing more was run: recreate it again once those builds have ended." in report.failure.orEmpty(),
+            "$report",
+        )
+        // A drop too, named as a drop.
+        val (dropping, dropReport) = drive(
+            postgres, name, call = ItemCall.DROP, listed = nameRecordUntil { false },
+            execute = deadlocking(99, { "DO \$forget\$" in it }),
+        )
+        assertEquals(3, dropping.count { "DO \$forget\$" in it }, dropping.joinToString("\n"))
+        assertNull(dropReport.rethrown, "$dropReport")
+        assertTrue(
+            "Postgres cancelled the drop of RANGE_INDEX on Person[name] 3 times, deadlocked each time with another session's online build on the same table " +
+                "(deadlock detected). Nothing more was run: drop it again once those builds have ended." in dropReport.failure.orEmpty(),
+            "$dropReport",
+        )
+    }
+
+    @Test
+    fun aRecreateOfAnIndexLeftInvalidWhoseBuildIsCancelledAsADeadlockIsMadeWholeAgain() {
+        // No record, the index invalid under the name: made whole, and made whole again where its build is cancelled.
+        val index = postgresDdl.objectName(PostgresDdl.RANGE, listOf("Person", "name"))
+        var creates = 0
+        val (ran, report) = drive(
+            postgres, name, call = ItemCall.RECREATE,
+            listed = { if (it == postgresDdl.listIndexesQuery(SchemaItemKind.RANGE_INDEX) && creates < 2) listOf(nameIndexObject(PostgresDdl.INVALID)) else emptyList() },
+            execute = { if (it.startsWith("CREATE INDEX CONCURRENTLY") && ++creates == 1) deadlocked else null },
+        )
+        assertEquals(
+            listOf("DROP INDEX IF INVALID $index", "CREATE INDEX CONCURRENTLY IF NOT EXISTS $index", "DROP INDEX IF INVALID $index", "CREATE INDEX CONCURRENTLY IF NOT EXISTS $index"),
+            indexBuilds(ran).map { it.substringBefore(" ON ") },
+        )
+        assertNull(report.failure, "$report")
+        assertIs<EnsureResult.Recreated>(report.item!!.result)
+        assertEquals(1, ranAgain(report, "recreate", "RANGE_INDEX", "Person[name]"), report.log.toString())
+    }
+
+    @Test
+    fun aConstraintDropsLeftoverCancelledAsADeadlockIsRunAgainAndSoIsTheDropOfOneARecreateCutOffLeft() {
+        val recreation = postgresDdl.recreation(email)
+        val leftover = "DROP INDEX IF EXISTS ${recreation.temporary}"
+        val record = ListingRows.rows("postgres", listOf(SchemaItemInfo(SchemaItemKind.UNIQUENESS_CONSTRAINT, "Person", listOf("email"), "Person_email_unique")), constraints = true)
+        val (ran, report) = drive(
+            postgres, email, call = ItemCall.DROP, listed = { if (it == postgresDdl.listConstraintsQuery()) record else emptyList() },
+            execute = deadlocking(1, { it == leftover }),
+        )
+        assertEquals(2, ran.count { it == leftover }, ran.joinToString("\n"))
+        assertEquals(1, ran.count { "DO \$forget\$" in it }, ran.joinToString("\n"))
+        assertEquals(true, report.item!!.dropped)
+        assertEquals(1, ranAgain(report, "drop", "UNIQUENESS_CONSTRAINT", "Person[email]"), report.log.toString())
+        // Only the index a recreate cut off built first standing: its drop, and its record's, each run again where cancelled.
+        val cutOff = { statement: String -> if (statement == postgresDdl.listConstraintsQuery()) listOf(emailIndexObject(PostgresDdl.INVALID) + ("object" to recreation.temporary.lowercase())) else emptyList() }
+        for (cancelled in listOf<(String) -> Boolean>({ it == leftover }, { "DO \$forget\$" in it })) {
+            val (dropping, dropped) = drive(postgres, email, call = ItemCall.DROP, listed = cutOff, execute = deadlocking(1, cancelled))
+            assertEquals(2, dropping.count(cancelled), dropping.joinToString("\n"))
+            assertNull(dropped.rethrown, "$dropped")
+            assertEquals(true, dropped.item!!.dropped)
+            assertTrue(dropped.log.any { "the index a recreate of it that was cut off built first" in it.message }, dropped.log.toString())
+            assertEquals(1, ranAgain(dropped, "drop", "UNIQUENESS_CONSTRAINT", "Person[email]"), dropped.log.toString())
+        }
+    }
+
+    @Test
+    fun aConstraintRecreatesSwapCancelledAsADeadlockIsNotRunAgain() {
+        // One transaction, which may have run in part where it is not the step cancelled: thrown as the store gave it.
+        val record = ListingRows.rows("postgres", listOf(SchemaItemInfo(SchemaItemKind.UNIQUENESS_CONSTRAINT, "Person", listOf("email"), "Person_email_unique")), constraints = true)
+        val (ran, report) = drive(
+            postgres, email, call = ItemCall.RECREATE,
+            listed = { if (it == postgresDdl.listConstraintsQuery()) record + listOf(emailIndexObject(null)) else emptyList() },
+            execute = deadlocking(99, { it.startsWith("DO \$swap\$") }),
+        )
+        assertEquals(1, ran.count { it.startsWith("DO \$swap\$") }, ran.joinToString("\n"))
+        assertTrue(ran.none { it.startsWith("CREATE UNIQUE INDEX CONCURRENTLY") }, ran.joinToString("\n"))
+        assertTrue(report.rethrown != null, "$report")
+        assertEquals(0, ranAgain(report, "recreate", "UNIQUENESS_CONSTRAINT", "Person[email]"), report.log.toString())
+    }
 }
