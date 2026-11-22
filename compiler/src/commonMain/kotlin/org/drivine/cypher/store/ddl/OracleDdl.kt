@@ -437,8 +437,8 @@ ${made.entries.joinToString("\n") { (function, making) ->
      * takes them: one made before there were labelled indexes is listed as incomplete (see
      * [listed]), so `ensure` makes it again, and its labelled index with it. With [online], each
      * is built [ONLINE], as an index's own create builds them (#381). A uniqueness constraint's are built blocking writes,
-     * as its unique index is: sessions ensuring it at once then take turns on the table (ORA-00054, waited out), where
-     * online builds of them beside a blocking one deadlock in the library cache (ORA-04020, #382).
+     * as its unique index is, where online builds of them beside a blocking one deadlocked in the library cache (ORA-04020,
+     * #382); sessions ensuring it at once build it in their turns ([buildClaim], drivine4j#777).
      */
     private fun rangeIndex(spec: RangeIndexSpec, online: Boolean = false): List<String> {
         val (name, shared) = sharedIndex(spec, online)
@@ -564,6 +564,50 @@ ${made.entries.joinToString("\n") { (function, making) ->
                 ${recorded(spec, side.name, details).trimIndent().replace("\n", "\n                ")}
             END;
         """
+    }
+
+    /**
+     * A claim in the catalog, of the kind `CLAIM:` and the item's, which no listing reads, marked `$at` by the ensure that
+     * takes it and stamped with when it was taken, in seconds of the store's own clock (UTC). Taken, and given up, each in
+     * a transaction of its own (`AUTONOMOUS_TRANSACTION`), so it commits nothing of the transaction the connection is in;
+     * one older than [CLAIM_STALE_SECONDS] is taken over where no online build is under way on the node table, as on
+     * Postgres: an `ONLINE` build keeps a journal, `SYS_JOURNAL_<the index's object id>`, which a session sees in
+     * `user_objects` without a grant, so a range index's build that outlasts it is never raced. A constraint's indexes are
+     * built blocking writes, and keep none: one that outlasts it is waited out on the table (`ORA-00054`) by the session
+     * that takes the claim over.
+     */
+    override fun buildClaim(spec: SchemaItemSpec): BuildClaim {
+        val key = "kind = ${literal(CLAIM + spec.kind.name)} AND label = ${literal(spec.label)} AND properties = ${literal(json(spec.properties))}"
+        // An online build under way of an index on the node table: its journal, SYS_JOURNAL_<the index's object id>, in the
+        // index's owner's schema, which a session reads without a grant.
+        val building = "EXISTS (SELECT 1 FROM user_objects j JOIN user_objects x ON j.object_name = 'SYS_JOURNAL_' || x.object_id " +
+            "JOIN user_indexes i ON i.index_name = x.object_name WHERE x.object_type = 'INDEX' AND i.table_name = UPPER(${literal(nodes)}))"
+        val take = """
+            DECLARE
+                PRAGMA AUTONOMOUS_TRANSACTION;
+                v_now NUMBER := (CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400;
+            BEGIN
+                DELETE FROM $catalog WHERE $key AND JSON_VALUE(details, '${'$'}.since' RETURNING NUMBER) < v_now - $CLAIM_STALE_SECONDS AND NOT $building;
+                INSERT INTO $catalog (kind, label, properties, details)
+                VALUES (${literal(CLAIM + spec.kind.name)}, ${literal(spec.label)}, ${literal(json(spec.properties))}, JSON_OBJECT('at' VALUE ${'$'}at, 'since' VALUE v_now));
+                COMMIT;
+            EXCEPTION
+                WHEN OTHERS THEN
+                    ROLLBACK;
+                    RAISE;
+            END;
+        """.trimIndent()
+        val release = """
+            DECLARE
+                PRAGMA AUTONOMOUS_TRANSACTION;
+            BEGIN
+                DELETE FROM $catalog WHERE $key AND JSON_VALUE(details, '${'$'}.at') = ${'$'}at;
+                COMMIT;
+            END;
+        """.trimIndent()
+        val held = "SELECT COUNT(*) FROM $catalog WHERE $key AND (JSON_VALUE(details, '${'$'}.since' RETURNING NUMBER) >= " +
+            "(CAST(SYS_EXTRACT_UTC(SYSTIMESTAMP) AS DATE) - DATE '1970-01-01') * 86400 - $CLAIM_STALE_SECONDS OR $building)"
+        return BuildClaim(take, release, BuildClaim.Taken.RAN, held)
     }
 
     /**
@@ -780,6 +824,12 @@ ${made.entries.joinToString("\n") { (function, making) ->
         const val SHARED = "ix"
         const val LABELLED = "lx"
         const val UNIQUE = "uq"
+
+        /** What a [buildClaim]'s kind begins with, before the item's: no item's kind does. */
+        const val CLAIM = "CLAIM:"
+
+        /** How old a [buildClaim] is taken over at: a build's default timeout (`PlanRequest.DEFAULT_BUILD_TIMEOUT_MILLIS`). */
+        const val CLAIM_STALE_SECONDS = 60
 
         /** What the names of a vector index's and a full-text index's tables beside the nodes say they are, and their triggers' and indexes' after them. */
         const val VECTORS = "v"

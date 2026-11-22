@@ -290,11 +290,12 @@ interface StoreSchema {
     fun isOnlineRefused(error: StoreError): Boolean = false
 
     /**
-     * Whether [error], from an ensure's statements, says the store cancelled one of them as a deadlock with another
-     * session's online build on the same table: on Postgres (`40P01`), two `CREATE INDEX CONCURRENTLY` on one table wait
-     * for each other where the index is over an expression, or partial, as Drivine's are, and the store cancels one. The
-     * ensure is run again ([org.drivine.cypher.store.plan.SchemaProgram]), and then finds that session's build under way,
-     * or ended, as another session's. Never, on a store that builds no index online.
+     * Whether [error], from an ensure's, a recreate's or a drop's statements, says the store cancelled one of them as a
+     * deadlock with another session's online build on the same table: on Postgres (`40P01`), two `CREATE INDEX CONCURRENTLY`
+     * on one table wait for each other where the index is over an expression, or partial, as Drivine's are, and the store
+     * cancels one. The ensure, or the recreate's or drop's step cancelled, is run again
+     * ([org.drivine.cypher.store.plan.SchemaProgram]), and then finds that session's build under way, or ended, as another
+     * session's. Never, on a store that builds no index online.
      */
     fun isBuildDeadlock(error: StoreError): Boolean = false
 
