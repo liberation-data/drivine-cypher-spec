@@ -665,7 +665,7 @@ internal class SchemaProgram(
     private fun dropIndex(spec: IndexSpec): Boolean {
         val existing = findIndex(spec) ?: return false
         if (leftToConstraint(existing, spec, "dropped") != null) return false
-        dropExisting(existing, spec.made())
+        throughBuildDeadlocks(spec, DROP, { dropExisting(existing, spec.made()) })
         return true
     }
 
@@ -701,12 +701,19 @@ internal class SchemaProgram(
         val cleared = clearMismatched(spec, found) { findIndex(spec) }
         cleared.drift?.let { return it }
         val existing = cleared.existing ?: found
-        if (existing != null) dropExisting(existing, spec)
+        if (existing != null) throughBuildDeadlocks(spec, RECREATE, { dropExisting(existing, spec) })
         // Read again after the drop: on a store with an index a label, the label may still have one over other
         // properties, which the create takes into account.
         val related = indexes(spec.kind).firstOrNull { it.kind == spec.kind && it.label == spec.label }
         warnUnsupportedTuning(spec)
-        if (isLeftIncomplete(spec)) ddlOnAQuietTable(made(spec, related, true)) else ddl(made(spec, related, false))
+        // An online build cancelled mid-build leaves its index invalid under the name, which its create would pass over:
+        // run again as what makes an index left so whole, which drops it on a quiet table first.
+        val incomplete = isLeftIncomplete(spec)
+        throughBuildDeadlocks(
+            spec, RECREATE,
+            { if (incomplete) ddlOnAQuietTable(made(spec, related, true)) else ddl(made(spec, related, false)) },
+            { ddlOnAQuietTable(made(spec, related, true)) },
+        )
         val created = awaitBuilt(spec, findIndex(spec), build) ?: SchemaItemInfo.fromSpec(spec)
         if (aliases.isNotEmpty()) alias(created, aliases)
         logEffectiveVectorConfig(spec, created)
@@ -1157,25 +1164,38 @@ internal class SchemaProgram(
      * ensure run again finds it under way, and waits for it, or ended, as another session's. Said at INFO; after
      * [BUILD_DEADLOCK_TRIES] tries, a failure that says so, never the store's bare deadlock.
      */
-    private fun afterBuildDeadlocks(spec: SchemaItemSpec, ensure: () -> EnsureResult): EnsureResult {
+    private fun afterBuildDeadlocks(spec: SchemaItemSpec, ensure: () -> EnsureResult): EnsureResult = throughBuildDeadlocks(spec, ENSURE, ensure)
+
+    /**
+     * [first] of [spec]'s [what] (an ensure, a recreate or a drop), and in its place [again], run where the store cancels
+     * one of its statements as a deadlock with another session's online build on the same table
+     * ([StoreSchema.isBuildDeadlock]), once no online build is under way there ([awaitNoOnlineBuild]): that session's build
+     * goes on, and the step run again finds it ended. A recreate or a drop runs again only the step cancelled, which the
+     * store cancelled whole (drivine-cypher-spec#410), as a recreate read what serves the item before its drop. Said at
+     * INFO; after [BUILD_DEADLOCK_TRIES] tries, a failure that says so, never the store's bare deadlock.
+     */
+    private fun <T> throughBuildDeadlocks(spec: SchemaItemSpec, what: String, first: () -> T, again: () -> T = first): T {
         var tries = 0
+        var run = first
         while (true) {
             try {
-                return ensure()
+                return run()
             } catch (refused: RawFailure) {
                 if (!store.isBuildDeadlock(refused.error)) throw refused
                 if (++tries >= BUILD_DEADLOCK_TRIES) {
+                    val after = if (what == ENSURE) "Nothing was made: ensure it again" else "Nothing more was run: $what it again"
                     throw OwnerFailure(
-                        "$engine cancelled the ensure of ${spec.kind} on ${spec.label}${spec.properties} $BUILD_DEADLOCK_TRIES times, deadlocked each time with " +
-                            "another session's online build on the same table (${messageOf(refused.error, "null")}). Nothing was made: ensure it again once those builds have ended.",
+                        "$engine cancelled the $what of ${spec.kind} on ${spec.label}${spec.properties} $BUILD_DEADLOCK_TRIES times, deadlocked each time with " +
+                            "another session's online build on the same table (${messageOf(refused.error, "null")}). $after once those builds have ended.",
                     )
                 }
                 log(
                     LogLevel.INFO, if (spec is ConstraintSpec) CONSTRAINT_MANAGER else INDEX_MANAGER,
-                    "$engine cancelled a statement of the ensure of ${spec.kind} on ${spec.label}${spec.properties}, deadlocked with another session's online build " +
-                        "on the same table: ensuring it again once no build is under way there",
+                    "$engine cancelled a statement of the $what of ${spec.kind} on ${spec.label}${spec.properties}, deadlocked with another session's online build " +
+                        "on the same table: ${if (what == ENSURE) "ensuring it again" else "running it again"} once no build is under way there",
                 )
                 awaitNoOnlineBuild()
+                run = again
             }
         }
     }
@@ -1230,8 +1250,8 @@ internal class SchemaProgram(
         val existing = findConstraint(spec) ?: return dropCutOff(spec)
         // On a SQL store, what a recreate left under the name it builds under first goes too: it would go on refusing keys
         // for a constraint no one declares.
-        (store.ddl as? SqlStoreDdl)?.let { sql -> ddl(sql.recreation(spec.made()).leftover) }
-        ddl(store.ddl.dropConstraint(existing.catalogItem))
+        (store.ddl as? SqlStoreDdl)?.let { sql -> throughBuildDeadlocks(spec, DROP, { ddl(sql.recreation(spec.made()).leftover) }) }
+        throughBuildDeadlocks(spec, DROP, { ddl(store.ddl.dropConstraint(existing.catalogItem)) })
         log(LogLevel.INFO, CONSTRAINT_MANAGER, "Dropped $engine ${spec.kind} on ${spec.label}${spec.properties}")
         return true
     }
@@ -1276,8 +1296,8 @@ internal class SchemaProgram(
         val recreation = sql.recreation(made)
         // One left invalid too: it may go on refusing keys all the same.
         if (!schema.cutOff(made, listings[sql.listConstraintsQuery()].orEmpty(), recreation.name, recreation.temporary, invalid = true)) return false
-        ddl(recreation.leftover)
-        ddl(sql.dropConstraint(CatalogItem(made.kind, made.label, made.properties, made.effectiveName)))
+        throughBuildDeadlocks(spec, DROP, { ddl(recreation.leftover) })
+        throughBuildDeadlocks(spec, DROP, { ddl(sql.dropConstraint(CatalogItem(made.kind, made.label, made.properties, made.effectiveName))) })
         log(
             LogLevel.INFO, CONSTRAINT_MANAGER,
             "Dropped $engine ${spec.kind} on ${spec.label}${spec.properties}, held by ${recreation.temporary}, the index a recreate of it that was cut off built first",
@@ -1364,7 +1384,8 @@ internal class SchemaProgram(
             throw OwnerFailure(messageOf(refused))
         }
         try {
-            ddl(recreation.build)
+            // A blocking build the store cancels builds nothing: run again as it was.
+            throughBuildDeadlocks(made, RECREATE, { ddl(recreation.build) })
         } catch (refused: RawFailure) {
             if (store.isViolation(refused.error)) return confirmedViolation(made, violationSampleSize) ?: throw refused
             if (!store.isAlreadyIndexed(refused.error)) throw refused
@@ -1452,7 +1473,8 @@ internal class SchemaProgram(
      */
     private fun remake(spec: ConstraintSpec, recreation: UniqueRecreation, previous: SchemaItemInfo?, violationSampleSize: Int, aliases: List<String> = emptyList()): EnsureResult {
         try {
-            ddl(store.ddl.createConstraint(spec))
+            // Cancelled at its table's lock, before it reads the name, the create changed nothing: run again as it was.
+            throughBuildDeadlocks(spec, RECREATE, { ddl(store.ddl.createConstraint(spec)) })
         } catch (refused: RawFailure) {
             if (store.isViolation(refused.error)) return confirmedViolation(spec, violationSampleSize) ?: throw refused
             throw refused
@@ -1715,8 +1737,13 @@ internal class SchemaProgram(
         /** How long a drop, or a constraint's build, in the background is waited for, as drivine4j waits. */
         const val ASYNC_TIMEOUT_MILLIS = 30_000L
 
-        /** How many times an ensure is run in all where the store cancels it as a deadlock with another session's online build. */
+        /** How many times an ensure, or a recreate's or a drop's step, is run in all where the store cancels it as a deadlock with another session's online build. */
         const val BUILD_DEADLOCK_TRIES = 3
+
+        /** What [throughBuildDeadlocks] runs again, as its lines name it. */
+        private const val ENSURE = "ensure"
+        private const val RECREATE = "recreate"
+        private const val DROP = "drop"
 
         /** The sample size drivine4j's marker constraint is made with: `ConstraintManager.DEFAULT_VIOLATION_SAMPLE_SIZE`. */
         const val DEFAULT_VIOLATION_SAMPLE_SIZE = 10
