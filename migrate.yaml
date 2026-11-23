@@ -32,15 +32,15 @@ statements:
   oracle:
     readBatch:
       nodes: |-
-        SELECT JSON_OBJECT('id' VALUE nid, 'labels' VALUE labels, 'props' VALUE JSON_SERIALIZE(props RETURNING CLOB EXTENDED) RETURNING JSON) FROM drivine_node
+        SELECT JSON_OBJECT('id' VALUE nid, 'labels' VALUE labels, 'props' VALUE TO_CLOB(JSON_SERIALIZE(props RETURNING CLOB EXTENDED)) RETURNING JSON) FROM drivine_node
         WHERE nid > $after ORDER BY nid FETCH FIRST $limit ROWS ONLY
       edges: |-
-        SELECT JSON_OBJECT('id' VALUE eid, 'labels' VALUE JSON_ARRAY(type), 'props' VALUE JSON_SERIALIZE(props RETURNING CLOB EXTENDED) RETURNING JSON) FROM drivine_edge
+        SELECT JSON_OBJECT('id' VALUE eid, 'labels' VALUE JSON_ARRAY(type), 'props' VALUE TO_CLOB(JSON_SERIALIZE(props RETURNING CLOB EXTENDED)) RETURNING JSON) FROM drivine_edge
         WHERE eid > $after ORDER BY eid FETCH FIRST $limit ROWS ONLY
     update:
       nodes: "UPDATE drivine_node SET props = JSON($props EXTENDED) WHERE nid = $id"
       edges: "UPDATE drivine_edge SET props = JSON($props EXTENDED) WHERE eid = $id"
-    own: "SELECT JSON_OBJECT('id' VALUE n.nid, 'props' VALUE JSON_SERIALIZE(n.props RETURNING CLOB EXTENDED) RETURNING JSON) FROM drivine_node n WHERE (INSTR(',' || LTRIM(RTRIM(JSON_SERIALIZE(n.labels), ']'), '[') || ',\"', ',\"DrivineStore\",\"') > 0 OR INSTR(',' || LTRIM(RTRIM(JSON_SERIALIZE(n.labels), ']'), '[') || ',\"', ',\"_DrivineSchema\",\"') > 0) ORDER BY n.nid"
+    own: "SELECT JSON_OBJECT('id' VALUE n.nid, 'props' VALUE TO_CLOB(JSON_SERIALIZE(n.props RETURNING CLOB EXTENDED)) RETURNING JSON) FROM drivine_node n WHERE (INSTR(',' || LTRIM(RTRIM(JSON_SERIALIZE(n.labels), ']'), '[') || ',\"', ',\"DrivineStore\",\"') > 0 OR INSTR(',' || LTRIM(RTRIM(JSON_SERIALIZE(n.labels), ']'), '[') || ',\"', ',\"_DrivineSchema\",\"') > 0) ORDER BY n.nid"
     sizes: "SELECT JSON_OBJECT('nodes' VALUE (SELECT COUNT(*) FROM drivine_node), 'lastNode' VALUE (SELECT MAX(nid) FROM drivine_node), 'edges' VALUE (SELECT COUNT(*) FROM drivine_edge), 'lastEdge' VALUE (SELECT MAX(eid) FROM drivine_edge) NULL ON NULL RETURNING JSON) FROM dual"
     createCheckpoint: "CREATE TABLE IF NOT EXISTS drivine_migrate2 (name VARCHAR2(400) PRIMARY KEY, state CLOB NOT NULL)"
     readCheckpoint: "SELECT JSON_OBJECT('name' VALUE name, 'state' VALUE state RETURNING JSON) FROM drivine_migrate2 ORDER BY name"
