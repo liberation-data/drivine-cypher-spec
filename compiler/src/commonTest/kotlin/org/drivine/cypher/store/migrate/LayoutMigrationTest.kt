@@ -104,6 +104,15 @@ class LayoutMigrationTest {
     }
 
     @Test
+    fun oraclesReadsGiveEachRowsPropsAsTextThroughToClob() {
+        // #428: JSON_OBJECT nests JSON_SERIALIZE's own result as an object, where a row's props are their text.
+        val statements = MigrationStatements.of(org.drivine.cypher.store.ddl.OracleDdl("drivine"))
+        for (read in MigrationStatements.Table.entries.map { statements.readBatch(it) } + statements.own) {
+            assertTrue(Regex("""'props' VALUE TO_CLOB\(JSON_SERIALIZE\([^)]*\)\)""").containsMatchIn(read), "on $target: $read")
+        }
+    }
+
+    @Test
     fun aFinishedGraphIsJudgedCurrentAsMigrateYamlPins() {
         for (case in spec["finished"]!!) {
             val store = case["store"]!!.textValue()!!

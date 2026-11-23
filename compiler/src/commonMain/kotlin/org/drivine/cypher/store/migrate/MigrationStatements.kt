@@ -137,20 +137,24 @@ sealed class MigrationStatements(val ddl: SqlStoreDdl) {
             "UPDATE ${ddl.nodes} n SET props = n.props || jsonb_build_object('layout', ${ValueLayout.LAYOUT}) WHERE ${PostgresSql.hasLabel("n", StoreStamp.LABEL)}"
     }
 
-    /** Oracle's: a row's props read as extended JSON, so a binary double is told from a `NUMBER`, and written back so. */
+    /**
+     * Oracle's: a row's props read as extended JSON, so a binary double is told from a `NUMBER`, and written back so. The
+     * text is given to `JSON_OBJECT` through `TO_CLOB`: `JSON_SERIALIZE`'s own result Oracle takes for JSON, and puts in the
+     * row as an object, where a row's props are their text.
+     */
     class Oracle(ddl: OracleDdl) : MigrationStatements(ddl) {
         override val store = Store.ORACLE
 
         override fun readBatch(table: Table): String {
             val labels = if (table == Table.NODES) "labels" else "JSON_ARRAY(type)"
-            return "SELECT JSON_OBJECT('id' VALUE ${idOf(table)}, 'labels' VALUE $labels, 'props' VALUE JSON_SERIALIZE(props RETURNING CLOB EXTENDED) RETURNING JSON) FROM ${tableOf(table)}\n" +
+            return "SELECT JSON_OBJECT('id' VALUE ${idOf(table)}, 'labels' VALUE $labels, 'props' VALUE TO_CLOB(JSON_SERIALIZE(props RETURNING CLOB EXTENDED)) RETURNING JSON) FROM ${tableOf(table)}\n" +
                 "WHERE ${idOf(table)} > \$after ORDER BY ${idOf(table)} FETCH FIRST \$limit ROWS ONLY"
         }
 
         override fun update(table: Table) = "UPDATE ${tableOf(table)} SET props = JSON(\$props EXTENDED) WHERE ${idOf(table)} = \$id"
 
         override val own =
-            "SELECT JSON_OBJECT('id' VALUE n.nid, 'props' VALUE JSON_SERIALIZE(n.props RETURNING CLOB EXTENDED) RETURNING JSON) FROM ${ddl.nodes} n " +
+            "SELECT JSON_OBJECT('id' VALUE n.nid, 'props' VALUE TO_CLOB(JSON_SERIALIZE(n.props RETURNING CLOB EXTENDED)) RETURNING JSON) FROM ${ddl.nodes} n " +
                 "WHERE ${StoreLayout.oracleOwn("n")} ORDER BY n.nid"
 
         override val sizes =
