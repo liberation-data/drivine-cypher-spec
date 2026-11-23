@@ -3,8 +3,9 @@
 The run that checks a store one library indexed is up to date for the other two (#135), over each case of this repo's
 declarations.yaml.
 
-For each store, and each library in turn as the writer, the writer enforces every case of declarations.yaml on a graph
-of its own; then each other library enforces the same case on the same graph. A check passes when the store is as the
+For each store, and each library in turn as the writer with each other library as its checker, the writer enforces
+every case of declarations.yaml on a graph of its own, written for that checker alone; then the checker enforces the
+same case on the same graph. A check passes when the store is as the
 writer left it: the same indexes, constraints, tables and triggers, each the same object (not one made again under its
 name), and the same rows in the graph's node and schema tables, the schema marker among them. The store is read here,
 not through any library, so no library's word is taken for what it did.
@@ -12,15 +13,16 @@ not through any library, so no library's word is taken for what it did.
 A case the writer could not apply is "refused": it passes when every library refuses it too. A case a library declares
 otherwise than the reference, known and filed, is a "known gap" and scored apart.
 
-Each library's half is a test in its own repo, run only when this driver sets INTEROP_PHASE: drivine4j's
-DeclarationsInteropTest, Drivine for TypeScript's test/2.Integration/interop/Interop135.spec.ts, and drivine-python's
-tests/interop. It starts its own Postgres and Oracle containers, and removes them at the end. See README.md.
+Each library's half is a test in its own repo, run only when this driver sets INTEROP_PHASE (drivine4j) or
+INTEROP_STORE (the other two): drivine4j's DeclarationsInteropTest, Drivine for TypeScript's
+test/2.Integration/interop/Interop135.spec.ts, and drivine-python's tests/interop. It starts its own Postgres and Oracle containers, and removes them at the end. See README.md.
 
-    interop.py --d4j DIR --ts DIR --py DIR [--stores sqlite,postgres,oracle] [--libs d4j,ts,py] [--cases FILE] [--out DIR]
+    interop.py --d4j DIR --ts DIR --py DIR [--stores sqlite,postgres,oracle] [--libs d4j,ts,py] [--cases FILE] [--out DIR] [--self-check]
 """
 import argparse
 import json
 import os
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -48,7 +50,7 @@ KNOWN_GAPS = {
     },
     "d4j": {},
 }
-# Failures that are the store's capacity, not what a case declares: never a refusal, and the run is run again.
+# Failures that are the store's capacity, not what a case declares: never a refusal, and a fail of the run.
 INFRA = ("ORA-12516", "ORA-12519", "ORA-12520", "Connection refused")
 REPOS = {"ts": "drivine", "py": "drivine-python", "d4j": "drivine4j"}
 
@@ -65,10 +67,12 @@ USER = PASSWORD = "drivine"
 
 
 def log(*args):
+    """Prints a line, stamped with the time, at once: a run is long, and is followed as it goes."""
     print(time.strftime("%H:%M:%S"), *args, flush=True)
 
 
 def run(cmd, **kw):
+    """Runs a command and gives its output; one that exits nonzero raises, with the end of its output."""
     done = subprocess.run(cmd, capture_output=True, text=True, **kw)
     if done.returncode != 0:
         raise RuntimeError(f"{cmd[:4]} exited {done.returncode}: {done.stderr.strip()[-2000:]} {done.stdout.strip()[-2000:]}")
@@ -83,15 +87,16 @@ class Containers:
     def __init__(self):
         self.names = []
 
-    def start(self, image, name, port, env, ready):
+    def start(self, image, name, port, env, ready, times=1):
+        """Starts a container, waits until its log holds `ready` `times` times, and gives the host port it serves on."""
         self.names.append(name)
         args = ["docker", "run", "-d", "--name", name, "-p", f"127.0.0.1::{port}"]
         for k, v in env.items():
             args += ["-e", f"{k}={v}"]
         run(args + [image])
         deadline = time.time() + 600
-        while ready not in subprocess.run(["docker", "logs", name], capture_output=True, text=True).stdout + \
-                subprocess.run(["docker", "logs", name], capture_output=True, text=True).stderr:
+        while subprocess.run(["docker", "logs", name], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                             text=True).stdout.count(ready) < times:
             if time.time() > deadline:
                 raise RuntimeError(f"{name} not ready in 10 minutes")
             time.sleep(2)
@@ -107,8 +112,10 @@ class Sqlite:
     name = "sqlite"
 
     def __init__(self, directory):
+        # A run starts from no files: one left by an earlier run into the same --out would be enforced over again.
         self.directory = directory
-        os.makedirs(directory, exist_ok=True)
+        shutil.rmtree(directory, ignore_errors=True)
+        os.makedirs(directory)
 
     def env(self):
         return {"INTEROP_DATABASE": self.directory}
@@ -143,9 +150,9 @@ class Postgres:
         self.port = containers.start(
             PG_IMAGE, self.container, 5432,
             {"POSTGRES_USER": USER, "POSTGRES_PASSWORD": PASSWORD, "POSTGRES_DB": "drivine"},
-            "database system is ready to accept connections",
+            # The image's init runs a server of its own first, which says so too, then stops it and starts the real one.
+            "database system is ready to accept connections", times=2,
         )
-        time.sleep(3)
 
     def env(self):
         return {"INTEROP_HOST": "127.0.0.1", "INTEROP_PORT": str(self.port), "INTEROP_USER": USER,
@@ -193,7 +200,9 @@ class Oracle:
                 "INTEROP_PASSWORD": PASSWORD, "INTEROP_DATABASE": "FREEPDB1"}
 
     def sql(self, statement):
-        script = ("SET HEADING OFF FEEDBACK OFF PAGESIZE 0 LINESIZE 32767 LONG 10000000 LONGCHUNKSIZE 10000000 "
+        # sqlplus exits 0 after an error of its statement, and prints it: without WHENEVER, a snapshot would be the
+        # error's text, the same before and after, and so a match.
+        script = ("WHENEVER SQLERROR EXIT FAILURE\nSET HEADING OFF FEEDBACK OFF PAGESIZE 0 LINESIZE 32767 LONG 10000000 LONGCHUNKSIZE 10000000 "
                   "TRIMSPOOL ON TRIMOUT ON\n" + statement + ";\nEXIT\n")
         return run(["docker", "exec", "-i", self.container, "sqlplus", "-S", f"{USER}/{PASSWORD}@localhost/FREEPDB1"],
                    input=script)
@@ -240,12 +249,16 @@ def half(lib, checkout, cases, store, graph, phase, report):
                     "tests/interop"], checkout
     else:
         raise ValueError(lib)
+    output = report[: -len(".json")] + ".log"
+    for path in (report, output):
+        if os.path.exists(path):
+            os.remove(path)  # An earlier run's, into the same --out, would be read as this one's.
     started = time.time()
     done = subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True, stdin=subprocess.DEVNULL)
     log(f"  {lib} {phase} on {store.name}/{graph}: exit {done.returncode} in {time.time() - started:.0f}s")
     if done.returncode != 0:
         # A half that exits nonzero beside a whole report (a teardown's failure, say) keeps its output to be read.
-        with open(report[: -len(".json")] + ".log", "w") as f:
+        with open(output, "w") as f:
             f.write(done.stdout + "\n----- stderr -----\n" + done.stderr)
     if not os.path.exists(report):
         sys.stderr.write(done.stdout[-4000:] + done.stderr[-4000:])
@@ -271,6 +284,21 @@ def comparable(value):
     return value
 
 
+def same(after, before):
+    """
+    Whether two snapshots are alike, as `comparable` gives them, with each table's rows in any order: the stores' row
+    queries order by a constant (an aggregate's `ORDER BY 1` is not a column's place), and a row an enforce updates,
+    the marker, may move on Postgres.
+    """
+    def ordered(snapshot):
+        snapshot = comparable(snapshot)
+        if isinstance(snapshot, dict) and isinstance(snapshot.get("rows"), dict):
+            snapshot["rows"] = {t: sorted(r, key=lambda row: json.dumps(row, sort_keys=True)) if isinstance(r, list) else r
+                                for t, r in snapshot["rows"].items()}
+        return snapshot
+    return ordered(after) == ordered(before)
+
+
 def seen(snapshot):
     """How much a snapshot holds: its objects, and the rows of each table, so an empty one is not taken for a match."""
     objects = comparable(snapshot.get("objects")) or []
@@ -279,20 +307,24 @@ def seen(snapshot):
 
 
 def entries(report):
-    """A report's cases: under `cases` (drivine4j, drivine-python) or `reports` (Drivine for TypeScript)."""
+    """A report's cases: under `cases` (drivine4j) or `reports` (Drivine for TypeScript, drivine-python)."""
     return (report or {}).get("cases") or (report or {}).get("reports") or []
 
 
 def drift(lib, report):
-    """Where a library's report and its pinned known gaps disagree: each case marked on one side only, or otherwise."""
+    """
+    Where a library's report and its pinned known gaps disagree: each case marked on one side only, or otherwise. A
+    pin is held against the cases the report has, so a --cases file without a pinned case is no drift.
+    """
     marked = {c["case"]: set(c.get("gap") or []) for c in entries(report) if c.get("gap")}
-    pinned = {case: set(issues) for case, issues in KNOWN_GAPS.get(lib, {}).items()}
+    reported = {c.get("case") for c in entries(report)}
+    pinned = {case: set(issues) for case, issues in KNOWN_GAPS.get(lib, {}).items() if case in reported}
     return sorted(f"{case}: report {sorted(marked.get(case, []))}, pinned {sorted(pinned.get(case, []))}"
                   for case in set(marked) | set(pinned) if marked.get(case) != pinned.get(case))
 
 
 def failed(report, case):
-    """The failure a library's report gives for a case, or None."""
+    """The failure a library's report gives for a case, or None; "no report" when the report has no entry for it."""
     entry = next((c for c in entries(report) if c.get("case") == case), None)
     if entry is None:
         return "no report"
@@ -315,53 +347,81 @@ def main():
     unknown = [lib for lib in libs if lib not in REPOS]
     if unknown:
         parser.error(f"--libs: {', '.join(unknown)} is not one of d4j, ts, py")
+    if len(set(libs)) < len(libs):
+        parser.error(f"--libs: {args.libs} names a library twice")
+    if len(libs) < 2 and not args.self_check:
+        # A lone writer has no other library to check its store: the run would check nothing, and pass.
+        parser.error(f"--libs: {args.libs} checks no other library's store: give two or more, or --self-check")
     missing = [lib for lib in libs if not getattr(args, lib)]
     if missing:
         parser.error(f"--libs runs {', '.join(missing)}: give {' '.join('--' + lib for lib in missing)}, the checkout of each")
     checkouts = {lib: os.path.abspath(getattr(args, lib)) for lib in libs}
+    absent = [f"--{lib} {path}" for lib, path in checkouts.items() if not os.path.isdir(path)]
+    if absent:
+        parser.error(f"no such directory: {', '.join(absent)}")
+    stores = args.stores.split(",")
+    unknown = [name for name in stores if name not in ("sqlite", "postgres", "oracle")]
+    if unknown:
+        parser.error(f"--stores: {', '.join(unknown)} is not one of sqlite, postgres, oracle")
+    if len(set(stores)) < len(stores):
+        parser.error(f"--stores: {args.stores} names a store twice")
     cases_file = os.path.abspath(args.cases)
+    if not os.path.isfile(cases_file):
+        parser.error(f"--cases: no such file: {cases_file}")
     args.out = os.path.abspath(args.out)
     os.makedirs(args.out, exist_ok=True)
     # The case names, in order: a Python with no YAML reader can run this, and each case opens `  - case: "<name>"`.
     with open(cases_file) as f:
         cases = [json.loads(line.split("case:", 1)[1]) for line in f if line.startswith("  - case:")]
+    if not cases:
+        parser.error(f"--cases: {cases_file} has no line opening `  - case: \"<name>\"`")
     results = []
     drifts = []
     containers = Containers()
     try:
-        for store_name in args.stores.split(","):
+        for store_name in stores:
             store = {"sqlite": lambda: Sqlite(os.path.join(args.out, "sqlite")),
                      "postgres": lambda: Postgres(containers), "oracle": lambda: Oracle(containers)}[store_name]()
             log(f"{store_name}: ready")
             for rotation, writer in enumerate(libs, start=1):
-                prefix = f"i{rotation}"
-                tag = f"{store_name}-{prefix}"
-                reports = {writer: half(writer, checkouts[writer], cases_file, store, prefix, "write", os.path.join(args.out, f"{tag}-{writer}-write.json"))}
-                if reports[writer] is None:
-                    raise RuntimeError(f"{writer} gave no report writing {tag}")
-                drifts += [f"{writer} writing {tag}: {d}" for d in drift(writer, reports[writer])]
-                left = {i: store.snapshot(f"{prefix}_{i}") for i in range(len(cases))}
-                for checker in (lib for lib in libs if lib != writer or args.self_check):
-                    reports[checker] = half(checker, checkouts[checker], cases_file, store, prefix, "check", os.path.join(args.out, f"{tag}-{checker}-check.json"))
-                    if reports[checker] is None:
+                checkers = [lib for lib in libs if lib != writer or args.self_check]
+                # Each checker checks a store of the writer's own, written for it alone: a check judged after another
+                # would see that one's changes (a known gap's, say), or the store it put back, and not the writer's.
+                for turn, checker in enumerate(checkers):
+                    prefix = f"i{rotation}{chr(ord('a') + turn)}"
+                    tag = f"{store_name}-{prefix}"
+                    reports = {writer: half(writer, checkouts[writer], cases_file, store, prefix, "write", os.path.join(args.out, f"{tag}-{writer}-write.json"))}
+                    if reports[writer] is None:
+                        raise RuntimeError(f"{writer} gave no report writing {tag}")
+                    drifts += [f"{writer} writing {tag}: {d}" for d in drift(writer, reports[writer])]
+                    left = {i: store.snapshot(f"{prefix}_{i}") for i in range(len(cases))}
+                    # Under --self-check the writer checks its own store: its check's report is kept apart from its write's.
+                    checked = half(checker, checkouts[checker], cases_file, store, prefix, "check", os.path.join(args.out, f"{tag}-{checker}-check.json"))
+                    if checked is None:
                         raise RuntimeError(f"{checker} gave no report checking {tag}")
-                    drifts += [f"{checker} checking {tag}: {d}" for d in drift(checker, reports[checker])]
+                    drifts += [f"{checker} checking {tag}: {d}" for d in drift(checker, checked)]
                     for i, case in enumerate(cases):
                         after = store.snapshot(f"{prefix}_{i}")
                         refused_by_writer = failed(reports[writer], case)
-                        refused_here = failed(reports[checker], case)
+                        refused_here = failed(checked, case)
                         gap = ", ".join(g for g in (gap_of(writer, case), gap_of(checker, case)) if g) or None
                         if any(code in (refused_by_writer or "") + (refused_here or "") for code in INFRA):
                             verdict = "store unavailable"
+                        elif "no report" in (refused_by_writer, refused_here):
+                            verdict = "no report"  # a library that gave no entry didn't refuse it: never agreed
                         elif refused_by_writer:
                             verdict = "refused, agreed" if refused_here else "refused by the writer only"
                         elif refused_here:
                             verdict = "failed"
-                        elif comparable(after) == comparable(left[i]):
+                        elif not seen(after)["objects"]:
+                            # An enforce leaves at least the graph's tables: a graph with none was never written (a
+                            # half that set out another graph, say), and alike before and after would pass unseen.
+                            verdict = "empty"
+                        elif same(after, left[i]):
                             verdict = "matching"
                         else:
                             verdict = "changed"
-                        if gap and verdict not in ("matching", "refused, agreed"):
+                        if gap and verdict not in ("matching", "refused, agreed", "store unavailable", "no report", "empty"):
                             verdict = f"known gap ({gap}): {verdict}"
                         results.append({"store": store_name, "writer": writer, "checker": checker, "case": case,
                                         "graph": f"{prefix}_{i}", "verdict": verdict, "seen": seen(after),
@@ -371,20 +431,21 @@ def main():
         containers.remove()
     with open(os.path.join(args.out, "results.json"), "w") as f:
         json.dump({"results": results, "drifts": drifts}, f, indent=2)
-    bad = [r for r in results if r["verdict"] in ("changed", "failed", "refused by the writer only", "store unavailable")]
+    bad = [r for r in results if r["verdict"] in ("changed", "failed", "refused by the writer only", "store unavailable",
+                                                 "no report", "empty")]
     tally = {}
     for r in results:
         key = r["verdict"].split(":")[0]
         tally[key] = tally.get(key, 0) + 1
     log("tally:", json.dumps(tally))
-    for store_name in args.stores.split(","):
+    for store_name in stores:
         held = [r["seen"] for r in results if r["store"] == store_name]
         if held:
             log(f"{store_name}: objects per graph {min(h['objects'] for h in held)}-{max(h['objects'] for h in held)},"
                 f" graphs with no objects {sum(1 for h in held if h['objects'] == 0)}")
     for r in bad:
         log(f"FAIL {r['store']} {r['writer']}->{r['checker']} {r['case']!r}: {r['verdict']}"
-            f" {(r['checker failure'] or '')[:200]}")
+            f" {(r['checker failure'] or r['writer failure'] or '')[:200]}")
     for d in drifts:
         log(f"FAIL known gaps drifted: {d}")
     log("PASS" if not bad and not drifts else f"{len(bad) + len(drifts)} FAILED")
