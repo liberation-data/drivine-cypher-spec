@@ -107,6 +107,7 @@ internal object StoreJson {
                 answer["ddl"] = ddl.ddl; answer["ensuring"] = ddl.ensuring; answer["functions"] = ddl.functions; answer["versions"] = ddl.versions
                 answer["storedFunctions"] = linkedMapOf("probes" to OracleFunctionProbes.probes(ddl.name), "noFunction" to OracleFunctionProbes.NO_FUNCTION)
                 answer["session"] = OracleSession.STATEMENTS
+                answer["labelled"] = ddl.labelledIndexesQuery()
             }
             is SqliteDdl -> { answer["ddl"] = ddl.ddl; answer["ensuring"] = null }
             else -> {}
