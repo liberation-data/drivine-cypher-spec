@@ -602,7 +602,10 @@ JSON entry, so TypeScript and Python run what drivine4j runs from the Kotlin typ
     mean it may not (904, 942, 1031, 6575).
     A library compiles with every flag it may call (drivine4j#808, #811); and `session`, the statements a library runs once
     on each connection as it opens it, before any other, so text is compared and sorted by its code points whatever the
-    session's `NLS_COMP` and `NLS_SORT` (`["ALTER SESSION SET NLS_COMP = BINARY NLS_SORT = BINARY"]`, #372);
+    session's `NLS_COMP` and `NLS_SORT` (`["ALTER SESSION SET NLS_COMP = BINARY NLS_SORT = BINARY"]`, #372); and
+    `labelled`, the query that lists the graph's labelled indexes, one JSON row each of `kind`, `label` and `properties`,
+    as `store.yaml`'s `catalog` pins it: a library tells the compiler each one's label and first property as
+    `indexedProperties`, so a key equality in a statement is read through the index (drivine4j#805);
   - `stamp` and `marker`, the statements of each node's stamp and of the schema marker, as `marker.yaml` pins them, each with
     the `constraint` that keeps one, after `prepare`.
 
