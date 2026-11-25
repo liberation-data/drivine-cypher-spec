@@ -96,6 +96,15 @@ class StoreJsonTest {
     }
 
     @Test
+    fun oraclesLabelledIndexesQueryIsTheOneALibraryTellsTheCompilerOf() {
+        val got = answer("{\"storeStatements\": {\"store\": \"oracle\", \"graph\": \"g\"}}")["labelled"]!!
+        assertEquals(OracleDdl("g").labelledIndexesQuery(), got.textValue(), "on $target")
+        for (store in listOf("postgres", "sqlite", "neo4j")) {
+            assertTrue(answer("{\"storeStatements\": {\"store\": \"$store\", \"graph\": \"g\"}}")["labelled"] == null, "on $target, $store lists none")
+        }
+    }
+
+    @Test
     fun oraclesSessionComparesTextByCodePointWhateverItsNlsSettings() {
         val got = answer("{\"storeStatements\": {\"store\": \"oracle\", \"graph\": \"g\"}}")["session"] as ArrayNode
         assertEquals(listOf("ALTER SESSION SET NLS_COMP = BINARY NLS_SORT = BINARY"), got.map { it.textValue() }, "on $target")
