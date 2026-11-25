@@ -1,0 +1,91 @@
+# A bulk import of nodes and relationships into a SQL store (liberation-data/drivine4j#684). See README.md, "Importing a
+# graph in bulk". `statements` are what the module's BulkImportStatements gives each store, for the graph `drivine`: the
+# nodes of :Person keyed by `id`, and relationships from them to :Repo nodes keyed by `$slug` (held escaped, `$$slug`). Each
+# binds its parameters by name; each that gives rows gives each as one JSON object. A library runs them in one
+# transaction, in this order:
+# - lock, lockTables, createStages;
+# - for each call of nodes: copyNodes (the rows, through COPY), takenKeys (any key it gives refuses the import, a node's
+#   whose props don't hold its key or whose labels haven't the call's among them), makeNodes (`$lower`: the JSON array of
+#   the keys whose lowercased copy the library keeps), clearNodes;
+# - before the first call of relationships: defer;
+# - for each call of relationships: copyEdges, then for each end ambiguousKeys (any key it gives refuses the import) and
+#   findEnds, then missingEnds (any row refuses the import), makeEdges (`$type`), relink (`$mark`, a fresh stamp), clearEdges;
+# - last: rebuild where defer ran, or analyze. Then the commit.
+statements:
+  postgres:
+    lock: "SELECT name FROM drivine_lock2 WHERE name = 'schema' FOR UPDATE"
+    lockTables: "LOCK TABLE drivine_node, drivine_edge IN SHARE ROW EXCLUSIVE MODE"
+    createStages:
+      - "CREATE TEMP TABLE drivine_bulk_node (key jsonb NOT NULL, labels jsonb NOT NULL, props jsonb NOT NULL, stamp varchar(33) NOT NULL) ON COMMIT DROP"
+      - "CREATE TEMP TABLE drivine_bulk_edge (src jsonb NOT NULL, dst jsonb NOT NULL, props jsonb NOT NULL) ON COMMIT DROP"
+      - "CREATE TEMP TABLE drivine_bulk_key (label text NOT NULL, property text NOT NULL, key jsonb NOT NULL, nid bigint NOT NULL, made boolean NOT NULL, PRIMARY KEY (label, property, key)) ON COMMIT DROP"
+    defer:
+      - "ALTER TABLE drivine_edge DROP CONSTRAINT drivine_edge_src_fkey"
+      - "ALTER TABLE drivine_edge DROP CONSTRAINT drivine_edge_dst_fkey"
+      - "DROP INDEX drivine_edge_src"
+      - "DROP INDEX drivine_edge_dst"
+    copyNodes: "COPY drivine_bulk_node (key, labels, props, stamp) FROM STDIN WITH (FORMAT csv)"
+    takenKeys: |-
+      SELECT jsonb_build_object('key', k.key) FROM (
+      SELECT s.key FROM drivine_bulk_node s WHERE (s.props -> 'id') IS DISTINCT FROM s.key OR NOT s.labels @> '["Person"]'
+      UNION SELECT s.key FROM drivine_bulk_node s GROUP BY s.key HAVING count(*) > 1
+      UNION SELECT s.key FROM drivine_bulk_node s JOIN drivine_node n ON (n.props -> 'id') = s.key AND n.labels @> '["Person"]'
+      UNION SELECT s.key FROM drivine_bulk_node s JOIN drivine_bulk_key m ON m.label = 'Person' AND m.property = 'id' AND m.key = s.key
+      ) k LIMIT 10
+    makeNodes: |-
+      WITH made AS (
+      INSERT INTO drivine_node (labels, props, stamp)
+      SELECT s.labels, drivine_lowered(s.props, CAST($lower AS jsonb)), s.stamp FROM drivine_bulk_node s
+      RETURNING nid, (props -> 'id') AS key
+      )
+      INSERT INTO drivine_bulk_key (label, property, key, nid, made) SELECT 'Person', 'id', made.key, made.nid, true FROM made
+    clearNodes: "TRUNCATE drivine_bulk_node"
+    copyEdges: "COPY drivine_bulk_edge (src, dst, props) FROM STDIN WITH (FORMAT csv)"
+    ambiguousKeys:
+      src: |-
+        SELECT jsonb_build_object('key', (n.props -> 'id')) FROM drivine_node n
+        WHERE n.labels @> '["Person"]' AND (n.props -> 'id') IN (SELECT s.src FROM drivine_bulk_edge s)
+        GROUP BY (n.props -> 'id') HAVING count(*) > 1 LIMIT 10
+      dst: |-
+        SELECT jsonb_build_object('key', (n.props -> '$$slug')) FROM drivine_node n
+        WHERE n.labels @> '["Repo"]' AND (n.props -> '$$slug') IN (SELECT s.dst FROM drivine_bulk_edge s)
+        GROUP BY (n.props -> '$$slug') HAVING count(*) > 1 LIMIT 10
+    findEnds:
+      src: |-
+        INSERT INTO drivine_bulk_key (label, property, key, nid, made)
+        SELECT 'Person', 'id', (n.props -> 'id'), n.nid, false FROM drivine_node n
+        WHERE n.labels @> '["Person"]' AND (n.props -> 'id') IN (SELECT s.src FROM drivine_bulk_edge s)
+        ON CONFLICT (label, property, key) DO NOTHING
+      dst: |-
+        INSERT INTO drivine_bulk_key (label, property, key, nid, made)
+        SELECT 'Repo', '$$slug', (n.props -> '$$slug'), n.nid, false FROM drivine_node n
+        WHERE n.labels @> '["Repo"]' AND (n.props -> '$$slug') IN (SELECT s.dst FROM drivine_bulk_edge s)
+        ON CONFLICT (label, property, key) DO NOTHING
+    missingEnds: |-
+      SELECT jsonb_build_object('src', s.src, 'dst', s.dst) FROM drivine_bulk_edge s
+      LEFT JOIN drivine_bulk_key a ON a.label = 'Person' AND a.property = 'id' AND a.key = s.src
+      LEFT JOIN drivine_bulk_key b ON b.label = 'Repo' AND b.property = '$$slug' AND b.key = s.dst
+      WHERE a.nid IS NULL OR b.nid IS NULL LIMIT 10
+    makeEdges: |-
+      INSERT INTO drivine_edge (src, dst, type, props)
+      SELECT a.nid, b.nid, CAST($type AS text), s.props FROM drivine_bulk_edge s
+      JOIN drivine_bulk_key a ON a.label = 'Person' AND a.property = 'id' AND a.key = s.src
+      JOIN drivine_bulk_key b ON b.label = 'Repo' AND b.property = '$$slug' AND b.key = s.dst
+    relink: |-
+      UPDATE drivine_node n SET stamp = COALESCE(substr(CASE WHEN length(n.stamp) = 33 AND substr(n.stamp, 17, 1) = ':' THEN n.stamp END, 1, 17), substr(CAST($mark AS text), 1, 17)) || substr(CAST($mark AS text), 18)
+      FROM (
+      SELECT a.nid FROM drivine_bulk_edge s JOIN drivine_bulk_key a ON a.label = 'Person' AND a.property = 'id' AND a.key = s.src AND NOT a.made
+      UNION SELECT b.nid FROM drivine_bulk_edge s JOIN drivine_bulk_key b ON b.label = 'Repo' AND b.property = '$$slug' AND b.key = s.dst AND NOT b.made
+      ) r WHERE n.nid = r.nid
+    clearEdges: "TRUNCATE drivine_bulk_edge"
+    rebuild:
+      - "SET LOCAL maintenance_work_mem = '1024MB'"
+      - "CREATE INDEX IF NOT EXISTS drivine_edge_src ON drivine_edge (src, type)"
+      - "CREATE INDEX IF NOT EXISTS drivine_edge_dst ON drivine_edge (dst, type)"
+      - "ALTER TABLE drivine_edge ADD CONSTRAINT drivine_edge_src_fkey FOREIGN KEY (src) REFERENCES drivine_node (nid) ON DELETE CASCADE"
+      - "ALTER TABLE drivine_edge ADD CONSTRAINT drivine_edge_dst_fkey FOREIGN KEY (dst) REFERENCES drivine_node (nid) ON DELETE CASCADE"
+      - "ANALYZE drivine_node"
+      - "ANALYZE drivine_edge"
+    analyze:
+      - "ANALYZE drivine_node"
+      - "ANALYZE drivine_edge"

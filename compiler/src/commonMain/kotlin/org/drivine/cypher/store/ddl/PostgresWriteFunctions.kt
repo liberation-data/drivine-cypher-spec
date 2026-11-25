@@ -47,7 +47,12 @@ class PostgresWriteFunctions internal constructor(private val graph: PostgresDdl
     private val edges = graph.edges
     private val find = "${graph.name}_find"
     private val owns = "${graph.name}_owns"
-    private val lowered = "${graph.name}_lowered"
+
+    /**
+     * The function a save writes a node's lowercased copies through, `<graph>_lowered(props, keys)`: a bulk import's nodes
+     * are written through it too (`BulkImportStatements`), so their copies are a save's.
+     */
+    val lowered = "${graph.name}_lowered"
 
     /** The function that carries out a plan. */
     val write = "${graph.name}_write"
@@ -627,10 +632,13 @@ END
 ${'$'}fn${'$'} LANGUAGE plpgsql
 """.trim()
 
-    /** [stamp] where it is two tokens, as every save leaves one, and null where it is not. */
-    private fun twoTokens(stamp: String): String = "CASE WHEN length($stamp) = 33 AND substr($stamp, 17, 1) = ':' THEN $stamp END"
-
     companion object {
+        /**
+         * [stamp] where it is two tokens, as every save leaves one, and null where it is not: what a relink keeps the first
+         * token of, here and in a bulk import's (`BulkImportStatements`).
+         */
+        internal fun twoTokens(stamp: String): String = "CASE WHEN length($stamp) = 33 AND substr($stamp, 17, 1) = ':' THEN $stamp END"
+
         /** The state a stale root is raised as, and caught. */
         const val STALE = "P0D01"
 
