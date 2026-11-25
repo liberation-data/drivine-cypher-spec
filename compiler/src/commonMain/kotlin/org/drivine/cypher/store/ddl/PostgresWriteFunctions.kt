@@ -627,10 +627,13 @@ END
 ${'$'}fn${'$'} LANGUAGE plpgsql
 """.trim()
 
-    /** [stamp] where it is two tokens, as every save leaves one, and null where it is not. */
-    private fun twoTokens(stamp: String): String = "CASE WHEN length($stamp) = 33 AND substr($stamp, 17, 1) = ':' THEN $stamp END"
-
     companion object {
+        /**
+         * [stamp] where it is two tokens, as every save leaves one, and null where it is not: what a relink keeps the first
+         * token of, here and in a bulk import's (`BulkImportStatements`).
+         */
+        internal fun twoTokens(stamp: String): String = "CASE WHEN length($stamp) = 33 AND substr($stamp, 17, 1) = ':' THEN $stamp END"
+
         /** The state a stale root is raised as, and caught. */
         const val STALE = "P0D01"
 

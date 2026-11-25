@@ -8,6 +8,7 @@ import org.drivine.cypher.number.target
 import org.drivine.cypher.store.bulk.BulkImportStatements.End
 import org.drivine.cypher.store.ddl.OracleDdl
 import org.drivine.cypher.store.ddl.PostgresDdl
+import org.drivine.cypher.store.ddl.PostgresWriteFunctions
 import org.drivine.cypher.store.ddl.SqliteDdl
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -104,6 +105,41 @@ class BulkImportStatementsTest {
         assertTrue(postgres.missingEnds(odd, odd).contains("a.label = 'It''s'"), "on $target")
         assertTrue(postgres.makeNodes("It's", "\$code").contains("RETURNING nid, (props -> '\$\$code') AS key"), "on $target")
         assertFailsWith<IllegalArgumentException> { postgres.findEnds(person, "both") }
+    }
+
+    @Test
+    fun anEndIsFoundByItsLabelAndItsPropertyNotByItsLabelAlone() {
+        // Nodes of :Person made keyed by `id`, then relationships from :Person found by `email`: a value one node holds under
+        // `id` and another under `email` names two nodes, so each is kept, and found, under its own property.
+        val byEmail = End("Person", "email")
+        assertTrue(postgres.createStages.last().contains("PRIMARY KEY (label, property, key)"), "on $target")
+        assertTrue(postgres.makeNodes("Person", "id").contains("SELECT 'Person', 'id', made.key"), "on $target")
+        assertTrue(postgres.takenKeys("Person", "id").contains("m.label = 'Person' AND m.property = 'id' AND m.key = s.key"), "on $target")
+        val found = postgres.findEnds(byEmail, "src")
+        assertTrue(found.contains("SELECT 'Person', 'email', (n.props -> 'email')"), "on $target: $found")
+        assertTrue(found.endsWith("ON CONFLICT (label, property, key) DO NOTHING"), "on $target: $found")
+        for (statement in listOf(postgres.missingEnds(byEmail, person), postgres.makeEdges(byEmail, person), postgres.relink(byEmail, person))) {
+            assertTrue(statement.contains("a.label = 'Person' AND a.property = 'email' AND a.key = s.src"), "on $target: $statement")
+            assertTrue(statement.contains("b.label = 'Person' AND b.property = 'id' AND b.key = s.dst"), "on $target: $statement")
+        }
+        // The property is held escaped, as the node holds its key.
+        assertTrue(postgres.makeEdges(person, repo).contains("b.property = '\$\$slug'"), "on $target")
+    }
+
+    @Test
+    fun anEndIsSrcOrDstInEachStatementThatNamesOne() {
+        assertFailsWith<IllegalArgumentException> { postgres.ambiguousKeys(person, "both") }
+        assertFailsWith<IllegalArgumentException> { postgres.findEnds(person, "src; DROP TABLE drivine_node") }
+    }
+
+    @Test
+    fun aRelinkKeepsTheFirstTokenAsASaveDoes() {
+        // The stamp's first token is kept as `<graph>_write`'s relinks keep it, through the same test of two tokens.
+        val save = PostgresDdl("drivine").writes.ddl.last()
+        val kept = "COALESCE(substr(${PostgresWriteFunctions.twoTokens("stamp")}, 1, 17), substr(p_mark, 1, 17)) || substr(p_mark, 18)"
+        assertTrue(save.contains(kept), "on $target: the save's relink")
+        val relink = postgres.relink(person, repo)
+        assertTrue(relink.contains(kept.replace("stamp", "n.stamp").replace("p_mark", "CAST(\$mark AS text)")), "on $target: $relink")
     }
 
     @Test

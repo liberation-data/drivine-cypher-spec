@@ -4,6 +4,7 @@ import org.drivine.DrivineInternalApi
 import org.drivine.cypher.store.PostgresSql
 import org.drivine.cypher.store.ValueLayout
 import org.drivine.cypher.store.ddl.PostgresDdl
+import org.drivine.cypher.store.ddl.PostgresWriteFunctions
 import org.drivine.cypher.store.ddl.SqlStoreDdl
 
 /**
@@ -22,10 +23,10 @@ import org.drivine.cypher.store.ddl.SqlStoreDdl
  *
  * The import holds the graph alone while it runs. It takes the lock row a schema change takes ([lock]), and locks the node and
  * edge tables against other writers ([lockTables]): reads go on, writes wait for it. On Postgres it then drops the edge table's
- * two foreign keys and its two indexes ([defer]), and makes them again once the relationships are in ([rebuild]), as
- * [PostgresDdl] made them. That keeps the cost of each relationship flat however large the graph: checked one by one, the
- * foreign keys cost a write to the node table's pages for each relationship once that table outgrows the cache. Made again at
- * the end, they check every relationship, so a dangling one fails the import there.
+ * two foreign keys and its two indexes ([defer]), after which reads of either table wait too, and makes them again once the
+ * relationships are in ([rebuild]), as [PostgresDdl] made them. That keeps the cost of each relationship flat however large
+ * the graph: checked one by one, the foreign keys cost a write to the node table's pages for each relationship once that
+ * table outgrows the cache. Made again at the end, they check every relationship, so a dangling one fails the import there.
  */
 @DrivineInternalApi
 sealed class BulkImportStatements(val ddl: SqlStoreDdl) {
@@ -53,26 +54,34 @@ sealed class BulkImportStatements(val ddl: SqlStoreDdl) {
         /** The staging table of the relationships of one call, written through [copyEdges]: each one's ends' keys and props. */
         val edgeStage = "${pg.name}_bulk_edge"
 
-        /** Each node's id by its label and key: the nodes the import made, and those of the graph its relationships named. */
+        /**
+         * Each node's id by its label, the property it is found by (as the node holds its key, [ValueLayout.escape]d) and
+         * that property's value: the nodes the import made, and those of the graph its relationships named. The property is
+         * part of the key, so one call that finds a label's nodes by one property and another that finds them by another never
+         * take one node's value for the other's.
+         */
         val keys = "${pg.name}_bulk_key"
 
         /** First: the row lock a schema change takes, so none runs while the edge table is without its foreign keys. */
         val lock: String = "SELECT name FROM ${pg.lock} WHERE name = ${PostgresSql.literal(pg.lockRow)} FOR UPDATE"
 
-        /** Second: other writers wait for the import's commit; reads go on, until [defer] drops the edge table's objects. */
+        /**
+         * Second: other writers wait for the import's commit; reads go on, until [defer] drops the edge table's foreign keys,
+         * which locks both tables.
+         */
         val lockTables: String = "LOCK TABLE ${pg.nodes}, ${pg.edges} IN SHARE ROW EXCLUSIVE MODE"
 
         /** Third: the staging tables, dropped at the commit. */
         val createStages: List<String> = listOf(
             "CREATE TEMP TABLE $nodeStage (key jsonb NOT NULL, labels jsonb NOT NULL, props jsonb NOT NULL, stamp varchar(33) NOT NULL) ON COMMIT DROP",
             "CREATE TEMP TABLE $edgeStage (src jsonb NOT NULL, dst jsonb NOT NULL, props jsonb NOT NULL) ON COMMIT DROP",
-            "CREATE TEMP TABLE $keys (label text NOT NULL, key jsonb NOT NULL, nid bigint NOT NULL, made boolean NOT NULL, PRIMARY KEY (label, key)) ON COMMIT DROP",
+            "CREATE TEMP TABLE $keys (label text NOT NULL, property text NOT NULL, key jsonb NOT NULL, nid bigint NOT NULL, made boolean NOT NULL, PRIMARY KEY (label, property, key)) ON COMMIT DROP",
         )
 
         /**
-         * Before the first relationship: the edge table's foreign keys and its two indexes dropped. The drop takes `ACCESS
-         * EXCLUSIVE` on the edge table, so reads of relationships wait for the commit too. A store that hasn't them all, as
-         * the layout makes them, refuses the import here.
+         * Before the first relationship: the edge table's foreign keys and its two indexes dropped. Dropping a foreign key
+         * takes `ACCESS EXCLUSIVE` on the edge table and on the node table it references, so reads of nodes and of
+         * relationships wait for the commit too. A store that hasn't them all, as the layout makes them, refuses the import here.
          */
         val defer: List<String> = pg.edgeForeignKeys.values.map { "ALTER TABLE ${pg.edges} DROP CONSTRAINT $it" } +
             listOf("src", "dst").map { "DROP INDEX ${pg.name}_edge_$it" }
@@ -92,7 +101,7 @@ sealed class BulkImportStatements(val ddl: SqlStoreDdl) {
             return "SELECT jsonb_build_object('key', k.key) FROM (\n" +
                 "SELECT s.key FROM $nodeStage s GROUP BY s.key HAVING count(*) > 1\n" +
                 "UNION SELECT s.key FROM $nodeStage s JOIN ${pg.nodes} n ON $value = s.key AND ${PostgresSql.hasLabel("n", label)}\n" +
-                "UNION SELECT s.key FROM $nodeStage s JOIN $keys m ON m.label = ${PostgresSql.literal(label)} AND m.key = s.key\n" +
+                "UNION SELECT s.key FROM $nodeStage s JOIN $keys m ON ${held("m", End(label, key))} AND m.key = s.key\n" +
                 ") k LIMIT 10"
         }
 
@@ -106,7 +115,7 @@ sealed class BulkImportStatements(val ddl: SqlStoreDdl) {
                 "SELECT s.labels, ${pg.name}_lowered(s.props, CAST(\$lower AS jsonb)), s.stamp FROM $nodeStage s\n" +
                 "RETURNING nid, ${PostgresSql.value("", ValueLayout.escape(key))} AS key\n" +
                 ")\n" +
-                "INSERT INTO $keys (label, key, nid, made) SELECT ${PostgresSql.literal(label)}, made.key, made.nid, true FROM made"
+                "INSERT INTO $keys (label, property, key, nid, made) SELECT ${heldValues(End(label, key))}, made.key, made.nid, true FROM made"
 
         /** After each call of nodes: [nodeStage] emptied. */
         val clearNodes: String = "TRUNCATE $nodeStage"
@@ -123,10 +132,10 @@ sealed class BulkImportStatements(val ddl: SqlStoreDdl) {
          */
         fun findEnds(end: End, column: String): String {
             val value = PostgresSql.value("n", ValueLayout.escape(end.key))
-            return "INSERT INTO $keys (label, key, nid, made)\n" +
-                "SELECT ${PostgresSql.literal(end.label)}, $value, n.nid, false FROM ${pg.nodes} n\n" +
+            return "INSERT INTO $keys (label, property, key, nid, made)\n" +
+                "SELECT ${heldValues(end)}, $value, n.nid, false FROM ${pg.nodes} n\n" +
                 "WHERE ${PostgresSql.hasLabel("n", end.label)} AND $value IN (SELECT s.${endColumn(column)} FROM $edgeStage s)\n" +
-                "ON CONFLICT (label, key) DO NOTHING"
+                "ON CONFLICT (label, property, key) DO NOTHING"
         }
 
         /**
@@ -146,27 +155,27 @@ sealed class BulkImportStatements(val ddl: SqlStoreDdl) {
          */
         fun missingEnds(from: End, to: End): String =
             "SELECT jsonb_build_object('src', s.src, 'dst', s.dst) FROM $edgeStage s\n" +
-                "LEFT JOIN $keys a ON a.label = ${PostgresSql.literal(from.label)} AND a.key = s.src\n" +
-                "LEFT JOIN $keys b ON b.label = ${PostgresSql.literal(to.label)} AND b.key = s.dst\n" +
+                "LEFT JOIN $keys a ON ${held("a", from)} AND a.key = s.src\n" +
+                "LEFT JOIN $keys b ON ${held("b", to)} AND b.key = s.dst\n" +
                 "WHERE a.nid IS NULL OR b.nid IS NULL LIMIT 10"
 
         /** The staged relationships made, of the type `$type`, from [from]'s node to [to]'s. */
         fun makeEdges(from: End, to: End): String =
             "INSERT INTO ${pg.edges} (src, dst, type, props)\n" +
                 "SELECT a.nid, b.nid, CAST(\$type AS text), s.props FROM $edgeStage s\n" +
-                "JOIN $keys a ON a.label = ${PostgresSql.literal(from.label)} AND a.key = s.src\n" +
-                "JOIN $keys b ON b.label = ${PostgresSql.literal(to.label)} AND b.key = s.dst"
+                "JOIN $keys a ON ${held("a", from)} AND a.key = s.src\n" +
+                "JOIN $keys b ON ${held("b", to)} AND b.key = s.dst"
 
         /**
          * Each node the import didn't make that a staged relationship starts or ends at, its stamp's second token `$mark`'s,
          * as a save gives a node whose relationships it changed: a stamp that is not two tokens is replaced whole.
          */
         fun relink(from: End, to: End): String {
-            val twoTokens = "CASE WHEN length(n.stamp) = 33 AND substr(n.stamp, 17, 1) = ':' THEN n.stamp END"
+            val twoTokens = PostgresWriteFunctions.twoTokens("n.stamp")
             return "UPDATE ${pg.nodes} n SET stamp = COALESCE(substr($twoTokens, 1, 17), substr(CAST(\$mark AS text), 1, 17)) || substr(CAST(\$mark AS text), 18)\n" +
                 "FROM (\n" +
-                "SELECT a.nid FROM $edgeStage s JOIN $keys a ON a.label = ${PostgresSql.literal(from.label)} AND a.key = s.src AND NOT a.made\n" +
-                "UNION SELECT b.nid FROM $edgeStage s JOIN $keys b ON b.label = ${PostgresSql.literal(to.label)} AND b.key = s.dst AND NOT b.made\n" +
+                "SELECT a.nid FROM $edgeStage s JOIN $keys a ON ${held("a", from)} AND a.key = s.src AND NOT a.made\n" +
+                "UNION SELECT b.nid FROM $edgeStage s JOIN $keys b ON ${held("b", to)} AND b.key = s.dst AND NOT b.made\n" +
                 ") r WHERE n.nid = r.nid"
         }
 
@@ -187,6 +196,13 @@ sealed class BulkImportStatements(val ddl: SqlStoreDdl) {
 
         /** Last, where [defer] didn't run, as an import of nodes alone: both tables analysed. */
         val analyze: List<String> = listOf("ANALYZE ${pg.nodes}", "ANALYZE ${pg.edges}")
+
+        /** Whether the row [alias] of [keys] is of [end]'s label and property. */
+        private fun held(alias: String, end: End): String =
+            "$alias.label = ${PostgresSql.literal(end.label)} AND $alias.property = ${PostgresSql.literal(ValueLayout.escape(end.key))}"
+
+        /** [end]'s label and property, as [keys] holds them. */
+        private fun heldValues(end: End): String = "${PostgresSql.literal(end.label)}, ${PostgresSql.literal(ValueLayout.escape(end.key))}"
 
         private fun endColumn(column: String): String {
             require(column == "src" || column == "dst") { "An end is src or dst, not $column." }

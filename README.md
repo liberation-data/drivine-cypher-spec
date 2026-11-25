@@ -469,13 +469,13 @@ A library gives the nodes and relationships call by call:
 
 While it runs the import holds the graph alone. It takes the lock row a schema change takes, and locks the node and edge
 tables against other writers (`lockTables`): reads go on. Before the first relationship it drops the edge table's two
-foreign keys and its two indexes (`defer`), and reads of relationships wait too. Last, it makes them again as the layout
-made them, with the `maintenance_work_mem` the library gives, and analyses both tables (`rebuild`). Each relationship's
-cost then stays flat however large the graph grows. Checked as each relationship is written, a foreign key locks its node's
-row, which writes to the node table; once that table outgrows the cache, each check is a read and a write of the disk. At
-scale 10 of Graph Bench (44.8M relationships) that took the load from 1,870 s to 219 s. Made again at the end, the foreign
-keys check every relationship, so one with no node at an end fails the import there. The staging tables are temporary, and
-dropped at the commit.
+foreign keys and its two indexes (`defer`), and reads of either table wait too: dropping a foreign key locks the table
+it references as well. Last, it makes them again as the layout made them, with the `maintenance_work_mem` the library
+gives, and analyses both tables (`rebuild`). Each relationship's cost then stays flat however large the graph grows.
+Checked as each relationship is written, a foreign key locks its node's row, which writes to the node table; once that
+table outgrows the cache, each check is a read and a write of the disk. At scale 10 of Graph Bench (44.8M relationships)
+that took the load from 1,870 s to 219 s. Made again at the end, the foreign keys check every relationship, so one with
+no node at an end fails the import there. The staging tables are temporary, and dropped at the commit.
 
 ## The schema plan
 

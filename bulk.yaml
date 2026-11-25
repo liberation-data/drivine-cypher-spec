@@ -17,7 +17,7 @@ statements:
     createStages:
       - "CREATE TEMP TABLE drivine_bulk_node (key jsonb NOT NULL, labels jsonb NOT NULL, props jsonb NOT NULL, stamp varchar(33) NOT NULL) ON COMMIT DROP"
       - "CREATE TEMP TABLE drivine_bulk_edge (src jsonb NOT NULL, dst jsonb NOT NULL, props jsonb NOT NULL) ON COMMIT DROP"
-      - "CREATE TEMP TABLE drivine_bulk_key (label text NOT NULL, key jsonb NOT NULL, nid bigint NOT NULL, made boolean NOT NULL, PRIMARY KEY (label, key)) ON COMMIT DROP"
+      - "CREATE TEMP TABLE drivine_bulk_key (label text NOT NULL, property text NOT NULL, key jsonb NOT NULL, nid bigint NOT NULL, made boolean NOT NULL, PRIMARY KEY (label, property, key)) ON COMMIT DROP"
     defer:
       - "ALTER TABLE drivine_edge DROP CONSTRAINT drivine_edge_src_fkey"
       - "ALTER TABLE drivine_edge DROP CONSTRAINT drivine_edge_dst_fkey"
@@ -28,7 +28,7 @@ statements:
       SELECT jsonb_build_object('key', k.key) FROM (
       SELECT s.key FROM drivine_bulk_node s GROUP BY s.key HAVING count(*) > 1
       UNION SELECT s.key FROM drivine_bulk_node s JOIN drivine_node n ON (n.props -> 'id') = s.key AND n.labels @> '["Person"]'
-      UNION SELECT s.key FROM drivine_bulk_node s JOIN drivine_bulk_key m ON m.label = 'Person' AND m.key = s.key
+      UNION SELECT s.key FROM drivine_bulk_node s JOIN drivine_bulk_key m ON m.label = 'Person' AND m.property = 'id' AND m.key = s.key
       ) k LIMIT 10
     makeNodes: |-
       WITH made AS (
@@ -36,7 +36,7 @@ statements:
       SELECT s.labels, drivine_lowered(s.props, CAST($lower AS jsonb)), s.stamp FROM drivine_bulk_node s
       RETURNING nid, (props -> 'id') AS key
       )
-      INSERT INTO drivine_bulk_key (label, key, nid, made) SELECT 'Person', made.key, made.nid, true FROM made
+      INSERT INTO drivine_bulk_key (label, property, key, nid, made) SELECT 'Person', 'id', made.key, made.nid, true FROM made
     clearNodes: "TRUNCATE drivine_bulk_node"
     copyEdges: "COPY drivine_bulk_edge (src, dst, props) FROM STDIN WITH (FORMAT csv)"
     ambiguousKeys:
@@ -50,30 +50,30 @@ statements:
         GROUP BY (n.props -> '$$slug') HAVING count(*) > 1 LIMIT 10
     findEnds:
       src: |-
-        INSERT INTO drivine_bulk_key (label, key, nid, made)
-        SELECT 'Person', (n.props -> 'id'), n.nid, false FROM drivine_node n
+        INSERT INTO drivine_bulk_key (label, property, key, nid, made)
+        SELECT 'Person', 'id', (n.props -> 'id'), n.nid, false FROM drivine_node n
         WHERE n.labels @> '["Person"]' AND (n.props -> 'id') IN (SELECT s.src FROM drivine_bulk_edge s)
-        ON CONFLICT (label, key) DO NOTHING
+        ON CONFLICT (label, property, key) DO NOTHING
       dst: |-
-        INSERT INTO drivine_bulk_key (label, key, nid, made)
-        SELECT 'Repo', (n.props -> '$$slug'), n.nid, false FROM drivine_node n
+        INSERT INTO drivine_bulk_key (label, property, key, nid, made)
+        SELECT 'Repo', '$$slug', (n.props -> '$$slug'), n.nid, false FROM drivine_node n
         WHERE n.labels @> '["Repo"]' AND (n.props -> '$$slug') IN (SELECT s.dst FROM drivine_bulk_edge s)
-        ON CONFLICT (label, key) DO NOTHING
+        ON CONFLICT (label, property, key) DO NOTHING
     missingEnds: |-
       SELECT jsonb_build_object('src', s.src, 'dst', s.dst) FROM drivine_bulk_edge s
-      LEFT JOIN drivine_bulk_key a ON a.label = 'Person' AND a.key = s.src
-      LEFT JOIN drivine_bulk_key b ON b.label = 'Repo' AND b.key = s.dst
+      LEFT JOIN drivine_bulk_key a ON a.label = 'Person' AND a.property = 'id' AND a.key = s.src
+      LEFT JOIN drivine_bulk_key b ON b.label = 'Repo' AND b.property = '$$slug' AND b.key = s.dst
       WHERE a.nid IS NULL OR b.nid IS NULL LIMIT 10
     makeEdges: |-
       INSERT INTO drivine_edge (src, dst, type, props)
       SELECT a.nid, b.nid, CAST($type AS text), s.props FROM drivine_bulk_edge s
-      JOIN drivine_bulk_key a ON a.label = 'Person' AND a.key = s.src
-      JOIN drivine_bulk_key b ON b.label = 'Repo' AND b.key = s.dst
+      JOIN drivine_bulk_key a ON a.label = 'Person' AND a.property = 'id' AND a.key = s.src
+      JOIN drivine_bulk_key b ON b.label = 'Repo' AND b.property = '$$slug' AND b.key = s.dst
     relink: |-
       UPDATE drivine_node n SET stamp = COALESCE(substr(CASE WHEN length(n.stamp) = 33 AND substr(n.stamp, 17, 1) = ':' THEN n.stamp END, 1, 17), substr(CAST($mark AS text), 1, 17)) || substr(CAST($mark AS text), 18)
       FROM (
-      SELECT a.nid FROM drivine_bulk_edge s JOIN drivine_bulk_key a ON a.label = 'Person' AND a.key = s.src AND NOT a.made
-      UNION SELECT b.nid FROM drivine_bulk_edge s JOIN drivine_bulk_key b ON b.label = 'Repo' AND b.key = s.dst AND NOT b.made
+      SELECT a.nid FROM drivine_bulk_edge s JOIN drivine_bulk_key a ON a.label = 'Person' AND a.property = 'id' AND a.key = s.src AND NOT a.made
+      UNION SELECT b.nid FROM drivine_bulk_edge s JOIN drivine_bulk_key b ON b.label = 'Repo' AND b.property = '$$slug' AND b.key = s.dst AND NOT b.made
       ) r WHERE n.nid = r.nid
     clearEdges: "TRUNCATE drivine_bulk_edge"
     rebuild:
