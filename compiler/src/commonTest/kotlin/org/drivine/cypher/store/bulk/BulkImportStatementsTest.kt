@@ -153,6 +153,16 @@ class BulkImportStatementsTest {
     }
 
     @Test
+    fun aNodesLowercasedCopiesAreWrittenThroughTheSavesFunction() {
+        // makeNodes calls the function the layout makes and a save writes its copies through, under the graph's name.
+        val ddl = PostgresDdl("other")
+        val lowered = ddl.writes.lowered
+        assertTrue(ddl.writes.ddl.any { it.startsWith("CREATE OR REPLACE FUNCTION $lowered(p_props jsonb, p_keys jsonb) ") }, "on $target: $lowered")
+        val made = (BulkImportStatements.of(ddl) as BulkImportStatements.Postgres).makeNodes("Person", "id")
+        assertTrue(made.contains("SELECT s.labels, $lowered(s.props, CAST(\$lower AS jsonb)), s.stamp FROM other_bulk_node s"), "on $target: $made")
+    }
+
+    @Test
     fun onlyPostgresHasABulkImportYet() {
         assertFailsWith<IllegalArgumentException> { BulkImportStatements.of(OracleDdl("drivine")) }
         assertFailsWith<IllegalArgumentException> { BulkImportStatements.of(SqliteDdl("drivine")) }

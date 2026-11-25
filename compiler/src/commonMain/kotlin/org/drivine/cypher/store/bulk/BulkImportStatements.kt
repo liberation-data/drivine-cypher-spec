@@ -13,7 +13,7 @@ import org.drivine.cypher.store.ddl.SqlStoreDdl
  * one transaction, and writes the rows into the staging tables through the store's own bulk path (`COPY` on Postgres).
  *
  * The import is all or nothing. It refuses a node whose key the graph or the import holds already, and a relationship
- * whose end is in neither. Its rows are those a save writes:
+ * whose end is in neither, or is two of the graph's nodes. Its rows are those a save writes:
  * - a node's labels, props and stamp, as the library writes them: each value as `StoreValues.text` gives it, nulls left out,
  *   keys [ValueLayout.escape]d, and a stamp of its own;
  * - the lowercased copies of the properties the library keeps them of, written by the graph's own `<graph>_lowered`;
@@ -115,7 +115,7 @@ sealed class BulkImportStatements(val ddl: SqlStoreDdl) {
         fun makeNodes(label: String, key: String): String =
             "WITH made AS (\n" +
                 "INSERT INTO ${pg.nodes} (labels, props, stamp)\n" +
-                "SELECT s.labels, ${pg.name}_lowered(s.props, CAST(\$lower AS jsonb)), s.stamp FROM $nodeStage s\n" +
+                "SELECT s.labels, ${pg.writes.lowered}(s.props, CAST(\$lower AS jsonb)), s.stamp FROM $nodeStage s\n" +
                 "RETURNING nid, ${PostgresSql.value("", ValueLayout.escape(key))} AS key\n" +
                 ")\n" +
                 "INSERT INTO $keys (label, property, key, nid, made) SELECT ${heldValues(End(label, key))}, made.key, made.nid, true FROM made"

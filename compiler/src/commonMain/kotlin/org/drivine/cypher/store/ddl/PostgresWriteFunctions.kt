@@ -47,7 +47,12 @@ class PostgresWriteFunctions internal constructor(private val graph: PostgresDdl
     private val edges = graph.edges
     private val find = "${graph.name}_find"
     private val owns = "${graph.name}_owns"
-    private val lowered = "${graph.name}_lowered"
+
+    /**
+     * The function a save writes a node's lowercased copies through, `<graph>_lowered(props, keys)`: a bulk import's nodes
+     * are written through it too (`BulkImportStatements`), so their copies are a save's.
+     */
+    val lowered = "${graph.name}_lowered"
 
     /** The function that carries out a plan. */
     val write = "${graph.name}_write"
