@@ -38,7 +38,9 @@ import org.drivine.schema.made
  *     flag's name (`nullsEqualStored`, `eraStored`, `temporalArithmeticStored`), and in `noFunction`, the error numbers a
  *     probe fails with where it finds none
  *     ([OracleFunctionProbes]); and on Oracle, `session`, the statements each connection runs once as it opens, so text is
- *     compared by its code points whatever the session's NLS settings ([OracleSession]);
+ *     compared by its code points whatever the session's NLS settings ([OracleSession]); and on Oracle, `labelled`, the
+ *     query that lists the graph's labelled indexes, a row of `kind`, `label` and `properties` each, whose labels and first
+ *     properties a library gives the compiler as `indexedProperties` ([OracleDdl.labelledIndexesQuery]);
  *   - `stamp`, [StoreStampStatements.of] the store: `prepare`, `assignIfAbsent`, `readStamps`, `foreignNodes`,
  *     `restampLayout`, `layoutObjects` and `constraint`, the statements that make the stamp's uniqueness constraint after
  *     `prepare`, each null where the store has none;
