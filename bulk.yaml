@@ -4,8 +4,9 @@
 # binds its parameters by name; each that gives rows gives each as one JSON object. A library runs them in one
 # transaction, in this order:
 # - lock, lockTables, createStages;
-# - for each call of nodes: copyNodes (the rows, through COPY), takenKeys (any key it gives refuses the import), makeNodes
-#   (`$lower`: the JSON array of the keys whose lowercased copy the library keeps), clearNodes;
+# - for each call of nodes: copyNodes (the rows, through COPY), takenKeys (any key it gives refuses the import, a node's
+#   whose props don't hold its key or whose labels haven't the call's among them), makeNodes (`$lower`: the JSON array of
+#   the keys whose lowercased copy the library keeps), clearNodes;
 # - before the first call of relationships: defer;
 # - for each call of relationships: copyEdges, then for each end ambiguousKeys (any key it gives refuses the import) and
 #   findEnds, then missingEnds (any row refuses the import), makeEdges (`$type`), relink (`$mark`, a fresh stamp), clearEdges;
@@ -26,7 +27,8 @@ statements:
     copyNodes: "COPY drivine_bulk_node (key, labels, props, stamp) FROM STDIN WITH (FORMAT csv)"
     takenKeys: |-
       SELECT jsonb_build_object('key', k.key) FROM (
-      SELECT s.key FROM drivine_bulk_node s GROUP BY s.key HAVING count(*) > 1
+      SELECT s.key FROM drivine_bulk_node s WHERE (s.props -> 'id') IS DISTINCT FROM s.key OR NOT s.labels @> '["Person"]'
+      UNION SELECT s.key FROM drivine_bulk_node s GROUP BY s.key HAVING count(*) > 1
       UNION SELECT s.key FROM drivine_bulk_node s JOIN drivine_node n ON (n.props -> 'id') = s.key AND n.labels @> '["Person"]'
       UNION SELECT s.key FROM drivine_bulk_node s JOIN drivine_bulk_key m ON m.label = 'Person' AND m.property = 'id' AND m.key = s.key
       ) k LIMIT 10

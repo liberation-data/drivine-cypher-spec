@@ -94,12 +94,15 @@ sealed class BulkImportStatements(val ddl: SqlStoreDdl) {
 
         /**
          * The keys among the staged nodes of [label] under [key] that the graph or the import holds already, or that the call
-         * gives twice, at most ten, each `{"key": <its JSON>}`: none, or the import is refused.
+         * gives twice, at most ten, each `{"key": <its JSON>}`: none, or the import is refused. A staged node whose props don't
+         * hold its key, or hold another value than its `key` column, or whose labels haven't [label], is among them too: it
+         * would be made with no key ([makeNodes] keeps the props' value), or kept as an end it isn't.
          */
         fun takenKeys(label: String, key: String): String {
             val value = PostgresSql.value("n", ValueLayout.escape(key))
             return "SELECT jsonb_build_object('key', k.key) FROM (\n" +
-                "SELECT s.key FROM $nodeStage s GROUP BY s.key HAVING count(*) > 1\n" +
+                "SELECT s.key FROM $nodeStage s WHERE ${PostgresSql.value("s", ValueLayout.escape(key))} IS DISTINCT FROM s.key OR NOT ${PostgresSql.hasLabel("s", label)}\n" +
+                "UNION SELECT s.key FROM $nodeStage s GROUP BY s.key HAVING count(*) > 1\n" +
                 "UNION SELECT s.key FROM $nodeStage s JOIN ${pg.nodes} n ON $value = s.key AND ${PostgresSql.hasLabel("n", label)}\n" +
                 "UNION SELECT s.key FROM $nodeStage s JOIN $keys m ON ${held("m", End(label, key))} AND m.key = s.key\n" +
                 ") k LIMIT 10"

@@ -127,6 +127,16 @@ class BulkImportStatementsTest {
     }
 
     @Test
+    fun aStagedNodeWhosePropsOrLabelsDisagreeWithItsRowIsTaken() {
+        // A node whose props don't hold its key, or hold another value, would be made with no key; one without the call's
+        // label would be kept as an end of a label it hasn't. takenKeys gives both, so the import is refused there. A
+        // missing property is SQL null, which IS DISTINCT FROM any key.
+        val taken = postgres.takenKeys("It's", "\$code")
+        val disagrees = "SELECT s.key FROM ${postgres.nodeStage} s WHERE (s.props -> '\$\$code') IS DISTINCT FROM s.key OR NOT s.labels @> '[\"It''s\"]'"
+        assertTrue(taken.lines().contains(disagrees), "on $target: $taken")
+    }
+
+    @Test
     fun anEndIsSrcOrDstInEachStatementThatNamesOne() {
         assertFailsWith<IllegalArgumentException> { postgres.ambiguousKeys(person, "both") }
         assertFailsWith<IllegalArgumentException> { postgres.findEnds(person, "src; DROP TABLE drivine_node") }

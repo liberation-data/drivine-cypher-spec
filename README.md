@@ -460,7 +460,8 @@ A library gives the nodes and relationships call by call:
   key. Each node is written as a save writes it: its labels, its props (each value as `StoreValues.text` gives it, nulls left
   out, keys escaped), and a stamp of its own. The lowercased copies the library keeps are written by the graph's own
   `<graph>_lowered`. A key the graph or the import holds already refuses the import (`takenKeys`): a bulk import makes
-  nodes, and finds none to merge into.
+  nodes, and finds none to merge into. So does a node whose props don't hold its key, or hold another value, or whose
+  labels haven't the call's.
 - **Relationships, by their ends' keys.** Each call is of one type, from one label's nodes to another's. An end is a node
   the import made, or one of the graph's (`findEnds`). A key two of the graph's nodes hold is no end (`ambiguousKeys`), nor
   is a key no node holds (`missingEnds`): either refuses the import. A relationship is made as `CREATE` makes one, beside
