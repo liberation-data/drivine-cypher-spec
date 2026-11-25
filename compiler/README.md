@@ -1180,6 +1180,8 @@ The JVM is the oracle. `./gradlew jvmOracle` writes, into `build/oracle`:
 - `migrate.json`: the spec's `migrate.yaml` as JSON, which `LayoutMigrationTest` reads on every target: each layout-1
   row that `LayoutMigration.rewrite`, and the JSON request `rewrite`, must give as layout 2 holds it on each store, with
   its changes and its invalid values, and the declarations `LayoutMigration.refusal` refuses.
+- `bulk.json`: the spec's `bulk.yaml` as JSON, which `BulkImportStatementsTest` reads on every target: the
+  statements of a bulk import that `org.drivine.cypher.store.bulk.BulkImportStatements` must give on each store.
 - `host.json`: the spec's `host.yaml` as JSON, which `HostSpecTest` reads on every target: the `function` steps the
   module's host functions (`org.drivine.cypher.host.HostFunctions`) must give. `./gradlew hostSpecJson` writes it alone,
   into `build/host`, for `nativeExtensionCheck`.

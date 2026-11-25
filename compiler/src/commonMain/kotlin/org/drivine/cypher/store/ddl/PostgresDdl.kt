@@ -85,8 +85,7 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
             PRIMARY KEY (kind, label, properties)
         )
         """,
-        "CREATE INDEX IF NOT EXISTS ${name}_edge_src ON $edges (src, type)",
-        "CREATE INDEX IF NOT EXISTS ${name}_edge_dst ON $edges (dst, type)",
+        *edgeIndexes.toTypedArray(),
         "CREATE INDEX IF NOT EXISTS ${name}_node_labels ON $nodes USING GIN (labels jsonb_path_ops)",
         """
         CREATE TABLE IF NOT EXISTS $counts (
@@ -108,6 +107,21 @@ class PostgresDdl(name: String) : SqlStoreDdl(name, ENGINE, MAX_OBJECT_NAME) {
         lockTable,
         lockSeed,
     ).map { it.trimIndent() } + writes.ddl + temporalKeyFunction() + heldFunction() + TemporalArithmeticFunction.postgres(name) + listKeyFunction() + "COMMENT ON TABLE $nodes IS '$VERSION'" }
+
+    /**
+     * The edge table's two indexes, over each end and the type, as [ddl] makes them: what a traversal from either end reads,
+     * and what a bulk import drops and makes again (`BulkImportStatements`), so it makes them as they were.
+     */
+    val edgeIndexes: List<String> get() = listOf(
+        "CREATE INDEX IF NOT EXISTS ${name}_edge_src ON $edges (src, type)",
+        "CREATE INDEX IF NOT EXISTS ${name}_edge_dst ON $edges (dst, type)",
+    )
+
+    /**
+     * The names Postgres gives the edge table's two foreign keys, `REFERENCES` in [ddl]'s `CREATE TABLE`: the table's name,
+     * the column's and `fkey`, which a graph's name always leaves room for ([SqlStoreDdl.refusal]).
+     */
+    val edgeForeignKeys: Map<String, String> get() = listOf("src", "dst").associateWith { "${edges}_${it}_fkey" }
 
     override val lockTable: String get() = "CREATE TABLE IF NOT EXISTS $lock (name text PRIMARY KEY)"
 

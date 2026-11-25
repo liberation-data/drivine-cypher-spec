@@ -1,0 +1,119 @@
+package org.drivine.cypher.store.bulk
+
+import org.drivine.cypher.json.CypherJson
+import org.drivine.cypher.json.JsonNode
+import org.drivine.cypher.json.ObjectNode
+import org.drivine.cypher.number.oracleFile
+import org.drivine.cypher.number.target
+import org.drivine.cypher.store.bulk.BulkImportStatements.End
+import org.drivine.cypher.store.ddl.OracleDdl
+import org.drivine.cypher.store.ddl.PostgresDdl
+import org.drivine.cypher.store.ddl.SqliteDdl
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
+
+/**
+ * `bulk.yaml`'s statements of a bulk import (liberation-data/drivine4j#684), on each target: each is what
+ * [BulkImportStatements] gives the graph `drivine`. The tests also hold that what an import drops it makes again, as the
+ * layout made it.
+ */
+class BulkImportStatementsTest {
+
+    private val spec: JsonNode = CypherJson.readTree(oracleFile("bulk.json"))
+
+    private val postgres = BulkImportStatements.of(PostgresDdl("drivine")) as BulkImportStatements.Postgres
+
+    private val person = End("Person", "id")
+    private val repo = End("Repo", "\$slug")
+
+    private fun texts(node: JsonNode) = node.toList().map { it.textValue() }
+
+    @Test
+    fun postgresStatementsAreTheOnesBulkYamlPins() {
+        val stores = spec["statements"] as ObjectNode
+        assertEquals(setOf("postgres"), stores.fieldNames().asSequence().toSet())
+        val pinned = stores["postgres"]!!
+        val given = mapOf(
+            "lock" to postgres.lock,
+            "lockTables" to postgres.lockTables,
+            "copyNodes" to postgres.copyNodes,
+            "takenKeys" to postgres.takenKeys("Person", "id"),
+            "makeNodes" to postgres.makeNodes("Person", "id"),
+            "clearNodes" to postgres.clearNodes,
+            "copyEdges" to postgres.copyEdges,
+            "missingEnds" to postgres.missingEnds(person, repo),
+            "makeEdges" to postgres.makeEdges(person, repo),
+            "relink" to postgres.relink(person, repo),
+            "clearEdges" to postgres.clearEdges,
+        )
+        for ((name, statement) in given) assertEquals(pinned[name]!!.textValue(), statement, "on $target: $name")
+        assertEquals(texts(pinned["createStages"]!!), postgres.createStages, "on $target: createStages")
+        assertEquals(texts(pinned["defer"]!!), postgres.defer, "on $target: defer")
+        assertEquals(texts(pinned["rebuild"]!!), postgres.rebuild(1024), "on $target: rebuild")
+        assertEquals(texts(pinned["analyze"]!!), postgres.analyze, "on $target: analyze")
+        assertEquals(pinned["ambiguousKeys"]!!["src"]!!.textValue(), postgres.ambiguousKeys(person, "src"), "on $target: ambiguousKeys src")
+        assertEquals(pinned["ambiguousKeys"]!!["dst"]!!.textValue(), postgres.ambiguousKeys(repo, "dst"), "on $target: ambiguousKeys dst")
+        assertEquals(pinned["findEnds"]!!["src"]!!.textValue(), postgres.findEnds(person, "src"), "on $target: findEnds src")
+        assertEquals(pinned["findEnds"]!!["dst"]!!.textValue(), postgres.findEnds(repo, "dst"), "on $target: findEnds dst")
+        // Every statement bulk.yaml pins is checked here.
+        val checked = given.keys + setOf("createStages", "defer", "rebuild", "analyze", "ambiguousKeys", "findEnds")
+        assertEquals(checked, (pinned as ObjectNode).fieldNames().asSequence().toSet(), "on $target: bulk.yaml's statements")
+    }
+
+    @Test
+    fun whatAnImportDropsItMakesAgainAsTheLayoutMadeIt() {
+        val ddl = PostgresDdl("drivine")
+        // The indexes made again are the layout's own statements, which the store's DDL runs.
+        assertTrue(ddl.ddl.containsAll(ddl.edgeIndexes), "on $target: the layout makes the edge indexes the import makes again")
+        val rebuild = postgres.rebuild(256)
+        assertTrue(rebuild.containsAll(ddl.edgeIndexes), "on $target: $rebuild")
+        // Each foreign key dropped is added again under its name, as the layout's REFERENCES makes it.
+        val edgeTable = ddl.ddl.single { it.startsWith("CREATE TABLE IF NOT EXISTS ${ddl.edges} ") }
+        for ((column, name) in ddl.edgeForeignKeys) {
+            assertTrue(postgres.defer.contains("ALTER TABLE ${ddl.edges} DROP CONSTRAINT $name"), "on $target: $name dropped")
+            assertTrue(rebuild.any { it.contains("ADD CONSTRAINT $name FOREIGN KEY ($column) REFERENCES ${ddl.nodes} (nid) ON DELETE CASCADE") }, "on $target: $name made again")
+            assertTrue(Regex("""\b$column\s+bigint NOT NULL REFERENCES ${ddl.nodes} \(nid\) ON DELETE CASCADE""").containsMatchIn(edgeTable), "on $target: the layout's $column")
+        }
+        // Each index dropped is one of the layout's two.
+        for (drop in postgres.defer.filter { it.startsWith("DROP INDEX ") }) {
+            val name = drop.removePrefix("DROP INDEX ")
+            assertTrue(ddl.edgeIndexes.any { it.startsWith("CREATE INDEX IF NOT EXISTS $name ON ") }, "on $target: $drop")
+        }
+        assertEquals("SET LOCAL maintenance_work_mem = '256MB'", rebuild.first(), "on $target")
+        assertEquals(postgres.analyze, rebuild.takeLast(2), "on $target")
+        assertFailsWith<IllegalArgumentException> { postgres.rebuild(0) }
+    }
+
+    @Test
+    fun theForeignKeysNamesAreTheOnesPostgresGivesThemForTheLongestGraphName() {
+        // Postgres names an inline REFERENCES `<table>_<column>_fkey`, truncated past 63 characters: a graph's name is short
+        // enough that it never is, so the names the import drops are those the store holds.
+        val longest = (1..63).map { "g" + "a".repeat(it - 1) }.last { SqlNames.refused(it) == null }
+        val ddl = PostgresDdl(longest)
+        for (name in ddl.edgeForeignKeys.values) assertTrue(name.length <= 63, "on $target: $name is ${name.length} long")
+    }
+
+    @Test
+    fun aKeyAndALabelAreWrittenAsTheNodeHoldsThemAndQuoted() {
+        val odd = End("It's", "\$code")
+        // A key beginning with $ is held with one more; a quote in a label or a key is doubled.
+        assertTrue(postgres.findEnds(odd, "src").contains("(n.props -> '\$\$code')"), "on $target")
+        assertTrue(postgres.findEnds(odd, "src").contains("n.labels @> '[\"It''s\"]'"), "on $target")
+        assertTrue(postgres.missingEnds(odd, odd).contains("a.label = 'It''s'"), "on $target")
+        assertTrue(postgres.makeNodes("It's", "\$code").contains("RETURNING nid, (props -> '\$\$code') AS key"), "on $target")
+        assertFailsWith<IllegalArgumentException> { postgres.findEnds(person, "both") }
+    }
+
+    @Test
+    fun onlyPostgresHasABulkImportYet() {
+        assertFailsWith<IllegalArgumentException> { BulkImportStatements.of(OracleDdl("drivine")) }
+        assertFailsWith<IllegalArgumentException> { BulkImportStatements.of(SqliteDdl("drivine")) }
+    }
+
+    /** What [org.drivine.cypher.store.ddl.SqlStoreDdl.refusal] says of a graph's name on Postgres. */
+    private object SqlNames {
+        fun refused(name: String): String? = org.drivine.cypher.store.ddl.SqlStoreDdl.refusal(name, "Postgres", PostgresDdl.MAX_OBJECT_NAME)
+    }
+}
