@@ -55,6 +55,30 @@ class OracleEraFunctionTest {
     }
 
     @Test
+    fun `an item of a list of moments is read as JSON, with no test of whether it is a text`() {
+        // A list's item is read through its text where it may be one (#388); a moment is a tag, never a text, and that test
+        // made the hard parse of the min and max of a list of moments, each read by index, 6.2 seconds where 0.53 without (#244).
+        val text = "THEN JSON(JSON_QUERY(JSON_SERIALIZE("
+        val moments = "UNWIND range(1, 3) AS i WITH k, datetime('2024-03-15T10:00:00Z') + duration({minutes: i}) AS t WITH k, collect(t) AS l"
+        for (item in listOf("min(l)[0].hour", "l[0]", "l[k]", "l[-1]")) {
+            val sql = stored("UNWIND [0, 1] AS k $moments RETURN $item").first
+            assertFalse(text in sql, item)
+            assertTrue("JSON_QUERY(" in sql && "'\$[\$i]' PASSING" in sql, sql)
+        }
+        // So is one of a slice of it, by a number: the slice's key read by a text is read as before.
+        assertTrue("WHEN 'number' THEN JSON_QUERY(" in stored("UNWIND [0, 1] AS k $moments RETURN l[0..2][k]").first)
+        // A list whose items may be texts is read as before: of texts, of moments beside a text, stored, given or split.
+        for (item in listOf("l[0]", "l[k]")) assertTrue(text in stored("UNWIND [0, 1] AS k MATCH (n:N) WITH k, collect(n.name) AS l RETURN $item").first, item)
+        val texts = listOf(
+            "WITH k, [datetime('2024-03-15T10:00:00Z'), 'x'] AS l", "MATCH (n:N) WITH k, n.l AS l", "WITH k, \$l AS l", "WITH k, split('a,b', ',') AS l",
+        )
+        for (list in texts) for (item in listOf("l[0]", "l[k]")) {
+            val sql = OracleCypherCompiler("g").compile("UNWIND [0, 1] AS k $list RETURN $item", mapOf("l" to listOf("a"))).sql
+            assertTrue(text in sql, "$list $item")
+        }
+    }
+
+    @Test
     fun `a statement that writes, and the step of a reduce, call them too`() {
         // A schema function, unlike one a query declares, is called from a block's queries and from a reduce's own function.
         for (cypher in listOf(
