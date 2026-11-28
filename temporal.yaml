@@ -1367,6 +1367,32 @@ cases:
                   inDays: duration.inDays(n.from, n.to).days, durationDays: duration(toString(n.d)).days}
         rows: [{minute: 0, zone: "+02:00", months: 2, days: 5, inDays: 65, durationDays: 2}]
 
+  - name: "The duration between two values stored, of different kinds"
+    description: "duration.between of two values read from the store, where the statement knows neither's kind, reads each as the kind its own tag names: between a date and a time of day only their times of day are compared, a date's being its midnight, and between a date and a moment the date is its midnight, as when either side is written in the statement. Each was read as the first's kind before, so a SQL store failed on the second's text, gave null, or read a moment as its date (#440)."
+    steps:
+      - only: [neo4j, sql]
+        cypher: "CREATE (:CyTemporal {id: 'a', day: date('2024-01-01'), later: date('2024-03-05'), ten: localtime('10:00'), next: localdatetime('2024-01-02T10:00'), tenAt: time('10:00+01:00'), at: datetime('2024-01-02T10:00+01:00')})"
+      - note: "Of one kind, as before."
+        only: [neo4j, sql]
+        cypher: "MATCH (n:CyTemporal) RETURN [toString(duration.between(n.day, n.later)), toString(duration.between(n.ten, n.ten))]"
+        rows: [["P2M4D", "PT0S"]]
+      - note: "A date and a time of day, either way round, and a time of day and a moment: their times of day."
+        only: [neo4j, sql]
+        cypher: "MATCH (n:CyTemporal) RETURN [toString(duration.between(n.day, n.ten)), toString(duration.between(n.ten, n.day)), toString(duration.between(n.ten, n.next)), toString(duration.between(n.day, n.tenAt))]"
+        rows: [["PT10H", "PT-10H", "PT0S", "PT10H"]]
+      - note: "A date and a moment, local or zoned: the date at its midnight."
+        only: [neo4j, sql]
+        cypher: "MATCH (n:CyTemporal) RETURN [toString(duration.between(n.day, n.next)), toString(duration.between(n.next, n.day)), toString(duration.between(n.day, n.at))]"
+        rows: [["P1DT10H", "P-1DT-10H", "P1DT10H"]]
+      - note: "In one unit: months, days and seconds."
+        only: [neo4j, sql]
+        cypher: "MATCH (n:CyTemporal) RETURN [toString(duration.inMonths(n.day, n.next)), toString(duration.inDays(n.day, n.next)), toString(duration.inSeconds(n.day, n.ten)), toString(duration.inMonths(n.day, n.ten))]"
+        rows: [["PT0S", "P1D", "PT10H", "PT0S"]]
+      - note: "As when one side is written in the statement."
+        only: [neo4j, sql]
+        cypher: "MATCH (n:CyTemporal) RETURN [toString(duration.between(n.day, localtime('10:00'))), toString(duration.between(date('2024-01-01'), n.next))]"
+        rows: [["PT10H", "P1DT10H"]]
+
   - name: "Dates take whole days of a duration"
     description: "A date takes a duration's time in whole days."
     steps:

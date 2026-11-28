@@ -7845,8 +7845,8 @@ abstract class SqlCypherCompiler(
                     if (arguments.size != 2) throw CompilerException("${function.name}() takes two temporal values.")
                     val unit = mapOf("duration.inmonths" to "months", "duration.indays" to "days", "duration.inseconds" to "seconds")[name]
                     val (from, to) = arguments.map { (it as? Value.Json) ?: throw CompilerException("${function.name}() takes two temporal values.") }
-                    // A value whose kind the statement does not make is read as the kind its tag names, and is taken to be of the other's
-                    // where neither's is known: so a stored date and a stored moment are read as the first is.
+                    // A value whose kind the statement does not make is read as the kind its tag names: where neither's is known, each
+                    // as its own tag's beside the other's (drivine-cypher-spec#440).
                     val (fromKind, toKind) = listOf(from, to).map { side -> side.temporal?.takeIf { it.instant } }
                     fun v(side: Value.Json, kind: Temporal?) = if (kind != null) tagTextOf(side) else tagText(comparable(inFlight(side)))
                     val (a, b) = v(from, fromKind) to v(to, toKind)
@@ -7854,7 +7854,7 @@ abstract class SqlCypherCompiler(
                         fromKind != null && toKind != null -> temporals.between(a, b, fromKind, unit, toKind)
                         fromKind != null -> shared(comparable(inFlight(to))) { (y) -> temporals.byTag(tagKind(y), tagText(y)) { k, t -> temporals.between(a, t, fromKind, unit, k) } }
                         toKind != null -> shared(comparable(inFlight(from))) { (x) -> temporals.byTag(tagKind(x), tagText(x)) { k, t -> temporals.between(t, b, k, unit, toKind) } }
-                        else -> shared(b) { (y) -> shared(comparable(inFlight(from))) { (x) -> temporals.byTag(tagKind(x), tagText(x)) { k, t -> temporals.between(t, y, k, unit) } } }
+                        else -> shared(comparable(inFlight(to))) { (y) -> shared(comparable(inFlight(from))) { (x) -> temporals.betweenTags(tagKind(x), tagText(x), tagKind(y), tagText(y), unit) } }
                     }
                     tagged(Temporal.DURATION, between)
                 }
