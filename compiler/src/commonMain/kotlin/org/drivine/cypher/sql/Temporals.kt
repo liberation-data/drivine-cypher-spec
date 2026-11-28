@@ -1018,17 +1018,40 @@ class Temporals(
      * Where one is a time of day and the other has a date, only their times of day are compared, as in Cypher: the one
      * with a date is read as its time of day, of the other's kind, so a date is its midnight (drivine4j#418).
      */
-    fun between(from: String, to: String, kind: Temporal, unit: String? = null, toKind: Temporal = kind): String {
-        val zoned = kind.zoned && toKind.zoned
-        val times = kind in TIMES || toKind in TIMES
-        val (a, aKind) = if (times && kind !in TIMES) convert(from, kind, toKind) to toKind else from to kind
-        val (b, bKind) = if (times && toKind !in TIMES) convert(to, toKind, kind) to kind else to to toKind
-        fun read(text: String, of: Temporal) = if (zoned) utc(text, of) else local(text, of)
-        return between(read(a, aKind), read(b, bKind), times, unit)
+    fun between(from: String, to: String, kind: Temporal, unit: String? = null, toKind: Temporal = kind): String =
+        between(side(from, kind, toKind), side(to, toKind, kind), unit) { a, b -> if (kind in TIMES || toKind in TIMES) "0" else sql.monthsBetween(a, b) }
+
+    /**
+     * [between] of two tags' texts, [fromText] and [toText], where the statement knows neither's kind: each is read as
+     * the kind its own tag names, [fromKind] and [toKind] (SQL texts), beside the kind the other's names, so a stored date
+     * and a stored time of day are compared by their times of day, as in Cypher, and not both read as the first's kind
+     * (drivine-cypher-spec#440). Each side is read in a `CASE` of its own kind and the other's, and the duration is
+     * worked out of the two once, its months none where either is a time of day: so the statement holds one duration's
+     * SQL, not one for each pair of kinds.
+     */
+    fun betweenTags(fromKind: String, fromText: String, toKind: String, toText: String, unit: String? = null): String =
+        shared(listOf(fromKind, toKind)) { (fk, tk) ->
+            fun other(kind: String, body: (Temporal) -> String) =
+                "CASE ${Temporal.instants.joinToString(" ") { "WHEN $kind = '${it.function}' THEN ${body(it)}" }} END"
+            val a = byTag(fk, fromText) { k, t -> other(tk) { o -> side(t, k, o) } }
+            val b = byTag(tk, toText) { k, t -> other(fk) { o -> side(t, k, o) } }
+            val times = TIMES.joinToString(", ") { "'${it.function}'" }
+            between(a, b, unit) { x, y -> "CASE WHEN $fk IN ($times) OR $tk IN ($times) THEN 0 ELSE ${sql.monthsBetween(x, y)} END" }
+        }
+
+    /**
+     * The text [text] of [kind] as [between] reads it beside a value of [other]: where either is a time of day, a value with
+     * a date is read as its time of day, of the other's kind, so a date is its midnight (drivine4j#418); two zoned values
+     * are read as the moments they are, and otherwise each on its wall clock.
+     */
+    private fun side(text: String, kind: Temporal, other: Temporal): String {
+        val (t, of) = if ((kind in TIMES || other in TIMES) && kind !in TIMES) convert(text, kind, other) to other else text to kind
+        return if (kind.zoned && other.zoned) utc(t, of) else local(t, of)
     }
 
-    private fun between(from: String, to: String, times: Boolean, unit: String?): String = shared(listOf(from, to)) { (a, b) ->
-        val months = if (times) "0" else sql.monthsBetween(a, b)
+    /** [between] of two timestamps, [from] and [to], read as [side] reads them, with the whole [months] between them. */
+    private fun between(from: String, to: String, unit: String?, months: (String, String) -> String): String = shared(listOf(from, to)) { (a, b) ->
+        val months = months(a, b)
         if (sql.exactTime) exactBetween(a, b, months, unit) else when (unit) {
             "months" -> text(Parts(months, "0", "0"))
             "days" -> text(Parts("0", sql.truncatedQuotient(sql.secondsBetween(a, b), "86400"), "0"))
